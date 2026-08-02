@@ -2535,10 +2535,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
       )
       const taskContextPrefix =
         `{"_tag":"pr-review","pluginConnectionId":"${request.pluginConnectionId}","subject":${subjectJson},"reviewProfile":`
+      const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
-        subjectRevision: request.subject.headRevision,
-        taskContextPrefix,
+        ...(request.allowDifferentHead === true ? {} : { subjectRevision: request.subject.headRevision }),
+        taskContextPrefix: request.allowDifferentHead === true ? identityPrefix : taskContextPrefix,
         excludeTargeted: true,
         ...(request.jobId === undefined ? {} : { jobId: request.jobId })
       })
@@ -2564,7 +2565,13 @@ const makeAgentJobRepository = Effect.gen(function*() {
       if (
         task._tag !== "pr-review" ||
         task.pluginConnectionId !== request.pluginConnectionId ||
-        !PrReviewSubjectEquivalence(task.subject, request.subject)
+        (
+          request.allowDifferentHead === true
+            ? task.subject.providerId !== request.subject.providerId ||
+              task.subject.repository !== request.subject.repository ||
+              task.subject.pullRequestId !== request.subject.pullRequestId
+            : !PrReviewSubjectEquivalence(task.subject, request.subject)
+        )
       ) {
         return yield* persistedRecordError(
           request.workspaceId,

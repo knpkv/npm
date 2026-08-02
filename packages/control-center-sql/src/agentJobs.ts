@@ -76,9 +76,10 @@ export interface AgentReviewContextEventsQueryInput {
 
 /** Exact immutable review subject used to recover its newest durable job. */
 export interface LatestAgentReviewQueryInput {
+  readonly allowDifferentHead?: boolean
   readonly excludeTargeted?: boolean
   readonly jobId?: string
-  readonly subjectRevision: string
+  readonly subjectRevision?: string
   readonly taskContextPrefix: string
   readonly workspaceId: string
 }
@@ -457,7 +458,11 @@ export const renderLatestAgentReviewQuery = (
   input: LatestAgentReviewQueryInput
 ): RenderedSql => {
   const subjectAndOptionalJob = input.jobId === undefined
-    ? Query.eq(agentJobs.subjectRevision, input.subjectRevision)
+    ? input.subjectRevision === undefined
+      ? undefined
+      : Query.eq(agentJobs.subjectRevision, input.subjectRevision)
+    : input.subjectRevision === undefined
+    ? Query.eq(agentJobs.jobId, input.jobId)
     : Query.and(
       Query.eq(agentJobs.subjectRevision, input.subjectRevision),
       Query.eq(agentJobs.jobId, input.jobId)
@@ -477,7 +482,7 @@ export const renderLatestAgentReviewQuery = (
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
-        subjectAndOptionalJob,
+        ...(subjectAndOptionalJob === undefined ? [] : [subjectAndOptionalJob]),
         ...(input.excludeTargeted === true
           ? [
             Query.not(

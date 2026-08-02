@@ -20,6 +20,7 @@ import {
   PullRequestReviewFailed,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
+  PullRequestReviewStale,
   type PullRequestReviewState,
   PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
@@ -402,14 +403,29 @@ const makePullRequestReviews = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     target: AvailableReviewTarget
   ) {
-    const latest = yield* mapPersistenceRead(
+    const exact = yield* mapPersistenceRead(
       persistence.agentJobs.latestReview({
         workspaceId,
         pluginConnectionId: target.pluginConnectionId,
         subject: target.subject
       })
     )
-    return yield* presentLatest(target, latest)
+    if (Option.isSome(exact)) return yield* presentLatest(target, exact)
+    const prior = yield* mapPersistenceRead(
+      persistence.agentJobs.latestReviewForPullRequest({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject
+      })
+    )
+    if (Option.isSome(prior) && prior.value.report !== null) {
+      return new PullRequestReviewStale({
+        subject: target.subject,
+        previousHead: prior.value.report.subject.headRevision,
+        previousJobId: prior.value.jobId
+      })
+    }
+    return yield* presentLatest(target, Option.none())
   }, Effect.withTracerEnabled(false))
 
   const currentJobFor = Effect.fnUntraced(function*(

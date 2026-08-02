@@ -424,7 +424,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
-  jobId: Schema.optionalKey(JobId)
+  jobId: Schema.optionalKey(JobId),
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 

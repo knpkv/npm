@@ -224,6 +224,22 @@ describe("durable agent job queries", () => {
     expect(rendered.sql).toContain("\"agent_jobs\".\"job_id\" = ?")
   })
 
+  it("renders a pull-request identity lookup without binding to one head", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      taskContextPrefix: "task-identity-prefix"
+    })
+
+    expect(rendered.params).toEqual([
+      "workspace-secret",
+      1,
+      "task-identity-prefix".length,
+      "task-identity-prefix",
+      1
+    ])
+    expect(rendered.sql).not.toContain("subject_revision")
+  })
+
   it("can exclude targeted follow-up jobs from the newest full-review lookup", () => {
     const rendered = renderLatestAgentReviewQuery({
       workspaceId: "workspace-secret",
