@@ -1,9 +1,10 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
+import * as Schema from "effect/Schema"
 import { type ReactElement, useMemo, useState } from "react"
 
 import type { EntityId, JobId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestion } from "../../domain/prReview.js"
+import { PrReviewDismissalReason, type PrReviewSuggestion } from "../../domain/prReview.js"
 import type { PrReviewSuggestionRevisionAuthor } from "../../domain/prReviewRevision.js"
 import { ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import { ReviewSuggestionRevisionDialog } from "./ReviewSuggestionRevisionDialog.js"
@@ -54,6 +55,7 @@ export const VersionedReviewSuggestionCard = ({
   const [dialogMode, setDialogMode] = useState<"edit" | "history">("history")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dismissOpen, setDismissOpen] = useState(false)
+  const [dismissalReason, setDismissalReason] = useState<typeof PrReviewDismissalReason.Type>("false-positive")
   const page =
     controller.state._tag === "ready" ||
     controller.state._tag === "dismissing" ||
@@ -171,12 +173,28 @@ export const VersionedReviewSuggestionCard = ({
           title="Dismiss finding?"
         >
           <Text>This records your decision without changing the pull request or publishing a comment.</Text>
+          <label>
+            Reason
+            <select
+              aria-label="Dismissal reason"
+              onChange={(event) =>
+                setDismissalReason(Schema.decodeUnknownSync(PrReviewDismissalReason)(event.target.value))
+              }
+              value={dismissalReason}
+            >
+              <option value="false-positive">False positive</option>
+              <option value="not-applicable">Not applicable</option>
+              <option value="accepted-risk">Accepted risk</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
           <div className={styles.publicationActions}>
             <Dialog.Close>Keep finding</Dialog.Close>
             <Button
               onClick={() => {
                 setDismissOpen(false)
-                controller.dismiss()
+                controller.dismiss(dismissalReason)
               }}
             >
               Dismiss finding

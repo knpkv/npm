@@ -435,6 +435,7 @@ describe("agent job review results", () => {
           expectedSequence: original.sequence,
           edit,
           state: "dismissed",
+          dismissalReason: "false-positive",
           author: PrReviewSuggestionOperatorAuthor.make({
             personId: PERSON_ID
           }),

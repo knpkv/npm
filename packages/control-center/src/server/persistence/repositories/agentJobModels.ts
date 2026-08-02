@@ -13,7 +13,7 @@ import {
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
+import { PrReviewReport, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../../domain/prReview.js"
 import {
   PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionAuthor,
@@ -412,6 +412,7 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   expectedSequence: PrReviewSuggestionRevisionSequence,
   edit: PrReviewSuggestionEdit,
   state: Schema.optionalKey(Schema.Literal("dismissed")),
+  dismissalReason: Schema.optionalKey(PrReviewSuggestion.fields.dismissalReason),
   validation: Schema.optionalKey(Schema.Literal("validated")),
   author: PrReviewSuggestionRevisionAuthor,
   createdAt: UtcTimestamp,
@@ -431,7 +432,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
-  jobId: Schema.optionalKey(JobId)
+  jobId: Schema.optionalKey(JobId),
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 

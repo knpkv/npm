@@ -15,6 +15,7 @@ import {
 } from "../domain/identifiers.js"
 import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
 import {
+  PrReviewDismissalReason,
   PrReviewOutcome,
   PrReviewReport,
   PrReviewSubject,
@@ -418,6 +419,13 @@ export class PullRequestReviewNotStarted
   extends Schema.TaggedClass<PullRequestReviewNotStarted>()("not-started", pullRequestReviewIdentity)
 {}
 
+/** A prior completed review exists, but its evidence is bound to an older head. */
+export class PullRequestReviewStale extends Schema.TaggedClass<PullRequestReviewStale>()("stale", {
+  ...pullRequestReviewIdentity,
+  previousHead: PrReviewSubject.fields.headRevision,
+  previousJobId: JobId
+}) {}
+
 /** One durable exact-head review is queued or running. */
 export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestReviewPending>()("pending", {
   ...pullRequestReviewJob,
@@ -447,6 +455,7 @@ export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestRevie
 export const PullRequestReviewState = Schema.Union([
   PullRequestReviewUnavailable,
   PullRequestReviewNotStarted,
+  PullRequestReviewStale,
   PullRequestReviewPending,
   PullRequestReviewCompleted,
   PullRequestReviewFailed
@@ -624,7 +633,8 @@ export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.T
 /** Optimistic concurrency boundary for one explicit human dismissal. */
 export const DismissReviewSuggestionRequest = Schema.Struct({
   expectedRevisionId: PrReviewSuggestionRevisionId,
-  expectedSequence: PrReviewSuggestionRevisionSequence
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  reason: PrReviewDismissalReason
 })
 
 /** Decoded human dismissal request. */

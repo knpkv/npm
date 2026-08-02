@@ -600,6 +600,8 @@ export const makeReviewSuggestionRevisionOperations = <
       }
       if (
         current.suggestion.state !== "draft" ||
+        (request.state === "dismissed" && request.dismissalReason === undefined) ||
+        (request.state !== "dismissed" && request.dismissalReason !== undefined) ||
         (
           request.edit.replacement !== undefined &&
           request.edit.replacement.reviewedHead !==
@@ -643,6 +645,7 @@ export const makeReviewSuggestionRevisionOperations = <
       )({
         suggestionId: request.suggestionId,
         state: request.state ?? current.suggestion.state,
+        ...(request.dismissalReason === undefined ? {} : { dismissalReason: request.dismissalReason }),
         ...request.edit
       }).pipe(
         Effect.mapError(() => operationFailure("agent-job.review-revision-suggestion-invalid"))

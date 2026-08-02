@@ -42,7 +42,8 @@ import {
   type PrReviewSuggestionAnchor,
   PrReviewSuggestionDraft,
   type PrReviewSuggestionDraft as PrReviewSuggestionDraftType,
-  PrReviewSuggestionId
+  PrReviewSuggestionId,
+  prReviewSuggestionIdentityMaterial
 } from "../../../domain/prReview.js"
 import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../../domain/prReviewRevision.js"
 import {
@@ -486,18 +487,7 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
   subject: typeof PrReviewSubject.Type,
   suggestion: PrReviewSuggestionDraftType
 ) {
-  const material = JSON.stringify([
-    subject.baseRevision,
-    subject.headRevision,
-    suggestion.title,
-    suggestion.anchor,
-    suggestion.evidence.path,
-    suggestion.evidence.startLine,
-    suggestion.evidence.endLine,
-    suggestion.evidence.excerpt,
-    suggestion.problem,
-    suggestion.recommendation
-  ])
+  const material = prReviewSuggestionIdentityMaterial(subject, suggestion)
   const bytes = yield* utf8Bytes(providerId, material)
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() =>

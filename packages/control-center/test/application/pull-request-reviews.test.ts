@@ -1373,7 +1373,8 @@ describe("pull request reviews", () => {
             suggestionId: SUGGESTION_ID,
             request: {
               expectedRevisionId: REVIEW_REVISION_ID,
-              expectedSequence: PrReviewSuggestionRevisionSequence.make(1)
+              expectedSequence: PrReviewSuggestionRevisionSequence.make(1),
+              reason: "false-positive"
             },
             session: HUMAN_SESSION
           })
