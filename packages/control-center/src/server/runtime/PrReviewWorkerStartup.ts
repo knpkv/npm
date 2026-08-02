@@ -46,19 +46,27 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const reconciliation = yield* sandboxes.reconcile(options.workspaceId).pipe(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
-  if ((reconciliation.reattachedSandboxes ?? []).length === 0) {
-    if (persistence.agentJobs.interruptRunningReviews === undefined) {
-      yield* Effect.logDebug("PR review interruption recovery is unavailable for this persistence boundary")
-    } else {
-      yield* DateTime.now.pipe(
-        Effect.flatMap((interruptedAt) =>
-          persistence.agentJobs.interruptRunningReviews!({
-            workspaceId: options.workspaceId,
-            interruptedAt
-          })
-        )
+  const runningAttempts = yield* persistence.agentJobs.listRunningPrReviewAttempts(options.workspaceId)
+  const preservedAttempts = (reconciliation.reattachedSandboxIdentities ?? []).flatMap((sandbox) =>
+    runningAttempts
+      .filter((attempt) =>
+        attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
+        attempt.attemptId === sandbox.attemptId
       )
-    }
+      .map(({ attemptSequence, jobId }) => ({ jobId, attemptSequence }))
+  )
+  if (persistence.agentJobs.interruptRunningReviews === undefined) {
+    yield* Effect.logDebug("PR review interruption recovery is unavailable for this persistence boundary")
+  } else {
+    yield* DateTime.now.pipe(
+      Effect.flatMap((interruptedAt) =>
+        persistence.agentJobs.interruptRunningReviews!({
+          workspaceId: options.workspaceId,
+          interruptedAt,
+          preservedAttempts
+        })
+      )
+    )
   }
   yield* persistence.retention
     .recordSandboxReconciliation(

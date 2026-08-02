@@ -313,6 +313,12 @@ export interface PrReviewSandboxReconciliation {
   readonly removedSandboxes: ReadonlyArray<string>
   /** Live server-private sandboxes retained for recovery inspection. */
   readonly reattachedSandboxes?: ReadonlyArray<string>
+  /** Parsed identity coordinates used to attribute live sandboxes to attempts. */
+  readonly reattachedSandboxIdentities?: ReadonlyArray<{
+    readonly name: string
+    readonly jobToken: string
+    readonly attemptId: string
+  }>
 }
 
 /** Session owner. The callback is scoped to the sbx sandbox lifetime. */
@@ -1101,9 +1107,17 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const names = text.split("\n")
       .filter((name) => name.startsWith(ownedPrefix))
       .sort()
+    const identityPattern = new RegExp(`^${ownedPrefix}([a-f0-9]{${SANDBOX_JOB_TOKEN_LENGTH}})-([a-f0-9]{12})$`, "u")
+    const identities = names.flatMap((name) => {
+      const match = identityPattern.exec(name)
+      return match === null || match[1] === undefined || match[2] === undefined
+        ? []
+        : [{ name, jobToken: match[1], attemptId: match[2] }]
+    })
     return {
       removedSandboxes: [],
-      reattachedSandboxes: names
+      reattachedSandboxes: names,
+      reattachedSandboxIdentities: identities
     } satisfies PrReviewSandboxReconciliation
   })
 

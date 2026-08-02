@@ -287,9 +287,21 @@ export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 /** Startup transition for review attempts whose owning process disappeared. */
 export const InterruptRunningReviewsInput = Schema.Struct({
   workspaceId: WorkspaceId,
-  interruptedAt: UtcTimestamp
+  interruptedAt: UtcTimestamp,
+  preservedAttempts: Schema.optionalKey(Schema.Array(Schema.Struct({
+    jobId: JobId,
+    attemptSequence: AgentAttemptSequence
+  })))
 })
 export type InterruptRunningReviewsInput = typeof InterruptRunningReviewsInput.Type
+
+/** Durable identity used to match a live Review Sandbox to one immutable attempt. */
+export const RunningPrReviewAttempt = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  attemptId: Schema.String.check(Schema.isPattern(/^[a-f0-9]{12}$/u))
+})
+export type RunningPrReviewAttempt = typeof RunningPrReviewAttempt.Type
 
 /** Persist the latest validated report while an immutable review is still running. */
 export const RecordAgentReviewProgressInput = Schema.Struct({
