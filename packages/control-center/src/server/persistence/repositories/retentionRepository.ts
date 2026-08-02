@@ -340,13 +340,11 @@ const makeRetentionRepository: Effect.Effect<
             SELECT 1 FROM agent_review_suggestion_revisions revision
             WHERE revision.workspace_id = job.workspace_id
               AND revision.source_job_id = job.job_id
-              AND revision.created_at > ${cutoffAt}
           )
           AND NOT EXISTS (
             SELECT 1 FROM agent_thread_events event
             WHERE event.workspace_id = job.workspace_id
               AND event.job_id = job.job_id
-              AND event.occurred_at > ${cutoffAt}
           )
           AND NOT EXISTS (
             SELECT 1 FROM domain_events event
@@ -379,12 +377,6 @@ const makeRetentionRepository: Effect.Effect<
             ) VALUES (${workspaceId}, ${run.runId}, 'agent-content', ${jobId})`,
             { discard: true }
           )
-          yield* sql`DELETE FROM agent_review_suggestion_revisions
-        WHERE workspace_id = ${workspaceId}
-          AND source_job_id IN ${sql.in(jobIds)}`
-          yield* sql`DELETE FROM agent_thread_events
-        WHERE workspace_id = ${workspaceId}
-          AND job_id IN ${sql.in(jobIds)}`
           yield* sql`DELETE FROM agent_job_leases
         WHERE workspace_id = ${workspaceId}
           AND job_id IN ${sql.in(jobIds)}`

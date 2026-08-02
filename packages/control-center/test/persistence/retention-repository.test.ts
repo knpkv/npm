@@ -169,6 +169,17 @@ const seedRetentionFixtures = Effect.gen(function*() {
       ${payload}, ${PREFIXED_DIGEST}, length(CAST(${payload} AS BLOB)),
       '2024-01-01T00:00:00.000Z'
     )`
+  yield* database.sql`INSERT INTO agent_jobs (
+      workspace_id, job_id, thread_id, release_id, provider_id, model, access,
+      prompt, context_fingerprint, subject_revision, task_context_json,
+      task_context_digest, state, created_at, cancel_requested_at, terminal_at
+    ) VALUES (
+      ${WORKSPACE_ID}, '01890f6f-6d6a-7cc0-98d2-000000000305',
+      '01890f6f-6d6a-7cc0-98d2-000000000303', 'release-retention',
+      'fake', NULL, 'read-only', 'old operational job', ${PREFIXED_DIGEST},
+      'release-revision:1', '{}', ${PREFIXED_DIGEST}, 'failed',
+      '2024-01-01T00:00:00.000Z', NULL, '2024-01-01T01:00:00.000Z'
+    )`
 })
 
 describe("RetentionRepository", () => {
@@ -236,11 +247,17 @@ describe("RetentionRepository", () => {
           evidence.map(({ evidenceId }) => evidenceId),
           ["evidence-held-2", "evidence-referenced-3"]
         )
-        const jobs = yield* database.sql`SELECT job_id FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID}`
-        const agentEvents = yield* database.sql`SELECT event_sequence FROM agent_thread_events
+        const jobs = yield* database.sql<{ readonly jobId: string }>`SELECT job_id AS jobId
+          FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID}`
+        const agentEvents = yield* database.sql<
+          { readonly eventSequence: number }
+        >`SELECT event_sequence AS eventSequence
+        FROM agent_thread_events
         WHERE workspace_id = ${WORKSPACE_ID}`
-        assert.lengthOf(jobs, 0)
-        assert.lengthOf(agentEvents, 0)
+        assert.deepStrictEqual(jobs.map(({ jobId }) => jobId), [
+          "01890f6f-6d6a-7cc0-98d2-000000000304"
+        ])
+        assert.deepStrictEqual(agentEvents.map(({ eventSequence }) => eventSequence), [1])
 
         const persistedRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
         assert.lengthOf(persistedRuns, 5)
@@ -360,8 +377,11 @@ describe("RetentionRepository", () => {
         )
 
         assert.deepStrictEqual(
-          remainingJobs.map(({ jobId }) => jobId),
-          [protectedJobId]
+          remainingJobs.map(({ jobId }) => jobId).sort(),
+          [
+            protectedJobId,
+            eligibleJobId
+          ].sort()
         )
         assert.lengthOf(remainingRevisions, 1)
         assert.strictEqual(agentRun?.selectedCount, 1)
