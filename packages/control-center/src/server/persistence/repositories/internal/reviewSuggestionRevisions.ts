@@ -599,7 +599,10 @@ export const makeReviewSuggestionRevisionOperations = <
         })
       }
       if (
-        current.suggestion.state !== "draft" ||
+        (
+          current.suggestion.state !== "draft" &&
+          !(request.state === "stale" && current.suggestion.state === "published")
+        ) ||
         (request.state === "dismissed" && request.dismissalReason === undefined) ||
         (request.state !== "dismissed" && request.dismissalReason !== undefined) ||
         (

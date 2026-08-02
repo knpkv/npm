@@ -1400,6 +1400,58 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("marks prior-head suggestions stale when a newer review completes", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const firstClaim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: firstClaim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        const secondClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T3,
+          leaseExpiresAt: T5
+        })
+        assert.isTrue(Option.isSome(secondClaim))
+        if (Option.isNone(secondClaim)) return yield* Effect.die("new-head review claim missing")
+        const advancedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          subject: advancedSubject
+        })
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: SWAP_JOB_ID,
+          attemptSequence: secondClaim.value.attemptSequence,
+          leaseToken: SECOND_LEASE_TOKEN,
+          report: advancedReport,
+          completedAt: T4
+        })
+
+        const stale = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: report.suggestions[0]!.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.strictEqual(stale.current.suggestion.state, "stale")
+        assert.strictEqual(stale.current.subject.headRevision, subject.headRevision)
+      })
+    ))
+
   it.effect("trims limitation cutoffs before freezing follow-up context", () =>
     withRepository(
       Effect.gen(function*() {
