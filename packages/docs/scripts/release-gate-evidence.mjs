@@ -15,14 +15,18 @@ export const parseReleaseGateRows = (markdown) =>
 
 const validateCanonicalFields = (row) => {
   const failures = []
+  const fieldValue = (text, fieldPattern) =>
+    text.match(new RegExp(`(?:${fieldPattern})\\s*[:=]\\s*([^;|]*)`, "iu"))?.[1]?.trim() ?? ""
+  const commandResult = fieldValue(row.reviewed, "commandResult")
+  const artifact = fieldValue(row.reviewed, "artifact|CI link")
+  const cleanupResult = fieldValue(row.cleanup, "cleanupResult")
   if (!shaPattern.test(row.reviewed))
     failures.push(`${row.criterion} PASS row must include a 40-character reviewedHead SHA`)
-  if (!/commandResult\s*[:=]/u.test(row.reviewed)) failures.push(`${row.criterion} PASS row must include commandResult`)
-  if (!/(?:artifact|CI link)\s*[:=]/iu.test(row.reviewed))
-    failures.push(`${row.criterion} PASS row must include an artifact or CI link`)
+  if (commandResult.length === 0) failures.push(`${row.criterion} PASS row must include a non-blank commandResult`)
+  if (artifact.length === 0) failures.push(`${row.criterion} PASS row must include an artifact or CI link`)
   if (!isoTimestampPattern.test(row.reviewed))
     failures.push(`${row.criterion} PASS row must include an ISO-8601 executedAt timestamp`)
-  if (!/cleanupResult\s*[:=]/u.test(row.cleanup)) failures.push(`${row.criterion} PASS row must include cleanupResult`)
+  if (cleanupResult.length === 0) failures.push(`${row.criterion} PASS row must include a non-blank cleanupResult`)
   return failures
 }
 

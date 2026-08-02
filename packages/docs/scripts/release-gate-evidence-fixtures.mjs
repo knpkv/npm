@@ -17,24 +17,39 @@ assert.ok(
   ),
   "duplicate criterion rows are rejected"
 )
-const passing = [
-  ...Array.from({ length: 25 }, (_, index) =>
-    row(
-      `SC7.${index + 1}`,
-      "PASS",
-      `reviewedHead: ${"a".repeat(40)}; commandResult: \`pnpm test\` => PASS; artifact: https://ci.example/run/1; executedAt: 2026-08-02T13:00:00Z`,
-      "cleanupResult: complete"
-    )
-  ),
-  row(
-    "Product completion journey",
-    "PASS",
-    `reviewedHead: ${"a".repeat(40)}; commandResult: \`pnpm test\` => PASS; artifact: https://ci.example/run/1; executedAt: 2026-08-02T13:00:00Z`,
-    "cleanupResult: complete"
-  )
-].join("\n")
+const canonicalReviewed = `reviewedHead: ${"a".repeat(40)}; commandResult: \`pnpm test\` => PASS; artifact: https://ci.example/run/1; executedAt: 2026-08-02T13:00:00Z`
+const canonicalCleanup = "cleanupResult: complete"
+const passingRows = [
+  ...Array.from({ length: 25 }, (_, index) => row(`SC7.${index + 1}`, "PASS", canonicalReviewed, canonicalCleanup)),
+  row("Product completion journey", "PASS", canonicalReviewed, canonicalCleanup)
+]
+const passing = passingRows.join("\n")
 assert.deepEqual(
   validateReleaseGateEvidence(passing, { releaseGate: true }),
   [],
   "canonical passing evidence is accepted"
 )
+for (const [label, reviewed, cleanup, expected] of [
+  [
+    "commandResult",
+    canonicalReviewed.replace("commandResult: `pnpm test` => PASS", "commandResult: "),
+    canonicalCleanup,
+    "commandResult"
+  ],
+  [
+    "artifact",
+    canonicalReviewed.replace("artifact: https://ci.example/run/1", "artifact: "),
+    canonicalCleanup,
+    "artifact or CI link"
+  ],
+  ["cleanupResult", canonicalReviewed, "cleanupResult: ", "cleanupResult"]
+]) {
+  const invalid = [...passingRows]
+  invalid[0] = row("SC7.1", "PASS", reviewed, cleanup)
+  assert.ok(
+    validateReleaseGateEvidence(invalid.join("\n"), { releaseGate: true }).some((failure) =>
+      failure.includes(expected)
+    ),
+    `blank ${label} metadata is rejected`
+  )
+}
