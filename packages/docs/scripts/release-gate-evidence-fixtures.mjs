@@ -30,6 +30,14 @@ assert.deepEqual(
   "canonical passing evidence is accepted"
 )
 for (const [label, reviewed, cleanup, expected] of [
+  ["reviewedHead", canonicalReviewed.replace("reviewedHead:", "previousRevision:"), canonicalCleanup, "reviewedHead"],
+  ["executedAt", canonicalReviewed.replace("executedAt:", "generatedAt:"), canonicalCleanup, "executedAt"],
+  [
+    "field boundary",
+    canonicalReviewed.replace("commandResult:", "previousCommandResult:"),
+    canonicalCleanup,
+    "commandResult"
+  ],
   [
     "commandResult",
     canonicalReviewed.replace("commandResult: `pnpm test` => PASS", "commandResult: "),
