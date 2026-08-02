@@ -11,7 +11,8 @@ import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRev
 import type {
   PullRequestReviewControllerState,
   PullRequestReviewPublicationState,
-  ReviewSuggestionPublicationTarget
+  ReviewSuggestionPublicationTarget,
+  ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
@@ -76,6 +77,7 @@ export const WorkspacePullRequestDetails = ({
   onReviewRetry,
   onReviewStart,
   onReviewSuggestionPublish,
+  onReviewTargetSuggestion = () => undefined,
   onSessionExpired,
   pullRequest,
   reviewCanEnqueue,
@@ -94,6 +96,7 @@ export const WorkspacePullRequestDetails = ({
   readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onReviewRetry: () => void
   readonly onReviewSuggestionPublish: (finalContent: string) => void
+  readonly onReviewTargetSuggestion?: (target: ReviewSuggestionTarget) => void
   readonly onReviewStart: (prompt?: DurableAgentPrompt) => void
   readonly pullRequest: WorkspacePullRequestPresentation
   readonly reviewCanEnqueue: boolean
@@ -240,6 +243,7 @@ export const WorkspacePullRequestDetails = ({
                 onLoadEarlier={onReviewLoadEarlier}
                 onPreviewPublication={onReviewPublicationPreview}
                 onPublishSuggestion={onReviewSuggestionPublish}
+                onTargetSuggestion={onReviewTargetSuggestion}
                 onRetry={onReviewRetry}
                 onStart={onReviewStart}
                 onSuggestionRevisionAccepted={onSuggestionRevisionAccepted}

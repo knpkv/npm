@@ -39,7 +39,8 @@ import {
   usePullRequestReview,
   type PullRequestReviewControllerState,
   type PullRequestReviewPublicationState,
-  type ReviewSuggestionPublicationTarget
+  type ReviewSuggestionPublicationTarget,
+  type ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
@@ -280,6 +281,7 @@ const EntityContent = ({
   reviewState,
   reviewSuggestionPublish,
   reviewSuggestionRevisionTransport,
+  reviewTargetSuggestion,
   sessionKey,
   stale
 }: {
@@ -299,6 +301,7 @@ const EntityContent = ({
   readonly reviewRetry: () => void
   readonly reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
   readonly reviewSuggestionPublish: (finalContent: string) => void
+  readonly reviewTargetSuggestion: (target: ReviewSuggestionTarget) => void
   readonly reviewStart: (prompt?: DurableAgentPrompt) => void
   readonly reviewState: PullRequestReviewControllerState
   readonly retry: () => void
@@ -346,6 +349,7 @@ const EntityContent = ({
           onReviewPublicationPreview={reviewPublicationPreview}
           onReviewRetry={reviewRetry}
           onReviewSuggestionPublish={reviewSuggestionPublish}
+          onReviewTargetSuggestion={reviewTargetSuggestion}
           onReviewStart={reviewStart}
           pullRequest={presentation.pullRequest}
           reviewCanEnqueue={reviewCanEnqueue}
@@ -382,6 +386,7 @@ interface WorkspaceEntityViewProps {
   readonly reviewRetry?: () => void
   readonly reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
   readonly reviewSuggestionPublish?: (finalContent: string) => void
+  readonly reviewTargetSuggestion?: (target: ReviewSuggestionTarget) => void
   readonly reviewStart?: (prompt?: DurableAgentPrompt) => void
   readonly reviewState?: PullRequestReviewControllerState
   readonly state: WorkspaceEntityState
@@ -416,6 +421,7 @@ export const WorkspaceEntityView = ({
   reviewState = { _tag: "idle" },
   reviewSuggestionPublish = ignoreAction,
   reviewSuggestionRevisionTransport,
+  reviewTargetSuggestion = ignoreAction,
   sessionKey = null,
   state,
   workspaceId
@@ -501,6 +507,7 @@ export const WorkspaceEntityView = ({
             reviewRetry={reviewRetry}
             {...(reviewSuggestionRevisionTransport === undefined ? {} : { reviewSuggestionRevisionTransport })}
             reviewSuggestionPublish={reviewSuggestionPublish}
+            reviewTargetSuggestion={reviewTargetSuggestion}
             reviewStart={reviewStart}
             reviewState={reviewState}
             retry={retry}
@@ -615,6 +622,7 @@ const ConnectedWorkspaceEntity = ({
       reviewPublicationPreview={reviewController.previewPublication}
       reviewRetry={reviewController.retry}
       reviewSuggestionPublish={reviewController.publishSuggestion}
+      reviewTargetSuggestion={reviewController.targetSuggestion}
       reviewStart={reviewController.start}
       reviewState={reviewController.state}
       state={controller.state}

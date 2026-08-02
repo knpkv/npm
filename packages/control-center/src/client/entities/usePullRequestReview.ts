@@ -18,7 +18,9 @@ import type {
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
 import type { RateLimitedApiError } from "../../api/errors.js"
-import type { EntityId, JobId } from "../../domain/identifiers.js"
+import type { EntityId, JobId, PrReviewSuggestionRevisionId } from "../../domain/identifiers.js"
+import type { PrReviewSuggestionId } from "../../domain/prReview.js"
+import type { PrReviewSuggestionRevisionSequence } from "../../domain/prReviewRevision.js"
 import {
   isRecoverablePullRequestReviewFailure,
   isUnauthorizedPullRequestReviewFailure
@@ -64,6 +66,15 @@ export type ReviewSuggestionPublicationTarget = Pick<
   ReviewSuggestionPublicationSelection,
   "jobId" | "revisionId" | "suggestionId"
 >
+
+/** Exact immutable revision selected for one targeted agent operation. */
+export type ReviewSuggestionTarget = {
+  readonly expectedRevisionId: PrReviewSuggestionRevisionId
+  readonly expectedSequence: PrReviewSuggestionRevisionSequence
+  readonly intent: "suggestion-edit" | "suggestion-revalidation"
+  readonly jobId: JobId
+  readonly suggestionId: PrReviewSuggestionId
+}
 
 export type PullRequestReviewControllerState =
   | { readonly _tag: "idle" }
@@ -145,6 +156,12 @@ export interface PullRequestReviewTransport {
     operation?: ReviewSuggestionPublicationOperation,
     commentId?: string
   ) => Promise<PublishedReviewComment>
+  readonly targetSuggestion?: (
+    entityId: EntityId,
+    target: ReviewSuggestionTarget,
+    provider: ReviewProviderSelection,
+    signal: AbortSignal
+  ) => Promise<PullRequestReviewState>
 }
 
 const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
@@ -264,6 +281,7 @@ export const usePullRequestReview = (
   readonly previewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly publication: PullRequestReviewPublicationState
   readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
+  readonly targetSuggestion: (target: ReviewSuggestionTarget) => void
   readonly retry: () => void
   readonly start: (
     prompt?: DurableAgentPrompt,
@@ -676,6 +694,41 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, publication, refreshThread, state, transport])
 
+  const targetSuggestion = useCallback((target: ReviewSuggestionTarget) => {
+    if (
+      state._tag !== "ready" ||
+      state.review._tag !== "completed" ||
+      state.review.jobId !== target.jobId ||
+      state.provider === null ||
+      !state.review.report.suggestions.some(({ suggestionId }) => suggestionId === target.suggestionId)
+    ) return
+    if (transport.targetSuggestion === undefined) return
+    const current = state
+    mutationAbort.current?.abort()
+    const abort = new AbortController()
+    mutationAbort.current = abort
+    setState({ ...current, action: "starting" })
+    transport.targetSuggestion(entityId, target, state.provider, abort.signal).then(
+      (review) => {
+        if (abort.signal.aborted) return
+        setState((latest) =>
+          latest._tag === "ready" && sameReviewScope(latest, current) && matchesScope(review, current)
+            ? { ...latest, action: "idle", review }
+            : latest
+        )
+      },
+      (failure) => {
+        if (abort.signal.aborted) return
+        if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
+        setState((latest) =>
+          latest._tag === "ready" && sameReviewScope(latest, current)
+            ? { ...latest, action: "failed" }
+            : latest
+        )
+      }
+    )
+  }, [entityId, onSessionExpired, state, transport])
+
   const currentState: PullRequestReviewControllerState = scope === null
     ? { _tag: "idle" }
     : state._tag !== "idle" && sameReviewScope(state, scope)
@@ -702,6 +755,7 @@ export const usePullRequestReview = (
     previewPublication,
     publication,
     publishSuggestion,
+    targetSuggestion,
     retry: useCallback(() => {
       automaticRetryScope.current = null
       setRequestRevision((revision) => revision + 1)

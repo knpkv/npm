@@ -157,6 +157,29 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
+  targetSuggestion: (entityId, target, provider, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.agent.targetReviewSuggestion({
+          params: {
+            entityId,
+            jobId: target.jobId,
+            suggestionId: target.suggestionId
+          },
+          payload: {
+            providerId: provider.providerId,
+            model: provider.model,
+            profile: "read-only",
+            reviewProfileId: provider.reviewProfile.profileId,
+            intent: target.intent,
+            expectedRevisionId: target.expectedRevisionId,
+            expectedSequence: target.expectedSequence
+          }
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   cancel: (entityId, jobId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

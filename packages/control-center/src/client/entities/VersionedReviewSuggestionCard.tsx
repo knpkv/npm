@@ -14,7 +14,7 @@ import {
   type ReviewSuggestionRevisionScope,
   type ReviewSuggestionRevisionTransport
 } from "./useReviewSuggestionRevisions.js"
-import type { ReviewSuggestionPublicationTarget } from "./usePullRequestReview.js"
+import type { ReviewSuggestionPublicationTarget, ReviewSuggestionTarget } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const authorLabel = (author: PrReviewSuggestionRevisionAuthor): string =>
@@ -28,6 +28,7 @@ export const VersionedReviewSuggestionCard = ({
   jobId,
   onPreviewPublication,
   onSuggestionRevisionAccepted,
+  onTargetSuggestion,
   revisionTransport = browserReviewSuggestionRevisionTransport,
   sessionKey,
   suggestion
@@ -37,6 +38,7 @@ export const VersionedReviewSuggestionCard = ({
   readonly isPreviewing: boolean
   readonly jobId: JobId
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
+  readonly onTargetSuggestion: (target: ReviewSuggestionTarget) => void
   readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly sessionKey: string
@@ -109,6 +111,40 @@ export const VersionedReviewSuggestionCard = ({
             {suggestionCanMutate ? (
               <Button disabled={page === null} onClick={() => setDismissOpen(true)} variant="quiet">
                 Dismiss
+              </Button>
+            ) : null}
+            {suggestionCanMutate && current !== undefined && current.validation._tag !== "requires-revalidation" ? (
+              <Button
+                disabled={controller.state._tag === "loading"}
+                onClick={() =>
+                  onTargetSuggestion({
+                    expectedRevisionId: current.revisionId,
+                    expectedSequence: current.sequence,
+                    intent: "suggestion-edit",
+                    jobId,
+                    suggestionId: presentedSuggestion.suggestionId
+                  })
+                }
+                variant="quiet"
+              >
+                Ask agent to edit
+              </Button>
+            ) : null}
+            {canEdit && current?.validation._tag === "requires-revalidation" ? (
+              <Button
+                disabled={controller.state._tag === "loading"}
+                onClick={() =>
+                  onTargetSuggestion({
+                    expectedRevisionId: current.revisionId,
+                    expectedSequence: current.sequence,
+                    intent: "suggestion-revalidation",
+                    jobId,
+                    suggestionId: presentedSuggestion.suggestionId
+                  })
+                }
+                variant="quiet"
+              >
+                Revalidate
               </Button>
             ) : null}
             {controller.state._tag === "dismissing" ? (
