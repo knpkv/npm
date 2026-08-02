@@ -70,6 +70,7 @@ import {
   ClaimAgentJobInput,
   ClaimedAgentJob,
   CompleteAgentReviewInput,
+  CompleteTargetedReviewInput,
   EnqueueAgentJobInput,
   ExtendReviewBudgetInput,
   LatestAgentReviewInput,
@@ -1477,6 +1478,98 @@ const makeAgentJobRepository = Effect.gen(function*() {
       return yield* reviewSuggestionRevisions.append(input).pipe(
         mapPersistenceOperation("agent-job.append-review-suggestion-revision")
       )
+    }),
+
+    completeTargetedReview: Effect.fn(
+      "AgentJobRepository.completeTargetedReview"
+    )(function*(input: typeof CompleteTargetedReviewInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(CompleteTargetedReviewInput)
+      )(input)
+      const report = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.target.report).pipe(
+        Effect.mapError(() =>
+          new AgentJobInputError({
+            workspaceId: request.target.workspaceId,
+            jobId: request.target.jobId,
+            reason: "invalid-result"
+          })
+        )
+      )
+      const encodedReport = yield* encodeReviewReport(report).pipe(
+        Effect.mapError(() =>
+          new AgentJobInputError({
+            workspaceId: request.target.workspaceId,
+            jobId: request.target.jobId,
+            reason: "invalid-result"
+          })
+        )
+      )
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const job = yield* getJob(request.target.workspaceId, request.target.jobId)
+          if (job.state === "cancel-requested") {
+            return yield* new AgentJobInputError({
+              workspaceId: request.target.workspaceId,
+              jobId: request.target.jobId,
+              reason: "cancellation-requested"
+            })
+          }
+          if (
+            job.state !== "running" ||
+            job.task._tag !== "pr-review" ||
+            job.subjectRevision !== job.task.subject.headRevision ||
+            !PrReviewSubjectEquivalence(job.task.subject, report.subject)
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.target.workspaceId,
+              jobId: request.target.jobId,
+              reason: "task-mismatch"
+            })
+          }
+          yield* validateLease({
+            workspaceId: request.target.workspaceId,
+            jobId: request.target.jobId,
+            attemptSequence: request.target.attemptSequence,
+            leaseToken: request.target.leaseToken,
+            observedAt: request.target.completedAt
+          })
+          const revision = yield* reviewSuggestionRevisions.appendInTransaction(request.source)
+          const eventSequence = yield* reserveEventSequence(
+            request.target.workspaceId,
+            job.threadId
+          )
+          yield* sql`INSERT INTO agent_thread_events (
+            workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+            event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+          ) VALUES (
+            ${request.target.workspaceId}, ${job.threadId}, ${eventSequence},
+            ${request.target.jobId}, ${request.target.attemptSequence}, 'review-report',
+            ${encodedReport.json}, ${encodedReport.digest}, ${encodedReport.bytes.length},
+            ${encodeTimestamp(request.target.completedAt)}
+          )`
+          yield* appendThreadEvent({
+            workspaceId: request.target.workspaceId,
+            threadId: job.threadId,
+            jobId: request.target.jobId,
+            attemptSequence: request.target.attemptSequence,
+            eventKind: "job-completed",
+            payload: { _tag: "completed", outcome: "success", sessionRef: null },
+            payloadSchema: AgentRuntimeEvent,
+            occurredAt: request.target.completedAt
+          })
+          yield* completeAttempt({
+            workspaceId: request.target.workspaceId,
+            jobId: request.target.jobId,
+            attemptSequence: request.target.attemptSequence,
+            completedAt: request.target.completedAt,
+            outcome: "success",
+            state: "succeeded",
+            sessionRef: null,
+            errorJson: null
+          })
+          return revision
+        })
+      ).pipe(mapPersistenceOperation("agent-job.complete-targeted-review"))
     }),
 
     enqueue: Effect.fn("AgentJobRepository.enqueue")(function*(input: typeof EnqueueAgentJobInput.Type) {
