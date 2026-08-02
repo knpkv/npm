@@ -16,7 +16,6 @@ Record `pass`, `fail`, or `blocked` beside each item and link any retained recor
 - [ ] `PENDING` Release preview → full view → CodeCommit PR entity navigation preserves context and announces the destination.
 - [ ] `PENDING` Release preview → full view → Confluence entity navigation preserves context and announces the destination.
 - [ ] `PENDING` Release preview → full view → CodePipeline entity navigation preserves context and announces the destination.
-- [ ] `PENDING` Release preview → full view → Clockify entity navigation preserves context and announces the destination.
 - [ ] `PENDING` The six-item relationship view exposes names, roles, states, and evidence in order.
 - [ ] `PENDING` Governed-action review exposes target, revision, payload, evidence, permission, and confirmation.
 - [ ] `PENDING` Jira proposal editing exposes labels, validation errors, stale conflicts, recovery, and no provider write without an enforced atomic revision precondition.

@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { validateReleaseGateEvidence } from "./release-gate-evidence.mjs"
 
 const docsRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(docsRoot, "../..")
@@ -26,23 +27,7 @@ const releaseGateEvidence = await readFile(
   resolve(workspaceRoot, ".specs/control-center/release-gate-evidence.md"),
   "utf8"
 )
-const expectedCriteria = Array.from({ length: 25 }, (_, index) => `SC7.${index + 1}`)
-const evidenceRows = new Map(
-  Array.from(releaseGateEvidence.matchAll(/^\| (SC7\.\d+)\s+\|\s+([^|]+)\s+\|/gmu), (match) => [
-    match[1],
-    match[2].trim()
-  ])
-)
-for (const criterion of expectedCriteria) {
-  if (!evidenceRows.has(criterion)) failures.push(`release-gate evidence is missing ${criterion}`)
-}
-if (releaseGate) {
-  for (const [criterion, status] of evidenceRows) {
-    if (status !== "PASS") failures.push(`${criterion} is not PASS in release-gate mode`)
-  }
-  const completionRow = releaseGateEvidence.match(/^\| Product completion journey \|\s+([^|]+)/mu)?.[1]?.trim()
-  if (completionRow !== "PASS") failures.push("product completion journey is not PASS in release-gate mode")
-}
+failures.push(...validateReleaseGateEvidence(releaseGateEvidence, { releaseGate }))
 const requiredReleaseJourneys = [
   "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
   "pnpm --filter @knpkv/control-center test:integration:live",
@@ -80,11 +65,13 @@ for (const command of requiredReleaseJourneys) {
 if (!releaseGateEvidence.includes("Product completion journey")) {
   failures.push("release-gate evidence is missing the product completion journey")
 }
-const sc723Row = releaseGateEvidence.match(/^\| SC7\.23\s+\|[^\n]*$/mu)?.[0] ?? ""
+const evidenceRow = (criterion) =>
+  releaseGateEvidence.match(new RegExp(`^\\|\\s*${criterion.replace(".", "\\.")}\\s*\\|[^\\n]*$`, "mu"))?.[0] ?? ""
+const sc723Row = evidenceRow("SC7.23")
 if (!sc723Row.includes("pnpm test --run")) {
   failures.push("SC7.23 must record the one-shot test command pnpm test --run")
 }
-const sc722Row = releaseGateEvidence.match(/^\| SC7\.22\s+\|[^\n]*$/mu)?.[0] ?? ""
+const sc722Row = evidenceRow("SC7.22")
 for (const command of [
   "pnpm --filter @knpkv/rly test:pack",
   "pnpm --filter @knpkv/rly test:browser",
@@ -92,7 +79,7 @@ for (const command of [
 ]) {
   if (!sc722Row.includes(command)) failures.push(`SC7.22 must record ${command}`)
 }
-const sc724Row = releaseGateEvidence.match(/^\| SC7\.24\s+\|[^\n]*$/mu)?.[0] ?? ""
+const sc724Row = evidenceRow("SC7.24")
 for (const command of ["pnpm --filter @knpkv/ai-codex test", "pnpm --filter @knpkv/ai-claude test"]) {
   if (!sc724Row.includes(command)) failures.push(`SC7.24 must record ${command}`)
 }
