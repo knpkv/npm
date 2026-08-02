@@ -1021,6 +1021,8 @@ const makeExecutor = Effect.gen(function*() {
         attemptId,
         baseRevision: subject.baseRevision,
         headRevision: subject.headRevision,
+        providerId: String(claim.providerId),
+        ...(selected.model === null ? {} : { model: String(selected.model) }),
         reviewExecution: selected.reviewExecution
       },
       (session) =>

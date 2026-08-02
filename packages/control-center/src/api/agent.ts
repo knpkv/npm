@@ -451,6 +451,13 @@ export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestRevie
   )
 }) {}
 
+/** Review interrupted by process restart; its partial evidence remains inspectable. */
+export class PullRequestReviewInterrupted extends Schema.TaggedClass<PullRequestReviewInterrupted>()("interrupted", {
+  ...pullRequestReviewJob,
+  completedAt: UtcTimestamp,
+  report: PrReviewReport
+}) {}
+
 /** Browser-safe current review state for one canonical pull-request entity. */
 export const PullRequestReviewState = Schema.Union([
   PullRequestReviewUnavailable,
@@ -458,7 +465,8 @@ export const PullRequestReviewState = Schema.Union([
   PullRequestReviewStale,
   PullRequestReviewPending,
   PullRequestReviewCompleted,
-  PullRequestReviewFailed
+  PullRequestReviewFailed,
+  PullRequestReviewInterrupted
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Decoded current pull-request review state. */
@@ -544,6 +552,10 @@ const PullRequestReviewRunFailedEvent = Schema.TaggedStruct("run-failed", {
   retryable: Schema.Boolean
 })
 
+const PullRequestReviewRunInterruptedEvent = Schema.TaggedStruct("run-interrupted", {
+  ...pullRequestReviewThreadEventFields
+})
+
 const PullRequestReviewCancellationRequestedEvent = Schema.TaggedStruct(
   "cancellation-requested",
   {
@@ -564,6 +576,7 @@ export const PullRequestReviewThreadEvent = Schema.Union([
   PullRequestReviewSuggestionPublishedEvent,
   PullRequestReviewRunCompletedEvent,
   PullRequestReviewRunFailedEvent,
+  PullRequestReviewRunInterruptedEvent,
   PullRequestReviewCancellationRequestedEvent
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type PullRequestReviewThreadEvent = typeof PullRequestReviewThreadEvent.Type

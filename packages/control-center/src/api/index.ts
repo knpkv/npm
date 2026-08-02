@@ -23,6 +23,7 @@ export {
   PublishReviewSuggestionRequest,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
+  PullRequestReviewInterrupted,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   PullRequestReviewState,

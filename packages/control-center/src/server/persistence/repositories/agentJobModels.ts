@@ -125,7 +125,7 @@ const PrReviewThreadRequestSummary = Schema.Struct({
 const PrReviewThreadRunSummary = Schema.Struct({
   jobId: JobId,
   subject: PrReviewSubject,
-  state: Schema.Literals(["cancelled", "failed", "succeeded", "unknown"]),
+  state: Schema.Literals(["cancelled", "failed", "interrupted", "succeeded", "unknown"]),
   requestedAt: UtcTimestamp,
   suggestionTitles: Schema.Array(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
@@ -282,6 +282,13 @@ export const CompleteAgentReviewInput = Schema.Struct({
   completedAt: UtcTimestamp
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
+
+/** Startup transition for review attempts whose owning process disappeared. */
+export const InterruptRunningReviewsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  interruptedAt: UtcTimestamp
+})
+export type InterruptRunningReviewsInput = typeof InterruptRunningReviewsInput.Type
 
 /** Persist the latest validated report while an immutable review is still running. */
 export const RecordAgentReviewProgressInput = Schema.Struct({
@@ -487,7 +494,7 @@ export const LatestAgentReviewRecord = Schema.Struct({
   threadId: AgentThreadId,
   providerId: AgentProviderId,
   model: AgentModel,
-  state: AgentJobState,
+  state: Schema.Union([AgentJobState, Schema.Literal("interrupted")]),
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
   startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
@@ -506,7 +513,9 @@ export const LatestAgentReviewRecord = Schema.Struct({
   })
 }).check(
   Schema.makeFilter(
-    ({ report, state }) => report === null || state === "succeeded" || state === "failed" || state === "cancelled",
+    ({ report, state }) =>
+      report === null || state === "succeeded" || state === "failed" ||
+      state === "cancelled" || state === "interrupted",
     { expected: "only terminal review jobs to carry a report" }
   )
 )

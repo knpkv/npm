@@ -1,9 +1,13 @@
 /** Writable, credential-free sbx session for one exact pull-request revision. @module */
+import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -23,6 +27,7 @@ import {
   type ReviewCommandArtifactStream
 } from "../../persistence/repositories/reviewCommandArtifactRepository.js"
 import { PrReviewSourceError, type PrReviewSourceRequest, PrReviewSourceWorkspace } from "./PrReviewSourceWorkspace.js"
+import { emitPrReviewTelemetry } from "./PrReviewTelemetry.js"
 import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.js"
 
 const DEFAULT_SBX_EXECUTABLE = "sbx"
@@ -144,6 +149,8 @@ const SessionRequest = Schema.Struct({
   attemptId: SandboxAttemptId,
   baseRevision: GitRevision,
   headRevision: GitRevision,
+  providerId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
+  model: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
   reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"]))
 })
 
@@ -183,6 +190,8 @@ export interface PrReviewSandboxSessionRequest extends PrReviewSourceRequest {
   readonly attemptSequence: AgentAttemptSequence
   readonly attemptId: string
   readonly reviewExecution?: "effect-ai" | "native-claude" | "native-codex"
+  readonly providerId?: string
+  readonly model?: string
 }
 
 /** Structured native Codex review material accepted only by Codex-backed sessions. */
@@ -302,6 +311,8 @@ export interface PrReviewSandboxSession {
 /** Startup cleanup report for stale Review Sandboxes. */
 export interface PrReviewSandboxReconciliation {
   readonly removedSandboxes: ReadonlyArray<string>
+  /** Live server-private sandboxes retained for recovery inspection. */
+  readonly reattachedSandboxes?: ReadonlyArray<string>
 }
 
 /** Session owner. The callback is scoped to the sbx sandbox lifetime. */
@@ -621,6 +632,77 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
               const closed = yield* Ref.make(false)
               const commandSequence = yield* Ref.make(0)
 
+              const executeObserved = Effect.fnUntraced(function*(
+                phase: string,
+                commandName: string,
+                args: ReadonlyArray<string>,
+                maximumOutputBytes: number,
+                timeout: Duration.Input,
+                input?: Uint8Array
+              ) {
+                const startedAt = yield* DateTime.now
+                const execution = yield* Effect.exit(execute(
+                  spawner,
+                  executable,
+                  hostEnvironment,
+                  args,
+                  maximumOutputBytes,
+                  timeout,
+                  input
+                ))
+                const completedAt = yield* DateTime.now
+                if (Exit.isFailure(execution)) {
+                  const failure = Cause.findErrorOption(execution.cause)
+                  yield* emitPrReviewTelemetry({
+                    workspaceId: request.workspaceId,
+                    jobId: request.jobId,
+                    attemptSequence: request.attemptSequence,
+                    revision: request.headRevision,
+                    provider: request.providerId ?? "unknown",
+                    model: request.model ?? null,
+                    cli: request.reviewExecution ?? "effect-ai",
+                    phase,
+                    commandName,
+                    durationMillis: Math.max(
+                      0,
+                      DateTime.toEpochMillis(completedAt) - DateTime.toEpochMillis(startedAt)
+                    ),
+                    exitStatus: null,
+                    stdoutBytes: 0,
+                    stderrBytes: 0,
+                    suggestionCount: 0,
+                    noteCount: 0,
+                    errorType: Option.isSome(failure) && isSessionError(failure.value)
+                      ? failure.value.reason
+                      : "execution-failed"
+                  })
+                  return yield* Effect.failCause(execution.cause)
+                }
+                const result = execution.value
+                yield* emitPrReviewTelemetry({
+                  workspaceId: request.workspaceId,
+                  jobId: request.jobId,
+                  attemptSequence: request.attemptSequence,
+                  revision: request.headRevision,
+                  provider: request.providerId ?? "unknown",
+                  model: request.model ?? null,
+                  cli: request.reviewExecution ?? "effect-ai",
+                  phase,
+                  commandName,
+                  durationMillis: Math.max(
+                    0,
+                    DateTime.toEpochMillis(completedAt) - DateTime.toEpochMillis(startedAt)
+                  ),
+                  exitStatus: Number(result.exitCode),
+                  stdoutBytes: result.stdout.byteLength,
+                  stderrBytes: result.stderr.byteLength,
+                  suggestionCount: 0,
+                  noteCount: 0,
+                  errorType: successful(result) ? null : "non-zero-exit"
+                })
+                return result
+              })
+
               const close = Ref.getAndSet(closed, true).pipe(
                 Effect.flatMap((wasClosed) => wasClosed ? Effect.void : removeSandbox(name))
               )
@@ -631,10 +713,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 input?: Uint8Array
               ) {
                 if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
-                return yield* execute(
-                  spawner,
-                  executable,
-                  hostEnvironment,
+                return yield* executeObserved(
+                  "sandbox-command",
+                  "review-command",
                   [
                     "exec",
                     ...(input === undefined ? [] : ["--interactive"]),
@@ -707,10 +788,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     textEncoder.encode(nativeRequest.outputSchema)
                   )
                   if (!successful(schemaWritten)) return yield* sessionError("sandbox-unavailable")
-                  const reviewed = yield* execute(
-                    spawner,
-                    executable,
-                    hostEnvironment,
+                  const reviewed = yield* executeObserved(
+                    "native-review",
+                    "codex",
                     [
                       "exec",
                       "--interactive",
@@ -782,10 +862,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     Effect.mapError(() => sessionError("invalid-request"))
                   )
                   if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
-                  const reviewed = yield* execute(
-                    spawner,
-                    executable,
-                    hostEnvironment,
+                  const reviewed = yield* executeObserved(
+                    "native-review",
+                    "claude",
                     [
                       "exec",
                       "--interactive",
@@ -1022,10 +1101,10 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const names = text.split("\n")
       .filter((name) => name.startsWith(ownedPrefix))
       .sort()
-    for (const name of names) {
-      yield* forceRemoveSandbox(name)
-    }
-    return { removedSandboxes: names } satisfies PrReviewSandboxReconciliation
+    return {
+      removedSandboxes: [],
+      reattachedSandboxes: names
+    } satisfies PrReviewSandboxReconciliation
   })
 
   return PrReviewSandboxSessions.of({ reconcile, withSession })

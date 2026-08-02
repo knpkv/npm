@@ -344,19 +344,21 @@ Run statuses are preparing, running, completed, cancelled, interrupted, failed, 
 
 On startup, Control Center:
 
-- Removes stale sbx sandboxes in the configured PR worker workspace's
-  `cc-pr-review-<compact-workspace-id>-` namespace.
-- Recovers durable queued or lease-expired review jobs through the worker.
-- Starts a fresh sandbox for a recovered attempt rather than simulating provider-session recovery.
+- Lists the configured PR worker workspace's server-private
+  `cc-pr-review-<compact-workspace-id>-` names and retains live entries for recovery inspection.
+- When no owned live sandbox remains, records active review jobs as interrupted with partial evidence.
+- Recovers durable queued or lease-expired review jobs through the worker and starts a fresh sandbox
+  rather than simulating provider-session recovery.
 
 Session acquisition and use are scoped. Cancellation, command or session
 timeout, copy/start failure, callback failure, and normal completion all force
 sbx sandbox removal. A command timeout fails the session before
 returning its typed failure, and model-requested timeouts cannot exceed the
 locally configured command cap. Startup reconciliation lists sbx sandboxes and
-removes only names with the exact configured workspace prefix. Names owned by
-another workspace and legacy unscoped `cc-pr-review-*` names remain untouched
-because the current worker cannot safely attribute them.
+retains live names with the exact configured workspace prefix for recovery
+inspection. Names owned by another workspace and legacy unscoped
+`cc-pr-review-*` names remain untouched because the current worker cannot safely
+attribute them.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 

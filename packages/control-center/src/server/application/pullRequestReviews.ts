@@ -18,6 +18,7 @@ import {
   PublishedReviewComment,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
+  PullRequestReviewInterrupted,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   PullRequestReviewStale,
@@ -76,6 +77,7 @@ import {
   type PrReviewThreadSubject as PrReviewThreadSubjectType,
   ReviewSuggestionPublicationDigest
 } from "../persistence/repositories/agentJobModels.js"
+import { PROCESS_RESTART_INTERRUPTION_MESSAGE } from "../persistence/repositories/agentJobRepository.js"
 import { assertAgentProviderAllowed, assertPullRequestReviewAllowed } from "./agentWorkspacePolicy.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import {
@@ -256,6 +258,9 @@ const mapReviewThreadEvent = Effect.fnUntraced(function*(
         ReviewThreadProviderFailurePayload,
         event.payload
       )
+      if (payload.error.message === PROCESS_RESTART_INTERRUPTION_MESSAGE) {
+        return { _tag: "run-interrupted", ...common }
+      }
       return { _tag: "run-failed", ...common, retryable: payload.error.retryable }
     }
     case "cancel-requested": {
@@ -379,6 +384,13 @@ const presentLatest = Effect.fnUntraced(function*(
         ...common,
         completedAt: record.terminalAt,
         state: record.state,
+        report: record.report
+      })
+    case "interrupted":
+      if (record.terminalAt === null || record.report === null) return yield* unavailable()
+      return new PullRequestReviewInterrupted({
+        ...common,
+        completedAt: record.terminalAt,
         report: record.report
       })
   }
