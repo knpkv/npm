@@ -19,6 +19,7 @@ import {
 } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
@@ -45,6 +46,7 @@ import {
 import {
   type AgentJobInputError,
   type ClaimedAgentJob,
+  MAXIMUM_REVIEW_BUDGET_MILLIS,
   PrReviewThreadContextSnapshot
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
@@ -594,6 +596,9 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   untrustedOutput: string,
   onActivity: (
     event: AgentRuntimeEvent
+  ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+  onPartialReport: (
+    report: typeof PrReviewReport.Type
   ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
 ) {
   const modelReport = yield* Schema.decodeUnknownEffect(
@@ -618,6 +623,19 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   }
   const suggestions = new Array<(typeof PrReviewReport.Type)["suggestions"][number]>()
   const suggestionIndexes = new Map<string, number>()
+  const notes = new Array<(typeof PrReviewReport.Type)["notes"][number]>()
+  const emitPartial = Effect.fnUntraced(function*() {
+    yield* onPartialReport({
+      schemaVersion: 3,
+      subject,
+      completion: {
+        status: "unable-to-conclude",
+        reason: "The review stopped before the complete project was examined."
+      },
+      suggestions: [...suggestions],
+      notes: [...notes]
+    }).pipe(Effect.mapError((failure) => executionFailure(claim.providerId, failure)))
+  })
   for (const suggestion of modelReport.suggestions) {
     const evidence = yield* exactEvidence(claim.providerId, session, suggestion).pipe(Effect.result)
     if (Result.isFailure(evidence)) {
@@ -653,6 +671,7 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
           )
         }
       }
+      yield* emitPartial()
       yield* onActivity({
         _tag: "output",
         channel: "progress",
@@ -665,8 +684,8 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     const anchor = yield* resolveAnchor(claim.providerId, session, canonicalSuggestion)
     suggestions.push({ ...canonicalSuggestion, anchor, state: "draft", suggestionId })
     suggestionIndexes.set(suggestionId, suggestions.length - 1)
+    yield* emitPartial()
   }
-  const notes = new Array<(typeof PrReviewReport.Type)["notes"][number]>()
   const seenNoteIds = new Set<string>()
   for (const note of modelReport.notes) {
     const location = yield* validatedNoteLocation(claim.providerId, session, note)
@@ -687,6 +706,7 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     if (seenNoteIds.has(noteId)) continue
     seenNoteIds.add(noteId)
     notes.push({ ...canonicalNote, noteId })
+    yield* emitPartial()
   }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
     schemaVersion: 3,
@@ -823,7 +843,8 @@ const makeExecutor = Effect.gen(function*() {
   return PrReviewTaskExecutor.of({
     execute: Effect.fnUntraced(function*(
       claim,
-      onActivity = () => Effect.void
+      onActivity = () => Effect.void,
+      onPartialReport = () => Effect.void
     ) {
       if (claim.context.task._tag !== "pr-review" || claim.access !== "read-only") {
         return yield* providerFailure(
@@ -855,6 +876,10 @@ const makeExecutor = Effect.gen(function*() {
       const profile = catalog.providers.find(
         ({ providerId }) => String(providerId) === String(claim.providerId)
       )?.reviewProfile
+      const persistedReviewBudgetMillis = persistedProfile.budgetMillis
+      // The worker owns the effective deadline and interrupts this maximum-sized
+      // provider run when the current budget expires or cancellation is requested.
+      const reviewBudgetMillis = MAXIMUM_REVIEW_BUDGET_MILLIS
       if (
         (!effectAiReview && !nativeReview) ||
         profile === undefined ||
@@ -916,8 +941,16 @@ const makeExecutor = Effect.gen(function*() {
                 ? session.runNativeCodexReview
                 : session.runNativeClaudeReview
               const nativeProviderLabel = nativeCodexReview ? "Codex" : "Claude"
+              if (nativeReviewMaximumDurationMillis(persistedReviewBudgetMillis) === null) {
+                return yield* providerFailure(
+                  claim.providerId,
+                  "configuration",
+                  `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
+                  false
+                )
+              }
               const maximumDurationMillis = nativeReviewMaximumDurationMillis(
-                persistedProfile.budgetMillis
+                reviewBudgetMillis
               )
               if (maximumDurationMillis === null) {
                 return yield* providerFailure(
@@ -993,7 +1026,8 @@ const makeExecutor = Effect.gen(function*() {
                 claim,
                 session,
                 normalizedOutput,
-                onRuntimeActivity
+                onRuntimeActivity,
+                onPartialReport
               )
             }
             if (languageModel === undefined) {
@@ -1014,7 +1048,7 @@ const makeExecutor = Effect.gen(function*() {
             )
             const adapter = makeToolAgentAdapter((request) =>
               runToolAgent({
-                budget: persistedProfile.budgetMillis,
+                budget: Duration.millis(reviewBudgetMillis),
                 context: {
                   operatorRequest: request.prompt,
                   subject,
@@ -1038,7 +1072,14 @@ const makeExecutor = Effect.gen(function*() {
               continuation: { _tag: "fresh" }
             }
             const output = yield* collectReviewOutput(claim, adapter.run(request), onRuntimeActivity)
-            return yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
+            return yield* anchorReport(
+              cryptoService,
+              claim,
+              session,
+              output,
+              onRuntimeActivity,
+              onPartialReport
+            )
           })
       ).pipe(
         Effect.mapError((failure) =>
@@ -1059,6 +1100,9 @@ export class PrReviewTaskExecutor extends Context.Service<
       claim: ClaimedAgentJob,
       onActivity?: (
         event: AgentRuntimeEvent
+      ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+      onPartialReport?: (
+        report: typeof PrReviewReport.Type
       ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
     ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError | AgentJobInputError>
   }

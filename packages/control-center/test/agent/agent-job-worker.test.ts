@@ -577,7 +577,7 @@ describe("agent job worker", () => {
           assert.isTrue(interrupted)
           assert.deepStrictEqual(
             events.events.map(({ eventKind }) => eventKind),
-            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+            ["user-message", "job-queued", "cancel-requested", "review-report", "job-completed"]
           )
         })
       )
@@ -672,7 +672,7 @@ describe("agent job worker", () => {
           })
           assert.deepStrictEqual(
             events.events.map(({ eventKind }) => eventKind),
-            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+            ["user-message", "job-queued", "cancel-requested", "review-report", "job-completed"]
           )
         })
       )

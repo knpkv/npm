@@ -279,6 +279,16 @@ const completeReview = Effect.gen(function*() {
   })
 })
 
+const incompleteReport = Schema.decodeUnknownSync(PrReviewReport)({
+  ...report,
+  completion: {
+    status: "unable-to-conclude",
+    reason: "The review stopped before the complete project was examined."
+  },
+  suggestions: [],
+  notes: []
+})
+
 const currentSuggestionRevision = (suggestionId: typeof report.suggestions[number]["suggestionId"]) =>
   Effect.gen(function*() {
     const jobs = yield* AgentJobRepository
@@ -312,6 +322,74 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("persists one budget extension and exposes the effective value to the claim", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+
+        const extended = yield* jobs.extendReviewBudget({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          extendedAt: T2
+        })
+        assert.deepStrictEqual(extended, {
+          reviewBudgetMillis: 2_400_000,
+          reviewBudgetExtensionCount: 1
+        })
+        assert.deepStrictEqual(
+          yield* jobs.reviewBudget({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            task: claim.context.task
+          }),
+          extended
+        )
+
+        const secondExtension = yield* jobs.extendReviewBudget({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          extendedAt: T3
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(secondExtension))
+        if (Result.isFailure(secondExtension)) {
+          assert.isTrue(Schema.is(AgentJobInputError)(secondExtension.failure))
+        }
+      })
+    ))
+
+  it.effect("keeps the newest validated partial report across multiple progress checkpoints", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: incompleteReport,
+          occurredAt: T1
+        })
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          occurredAt: T2
+        })
+
+        const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+        assert.deepStrictEqual(persisted.report, report)
+      })
+    ))
+
   it.effect("projects the immutable report suggestion as validated revision one", () =>
     withRepository(
       Effect.gen(function*() {

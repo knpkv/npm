@@ -157,6 +157,28 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
+  cancel: (entityId, jobId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.agent.cancelPullRequestReview({
+          params: { entityId, jobId },
+          payload: {}
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  extendBudget: (entityId, jobId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.agent.extendPullRequestReviewBudget({
+          params: { entityId, jobId },
+          payload: {}
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   load: (entityId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

@@ -629,6 +629,22 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     EnqueuePullRequestReviewResponse,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
+  readonly cancel: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly extendBudget: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly revisions: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
