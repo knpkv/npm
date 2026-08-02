@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { CONFLUENCE_SCOPES, JIRA_PROPOSAL_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
+import { CONFLUENCE_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
 import {
   HomeDirectoryLive,
   loadOAuthConfig,
@@ -32,12 +32,15 @@ const SHARED_OAUTH_CONFIG = { clientId: "client-id", clientSecret: "client-secre
 const CONTROL_CENTER_AUTH_STORE_NAME = "control-center"
 
 describe("Atlassian OAuth scope boundaries", () => {
-  it("does not grant Jira mutation scopes to the proposal-only Control Center flow", () => {
-    assert.deepStrictEqual([...JIRA_PROPOSAL_SCOPES].sort(), [
+  it("grants Jira release-publication scopes while preserving the shared OAuth contract", () => {
+    assert.deepStrictEqual([...JIRA_SCOPES].sort(), [
+      "manage:jira-configuration",
+      "manage:jira-project",
       "offline_access",
       "read:jira-user",
       "read:jira-work",
-      "read:me"
+      "read:me",
+      "write:jira-work"
     ])
   })
 })
@@ -429,7 +432,7 @@ describe("AtlassianOAuthGrants", () => {
       const requestedScopes = new URL(ready.authorizationUrl).searchParams.get("scope")?.split(" ").sort()
       assert.deepStrictEqual(
         requestedScopes,
-        Array.from(new Set([...JIRA_PROPOSAL_SCOPES, ...CONFLUENCE_SCOPES])).sort()
+        Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).sort()
       )
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
@@ -498,7 +501,7 @@ describe("AtlassianOAuthGrants", () => {
       if (started._tag !== "ready") return
       assert.deepStrictEqual(
         new URL(started.authorizationUrl).searchParams.get("scope")?.split(" ").sort(),
-        [...JIRA_PROPOSAL_SCOPES].sort()
+        [...JIRA_SCOPES].sort()
       )
       const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
         new URL(started.authorizationUrl).searchParams.get("state")

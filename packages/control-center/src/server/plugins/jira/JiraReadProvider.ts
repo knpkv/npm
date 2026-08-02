@@ -646,7 +646,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         versions.map((version) => ({
           id: version.id,
           name: version.name,
-          projectId: version.projectId === undefined
+          projectId: version.projectId === undefined || version.projectId === null
             ? version.project ?? null
             : String(version.projectId)
         }))
@@ -690,7 +690,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       Effect.map((version) => ({
         id: version.id,
         name: version.name,
-        projectId: version.projectId === undefined
+        projectId: version.projectId === undefined || version.projectId === null
           ? version.project ?? input.projectId
           : String(version.projectId)
       })),

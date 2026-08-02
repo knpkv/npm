@@ -82,14 +82,6 @@ export const JIRA_SCOPES = [
   "offline_access"
 ]
 
-/** Jira scopes used by Control Center's proposal-only integration. */
-export const JIRA_PROPOSAL_SCOPES = [
-  "read:jira-work",
-  "read:jira-user",
-  "read:me",
-  "offline_access"
-]
-
 /**
  * Options for building OAuth2 authorization URL.
  *

@@ -22,7 +22,6 @@ import {
 } from "../../domain/governedAction/index.js"
 import {
   DomainEventId,
-  EntityId,
   GovernedActionAuthorizationId,
   GovernedActionId,
   GovernedActionTransitionId,
@@ -56,6 +55,7 @@ interface SubmitInput {
   readonly releaseId: ReleaseId
   readonly request: SubmitReleasePublicationRequest
   readonly session: SessionSummary
+  readonly useReleaseIdentity?: boolean
   readonly workspaceId: WorkspaceId
 }
 
@@ -99,9 +99,32 @@ const makeService = Effect.gen(function*() {
     if (input.session.permission !== "workspace-owner") return yield* failure("forbidden")
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
+    const publicationTitle = input.useReleaseIdentity === true
+      ? input.request.provider === "jira" ? release.release.version : `${release.release.version} release`
+      : input.request.title
+    const publicationMarkdown = input.useReleaseIdentity === true
+      ? `Release ${release.release.version} for ${release.release.serviceName}. Published by Relay after human confirmation.`
+      : input.request.markdown
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)
-    if (sources.length !== 1) return yield* failure("conflict")
-    const source = sources[0]
+    if (sources.length > 1) return yield* failure("conflict")
+    const releaseSource = sources[0]
+    const workspaceConnections = releaseSource === undefined
+      ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
+      : []
+    const fallbackConnection = releaseSource === undefined
+      ? workspaceConnections.find(({ isEnabled, providerId }) => providerId === input.request.provider && isEnabled)
+      : undefined
+    const workspaceEntities = releaseSource === undefined && fallbackConnection !== undefined
+      ? yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)
+      : []
+    const fallbackEntity = fallbackConnection === undefined
+      ? undefined
+      : workspaceEntities.find(
+        ({ sourceRevision }) =>
+          sourceRevision.providerId === input.request.provider &&
+          sourceRevision.pluginConnectionId === fallbackConnection.pluginConnectionId
+      )
+    const source = releaseSource ?? fallbackEntity?.sourceRevision
     if (source === undefined || connections.proposalContextEffect === undefined) {
       return yield* failure("unavailable")
     }
@@ -115,6 +138,17 @@ const makeService = Effect.gen(function*() {
       source.pluginConnectionId
     ).pipe(mapFailure)
     if (!connectionRecord.isEnabled) return yield* failure("conflict")
+    // Governed actions are intentionally scoped to a current normalized
+    // provider entity. A release projection is not itself an entity, so bind
+    // the action to an existing current entity from the same provider scope;
+    // the immutable provider request below still carries the exact release
+    // destination (project version or Confluence space).
+    const publicationAnchor = (yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)).find(
+      (entity) =>
+        entity.sourceRevision.pluginConnectionId === source.pluginConnectionId &&
+        entity.sourceRevision.providerId === source.providerId
+    )
+    if (publicationAnchor === undefined) return yield* failure("conflict")
     const capability = connection.descriptor.capabilities.find(({ capabilityId }) => capabilityId === "action.execute")
     if (capability === undefined) return yield* failure("conflict")
 
@@ -140,14 +174,14 @@ const makeService = Effect.gen(function*() {
         ? {
           _tag: "create-release-version",
           projectId: destination.value,
-          name: input.request.title,
-          description: input.request.markdown
+          name: publicationTitle,
+          description: publicationMarkdown
         }
         : {
           _tag: "create-page",
           spaceId: destination.value,
-          title: input.request.title,
-          markdown: input.request.markdown,
+          title: publicationTitle,
+          markdown: publicationMarkdown,
           parentId: input.request.parentId
         },
       evidenceIds: []
@@ -164,9 +198,10 @@ const makeService = Effect.gen(function*() {
       workspaceId: input.workspaceId,
       releaseId: input.releaseId,
       provider: input.request.provider,
-      title: input.request.title,
-      markdown: input.request.markdown,
-      parentId: input.request.parentId
+      title: publicationTitle,
+      markdown: publicationMarkdown,
+      parentId: input.request.parentId,
+      targetEntityId: publicationAnchor.entityId
     }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
     const idempotencyKey = GovernedActionIdempotencyKey.make("release-publication:v1:" + digest)
     const existing = yield* persistence.governedActions.readByIdempotencyKey({
@@ -223,7 +258,7 @@ const makeService = Effect.gen(function*() {
       pluginAdapterVersion: connection.descriptor.descriptor.adapterVersion,
       providerId: input.request.provider,
       capability: { capabilityId: "action.execute", version: capability.version },
-      targetEntityId: EntityId.make(input.releaseId),
+      targetEntityId: publicationAnchor.entityId,
       proposal: providerProposal,
       evidence,
       evidenceSetDigest,

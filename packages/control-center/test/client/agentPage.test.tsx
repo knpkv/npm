@@ -146,6 +146,16 @@ describe("AgentPage context", () => {
     expect(workMarkup).toContain(`href="${workPath.replaceAll("&", "&amp;")}"`)
   })
 
+  it("names the exact selected workspace entity in the Relay chooser", () => {
+    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+    const entityId = "37eadfe4-caa9-73ca-81ec-86e2ec8f6a07"
+    const path = `/w/${workspaceId}/items?object=${entityId}#item-details`
+    const markup = renderAgentPage(path)
+    expect(markup).toContain(`Workspace item ${entityId.slice(-6)}`)
+    expect(markup).toContain(entityId)
+    expect(markup).toContain(`href="${path.replaceAll("&", "&amp;")}"`)
+  })
+
   it("preserves an exact Timeline context for Relay", () => {
     const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
     const timelinePath = `/w/${workspaceId}/timeline?actor=plugin&amp;from=2026-07-01`

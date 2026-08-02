@@ -61,8 +61,9 @@ const program = Effect.gen(function* () {
 ```
 
 `JIRA_SCOPES` is the legacy CLI set and includes Jira mutation scopes. Control Center must use
-`JIRA_PROPOSAL_SCOPES` and `JIRA_PROPOSAL_REQUIRED_SCOPES` instead; those sets contain only the
-read and identity scopes needed for its proposal-only Jira integration. They must not be presented
+`JIRA_SCOPES` and `JIRA_REQUIRED_SCOPES`; these include the Jira write and project-management scopes
+needed for governed release-version publication. Jira issue edits remain proposal-only in Control Center.
+They must not be presented
 as granting atomic Jira writes or project-management mutations.
 
 ## Token And Profile Storage

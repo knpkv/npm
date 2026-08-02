@@ -42,14 +42,6 @@ export const JIRA_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "offline_access"
 ]
 
-/** Jira scopes required by Control Center while Jira mutations remain disabled. */
-export const JIRA_PROPOSAL_REQUIRED_SCOPES: ReadonlyArray<string> = [
-  "read:jira-work",
-  "read:jira-user",
-  "read:me",
-  "offline_access"
-]
-
 export const CONFLUENCE_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:page:confluence",
   "write:page:confluence",

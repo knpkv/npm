@@ -16,6 +16,7 @@ import {
   releaseFullPath,
   releaseTransitionNames
 } from "./releases/releaseRoutes.js"
+import { decodeEntityRouteId } from "./items/workspaceEntityRoutes.js"
 import {
   readReleaseAgentThread,
   type StoredReleaseAgentThreadMessage,
@@ -142,6 +143,14 @@ export const contextFor = (path: string | null): AgentPageContext => {
     }
   }
   if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "items" && releaseId === null) {
+    const selectedEntityId = decodeEntityRouteId(contextUrl.searchParams.get("object"))
+    if (selectedEntityId !== null) {
+      return {
+        description: `Workspace item ${selectedEntityId} is selected in the normalized delivery view. Relay will keep this exact entity selection and the surrounding item filters in context.`,
+        label: `Workspace item ${selectedEntityId.slice(-6)}`,
+        path: safePath
+      }
+    }
     return {
       description: `Current normalized delivery items in workspace ${workspaceId}, including the exact active filters and selection.`,
       label: "Workspace items",

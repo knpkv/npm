@@ -30,6 +30,7 @@ import {
   ClockifyActionSubmissions
 } from "../application/clockifyActionSubmissions.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
+import { detectReleasePublicationIntent } from "../application/releasePublicationIntent.js"
 import {
   type ReleasePublicationSubmissionError,
   ReleasePublicationSubmissions
@@ -1222,11 +1223,33 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               if (session.permission !== "workspace-owner") {
                 return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
               }
+              const publicationIntent = detectReleasePublicationIntent(payload.prompt)
+              const publicationResult = publicationIntent === undefined || publications === undefined
+                ? undefined
+                : yield* Effect.gen(function*() {
+                  const result = yield* publications.submit({
+                    workspaceId: session.workspaceId,
+                    releaseId: params.releaseId,
+                    request: {
+                      markdown: "Release artifact published by Relay after human confirmation.",
+                      parentId: null,
+                      provider: publicationIntent.provider,
+                      title: publicationIntent.provider === "jira" ? "Relay Jira release" : "Relay Confluence release"
+                    },
+                    session,
+                    useReleaseIdentity: true
+                  }).pipe(Effect.catchTag(
+                    "ReleasePublicationSubmissionError",
+                    () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+                  ))
+                  return `provider=${publicationIntent.provider}; state=${result.state}; actionId=${result.actionId}`
+                })
               return yield* agent.runTurn({
                 history: payload.history,
                 ...(payload.originPath === undefined ? {} : { originPath: payload.originPath }),
                 prompt: payload.prompt,
                 provider: payload.provider,
+                ...(publicationResult === undefined ? {} : { publicationResult }),
                 releaseId: params.releaseId,
                 workspaceId: session.workspaceId
               }).pipe(Effect.catchTags({

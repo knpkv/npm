@@ -220,17 +220,6 @@ const proposeReleaseVersion = Effect.fn("JiraGovernedActions.proposeReleaseVersi
       diagnosticCode: "jira-release-version-project-outside-connection"
     })
   }
-  const versions = yield* withTimeout(
-    "jira-get-project-versions",
-    configuration.operationTimeoutMillis,
-    provider.getProjectVersions(configuration.projectId)
-  )
-  if (versions.some((version) => version.name === payload.name)) {
-    return yield* new PluginConflictFailure({
-      operation: "propose-action",
-      diagnosticCode: "jira-release-version-name-already-exists"
-    })
-  }
   const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
     Effect.mapError(() =>
@@ -511,12 +500,44 @@ const releaseVersionLocator = (payloadDigest: string) =>
 
 const releaseVersionReceipt = (
   version: { readonly id: string; readonly name: string },
-  observedAt: typeof UtcTimestamp.Type
+  observedAt: typeof UtcTimestamp.Type,
+  verb: "Created" | "Confirmed"
 ): PluginProviderReceiptV1 => ({
   status: "succeeded",
   providerOperationId: PluginProviderOperationId.make(`jira-project-version:${version.id}`),
-  safeSummary: `Created Jira release version ${version.name}`,
+  safeSummary: `${verb} Jira release version ${version.name}`,
   observedAt
+})
+
+const recoverAmbiguousReleaseVersion = Effect.fn("JiraGovernedActions.recoverAmbiguousReleaseVersion")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraGovernedActionConfiguration,
+  request: AuthorizedPluginActionV1,
+  payload: typeof CreateReleaseVersionPayload.Type
+): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+  const versions = yield* provider.getProjectVersions(configuration.projectId).pipe(
+    Effect.catch(() =>
+      Effect.fail(
+        new PluginUnknownOutcomeFailure({
+          operation: "jira-create-project-version",
+          reconciliationKey: releaseVersionLocator(request.payloadDigest)
+        })
+      )
+    )
+  )
+  // getProjectVersions is already scoped to the configured project. Jira's
+  // project-version list response may omit the project identity, so the
+  // version name is the only stable recovery key available here.
+  const matches = versions.filter(({ name }) => name === payload.name)
+  const match = matches[0]
+  if (match === undefined || matches.length !== 1) {
+    return yield* new PluginUnknownOutcomeFailure({
+      operation: "jira-create-project-version",
+      reconciliationKey: releaseVersionLocator(request.payloadDigest)
+    })
+  }
+  const observedAt = yield* DateTime.now
+  return { _tag: "confirmed", receipt: releaseVersionReceipt(match, observedAt, "Confirmed") }
 })
 
 const makeReleaseVersionExecutor = (
@@ -533,8 +554,9 @@ const makeReleaseVersionExecutor = (
       provider.getProjectVersions(configuration.projectId)
     )
     const checkedAt = yield* DateTime.now
-    if (versions.some((version) => version.name === payload.name)) {
-      return { _tag: "blocked", reasons: ["A Jira project version with this exact name already exists"], checkedAt }
+    const matches = versions.filter((version) => version.name === payload.name)
+    if (matches.length > 1) {
+      return { _tag: "blocked", reasons: ["Multiple Jira project versions have this exact name"], checkedAt }
     }
     return { _tag: "ready", checkedRevision: Revision.make(EMPTY_REVISION), checkedAt }
   }),
@@ -542,6 +564,23 @@ const makeReleaseVersionExecutor = (
     request: AuthorizedPluginActionV1
   ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const payload = yield* decodeAuthorizedReleaseVersion(request, configuration.projectId)
+    const existingVersions = yield* withTimeout(
+      "jira-pre-execute-project-versions",
+      configuration.operationTimeoutMillis,
+      provider.getProjectVersions(configuration.projectId)
+    )
+    const existingMatches = existingVersions.filter(({ name }) => name === payload.name)
+    const existingMatch = existingMatches[0]
+    if (existingMatch !== undefined && existingMatches.length === 1) {
+      const observedAt = yield* DateTime.now
+      return { _tag: "confirmed", receipt: releaseVersionReceipt(existingMatch, observedAt, "Confirmed") }
+    }
+    if (existingMatches.length > 1) {
+      return yield* new PluginConflictFailure({
+        operation: "jira-create-project-version",
+        diagnosticCode: "jira-release-version-name-ambiguous"
+      })
+    }
     const result = yield* provider.createProjectVersion({
       name: payload.name,
       description: payload.description,
@@ -553,12 +592,7 @@ const makeReleaseVersionExecutor = (
         Schema.is(PluginTimeoutFailure)(result.failure) ||
         Schema.is(PluginOutageFailure)(result.failure) ||
         Schema.is(PluginMalformedResponseFailure)(result.failure)
-      ) {
-        return yield* new PluginUnknownOutcomeFailure({
-          operation: "jira-create-project-version",
-          reconciliationKey: releaseVersionLocator(request.payloadDigest)
-        })
-      }
+      ) return yield* recoverAmbiguousReleaseVersion(provider, configuration, request, payload)
       if (
         Schema.is(PluginRateLimitFailure)(result.failure) ||
         Schema.is(PluginAuthenticationFailure)(result.failure) ||
@@ -577,12 +611,9 @@ const makeReleaseVersionExecutor = (
       }
     }
     if (result.success.name !== payload.name || result.success.projectId !== payload.projectId) {
-      return yield* new PluginUnknownOutcomeFailure({
-        operation: "jira-create-project-version",
-        reconciliationKey: releaseVersionLocator(request.payloadDigest)
-      })
+      return yield* recoverAmbiguousReleaseVersion(provider, configuration, request, payload)
     }
-    return { _tag: "confirmed", receipt: releaseVersionReceipt(result.success, observedAt) }
+    return { _tag: "confirmed", receipt: releaseVersionReceipt(result.success, observedAt, "Created") }
   }),
   requestCancellation: () =>
     Effect.fail(
@@ -610,7 +641,7 @@ const makeReleaseVersionExecutor = (
     const checkedAt = yield* DateTime.now
     const match = matches[0]
     if (match !== undefined && matches.length === 1) {
-      return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt) }
+      return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt, "Confirmed") }
     }
     if (matches.length === 0) return { _tag: "pending", checkedAt }
     return {

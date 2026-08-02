@@ -9,7 +9,7 @@ import {
   generateCodeVerifier,
   getAccessibleResources,
   getUserInfo,
-  JIRA_PROPOSAL_SCOPES,
+  JIRA_SCOPES,
   type TokenResponse,
   type UserInfo
 } from "@knpkv/atlassian-common/auth"
@@ -19,7 +19,7 @@ import {
   getOAuthConfigPath,
   getProfilesPath,
   HomeDirectoryLive,
-  JIRA_PROPOSAL_REQUIRED_SCOPES,
+  JIRA_REQUIRED_SCOPES,
   loadOAuthConfig,
   loadProfiles,
   type OAuthConfig,
@@ -185,8 +185,15 @@ const sameOAuthConfig = (left: OAuthConfig, right: OAuthConfig): boolean =>
   left.clientId === right.clientId && left.clientSecret === right.clientSecret
 
 const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boolean => {
+  const storedScopes = new Set(stored.scope.split(/\s+/).filter((scope) => scope.length > 0))
   const replacementScopes = new Set(replacement.scope.split(/\s+/).filter((scope) => scope.length > 0))
-  return stored.scope.split(/\s+/).filter((scope) => scope.length > 0).every((scope) => replacementScopes.has(scope))
+  const productScopes = [JIRA_REQUIRED_SCOPES, CONFLUENCE_REQUIRED_SCOPES]
+  // Preserve every product capability represented by the stored profile, while
+  // allowing obsolete provider scopes that are no longer requested by the
+  // current proposal to disappear during recovery.
+  return productScopes.every((required) =>
+    required.some((scope) => !storedScopes.has(scope)) || required.every((scope) => replacementScopes.has(scope))
+  )
 }
 
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
@@ -354,17 +361,17 @@ const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileM
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
 const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_PROPOSAL_SCOPES,
+  jira: JIRA_SCOPES,
   confluence: CONFLUENCE_SCOPES
 }
 
 const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_PROPOSAL_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
+  jira: JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
 }
 
 const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_PROPOSAL_REQUIRED_SCOPES,
+  jira: JIRA_REQUIRED_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
 }
 

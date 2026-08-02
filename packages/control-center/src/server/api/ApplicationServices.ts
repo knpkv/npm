@@ -571,6 +571,7 @@ export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
     readonly provider: AgentProvider
     readonly prompt: AgentPrompt
     readonly history: ReadonlyArray<AgentHistoryMessage>
+    readonly publicationResult?: string
   }) => Effect.Effect<
     ReleaseAgentTurnResponse,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
