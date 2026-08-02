@@ -339,6 +339,10 @@ export class PrReviewSandboxSessions extends Context.Service<
       PrReviewSandboxReconciliation,
       PrReviewSandboxSessionError
     >
+    /** Remove only names already attributed as unmatched by startup recovery. */
+    readonly cleanupUnmatched?: (
+      names: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlyArray<string>, PrReviewSandboxSessionError>
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewSandboxSessions") {}
 
@@ -1121,7 +1125,14 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     } satisfies PrReviewSandboxReconciliation
   })
 
-  return PrReviewSandboxSessions.of({ reconcile, withSession })
+  const cleanupUnmatched = Effect.fn("PrReviewSandboxSessions.cleanupUnmatched")(function*(
+    names: ReadonlyArray<string>
+  ) {
+    yield* Effect.forEach(names, removeSandbox)
+    return names
+  })
+
+  return PrReviewSandboxSessions.of({ cleanupUnmatched, reconcile, withSession })
 })
 
 /** Production layer for scoped writable sbx Review Sandbox sessions. */
