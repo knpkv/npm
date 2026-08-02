@@ -62,30 +62,30 @@ Commits must not leave dead routes, temporarily export vendor shapes, bypass typ
 
 ## Acceptance ownership
 
-| Success criteria                                          | Primary proving commits                                             |
-| --------------------------------------------------------- | ------------------------------------------------------------------- |
-| SC7.1 fresh installation                                  | T04–T10, I11                                                        |
-| SC7.2–SC7.5 portfolio, preview, routing, six-item clarity | T07–T10, D01–D07                                                    |
-| SC7.6 relationship repair                                 | D01–D04                                                             |
-| SC7.7 pipeline retry                                      | D03, I10, S05                                                       |
-| SC7.8 Active work                                         | D06                                                                 |
-| SC7.9 Jira lifecycle (proposal-only until atomic provider precondition) | I04–I05, S02; Jira capability contract tests |
-| SC7.10 complete diff and agent review                     | I01–I03, R15, A01–A12                                               |
-| SC7.11 agent isolation                                    | A03–A05, A09–A12                                                    |
-| SC7.12 governed mutation                                  | T05, D03–D04 and every adapter action execution/reconciliation test |
-| SC7.13 full service routes                                | I12, S01–S07                                                        |
-| SC7.14 plugin partial failure                             | T05, I03/I05/I07/I09/I10, I11                                       |
-| SC7.15 live recovery                                      | T08, T10, D04–D07, A03–A07                                          |
-| SC7.16 restart and corruption                             | T03/T12, D09, A03/A11/A12, H01–H02                                  |
-| SC7.17 LAN security                                       | T04, H03                                                            |
-| SC7.18 sandbox containment                                | A11–A12                                                             |
-| SC7.19 content and secret safety                          | T04/T06, every adapter, A06–A12, H03                                |
-| SC7.20 accessibility and presentation                     | R04–R16, I12, every page commit, H04                                |
-| SC7.21 performance and bounds                             | T11, A01–A03, H05                                                   |
-| SC7.22 design-system reuse                                | R01–R16, T01, S01, H06                                              |
-| SC7.23 complete validation                                | H08                                                                 |
-| SC7.24 local Effect AI wrappers                           | A06–A09, H08                                                        |
-| SC7.25 new-package documentation site                     | R16, A06–A07, H06                                                   |
+| Success criteria                                                        | Primary proving commits                                             |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| SC7.1 fresh installation                                                | T04–T10, I11                                                        |
+| SC7.2–SC7.5 portfolio, preview, routing, six-item clarity               | T07–T10, D01–D07                                                    |
+| SC7.6 relationship repair                                               | D01–D04                                                             |
+| SC7.7 pipeline retry                                                    | D03, I10, S05                                                       |
+| SC7.8 Active work                                                       | D06                                                                 |
+| SC7.9 Jira lifecycle (proposal-only until atomic provider precondition) | I04–I05, S02; Jira capability contract tests                        |
+| SC7.10 complete diff and agent review                                   | I01–I03, R15, A01–A12                                               |
+| SC7.11 agent isolation                                                  | A03–A05, A09–A12                                                    |
+| SC7.12 governed mutation                                                | T05, D03–D04 and every adapter action execution/reconciliation test |
+| SC7.13 full service routes                                              | I12, S01–S07                                                        |
+| SC7.14 plugin partial failure                                           | T05, I03/I05/I07/I09/I10, I11                                       |
+| SC7.15 live recovery                                                    | T08, T10, D04–D07, A03–A07                                          |
+| SC7.16 restart and corruption                                           | T03/T12, D09, A03/A11/A12, H01–H02                                  |
+| SC7.17 LAN security                                                     | T04, H03                                                            |
+| SC7.18 sandbox containment                                              | A11–A12                                                             |
+| SC7.19 content and secret safety                                        | T04/T06, every adapter, A06–A12, H03                                |
+| SC7.20 accessibility and presentation                                   | R04–R16, I12, every page commit, H04                                |
+| SC7.21 performance and bounds                                           | T11, A01–A03, H05                                                   |
+| SC7.22 design-system reuse                                              | R01–R16, T01, S01, H06                                              |
+| SC7.23 complete validation                                              | H08                                                                 |
+| SC7.24 local Effect AI wrappers                                         | A06–A09, H08                                                        |
+| SC7.25 new-package documentation site                                   | R16, A06–A07, H06                                                   |
 
 ## Approval boundary
 
