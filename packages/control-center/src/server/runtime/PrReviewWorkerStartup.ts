@@ -10,8 +10,13 @@ import { AgentSessionRef } from "@knpkv/ai-runtime"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
-import { type PrReviewSandboxSessionError, PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
+import {
+  type PrReviewSandboxReconciliation,
+  type PrReviewSandboxSessionError,
+  PrReviewSandboxSessions
+} from "../agent/internal/PrReviewSandboxSession.js"
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
+import type { RunningPrReviewAttempt } from "../persistence/repositories/agentJobModels.js"
 import { ControlCenterBootstrap } from "./Bootstrap.js"
 import { superviseAgentJobWorker } from "./internal/superviseAgentJobWorker.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
@@ -37,6 +42,27 @@ export class PrReviewWorkerStartup extends Context.Service<
   PrReviewWorkerRunning
 >()("@knpkv/control-center/server/runtime/PrReviewWorkerStartup") {}
 
+type ReattachedSandboxIdentity = NonNullable<
+  PrReviewSandboxReconciliation["reattachedSandboxIdentities"]
+>[number]
+
+/** Select the newest live attempt that still owns a recovered sandbox. */
+export const selectPreservedSandboxAttempts = (
+  runningAttempts: ReadonlyArray<RunningPrReviewAttempt>,
+  sandboxIdentities: ReadonlyArray<ReattachedSandboxIdentity>
+) =>
+  sandboxIdentities.flatMap((sandbox) => {
+    const sessionRef = AgentSessionRef.make(`sbx:${sandbox.name}`)
+    const carriedAttempts = runningAttempts.filter((attempt) => attempt.sessionRef === sessionRef)
+    const directAttempts = runningAttempts.filter((attempt) =>
+      attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
+      attempt.attemptId === sandbox.attemptId
+    )
+    const latest = [...(carriedAttempts.length > 0 ? carriedAttempts : directAttempts)]
+      .sort((left, right) => right.attemptSequence - left.attemptSequence)[0]
+    return latest === undefined ? [] : [{ sandboxName: sandbox.name, ...latest }]
+  })
+
 const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   options: PrReviewWorkerStartupOptions
 ) {
@@ -49,17 +75,10 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
   const runningAttempts = yield* persistence.agentJobs.listRunningPrReviewAttempts(options.workspaceId)
-  const preservedSandboxAttempts = (reconciliation.reattachedSandboxIdentities ?? []).flatMap((sandbox) => {
-    const sessionRef = AgentSessionRef.make(`sbx:${sandbox.name}`)
-    const carriedAttempts = runningAttempts.filter((attempt) => attempt.sessionRef === sessionRef)
-    const directAttempts = runningAttempts.filter((attempt) =>
-      attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
-      attempt.attemptId === sandbox.attemptId
-    )
-    const latest = [...(carriedAttempts.length > 0 ? carriedAttempts : directAttempts)]
-      .sort((left, right) => right.attemptSequence - left.attemptSequence)[0]
-    return latest === undefined ? [] : [{ sandboxName: sandbox.name, ...latest }]
-  })
+  const preservedSandboxAttempts = selectPreservedSandboxAttempts(
+    runningAttempts,
+    reconciliation.reattachedSandboxIdentities ?? []
+  )
   const preservedAttempts = preservedSandboxAttempts.map(({ attemptSequence, jobId }) => ({ attemptSequence, jobId }))
   if (persistence.agentJobs.attachRunningPrReviewSession !== undefined) {
     yield* Effect.forEach(
