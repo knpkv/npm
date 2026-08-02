@@ -719,7 +719,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("keeps the current Jira runtime proposal-only in the production registry", () =>
+  it.effect("exposes governed Jira release publication in the production registry", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-jira-proposal-")
@@ -792,10 +792,10 @@ describe("first-party plugin runtime", () => {
 
         assert.deepStrictEqual(
           connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
-          ["entity.read", "sync.incremental", "action.propose"]
+          ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
         )
-        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
-        assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+        assert.isTrue(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isTrue(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
         assert.lengthOf(requests, 0)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),

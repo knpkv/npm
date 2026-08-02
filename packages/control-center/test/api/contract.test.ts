@@ -561,7 +561,8 @@ describe("ControlCenterApi contract", () => {
           "GET",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
         ],
-        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"]
+        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"],
+        ["submitReleasePublication", "POST", "/api/v1/agent/releases/:releaseId/publications"]
       ]
     )
   })
@@ -692,7 +693,8 @@ describe("ControlCenterApi contract", () => {
       targetReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       dismissReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       previewReviewSuggestionPublication: [SessionCookieAuth.key],
-      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key]
+      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      submitReleasePublication: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
