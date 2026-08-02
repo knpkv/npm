@@ -50,6 +50,7 @@ const MAXIMUM_HISTORY_MESSAGES = 12
 const MAXIMUM_HISTORY_MESSAGE_LENGTH = 12_000
 const MAXIMUM_HISTORY_CONTENT_LENGTH = 64_000
 const MAXIMUM_REPLY_LENGTH = 32_000
+const MAXIMUM_ORIGIN_PATH_LENGTH = 2_048
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
 /** Maximum targeted request length retained in a pull-request review thread. */
 export const MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH = 2_500
@@ -223,7 +224,14 @@ const ReleaseAgentHistory = Schema.Array(AgentHistoryMessage).check(
 export const ReleaseAgentTurnRequest = Schema.Struct({
   provider: AgentProvider,
   prompt: AgentPrompt,
-  history: ReleaseAgentHistory
+  history: ReleaseAgentHistory,
+  originPath: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isPattern(/^\/(?![\\/])[^\\]*$/u, { expected: "a same-origin Control Center path" }),
+      Schema.isMaxLength(MAXIMUM_ORIGIN_PATH_LENGTH)
+    )
+  )
 }).annotate({ identifier: "ReleaseAgentTurnRequest" })
 
 /** Decoded release-aware model request. */

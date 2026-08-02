@@ -567,6 +567,7 @@ export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
   readonly runTurn: (input: {
     readonly workspaceId: WorkspaceId
     readonly releaseId: ReleaseId
+    readonly originPath?: string
     readonly provider: AgentProvider
     readonly prompt: AgentPrompt
     readonly history: ReadonlyArray<AgentHistoryMessage>

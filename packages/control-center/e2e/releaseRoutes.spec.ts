@@ -1646,8 +1646,35 @@ test("uses semantic fallback when direct Active work changes release", async ({ 
 test("opens the selected Active work release from the shell agent control", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
   await page.getByRole("link", { name: "Ask Relay" }).click()
-  await expect(page).toHaveURL(`${heldFullPath}/agent`)
+  await expect(page).toHaveURL(
+    `${heldFullPath}/agent?from=${
+      encodeURIComponent(
+        `/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`
+      )
+    }`
+  )
   await expect(page.getByRole("heading", { level: 1, name: `Ask ${heldRelease.relay.codename}.` })).toBeVisible()
+})
+
+test("opens Relay from any primary page and preserves the calling context", async ({ page }) => {
+  const originPath = `${overviewPath}?status=attention`
+  await page.goto(originPath)
+  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await expect(page).toHaveURL(`/agent?from=${encodeURIComponent(originPath)}`)
+  await expect(page.getByRole("heading", { level: 1, name: "Choose a release." })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 2, name: "Workspace overview" })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Solar Grove/u })).toHaveAttribute(
+    "href",
+    `/w/${snapshot.workspaceId}/releases/${release.releaseId}/agent?from=${encodeURIComponent(originPath)}`
+  )
+
+  await page.getByRole("link", { name: /Solar Grove/u }).click()
+  await expect(page).toHaveURL(
+    `/w/${snapshot.workspaceId}/releases/${release.releaseId}/agent?from=${encodeURIComponent(originPath)}`
+  )
+  await expect(page.getByRole("heading", { level: 1, name: "Ask Solar Grove." })).toBeVisible()
+  await expect(page.getByText("Workspace overview")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Return to calling page" })).toHaveAttribute("href", originPath)
 })
 
 test("keeps an invalid Active work agent context on the safe generic fallback", async ({ page }) => {

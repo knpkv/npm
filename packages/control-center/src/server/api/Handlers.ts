@@ -1197,6 +1197,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               }
               return yield* agent.runTurn({
                 history: payload.history,
+                ...(payload.originPath === undefined ? {} : { originPath: payload.originPath }),
                 prompt: payload.prompt,
                 provider: payload.provider,
                 releaseId: params.releaseId,

@@ -610,7 +610,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     {
       audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
-      landmark: () => page.getByRole("heading", { name: "Ask in context." }),
+      landmark: () => page.getByRole("heading", { name: "Release context stays private" }),
       primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
     },
     {
@@ -738,7 +738,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
   })
   const authenticatedAgent = {
     audit: productionRouteAuditCase("scaffold", "agent", "authenticated", "agent"),
-    landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
+    landmark: page.getByRole("heading", { level: 1, name: "Choose a release." }),
     primaryAction: page.getByRole("link", { name: "Return to Overview" })
   }
   await resetProductionRouteEntryPresentation(page)
@@ -786,10 +786,8 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.getByRole("link", { name: "Ask Relay" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ask in context." })).toBeVisible()
-  await expect(page.getByText("Current context")).toBeVisible()
-  await expect(page.getByRole("heading", { level: 2, name: "Releases" })).toBeVisible()
-  await expect(page.getByText("Open Relay from a release to start an exact, release-owned thread.")).toBeVisible()
+  await expect(page.getByRole("heading", { level: 2, name: "Release context stays private" })).toBeVisible()
+  await expect(page.getByText("Pair this browser before Relay reads a workspace release.")).toBeVisible()
   await expect(page.getByRole("heading", { level: 2, name: "Run Relay with an exact release context" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Choose a release to run Relay" })).toHaveAttribute("href", "/releases")
 })

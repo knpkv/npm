@@ -15,6 +15,7 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
     params: { releaseId: input.releaseId },
     payload: {
       history: input.history,
+      ...(input.originPath === undefined ? {} : { originPath: input.originPath }),
       prompt: input.prompt,
       provider: input.provider
     }
