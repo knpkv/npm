@@ -99,6 +99,10 @@ const contexts: Readonly<Record<string, AgentPageContext>> = {
 }
 
 const AGENT_CONTEXT_BASE = "https://control-center.invalid"
+const SAME_ORIGIN_PATH = /^\/(?:[^/].*)?$/u
+
+const safeOriginPath = (candidate: string | null, fallback: string): string =>
+  candidate !== null && SAME_ORIGIN_PATH.test(candidate) ? candidate : fallback
 
 export const contextFor = (path: string | null): AgentPageContext => {
   if (path === null) return DEFAULT_CONTEXT
@@ -486,7 +490,10 @@ const ReleaseAgentRoom = ({
     setIsRunning(true)
     setAnnouncement("Relay is reading the release context.")
 
-    const originPath = searchParams.get("from") ?? `${location.pathname}${location.search}${location.hash}`
+    const originPath = safeOriginPath(
+      searchParams.get("from"),
+      `${location.pathname}${location.search}${location.hash}`
+    )
     runTurn(
       { history, originPath, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
       { signal: abortController.signal }
@@ -767,6 +774,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
           <StatePanel
             action={controller.state.reason === "anonymous" ? <Link to="/pair">Pair this browser</Link> : undefined}
             description="Pair this browser before Relay reads a workspace release."
+            id="agent-title"
             title="Release context stays private"
             tone="caution"
           />
@@ -775,7 +783,11 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
     case "loading":
       return (
         <section aria-labelledby="agent-title" className={styles.state}>
-          <StatePanel description="Loading the releases for this page context." title="Choosing a release" />
+          <StatePanel
+            description="Loading the releases for this page context."
+            id="agent-title"
+            title="Choosing a release"
+          />
         </section>
       )
     case "failed":
@@ -784,14 +796,14 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
           <StatePanel
             action={<Button onClick={controller.onRetry}>Try again</Button>}
             description="Relay could not load the releases needed to preserve this page context."
+            id="agent-title"
             title="Release context unavailable"
             tone="critical"
           />
         </section>
       )
-    case "ready":
-      {
-        const { portfolio } = controller.state
+    case "ready": {
+      const { portfolio } = controller.state
       return (
         <section aria-labelledby="agent-title" className={styles.legacy}>
           <header className={styles.legacyHeader}>
@@ -842,7 +854,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
           )}
         </section>
       )
-      }
+    }
   }
 }
 
@@ -934,7 +946,7 @@ export const ConnectedAgentPage = ({
   }, [catalogRequest, loadPresets])
   const availableProviders = catalog._tag === "ready" ? catalog.providers : undefined
   const isCanonicalRoute = params.workspaceId !== undefined || params.releaseId !== undefined
-  const originPath = searchParams.get("from") ?? `${location.pathname}${location.search}${location.hash}`
+  const originPath = safeOriginPath(searchParams.get("from"), `${location.pathname}${location.search}${location.hash}`)
   return (
     <>
       {catalog._tag === "failed" ? (
