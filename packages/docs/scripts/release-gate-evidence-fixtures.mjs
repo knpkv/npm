@@ -17,7 +17,7 @@ assert.ok(
   ),
   "duplicate criterion rows are rejected"
 )
-const canonicalReviewed = `reviewedHead: ${"a".repeat(40)}; commandResult: \`pnpm test\` => PASS; artifact: https://ci.example/run/1; executedAt: 2026-08-02T13:00:00Z`
+const canonicalReviewed = `reviewedHead: ${"a".repeat(40)}; commandResult: \`pnpm test\` => PASS; artifact: https://ci.example/run/1; executedAt: 2026-08-02T13:00:00Z; providerIdentity: Jira site knpkv; capabilityStatus: proposal-only; credentialSurface: absent`
 const canonicalCleanup = "cleanupResult: complete"
 const passingRows = [
   ...Array.from({ length: 25 }, (_, index) => row(`SC7.${index + 1}`, "PASS", canonicalReviewed, canonicalCleanup)),
@@ -45,12 +45,48 @@ for (const [label, reviewed, cleanup, expected] of [
     "commandResult"
   ],
   [
+    "failed command",
+    canonicalReviewed.replace("`pnpm test` => PASS", "`pnpm test` => FAIL"),
+    canonicalCleanup,
+    "commandResult"
+  ],
+  [
     "artifact",
     canonicalReviewed.replace("artifact: https://ci.example/run/1", "artifact: "),
     canonicalCleanup,
     "artifact or CI link"
   ],
-  ["cleanupResult", canonicalReviewed, "cleanupResult: ", "cleanupResult"]
+  ["cleanupResult", canonicalReviewed, "cleanupResult: ", "cleanupResult"],
+  [
+    "secret-bearing artifact",
+    canonicalReviewed.replace("https://ci.example/run/1", "https://ci.example/run/1?access_token=redacted"),
+    canonicalCleanup,
+    "prohibited"
+  ],
+  [
+    "provider locator",
+    canonicalReviewed.replace("providerIdentity: Jira site knpkv", "providerIdentity: bucket:private-artifact"),
+    canonicalCleanup,
+    "prohibited"
+  ],
+  [
+    "providerIdentity",
+    canonicalReviewed.replace("providerIdentity: Jira site knpkv; ", ""),
+    canonicalCleanup,
+    "providerIdentity"
+  ],
+  [
+    "capabilityStatus",
+    canonicalReviewed.replace("capabilityStatus: proposal-only; ", ""),
+    canonicalCleanup,
+    "capabilityStatus"
+  ],
+  [
+    "credentialSurface",
+    canonicalReviewed.replace("credentialSurface: absent", "credentialSurface: present"),
+    canonicalCleanup,
+    "credentialSurface"
+  ]
 ]) {
   const invalid = [...passingRows]
   invalid[0] = row("SC7.1", "PASS", reviewed, cleanup)
