@@ -365,61 +365,59 @@ const makeAgentJobWorker = Effect.gen(function*() {
           }
           return yield* Effect.fail(source.failure)
         }
+        const completedAt = yield* DateTime.now
         const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
-        const revised = yield* jobs.appendReviewSuggestionRevision({
-          workspaceId: claim.workspaceId,
-          jobId: target.sourceJobId,
-          suggestionId: target.suggestionId,
-          expectedRevisionId: target.selectedRevisionId,
-          expectedSequence: target.history.current.sequence,
-          edit: selected.success.report.edit,
-          ...(validation === undefined ? {} : { validation }),
-          author: PrReviewSuggestionAgentAuthor.make({
-            jobId: claim.jobId,
-            providerId: claim.providerId,
-            model: claim.model === null ? null : String(claim.model),
-            runtimeMetadata: selected.success.report.runtimeMetadata ?? null
-          }),
-          createdAt: yield* DateTime.now,
-          leaseFence: {
+        const completion = yield* jobs.completeTargetedReview({
+          source: {
+            workspaceId: claim.workspaceId,
+            jobId: target.sourceJobId,
+            suggestionId: target.suggestionId,
+            expectedRevisionId: target.selectedRevisionId,
+            expectedSequence: target.history.current.sequence,
+            edit: selected.success.report.edit,
+            ...(validation === undefined ? {} : { validation }),
+            author: PrReviewSuggestionAgentAuthor.make({
+              jobId: claim.jobId,
+              providerId: claim.providerId,
+              model: claim.model === null ? null : String(claim.model),
+              runtimeMetadata: selected.success.report.runtimeMetadata ?? null
+            }),
+            createdAt: completedAt,
+            leaseFence: {
+              jobId: claim.jobId,
+              attemptSequence: claim.attemptSequence,
+              leaseToken: claim.leaseToken
+            }
+          },
+          target: {
+            workspaceId: claim.workspaceId,
             jobId: claim.jobId,
             attemptSequence: claim.attemptSequence,
-            leaseToken: claim.leaseToken
+            leaseToken: claim.leaseToken,
+            report: source.success.report,
+            completedAt
           }
         }).pipe(Effect.result)
-        if (Result.isFailure(revised)) {
-          if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)
-          if (Schema.is(RevisionConflictError)(revised.failure) || isAgentJobInputError(revised.failure)) {
+        if (Result.isFailure(completion)) {
+          if (isCancellationRequested(completion.failure)) return yield* cancelClaim(claim)
+          if (Schema.is(RevisionConflictError)(completion.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review revision became stale before it could be applied.",
+                retryable: false
+              })
+            )
+          }
+          if (isAgentJobInputError(completion.failure)) {
             return yield* failClaim(
               claim,
               new AgentProviderError({
                 providerId: claim.providerId,
                 phase: "protocol",
                 message: "Targeted review result could not be applied to the selected revision.",
-                retryable: false
-              })
-            )
-          }
-          return yield* Effect.fail(revised.failure)
-        }
-        const completedAt = yield* DateTime.now
-        const completion = yield* jobs.completeReview({
-          workspaceId: claim.workspaceId,
-          jobId: claim.jobId,
-          attemptSequence: claim.attemptSequence,
-          leaseToken: claim.leaseToken,
-          report: source.success.report,
-          completedAt
-        }).pipe(Effect.result)
-        if (Result.isFailure(completion)) {
-          if (isCancellationRequested(completion.failure)) return yield* cancelClaim(claim)
-          if (isInvalidReviewResult(completion.failure)) {
-            return yield* failClaim(
-              claim,
-              new AgentProviderError({
-                providerId: claim.providerId,
-                phase: "protocol",
-                message: "Targeted review completion was invalid.",
                 retryable: false
               })
             )

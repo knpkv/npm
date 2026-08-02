@@ -420,6 +420,13 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
 })
 export type AppendReviewSuggestionRevisionInput = typeof AppendReviewSuggestionRevisionInput.Type
 
+/** Atomic targeted completion: append the source revision and terminalize the worker job together. */
+export const CompleteTargetedReviewInput = Schema.Struct({
+  source: AppendReviewSuggestionRevisionInput,
+  target: CompleteAgentReviewInput
+})
+export type CompleteTargetedReviewInput = typeof CompleteTargetedReviewInput.Type
+
 /** Exact immutable subject used to recover its newest durable review job. */
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
