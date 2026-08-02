@@ -12,6 +12,7 @@
     "validate": "pnpm validate:rly && pnpm validate:control-center",
     "validate:source": "pnpm validate:rly:source && pnpm validate:control-center:source",
     "validate:control-center": "node scripts/validate-control-center-docs.mjs",
+    "validate:control-center:release": "node scripts/validate-control-center-docs.mjs --release-gate",
     "validate:control-center:source": "node scripts/validate-control-center-docs.mjs --source-only",
     "validate:rly": "node scripts/validate-rly-docs.mjs",
     "validate:rly:source": "node scripts/validate-rly-docs.mjs --source-only",

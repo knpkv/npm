@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 const docsRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(docsRoot, "../..")
 const sourceOnly = process.argv.includes("--source-only")
+const releaseGate = process.argv.includes("--release-gate")
 const docsFiles = [
   "control-center.mdx",
   "control-center-setup.mdx",
@@ -25,6 +26,23 @@ const releaseGateEvidence = await readFile(
   resolve(workspaceRoot, ".specs/control-center/release-gate-evidence.md"),
   "utf8"
 )
+const expectedCriteria = Array.from({ length: 25 }, (_, index) => `SC7.${index + 1}`)
+const evidenceRows = new Map(
+  Array.from(releaseGateEvidence.matchAll(/^\| (SC7\.\d+)\s+\|\s+([^|]+)\s+\|/gmu), (match) => [
+    match[1],
+    match[2].trim()
+  ])
+)
+for (const criterion of expectedCriteria) {
+  if (!evidenceRows.has(criterion)) failures.push(`release-gate evidence is missing ${criterion}`)
+}
+if (releaseGate) {
+  for (const [criterion, status] of evidenceRows) {
+    if (status !== "PASS") failures.push(`${criterion} is not PASS in release-gate mode`)
+  }
+  const completionRow = releaseGateEvidence.match(/^\| Product completion journey \|\s+([^|]+)/mu)?.[1]?.trim()
+  if (completionRow !== "PASS") failures.push("product completion journey is not PASS in release-gate mode")
+}
 const requiredReleaseJourneys = [
   "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
   "pnpm --filter @knpkv/control-center test:integration:live",
