@@ -547,6 +547,11 @@ const ReleaseAgentRoom = ({
           Return to calling page
         </Link>
       ) : null}
+      {callingContext.path !== null ? (
+        <Text className={styles.eyebrow} tone="secondary" variant="label">
+          {callingContext.label}
+        </Text>
+      ) : null}
       <header className={styles.hero}>
         <ReleaseRelay
           algorithm={release.relay.algorithm}
@@ -774,11 +779,13 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
     case "session":
       return (
         <section aria-labelledby="agent-title" className={styles.state}>
+          <Text as="h2" id="agent-title" variant="section-title">
+            Release context stays private
+          </Text>
           <StatePanel
             action={controller.state.reason === "anonymous" ? <Link to="/pair">Pair this browser</Link> : undefined}
             description="Pair this browser before Relay reads a workspace release."
-            id="agent-title"
-            title="Release context stays private"
+            title="Pairing required"
             tone="caution"
           />
         </section>
@@ -786,20 +793,21 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
     case "loading":
       return (
         <section aria-labelledby="agent-title" className={styles.state}>
-          <StatePanel
-            description="Loading the releases for this page context."
-            id="agent-title"
-            title="Choosing a release"
-          />
+          <Text as="h2" id="agent-title" variant="section-title">
+            Choosing a release
+          </Text>
+          <StatePanel description="Loading the releases for this page context." title="Choosing a release" />
         </section>
       )
     case "failed":
       return (
         <section aria-labelledby="agent-title" className={styles.state}>
+          <Text as="h2" id="agent-title" variant="section-title">
+            Release context unavailable
+          </Text>
           <StatePanel
             action={<Button onClick={controller.onRetry}>Try again</Button>}
             description="Relay could not load the releases needed to preserve this page context."
-            id="agent-title"
             title="Release context unavailable"
             tone="critical"
           />
