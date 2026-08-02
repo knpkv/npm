@@ -12,13 +12,15 @@ import type {
 } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId, JobId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestion, PrReviewSuggestionId } from "../../domain/prReview.js"
+import type { PrReviewDismissalReason, PrReviewSuggestion, PrReviewSuggestionId } from "../../domain/prReview.js"
 import {
   type PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionPageSize,
   type PrReviewSuggestionRevisionSequence
 } from "../../domain/prReviewRevision.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+
+type PrReviewDismissalReasonType = typeof PrReviewDismissalReason.Type
 
 const REVISION_PAGE_SIZE = PrReviewSuggestionRevisionPageSize.make(24)
 
@@ -188,7 +190,7 @@ export const useReviewSuggestionRevisions = (
   transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport,
   onAccepted: ReviewSuggestionRevisionAccepted = ignoreAcceptedRevision
 ): {
-  readonly dismiss: () => void
+  readonly dismiss: (reason: PrReviewDismissalReasonType) => void
   readonly loadEarlier: () => void
   readonly loadingEarlier: boolean
   readonly resolveConflict: () => void
@@ -305,7 +307,7 @@ export const useReviewSuggestionRevisions = (
     )
   }, [scope, state, transport])
 
-  const dismiss = useCallback((): void => {
+  const dismiss = useCallback((reason: PrReviewDismissalReasonType): void => {
     if (scope === null || state._tag !== "ready" || transport.dismiss === undefined) return
     const current = scope
     const retained = state.page
@@ -317,7 +319,8 @@ export const useReviewSuggestionRevisions = (
     setState({ _tag: "dismissing", page: retained })
     transport.dismiss(current, {
       expectedRevisionId: retained.current.revisionId,
-      expectedSequence: retained.current.sequence
+      expectedSequence: retained.current.sequence,
+      reason
     }, abort.signal).then(
       (accepted) => {
         if (

@@ -15,6 +15,7 @@ import {
 } from "../domain/identifiers.js"
 import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
 import {
+  PrReviewDismissalReason,
   PrReviewOutcome,
   PrReviewReport,
   PrReviewSubject,
@@ -632,7 +633,8 @@ export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.T
 /** Optimistic concurrency boundary for one explicit human dismissal. */
 export const DismissReviewSuggestionRequest = Schema.Struct({
   expectedRevisionId: PrReviewSuggestionRevisionId,
-  expectedSequence: PrReviewSuggestionRevisionSequence
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  reason: PrReviewDismissalReason
 })
 
 /** Decoded human dismissal request. */

@@ -139,6 +139,18 @@ export const PrReviewSuggestionState = Schema.Literals([
 /** Decoded suggestion presentation state. */
 export type PrReviewSuggestionState = typeof PrReviewSuggestionState.Type
 
+/** Human-selected reason a suggestion was dismissed. */
+export const PrReviewDismissalReason = Schema.Literals([
+  "false-positive",
+  "not-applicable",
+  "accepted-risk",
+  "duplicate",
+  "other"
+])
+
+/** Decoded dismissal reason retained with the immutable suggestion history. */
+export type PrReviewDismissalReason = typeof PrReviewDismissalReason.Type
+
 const PrReviewLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
 
 const PrReviewLocation = Schema.Struct({
@@ -318,6 +330,7 @@ export type PrReviewSuggestionDraft = typeof PrReviewSuggestionDraft.Type
 export const PrReviewSuggestion = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   state: PrReviewSuggestionState,
+  dismissalReason: Schema.optionalKey(PrReviewDismissalReason),
   ...prReviewSuggestionDraftFields,
   anchor: PrReviewSuggestionAnchor
 })

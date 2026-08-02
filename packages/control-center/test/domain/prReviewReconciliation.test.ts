@@ -47,6 +47,19 @@ describe("PR review suggestion reconciliation", () => {
     })
   })
 
+  it("does not manufacture transitions for omitted terminal suggestions", () => {
+    const result = reconcilePrReviewSuggestions({
+      previous: [
+        { suggestionId: first, state: "dismissed" },
+        { suggestionId: second, state: "resolved" }
+      ],
+      currentSuggestionIds: [],
+      declared: []
+    })
+
+    assert.deepEqual(result, { _tag: "success", transitions: [] })
+  })
+
   it("rejects unknown, duplicate, and contradictory declarations", () => {
     const unknown = reconcilePrReviewSuggestions({
       previous: [],

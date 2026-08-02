@@ -1232,6 +1232,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         expectedSequence: input.request.expectedSequence,
         edit,
         state: "dismissed",
+        dismissalReason: input.request.reason,
         author: PrReviewSuggestionOperatorAuthor.make({
           personId: input.session.actor.personId
         }),

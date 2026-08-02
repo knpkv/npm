@@ -2796,7 +2796,8 @@ describe("Control Center API handlers", () => {
           params: { entityId, jobId, suggestionId },
           payload: {
             expectedRevisionId: editedRevisionId,
-            expectedSequence: editedRevision.sequence
+            expectedSequence: editedRevision.sequence,
+            reason: "false-positive"
           }
         })
         const accepted = yield* client.agent.enqueuePullRequestReview({
@@ -2899,7 +2900,8 @@ describe("Control Center API handlers", () => {
           suggestionId,
           request: {
             expectedRevisionId: editedRevisionId,
-            expectedSequence: editedRevision.sequence
+            expectedSequence: editedRevision.sequence,
+            reason: "false-positive"
           },
           session
         },
@@ -3186,7 +3188,8 @@ describe("Control Center API handlers", () => {
           params: { entityId, jobId, suggestionId },
           payload: {
             expectedRevisionId: revisionId,
-            expectedSequence: sequence
+            expectedSequence: sequence,
+            reason: "other"
           }
         }).pipe(Effect.result)
         const previewed = yield* client.agent.previewReviewSuggestionPublication({

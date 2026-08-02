@@ -87,6 +87,18 @@ describe("PR review domain", () => {
     )
   })
 
+  it("changes suggestion identity when stable finding content changes", () => {
+    const changedSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+      ...suggestion,
+      recommendation: "Use the typed decoder at the persistence boundary."
+    })
+
+    assert.notStrictEqual(
+      prReviewSuggestionIdentityMaterial(subject, suggestion),
+      prReviewSuggestionIdentityMaterial(subject, changedSuggestion)
+    )
+  })
+
   it("rejects pre-stable schema v2 reports instead of guessing a migration", () => {
     assert.isTrue(
       Result.isFailure(

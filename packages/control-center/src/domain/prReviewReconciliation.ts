@@ -78,6 +78,7 @@ export const reconcilePrReviewSuggestions = (
 
   const expected = new Map<PrReviewSuggestionId, PrReviewSuggestionReconciliationKind>()
   for (const [suggestionId, state] of previous) {
+    if (!current.has(suggestionId) && (state === "dismissed" || state === "resolved")) continue
     expected.set(
       suggestionId,
       current.has(suggestionId)

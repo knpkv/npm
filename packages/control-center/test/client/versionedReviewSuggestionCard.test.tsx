@@ -233,7 +233,8 @@ describe("VersionedReviewSuggestionCard", () => {
       }),
       {
         expectedRevisionId: original.current.revisionId,
-        expectedSequence: original.current.sequence
+        expectedSequence: original.current.sequence,
+        reason: "false-positive"
       },
       expect.any(AbortSignal)
     )
