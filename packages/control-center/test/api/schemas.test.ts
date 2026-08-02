@@ -626,6 +626,11 @@ describe("public API schemas", () => {
       )
     )
     assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({ ...valid, originPath: "/\\evil.test" })
+      )
+    )
+    assert.isTrue(
       Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({ ...valid, provider: "remote" }))
     )
     assert.isTrue(

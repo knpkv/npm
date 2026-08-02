@@ -118,6 +118,11 @@ describe("command search", () => {
         `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=issue#release-work`
       )}`
     )
+    const canonicalAgentPath = `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}/agent`
+    const existingOrigin = `/w/${WORKSET_WORKSPACE_ID}/overview?status=attention`
+    expect(contextualAgentPath(canonicalAgentPath, `?from=${encodeURIComponent(existingOrigin)}`)).toBe(
+      `${canonicalAgentPath}?from=${encodeURIComponent(existingOrigin)}`
+    )
     const release: CommandReleasePresentation = {
       codename: "Copper Finch",
       href: `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}`,

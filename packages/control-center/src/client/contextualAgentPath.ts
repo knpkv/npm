@@ -26,6 +26,15 @@ export const contextualAgentPath = (pathname: string, search: string, hash = "")
     segments[1] === "w" &&
     isWorkspaceRouteId(workspaceId) &&
     segments[3] === "releases" &&
+    isReleaseRouteId(releaseId) &&
+    segments[5] === "agent"
+  ) {
+    return `${pathname}${search}${hash}`
+  }
+  if (
+    segments[1] === "w" &&
+    isWorkspaceRouteId(workspaceId) &&
+    segments[3] === "releases" &&
     isReleaseRouteId(releaseId)
   ) {
     return contextualReleaseAgentPath(workspaceId, releaseId, `${pathname}${search}${hash}`)

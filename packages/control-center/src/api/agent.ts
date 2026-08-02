@@ -228,7 +228,7 @@ export const ReleaseAgentTurnRequest = Schema.Struct({
   originPath: Schema.optionalKey(
     Schema.String.check(
       Schema.isTrimmed(),
-      Schema.isPattern(/^\/(?:[^/].*)?$/u, { expected: "a same-origin Control Center path" }),
+      Schema.isPattern(/^\/(?![\\/])[^\\]*$/u, { expected: "a same-origin Control Center path" }),
       Schema.isMaxLength(MAXIMUM_ORIGIN_PATH_LENGTH)
     )
   )

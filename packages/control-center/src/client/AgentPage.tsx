@@ -99,7 +99,7 @@ const contexts: Readonly<Record<string, AgentPageContext>> = {
 }
 
 const AGENT_CONTEXT_BASE = "https://control-center.invalid"
-const SAME_ORIGIN_PATH = /^\/(?:[^/].*)?$/u
+const SAME_ORIGIN_PATH = /^\/(?![\\/])[^\\]*$/u
 
 const safeOriginPath = (candidate: string | null, fallback: string): string =>
   candidate !== null && SAME_ORIGIN_PATH.test(candidate) ? candidate : fallback
@@ -433,6 +433,7 @@ const ReleaseAgentRoom = ({
 }): ReactElement => {
   const location = useLocation()
   const [searchParams] = useSearchParams()
+  const callingContext = contextFor(searchParams.get("from"))
   const [prompt, setPrompt] = useState("")
   const [provider, setProvider] = useState<"claude" | "codex">("codex")
   const providerWasSelected = useRef(false)
@@ -544,6 +545,11 @@ const ReleaseAgentRoom = ({
       <Link className={styles.back} state={location.state} to={releaseFullPath(workspaceId, release.id)}>
         Back to release
       </Link>
+      {callingContext.path !== null ? (
+        <Link className={styles.back} to={callingContext.path}>
+          Return to calling page
+        </Link>
+      ) : null}
       <header className={styles.hero}>
         <ReleaseRelay
           algorithm={release.relay.algorithm}
@@ -825,9 +831,11 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
               {context.label}
             </Text>
             <Text tone="secondary">{context.description}</Text>
-            <Link className={styles.back} to={context.path ?? "/"}>
-              Return to calling page
-            </Link>
+            {context.path !== null ? (
+              <Link className={styles.back} to={context.path}>
+                Return to calling page
+              </Link>
+            ) : null}
           </Surface>
           {portfolio.releases.length === 0 ? (
             <StatePanel
