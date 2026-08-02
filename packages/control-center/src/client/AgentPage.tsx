@@ -790,6 +790,8 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
         </section>
       )
     case "ready":
+      {
+        const { portfolio } = controller.state
       return (
         <section aria-labelledby="agent-title" className={styles.legacy}>
           <header className={styles.legacyHeader}>
@@ -815,7 +817,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
               Return to calling page
             </Link>
           </Surface>
-          {controller.state.portfolio.releases.length === 0 ? (
+          {portfolio.releases.length === 0 ? (
             <StatePanel
               action={<Link to="/services">Connect a service</Link>}
               description="Relay needs one synchronized release before it can start a scoped thread."
@@ -823,11 +825,11 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
             />
           ) : (
             <div aria-label="Releases available to Relay" className={styles.presetList}>
-              {controller.state.portfolio.releases.map((release) => (
+              {portfolio.releases.map((release) => (
                 <Link
                   className={styles.preset}
                   key={release.id}
-                  to={contextualReleaseAgentPath(controller.state.portfolio.workspaceId, release.id, originPath)}
+                  to={contextualReleaseAgentPath(portfolio.workspaceId, release.id, originPath)}
                 >
                   <strong>{release.relay.codename}</strong>
                   <span>
@@ -840,6 +842,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
           )}
         </section>
       )
+      }
   }
 }
 
