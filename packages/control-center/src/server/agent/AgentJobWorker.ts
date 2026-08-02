@@ -21,6 +21,8 @@ import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
 import type { PrReviewReport } from "../../domain/prReview.js"
+import { PrReviewSuggestionAgentAuthor } from "../../domain/prReviewRevision.js"
+import { RevisionConflictError } from "../persistence/errors.js"
 import {
   AgentJobInputError,
   type AgentLeaseOwner,
@@ -329,13 +331,121 @@ const makeAgentJobWorker = Effect.gen(function*() {
       )
     }
     if (selected.success._tag === "pr-review") {
+      const targetedIntent = claim.context.task._tag === "pr-review" &&
+        (claim.context.task.intent === "suggestion-edit" || claim.context.task.intent === "suggestion-revalidation")
+      if (targetedIntent) {
+        const target = claim.context.task.target
+        if (target === undefined || selected.success.report._tag !== "targeted") {
+          return yield* failClaim(
+            claim,
+            new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "protocol",
+              message: "Targeted review returned no immutable suggestion result.",
+              retryable: false
+            })
+          )
+        }
+        const source = yield* jobs.reviewResult({
+          workspaceId: claim.workspaceId,
+          jobId: target.sourceJobId
+        }).pipe(Effect.result)
+        if (Result.isFailure(source)) {
+          if (isCancellationRequested(source.failure)) return yield* cancelClaim(claim)
+          if (isAgentJobInputError(source.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "The targeted review source result could not be loaded.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(source.failure)
+        }
+        const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
+        const revised = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: claim.workspaceId,
+          jobId: target.sourceJobId,
+          suggestionId: target.suggestionId,
+          expectedRevisionId: target.selectedRevisionId,
+          expectedSequence: target.history.current.sequence,
+          edit: selected.success.report.edit,
+          ...(validation === undefined ? {} : { validation }),
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: claim.jobId,
+            providerId: claim.providerId,
+            model: claim.model === null ? null : String(claim.model),
+            runtimeMetadata: selected.success.report.runtimeMetadata ?? null
+          }),
+          createdAt: yield* DateTime.now,
+          leaseFence: {
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken
+          }
+        }).pipe(Effect.result)
+        if (Result.isFailure(revised)) {
+          if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)
+          if (Schema.is(RevisionConflictError)(revised.failure) || isAgentJobInputError(revised.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review result could not be applied to the selected revision.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(revised.failure)
+        }
+        const completedAt = yield* DateTime.now
+        const completion = yield* jobs.completeReview({
+          workspaceId: claim.workspaceId,
+          jobId: claim.jobId,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: claim.leaseToken,
+          report: source.success.report,
+          completedAt
+        }).pipe(Effect.result)
+        if (Result.isFailure(completion)) {
+          if (isCancellationRequested(completion.failure)) return yield* cancelClaim(claim)
+          if (isInvalidReviewResult(completion.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review completion was invalid.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(completion.failure)
+        }
+        return { _tag: "completed", jobId: claim.jobId, outcome: "success" } satisfies AgentJobWorkerRunResult
+      }
       const completedAt = yield* DateTime.now
+      if (selected.success.report._tag !== "report") {
+        return yield* failClaim(
+          claim,
+          new AgentProviderError({
+            providerId: claim.providerId,
+            phase: "protocol",
+            message: "Agent task executor returned a targeted result for a full PR review.",
+            retryable: false
+          })
+        )
+      }
       const completion = yield* jobs.completeReview({
         workspaceId: claim.workspaceId,
         jobId: claim.jobId,
         attemptSequence: claim.attemptSequence,
         leaseToken: claim.leaseToken,
-        report: selected.success.report,
+        report: selected.success.report.report,
         completedAt
       }).pipe(Effect.result)
       if (Result.isFailure(completion)) {

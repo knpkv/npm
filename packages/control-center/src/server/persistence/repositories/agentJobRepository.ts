@@ -2539,6 +2539,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         workspaceId: request.workspaceId,
         subjectRevision: request.subject.headRevision,
         taskContextPrefix,
+        excludeTargeted: true,
         ...(request.jobId === undefined ? {} : { jobId: request.jobId })
       })
       const rows = yield* sql
@@ -2654,6 +2655,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
           ? {}
           : { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
         reviewBudgetExtensionCount: reviewBudget.reviewBudgetExtensionCount,
+        taskIntent: task.intent ?? null,
         report,
         reviewProfile: task.reviewProfile,
         activity: {

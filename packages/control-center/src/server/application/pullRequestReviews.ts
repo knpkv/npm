@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  type EnqueuePullRequestReviewRequest,
   MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
   PublishedReviewComment,
   PullRequestReviewCompleted,
@@ -26,7 +27,7 @@ import {
   ReleaseAgentThreadCursor,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview,
-  type ReviewSuggestionRevisionPage
+  ReviewSuggestionRevisionPage
 } from "../../api/agent.js"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import {
@@ -57,6 +58,7 @@ import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
 import type { ApplicationResourceNotFound } from "../api/ApplicationServices.js"
 import {
+  ApplicationConflict,
   ApplicationInvalidRequest,
   ApplicationServiceUnavailable,
   DeliveryGraphInspection,
@@ -83,6 +85,11 @@ import {
 
 const DEFAULT_REVIEW_REQUEST = "Review this pull request."
 const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
+// Target history is copied into the queued task and into the attempt snapshot.
+// Leave room for the task envelope and the bounded request context so every
+// accepted targeted task fits the repository's 32 KiB event limit.
+const MAXIMUM_TARGET_HISTORY_BYTES = 24_000
+const MAXIMUM_TARGET_HISTORY_REVISIONS = 128
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
@@ -440,6 +447,34 @@ const makePullRequestReviews = Effect.gen(function*() {
     ).pipe(Effect.mapError(unavailable))
   })
 
+  const selectSupportedReviewRunner = Effect.fn(
+    "PullRequestReviews.selectSupportedReviewRunner"
+  )(function*(request: Pick<EnqueuePullRequestReviewRequest, "providerId" | "model" | "profile" | "reviewProfileId">) {
+    const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(request.providerId).pipe(
+      Effect.mapError(unavailable)
+    )
+    const selected = yield* runtimes.select({
+      providerId,
+      model: request.model,
+      access: request.profile,
+      capability: "pr-review"
+    }).pipe(Effect.mapError(unavailable))
+    const catalog = yield* runtimes.catalog()
+    const reviewProfile = catalog.providers.find(
+      (provider) =>
+        String(provider.providerId) === String(providerId) &&
+        provider.reviewProfile?.profileId === request.reviewProfileId
+    )?.reviewProfile
+    if (reviewProfile === undefined) return yield* new ApplicationInvalidRequest()
+    const supportedReviewRunner = (selected.reviewExecution === "effect-ai" &&
+      selected.filesystemAccess === "none" && selected.languageModel !== undefined &&
+      reviewProfile.networkAccess === "blocked") ||
+      ((selected.reviewExecution === "native-codex" || selected.reviewExecution === "native-claude") &&
+        selected.reviewExecutable !== undefined && reviewProfile.networkAccess === "provider-enabled")
+    if (!supportedReviewRunner) return yield* unavailable()
+    return { providerId, selected, reviewProfile }
+  })
+
   const selectedSuggestion = Effect.fn("PullRequestReviews.selectedSuggestion")(function*(
     workspaceId: WorkspaceId,
     target: AvailableReviewTarget,
@@ -454,8 +489,18 @@ const makePullRequestReviews = Effect.gen(function*() {
         jobId
       })
     )
+    if (
+      Option.isSome(selected) &&
+      (selected.value.taskIntent === "suggestion-edit" ||
+        selected.value.taskIntent === "suggestion-revalidation")
+    ) {
+      return yield* new ApplicationInvalidRequest()
+    }
     const review = yield* presentLatest(target, selected)
-    if (review._tag !== "completed" || review.jobId !== jobId) {
+    if (
+      review._tag !== "completed" ||
+      review.jobId !== jobId
+    ) {
       return yield* new ApplicationInvalidRequest()
     }
     const suggestion = review.report.suggestions.find(
@@ -565,6 +610,67 @@ const makePullRequestReviews = Effect.gen(function*() {
     return {
       ...page,
       current
+    }
+  })
+
+  const completeRevisionHistory = Effect.fn(
+    "PullRequestReviews.completeRevisionHistory"
+  )(function*(
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget,
+    jobId: JobId,
+    suggestionId: typeof PrReviewSuggestionId.Type
+  ) {
+    const limit = PrReviewSuggestionRevisionPageSize.make(128)
+    let beforeSequence: PrReviewSuggestionRevisionSequence | null = null
+    let lastPage: ReviewSuggestionRevisionPage | undefined
+    let overBound = false
+    const revisions = new Array<typeof PrReviewSuggestionRevision.Type>()
+    yield* Effect.whileLoop({
+      while: () =>
+        !overBound &&
+        (lastPage === undefined || (lastPage.hasMore && lastPage.nextBeforeSequence !== null)),
+      body: () =>
+        revisionHistory(
+          workspaceId,
+          target,
+          jobId,
+          suggestionId,
+          beforeSequence,
+          limit
+        ),
+      step: (page) => {
+        lastPage = page
+        if (revisions.length + page.revisions.length > MAXIMUM_TARGET_HISTORY_REVISIONS) {
+          overBound = true
+          return
+        }
+        for (const revision of page.revisions) revisions.push(revision)
+        beforeSequence = page.nextBeforeSequence
+      }
+    })
+    if (lastPage === undefined || lastPage.hasMore || overBound) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return yield* Schema.decodeUnknownEffect(Schema.toType(ReviewSuggestionRevisionPage))({
+      ...lastPage,
+      revisions,
+      hasMore: false,
+      nextBeforeSequence: null
+    }).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+  })
+
+  const assertTargetHistoryFitsJobPayload = Effect.fn(
+    "PullRequestReviews.assertTargetHistoryFitsJobPayload"
+  )(function*(page: ReviewSuggestionRevisionPage) {
+    const json = yield* Schema.encodeUnknownEffect(
+      Schema.fromJsonString(ReviewSuggestionRevisionPage)
+    )(page).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    const bytes = yield* Effect.fromResult(
+      Encoding.decodeBase64(Encoding.encodeBase64(json))
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    if (bytes.length > MAXIMUM_TARGET_HISTORY_BYTES) {
+      return yield* new ApplicationInvalidRequest()
     }
   })
 
@@ -820,32 +926,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       const target = derived
       const existing = yield* currentFor(input.workspaceId, target)
       if (existing._tag === "pending") return existing
-      const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(input.request.providerId).pipe(
-        Effect.mapError(unavailable)
-      )
-      const selected = yield* runtimes.select({
-        providerId,
-        model: input.request.model,
-        access: input.request.profile,
-        capability: "pr-review"
-      }).pipe(Effect.mapError(unavailable))
-      const catalog = yield* runtimes.catalog()
-      const reviewProfile = catalog.providers.find(
-        (provider) =>
-          String(provider.providerId) === String(providerId) &&
-          provider.reviewProfile?.profileId === input.request.reviewProfileId
-      )?.reviewProfile
-      if (reviewProfile === undefined) {
-        return yield* new ApplicationInvalidRequest()
-      }
-      const supportedReviewRunner = (selected.reviewExecution === "effect-ai" &&
-        selected.filesystemAccess === "none" &&
-        selected.languageModel !== undefined &&
-        reviewProfile.networkAccess === "blocked") ||
-        ((selected.reviewExecution === "native-codex" || selected.reviewExecution === "native-claude") &&
-          selected.reviewExecutable !== undefined &&
-          reviewProfile.networkAccess === "provider-enabled")
-      if (!supportedReviewRunner) return yield* unavailable()
+      const { providerId, reviewProfile } = yield* selectSupportedReviewRunner(input.request)
 
       const jobId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
@@ -917,6 +998,97 @@ const makePullRequestReviews = Effect.gen(function*() {
           }
         })
       )
+    }),
+    targetSuggestion: Effect.fn("PullRequestReviews.targetSuggestion")(function*(input) {
+      const derived = yield* inspectTarget({
+        workspaceId: input.workspaceId,
+        entityId: input.entityId
+      })
+      if (derived._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const target = derived
+      const page = yield* completeRevisionHistory(input.workspaceId, target, input.jobId, input.suggestionId)
+      yield* assertTargetHistoryFitsJobPayload(page)
+      if (
+        page.current.revisionId !== input.request.expectedRevisionId ||
+        page.current.sequence !== input.request.expectedSequence
+      ) return yield* new ApplicationConflict()
+      if (
+        page.current.suggestion.state !== "draft" ||
+        (input.request.intent === "suggestion-revalidation" && page.current.validation._tag !== "requires-revalidation")
+      ) return yield* new ApplicationInvalidRequest()
+      const { providerId, reviewProfile } = yield* selectSupportedReviewRunner(input.request)
+      const jobId = yield* cryptoService.randomUUIDv7.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
+        Effect.mapError(unavailable)
+      )
+      const userPrompt = input.request.prompt ??
+        (input.request.intent === "suggestion-edit" ? "Update this draft suggestion." : "Revalidate this suggestion.")
+      const prompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(
+        `${
+          input.request.intent === "suggestion-edit" ? "Edit" : "Revalidate"
+        } the selected review suggestion.\n\nOperator request:\n${userPrompt}`
+      ).pipe(Effect.mapError(unavailable))
+      const createdAt = yield* DateTime.now
+      return yield* persistence.workspaceSettings.readAtomically(
+        input.workspaceId,
+        (settings) =>
+          Effect.gen(function*() {
+            yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+            yield* assertPullRequestReviewAllowed(settings.settings.agent)
+            yield* persistence.agentJobs.enqueue({
+              workspaceId: input.workspaceId,
+              releaseId: target.releaseId,
+              jobId,
+              providerId,
+              model: input.request.model,
+              access: input.request.profile,
+              userPrompt,
+              prompt,
+              contextFingerprint: yield* makeContextFingerprint(input.workspaceId, target),
+              subjectRevision: target.subject.headRevision,
+              task: {
+                _tag: "pr-review",
+                pluginConnectionId: target.pluginConnectionId,
+                subject: target.subject,
+                reviewProfile,
+                intent: input.request.intent,
+                target: {
+                  sourceJobId: input.jobId,
+                  suggestionId: input.suggestionId,
+                  selectedRevisionId: page.current.revisionId,
+                  history: page
+                }
+              },
+              createdAt
+            }).pipe(
+              Effect.mapError(mapPersistenceWriteError),
+              Effect.mapError((error) =>
+                error._tag === "ApplicationInvalidRequest" || error._tag === "ApplicationResourceNotFound"
+                  ? error
+                  : unavailable()
+              )
+            )
+            return new PullRequestReviewPending({
+              subject: target.subject,
+              jobId,
+              providerId: input.request.providerId,
+              model: input.request.model,
+              reviewProfile,
+              activity: { events: [], truncated: false },
+              requestedAt: createdAt,
+              state: "queued"
+            })
+          })
+      ).pipe(Effect.mapError((error) => {
+        switch (error._tag) {
+          case "ApplicationInvalidRequest":
+          case "ApplicationResourceNotFound":
+          case "ApplicationServiceUnavailable":
+            return error
+          default:
+            return unavailable()
+        }
+      }))
     }),
     cancel: Effect.fn("PullRequestReviews.cancel")(function*(input) {
       const target = yield* inspectTarget(input)

@@ -23,6 +23,7 @@ import {
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
 import {
   MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
+  PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
   PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevisionPageSize
@@ -562,6 +563,45 @@ describe("agent job review results", () => {
           "requires-revalidation"
         )
 
+        const humanValidationAttempt = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: technical.revisionId,
+          expectedSequence: technical.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author,
+          createdAt: T4
+        })
+        assert.strictEqual(humanValidationAttempt.sequence, 4)
+        assert.strictEqual(humanValidationAttempt.validation._tag, "requires-revalidation")
+
+        const revalidated = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidationAttempt.revisionId,
+          expectedSequence: humanValidationAttempt.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(revalidated.sequence, 5)
+        assert.strictEqual(revalidated.validation._tag, "validated")
+        if (revalidated.validation._tag !== "validated") {
+          return yield* Effect.die("expected agent revalidation metadata")
+        }
+        assert.strictEqual(revalidated.validation.validatingJobId, JOB_ID)
+        assert.strictEqual(revalidated.validation.sourceRevisionId, humanValidationAttempt.revisionId)
+        assert.strictEqual(revalidated.validation.reviewedHead, technical.subject.headRevision)
+
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
@@ -569,13 +609,13 @@ describe("agent job review results", () => {
           beforeSequence: null,
           limit: PrReviewSuggestionRevisionPageSize.make(1)
         })
-        assert.strictEqual(firstPage.current.revisionId, technical.revisionId)
+        assert.strictEqual(firstPage.current.revisionId, revalidated.revisionId)
         assert.deepStrictEqual(
           firstPage.revisions.map(({ sequence }) => sequence),
-          [2]
+          [4]
         )
         assert.isTrue(firstPage.hasMore)
-        assert.strictEqual(firstPage.nextBeforeSequence, 2)
+        assert.strictEqual(firstPage.nextBeforeSequence, 4)
 
         const secondPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -586,9 +626,29 @@ describe("agent job review results", () => {
         })
         assert.deepStrictEqual(
           secondPage.revisions.map(({ sequence }) => sequence),
-          [1]
+          [3]
         )
-        assert.isFalse(secondPage.hasMore)
+        assert.isTrue(secondPage.hasMore)
+
+        const thirdPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: secondPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(thirdPage.revisions.map(({ sequence }) => sequence), [2])
+        assert.isTrue(thirdPage.hasMore)
+
+        const fourthPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: thirdPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(fourthPage.revisions.map(({ sequence }) => sequence), [1])
+        assert.isFalse(fourthPage.hasMore)
 
         const thread = yield* jobs.reviewThreadTail({
           workspaceId: WORKSPACE_ID,
@@ -600,7 +660,7 @@ describe("agent job review results", () => {
           thread.events.filter(
             ({ eventKind }) => eventKind === "review-suggestion-revised"
           ).length,
-          2
+          4
         )
 
         const update = yield* database.sql`UPDATE agent_review_suggestion_revisions
@@ -612,6 +672,76 @@ describe("agent job review results", () => {
             AND source_job_id = ${JOB_ID}`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(update))
         assert.isTrue(Result.isFailure(deletion))
+      })
+    ))
+
+  it.effect("allows an agent validation to correct the technical claim", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const operator = PrReviewSuggestionOperatorAuthor.make({ personId: PERSON_ID })
+        const technicalEdit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...suggestion,
+          problem: "The first technical claim was incomplete."
+        })
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: technicalEdit,
+          author: operator,
+          createdAt: T3
+        })
+        const humanValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: edited.revisionId,
+          expectedSequence: edited.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: operator,
+          createdAt: T4
+        })
+        const corrected = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...technicalEdit,
+          problem: "The corrected technical claim is now complete."
+        })
+        const agentValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidation.revisionId,
+          expectedSequence: humanValidation.sequence,
+          edit: corrected,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(agentValidation.validation._tag, "validated")
+        assert.strictEqual(agentValidation.suggestion.problem, corrected.problem)
+        if (agentValidation.validation._tag !== "validated") {
+          return yield* Effect.die("expected corrected agent validation metadata")
+        }
+        assert.strictEqual(agentValidation.validation.sourceRevisionId, humanValidation.revisionId)
       })
     ))
 

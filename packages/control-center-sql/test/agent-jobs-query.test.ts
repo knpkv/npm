@@ -223,4 +223,17 @@ describe("durable agent job queries", () => {
     expect(rendered.params).toContain("job-secret")
     expect(rendered.sql).toContain("\"agent_jobs\".\"job_id\" = ?")
   })
+
+  it("can exclude targeted follow-up jobs from the newest full-review lookup", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      subjectRevision: "head-secret",
+      taskContextPrefix: "task-prefix",
+      excludeTargeted: true
+    })
+
+    expect(rendered.sql).toContain("not ((\"agent_jobs\".\"task_context_json\" like ?) or")
+    expect(rendered.params).toContain("%\"intent\":\"suggestion-edit\"%")
+    expect(rendered.params).toContain("%\"intent\":\"suggestion-revalidation\"%")
+  })
 })

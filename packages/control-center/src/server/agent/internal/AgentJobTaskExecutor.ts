@@ -18,7 +18,7 @@ import type {
   ClaimedAgentJob
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
-import { PrReviewTaskExecutor } from "./PrReviewTaskExecutor.js"
+import { type PrReviewTaskExecution, PrReviewTaskExecutor } from "./PrReviewTaskExecutor.js"
 
 /** Task-specific execution material; only complete review output may cross the review branch. */
 export type AgentJobTaskExecution =
@@ -28,7 +28,7 @@ export type AgentJobTaskExecution =
   }
   | {
     readonly _tag: "pr-review"
-    readonly report: unknown
+    readonly report: PrReviewTaskExecution
   }
 
 /** Server-owned task executor contract hidden behind the durable worker. */
@@ -68,7 +68,15 @@ const executeReview = Effect.fnUntraced(
     }
     return {
       _tag: "pr-review",
-      report: yield* reviews.execute(claim, onActivity, onPartialReport)
+      report: yield* (
+        claim.context.task.intent === "suggestion-edit" ||
+          claim.context.task.intent === "suggestion-revalidation"
+          ? reviews.executeTargeted(claim, onActivity)
+          : Effect.map(reviews.execute(claim, onActivity, onPartialReport), (report) => ({
+            _tag: "report",
+            report
+          } satisfies Extract<PrReviewTaskExecution, { readonly _tag: "report" }>))
+      )
     }
   },
   Effect.withTracerEnabled(false)
