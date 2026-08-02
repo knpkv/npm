@@ -1268,6 +1268,9 @@ export const agentHandlersLayer = HttpApiBuilder.group(
           lifecycle.runMutation(
             Effect.gen(function*() {
               const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
               if (publications === undefined) {
                 return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
               }

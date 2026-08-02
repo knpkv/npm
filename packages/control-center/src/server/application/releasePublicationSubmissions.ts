@@ -118,12 +118,10 @@ const makeService = Effect.gen(function*() {
     const workspaceConnections = releaseSource === undefined
       ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
       : []
+    const workspaceEntities = yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)
     const fallbackConnection = releaseSource === undefined
       ? workspaceConnections.find(({ isEnabled, providerId }) => providerId === input.request.provider && isEnabled)
       : undefined
-    const workspaceEntities = releaseSource === undefined && fallbackConnection !== undefined
-      ? yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)
-      : []
     const fallbackEntity = fallbackConnection === undefined
       ? undefined
       : workspaceEntities.find(
@@ -150,7 +148,7 @@ const makeService = Effect.gen(function*() {
     // the action to an existing current entity from the same provider scope;
     // the immutable provider request below still carries the exact release
     // destination (project version or Confluence space).
-    const publicationAnchor = (yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)).find(
+    const publicationAnchor = workspaceEntities.find(
       (entity) =>
         entity.sourceRevision.pluginConnectionId === source.pluginConnectionId &&
         entity.sourceRevision.providerId === source.providerId
@@ -188,6 +186,7 @@ const makeService = Effect.gen(function*() {
       },
       expectedRevision: input.request.provider === "confluence" && input.request.expectedVersion !== undefined
         ? Revision.make(String(input.request.expectedVersion))
+        // Creation actions have no provider revision; "0" is a sentinel, not a real revision.
         : Revision.make("0"),
       payload: input.request.provider === "jira"
         ? {
@@ -224,7 +223,6 @@ const makeService = Effect.gen(function*() {
     const sourceRevisionDigest = yield* digestReleaseSourceRevisions(release.release.sourceRevisions).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)
     )
-    const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
     const digest = yield* digestCanonicalGovernedActionJson({
       schemaVersion: 1,
       workspaceId: input.workspaceId,
@@ -251,8 +249,7 @@ const makeService = Effect.gen(function*() {
     )
     if (Option.isSome(existing)) {
       if (
-        existing.value.envelope.proposal.payloadDigest !== providerProposal.payloadDigest ||
-        !Equal.equals(existing.value.envelope.proposal.request, providerProposal.request)
+        !Equal.equals(existing.value.envelope.proposal.request, providerRequest)
       ) {
         return yield* failure("conflict")
       }
@@ -270,6 +267,8 @@ const makeService = Effect.gen(function*() {
       }).pipe(mapFailure)
       return { actionId: record.envelope.actionId, state: record.head.state }
     }
+
+    const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
 
     const actor = input.session.actor
     if (actor._tag !== "human") return yield* failure("conflict")
