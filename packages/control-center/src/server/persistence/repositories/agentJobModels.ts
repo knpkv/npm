@@ -444,6 +444,7 @@ export const LatestAgentReviewRecord = Schema.Struct({
   state: AgentJobState,
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
+  taskIntent: Schema.optionalKey(Schema.NullOr(Schema.Literals(["suggestion-edit", "suggestion-revalidation"]))),
   report: Schema.NullOr(PrReviewReport),
   reviewProfile: ReviewAgentProfile,
   activity: Schema.Struct({

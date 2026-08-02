@@ -468,8 +468,18 @@ const makePullRequestReviews = Effect.gen(function*() {
         jobId
       })
     )
+    if (
+      Option.isSome(selected) &&
+      (selected.value.taskIntent === "suggestion-edit" ||
+        selected.value.taskIntent === "suggestion-revalidation")
+    ) {
+      return yield* new ApplicationInvalidRequest()
+    }
     const review = yield* presentLatest(target, selected)
-    if (review._tag !== "completed" || review.jobId !== jobId) {
+    if (
+      review._tag !== "completed" ||
+      review.jobId !== jobId
+    ) {
       return yield* new ApplicationInvalidRequest()
     }
     const suggestion = review.report.suggestions.find(

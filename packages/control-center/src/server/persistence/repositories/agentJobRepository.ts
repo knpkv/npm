@@ -2422,6 +2422,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       }
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
+        taskIntent: task.intent ?? null,
         report,
         reviewProfile: task.reviewProfile,
         activity: {

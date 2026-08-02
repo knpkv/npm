@@ -303,7 +303,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
             jobId: claim.jobId,
             providerId: claim.providerId,
             model: claim.model === null ? null : String(claim.model),
-            runtimeMetadata: null
+            runtimeMetadata: selected.success.report.runtimeMetadata ?? null
           }),
           createdAt: yield* DateTime.now,
           leaseFence: {

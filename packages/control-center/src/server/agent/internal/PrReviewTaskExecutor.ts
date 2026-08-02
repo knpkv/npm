@@ -13,6 +13,7 @@ import {
   type AgentRunRequest,
   type AgentRuntimeError,
   type AgentRuntimeEvent,
+  type AgentRuntimeMetadata,
   attachAgentRuntimeMetadata,
   makeToolAgentAdapter,
   runToolAgent
@@ -77,7 +78,11 @@ export type TargetedSuggestionResult = typeof TargetedSuggestionResult.Type
 
 export type PrReviewTaskExecution =
   | { readonly _tag: "report"; readonly report: typeof PrReviewReport.Type }
-  | { readonly _tag: "targeted"; readonly edit: typeof PrReviewSuggestionEdit.Type }
+  | {
+    readonly _tag: "targeted"
+    readonly edit: typeof PrReviewSuggestionEdit.Type
+    readonly runtimeMetadata?: AgentRuntimeMetadata
+  }
 
 const reportExecution = (
   report: typeof PrReviewReport.Type
@@ -87,10 +92,12 @@ const reportExecution = (
 })
 
 const targetedExecution = (
-  edit: typeof PrReviewSuggestionEdit.Type
+  edit: typeof PrReviewSuggestionEdit.Type,
+  runtimeMetadata?: AgentRuntimeMetadata
 ): Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }> => ({
   _tag: "targeted",
-  edit
+  edit,
+  ...(runtimeMetadata === undefined ? {} : { runtimeMetadata })
 })
 
 const { location: _nativeNoteLocation, ...nativeNoteDraftFields } = PrReviewNoteDraft.fields
@@ -1120,7 +1127,7 @@ const makeExecutor = Effect.gen(function*() {
                     ...edit,
                     ...(prevention === null ? {} : { prevention }),
                     ...(replacement === null ? {} : { replacement })
-                  }).pipe(Effect.map(targetedExecution))
+                  }).pipe(Effect.map((edit) => targetedExecution(edit, selected.runtimeMetadata)))
                 })
               )
             }
@@ -1182,7 +1189,8 @@ const makeExecutor = Effect.gen(function*() {
               )
             )
             return targetedExecution(
-              yield* validateTargetedEdit(claim.providerId, session, result.edit)
+              yield* validateTargetedEdit(claim.providerId, session, result.edit),
+              selected.runtimeMetadata
             )
           }
           return reportExecution(
