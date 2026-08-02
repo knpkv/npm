@@ -82,7 +82,8 @@ Last projected update: ${release.updatedAt}
 const modelPrompt = (
   release: PortfolioReleaseSummary,
   history: ReadonlyArray<AgentHistoryMessage>,
-  prompt: AgentPrompt
+  prompt: AgentPrompt,
+  originPath?: string
 ): string =>
   `
 You are Relay, the read-only release agent in Control Center.
@@ -96,6 +97,10 @@ When asked to review code or changes, every actionable finding must also include
 an existing or proposed ast-grep rule, ESLint rule, type check, focused test, or repository agent instruction.
 If static analysis would be misleading, say that human judgment remains necessary. Never apply those changes
 without an explicit governed action.
+
+<originating-page>
+${originPath ?? "direct release thread"}
+</originating-page>
 
 <release-context>
 ${releaseContext(release)}
@@ -136,7 +141,7 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
       if (release === undefined) return yield* new ApplicationResourceNotFound()
 
       const generation = LanguageModel.generateText({
-        prompt: modelPrompt(release, input.history, input.prompt)
+        prompt: modelPrompt(release, input.history, input.prompt, input.originPath)
       })
       const modelTurn = provider === "codex"
         ? generation.pipe(

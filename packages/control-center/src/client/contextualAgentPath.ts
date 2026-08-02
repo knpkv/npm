@@ -10,6 +10,13 @@ export const isWorkspaceRouteId = (value: string | undefined): value is Workspac
 const isReleaseRouteId = (value: string | undefined): value is ReleaseId =>
   value !== undefined && CANONICAL_ID.test(value)
 
+/** Build an exact release-agent destination while preserving the page that opened Relay. */
+export const contextualReleaseAgentPath = (
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId,
+  originPath: string
+): string => `${releaseAgentPath(workspaceId, releaseId)}?from=${encodeURIComponent(originPath)}`
+
 /** Route Relay to an exact release thread when possible, otherwise preserve the complete calling page. */
 export const contextualAgentPath = (pathname: string, search: string, hash = ""): string => {
   const segments = pathname.split("/")
@@ -21,7 +28,7 @@ export const contextualAgentPath = (pathname: string, search: string, hash = "")
     segments[3] === "releases" &&
     isReleaseRouteId(releaseId)
   ) {
-    return releaseAgentPath(workspaceId, releaseId)
+    return contextualReleaseAgentPath(workspaceId, releaseId, `${pathname}${search}${hash}`)
   }
   const activeWorkReleaseId = new URLSearchParams(search).get("release") ?? undefined
   if (
@@ -30,7 +37,7 @@ export const contextualAgentPath = (pathname: string, search: string, hash = "")
     segments[3] === "work" &&
     isReleaseRouteId(activeWorkReleaseId)
   ) {
-    return releaseAgentPath(workspaceId, activeWorkReleaseId)
+    return contextualReleaseAgentPath(workspaceId, activeWorkReleaseId, `${pathname}${search}${hash}`)
   }
   return `/agent?from=${encodeURIComponent(`${pathname}${search}${hash}`)}`
 }

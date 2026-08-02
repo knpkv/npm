@@ -7,6 +7,8 @@ import { Link, useLocation, useOutletContext, useParams, useSearchParams } from 
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { contextualReleaseAgentPath } from "./contextualAgentPath.js"
+import { usePortfolioOverviewController } from "./portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "./portfolio/presentPortfolio.js"
 import {
   decodeReleaseRouteId,
@@ -30,6 +32,8 @@ export interface ReleaseAgentHistoryMessage {
 
 export interface ReleaseAgentTurnInput {
   readonly history: ReadonlyArray<ReleaseAgentHistoryMessage>
+  /** Same-origin page that launched Relay; omitted only for a direct release route. */
+  readonly originPath?: string
   readonly prompt: string
   readonly provider: "claude" | "codex"
   readonly releaseId: ReleaseId
@@ -96,7 +100,7 @@ const contexts: Readonly<Record<string, AgentPageContext>> = {
 
 const AGENT_CONTEXT_BASE = "https://control-center.invalid"
 
-const contextFor = (path: string | null): AgentPageContext => {
+export const contextFor = (path: string | null): AgentPageContext => {
   if (path === null) return DEFAULT_CONTEXT
   const contextUrl = URL.parse(path, AGENT_CONTEXT_BASE)
   if (contextUrl === null || contextUrl.origin !== AGENT_CONTEXT_BASE) {
@@ -424,6 +428,7 @@ const ReleaseAgentRoom = ({
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const [prompt, setPrompt] = useState("")
   const [provider, setProvider] = useState<"claude" | "codex">("codex")
   const providerWasSelected = useRef(false)
@@ -481,8 +486,9 @@ const ReleaseAgentRoom = ({
     setIsRunning(true)
     setAnnouncement("Relay is reading the release context.")
 
+    const originPath = searchParams.get("from") ?? `${location.pathname}${location.search}${location.hash}`
     runTurn(
-      { history, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
+      { history, originPath, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
       { signal: abortController.signal }
     )
       .then(
@@ -750,6 +756,93 @@ const LegacyAgentPage = (): ReactElement => {
   )
 }
 
+/** Choose an exact release while retaining the page that launched Relay. */
+const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): ReactElement => {
+  const controller = usePortfolioOverviewController()
+  const context = contextFor(originPath)
+  switch (controller.state._tag) {
+    case "session":
+      return (
+        <section aria-labelledby="agent-title" className={styles.state}>
+          <StatePanel
+            action={controller.state.reason === "anonymous" ? <Link to="/pair">Pair this browser</Link> : undefined}
+            description="Pair this browser before Relay reads a workspace release."
+            title="Release context stays private"
+            tone="caution"
+          />
+        </section>
+      )
+    case "loading":
+      return (
+        <section aria-labelledby="agent-title" className={styles.state}>
+          <StatePanel description="Loading the releases for this page context." title="Choosing a release" />
+        </section>
+      )
+    case "failed":
+      return (
+        <section aria-labelledby="agent-title" className={styles.state}>
+          <StatePanel
+            action={<Button onClick={controller.onRetry}>Try again</Button>}
+            description="Relay could not load the releases needed to preserve this page context."
+            title="Release context unavailable"
+            tone="critical"
+          />
+        </section>
+      )
+    case "ready":
+      return (
+        <section aria-labelledby="agent-title" className={styles.legacy}>
+          <header className={styles.legacyHeader}>
+            <Text className={styles.eyebrow} tone="secondary" variant="label">
+              Relay
+            </Text>
+            <Text as="h1" id="agent-title" variant="verdict">
+              Choose a release.
+            </Text>
+            <Text tone="secondary" variant="body-large">
+              Relay will keep the exact page context below and answer inside the release you choose.
+            </Text>
+          </header>
+          <Surface as="section" className={styles.legacyContext} padding="spacious" shape="grouped" tone="secondary">
+            <Text tone="secondary" variant="label">
+              Calling page
+            </Text>
+            <Text as="h2" variant="section-title">
+              {context.label}
+            </Text>
+            <Text tone="secondary">{context.description}</Text>
+            <Link className={styles.back} to={context.path ?? "/"}>
+              Return to calling page
+            </Link>
+          </Surface>
+          {controller.state.portfolio.releases.length === 0 ? (
+            <StatePanel
+              action={<Link to="/services">Connect a service</Link>}
+              description="Relay needs one synchronized release before it can start a scoped thread."
+              title="No releases available"
+            />
+          ) : (
+            <div aria-label="Releases available to Relay" className={styles.presetList}>
+              {controller.state.portfolio.releases.map((release) => (
+                <Link
+                  className={styles.preset}
+                  key={release.id}
+                  to={contextualReleaseAgentPath(controller.state.portfolio.workspaceId, release.id, originPath)}
+                >
+                  <strong>{release.relay.codename}</strong>
+                  <span>
+                    {release.serviceName} · {release.version}
+                  </span>
+                  <small>{release.lifecycleLabel}</small>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      )
+  }
+}
+
 /** Render an exact release-owned local agent thread, with a safe legacy context preview. */
 export const AgentPage = ({
   availableProviders,
@@ -818,6 +911,9 @@ export const ConnectedAgentPage = ({
   readonly loadPresets?: ReleaseAgentPresetLoader
   readonly runTurn?: ReleaseAgentTurn
 } = {}): ReactElement => {
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const params = useParams()
   const [catalog, setCatalog] = useState<ProviderCatalogState>({ _tag: "loading" })
   const [catalogRequest, setCatalogRequest] = useState(0)
   useEffect(() => {
@@ -834,6 +930,8 @@ export const ConnectedAgentPage = ({
     return () => abort.abort()
   }, [catalogRequest, loadPresets])
   const availableProviders = catalog._tag === "ready" ? catalog.providers : undefined
+  const isCanonicalRoute = params.workspaceId !== undefined || params.releaseId !== undefined
+  const originPath = searchParams.get("from") ?? `${location.pathname}${location.search}${location.hash}`
   return (
     <>
       {catalog._tag === "failed" ? (
@@ -846,11 +944,15 @@ export const ConnectedAgentPage = ({
           />
         </section>
       ) : null}
-      <AgentPage
-        {...(availableProviders === undefined ? {} : { availableProviders })}
-        providerCatalogPending={catalog._tag !== "ready"}
-        runTurn={runTurn}
-      />
+      {isCanonicalRoute ? (
+        <AgentPage
+          {...(availableProviders === undefined ? {} : { availableProviders })}
+          providerCatalogPending={catalog._tag !== "ready"}
+          runTurn={runTurn}
+        />
+      ) : (
+        <ContextualAgentPage originPath={originPath} />
+      )}
     </>
   )
 }

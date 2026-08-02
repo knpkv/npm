@@ -403,6 +403,7 @@ describe("AgentPage context", () => {
     expect(runTurn).toHaveBeenCalledOnce()
     expect(runTurn.mock.calls[0]?.[0]).toEqual({
       history: [],
+      originPath: agentPath,
       prompt: "Which evidence is still missing?",
       provider: "codex",
       releaseId,
