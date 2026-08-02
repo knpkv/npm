@@ -45,6 +45,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { GovernedActionCommitInput } from "../persistence/repositories/governedActionRepository.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
+import { digestReleaseSourceRevisions } from "./releasePublicationMetadata.js"
 
 export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<ReleasePublicationSubmissionError>()(
   "ReleasePublicationSubmissionError",
@@ -97,6 +98,12 @@ const makeService = Effect.gen(function*() {
       DateTime.Order(checkedAt, input.session.absoluteExpiresAt) >= 0
     ) return yield* failure("unauthorized")
     if (input.session.permission !== "workspace-owner") return yield* failure("forbidden")
+    const hasPageId = input.request.pageId !== undefined
+    const hasExpectedVersion = input.request.expectedVersion !== undefined
+    if (
+      hasPageId !== hasExpectedVersion ||
+      (input.request.provider !== "confluence" && (hasPageId || hasExpectedVersion))
+    ) return yield* failure("conflict")
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
     const publicationTitle = input.useReleaseIdentity === true
@@ -164,18 +171,40 @@ const makeService = Effect.gen(function*() {
       return yield* failure("conflict")
     }
     const providerRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
-      actionKind: input.request.provider === "jira" ? "create-release-version" : "create-page",
+      actionKind: input.request.provider === "jira"
+        ? "create-release-version"
+        : input.request.pageId !== undefined && input.request.expectedVersion !== undefined
+        ? "update-page"
+        : "create-page",
       target: {
-        entityType: input.request.provider === "jira" ? "jira.project-version" : "release-page",
-        vendorImmutableId: destination.value
+        entityType: input.request.provider === "jira"
+          ? "jira.project-version"
+          : input.request.pageId !== undefined && input.request.expectedVersion !== undefined
+          ? "page"
+          : "release-page",
+        vendorImmutableId: input.request.provider === "jira" || input.request.pageId === undefined
+          ? destination.value
+          : input.request.pageId
       },
-      expectedRevision: Revision.make("0"),
+      expectedRevision: input.request.provider === "confluence" && input.request.expectedVersion !== undefined
+        ? Revision.make(String(input.request.expectedVersion))
+        : Revision.make("0"),
       payload: input.request.provider === "jira"
         ? {
           _tag: "create-release-version",
           projectId: destination.value,
           name: publicationTitle,
           description: publicationMarkdown
+        }
+        : input.request.pageId !== undefined && input.request.expectedVersion !== undefined
+        ? {
+          _tag: "update-page",
+          pageId: input.request.pageId,
+          spaceId: destination.value,
+          title: publicationTitle,
+          markdown: publicationMarkdown,
+          expectedVersion: input.request.expectedVersion,
+          versionMessage: "Updated by Relay after an explicit owner confirmation."
         }
         : {
           _tag: "create-page",
@@ -192,15 +221,22 @@ const makeService = Effect.gen(function*() {
         )
       )
     )
+    const sourceRevisionDigest = yield* digestReleaseSourceRevisions(release.release.sourceRevisions).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
     const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
     const digest = yield* digestCanonicalGovernedActionJson({
       schemaVersion: 1,
       workspaceId: input.workspaceId,
       releaseId: input.releaseId,
       provider: input.request.provider,
+      actionKind: providerRequest.actionKind,
       title: publicationTitle,
       markdown: publicationMarkdown,
       parentId: input.request.parentId,
+      pageId: input.request.pageId ?? null,
+      expectedVersion: input.request.expectedVersion ?? null,
+      sourceRevisionDigest,
       targetEntityId: publicationAnchor.entityId
     }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
     const idempotencyKey = GovernedActionIdempotencyKey.make("release-publication:v1:" + digest)
@@ -266,7 +302,12 @@ const makeService = Effect.gen(function*() {
       origin: { _tag: "human", actor, sessionId: input.session.sessionId },
       proposalExpiresAt: DateTime.addDuration(checkedAt, Duration.minutes(10)),
       causationId: null,
-      correlationId: null
+      correlationId: null,
+      releasePublication: {
+        releaseId: input.releaseId,
+        sourceRevisionDigest,
+        sourceRevisionCount: release.release.sourceRevisions.length
+      }
     })
     const envelope = (yield* makeGovernedActionEnvelope(material).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)

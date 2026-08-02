@@ -13,6 +13,7 @@ import {
   GovernedActionId,
   JobId,
   PluginConnectionId,
+  ReleaseId,
   SessionId,
   WorkspaceId
 } from "../identifiers.js"
@@ -43,6 +44,16 @@ export const GovernedActionEnvelopeDigest = sha256Digest("GovernedActionEnvelope
 
 /** Decoded governed-action envelope digest. */
 export type GovernedActionEnvelopeDigest = typeof GovernedActionEnvelopeDigest.Type
+
+/** Exact release and source-revision baseline captured by a release publication. */
+export const ReleasePublicationMetadataV1 = Schema.Struct({
+  releaseId: ReleaseId,
+  sourceRevisionDigest: GovernedActionEnvelopeDigest,
+  sourceRevisionCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
+/** Decoded release publication metadata. */
+export type ReleasePublicationMetadataV1 = typeof ReleasePublicationMetadataV1.Type
 
 /** Digest of the canonical evidence-reference set bound to an action. */
 export const GovernedActionEvidenceSetDigest = sha256Digest("GovernedActionEvidenceSetDigest")
@@ -251,7 +262,8 @@ const governedActionEnvelopeMaterialFields = {
   origin: GovernedActionProposalOrigin,
   proposalExpiresAt: UtcTimestamp,
   causationId: Schema.NullOr(DomainEventId),
-  correlationId: Schema.NullOr(DomainEventCorrelationId)
+  correlationId: Schema.NullOr(DomainEventCorrelationId),
+  releasePublication: Schema.optionalKey(ReleasePublicationMetadataV1)
 }
 
 /** Complete digest-free material used to derive an immutable action envelope identity. */

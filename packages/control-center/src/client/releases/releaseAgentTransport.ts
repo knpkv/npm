@@ -12,13 +12,22 @@ export const submitBrowserReleasePublication = (input: {
   readonly provider: ReleasePublicationProvider
   readonly title: string
   readonly markdown: string
+  readonly pageId?: string
+  readonly expectedVersion?: number
 }): Promise<{ readonly actionId: string; readonly state: string }> =>
   Effect.runPromise(
     Effect.gen(function*() {
       const client = yield* makeAuthenticatedMutationClient
       return yield* client.agent.submitReleasePublication({
         params: { releaseId: input.releaseId },
-        payload: { provider: input.provider, title: input.title, markdown: input.markdown, parentId: null }
+        payload: {
+          provider: input.provider,
+          title: input.title,
+          markdown: input.markdown,
+          parentId: null,
+          ...(input.pageId === undefined ? {} : { pageId: input.pageId }),
+          ...(input.expectedVersion === undefined ? {} : { expectedVersion: input.expectedVersion })
+        }
       })
     }).pipe(Effect.provide(FetchHttpClient.layer))
   )

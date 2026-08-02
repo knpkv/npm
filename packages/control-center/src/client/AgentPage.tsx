@@ -491,6 +491,9 @@ const ReleaseAgentRoom = ({
   const runtimeUnavailable = runTurn === undefined
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
+  const pageAwareness = release.releasePageAwareness
+  const confluenceUpdateReady = pageAwareness?.state === "stale" &&
+    pageAwareness.pageId !== undefined && pageAwareness.pageVersion !== undefined
 
   useEffect(() => {
     if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
@@ -568,17 +571,21 @@ const ReleaseAgentRoom = ({
   const publish = (publicationProvider: "jira" | "confluence"): void => {
     if (publicationBusy !== null || publicationTitle.trim() === "" || publicationMarkdown.trim() === "") return
     setPublicationBusy(publicationProvider)
-    setAnnouncement("Relay is creating the " + publicationProvider + " release artifact.")
+    const updatingConfluence = publicationProvider === "confluence" && confluenceUpdateReady
+    setAnnouncement("Relay is " + (updatingConfluence ? "updating" : "creating") + " the " + publicationProvider + " release artifact.")
     submitBrowserReleasePublication({
       releaseId: release.id,
       provider: publicationProvider,
       title: publicationTitle.trim(),
-      markdown: publicationMarkdown.trim()
+      markdown: publicationMarkdown.trim(),
+      ...(updatingConfluence && pageAwareness?.pageId !== undefined && pageAwareness.pageVersion !== undefined
+        ? { pageId: pageAwareness.pageId, expectedVersion: pageAwareness.pageVersion }
+        : {})
     })
       .then(
         (result) =>
-          setAnnouncement("Relay created a governed " + publicationProvider + " publication (" + result.state + ")."),
-        () => setAnnouncement("Relay could not create the " + publicationProvider + " publication.")
+          setAnnouncement("Relay submitted a governed " + (updatingConfluence ? "Confluence page update" : publicationProvider + " publication") + " (" + result.state + ")."),
+        () => setAnnouncement("Relay could not publish the " + publicationProvider + " release artifact.")
       )
       .finally(() => setPublicationBusy(null))
   }
@@ -739,9 +746,15 @@ const ReleaseAgentRoom = ({
           Publish a release artifact
         </Text>
         <Text tone="secondary">
-          These append-only actions use the current release context and require your workspace-owner confirmation. Jira
+          These governed actions use the current release context and require your workspace-owner confirmation. Jira
           issue edits remain proposal-only.
         </Text>
+        {pageAwareness?.state === "stale" ? (
+          <Text tone="secondary">
+            The release changed after the last successful Confluence publication. Relay suggests updating the page;
+            publishing requires an explicit owner confirmation.
+          </Text>
+        ) : null}
         <Field label="Title">
           {(controlProps) => (
             <input
@@ -769,12 +782,15 @@ const ReleaseAgentRoom = ({
             Create Jira release version
           </Button>
           <Button
-            disabled={publicationBusy !== null}
+            disabled={publicationBusy !== null || (pageAwareness?.state === "stale" && !confluenceUpdateReady)}
             loading={publicationBusy === "confluence"}
             onClick={() => publish("confluence")}
           >
-            Create Confluence release page
+            {pageAwareness?.state === "stale" ? "Update Confluence release page" : "Create Confluence release page"}
           </Button>
+          {pageAwareness?.state === "stale" && !confluenceUpdateReady ? (
+            <Text tone="secondary">The existing page identity is unavailable, so Relay will not create a duplicate page.</Text>
+          ) : null}
         </div>
       </Surface>
     </article>

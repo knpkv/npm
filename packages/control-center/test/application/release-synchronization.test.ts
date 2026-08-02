@@ -23,7 +23,10 @@ import {
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { makePortfolioSnapshots } from "../../src/server/application/portfolioSnapshots.js"
+import {
+  classifyReleasePageAwareness,
+  makePortfolioSnapshots
+} from "../../src/server/application/portfolioSnapshots.js"
 import {
   reconcileFakeReleaseProjection,
   recoverFakeReleaseProjection,
@@ -44,6 +47,17 @@ import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
+
+describe("release page awareness", () => {
+  const releaseUpdatedAt = Schema.decodeSync(UtcTimestamp)("2026-08-03T10:00:00.000Z")
+  const publicationAt = Schema.decodeSync(UtcTimestamp)("2026-08-03T09:00:00.000Z")
+
+  it("detects a release projection that changed after publication", () => {
+    assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, publicationAt), "stale")
+    assert.equal(classifyReleasePageAwareness(publicationAt, releaseUpdatedAt), "current")
+    assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, null), "not-published")
+  })
+})
 
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000101")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000102")
