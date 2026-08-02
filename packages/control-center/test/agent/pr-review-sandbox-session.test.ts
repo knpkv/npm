@@ -673,13 +673,11 @@ describe("PrReviewSandboxSessions", () => {
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
       const reconciliation = yield* sessions.reconcile(WORKSPACE_ID)
-      assert.deepStrictEqual(reconciliation.removedSandboxes, [
-        ownedA,
-        ownedB
-      ])
+      assert.deepStrictEqual(reconciliation.removedSandboxes, [])
+      assert.deepStrictEqual(reconciliation.reattachedSandboxes, [ownedA, ownedB])
       assert.deepStrictEqual(
         calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
-        [ownedA, ownedB]
+        []
       )
       assert.strictEqual(calls.filter(({ args }) => args[0] === "ls").length, 1)
     }).pipe(

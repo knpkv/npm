@@ -311,6 +311,8 @@ export interface PrReviewSandboxSession {
 /** Startup cleanup report for stale Review Sandboxes. */
 export interface PrReviewSandboxReconciliation {
   readonly removedSandboxes: ReadonlyArray<string>
+  /** Live server-private sandboxes retained for recovery inspection. */
+  readonly reattachedSandboxes?: ReadonlyArray<string>
 }
 
 /** Session owner. The callback is scoped to the sbx sandbox lifetime. */
@@ -1099,10 +1101,10 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const names = text.split("\n")
       .filter((name) => name.startsWith(ownedPrefix))
       .sort()
-    for (const name of names) {
-      yield* forceRemoveSandbox(name)
-    }
-    return { removedSandboxes: names } satisfies PrReviewSandboxReconciliation
+    return {
+      removedSandboxes: [],
+      reattachedSandboxes: names
+    } satisfies PrReviewSandboxReconciliation
   })
 
   return PrReviewSandboxSessions.of({ reconcile, withSession })

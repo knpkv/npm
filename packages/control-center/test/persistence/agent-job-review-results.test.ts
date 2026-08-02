@@ -323,6 +323,82 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("records an active review as interrupted with partial evidence on restart", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* claimReview
+
+        const first = yield* jobs.interruptRunningReviews({
+          workspaceId: WORKSPACE_ID,
+          interruptedAt: T2
+        })
+        assert.deepStrictEqual(first, { interrupted: 1 })
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.state, "interrupted")
+          assert.strictEqual(latest.value.report?.completion.status, "unable-to-conclude")
+        }
+
+        const second = yield* jobs.interruptRunningReviews({
+          workspaceId: WORKSPACE_ID,
+          interruptedAt: T3
+        })
+        assert.deepStrictEqual(second, { interrupted: 0 })
+      })
+    ))
+
+  it.effect("retains the latest validated report when interrupting an active review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          occurredAt: T1
+        })
+
+        assert.deepStrictEqual(
+          yield* jobs.interruptRunningReviews({
+            workspaceId: WORKSPACE_ID,
+            interruptedAt: T2
+          }),
+          { interrupted: 1 }
+        )
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.state, "interrupted")
+          assert.deepStrictEqual(latest.value.report, {
+            ...report,
+            completion: {
+              status: "unable-to-conclude",
+              reason: "Review interrupted because the Control Center process restarted."
+            }
+          })
+        }
+      })
+    ))
+
   it.effect("persists one budget extension and exposes the effective value to the claim", () =>
     withRepository(
       Effect.gen(function*() {

@@ -109,6 +109,8 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
       return `Run completed · ${event.outcome}`
     case "run-failed":
       return event.retryable ? "Run failed · retryable" : "Run failed"
+    case "run-interrupted":
+      return "Run interrupted · Control Center restarted"
     case "cancellation-requested":
       return "Cancellation requested"
     case "usage":
@@ -539,6 +541,52 @@ export const PullRequestReviewPanel = ({
               </span>
             ) : null}
             {reviewLaunch(review.subject.headRevision, "Try again")}
+          </>
+        ) : null}
+      </>
+    )
+  }
+  if (review._tag === "interrupted") {
+    return withThread(
+      <>
+        <strong>Review interrupted by restart</strong>
+        <Text>
+          Control Center restarted before this run finished. The retained findings were validated before the run
+          stopped; unreviewed areas remain.
+        </Text>
+        {review.report.suggestions.length === 0 ? (
+          <span>No validated suggestions were retained before the run stopped.</span>
+        ) : (
+          <ol className={styles.reviewFindings}>
+            {review.report.suggestions.map((suggestion) => (
+              <li key={suggestion.suggestionId}>
+                <VersionedReviewSuggestionCard
+                  canEdit={canEnqueue}
+                  entityId={state.entityId}
+                  isPreviewing={
+                    publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
+                  }
+                  jobId={review.jobId}
+                  onPreviewPublication={onPreviewPublication}
+                  {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
+                  {...(revisionTransport === undefined ? {} : { revisionTransport })}
+                  sessionKey={state.sessionKey}
+                  suggestion={suggestion}
+                />
+              </li>
+            ))}
+          </ol>
+        )}
+        <ReviewNotes notes={review.report.notes} />
+        <span>Retained findings remain advice only and may be published after confirmation.</span>
+        {canEnqueue && state.provider !== null ? (
+          <>
+            {state.action === "failed" && submittedRequest === null ? (
+              <span role="alert">
+                A new full review could not be started. Check the provider and worker, then try again.
+              </span>
+            ) : null}
+            {reviewLaunch(review.subject.headRevision, "Start a new review")}
           </>
         ) : null}
       </>

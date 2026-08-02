@@ -1,6 +1,7 @@
 /** Supervise the durable PR-review worker for one configured workspace. @module */
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -45,6 +46,20 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const reconciliation = yield* sandboxes.reconcile(options.workspaceId).pipe(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
+  if ((reconciliation.reattachedSandboxes ?? []).length === 0) {
+    if (persistence.agentJobs.interruptRunningReviews === undefined) {
+      yield* Effect.logDebug("PR review interruption recovery is unavailable for this persistence boundary")
+    } else {
+      yield* DateTime.now.pipe(
+        Effect.flatMap((interruptedAt) =>
+          persistence.agentJobs.interruptRunningReviews!({
+            workspaceId: options.workspaceId,
+            interruptedAt
+          })
+        )
+      )
+    }
+  }
   yield* persistence.retention
     .recordSandboxReconciliation(
       options.workspaceId,

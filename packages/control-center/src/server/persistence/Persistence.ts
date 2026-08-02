@@ -383,6 +383,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
       extendReviewBudget: (...args: Parameters<AgentJobRepositoryService["extendReviewBudget"]>) =>
         publicOperation("agent-job.extend-review-budget", agentJobs.extendReviewBudget(...args)),
+      interruptRunningReviews: (
+        ...args: Parameters<AgentJobRepositoryService["interruptRunningReviews"]>
+      ) =>
+        publicOperation(
+          "agent-job.interrupt-running-reviews",
+          agentJobs.interruptRunningReviews(...args)
+        ),
       reviewThreadAfter: (...args: Parameters<AgentJobRepositoryService["reviewThreadAfter"]>) =>
         publicOperation("agent-job.review-thread-after", agentJobs.reviewThreadAfter(...args)),
       reviewThreadBefore: (...args: Parameters<AgentJobRepositoryService["reviewThreadBefore"]>) =>
@@ -735,7 +742,11 @@ const makePersistence = Effect.gen(function*() {
 })
 
 /** Public repository collection exposed to authenticated server workflows. */
-export interface PersistenceService extends Success<typeof makePersistence> {}
+export interface PersistenceService extends Omit<Success<typeof makePersistence>, "agentJobs"> {
+  readonly agentJobs: Omit<Success<typeof makePersistence>["agentJobs"], "interruptRunningReviews"> & {
+    readonly interruptRunningReviews?: Success<typeof makePersistence>["agentJobs"]["interruptRunningReviews"]
+  }
+}
 
 /** Server-only durable state boundary; the database and filesystem stay private. */
 export class Persistence extends Context.Service<Persistence, PersistenceService>()(

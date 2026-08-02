@@ -73,6 +73,7 @@ import {
   CompleteTargetedReviewInput,
   EnqueueAgentJobInput,
   ExtendReviewBudgetInput,
+  InterruptRunningReviewsInput,
   LatestAgentReviewInput,
   LatestAgentReviewRecord,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
@@ -146,6 +147,8 @@ const CancellationRequestedPayload = Schema.Struct({
 const ProviderFailurePayload = Schema.Struct({
   error: AgentProviderError
 })
+
+export const PROCESS_RESTART_INTERRUPTION_MESSAGE = "Review interrupted because the Control Center process restarted."
 
 const ReviewSuggestionPublishedPayload = Schema.Struct({
   suggestionId: RecordReviewSuggestionPublicationInput.fields.suggestionId,
@@ -849,7 +852,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       readonly jobId: typeof JobId.Type
       readonly subject: typeof PrReviewSubject.Type
       readonly requestedAt: typeof UtcTimestamp.Type
-      readonly state: "cancelled" | "failed" | "succeeded" | "unknown"
+      readonly state: "cancelled" | "failed" | "interrupted" | "succeeded" | "unknown"
       readonly report: null | typeof PrReviewReport.Type
     }
 
@@ -939,9 +942,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
           break
         }
-        case "job-failed":
-          runs.set(row.jobId, { ...current, state: "failed" })
+        case "job-failed": {
+          const failure = yield* Schema.decodeUnknownEffect(ProviderFailurePayload)(payload)
+          runs.set(row.jobId, {
+            ...current,
+            state: failure.error.message === PROCESS_RESTART_INTERRUPTION_MESSAGE ? "interrupted" : "failed"
+          })
           break
+        }
         case "cancel-requested":
           if (row.jobState === "cancelled") {
             runs.set(row.jobId, { ...current, state: "cancelled" })
@@ -2511,6 +2519,105 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .pipe(mapPersistenceOperation("agent-job.fail-attempt"))
     }),
 
+    interruptRunningReviews: Effect.fn("AgentJobRepository.interruptRunningReviews")(function*(
+      input: typeof InterruptRunningReviewsInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(InterruptRunningReviewsInput)
+      )(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const rows = yield* sql<Record<string, unknown>>`SELECT job_id AS jobId
+            FROM agent_jobs
+            WHERE workspace_id = ${request.workspaceId}
+              AND state IN ('running', 'cancel-requested')`
+          let interrupted = 0
+          for (const row of rows) {
+            const jobId = yield* Schema.decodeUnknownEffect(JobId)(row.jobId).pipe(
+              Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.interrupt-job-id" }))
+            )
+            const job = yield* getJob(request.workspaceId, jobId)
+            if (job.task._tag !== "pr-review") continue
+            const attemptRows = yield* sql<Record<string, unknown>>`SELECT attempt_sequence AS attemptSequence
+              FROM agent_job_attempts
+              WHERE workspace_id = ${request.workspaceId}
+                AND job_id = ${jobId}
+                AND completed_at IS NULL
+              ORDER BY attempt_sequence DESC
+              LIMIT 1`
+            const attempt = Schema.decodeUnknownResult(
+              Schema.Struct({ attemptSequence: AgentAttemptSequence })
+            )(attemptRows[0])
+            if (Result.isFailure(attempt)) continue
+            const existing = yield* readReviewResult({
+              workspaceId: request.workspaceId,
+              jobId
+            }).pipe(Effect.result)
+            if (Result.isFailure(existing) && existing.failure._tag !== "RecordNotFoundError") {
+              return yield* existing.failure
+            }
+            const report = Result.isSuccess(existing)
+              ? {
+                ...existing.success.report,
+                completion: {
+                  status: "unable-to-conclude",
+                  reason: PROCESS_RESTART_INTERRUPTION_MESSAGE
+                }
+              }
+              : {
+                schemaVersion: 3,
+                subject: job.task.subject,
+                completion: {
+                  status: "unable-to-conclude",
+                  reason: PROCESS_RESTART_INTERRUPTION_MESSAGE
+                },
+                suggestions: [],
+                notes: []
+              } satisfies typeof PrReviewReport.Type
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId,
+              attemptSequence: attempt.success.attemptSequence,
+              eventKind: "review-report",
+              payload: report,
+              payloadSchema: PrReviewReport,
+              occurredAt: request.interruptedAt
+            })
+            const error = new AgentProviderError({
+              providerId: job.providerId,
+              phase: "execution",
+              message: PROCESS_RESTART_INTERRUPTION_MESSAGE,
+              retryable: false
+            })
+            const encodedFailure = yield* encodePayload(ProviderFailurePayload, { error })
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId,
+              attemptSequence: attempt.success.attemptSequence,
+              eventKind: "job-failed",
+              payload: { error },
+              payloadSchema: ProviderFailurePayload,
+              occurredAt: request.interruptedAt
+            })
+            yield* completeAttempt({
+              workspaceId: request.workspaceId,
+              jobId,
+              attemptSequence: attempt.success.attemptSequence,
+              completedAt: request.interruptedAt,
+              outcome: "failed",
+              state: "failed",
+              sessionRef: null,
+              errorJson: encodedFailure.json
+            })
+            interrupted += 1
+          }
+          return { interrupted }
+        })
+      ).pipe(mapPersistenceOperation("agent-job.interrupt-running-reviews"))
+    }),
+
     reviewBudget: Effect.fn("AgentJobRepository.reviewBudget")(function*(
       input: typeof ReadReviewBudgetInput.Type
     ) {
@@ -2655,6 +2762,18 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.taskContextJson,
         row.success.taskContextDigest
       )
+      let interrupted = false
+      if (row.success.state === "failed") {
+        const interruptionRows = yield* sql<Record<string, unknown>>`SELECT COUNT(*) AS interrupted
+          FROM agent_thread_events
+          WHERE workspace_id = ${request.workspaceId}
+            AND job_id = ${row.success.jobId}
+            AND event_kind = 'job-failed'
+            AND payload_json LIKE ${`%${PROCESS_RESTART_INTERRUPTION_MESSAGE}%`}`.pipe(
+          mapPersistenceOperation("agent-job.latest-review-interruption")
+        )
+        interrupted = Number(interruptionRows[0]?.interrupted ?? 0) > 0
+      }
       if (
         task._tag !== "pr-review" ||
         task.pluginConnectionId !== request.pluginConnectionId ||
@@ -2750,6 +2869,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       }
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
+        state: interrupted ? "interrupted" : row.success.state,
         startedAt: startedAt.success.startedAt,
         ...(reviewBudget.reviewBudgetMillis === undefined
           ? {}
