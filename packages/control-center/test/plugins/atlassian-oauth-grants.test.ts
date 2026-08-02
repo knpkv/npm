@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { CONFLUENCE_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
+import { CONFLUENCE_SCOPES, JIRA_PROPOSAL_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
 import {
   HomeDirectoryLive,
   loadOAuthConfig,
@@ -30,6 +30,17 @@ const owner = {
 
 const SHARED_OAUTH_CONFIG = { clientId: "client-id", clientSecret: "client-secret" }
 const CONTROL_CENTER_AUTH_STORE_NAME = "control-center"
+
+describe("Atlassian OAuth scope boundaries", () => {
+  it("does not grant Jira mutation scopes to the proposal-only Control Center flow", () => {
+    assert.deepStrictEqual([...JIRA_PROPOSAL_SCOPES].sort(), [
+      "offline_access",
+      "read:jira-user",
+      "read:jira-work",
+      "read:me"
+    ])
+  })
+})
 
 const writeOAuthConfig = Effect.fn("test.writeAtlassianOAuthConfig")(function*(
   configHome: string,
@@ -416,7 +427,10 @@ describe("AtlassianOAuthGrants", () => {
       assert.strictEqual(ready._tag, "ready")
       if (ready._tag !== "ready") return
       const requestedScopes = new URL(ready.authorizationUrl).searchParams.get("scope")?.split(" ").sort()
-      assert.deepStrictEqual(requestedScopes, Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).sort())
+      assert.deepStrictEqual(
+        requestedScopes,
+        Array.from(new Set([...JIRA_PROPOSAL_SCOPES, ...CONFLUENCE_SCOPES])).sort()
+      )
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),
@@ -484,7 +498,7 @@ describe("AtlassianOAuthGrants", () => {
       if (started._tag !== "ready") return
       assert.deepStrictEqual(
         new URL(started.authorizationUrl).searchParams.get("scope")?.split(" ").sort(),
-        [...JIRA_SCOPES].sort()
+        [...JIRA_PROPOSAL_SCOPES].sort()
       )
       const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
         new URL(started.authorizationUrl).searchParams.get("state")

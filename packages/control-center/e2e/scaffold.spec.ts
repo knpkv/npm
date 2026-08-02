@@ -790,6 +790,8 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByText("Current context")).toBeVisible()
   await expect(page.getByRole("heading", { level: 2, name: "Releases" })).toBeVisible()
   await expect(page.getByText("Open Relay from a release to start an exact, release-owned thread.")).toBeVisible()
+  await expect(page.getByRole("heading", { level: 2, name: "Run Relay with an exact release context" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Choose a release to run Relay" })).toHaveAttribute("href", "/releases")
 })
 
 test("keeps mobile navigation clear of application identity and content", async ({ page }) => {
