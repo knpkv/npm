@@ -5,11 +5,14 @@ import {
   AgentProviderCatalog,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
-  ReviewAgentProfile
+  ReviewAgentProfile,
+  ReviewSuggestionPublicationAuthorityBinding,
+  ReviewSuggestionPublicationPreview
 } from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
 import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../src/api/plugins.js"
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
+import { PrReviewSuggestionRevision, PrReviewSuggestionRevisionPage } from "../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
@@ -329,6 +332,73 @@ const reviewReport = Schema.encodeSync(PrReviewReport)(
       }
     ],
     notes: []
+  })
+)
+const reviewSuggestion = reviewReport.suggestions[0]
+if (reviewSuggestion === undefined) throw new Error("Expected one review suggestion fixture")
+const reviewRevision = (
+  sequence: 1 | 2 | 3,
+  suggestion = reviewSuggestion,
+  validation: "validated" | "requires-revalidation" = "validated"
+) =>
+  Schema.decodeUnknownSync(PrReviewSuggestionRevision)({
+    revisionId: `sha256:${String(sequence).repeat(64)}`,
+    sequence,
+    predecessorRevisionId: sequence === 1 ? null : `sha256:${String(sequence - 1).repeat(64)}`,
+    sourceJobId: reviewJobId,
+    subject: reviewSubject,
+    suggestion,
+    validation: validation === "validated"
+      ? {
+        _tag: "validated",
+        reviewedHead: reviewHeadRevision,
+        validatingJobId: reviewJobId,
+        sourceRevisionId: `sha256:${String(sequence).repeat(64)}`
+      }
+      : {
+        _tag: "requires-revalidation",
+        reviewedHead: reviewHeadRevision,
+        sourceRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        reason: "technical-claim-edited"
+      },
+    author: { _tag: "operator", personId: pairedSession.actor.personId },
+    createdAt: "2026-07-14T10:02:00.000Z"
+  })
+const reviewRevisionPage = (current: ReturnType<typeof reviewRevision>) =>
+  Schema.encodeSync(PrReviewSuggestionRevisionPage)({
+    current,
+    revisions: [current],
+    hasMore: false,
+    nextBeforeSequence: null
+  })
+const reviewPublicationPreview = Schema.encodeSync(ReviewSuggestionPublicationPreview)(
+  Schema.decodeUnknownSync(ReviewSuggestionPublicationPreview)({
+    jobId: reviewJobId,
+    suggestionId: reviewSuggestionId,
+    revisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    subject: reviewSubject,
+    suggestionRevision: {
+      jobId: reviewJobId,
+      suggestionId: reviewSuggestionId,
+      revisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      sequence: 3,
+      reviewedHead: reviewHeadRevision
+    },
+    anchor: reviewSuggestion.anchor,
+    editableContent: "Reuse the original idempotency key.",
+    editableContentMaximumLength: 10_100,
+    finalContent: "Reuse the original idempotency key.",
+    publicationFooter: "Reviewed by Relay",
+    replacement: null,
+    connectedIdentity: {
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:role/CodeCommitReviewer"
+    },
+    authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+      "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    ),
+    proposingAgent: reviewProfile,
+    publishingOperator: pairedSession.actor.personId
   })
 )
 const completedPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
@@ -1011,6 +1081,13 @@ test("launches an exact-head review and presents its durable findings", async ({
   let enqueued = false
   let enqueuePayload: unknown
   let remainingPendingReviewPolls = 1
+  let targetedReview = false
+  let remainingTargetedReviewPolls = 1
+  let dismissed = false
+  let changedHead = false
+  let edited = false
+  let targetedPayload: unknown
+  const editedSuggestion = { ...reviewSuggestion, title: "Reuse the original idempotency key after retry" }
   let releaseRenderer: (() => void) | undefined
   const rendererGate = new Promise<void>((resolve) => {
     releaseRenderer = resolve
@@ -1129,14 +1206,28 @@ test("launches an exact-head review and presents its durable findings", async ({
     })
   })
   await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review`, async (route) => {
-    const review = !enqueued
+    const review = changedHead
+      ? Schema.encodeSync(PullRequestReviewState)(
+        Schema.decodeUnknownSync(PullRequestReviewState)({
+          _tag: "stale",
+          subject: reviewSubject,
+          previousHead: reviewHeadRevision,
+          previousJobId: reviewJobId
+        })
+      )
+      : !enqueued
       ? notStartedPullRequestReview
+      : targetedReview && remainingTargetedReviewPolls > 0
+      ? pendingPullRequestReview
       : remainingPendingReviewPolls > 0
       ? pendingPullRequestReview
+      : dismissed
+      ? completedPullRequestReview
       : completedPullRequestReview
     if (enqueued && remainingPendingReviewPolls > 0) {
       remainingPendingReviewPolls -= 1
     }
+    if (targetedReview && remainingTargetedReviewPolls > 0) remainingTargetedReviewPolls -= 1
     await route.fulfill({
       body: JSON.stringify(review),
       contentType: "application/json",
@@ -1167,6 +1258,72 @@ test("launches an exact-head review and presents its durable findings", async ({
       status: 202
     })
   })
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/revisions**",
+    async (route) => {
+      if (route.request().method() === "GET") {
+        const current = targetedReview
+          ? reviewRevision(3)
+          : reviewRevision(
+            edited ? 2 : 1,
+            edited ? editedSuggestion : reviewSuggestion,
+            edited ? "requires-revalidation" : "validated"
+          )
+        await route.fulfill({
+          body: JSON.stringify(reviewRevisionPage(current)),
+          contentType: "application/json",
+          status: 200
+        })
+        return
+      }
+      edited = true
+      await route.fulfill({
+        body: JSON.stringify(
+          Schema.encodeSync(PrReviewSuggestionRevision)(reviewRevision(2, editedSuggestion, "requires-revalidation"))
+        ),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/agent",
+    async (route) => {
+      targetedReview = true
+      targetedPayload = route.request().postDataJSON()
+      await route.fulfill({
+        body: JSON.stringify(pendingPullRequestReview),
+        contentType: "application/json",
+        status: 202
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/dismissal",
+    async (route) => {
+      dismissed = true
+      changedHead = true
+      await route.fulfill({
+        body: JSON.stringify(
+          Schema.encodeSync(PrReviewSuggestionRevision)(
+            reviewRevision(3, { ...reviewSuggestion, state: "dismissed" })
+          )
+        ),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/publication-preview**",
+    async (route) => {
+      await route.fulfill({
+        body: JSON.stringify(reviewPublicationPreview),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
   await page.route("**/assets/diff-*.js", async (route) => {
     await rendererGate
     await route.continue()
@@ -1267,6 +1424,47 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(allFilesTarget).toBeVisible()
   await expect(allFilesTarget).toBeInViewport()
   expect(diffContentRequests).toBe(4)
+
+  await expect(page.getByText("Revision 1")).toBeVisible()
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  const editDialog = page.getByRole("dialog", { name: "Edit review suggestion" })
+  await expect(editDialog).toBeVisible()
+  await editDialog.locator("input").fill(editedSuggestion.title)
+  await editDialog.getByRole("button", { name: "Save revision" }).click()
+  await editDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByText("Needs revalidation", { exact: true })).toBeVisible()
+  await expect(page.getByText(editedSuggestion.title, { exact: true }).first()).toBeVisible()
+
+  await page.getByRole("button", { name: "Revalidate" }).click()
+  await expect
+    .poll(() => targetedPayload)
+    .toEqual({
+      providerId: "openai-compatible",
+      model: "review-model",
+      profile: "read-only",
+      reviewProfileId: reviewProfile.profileId,
+      intent: "suggestion-revalidation",
+      expectedRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      expectedSequence: 2
+    })
+  await expect(page.getByText("Review queued")).toBeVisible()
+  await page.clock.runFor(2_100)
+  await expect(page.getByText("Run completed · success")).toBeVisible()
+
+  await page.getByRole("button", { name: "Review & approve" }).click()
+  const publicationDialog = page.getByRole("dialog", { name: "Approve finding" })
+  await expect(publicationDialog).toBeVisible()
+  await expect(publicationDialog).toContainText("arn:aws:iam::123456789012:role/CodeCommitReviewer")
+  await expect(publicationDialog).toContainText(reviewHeadRevision)
+  await publicationDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(publicationDialog).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Dismiss" }).click()
+  await page.getByRole("dialog", { name: "Dismiss finding?" }).getByRole("button", { name: "Dismiss finding" }).click()
+  await expect(page.getByText("Dismissed · high confidence", { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("Agent review not run")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review exact head" })).toBeVisible()
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

@@ -194,7 +194,8 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
   loadThread: (...args) => generatedClientTransport.then((transport) => transport.loadThread(...args)),
   previewPublication: (...args) => generatedClientTransport.then((transport) => transport.previewPublication(...args)),
   providers: (...args) => generatedClientTransport.then((transport) => transport.providers(...args)),
-  publishSuggestion: (...args) => generatedClientTransport.then((transport) => transport.publishSuggestion(...args))
+  publishSuggestion: (...args) => generatedClientTransport.then((transport) => transport.publishSuggestion(...args)),
+  targetSuggestion: (...args) => generatedClientTransport.then((transport) => transport.targetSuggestion!(...args))
 }
 
 const sameReviewScope = (
