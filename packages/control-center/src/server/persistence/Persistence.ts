@@ -363,6 +363,13 @@ const makePersistence = Effect.gen(function*() {
           "agent-job.list-running-pr-review-attempts",
           agentJobs.listRunningPrReviewAttempts(...args)
         ),
+      attachRunningPrReviewSession: (
+        ...args: Parameters<AgentJobRepositoryService["attachRunningPrReviewSession"]>
+      ) =>
+        publicOperation(
+          "agent-job.attach-running-pr-review-session",
+          agentJobs.attachRunningPrReviewSession(...args)
+        ),
       readReviewSuggestionPublication: (
         ...args: Parameters<AgentJobRepositoryService["readReviewSuggestionPublication"]>
       ) =>
@@ -757,9 +764,14 @@ const makePersistence = Effect.gen(function*() {
 
 /** Public repository collection exposed to authenticated server workflows. */
 export interface PersistenceService extends Omit<Success<typeof makePersistence>, "agentJobs"> {
-  readonly agentJobs: Omit<Success<typeof makePersistence>["agentJobs"], "interruptRunningReviews"> & {
-    readonly interruptRunningReviews?: Success<typeof makePersistence>["agentJobs"]["interruptRunningReviews"]
-  }
+  readonly agentJobs:
+    & Omit<Success<typeof makePersistence>["agentJobs"], "attachRunningPrReviewSession" | "interruptRunningReviews">
+    & {
+      readonly attachRunningPrReviewSession?: Success<
+        typeof makePersistence
+      >["agentJobs"]["attachRunningPrReviewSession"]
+      readonly interruptRunningReviews?: Success<typeof makePersistence>["agentJobs"]["interruptRunningReviews"]
+    }
 }
 
 /** Server-only durable state boundary; the database and filesystem stay private. */

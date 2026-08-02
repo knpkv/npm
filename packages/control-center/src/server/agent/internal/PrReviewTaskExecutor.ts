@@ -1023,7 +1023,10 @@ const makeExecutor = Effect.gen(function*() {
         headRevision: subject.headRevision,
         providerId: String(claim.providerId),
         ...(selected.model === null ? {} : { model: String(selected.model) }),
-        reviewExecution: selected.reviewExecution
+        reviewExecution: selected.reviewExecution,
+        ...(claim.sessionRef?.startsWith("sbx:")
+          ? { recoverySandboxName: claim.sessionRef.slice("sbx:".length) }
+          : {})
       },
       (session) =>
         Effect.gen(function*() {

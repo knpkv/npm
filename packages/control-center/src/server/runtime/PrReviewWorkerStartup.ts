@@ -6,6 +6,8 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
+import { AgentSessionRef } from "@knpkv/ai-runtime"
+
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
 import { type PrReviewSandboxSessionError, PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
@@ -47,23 +49,42 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
   const runningAttempts = yield* persistence.agentJobs.listRunningPrReviewAttempts(options.workspaceId)
-  const preservedAttempts = (reconciliation.reattachedSandboxIdentities ?? []).flatMap((sandbox) =>
-    runningAttempts
-      .filter((attempt) =>
-        attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
-        attempt.attemptId === sandbox.attemptId
-      )
-      .map(({ attemptSequence, jobId }) => ({ jobId, attemptSequence }))
-  )
+  const preservedSandboxAttempts = (reconciliation.reattachedSandboxIdentities ?? []).flatMap((sandbox) => {
+    const sessionRef = AgentSessionRef.make(`sbx:${sandbox.name}`)
+    const carriedAttempts = runningAttempts.filter((attempt) => attempt.sessionRef === sessionRef)
+    const directAttempts = runningAttempts.filter((attempt) =>
+      attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
+      attempt.attemptId === sandbox.attemptId
+    )
+    const latest = [...(carriedAttempts.length > 0 ? carriedAttempts : directAttempts)]
+      .sort((left, right) => right.attemptSequence - left.attemptSequence)[0]
+    return latest === undefined ? [] : [{ sandboxName: sandbox.name, ...latest }]
+  })
+  const preservedAttempts = preservedSandboxAttempts.map(({ attemptSequence, jobId }) => ({ attemptSequence, jobId }))
+  if (persistence.agentJobs.attachRunningPrReviewSession !== undefined) {
+    yield* Effect.forEach(
+      (reconciliation.reattachedSandboxIdentities ?? []).flatMap((sandbox) =>
+        runningAttempts
+          .filter((attempt) =>
+            attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
+            attempt.attemptId === sandbox.attemptId
+          )
+          .map(({ attemptSequence, jobId }) => ({
+            attemptSequence,
+            jobId,
+            sessionRef: AgentSessionRef.make(`sbx:${sandbox.name}`)
+          }))
+      ),
+      (recovered) =>
+        persistence.agentJobs.attachRunningPrReviewSession!({
+          workspaceId: options.workspaceId,
+          ...recovered
+        }),
+      { discard: true }
+    )
+  }
   const preservedSandboxNames = new Set(
-    (reconciliation.reattachedSandboxIdentities ?? [])
-      .filter((sandbox) =>
-        runningAttempts.some((attempt) =>
-          attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
-          attempt.attemptId === sandbox.attemptId
-        )
-      )
-      .map(({ name }) => name)
+    preservedSandboxAttempts.map(({ sandboxName }) => sandboxName)
   )
   const unmatchedSandboxNames = (reconciliation.reattachedSandboxes ?? [])
     .filter((name) => !preservedSandboxNames.has(name))

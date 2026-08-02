@@ -164,6 +164,46 @@ describe("PrReviewSandboxSessions", () => {
     )
   })
 
+  it.effect("reattaches a retained sandbox for a new immutable attempt", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const recoveredSandbox = SANDBOX_NAME
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      yield* sessions.withSession(
+        {
+          ...request,
+          attemptSequence: AgentAttemptSequence.make(2),
+          attemptId: "abcdef012345",
+          recoverySandboxName: recoveredSandbox
+        },
+        () => Effect.void
+      )
+
+      assert.isFalse(calls.some(({ args }) => args[0] === "create" || args[0] === "run"))
+      const contained = calls.filter(({ args }) => args[0] === "exec")
+      assert.isAtLeast(contained.length, 1)
+      assert.isTrue(contained.every(({ args }) => !args.includes("--workdir")))
+      assert.isTrue(calls.some(({ args }) => args[0] === "ls" && args[1] === "--quiet"))
+      assert.isTrue(calls.some(({ args }) => args[0] === "rm" && args.at(-1) === recoveredSandbox))
+    }).pipe(Effect.provide(testLayer(calls)))
+  })
+
+  it.effect("fails when the retained recovery sandbox is missing", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const result = yield* sessions.withSession(
+        { ...request, recoverySandboxName: SANDBOX_NAME },
+        () => Effect.void
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.reason, "sandbox-unavailable")
+      }
+    }).pipe(Effect.provide(testLayer(calls, [], "cc-pr-review-missing")))
+  })
+
   it.effect("runs native Codex review in the exact cloned sbx workspace", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const report = JSON.stringify({
