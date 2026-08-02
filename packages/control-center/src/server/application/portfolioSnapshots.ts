@@ -123,6 +123,7 @@ const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness"
       .filter(({ providerId }) => providerId === "confluence")
       .map(({ pluginConnectionId }) => pluginConnectionId)
   )
+  const publicationActionKinds: ReadonlyArray<"create-page" | "update-page"> = ["create-page", "update-page"]
   const candidates = yield* Effect.forEach(
     entities.filter(({ sourceRevision }) =>
       sourceRevision.providerId === "confluence" &&
@@ -130,7 +131,7 @@ const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness"
     ),
     (entity) =>
       Effect.forEach(
-        ["create-page", "update-page"] as const,
+        publicationActionKinds,
         (actionKind) =>
           persistence.governedActions.readLatestTerminalByTarget({
             workspaceId: release.workspaceId,

@@ -395,11 +395,7 @@ describe("ServicesPage connection tests", () => {
     )
     if (button === undefined) throw new Error("Expected Atlassian reauthorization button")
     await act(async () => button.click())
-    expect(onStartAtlassianOAuth).toHaveBeenCalledWith(
-      ["jira", "confluence"],
-      expect.any(AbortSignal),
-      undefined
-    )
+    expect(onStartAtlassianOAuth).toHaveBeenCalledWith(["jira", "confluence"], expect.any(AbortSignal), undefined)
   })
 
   it("preserves opaque secret bytes and trims textual credential locators", async () => {
