@@ -33,9 +33,12 @@ const CONTROL_CENTER_AUTH_STORE_NAME = "control-center"
 
 describe("Atlassian OAuth scope boundaries", () => {
   it("does not grant Jira mutation scopes to the proposal-only Control Center flow", () => {
-    assert.notInclude(JIRA_PROPOSAL_SCOPES, "write:jira-work")
-    assert.notInclude(JIRA_PROPOSAL_SCOPES, "manage:jira-project")
-    assert.notInclude(JIRA_PROPOSAL_SCOPES, "manage:jira-configuration")
+    assert.deepStrictEqual([...JIRA_PROPOSAL_SCOPES].sort(), [
+      "offline_access",
+      "read:jira-user",
+      "read:jira-work",
+      "read:me"
+    ])
   })
 })
 
