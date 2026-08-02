@@ -1,10 +1,13 @@
 /** Writable, credential-free sbx session for one exact pull-request revision. @module */
+import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -636,7 +639,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 input?: Uint8Array
               ) {
                 const startedAt = yield* DateTime.now
-                const result = yield* execute(
+                const execution = yield* Effect.exit(execute(
                   spawner,
                   executable,
                   hostEnvironment,
@@ -644,8 +647,36 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   maximumOutputBytes,
                   timeout,
                   input
-                )
+                ))
                 const completedAt = yield* DateTime.now
+                if (Exit.isFailure(execution)) {
+                  const failure = Cause.findErrorOption(execution.cause)
+                  yield* emitPrReviewTelemetry({
+                    workspaceId: request.workspaceId,
+                    jobId: request.jobId,
+                    attemptSequence: request.attemptSequence,
+                    revision: request.headRevision,
+                    provider: request.providerId ?? "unknown",
+                    model: request.model ?? null,
+                    cli: request.reviewExecution ?? "effect-ai",
+                    phase,
+                    commandName,
+                    durationMillis: Math.max(
+                      0,
+                      DateTime.toEpochMillis(completedAt) - DateTime.toEpochMillis(startedAt)
+                    ),
+                    exitStatus: null,
+                    stdoutBytes: 0,
+                    stderrBytes: 0,
+                    suggestionCount: 0,
+                    noteCount: 0,
+                    errorType: Option.isSome(failure) && isSessionError(failure.value)
+                      ? failure.value.reason
+                      : "execution-failed"
+                  })
+                  return yield* Effect.failCause(execution.cause)
+                }
+                const result = execution.value
                 yield* emitPrReviewTelemetry({
                   workspaceId: request.workspaceId,
                   jobId: request.jobId,
