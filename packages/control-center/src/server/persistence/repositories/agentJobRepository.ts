@@ -74,6 +74,7 @@ import {
   AgentThreadEventPageSize,
   AppendAgentEventInput,
   type AppendReviewSuggestionRevisionInput,
+  AttachRunningPrReviewSessionInput,
   ClaimAgentJobInput,
   ClaimedAgentJob,
   CompleteAgentReviewInput,
@@ -2841,7 +2842,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     ) {
       const rows = yield* sql<Record<string, unknown>>`SELECT
         job.job_id AS jobId, attempt.attempt_sequence AS attemptSequence,
-        job.provider_id AS providerId
+        job.provider_id AS providerId, attempt.session_ref AS sessionRef
         FROM agent_jobs job
         JOIN agent_job_attempts attempt
           ON attempt.workspace_id = job.workspace_id
@@ -2874,7 +2875,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
         const attempt = Schema.decodeUnknownResult(RunningPrReviewAttempt)({
           jobId,
           attemptSequence,
-          attemptId: Encoding.encodeHex(digest).slice(0, 12)
+          attemptId: Encoding.encodeHex(digest).slice(0, 12),
+          sessionRef: row.sessionRef
         })
         if (Result.isFailure(attempt)) {
           return yield* new PersistenceOperationError({ operation: "agent-job.running-review-attempt-invalid" })
@@ -2882,6 +2884,27 @@ const makeAgentJobRepository = Effect.gen(function*() {
         attempts.push(attempt.success)
       }
       return attempts
+    }),
+
+    attachRunningPrReviewSession: Effect.fn("AgentJobRepository.attachRunningPrReviewSession")(function*(
+      input: typeof AttachRunningPrReviewSessionInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(AttachRunningPrReviewSessionInput)
+      )(input)
+      yield* sql`UPDATE agent_job_attempts
+        SET session_ref = ${request.sessionRef}
+        WHERE workspace_id = ${request.workspaceId}
+          AND job_id = ${request.jobId}
+          AND attempt_sequence = ${request.attemptSequence}
+          AND completed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM agent_jobs job
+            WHERE job.workspace_id = agent_job_attempts.workspace_id
+              AND job.job_id = agent_job_attempts.job_id
+              AND job.state IN ('running', 'cancel-requested')
+          )`
+      return undefined
     }),
 
     interruptRunningReviews: Effect.fn("AgentJobRepository.interruptRunningReviews")(function*(

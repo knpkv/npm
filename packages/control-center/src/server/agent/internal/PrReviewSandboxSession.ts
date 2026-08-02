@@ -63,6 +63,11 @@ const SandboxAttemptId = Schema.String.check(
   })
 )
 
+const RecoverySandboxName = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isPattern(/^cc-pr-review-[a-f0-9]{32}-[a-f0-9]{4}-[a-f0-9]{12}$/u)
+)
+
 const Executable = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -151,7 +156,8 @@ const SessionRequest = Schema.Struct({
   headRevision: GitRevision,
   providerId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
   model: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
-  reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"]))
+  reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"])),
+  recoverySandboxName: Schema.optionalKey(RecoverySandboxName)
 })
 
 const NativeCodexReviewRequest = Schema.Struct({
@@ -192,6 +198,8 @@ export interface PrReviewSandboxSessionRequest extends PrReviewSourceRequest {
   readonly reviewExecution?: "effect-ai" | "native-claude" | "native-codex"
   readonly providerId?: string
   readonly model?: string
+  /** Server-private sandbox retained across a process restart. */
+  readonly recoverySandboxName?: string
 }
 
 /** Structured native Codex review material accepted only by Codex-backed sessions. */
@@ -586,7 +594,15 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const request = yield* Schema.decodeUnknownEffect(SessionRequest)(unknownRequest).pipe(
       Effect.mapError(() => sessionError("invalid-request"))
     )
-    const name = sandboxName(request.workspaceId, request.jobId, request.attemptId)
+    const expectedName = sandboxName(request.workspaceId, request.jobId, request.attemptId)
+    const name = request.recoverySandboxName ?? expectedName
+    const recovery = request.recoverySandboxName !== undefined
+    if (
+      recovery &&
+      !name.startsWith(`${workspaceSandboxPrefix(request.workspaceId)}${compactUuid(request.jobId).slice(-4)}-`)
+    ) {
+      return yield* sessionError("invalid-request")
+    }
     const nativeCodex = request.reviewExecution === "native-codex"
     const nativeClaude = request.reviewExecution === "native-claude"
     const nativeAgent = nativeCodex || nativeClaude
@@ -594,37 +610,51 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       request,
       (sourceRoot) =>
         Effect.acquireUseRelease(
-          runControl(
-            nativeAgent
-              ? [
-                "run",
-                nativeCodex ? "codex" : "claude",
-                sourceRoot,
-                "--clone",
-                "--name",
-                name,
-                "--detached"
-              ]
-              : [
-                "create",
-                "shell",
-                sourceRoot,
-                "--clone",
-                "--name",
-                name,
-                "--quiet",
-                ...(options.template === undefined ? [] : ["--template", options.template])
-              ],
-            SOURCE_HANDOFF_TIMEOUT,
-            hostEnvironment
-          ).pipe(
-            Effect.flatMap((created) =>
-              successful(created)
-                ? Effect.succeed(name)
-                : Effect.fail(sessionError("sandbox-unavailable"))
+          recovery
+            ? runControl(["ls", "--quiet"], SOURCE_HANDOFF_TIMEOUT, hostEnvironment).pipe(
+              Effect.flatMap((listed) =>
+                successful(listed)
+                  ? decodeUtf8(listed.stdout, "sandbox-unavailable").pipe(
+                    Effect.filterOrFail(
+                      (output) => output.split("\n").includes(name),
+                      () => sessionError("sandbox-unavailable")
+                    ),
+                    Effect.as(name)
+                  )
+                  : Effect.fail(sessionError("sandbox-unavailable"))
+              )
+            )
+            : runControl(
+              nativeAgent
+                ? [
+                  "run",
+                  nativeCodex ? "codex" : "claude",
+                  sourceRoot,
+                  "--clone",
+                  "--name",
+                  name,
+                  "--detached"
+                ]
+                : [
+                  "create",
+                  "shell",
+                  sourceRoot,
+                  "--clone",
+                  "--name",
+                  name,
+                  "--quiet",
+                  ...(options.template === undefined ? [] : ["--template", options.template])
+                ],
+              SOURCE_HANDOFF_TIMEOUT,
+              hostEnvironment
+            ).pipe(
+              Effect.flatMap((created) =>
+                successful(created)
+                  ? Effect.succeed(name)
+                  : Effect.fail(sessionError("sandbox-unavailable"))
+              ),
+              Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
             ),
-            Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
-          ),
           () =>
             Effect.gen(function*() {
               if (!nativeAgent) {
@@ -729,8 +759,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   [
                     "exec",
                     ...(input === undefined ? [] : ["--interactive"]),
-                    "--workdir",
-                    sourceRoot,
+                    ...(recovery ? [] : ["--workdir", sourceRoot]),
                     name,
                     "env",
                     "-i",
@@ -804,8 +833,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     [
                       "exec",
                       "--interactive",
-                      "--workdir",
-                      sourceRoot,
+                      ...(recovery ? [] : ["--workdir", sourceRoot]),
                       name,
                       nativeRequest.executable,
                       "exec",
@@ -878,8 +906,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     [
                       "exec",
                       "--interactive",
-                      "--workdir",
-                      sourceRoot,
+                      ...(recovery ? [] : ["--workdir", sourceRoot]),
                       name,
                       nativeRequest.executable,
                       "-p",
