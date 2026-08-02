@@ -1,8 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { AgentSessionRef } from "@knpkv/ai-runtime"
 import { DateTime, Deferred, Effect, Layer, Ref, Result } from "effect"
 
-import { WorkspaceId } from "../../src/domain/identifiers.js"
+import { JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { AgentJobWorker, type AgentJobWorkerRunResult } from "../../src/server/agent/AgentJobWorker.js"
 import {
   PrReviewSandboxSessionError,
@@ -10,18 +11,22 @@ import {
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import {
   PrReviewWorkerRunning,
   PrReviewWorkerStartup,
-  prReviewWorkerStartupLayer
+  prReviewWorkerStartupLayer,
+  selectPreservedSandboxAttempts
 } from "../../src/server/runtime/PrReviewWorkerStartup.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const FIXTURE_TIME = DateTime.makeUnsafe("2026-07-30T12:00:00.000Z")
+const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+const REVIEW_SANDBOX_NAME = "cc-pr-review-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0099-0123456789ab"
 
 const makeTestPersistence = Effect.fn("PrReviewWorkerStartupTest.makePersistence")(function*(
   createWorkspace: boolean
@@ -48,6 +53,34 @@ const bootstrapLayer = Layer.succeed(ControlCenterBootstrap, {
 })
 
 describe("PR review worker startup", () => {
+  it("preserves the newest immutable attempt across repeated sandbox recovery", () => {
+    const preserved = selectPreservedSandboxAttempts(
+      [
+        {
+          jobId: REVIEW_JOB_ID,
+          attemptSequence: AgentAttemptSequence.make(1),
+          attemptId: "0123456789ab",
+          sessionRef: AgentSessionRef.make(`sbx:${REVIEW_SANDBOX_NAME}`)
+        },
+        {
+          jobId: REVIEW_JOB_ID,
+          attemptSequence: AgentAttemptSequence.make(2),
+          attemptId: "abcdef012345",
+          sessionRef: AgentSessionRef.make(`sbx:${REVIEW_SANDBOX_NAME}`)
+        }
+      ],
+      [{ name: REVIEW_SANDBOX_NAME, jobToken: "0099", attemptId: "0123456789ab" }]
+    )
+
+    assert.deepStrictEqual(preserved, [{
+      attemptId: "abcdef012345",
+      attemptSequence: AgentAttemptSequence.make(2),
+      jobId: REVIEW_JOB_ID,
+      sandboxName: REVIEW_SANDBOX_NAME,
+      sessionRef: AgentSessionRef.make(`sbx:${REVIEW_SANDBOX_NAME}`)
+    }])
+  })
+
   it.effect("attaches the worker to the server scope and exits it during drain", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle.make
