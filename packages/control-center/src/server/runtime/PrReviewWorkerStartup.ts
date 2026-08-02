@@ -55,6 +55,21 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
       )
       .map(({ attemptSequence, jobId }) => ({ jobId, attemptSequence }))
   )
+  const preservedSandboxNames = new Set(
+    (reconciliation.reattachedSandboxIdentities ?? [])
+      .filter((sandbox) =>
+        runningAttempts.some((attempt) =>
+          attempt.jobId.replaceAll("-", "").slice(-4) === sandbox.jobToken &&
+          attempt.attemptId === sandbox.attemptId
+        )
+      )
+      .map(({ name }) => name)
+  )
+  const unmatchedSandboxNames = (reconciliation.reattachedSandboxes ?? [])
+    .filter((name) => !preservedSandboxNames.has(name))
+  const removedSandboxes = sandboxes.cleanupUnmatched === undefined
+    ? []
+    : yield* sandboxes.cleanupUnmatched(unmatchedSandboxNames)
   if (persistence.agentJobs.interruptRunningReviews === undefined) {
     yield* Effect.logDebug("PR review interruption recovery is unavailable for this persistence boundary")
   } else {
@@ -71,7 +86,7 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   yield* persistence.retention
     .recordSandboxReconciliation(
       options.workspaceId,
-      reconciliation.removedSandboxes.length
+      reconciliation.removedSandboxes.length + removedSandboxes.length
     )
   const idlePollInterval = Duration.fromInputUnsafe(
     options.idlePollInterval ?? DEFAULT_IDLE_POLL_INTERVAL

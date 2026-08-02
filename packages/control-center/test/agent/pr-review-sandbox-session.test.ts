@@ -695,6 +695,20 @@ describe("PrReviewSandboxSessions", () => {
     )
   })
 
+  it.effect("removes only explicitly unmatched owned sandboxes", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const owned = `${WORKSPACE_SANDBOX_PREFIX}1234-abcdef012345`
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const removed = yield* sessions.cleanupUnmatched?.([owned]) ?? Effect.die("cleanup is unavailable")
+      assert.deepStrictEqual(removed, [owned])
+      assert.deepStrictEqual(
+        calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
+        [owned]
+      )
+    }).pipe(Effect.provide(testLayer(calls, [], owned)))
+  })
+
   it.effect("assigns distinct retained-artifact identities to overlapping commands", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const largeOutput = "x".repeat(40_000)
