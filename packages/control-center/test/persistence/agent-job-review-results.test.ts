@@ -20,7 +20,12 @@ import {
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewReport,
+  PrReviewSubject,
+  reconcilePrReviewReports
+} from "../../src/domain/prReview.js"
 import {
   MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
   PrReviewSuggestionAgentAuthor,
@@ -194,7 +199,7 @@ const nearLimitReport = (): PrReviewReport => {
       ...candidate,
       suggestions: suggestions.map((item) => ({ ...item, state: "published" }))
     })).byteLength
-  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1 - projectedBytes()
+  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1_500 - projectedBytes()
   for (const item of suggestions) {
     const available = 8_000 - item.recommendation.length
     const added = Math.min(available, remaining)
@@ -202,7 +207,7 @@ const nearLimitReport = (): PrReviewReport => {
     remaining -= added
   }
   assert.strictEqual(remaining, 0)
-  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1)
+  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1_500)
   return Schema.decodeUnknownSync(PrReviewReport)(candidate)
 }
 
@@ -1989,7 +1994,15 @@ describe("agent job review results", () => {
           ...bounded,
           suggestions: bounded.suggestions.map((suggestion, index) =>
             index === 0
-              ? { ...suggestion, title: `${suggestion.title}xx` }
+              ? {
+                ...suggestion,
+                relatedLocations: Array.from({ length: 16 }, () => ({
+                  path: "packages/control-center/src/index.ts",
+                  startLine: 1,
+                  endLine: 1,
+                  label: "related"
+                }))
+              }
               : suggestion
           )
         }
@@ -2225,8 +2238,15 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID
         })
+        const expectedReport = PrReviewReport.make({
+          ...report,
+          transitions: reconcilePrReviewReports(
+            PrReviewReport.make({ ...report, suggestions: [], transitions: [] }),
+            report
+          )
+        })
         assert.strictEqual(persisted.attemptSequence, claim.attemptSequence)
-        assert.deepStrictEqual(persisted.report, report)
+        assert.deepStrictEqual(persisted.report, expectedReport)
         assert.isTrue(DateTime.Equivalence(persisted.completedAt, T2))
 
         const latest = yield* jobs.latestReview({
@@ -2238,7 +2258,7 @@ describe("agent job review results", () => {
         if (Option.isSome(latest)) {
           assert.strictEqual(latest.value.jobId, JOB_ID)
           assert.strictEqual(latest.value.state, "succeeded")
-          assert.deepStrictEqual(latest.value.report, report)
+          assert.deepStrictEqual(latest.value.report, expectedReport)
         }
 
         const page = yield* jobs.reviewThreadAfter({
@@ -2269,6 +2289,77 @@ describe("agent job review results", () => {
             }
           ]
         )
+      })
+    ))
+
+  it.effect("rejects agent-declared transitions without terminalizing the review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const invalidReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          transitions: [{
+            suggestionId: `sha256:${"9".repeat(64)}`,
+            transition: "new",
+            previousState: null,
+            currentState: "draft",
+            previousHead: null,
+            currentHead: subject.headRevision
+          }]
+        })
+        const result = yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: invalidReport,
+          completedAt: T2
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "invalid-result")
+        }
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) assert.strictEqual(latest.value.state, "running")
+      })
+    ))
+
+  it.effect("rejects provider-owned published and dismissed suggestion states", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const providerOwnedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          suggestions: report.suggestions.map((suggestion) => ({
+            ...suggestion,
+            state: "published"
+          }))
+        })
+        const result = yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: providerOwnedReport,
+          completedAt: T2
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "invalid-result")
+        }
       })
     ))
 
@@ -2320,7 +2411,16 @@ describe("agent job review results", () => {
           report,
           completedAt: T2
         })
-        assert.deepStrictEqual((yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })).report, report)
+        assert.deepStrictEqual(
+          (yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })).report,
+          PrReviewReport.make({
+            ...report,
+            transitions: reconcilePrReviewReports(
+              PrReviewReport.make({ ...report, suggestions: [], transitions: [] }),
+              report
+            )
+          })
+        )
       })
     ))
 

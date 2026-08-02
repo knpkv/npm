@@ -78,6 +78,9 @@ export interface AgentReviewContextEventsQueryInput {
 export interface LatestAgentReviewQueryInput {
   readonly allowDifferentHead?: boolean
   readonly excludeTargeted?: boolean
+  readonly excludeJobId?: string
+  readonly excludeSubjectRevision?: string
+  readonly limit?: number
   readonly jobId?: string
   readonly subjectRevision?: string
   readonly taskContextPrefix: string
@@ -482,6 +485,10 @@ export const renderLatestAgentReviewQuery = (
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
+        ...(input.excludeJobId === undefined ? [] : [Query.not(Query.eq(agentJobs.jobId, input.excludeJobId))]),
+        ...(input.excludeSubjectRevision === undefined
+          ? []
+          : [Query.not(Query.eq(agentJobs.subjectRevision, input.excludeSubjectRevision))]),
         ...(subjectAndOptionalJob === undefined ? [] : [subjectAndOptionalJob]),
         ...(input.excludeTargeted === true
           ? [
@@ -504,7 +511,7 @@ export const renderLatestAgentReviewQuery = (
     ),
     Query.orderBy(agentJobs.createdAt, "desc"),
     Query.orderBy(agentJobs.jobId, "desc"),
-    Query.limit(1)
+    Query.limit(input.limit ?? 1)
   )
   const rendered = renderer.render(plan)
   return { params: rendered.params, sql: rendered.sql }

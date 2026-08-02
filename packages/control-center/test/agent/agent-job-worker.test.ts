@@ -14,7 +14,7 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { AgentModelId, type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
 import { JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
+import { PrReviewReport, type PrReviewSubject, reconcilePrReviewReports } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import type { WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import {
@@ -394,7 +394,14 @@ describe("agent job worker", () => {
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(claims.length, 1)
         assert.strictEqual(claims[0]?.context.task._tag, "pr-review")
-        assert.deepStrictEqual(persisted.report, reviewReport)
+        const expectedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...reviewReport,
+          transitions: reconcilePrReviewReports(
+            PrReviewReport.make({ ...reviewReport, suggestions: [], transitions: [] }),
+            reviewReport
+          )
+        })
+        assert.deepStrictEqual(persisted.report, expectedReport)
         assert.deepStrictEqual(
           events.events.map(({ eventKind }) => eventKind),
           [
@@ -727,7 +734,16 @@ describe("agent job worker", () => {
 
           assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
           assert.strictEqual(executionCount, 1)
-          assert.deepStrictEqual(persisted.report, reviewReport)
+          assert.deepStrictEqual(
+            persisted.report,
+            Schema.decodeUnknownSync(PrReviewReport)({
+              ...reviewReport,
+              transitions: reconcilePrReviewReports(
+                PrReviewReport.make({ ...reviewReport, suggestions: [], transitions: [] }),
+                reviewReport
+              )
+            })
+          )
         })
       )
     })

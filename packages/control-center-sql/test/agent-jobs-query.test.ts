@@ -252,4 +252,15 @@ describe("durable agent job queries", () => {
     expect(rendered.params).toContain("%\"intent\":\"suggestion-edit\"%")
     expect(rendered.params).toContain("%\"intent\":\"suggestion-revalidation\"%")
   })
+
+  it("can exclude the just-completed job when finding the previous review head", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      taskContextPrefix: "task-identity-prefix",
+      excludeJobId: "current-job-secret"
+    })
+
+    expect(rendered.sql).toContain("not (\"agent_jobs\".\"job_id\" = ?)")
+    expect(rendered.params).toContain("current-job-secret")
+  })
 })
