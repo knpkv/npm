@@ -1115,7 +1115,7 @@ const makeExecutor = Effect.gen(function*() {
             }
             if (targeted) {
               return yield* Schema.decodeUnknownEffect(
-                Schema.fromJsonString(TargetedSuggestionResult),
+                Schema.fromJsonString(NativeModelTargetedSuggestion),
                 { onExcessProperty: "error" }
               )(output).pipe(
                 Effect.mapError(() =>
@@ -1165,7 +1165,7 @@ const makeExecutor = Effect.gen(function*() {
               },
               instructions: targeted ? TARGETED_REVIEW_INSTRUCTIONS : REVIEW_INSTRUCTIONS,
               model: languageModel,
-              outputSchema: targeted ? Schema.Json : ModelReviewReport,
+              outputSchema: targeted ? TargetedSuggestionResult : ModelReviewReport,
               toolkit
             })
           )
