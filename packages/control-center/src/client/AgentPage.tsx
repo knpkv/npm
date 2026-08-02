@@ -731,6 +731,21 @@ const LegacyAgentPage = (): ReactElement => {
           </Link>
         )}
       </Surface>
+      <Surface as="section" className={styles.legacyContext} padding="spacious" shape="grouped">
+        <Text tone="secondary" variant="label">
+          Choose a release
+        </Text>
+        <Text as="h2" variant="section-title">
+          Run Relay with an exact release context
+        </Text>
+        <Text tone="secondary">
+          Relay never runs as an unscoped chatbot. Choose the release whose evidence, freshness, and permissions should
+          bound the thread before sending a message.
+        </Text>
+        <Link className={styles.back} to="/releases">
+          Choose a release to run Relay
+        </Link>
+      </Surface>
     </section>
   )
 }
