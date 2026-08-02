@@ -139,6 +139,19 @@ export const PrReviewSuggestionState = Schema.Literals([
 /** Decoded suggestion presentation state. */
 export type PrReviewSuggestionState = typeof PrReviewSuggestionState.Type
 
+/** Explicit lifecycle result when comparing one immutable review head to another. */
+export const PrReviewSuggestionTransition = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  transition: Schema.Literals(["new", "still-present", "resolved", "reopened"]),
+  previousState: Schema.NullOr(PrReviewSuggestionState),
+  currentState: Schema.NullOr(PrReviewSuggestionState),
+  previousHead: Schema.NullOr(PrReviewSubject.fields.headRevision),
+  currentHead: PrReviewSubject.fields.headRevision
+})
+
+/** Decoded immutable-head suggestion transition. */
+export type PrReviewSuggestionTransition = typeof PrReviewSuggestionTransition.Type
+
 /** Human-selected reason a suggestion was dismissed. */
 export const PrReviewDismissalReason = Schema.Literals([
   "false-positive",
@@ -491,6 +504,47 @@ export const PrReviewReport = Schema.Struct({
 
 /** Decoded complete PR-review report. */
 export type PrReviewReport = typeof PrReviewReport.Type
+
+/** Reconcile stable suggestion identities across two immutable review heads. */
+export const reconcilePrReviewReports = (
+  previous: PrReviewReport,
+  current: PrReviewReport
+): ReadonlyArray<PrReviewSuggestionTransition> => {
+  const previousSuggestions = new Map(previous.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const currentSuggestions = new Map(current.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const transitions = new Array<PrReviewSuggestionTransition>()
+
+  for (const suggestion of current.suggestions) {
+    const prior = previousSuggestions.get(suggestion.suggestionId)
+    const transition = prior === undefined
+      ? "new"
+      : prior.state === "dismissed"
+      ? "reopened"
+      : "still-present"
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition,
+      previousState: prior?.state ?? null,
+      currentState: suggestion.state,
+      previousHead: prior === undefined ? null : previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  for (const suggestion of previous.suggestions) {
+    if (currentSuggestions.has(suggestion.suggestionId)) continue
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition: "resolved",
+      previousState: suggestion.state,
+      currentState: null,
+      previousHead: previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  return transitions
+}
 
 /** Outcome derived by Control Center, never authored by the model. */
 export const PrReviewOutcome = Schema.Literals([
