@@ -12,10 +12,14 @@ Record `pass`, `fail`, or `blocked` beside each item and link any retained recor
 
 - [ ] `PENDING` Landmarks, headings, sidebar, and command navigation are understandable.
 - [ ] `PENDING` Portfolio → release preview preserves focus and reading order.
-- [ ] `PENDING` Release preview → full view → Jira, PR, Confluence, CodePipeline, and Clockify entity navigation preserves context and announces the destination.
+- [ ] `PENDING` Release preview → full view → Jira entity navigation preserves context and announces the destination.
+- [ ] `PENDING` Release preview → full view → CodeCommit PR entity navigation preserves context and announces the destination.
+- [ ] `PENDING` Release preview → full view → Confluence entity navigation preserves context and announces the destination.
+- [ ] `PENDING` Release preview → full view → CodePipeline entity navigation preserves context and announces the destination.
+- [ ] `PENDING` Release preview → full view → Clockify entity navigation preserves context and announces the destination.
 - [ ] `PENDING` The six-item relationship view exposes names, roles, states, and evidence in order.
 - [ ] `PENDING` Governed-action review exposes target, revision, payload, evidence, permission, and confirmation.
-- [ ] `PENDING` Jira editing exposes labels, validation errors, stale conflicts, and recovery.
+- [ ] `PENDING` Jira proposal editing exposes labels, validation errors, stale conflicts, recovery, and no provider write without an enforced atomic revision precondition.
 - [ ] `PENDING` PR diff exposes Before/After content, changed-file state, finding anchors, review notes, suggestion edits, revalidation, dismissal, and publication preview/decision controls.
 - [ ] `PENDING` Settings exposes provider configuration, capability state, validation errors, and save/cancel feedback.
 - [ ] `PENDING` Live connection and job changes are announced without trapping focus.

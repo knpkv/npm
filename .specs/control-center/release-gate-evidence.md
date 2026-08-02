@@ -28,9 +28,9 @@ never turns an unrun live journey into a green claim.
 | SC7.19      | PENDING | `packages/control-center/test/http/security/*`; `packages/control-center/test/unit/browserSecretSurface.test.ts`; `packages/control-center/e2e/atlassian-oauth.spec.ts`; result: PENDING                                                                                                      | Real OAuth surface: operator-owned, PENDING                                                                                                                        |
 | SC7.20      | PENDING | `packages/control-center/e2e/releaseRoutes.spec.ts`; `packages/control-center/test/client/workspaceEntityRoutes.test.ts`; `packages/control-center/docs/screen-reader-checklist.md`; result: PENDING                                                                                          | Manual screen-reader sign-off: operator-owned, PENDING                                                                                                             |
 | SC7.21      | PENDING | `packages/control-center/scripts/runBenchmark.ts`; `packages/control-center/scripts/validateRuntimeBenchmarkReport.ts`; benchmark scripts; result: PENDING                                                                                                                                    | Eligible-machine report: operator-owned, PENDING                                                                                                                   |
-| SC7.22      | PENDING | rly registry/packed-consumer tests, Storybook, boundary tests, and docs validation; result: PENDING                                                                                                                                                                                           | Browser/Storybook cleanup: PENDING                                                                                                                                 |
+| SC7.22      | PENDING | `pnpm --filter @knpkv/rly test:pack`; `pnpm --filter @knpkv/rly test:browser`; `pnpm --filter @knpkv/docs validate:rly`; `packages/rly/scripts/test-packed-package.ts`; `packages/rly/test/**`; `packages/rly/visual/**`; `packages/docs/scripts/validate-rly-docs.mjs`; result: PENDING | Browser/Storybook cleanup: PENDING                                                                                                                                 |
 | SC7.23      | PENDING | `pnpm format`, `pnpm lint`, `pnpm check`, `pnpm test --run`, changeset/docs checks, audit; result: PENDING                                                                                                                                                                                    | None                                                                                                                                                               |
-| SC7.24      | PENDING | cdx/cld fake-executable and packed-consumer suites; result: PENDING                                                                                                                                                                                                                           | Codex smoke `pnpm --filter @knpkv/ai-codex test:smoke:real`: operator-owned, PENDING                                                                               |
+| SC7.24      | PENDING | `pnpm --filter @knpkv/ai-codex test`; `pnpm --filter @knpkv/ai-claude test`; `packages/ai-codex/test/**`; `packages/ai-claude/test/**`; fake-executable contract coverage; result: PENDING                                                                                              | Codex smoke `pnpm --filter @knpkv/ai-codex test:smoke:real`: operator-owned, PENDING                                                                               |
 | SC7.25      | PENDING | `packages/docs` source validation, production build, package-index and route/link checks; result: PENDING                                                                                                                                                                                     | Docs cleanup: PENDING                                                                                                                                              |
 
 | Product completion journey | PENDING | Fresh install → real cross-provider data → governed action → durable agent review → restart/failure recovery → presentation checks → second-machine HTTPS; reviewed head, result, artifact, and date: PENDING | Operator cleanup, process/container state, and owner: PENDING |
@@ -58,3 +58,26 @@ credential-surface assertions may be retained or shown. Access tokens, refresh t
 codes, client secrets, state values, and raw callback query data are explicitly prohibited from evidence,
 normalization, HTTP responses, browser state, logs, and telemetry. The AWS and Codex journeys are
 likewise local-only and must follow this boundary.
+
+## Canonical retained-evidence representation
+
+The release record is a Markdown evidence index; no secret-bearing raw provider response is persisted in
+the repository. When an operator records a result, the canonical retained record contains exactly these
+fields and classifications:
+
+| Field | Persisted representation | Client-visible / public evidence | Server-private input excluded from evidence |
+| --- | --- | --- | --- |
+| `reviewedHead` | Full Git commit SHA | Full SHA and repository link | None |
+| `commandResult` | Exact command plus `pass`, `fail`, or `blocked` | Exact command and result | Environment secrets and raw output |
+| `artifact` | Redacted CI URL or repository artifact path | Redacted link | Local credential files and raw logs |
+| `executedAt` | ISO-8601 timestamp | Timestamp | None |
+| `cleanupResult` | Redacted process/container/temp-root outcome | Outcome only | Host paths, process IDs, tokens |
+| `providerIdentity` | Normalized provider/site/account identity | Safe name, tenant/account/region when non-sensitive | Bucket, key, ARN, URL with embedded credentials, or other provider locator |
+| `capabilityStatus` | Negotiated capability and revision status | Capability truth and unsupported state | Provider authorization material |
+| `credentialSurface` | Boolean assertion that prohibited values were absent | Assertion only | Access/refresh tokens, client secrets, authorization codes, state, and raw callback query data |
+
+The identity inputs are the exact normalized provider/site/account/region identity, immutable source
+revision, capability status, and evidence revision used by the production projection. Provider-private
+coordinates are lookup inputs only and never cross normalization or HTTP boundaries. The prohibited set
+is any token, secret, authorization code, callback state/query, raw provider locator, bucket, key, ARN,
+signed URL, or credential-bearing URL.

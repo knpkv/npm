@@ -84,6 +84,32 @@ const sc723Row = releaseGateEvidence.match(/^\| SC7\.23\s+\|[^\n]*$/mu)?.[0] ?? 
 if (!sc723Row.includes("pnpm test --run")) {
   failures.push("SC7.23 must record the one-shot test command pnpm test --run")
 }
+const sc722Row = releaseGateEvidence.match(/^\| SC7\.22\s+\|[^\n]*$/mu)?.[0] ?? ""
+for (const command of [
+  "pnpm --filter @knpkv/rly test:pack",
+  "pnpm --filter @knpkv/rly test:browser",
+  "pnpm --filter @knpkv/docs validate:rly"
+]) {
+  if (!sc722Row.includes(command)) failures.push(`SC7.22 must record ${command}`)
+}
+const sc724Row = releaseGateEvidence.match(/^\| SC7\.24\s+\|[^\n]*$/mu)?.[0] ?? ""
+for (const command of ["pnpm --filter @knpkv/ai-codex test", "pnpm --filter @knpkv/ai-claude test"]) {
+  if (!sc724Row.includes(command)) failures.push(`SC7.24 must record ${command}`)
+}
+for (const phrase of [
+  "## Canonical retained-evidence representation",
+  "reviewedHead",
+  "commandResult",
+  "cleanupResult",
+  "providerIdentity",
+  "capabilityStatus",
+  "credentialSurface",
+  "Provider-private",
+  "raw callback query data"
+]) {
+  if (!releaseGateEvidence.includes(phrase))
+    failures.push(`release-gate evidence is missing canonical field boundary ${phrase}`)
+}
 if (!releaseGateEvidence.includes("safe client-visible configuration")) {
   failures.push("release-gate evidence must distinguish safe callback configuration from callback secrets")
 }
