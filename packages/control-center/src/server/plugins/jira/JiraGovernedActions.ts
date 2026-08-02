@@ -5,15 +5,32 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
-import { PluginActionProposalV1, type ProposePluginActionRequestV1 } from "../../../domain/plugins/index.js"
+import {
+  type AuthorizedPluginActionV1,
+  type PluginActionDispatchResultV1,
+  type PluginActionPreflightV1,
+  PluginActionProposalV1,
+  PluginActionReconciliationKey,
+  type PluginActionReconciliationRequestV1,
+  type PluginActionReconciliationResultV1,
+  PluginProviderOperationId,
+  type PluginProviderReceiptV1,
+  type ProposePluginActionRequestV1
+} from "../../../domain/plugins/index.js"
+import { Revision } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
+  PluginAuthenticationFailure,
+  PluginAuthorizationFailure,
   PluginConfigurationFailure,
   PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
+  PluginOutageFailure,
+  PluginRateLimitFailure,
   PluginTimeoutFailure,
+  PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
 import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
@@ -31,6 +48,13 @@ interface JiraGovernedActionConfiguration {
 const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraProviderIdentity = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const CreateReleaseVersionPayload = Schema.TaggedStruct("create-release-version", {
+  projectId: JiraProjectId,
+  name: JiraProviderIdentity.pipe(Schema.check(Schema.isMaxLength(255))),
+  description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(16_384)))
+})
+const CreateReleaseVersionTarget = "jira.project-version"
+const EMPTY_REVISION = "0"
 const ReplyCommentRequestPayload = Schema.Struct({
   parentCommentId: JiraProviderPathIdentifier,
   body: JiraDescriptionDocument
@@ -164,6 +188,79 @@ const decodePayload = <A, I>(
       })
     )
   )
+
+const decodeCreateReleaseVersion = (
+  request: ProposePluginActionRequestV1
+): Effect.Effect<typeof CreateReleaseVersionPayload.Type, PluginConfigurationFailure> =>
+  Schema.decodeUnknownEffect(Schema.toType(CreateReleaseVersionPayload))(request.payload).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-release-version-payload-invalid" }))
+  )
+
+const proposeReleaseVersion = Effect.fn("JiraGovernedActions.proposeReleaseVersion")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraGovernedActionConfiguration,
+  cryptoService: Crypto.Crypto,
+  request: ProposePluginActionRequestV1
+) {
+  if (
+    request.actionKind !== "create-release-version" ||
+    request.target.entityType !== CreateReleaseVersionTarget ||
+    request.expectedRevision !== EMPTY_REVISION
+  ) {
+    return yield* new PluginUnsupportedCapabilityFailure({
+      capabilityId: "action.propose",
+      requestedVersion: 1,
+      diagnosticCode: "jira-release-version-action-unsupported"
+    })
+  }
+  const payload = yield* decodeCreateReleaseVersion(request)
+  if (payload.projectId !== configuration.projectId || request.target.vendorImmutableId !== payload.projectId) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "jira-release-version-project-outside-connection"
+    })
+  }
+  const versions = yield* withTimeout(
+    "jira-get-project-versions",
+    configuration.operationTimeoutMillis,
+    provider.getProjectVersions(configuration.projectId)
+  )
+  if (versions.some((version) => version.name === payload.name)) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "jira-release-version-name-already-exists"
+    })
+  }
+  const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
+    Effect.provideService(Crypto.Crypto, cryptoService),
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "propose-action",
+        diagnosticCode: "jira-release-version-payload-digest-failed"
+      })
+    )
+  )
+  const proposedAt = yield* DateTime.now
+  return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionProposalV1))({
+    proposalKey: "jira-release-version:" + payloadDigest,
+    capabilityVersion: 1,
+    request: { ...request, payload },
+    payloadDigest,
+    summary: `Create Jira release version ${payload.name}`,
+    impact: {
+      level: "medium",
+      summary: "Creates one append-only Jira project version; existing versions and Jira issue fields are untouched"
+    },
+    proposedAt
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "propose-action",
+        diagnosticCode: "jira-release-version-proposal-invalid"
+      })
+    )
+  )
+})
 
 const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(function*(
   provider: JiraReadProvider,
@@ -382,7 +479,155 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
   )
 })
 
-/** Build the proposal-only governed Jira association surface. @internal */
+const decodeAuthorizedReleaseVersion = (
+  request: AuthorizedPluginActionV1,
+  expectedProjectId: string
+): Effect.Effect<typeof CreateReleaseVersionPayload.Type, PluginFailure> => {
+  const proposal = request.proposal
+  if (
+    proposal.request.actionKind !== "create-release-version" ||
+    proposal.request.target.entityType !== CreateReleaseVersionTarget ||
+    proposal.request.expectedRevision !== EMPTY_REVISION ||
+    proposal.request.target.vendorImmutableId !== expectedProjectId
+  ) {
+    return Effect.fail(
+      new PluginUnsupportedCapabilityFailure({
+        capabilityId: "action.execute",
+        requestedVersion: 1,
+        diagnosticCode: "jira-issue-mutation-remains-proposal-only"
+      })
+    )
+  }
+  return decodeCreateReleaseVersion(proposal.request).pipe(
+    Effect.filterOrFail(
+      (payload) => payload.projectId === expectedProjectId,
+      () => new PluginConfigurationFailure({ diagnosticCode: "jira-release-version-project-mismatch" })
+    )
+  )
+}
+
+const releaseVersionLocator = (payloadDigest: string) =>
+  PluginActionReconciliationKey.make("jira-release-version:" + payloadDigest)
+
+const releaseVersionReceipt = (
+  version: { readonly id: string; readonly name: string },
+  observedAt: typeof UtcTimestamp.Type
+): PluginProviderReceiptV1 => ({
+  status: "succeeded",
+  providerOperationId: PluginProviderOperationId.make(`jira-project-version:${version.id}`),
+  safeSummary: `Created Jira release version ${version.name}`,
+  observedAt
+})
+
+const makeReleaseVersionExecutor = (
+  provider: JiraReadProvider,
+  configuration: JiraGovernedActionConfiguration
+) => ({
+  preflight: Effect.fn("JiraGovernedActions.releaseVersionPreflight")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<PluginActionPreflightV1, PluginFailure> {
+    const payload = yield* decodeAuthorizedReleaseVersion(request, configuration.projectId)
+    const versions = yield* withTimeout(
+      "jira-preflight-project-versions",
+      configuration.operationTimeoutMillis,
+      provider.getProjectVersions(configuration.projectId)
+    )
+    const checkedAt = yield* DateTime.now
+    if (versions.some((version) => version.name === payload.name)) {
+      return { _tag: "blocked", reasons: ["A Jira project version with this exact name already exists"], checkedAt }
+    }
+    return { _tag: "ready", checkedRevision: Revision.make(EMPTY_REVISION), checkedAt }
+  }),
+  executeAuthorizedAction: Effect.fn("JiraGovernedActions.releaseVersionExecute")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+    const payload = yield* decodeAuthorizedReleaseVersion(request, configuration.projectId)
+    const result = yield* provider.createProjectVersion({
+      name: payload.name,
+      description: payload.description,
+      projectId: payload.projectId
+    }).pipe(Effect.result)
+    const observedAt = yield* DateTime.now
+    if (result._tag === "Failure") {
+      if (
+        Schema.is(PluginTimeoutFailure)(result.failure) ||
+        Schema.is(PluginOutageFailure)(result.failure) ||
+        Schema.is(PluginMalformedResponseFailure)(result.failure)
+      ) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation: "jira-create-project-version",
+          reconciliationKey: releaseVersionLocator(request.payloadDigest)
+        })
+      }
+      if (
+        Schema.is(PluginRateLimitFailure)(result.failure) ||
+        Schema.is(PluginAuthenticationFailure)(result.failure) ||
+        Schema.is(PluginAuthorizationFailure)(result.failure)
+      ) return yield* result.failure
+      return {
+        _tag: "confirmed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(
+            "jira-project-version-rejected:" + request.payloadDigest
+          ),
+          safeSummary: "Jira rejected the authorized release-version creation without applying it",
+          observedAt
+        }
+      }
+    }
+    if (result.success.name !== payload.name || result.success.projectId !== payload.projectId) {
+      return yield* new PluginUnknownOutcomeFailure({
+        operation: "jira-create-project-version",
+        reconciliationKey: releaseVersionLocator(request.payloadDigest)
+      })
+    }
+    return { _tag: "confirmed", receipt: releaseVersionReceipt(result.success, observedAt) }
+  }),
+  requestCancellation: () =>
+    Effect.fail(
+      new PluginUnsupportedCapabilityFailure({
+        capabilityId: "action.cancel",
+        requestedVersion: 1,
+        diagnosticCode: "jira-release-version-cancellation-unavailable"
+      })
+    ),
+  reconcile: Effect.fn("JiraGovernedActions.releaseVersionReconcile")(function*(
+    request: PluginActionReconciliationRequestV1
+  ): Effect.fn.Return<PluginActionReconciliationResultV1, PluginFailure> {
+    if (request.authorizedAction === undefined) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "jira-release-version-reconciliation-action-missing"
+      })
+    }
+    const payload = yield* decodeAuthorizedReleaseVersion(request.authorizedAction, configuration.projectId)
+    const versions = yield* withTimeout(
+      "jira-reconcile-project-versions",
+      configuration.operationTimeoutMillis,
+      provider.getProjectVersions(payload.projectId)
+    )
+    const matches = versions.filter((version) => version.name === payload.name)
+    const checkedAt = yield* DateTime.now
+    const match = matches[0]
+    if (match !== undefined && matches.length === 1) {
+      return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt) }
+    }
+    if (matches.length === 0) return { _tag: "pending", checkedAt }
+    return {
+      _tag: "failed",
+      receipt: {
+        status: "failed",
+        providerOperationId: PluginProviderOperationId.make(
+          "jira-project-version-duplicate:" + request.payloadDigest
+        ),
+        safeSummary: "Multiple Jira release versions match the authorized creation name",
+        observedAt: checkedAt
+      }
+    }
+  })
+})
+
+/** Build the governed Jira association and append-only release-version surfaces. @internal */
 export const makeJiraGovernedActions = (
   provider: JiraReadProvider,
   configuration: JiraGovernedActionConfiguration,
@@ -390,11 +635,8 @@ export const makeJiraGovernedActions = (
   includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>
 ) => ({
   proposeAction: (request: ProposePluginActionRequestV1) =>
-    proposeJiraAssociation(
-      provider,
-      configuration,
-      cryptoService,
-      includeControlCenterAttribution,
-      request
-    )
+    request.actionKind === "create-release-version"
+      ? proposeReleaseVersion(provider, configuration, cryptoService, request)
+      : proposeJiraAssociation(provider, configuration, cryptoService, includeControlCenterAttribution, request),
+  executor: makeReleaseVersionExecutor(provider, configuration)
 })

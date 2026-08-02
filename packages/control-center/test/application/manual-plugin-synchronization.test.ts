@@ -214,6 +214,7 @@ const confluenceClient = (overrides: Partial<ConfluencePageClientShape> = {}): C
     ),
   getPageVersion: () => Effect.succeed(confluencePage.version),
   updatePage: () => Effect.die("unused updatePage"),
+  createPage: () => Effect.die("unused createPage"),
   getSpacePages: () => Effect.succeed({ results: [confluencePage] }),
   getPageAttachments: () => Effect.succeed({ results: [] }),
   getPageWatchers: (_pageId, start) => Effect.succeed({ results: [], start, limit: 50, size: 0 }),
@@ -513,6 +514,8 @@ describe("manual plugin synchronization", () => {
         getIssueTransitions: () => Effect.succeed([]),
         transitionIssue: () => Effect.void,
         getProjectVersion: () => Effect.succeed(Option.none()),
+        getProjectVersions: () => Effect.succeed([]),
+        createProjectVersion: () => Effect.die("unused createProjectVersion"),
         getIssueLinkTypes: Effect.succeed([]),
         searchProjectIssues: () =>
           Effect.succeed({

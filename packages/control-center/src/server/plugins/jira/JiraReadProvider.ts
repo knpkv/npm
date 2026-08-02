@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -62,6 +63,21 @@ export const JiraProviderPathIdentifier = JiraProviderIdentifier.check(
     (value) => value !== "." && value !== ".." && /^[A-Za-z0-9._~-]+$/u.test(value),
     { expected: "a Jira identifier safe for one URL path segment" }
   )
+)
+
+const JiraNumericProjectId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isMaxLength(15),
+  Schema.isPattern(/^[1-9][0-9]*$/u, { expected: "a canonical numeric Jira project id" }),
+  Schema.makeFilter(
+    (value) => Number.isSafeInteger(Number(value)),
+    { expected: "a safe integer Jira project id" }
+  )
+).pipe(
+  Schema.decodeTo(Schema.Int, {
+    decode: SchemaGetter.transform((value) => Number(value)),
+    encode: SchemaGetter.transform((value) => String(value))
+  })
 )
 
 /** Decode an untrusted Jira path parameter before crossing the provider boundary. @internal */
@@ -132,6 +148,13 @@ export interface JiraProjectVersion {
   readonly projectId: string | null
 }
 
+/** Append-only project-version material accepted by the governed release publisher. @internal */
+export interface JiraProjectVersionCreation {
+  readonly name: string
+  readonly description: string | null
+  readonly projectId: string
+}
+
 /** Stable issue-link type data needed by the governed proposal boundary. @internal */
 export interface JiraIssueLinkType {
   readonly id: string
@@ -182,6 +205,12 @@ export interface JiraReadProvider {
   readonly getProjectVersion: (
     versionId: string
   ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
+  readonly getProjectVersions: (
+    projectId: string
+  ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
+  readonly createProjectVersion: (
+    input: JiraProjectVersionCreation
+  ) => Effect.Effect<JiraProjectVersion, PluginFailure>
   readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
 }
 
@@ -339,6 +368,7 @@ const JiraProjectVersionResponse = Schema.Struct({
   projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
   project: Schema.optionalKey(Schema.String)
 })
+const JiraProjectVersionListResponse = Schema.Array(JiraProjectVersionResponse)
 const JiraIssueLinkTypes = Schema.Struct({
   issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
     id: JiraProviderIdentifier,
@@ -601,6 +631,76 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               )
             )
         })
+      )
+    ),
+  getProjectVersions: (projectId) =>
+    decodeJiraProviderPathIdentifier(projectId).pipe(
+      Effect.flatMap((projectId) =>
+        providerCall(
+          "jira-get-project-versions",
+          client.getProjectVersions(projectId, undefined)
+        )
+      ),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionListResponse)),
+      Effect.map((versions) =>
+        versions.map((version) => ({
+          id: version.id,
+          name: version.name,
+          projectId: version.projectId === undefined
+            ? version.project ?? null
+            : String(version.projectId)
+        }))
+      ),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-get-project-versions",
+            diagnosticCode: "jira-project-versions-response-invalid"
+          })
+          : error
+      )
+    ),
+  createProjectVersion: (input) =>
+    Effect.all([
+      Schema.decodeUnknownEffect(JiraNumericProjectId)(input.projectId).pipe(
+        Effect.mapError(() =>
+          new PluginConfigurationFailure({
+            diagnosticCode: "jira-project-version-project-id-invalid"
+          })
+        )
+      ),
+      Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(255)))(
+        input.name
+      ),
+      Schema.decodeUnknownEffect(Schema.NullOr(Schema.String.check(Schema.isMaxLength(16_384))))(input.description)
+    ]).pipe(
+      Effect.flatMap(([projectId, name, description]) =>
+        providerCall(
+          "jira-create-project-version",
+          client.createVersion({
+            payload: {
+              name,
+              projectId,
+              ...(description === null ? {} : { description })
+            }
+          })
+        )
+      ),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionResponse)),
+      Effect.map((version) => ({
+        id: version.id,
+        name: version.name,
+        projectId: version.projectId === undefined
+          ? version.project ?? input.projectId
+          : String(version.projectId)
+      })),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-create-project-version",
+            diagnosticCode: "jira-created-project-version-response-invalid"
+          })
+          : error
       )
     ),
   getIssueLinkTypes: providerCall(

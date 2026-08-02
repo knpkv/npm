@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { AgentProviderIdentifier } from "../domain/agentProviderIdentifier.js"
+import { GovernedActionState } from "../domain/governedAction/index.js"
 import {
   EntityId,
   EventCursor,
@@ -193,6 +194,26 @@ export const ReleaseAgentProvider = AgentProvider
 
 /** Decoded release-agent provider. */
 export type ReleaseAgentProvider = AgentProvider
+
+/** Append-only provider destination that Relay may publish after human confirmation. */
+export const ReleasePublicationProvider = Schema.Literals(["jira", "confluence"])
+export type ReleasePublicationProvider = typeof ReleasePublicationProvider.Type
+
+export const SubmitReleasePublicationRequest = Schema.Struct({
+  provider: ReleasePublicationProvider,
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  markdown: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+  parentId: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  )
+})
+export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
+
+export const SubmitReleasePublicationResponse = Schema.Struct({
+  actionId: GovernedActionId,
+  state: GovernedActionState
+})
+export type SubmitReleasePublicationResponse = typeof SubmitReleasePublicationResponse.Type
 
 /** One bounded prior turn supplied to preserve release-thread context. */
 export const AgentHistoryMessage = Schema.Struct({
@@ -1138,6 +1159,25 @@ const publishReviewSuggestion = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const submitReleasePublication = HttpApiEndpoint.post(
+  "submitReleasePublication",
+  "/releases/:releaseId/publications",
+  {
+    params: { releaseId: ReleaseId },
+    payload: SubmitReleasePublicationRequest,
+    success: SubmitReleasePublicationResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(providers)
@@ -1155,5 +1195,6 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(dismissReviewSuggestion)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)
+  .add(submitReleasePublication)
   .prefix("/api/v1/agent")
 {}
