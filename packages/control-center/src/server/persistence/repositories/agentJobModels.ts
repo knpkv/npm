@@ -439,6 +439,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
+  excludeJobId: Schema.optionalKey(JobId),
+  excludeSubjectRevision: Schema.optionalKey(Schema.String),
   jobId: Schema.optionalKey(JobId),
   allowDifferentHead: Schema.optionalKey(Schema.Boolean)
 })

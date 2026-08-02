@@ -35,8 +35,10 @@ import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewReport,
   PrReviewSubject,
-  PrReviewSuggestionId
+  PrReviewSuggestionId,
+  reconcilePrReviewReports
 } from "../../../domain/prReview.js"
+import { validatePrReviewReportTransitions } from "../../../domain/prReviewReconciliation.js"
 import { PrReviewSuggestionRevision, PrReviewSuggestionRevisionPageSize } from "../../../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -346,6 +348,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
     return { bytes, digest: yield* digestBytes(bytes), json }
   })
+
+  const sanitizeAgentReviewReport = (report: typeof PrReviewReport.Type): typeof PrReviewReport.Type =>
+    (() => {
+      const { transitions: _agentOwnedTransitions, ...agentOwnedReport } = report
+      return PrReviewReport.make(agentOwnedReport)
+    })()
+  const isAgentOwnedSuggestionState = (state: typeof PrReviewReport.Type["suggestions"][number]["state"]): boolean =>
+    state === "draft" || state === "resolved"
 
   const decodeTaskContext = Effect.fn("AgentJobRepository.decodeTaskContext")(function*(
     workspaceId: typeof WorkspaceId.Type,
@@ -1313,6 +1323,50 @@ const makeAgentJobRepository = Effect.gen(function*() {
     })
   })
 
+  const findPreviousReviewReport = Effect.fn("AgentJobRepository.findPreviousReviewReport")(function*(input: {
+    readonly workspaceId: typeof WorkspaceId.Type
+    readonly pluginConnectionId: typeof PluginConnectionId.Type
+    readonly subject: typeof PrReviewSubject.Type
+    readonly excludeJobId: typeof JobId.Type
+  }) {
+    const subjectJson = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(PrReviewSubject))(input.subject).pipe(
+      Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.previous-review-subject" }))
+    )
+    const taskContextPrefix =
+      `{"_tag":"pr-review","pluginConnectionId":"${input.pluginConnectionId}","subject":${subjectJson},"reviewProfile":`
+    const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: input.workspaceId,
+      taskContextPrefix: identityPrefix,
+      excludeTargeted: true,
+      excludeJobId: input.excludeJobId,
+      excludeSubjectRevision: input.subject.headRevision,
+      limit: 32
+    })
+    const rows = yield* sql
+      .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+      .pipe(mapPersistenceOperation("agent-job.previous-review"))
+    for (const rawRow of rows) {
+      const row = Schema.decodeUnknownResult(LatestReviewRow)(rawRow)
+      if (Result.isFailure(row)) {
+        return yield* persistedRecordError(
+          input.workspaceId,
+          "agent-review",
+          input.subject.pullRequestId,
+          "agent-review-previous-schema-invalid"
+        )
+      }
+      if (row.success.state !== "succeeded" && row.success.state !== "failed" && row.success.state !== "cancelled") {
+        continue
+      }
+      const result = yield* readReviewResult({ workspaceId: input.workspaceId, jobId: row.success.jobId }).pipe(
+        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
+      )
+      if (result !== null && result.report !== null) return Option.some(result.report)
+    }
+    return Option.none<typeof PrReviewReport.Type>()
+  })
+
   const decodeThreadEventRows = Effect.fn("AgentJobRepository.decodeThreadEventRows")(function*(
     workspaceId: typeof WorkspaceId.Type,
     threadId: typeof AgentThreadId.Type,
@@ -2044,7 +2098,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       input: typeof RecordAgentReviewProgressInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(RecordAgentReviewProgressInput))(input)
-      const report = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
+      const agentReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
         Effect.mapError(
           () =>
             new AgentJobInputError({
@@ -2054,6 +2108,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
             })
         )
       )
+      if (!agentReport.suggestions.every(({ state }) => isAgentOwnedSuggestionState(state))) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "invalid-result"
+        })
+      }
+      const report = sanitizeAgentReviewReport(agentReport)
       return yield* database.transaction(
         Effect.gen(function*() {
           const job = yield* getJob(request.workspaceId, request.jobId)
@@ -2101,7 +2163,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       input: typeof CompleteAgentReviewInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(CompleteAgentReviewInput))(input)
-      const report = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
+      const agentReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
         Effect.mapError(
           () =>
             new AgentJobInputError({
@@ -2111,16 +2173,13 @@ const makeAgentJobRepository = Effect.gen(function*() {
             })
         )
       )
-      const encodedReport = yield* encodeReviewReport(report).pipe(
-        Effect.mapError(
-          () =>
-            new AgentJobInputError({
-              workspaceId: request.workspaceId,
-              jobId: request.jobId,
-              reason: "invalid-result"
-            })
-        )
-      )
+      if (!agentReport.suggestions.every(({ state }) => isAgentOwnedSuggestionState(state))) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "invalid-result"
+        })
+      }
       return yield* database
         .transaction(
           Effect.gen(function*() {
@@ -2136,7 +2195,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               job.state !== "running" ||
               job.task._tag !== "pr-review" ||
               job.subjectRevision !== job.task.subject.headRevision ||
-              !PrReviewSubjectEquivalence(job.task.subject, report.subject)
+              !PrReviewSubjectEquivalence(job.task.subject, agentReport.subject)
             ) {
               return yield* new AgentJobInputError({
                 workspaceId: request.workspaceId,
@@ -2144,6 +2203,41 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 reason: "task-mismatch"
               })
             }
+            const previous = yield* findPreviousReviewReport({
+              workspaceId: request.workspaceId,
+              pluginConnectionId: job.task.pluginConnectionId,
+              subject: job.task.subject,
+              excludeJobId: request.jobId
+            })
+            const previousReport = Option.isSome(previous)
+              ? previous.value
+              : PrReviewReport.make({ ...agentReport, suggestions: [], transitions: [] })
+            const expectedTransitions = reconcilePrReviewReports(previousReport, agentReport)
+            if (agentReport.transitions !== undefined) {
+              const validation = validatePrReviewReportTransitions(
+                previousReport,
+                agentReport,
+                agentReport.transitions
+              )
+              if (validation._tag === "failure") {
+                return yield* new AgentJobInputError({
+                  workspaceId: request.workspaceId,
+                  jobId: request.jobId,
+                  reason: "invalid-result"
+                })
+              }
+            }
+            const report = PrReviewReport.make({ ...agentReport, transitions: expectedTransitions })
+            const encodedReport = yield* encodeReviewReport(report).pipe(
+              Effect.mapError(
+                () =>
+                  new AgentJobInputError({
+                    workspaceId: request.workspaceId,
+                    jobId: request.jobId,
+                    reason: "invalid-result"
+                  })
+              )
+            )
             yield* validateLease({
               workspaceId: request.workspaceId,
               jobId: request.jobId,
@@ -2738,6 +2832,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
+        ...(request.excludeJobId === undefined ? {} : { excludeJobId: request.excludeJobId }),
         ...(request.allowDifferentHead === true ? {} : { subjectRevision: request.subject.headRevision }),
         taskContextPrefix: request.allowDifferentHead === true ? identityPrefix : taskContextPrefix,
         excludeTargeted: true,

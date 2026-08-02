@@ -139,19 +139,6 @@ export const PrReviewSuggestionState = Schema.Literals([
 /** Decoded suggestion presentation state. */
 export type PrReviewSuggestionState = typeof PrReviewSuggestionState.Type
 
-/** Explicit lifecycle result when comparing one immutable review head to another. */
-export const PrReviewSuggestionTransition = Schema.Struct({
-  suggestionId: PrReviewSuggestionId,
-  transition: Schema.Literals(["new", "still-present", "resolved", "reopened"]),
-  previousState: Schema.NullOr(PrReviewSuggestionState),
-  currentState: Schema.NullOr(PrReviewSuggestionState),
-  previousHead: Schema.NullOr(PrReviewSubject.fields.headRevision),
-  currentHead: PrReviewSubject.fields.headRevision
-})
-
-/** Decoded immutable-head suggestion transition. */
-export type PrReviewSuggestionTransition = typeof PrReviewSuggestionTransition.Type
-
 /** Human-selected reason a suggestion was dismissed. */
 export const PrReviewDismissalReason = Schema.Literals([
   "false-positive",
@@ -163,6 +150,20 @@ export const PrReviewDismissalReason = Schema.Literals([
 
 /** Decoded dismissal reason retained with the immutable suggestion history. */
 export type PrReviewDismissalReason = typeof PrReviewDismissalReason.Type
+
+/** Explicit lifecycle result when comparing one immutable review head to another. */
+export const PrReviewSuggestionTransition = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  transition: Schema.Literals(["new", "still-present", "resolved", "reopened"]),
+  previousState: Schema.NullOr(PrReviewSuggestionState),
+  currentState: Schema.NullOr(PrReviewSuggestionState),
+  previousDismissalReason: Schema.optionalKey(PrReviewDismissalReason),
+  previousHead: Schema.NullOr(PrReviewSubject.fields.headRevision),
+  currentHead: PrReviewSubject.fields.headRevision
+})
+
+/** Decoded immutable-head suggestion transition. */
+export type PrReviewSuggestionTransition = typeof PrReviewSuggestionTransition.Type
 
 const PrReviewLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
 
@@ -488,7 +489,9 @@ export const PrReviewReport = Schema.Struct({
       (notes) => new Set(notes.map(({ noteId }) => noteId)).size === notes.length,
       { expected: "unique PR review note identifiers" }
     )
-  )
+  ),
+  /** Host-derived lifecycle transitions; absent on agent-authored input. */
+  transitions: Schema.optionalKey(Schema.Array(PrReviewSuggestionTransition))
 })
   .check(
     Schema.makeFilter(
@@ -516,9 +519,17 @@ export const reconcilePrReviewReports = (
 
   for (const suggestion of current.suggestions) {
     const prior = previousSuggestions.get(suggestion.suggestionId)
+    const materiallyChanged = prior === undefined
+      ? false
+      : prior.evidence.path !== suggestion.evidence.path ||
+        prior.evidence.startLine !== suggestion.evidence.startLine ||
+        prior.evidence.endLine !== suggestion.evidence.endLine ||
+        JSON.stringify(prior.anchor) !== JSON.stringify(suggestion.anchor)
     const transition = prior === undefined
       ? "new"
-      : prior.state === "dismissed"
+      : (prior.state === "dismissed" || prior.state === "resolved") &&
+          suggestion.state === "reopened" &&
+          materiallyChanged
       ? "reopened"
       : "still-present"
     transitions.push({
@@ -526,6 +537,7 @@ export const reconcilePrReviewReports = (
       transition,
       previousState: prior?.state ?? null,
       currentState: suggestion.state,
+      ...(prior?.dismissalReason === undefined ? {} : { previousDismissalReason: prior.dismissalReason }),
       previousHead: prior === undefined ? null : previous.subject.headRevision,
       currentHead: current.subject.headRevision
     })
@@ -533,6 +545,7 @@ export const reconcilePrReviewReports = (
 
   for (const suggestion of previous.suggestions) {
     if (currentSuggestions.has(suggestion.suggestionId)) continue
+    if (suggestion.state === "dismissed" || suggestion.state === "resolved") continue
     transitions.push({
       suggestionId: suggestion.suggestionId,
       transition: "resolved",

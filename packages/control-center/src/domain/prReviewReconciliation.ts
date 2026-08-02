@@ -1,6 +1,12 @@
 /** Pure cross-head reconciliation for immutable PR-review suggestions. @module */
 
-import type { PrReviewSuggestionId, PrReviewSuggestionState } from "./prReview.js"
+import {
+  type PrReviewReport,
+  type PrReviewSuggestionId,
+  type PrReviewSuggestionState,
+  type PrReviewSuggestionTransition,
+  reconcilePrReviewReports
+} from "./prReview.js"
 
 /** One suggestion's state at the last completed review head. */
 export type PreviousPrReviewSuggestion = {
@@ -49,6 +55,57 @@ export type PrReviewSuggestionReconciliation = {
 export type ReconcilePrReviewSuggestionsResult =
   | { readonly _tag: "success"; readonly transitions: ReadonlyArray<PrReviewSuggestionReconciliation> }
   | { readonly _tag: "failure"; readonly failure: ReconcilePrReviewSuggestionsFailure }
+
+/** Validate a report's explicit host transition set against the two immutable heads. */
+export const validatePrReviewReportTransitions = (
+  previous: PrReviewReport,
+  current: PrReviewReport,
+  declared: ReadonlyArray<PrReviewSuggestionTransition>
+): ReconcilePrReviewSuggestionsResult => {
+  const expected = reconcilePrReviewReports(previous, current)
+  const expectedById = new Map(expected.map((transition) => [transition.suggestionId, transition]))
+  const declaredById = new Map<PrReviewSuggestionId, PrReviewSuggestionTransition>()
+
+  for (const transition of declared) {
+    if (!expectedById.has(transition.suggestionId)) {
+      return { _tag: "failure", failure: { _tag: "unknown-id", suggestionId: transition.suggestionId } }
+    }
+    if (declaredById.has(transition.suggestionId)) {
+      return { _tag: "failure", failure: { _tag: "duplicate-id", suggestionId: transition.suggestionId } }
+    }
+    declaredById.set(transition.suggestionId, transition)
+  }
+
+  for (const [suggestionId, expectedTransition] of expectedById) {
+    const actual = declaredById.get(suggestionId)
+    if (actual === undefined) {
+      return { _tag: "failure", failure: { _tag: "missing-transition", suggestionId } }
+    }
+    if (
+      actual.transition !== expectedTransition.transition ||
+      actual.previousState !== expectedTransition.previousState ||
+      actual.currentState !== expectedTransition.currentState ||
+      actual.previousDismissalReason !== expectedTransition.previousDismissalReason ||
+      actual.previousHead !== expectedTransition.previousHead ||
+      actual.currentHead !== expectedTransition.currentHead
+    ) {
+      return {
+        _tag: "failure",
+        failure: {
+          _tag: "contradictory-transition",
+          suggestionId,
+          expected: expectedTransition.transition,
+          actual: actual.transition
+        }
+      }
+    }
+  }
+
+  return {
+    _tag: "success",
+    transitions: expected.map(({ suggestionId, transition: kind }) => ({ suggestionId, kind }))
+  }
+}
 
 const isPresentState = (state: PrReviewSuggestionState): boolean =>
   state === "draft" || state === "published" || state === "stale" || state === "reopened"

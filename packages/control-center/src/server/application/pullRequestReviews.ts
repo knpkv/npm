@@ -47,7 +47,8 @@ import {
   PrReviewSubject,
   type PrReviewSubject as PrReviewSubjectType,
   PrReviewSuggestion,
-  PrReviewSuggestionId
+  PrReviewSuggestionId,
+  reconcilePrReviewReports
 } from "../../domain/prReview.js"
 import {
   PrReviewSuggestionEdit,
@@ -422,7 +423,34 @@ const makePullRequestReviews = Effect.gen(function*() {
         subject: target.subject
       })
     )
-    if (Option.isSome(exact)) return yield* presentLatest(target, exact)
+    if (Option.isSome(exact)) {
+      const report = exact.value.report
+      if (report === null) return yield* presentLatest(target, exact)
+      const prior = yield* mapPersistenceRead(
+        persistence.agentJobs.latestReviewForPullRequest({
+          workspaceId,
+          pluginConnectionId: target.pluginConnectionId,
+          subject: target.subject,
+          excludeJobId: exact.value.jobId,
+          excludeSubjectRevision: target.subject.headRevision
+        })
+      )
+      const previous = Option.isSome(prior) && prior.value.report !== null
+        ? prior.value.report
+        : PrReviewReport.make({
+          ...report,
+          suggestions: [],
+          transitions: []
+        })
+      const transitionedReport = PrReviewReport.make({
+        ...report,
+        transitions: reconcilePrReviewReports(previous, report)
+      })
+      return yield* presentLatest(
+        target,
+        Option.some({ ...exact.value, report: transitionedReport })
+      )
+    }
     const prior = yield* mapPersistenceRead(
       persistence.agentJobs.latestReviewForPullRequest({
         workspaceId,
