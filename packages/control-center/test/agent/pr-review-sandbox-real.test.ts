@@ -303,7 +303,9 @@ it.effect("runs the review session through the installed sbx runtime", () =>
       assert.strictEqual(observed.credentials.exitCode, 0)
       assert.strictEqual(observed.structured.exitCode, 0)
       assert.deepStrictEqual(JSON.parse(observed.structured.stdout.text), {
-        files: [".control-center-sbx-smoke", "README.md", "package.json", "src"],
+        // The real sbx clone preserves the repository metadata needed for the
+        // review session's exact-head and diff checks.
+        files: [".control-center-sbx-smoke", ".git", "README.md", "package.json", "src"],
         status: "ok"
       })
       assert.strictEqual(observed.file.stdout.text, "SBX_WRITE_OK\n")
