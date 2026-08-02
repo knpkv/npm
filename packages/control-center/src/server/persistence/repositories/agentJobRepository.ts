@@ -39,7 +39,12 @@ import {
   reconcilePrReviewReports
 } from "../../../domain/prReview.js"
 import { validatePrReviewReportTransitions } from "../../../domain/prReviewReconciliation.js"
-import { PrReviewSuggestionRevision, PrReviewSuggestionRevisionPageSize } from "../../../domain/prReviewRevision.js"
+import {
+  PrReviewSuggestionAgentAuthor,
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPageSize
+} from "../../../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
 import {
@@ -1362,9 +1367,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const result = yield* readReviewResult({ workspaceId: input.workspaceId, jobId: row.success.jobId }).pipe(
         Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
       )
-      if (result !== null && result.report !== null) return Option.some(result.report)
+      if (result !== null && result.report !== null) {
+        return Option.some({ jobId: row.success.jobId, report: result.report })
+      }
     }
-    return Option.none<typeof PrReviewReport.Type>()
+    return Option.none<{ readonly jobId: typeof JobId.Type; readonly report: typeof PrReviewReport.Type }>()
   })
 
   const decodeThreadEventRows = Effect.fn("AgentJobRepository.decodeThreadEventRows")(function*(
@@ -2210,8 +2217,46 @@ const makeAgentJobRepository = Effect.gen(function*() {
               excludeJobId: request.jobId
             })
             const previousReport = Option.isSome(previous)
-              ? previous.value
+              ? previous.value.report
               : PrReviewReport.make({ ...agentReport, suggestions: [], transitions: [] })
+            if (Option.isSome(previous)) {
+              for (const suggestion of previous.value.report.suggestions) {
+                if (
+                  suggestion.state !== "draft" && suggestion.state !== "published" && suggestion.state !== "reopened"
+                ) {
+                  continue
+                }
+                const currentRevision = yield* reviewSuggestionRevisions.read({
+                  workspaceId: request.workspaceId,
+                  jobId: previous.value.jobId,
+                  suggestionId: suggestion.suggestionId,
+                  beforeSequence: null,
+                  limit: PrReviewSuggestionRevisionPageSize.make(1)
+                })
+                if (
+                  currentRevision.current.suggestion.state !== "draft" &&
+                  currentRevision.current.suggestion.state !== "published"
+                ) {
+                  continue
+                }
+                yield* reviewSuggestionRevisions.appendInTransaction({
+                  workspaceId: request.workspaceId,
+                  jobId: previous.value.jobId,
+                  suggestionId: suggestion.suggestionId,
+                  expectedRevisionId: currentRevision.current.revisionId,
+                  expectedSequence: currentRevision.current.sequence,
+                  edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)(currentRevision.current.suggestion),
+                  state: "stale",
+                  author: PrReviewSuggestionAgentAuthor.make({
+                    jobId: request.jobId,
+                    providerId: job.providerId,
+                    model: job.model,
+                    runtimeMetadata: null
+                  }),
+                  createdAt: request.completedAt
+                })
+              }
+            }
             const expectedTransitions = reconcilePrReviewReports(previousReport, agentReport)
             if (agentReport.transitions !== undefined) {
               const validation = validatePrReviewReportTransitions(
