@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Result, Sink, Stream, Tracer } from "effect"
+import { DateTime, Effect, Layer, Logger, Ref, Result, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -124,7 +124,9 @@ const request = {
   repository: "control-center",
   attemptId: ATTEMPT_ID,
   baseRevision: BASE_REVISION,
-  headRevision: HEAD_REVISION
+  headRevision: HEAD_REVISION,
+  providerId: "codex",
+  model: "gpt-review"
 }
 
 describe("PrReviewSandboxSessions", () => {
@@ -501,6 +503,10 @@ describe("PrReviewSandboxSessions", () => {
     })
     const sensitiveOutput = `${SOURCE_OUTPUT_CANARY}\n${"x".repeat(40_000)}\n${CREDENTIAL_OUTPUT_CANARY}`
     return Effect.gen(function*() {
+      const logsRef = yield* Ref.make<Array<unknown>>([])
+      const logger = Logger.make<unknown, void>((entry) => {
+        Effect.runSync(Ref.update(logsRef, (items) => [...items, entry.message]))
+      })
       const sessions = yield* PrReviewSandboxSessions
       const observed = yield* sessions.withSession(request, (session) =>
         Effect.gen(function*() {
@@ -514,7 +520,7 @@ describe("PrReviewSandboxSessions", () => {
             ARTIFACT_QUERY_CANARY
           )
           return { command, matches, page }
-        }))
+        })).pipe(Effect.withLogger(logger))
       assert.isTrue(observed.command.stdout.truncated)
       assert.include(observed.page.text, SOURCE_OUTPUT_CANARY)
 
@@ -536,6 +542,25 @@ describe("PrReviewSandboxSessions", () => {
       ) {
         assert.notInclude(telemetry, canary)
       }
+      const logText = JSON.stringify(yield* Ref.get(logsRef))
+      assert.include(logText, "pr-review.telemetry")
+      assert.include(logText, "\"provider\":\"codex\"")
+      assert.include(logText, "\"model\":\"gpt-review\"")
+      assert.include(logText, `"revision":"${HEAD_REVISION}"`)
+      assert.include(logText, "\"phase\":\"sandbox-command\"")
+      assert.include(logText, "\"cli\":\"effect-ai\"")
+      assert.include(logText, "\"commandName\":\"review-command\"")
+      assert.include(logText, "\"durationMillis\":")
+      assert.include(logText, "\"exitStatus\":0")
+      assert.include(logText, "\"stdoutBytes\":")
+      assert.include(logText, "\"stderrBytes\":0")
+      assert.include(logText, "\"suggestionCount\":0")
+      assert.include(logText, "\"noteCount\":0")
+      assert.include(logText, "\"errorType\":null")
+      assert.notInclude(logText, "emit-sensitive")
+      assert.notInclude(logText, SOURCE_OUTPUT_CANARY)
+      assert.notInclude(logText, CREDENTIAL_OUTPUT_CANARY)
+      assert.notInclude(logText, ARTIFACT_QUERY_CANARY)
     }).pipe(
       Effect.provide(testLayer(calls, [{
         matches: ({ args }) => args.at(-1) === "emit-sensitive",
