@@ -668,13 +668,19 @@ describe("PrReviewSandboxSessions", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const ownedA = `${WORKSPACE_SANDBOX_PREFIX}a`
     const ownedB = `${WORKSPACE_SANDBOX_PREFIX}b`
+    const ownedLive = `${WORKSPACE_SANDBOX_PREFIX}1234-abcdef012345`
     const foreign = `cc-pr-review-${compactUuid(FOREIGN_WORKSPACE_ID)}-a`
     const legacy = "cc-pr-review-legacy"
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
       const reconciliation = yield* sessions.reconcile(WORKSPACE_ID)
       assert.deepStrictEqual(reconciliation.removedSandboxes, [])
-      assert.deepStrictEqual(reconciliation.reattachedSandboxes, [ownedA, ownedB])
+      assert.deepStrictEqual(reconciliation.reattachedSandboxes, [ownedLive, ownedA, ownedB])
+      assert.deepStrictEqual(reconciliation.reattachedSandboxIdentities, [{
+        name: ownedLive,
+        jobToken: "1234",
+        attemptId: "abcdef012345"
+      }])
       assert.deepStrictEqual(
         calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
         []
@@ -684,7 +690,7 @@ describe("PrReviewSandboxSessions", () => {
       Effect.provide(testLayer(
         calls,
         [],
-        `unrelated\n${foreign}\n${ownedB}\n${legacy}\n${ownedA}`
+        `unrelated\n${foreign}\n${ownedB}\n${legacy}\n${ownedA}\n${ownedLive}`
       ))
     )
   })

@@ -97,7 +97,8 @@ import {
   ReserveReviewSuggestionPublicationInput,
   ReviewSuggestionPublicationCommentId,
   ReviewSuggestionPublicationDigest,
-  ReviewSuggestionPublicationReservation
+  ReviewSuggestionPublicationReservation,
+  RunningPrReviewAttempt
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 import {
@@ -2835,6 +2836,54 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .pipe(mapPersistenceOperation("agent-job.fail-attempt"))
     }),
 
+    listRunningPrReviewAttempts: Effect.fn("AgentJobRepository.listRunningPrReviewAttempts")(function*(
+      workspaceId: typeof WorkspaceId.Type
+    ) {
+      const rows = yield* sql<Record<string, unknown>>`SELECT
+        job.job_id AS jobId, attempt.attempt_sequence AS attemptSequence,
+        job.provider_id AS providerId
+        FROM agent_jobs job
+        JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id
+          AND attempt.job_id = job.job_id
+        WHERE job.workspace_id = ${workspaceId}
+          AND job.state IN ('running', 'cancel-requested')
+          AND attempt.completed_at IS NULL
+        ORDER BY job.job_id, attempt.attempt_sequence`
+      const attempts: Array<typeof RunningPrReviewAttempt.Type> = []
+      for (const row of rows) {
+        const jobId = yield* Schema.decodeUnknownEffect(JobId)(row.jobId).pipe(
+          Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.running-review-job-id" }))
+        )
+        const attemptSequence = yield* Schema.decodeUnknownEffect(AgentAttemptSequence)(row.attemptSequence).pipe(
+          Effect.mapError(() =>
+            new PersistenceOperationError({ operation: "agent-job.running-review-attempt-sequence" })
+          )
+        )
+        const providerId = yield* Schema.decodeUnknownEffect(Schema.String)(row.providerId).pipe(
+          Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.running-review-provider-id" }))
+        )
+        const job = yield* getJob(workspaceId, jobId)
+        if (job.task._tag !== "pr-review") continue
+        const digest = yield* cryptoService.digest(
+          "SHA-256",
+          yield* bytesFromText(`${providerId}:${jobId}:${String(attemptSequence)}`)
+        ).pipe(
+          Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.running-review-attempt-id" }))
+        )
+        const attempt = Schema.decodeUnknownResult(RunningPrReviewAttempt)({
+          jobId,
+          attemptSequence,
+          attemptId: Encoding.encodeHex(digest).slice(0, 12)
+        })
+        if (Result.isFailure(attempt)) {
+          return yield* new PersistenceOperationError({ operation: "agent-job.running-review-attempt-invalid" })
+        }
+        attempts.push(attempt.success)
+      }
+      return attempts
+    }),
+
     interruptRunningReviews: Effect.fn("AgentJobRepository.interruptRunningReviews")(function*(
       input: typeof InterruptRunningReviewsInput.Type
     ) {
@@ -2865,6 +2914,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
               Schema.Struct({ attemptSequence: AgentAttemptSequence })
             )(attemptRows[0])
             if (Result.isFailure(attempt)) continue
+            if (
+              request.preservedAttempts?.some((preserved) =>
+                preserved.jobId === jobId && preserved.attemptSequence === attempt.success.attemptSequence
+              )
+            ) continue
             const existing = yield* readReviewResult({
               workspaceId: request.workspaceId,
               jobId
