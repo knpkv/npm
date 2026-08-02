@@ -491,10 +491,7 @@ const ReleaseAgentRoom = ({
     setIsRunning(true)
     setAnnouncement("Relay is reading the release context.")
 
-    const originPath = safeOriginPath(
-      searchParams.get("from"),
-      `${location.pathname}${location.hash}`
-    )
+    const originPath = safeOriginPath(searchParams.get("from"), `${location.pathname}${location.hash}`)
     runTurn(
       { history, originPath, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
       { signal: abortController.signal }
