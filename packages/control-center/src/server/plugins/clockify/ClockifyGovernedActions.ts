@@ -120,8 +120,6 @@ const ClockifyActionPayload = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("_tag"))
 type ClockifyActionPayload = typeof ClockifyActionPayload.Type
 
-const isCorrectionPayload = (payload: ClockifyActionPayload): boolean => payload._tag === CORRECT_ASSOCIATION
-
 const CurrentUser = Schema.Struct({ id: ClockifyIdentifier })
 
 const configurationFailure = (diagnosticCode: string) => new PluginConfigurationFailure({ diagnosticCode })
@@ -493,13 +491,6 @@ export const makeClockifyGovernedActions = (
     request: AuthorizedPluginActionV1
   ) {
     const payload = yield* decodeAuthorized(input, request)
-    if (isCorrectionPayload(payload)) {
-      return yield* new PluginUnsupportedCapabilityFailure({
-        capabilityId: "action.execute",
-        requestedVersion: 1,
-        diagnosticCode: "clockify-correction-provider-atomic-revision-unavailable"
-      })
-    }
     const checkedAt = yield* DateTime.now
     const snapshotResult = yield* readSnapshot(input, payload.entryId).pipe(Effect.result)
     if (snapshotResult._tag === "Failure") {
@@ -545,13 +536,6 @@ export const makeClockifyGovernedActions = (
     request: AuthorizedPluginActionV1
   ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const payload = yield* decodeAuthorized(input, request)
-    if (isCorrectionPayload(payload)) {
-      return yield* new PluginUnsupportedCapabilityFailure({
-        capabilityId: "action.execute",
-        requestedVersion: 1,
-        diagnosticCode: "clockify-correction-provider-atomic-revision-unavailable"
-      })
-    }
     const currentResult = yield* Effect.gen(function*() {
       const snapshot = yield* readSnapshot(input, payload.entryId)
       const revision = yield* snapshotRevision(snapshot, input.cryptoService)
@@ -704,13 +688,6 @@ export const makeClockifyGovernedActions = (
       return yield* configurationFailure("clockify-reconciliation-authorized-action-missing")
     }
     const payload = yield* decodeAuthorized(input, request.authorizedAction)
-    if (isCorrectionPayload(payload)) {
-      return yield* new PluginUnsupportedCapabilityFailure({
-        capabilityId: "action.reconcile",
-        requestedVersion: 1,
-        diagnosticCode: "clockify-correction-provider-atomic-revision-unavailable"
-      })
-    }
     if (
       request.idempotencyKey !== request.authorizedAction.idempotencyKey ||
       request.payloadDigest !== request.authorizedAction.payloadDigest

@@ -2914,7 +2914,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("keeps non-atomic Clockify corrections fail-closed through the production registry", () =>
+  it.effect("persists successful, rejected, and stale Clockify corrections through the production registry", () =>
     Effect.gen(function*() {
       const executionTime = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
@@ -2928,7 +2928,17 @@ describe("first-party plugin runtime", () => {
         | "pre-mutation-outage"
         | "stale-denied"
         | "manual-recovery"
-      > = ["succeeded"]
+      > = [
+        "succeeded",
+        "rate-limited",
+        "rate-limit-exhausted",
+        "provider-rejected",
+        "authorization-rejected",
+        "ambiguous-timeout",
+        "pre-mutation-outage",
+        "stale-denied",
+        "manual-recovery"
+      ]
       yield* Effect.forEach(
         scenarios,
         (scenario) =>
@@ -3154,7 +3164,7 @@ describe("first-party plugin runtime", () => {
                   return yield* engine.run({
                     workspaceId: GOVERNED_WORKSPACE,
                     actionId: GOVERNED_ACTION
-                  }).pipe(Effect.result)
+                  })
                 }).pipe(
                   Effect.provide(engineLayer),
                   Effect.provide(store)
@@ -3166,7 +3176,7 @@ describe("first-party plugin runtime", () => {
                     engine.run({
                       workspaceId: GOVERNED_WORKSPACE,
                       actionId: GOVERNED_ACTION
-                    }).pipe(Effect.result),
+                    }),
                     "mutation"
                   ).pipe(
                     Effect.provide(RequestLimitPolicy.defaultLayer),
@@ -3182,7 +3192,7 @@ describe("first-party plugin runtime", () => {
                   const fiber = yield* engine.run({
                     workspaceId: GOVERNED_WORKSPACE,
                     actionId: GOVERNED_ACTION
-                  }).pipe(Effect.result, Effect.forkChild)
+                  }).pipe(Effect.forkChild)
                   yield* Deferred.await(rateLimitObserved)
                   yield* TestClock.adjust(Duration.seconds(1))
                   return yield* Fiber.join(fiber)
@@ -3192,21 +3202,50 @@ describe("first-party plugin runtime", () => {
                   return yield* engine.run({
                     workspaceId: GOVERNED_WORKSPACE,
                     actionId: GOVERNED_ACTION
-                  }).pipe(Effect.result)
+                  })
                 }).pipe(Effect.provide(engineLayer))
               const repository = yield* GovernedActionRepository
               const record = yield* repository.read({
                 workspaceId: GOVERNED_WORKSPACE,
                 actionId: GOVERNED_ACTION
               })
-              assert.isTrue(Result.isFailure(execution))
-              if (Result.isFailure(execution)) {
-                assert.strictEqual(execution.failure._tag, "PluginUnsupportedCapabilityFailure")
-              }
-              assert.strictEqual(record.head.state, "authorized")
-              assert.strictEqual(record.head.lineage._tag, "none")
-              assert.strictEqual(yield* Ref.get(entryReads), 0)
-              assert.strictEqual(yield* Ref.get(mutations), 0)
+              const expectedState = scenario === "succeeded" ||
+                  scenario === "rate-limited" ||
+                  scenario === "manual-recovery"
+                ? "succeeded"
+                : scenario === "provider-rejected" ||
+                    scenario === "authorization-rejected" ||
+                    scenario === "rate-limit-exhausted" ||
+                    scenario === "pre-mutation-outage"
+                ? "failed"
+                : scenario === "ambiguous-timeout"
+                ? "unknown"
+                : "denied"
+
+              assert.deepStrictEqual(execution, { _tag: "advanced", state: expectedState })
+              assert.strictEqual(record.head.state, expectedState)
+              assert.strictEqual(
+                record.head.lineage._tag,
+                scenario === "stale-denied"
+                  ? "none"
+                  : scenario === "ambiguous-timeout"
+                  ? "reconcilable"
+                  : "terminal"
+              )
+              assert.strictEqual(
+                yield* Ref.get(entryReads),
+                scenario === "stale-denied" || scenario === "manual-recovery" ? 1 : 2
+              )
+              assert.strictEqual(
+                yield* Ref.get(mutations),
+                scenario === "stale-denied" ||
+                  scenario === "manual-recovery" ||
+                  scenario === "pre-mutation-outage"
+                  ? 0
+                  : scenario === "rate-limited"
+                  ? 2
+                  : 1
+              )
             }).pipe(
               Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
               Effect.provide(dependencies)
@@ -3471,12 +3510,33 @@ describe("first-party plugin runtime", () => {
           }),
           session: ownerSession
         }
-        const failedCorrection = yield* submissions.submit(correctionRequest).pipe(Effect.result)
-        assert.isTrue(Result.isFailure(failedCorrection))
-        if (Result.isFailure(failedCorrection)) {
-          assert.strictEqual(failedCorrection.failure.reason, "unavailable")
+        const failedCorrection = yield* submissions.submit(correctionRequest)
+        const failedCorrectionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: failedCorrection.actionId
+        })
+        assert.strictEqual(failedCorrection.state, "failed")
+        assert.strictEqual(failedCorrectionRecord.head.state, "failed")
+        assert.strictEqual(yield* Ref.get(mutations), 1)
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const correction = yield* submissions.submit(correctionRequest)
+        const correctionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: correction.actionId
+        })
+        assert.notStrictEqual(correction.actionId, failedCorrection.actionId)
+        assert.strictEqual(correction.state, "succeeded")
+        assert.isNotNull(correctionRecord.authorization)
+        if (correctionRecord.authorization !== null) {
+          assert.isTrue(
+            DateTime.Order(
+              correctionRecord.authorization.authorizedAt,
+              correctionRecord.envelope.proposal.proposedAt
+            ) >= 0
+          )
         }
-        assert.strictEqual(yield* Ref.get(mutations), 0)
+        assert.strictEqual(yield* Ref.get(mutations), 2)
         const readsAfterCorrection = yield* Ref.get(entryReads)
 
         yield* sql`INSERT INTO entity_revisions (
@@ -3490,10 +3550,12 @@ describe("first-party plugin runtime", () => {
         yield* sql`UPDATE entities SET current_revision = 2, updated_at = '2026-07-15T10:03:00.000Z'
           WHERE workspace_id = ${GOVERNED_WORKSPACE} AND entity_id = ${EntityId.make(GOVERNED_ENTITY_ID)}`
 
+        const correctionRetry = yield* submissions.submit(correctionRequest)
         const approvalRetry = yield* submissions.submit({ ...request, session: ownerSession })
+        assert.deepStrictEqual(correctionRetry, correction)
         assert.deepStrictEqual(approvalRetry, result)
         assert.strictEqual(yield* Ref.get(entryReads), readsAfterCorrection)
-        assert.strictEqual(yield* Ref.get(mutations), 0)
+        assert.strictEqual(yield* Ref.get(mutations), 2)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
         Effect.provide(dependencies)
