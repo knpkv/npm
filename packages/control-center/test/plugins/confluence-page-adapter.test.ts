@@ -98,6 +98,21 @@ const actionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
   evidenceIds: ["evidence-17"]
 })
 
+const createActionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "create-page",
+  target: {
+    entityType: "release-page",
+    vendorImmutableId: "space-payments"
+  },
+  expectedRevision: "0",
+  payload: {
+    title: "Release notes 2026.08",
+    markdown: "Release notes",
+    parentId: "42"
+  },
+  evidenceIds: []
+})
+
 const authorize = (
   proposal: typeof AuthorizedPluginActionV1.Type["proposal"],
   idempotencyKey = "confluence-publication-17"
@@ -113,7 +128,7 @@ const authorize = (
 
 const reconciliationRequest = (
   authorized: typeof AuthorizedPluginActionV1.Type,
-  reconciliationKey = "cfpg:v1:42:4"
+  reconciliationKey: string | null = "cfpg:v1:42:4"
 ) =>
   Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
     reconciliationKey,
@@ -160,6 +175,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
     ),
   getPageVersion: () => Effect.succeed(currentPage.version),
   updatePage: () => Effect.die("unused updatePage"),
+  createPage: () => Effect.die("unused createPage"),
   getSpacePages: () => Effect.succeed({ results: [currentPage] }),
   getPageAttachments: () => Effect.succeed({ results: [] }),
   getPageWatchers: (_pageId, start) => Effect.succeed({ results: [], start, limit: 50, size: 0 }),
@@ -323,6 +339,88 @@ describe("Confluence page adapter", () => {
         type: "doc",
         version: 1
       })
+    }))
+
+  it.effect("creates and reconciles an append-only release page without replaying an unknown outcome", () =>
+    Effect.gen(function*() {
+      const createCalls = yield* Ref.make(0)
+      const createdPage = {
+        ...currentPage,
+        id: "43",
+        title: "Release notes 2026.08",
+        body: {
+          atlas_doc_format: {
+            representation: "atlas_doc_format",
+            value: JSON.stringify({
+              type: "doc",
+              version: 1,
+              content: [{
+                type: "paragraph",
+                content: [{ type: "text", text: "Release notes" }]
+              }]
+            })
+          }
+        }
+      }
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [] }),
+        createPage: () =>
+          Ref.update(createCalls, (count) => count + 1).pipe(
+            Effect.flatMap(() =>
+              Effect.fail(
+                new ConfluencePageClientFailure({
+                  operation: "confluence-page-create",
+                  reason: "outage",
+                  retryAfterSeconds: null
+                })
+              )
+            )
+          )
+      }))
+      const proposal = yield* adapter.connection.proposeAction(createActionRequest)
+      const authorized = authorize(proposal, "confluence-release-publication-17")
+      const preflight = yield* adapter.executor.preflight(authorized)
+      assert.strictEqual(preflight._tag, "ready")
+      const execution = yield* adapter.executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(execution))
+      if (Result.isFailure(execution)) assert.strictEqual(execution.failure._tag, "PluginUnknownOutcomeFailure")
+      const canonicalPayload = Schema.decodeUnknownSync(Schema.Struct({ adf: Schema.String }))(
+        authorized.proposal.request.payload
+      )
+      const reconciledPage = {
+        ...createdPage,
+        body: {
+          atlas_doc_format: {
+            representation: "atlas_doc_format",
+            value: canonicalPayload.adf
+          }
+        }
+      }
+      const reconciliationAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [reconciledPage] })
+      }))
+      const reconciled = yield* reconciliationAdapter.executor.reconcile(reconciliationRequest(authorized, null))
+      assert.strictEqual(reconciled._tag, "succeeded")
+      assert.strictEqual(yield* Ref.get(createCalls), 1)
+    }))
+
+  it.effect("blocks duplicate append-only release page titles before creation", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [currentPage] })
+      }))
+      const proposal = yield* adapter.connection.proposeAction(
+        Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+          ...createActionRequest,
+          payload: {
+            title: currentPage.title,
+            markdown: "Release notes",
+            parentId: "42"
+          }
+        })
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(proposal))
+      if (Result.isFailure(proposal)) assert.strictEqual(proposal.failure._tag, "PluginConflictFailure")
     }))
 
   it.effect("keeps retryable publication failures in the typed failure channel", () =>

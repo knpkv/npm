@@ -173,7 +173,7 @@ export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
-  adapterVersion: { major: 0, minor: 3, patch: 0 },
+  adapterVersion: { major: 0, minor: 4, patch: 0 },
   displayName: "Jira issue reader",
   configurationFields: [
     {
@@ -254,7 +254,9 @@ export const jiraReadPluginDescriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: ["entity.read", "sync.incremental", "action.propose"].map((capabilityId) => ({
+  capabilities: ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"].map((
+    capabilityId
+  ) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -902,7 +904,9 @@ const makeRuntime = (
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
       syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
-      actionPropose: pluginCapabilityCodecsV1.actionPropose
+      actionPropose: pluginCapabilityCodecsV1.actionPropose,
+      actionExecute: pluginCapabilityCodecsV1.actionExecute,
+      actionReconcile: pluginCapabilityCodecsV1.actionReconcile
     },
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
@@ -1003,12 +1007,7 @@ const makeRuntime = (
               )
               : governedActions.proposeAction(request)
         }
-        const executor: AuthorizedPluginExecutorV1 = {
-          preflight: () => Effect.fail(unsupported("action.execute")),
-          executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-          requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-          reconcile: () => Effect.fail(unsupported("action.reconcile"))
-        }
+        const executor: AuthorizedPluginExecutorV1 = governedActions.executor
         return { connection, executor }
       })
   })

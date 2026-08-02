@@ -16,7 +16,8 @@ import type {
   ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
-  ServiceUnavailableApiError
+  ServiceUnavailableApiError,
+  UnauthorizedApiError
 } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
@@ -29,6 +30,10 @@ import {
   ClockifyActionSubmissions
 } from "../application/clockifyActionSubmissions.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
+import {
+  type ReleasePublicationSubmissionError,
+  ReleasePublicationSubmissions
+} from "../application/releasePublicationSubmissions.js"
 import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
 import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
@@ -68,7 +73,8 @@ import {
   mapAuthenticationFailures,
   mapCredentialAuthenticationFailures,
   notFoundApiError,
-  serviceUnavailableApiError
+  serviceUnavailableApiError,
+  unauthorizedApiError
 } from "./ErrorMapping.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
@@ -99,6 +105,26 @@ const mapClockifyActionSubmissionError = (
   error: ClockifyActionSubmissionError
 ): Effect.Effect<never, ConflictApiError | ForbiddenApiError | InvalidRequestApiError | ServiceUnavailableApiError> => {
   switch (error.reason) {
+    case "conflict":
+      return mapApplicationConflict(new ApplicationConflict())
+    case "forbidden":
+      return Effect.flatMap(forbiddenApiError, Effect.fail)
+    case "invalid-request":
+      return Effect.flatMap(invalidRequestApiError, Effect.fail)
+    case "unavailable":
+      return Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+  }
+}
+
+const mapReleasePublicationSubmissionError = (
+  error: ReleasePublicationSubmissionError
+): Effect.Effect<
+  never,
+  ConflictApiError | ForbiddenApiError | InvalidRequestApiError | ServiceUnavailableApiError | UnauthorizedApiError
+> => {
+  switch (error.reason) {
+    case "unauthorized":
+      return Effect.flatMap(unauthorizedApiError, Effect.fail)
     case "conflict":
       return mapApplicationConflict(new ApplicationConflict())
     case "forbidden":
@@ -1169,6 +1195,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
       const agent = yield* ReleaseAgentTurns
       const jobs = yield* ReleaseAgentJobs
       const reviews = yield* PullRequestReviews
+      const publications = Option.getOrUndefined(yield* Effect.serviceOption(ReleasePublicationSubmissions))
       const lifecycle = yield* ServerLifecycle
       return handlers
         .handle("providers", () =>
@@ -1207,6 +1234,29 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                 ApplicationResourceNotFound: mapApplicationNotFound,
                 ApplicationServiceUnavailable: mapApplicationUnavailable
               }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
+        .handle("submitReleasePublication", ({ params, payload }) =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (publications === undefined) {
+                return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+              }
+              return yield* publications.submit({
+                workspaceId: session.workspaceId,
+                releaseId: params.releaseId,
+                request: payload,
+                session
+              }).pipe(Effect.catchTag(
+                "ReleasePublicationSubmissionError",
+                mapReleasePublicationSubmissionError
+              ))
             })
           ).pipe(
             Effect.catchTag(

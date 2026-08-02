@@ -219,6 +219,8 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
   getIssueTransitions: () => Effect.succeed([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]),
   transitionIssue: () => Effect.void,
   getProjectVersion: () => Effect.succeed(Option.none()),
+  getProjectVersions: () => Effect.succeed([]),
+  createProjectVersion: () => Effect.die("unused createProjectVersion"),
   getIssueLinkTypes: Effect.succeed([]),
   ...overrides
 })
@@ -469,7 +471,7 @@ describe("JiraReadPlugin", () => {
           assert.strictEqual(proposal.summary, "Comment on Jira issue PAY-42")
           assert.deepStrictEqual(
             connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
-            ["entity.read", "sync.incremental", "action.propose"]
+            ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
           )
           assert.strictEqual(yield* Ref.get(issueReads), 1)
           assert.strictEqual(yield* Ref.get(mutations), 0)

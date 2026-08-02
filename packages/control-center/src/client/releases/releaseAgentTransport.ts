@@ -2,8 +2,26 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
+import type { ReleasePublicationProvider } from "../../api/agent.js"
+import type { ReleaseId } from "../../domain/identifiers.js"
 import type { ReleaseAgentTurn } from "../AgentPage.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+
+export const submitBrowserReleasePublication = (input: {
+  readonly releaseId: ReleaseId
+  readonly provider: ReleasePublicationProvider
+  readonly title: string
+  readonly markdown: string
+}): Promise<{ readonly actionId: string; readonly state: string }> =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const client = yield* makeAuthenticatedMutationClient
+      return yield* client.agent.submitReleasePublication({
+        params: { releaseId: input.releaseId },
+        payload: { provider: input.provider, title: input.title, markdown: input.markdown, parentId: null }
+      })
+    }).pipe(Effect.provide(FetchHttpClient.layer))
+  )
 
 class ReleaseAgentProtocolError extends Data.TaggedError("ReleaseAgentProtocolError") {}
 

@@ -22,7 +22,11 @@ import {
   writeReleaseAgentThread
 } from "./releases/releaseAgentThreadStorage.js"
 import type { WorkspaceReleaseOutletContext } from "./releases/WorkspaceReleaseLayout.js"
-import { loadBrowserReleaseAgentPresets, runBrowserReleaseAgentTurn } from "./releases/releaseAgentTransport.js"
+import {
+  loadBrowserReleaseAgentPresets,
+  runBrowserReleaseAgentTurn,
+  submitBrowserReleasePublication
+} from "./releases/releaseAgentTransport.js"
 import styles from "./AgentPage.module.css"
 
 export interface ReleaseAgentHistoryMessage {
@@ -441,6 +445,11 @@ const ReleaseAgentRoom = ({
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [announcement, setAnnouncement] = useState("")
+  const [publicationTitle, setPublicationTitle] = useState(release.version + " release")
+  const [publicationMarkdown, setPublicationMarkdown] = useState(
+    "Release " + release.version + " for " + release.serviceName + ". Published by Relay after human confirmation."
+  )
+  const [publicationBusy, setPublicationBusy] = useState<"jira" | "confluence" | null>(null)
   const nextMessage = useRef(nextThreadSequence(messages))
   const activeTurn = useRef<AbortController | null>(null)
   const transitionNames = releaseTransitionNames(release.id)
@@ -535,6 +544,24 @@ const ReleaseAgentRoom = ({
         activeTurn.current = null
         setIsRunning(false)
       })
+  }
+
+  const publish = (publicationProvider: "jira" | "confluence"): void => {
+    if (publicationBusy !== null || publicationTitle.trim() === "" || publicationMarkdown.trim() === "") return
+    setPublicationBusy(publicationProvider)
+    setAnnouncement("Relay is creating the " + publicationProvider + " release artifact.")
+    submitBrowserReleasePublication({
+      releaseId: release.id,
+      provider: publicationProvider,
+      title: publicationTitle.trim(),
+      markdown: publicationMarkdown.trim()
+    })
+      .then(
+        (result) =>
+          setAnnouncement("Relay created a governed " + publicationProvider + " publication (" + result.state + ")."),
+        () => setAnnouncement("Relay could not create the " + publicationProvider + " publication.")
+      )
+      .finally(() => setPublicationBusy(null))
   }
 
   return (
@@ -682,6 +709,55 @@ const ReleaseAgentRoom = ({
         heading="Release thread"
         messages={threadMessages}
       />
+      <Surface
+        as="section"
+        aria-labelledby="relay-publication"
+        className={styles.people}
+        padding="spacious"
+        shape="grouped"
+      >
+        <Text as="h2" id="relay-publication" variant="section-title">
+          Publish a release artifact
+        </Text>
+        <Text tone="secondary">
+          These append-only actions use the current release context and require your workspace-owner confirmation. Jira
+          issue edits remain proposal-only.
+        </Text>
+        <Field label="Title">
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              value={publicationTitle}
+              onChange={(event) => setPublicationTitle(event.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Release notes">
+          {(controlProps) => (
+            <textarea
+              {...controlProps}
+              value={publicationMarkdown}
+              onChange={(event) => setPublicationMarkdown(event.target.value)}
+            />
+          )}
+        </Field>
+        <div className={styles.presetList}>
+          <Button
+            disabled={publicationBusy !== null}
+            loading={publicationBusy === "jira"}
+            onClick={() => publish("jira")}
+          >
+            Create Jira release version
+          </Button>
+          <Button
+            disabled={publicationBusy !== null}
+            loading={publicationBusy === "confluence"}
+            onClick={() => publish("confluence")}
+          >
+            Create Confluence release page
+          </Button>
+        </div>
+      </Surface>
     </article>
   )
 }

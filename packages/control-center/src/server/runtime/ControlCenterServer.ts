@@ -65,6 +65,8 @@ import {
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
+  releasePublicationSubmissionsLayer,
+  releasePublicationSubmissionsUnavailableLayer,
   timelineExportAuditsLayer,
   timelineReadsLayer,
   workspaceSettingsAdministrationLayer
@@ -476,6 +478,15 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       Layer.provide(publicationConnections),
       Layer.provide(persistence)
     )
+  const releasePublicationSubmissions = !governedActionExecutionReady || publicationConnections === null
+    ? releasePublicationSubmissionsUnavailableLayer
+    : releasePublicationSubmissionsLayer.pipe(
+      Layer.provide(governedActionSubmission),
+      Layer.provide(governedActionPolicyBindings!),
+      Layer.provide(governedActionProposalAuthorityLiveLayer.pipe(Layer.provide(database))),
+      Layer.provide(publicationConnections),
+      Layer.provide(persistence)
+    )
   const pullRequestReviews = pullRequestReviewsLayer.pipe(
     Layer.provide(providerRegistry),
     Layer.provide(reviewSuggestionPublications),
@@ -591,6 +602,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     releaseAgentJobs,
     pullRequestReviews,
     clockifyActionSubmissions,
+    releasePublicationSubmissions,
     liveEventRuntime,
     databaseDrain
   )
