@@ -89,6 +89,7 @@ const REVIEW_PROMPT = "Review the exact immutable pull request using only the fu
 // Leave room for the task envelope and the bounded request context so every
 // accepted targeted task fits the repository's 32 KiB event limit.
 const MAXIMUM_TARGET_HISTORY_BYTES = 24_000
+const MAXIMUM_TARGET_HISTORY_REVISIONS = 128
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
@@ -603,9 +604,12 @@ const makePullRequestReviews = Effect.gen(function*() {
     const limit = PrReviewSuggestionRevisionPageSize.make(128)
     let beforeSequence: PrReviewSuggestionRevisionSequence | null = null
     let lastPage: ReviewSuggestionRevisionPage | undefined
+    let overBound = false
     const revisions = new Array<typeof PrReviewSuggestionRevision.Type>()
     yield* Effect.whileLoop({
-      while: () => lastPage === undefined || (lastPage.hasMore && lastPage.nextBeforeSequence !== null),
+      while: () =>
+        !overBound &&
+        (lastPage === undefined || (lastPage.hasMore && lastPage.nextBeforeSequence !== null)),
       body: () =>
         revisionHistory(
           workspaceId,
@@ -617,11 +621,17 @@ const makePullRequestReviews = Effect.gen(function*() {
         ),
       step: (page) => {
         lastPage = page
+        if (revisions.length + page.revisions.length > MAXIMUM_TARGET_HISTORY_REVISIONS) {
+          overBound = true
+          return
+        }
         for (const revision of page.revisions) revisions.push(revision)
         beforeSequence = page.nextBeforeSequence
       }
     })
-    if (lastPage === undefined || lastPage.hasMore) return yield* new ApplicationInvalidRequest()
+    if (lastPage === undefined || lastPage.hasMore || overBound) {
+      return yield* new ApplicationInvalidRequest()
+    }
     return yield* Schema.decodeUnknownEffect(Schema.toType(ReviewSuggestionRevisionPage))({
       ...lastPage,
       revisions,

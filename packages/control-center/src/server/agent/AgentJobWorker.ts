@@ -288,6 +288,17 @@ const makeAgentJobWorker = Effect.gen(function*() {
         }).pipe(Effect.result)
         if (Result.isFailure(source)) {
           if (isCancellationRequested(source.failure)) return yield* cancelClaim(claim)
+          if (isAgentJobInputError(source.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "The targeted review source result could not be loaded.",
+                retryable: false
+              })
+            )
+          }
           return yield* Effect.fail(source.failure)
         }
         const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
