@@ -151,6 +151,12 @@ The agent does not issue an overall verdict. Control Center derives:
 
 Validated suggestions from an incomplete run remain publishable, but the incomplete warning remains visible and the run can never yield No Issues Found.
 
+The selected Review Agent Profile budget is a durable run limit enforced by the worker, rather than a
+provider-specific process timeout. A running review may be extended once by one additional profile budget;
+the extension is recorded in the review thread so a restarted worker observes the same limit. Cancellation
+and budget expiry retain the latest validated partial report and finish the run as Unable to Conclude.
+Retained findings remain advice-only while the report explicitly marks the unexamined portion of the project.
+
 ## Suggestion lifecycle
 
 A changed pull-request head makes prior suggestions stale and blocks their publication. Re-review creates a new immutable run and performs ID-based Suggestion Reconciliation:

@@ -20,6 +20,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
+import type { PrReviewReport } from "../../domain/prReview.js"
 import { PrReviewSuggestionAgentAuthor } from "../../domain/prReviewRevision.js"
 import { RevisionConflictError } from "../persistence/errors.js"
 import {
@@ -197,6 +198,46 @@ const makeAgentJobWorker = Effect.gen(function*() {
     return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
   })
 
+  const incompleteReport = (claim: ClaimedAgentJob): PrReviewReport | null =>
+    claim.context.task._tag !== "pr-review"
+      ? null
+      : {
+        schemaVersion: 3,
+        subject: claim.context.task.subject,
+        completion: {
+          status: "unable-to-conclude",
+          reason: "The review stopped before the complete project was examined."
+        },
+        suggestions: [],
+        notes: []
+      }
+
+  const persistIncompleteReview = Effect.fn("AgentJobWorker.persistIncompleteReview")(function*(
+    claim: ClaimedAgentJob
+  ) {
+    const report = incompleteReport(claim)
+    if (report === null) return
+    const existing = yield* jobs.reviewResult({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId
+    }).pipe(Effect.result)
+    if (Result.isSuccess(existing)) return
+    if (existing.failure._tag !== "RecordNotFoundError") return
+    yield* DateTime.now.pipe(
+      Effect.flatMap((occurredAt) =>
+        jobs.recordReviewProgress({
+          workspaceId: claim.workspaceId,
+          jobId: claim.jobId,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: claim.leaseToken,
+          report,
+          occurredAt
+        })
+      ),
+      Effect.ignore
+    )
+  })
+
   const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
     if (claim.cancellationRequested) {
       return yield* cancelClaim(claim)
@@ -205,7 +246,6 @@ const makeAgentJobWorker = Effect.gen(function*() {
     const providerAllowed = policy.allowedProviders.some(
       (providerId) => providerId === String(claim.providerId)
     )
-
     const toolsAllowed = claim.context.task._tag !== "pr-review" ||
       policy.toolPolicy === "review-sandbox"
     if (!providerAllowed || !toolsAllowed) {
@@ -244,9 +284,34 @@ const makeAgentJobWorker = Effect.gen(function*() {
             })
         )
       )
-    const selected = yield* taskExecutor.execute(claim, onReviewActivity).pipe(Effect.result)
+    const onPartialReview = (report: PrReviewReport) =>
+      DateTime.now.pipe(
+        Effect.flatMap((occurredAt) =>
+          jobs.recordReviewProgress({
+            workspaceId: claim.workspaceId,
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken,
+            report,
+            occurredAt
+          })
+        ),
+        Effect.asVoid,
+        Effect.mapError((failure) =>
+          isCancellationRequested(failure)
+            ? failure
+            : new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "execution",
+              message: "Partial review persistence failed.",
+              retryable: false
+            })
+        )
+      )
+    const selected = yield* taskExecutor.execute(claim, onReviewActivity, onPartialReview).pipe(Effect.result)
     if (Result.isFailure(selected)) {
       if (isCancellationRequested(selected.failure)) {
+        yield* persistIncompleteReview(claim)
         return yield* cancelClaim(claim)
       }
       if (isAgentRuntimeFailure(selected.failure)) {
@@ -267,8 +332,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
     }
     if (selected.success._tag === "pr-review") {
       const targetedIntent = claim.context.task._tag === "pr-review" &&
-        (claim.context.task.intent === "suggestion-edit" ||
-          claim.context.task.intent === "suggestion-revalidation")
+        (claim.context.task.intent === "suggestion-edit" || claim.context.task.intent === "suggestion-revalidation")
       if (targetedIntent) {
         const target = claim.context.task.target
         if (target === undefined || selected.success.report._tag !== "targeted") {
@@ -325,18 +389,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
         }).pipe(Effect.result)
         if (Result.isFailure(revised)) {
           if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)
-          if (Schema.is(RevisionConflictError)(revised.failure)) {
-            return yield* failClaim(
-              claim,
-              new AgentProviderError({
-                providerId: claim.providerId,
-                phase: "protocol",
-                message: "Targeted review revision became stale before it could be applied.",
-                retryable: false
-              })
-            )
-          }
-          if (isAgentJobInputError(revised.failure)) {
+          if (Schema.is(RevisionConflictError)(revised.failure) || isAgentJobInputError(revised.failure)) {
             return yield* failClaim(
               claim,
               new AgentProviderError({
@@ -373,11 +426,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
           }
           return yield* Effect.fail(completion.failure)
         }
-        return {
-          _tag: "completed",
-          jobId: claim.jobId,
-          outcome: "success"
-        } satisfies AgentJobWorkerRunResult
+        return { _tag: "completed", jobId: claim.jobId, outcome: "success" } satisfies AgentJobWorkerRunResult
       }
       const completedAt = yield* DateTime.now
       if (selected.success.report._tag !== "report") {
@@ -496,8 +545,10 @@ const makeAgentJobWorker = Effect.gen(function*() {
       const heartbeatInterval = Duration.millis(
         Math.max(1, Math.min(10_000, Math.floor(Duration.toMillis(leaseDuration) / 3)))
       )
+      const executionStartedAt = yield* DateTime.now
+      const claimedTask = claimed.context.task
       const awaitCancellation = (): Effect.Effect<
-        void,
+        "budget-exhausted" | "cancelled",
         Effect.Error<ReturnType<AgentJobRepositoryService["heartbeat"]>>
       > =>
         Effect.sleep(heartbeatInterval).pipe(
@@ -512,18 +563,60 @@ const makeAgentJobWorker = Effect.gen(function*() {
             })
           ),
           Effect.flatMap((cancellationRequested) =>
-            cancellationRequested ? Effect.void : Effect.suspend(awaitCancellation)
+            cancellationRequested
+              ? Effect.succeed("cancelled")
+              : claimedTask._tag !== "pr-review"
+              ? Effect.suspend(awaitCancellation)
+              : jobs.reviewBudget({
+                workspaceId: claimed.workspaceId,
+                jobId: claimed.jobId,
+                task: claimedTask
+              }).pipe(
+                Effect.flatMap(({ reviewBudgetMillis }) =>
+                  DateTime.now.pipe(
+                    Effect.map((observedAt) =>
+                      DateTime.toEpochMillis(observedAt) - DateTime.toEpochMillis(executionStartedAt) >=
+                          (reviewBudgetMillis ?? claimedTask.reviewProfile.budgetMillis)
+                        ? "budget-exhausted"
+                        : null
+                    )
+                  )
+                ),
+                Effect.flatMap((budgetState) =>
+                  budgetState === "budget-exhausted"
+                    ? Effect.succeed(budgetState)
+                    : Effect.suspend(awaitCancellation)
+                )
+              )
           )
         )
       const observed = yield* Effect.raceFirst(
         executeClaim(claimed).pipe(
-          Effect.map((result) => Option.some<AgentJobWorkerRunResult>(result))
+          Effect.map((result) => ({
+            _tag: "executed",
+            result
+          } satisfies { readonly _tag: "executed"; readonly result: AgentJobWorkerRunResult }))
         ),
-        awaitCancellation().pipe(Effect.as(Option.none<AgentJobWorkerRunResult>()))
+        awaitCancellation().pipe(
+          Effect.map((reason) => ({
+            _tag: "interrupted",
+            reason
+          } satisfies { readonly _tag: "interrupted"; readonly reason: "budget-exhausted" | "cancelled" }))
+        )
       )
-      return Option.isSome(observed)
-        ? observed.value
-        : yield* cancelClaim(claimed)
+      if (observed._tag === "executed") return observed.result
+      yield* persistIncompleteReview(claimed)
+      return observed.reason === "cancelled"
+        ? yield* cancelClaim(claimed)
+        : yield* failClaim(
+          claimed,
+          new AgentProviderError({
+            providerId: claimed.providerId,
+            phase: "timeout",
+            message: "The review budget expired before the complete project was examined.",
+            retryable: false
+          })
+        )
     })
   })
 })

@@ -406,6 +406,8 @@ const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
   thread: () => Effect.die("not used"),
   current: () => Effect.die("not used"),
   enqueue: () => Effect.die("not used"),
+  cancel: () => Effect.die("not used"),
+  extendBudget: () => Effect.die("not used"),
   revisions: () => Effect.die("not used"),
   editSuggestion: () => Effect.die("not used"),
   targetSuggestion: () => Effect.die("not used"),
@@ -2708,6 +2710,8 @@ describe("Control Center API handlers", () => {
               })
             )
           ),
+        cancel: () => Effect.die("not used"),
+        extendBudget: () => Effect.die("not used"),
         revisions: (input) =>
           Effect.gen(function*() {
             yield* Ref.update(received, (items) => [...items, input])
@@ -3004,6 +3008,8 @@ describe("Control Center API handlers", () => {
         thread: () => Effect.die("not used"),
         current: () => Effect.die("not used"),
         enqueue: () => Effect.die("not used"),
+        cancel: () => Effect.die("not used"),
+        extendBudget: () => Effect.die("not used"),
         revisions: () => Effect.die("not used"),
         editSuggestion: () => Effect.die("not used"),
         targetSuggestion: () => Effect.die("not used"),
@@ -3145,6 +3151,8 @@ describe("Control Center API handlers", () => {
         thread: () => Effect.die("not used"),
         current: () => Effect.die("not used"),
         enqueue: () => Effect.die("not used"),
+        cancel: () => blockedMutation,
+        extendBudget: () => blockedMutation,
         revisions: () => Effect.die("not used"),
         editSuggestion: () => blockedMutation,
         targetSuggestion: () => blockedMutation,

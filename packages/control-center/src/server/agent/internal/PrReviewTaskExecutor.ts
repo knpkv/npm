@@ -20,6 +20,7 @@ import {
 } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
@@ -47,6 +48,7 @@ import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../..
 import {
   type AgentJobInputError,
   type ClaimedAgentJob,
+  MAXIMUM_REVIEW_BUDGET_MILLIS,
   PrReviewThreadContextSnapshot
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
@@ -942,6 +944,7 @@ const makeExecutor = Effect.gen(function*() {
     })
     const catalog = yield* runtimes.catalog()
     const persistedProfile = claim.context.task.reviewProfile
+    const reviewBudgetMillis = MAXIMUM_REVIEW_BUDGET_MILLIS
     const languageModel = selected.languageModel
     const effectAiReview = selected.reviewExecution === "effect-ai" &&
       selected.filesystemAccess === "none" &&
@@ -1037,8 +1040,16 @@ const makeExecutor = Effect.gen(function*() {
               ? session.runNativeCodexReview
               : session.runNativeClaudeReview
             const nativeProviderLabel = nativeCodexReview ? "Codex" : "Claude"
+            if (nativeReviewMaximumDurationMillis(persistedProfile.budgetMillis) === null) {
+              return yield* providerFailure(
+                claim.providerId,
+                "configuration",
+                `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
+                false
+              )
+            }
             const maximumDurationMillis = nativeReviewMaximumDurationMillis(
-              persistedProfile.budgetMillis
+              reviewBudgetMillis
             )
             if (maximumDurationMillis === null) {
               return yield* providerFailure(
@@ -1154,7 +1165,7 @@ const makeExecutor = Effect.gen(function*() {
           )
           const adapter = makeToolAgentAdapter((request) =>
             runToolAgent({
-              budget: persistedProfile.budgetMillis,
+              budget: Duration.millis(reviewBudgetMillis),
               context: {
                 operatorRequest: request.prompt,
                 subject,
@@ -1206,7 +1217,7 @@ const makeExecutor = Effect.gen(function*() {
     )
   }, Effect.withTracerEnabled(false))
   return PrReviewTaskExecutor.of({
-    execute: (claim, onActivity) =>
+    execute: (claim, onActivity, _onPartialReport = () => Effect.void) =>
       executeInternal(claim, onActivity).pipe(
         Effect.flatMap((result) =>
           result._tag === "report"
@@ -1247,6 +1258,9 @@ export class PrReviewTaskExecutor extends Context.Service<
       claim: ClaimedAgentJob,
       onActivity?: (
         event: AgentRuntimeEvent
+      ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+      onPartialReport?: (
+        report: typeof PrReviewReport.Type
       ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
     ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError | AgentJobInputError>
     readonly executeTargeted: (

@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as Stream from "effect/Stream"
 
+import type { PrReviewReport } from "../../../domain/prReview.js"
 import type {
   AgentJobInputError,
   AgentJobTaskTag,
@@ -35,7 +36,8 @@ export interface AgentJobTaskExecutorService {
   readonly taskTags: ReadonlyArray<AgentJobTaskTag>
   readonly execute: (
     claim: ClaimedAgentJob,
-    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+    onPartialReport?: (report: PrReviewReport) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
   ) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError>
 }
 
@@ -53,7 +55,8 @@ const executeReview = Effect.fnUntraced(
   function*(
     reviews: PrReviewTaskExecutor["Service"],
     claim: ClaimedAgentJob,
-    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+    onPartialReport?: (report: PrReviewReport) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
   ): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError> {
     if (claim.context.task._tag !== "pr-review") {
       return yield* new AgentProviderError({
@@ -69,7 +72,7 @@ const executeReview = Effect.fnUntraced(
         claim.context.task.intent === "suggestion-edit" ||
           claim.context.task.intent === "suggestion-revalidation"
           ? reviews.executeTargeted(claim, onActivity)
-          : Effect.map(reviews.execute(claim, onActivity), (report) => ({
+          : Effect.map(reviews.execute(claim, onActivity, onPartialReport), (report) => ({
             _tag: "report",
             report
           } satisfies Extract<PrReviewTaskExecution, { readonly _tag: "report" }>))

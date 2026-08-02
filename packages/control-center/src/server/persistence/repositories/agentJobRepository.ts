@@ -71,13 +71,16 @@ import {
   ClaimedAgentJob,
   CompleteAgentReviewInput,
   EnqueueAgentJobInput,
+  ExtendReviewBudgetInput,
   LatestAgentReviewInput,
   LatestAgentReviewRecord,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
   PrReviewThreadContextSnapshot,
   type PrReviewThreadSubject,
+  ReadReviewBudgetInput,
   type ReadReviewSuggestionRevisionsInput,
+  RecordAgentReviewProgressInput,
   RecordReviewSuggestionPublicationInput,
   ReleaseReviewSuggestionPublicationInput,
   ReserveReviewSuggestionPublicationInput,
@@ -130,7 +133,9 @@ const PersistedJobQueuedPayload = Schema.Struct({
   model: EnqueueAgentJobInput.fields.model,
   providerId: EnqueueAgentJobInput.fields.providerId,
   subjectRevision: EnqueueAgentJobInput.fields.subjectRevision,
-  task: AgentJobTask
+  task: AgentJobTask,
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(Schema.Literal(1))
 })
 
 const CancellationRequestedPayload = Schema.Struct({
@@ -742,6 +747,78 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
   })
 
+  const reviewBudgetState = Effect.fn("AgentJobRepository.reviewBudgetState")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    jobId: typeof JobId.Type,
+    task: typeof AgentJobTask.Type
+  ) {
+    if (task._tag !== "pr-review") {
+      return { reviewBudgetMillis: undefined, reviewBudgetExtensionCount: 0 }
+    }
+    const rows = yield* sql<Record<string, unknown>>`SELECT
+      workspace_id AS workspaceId, thread_id AS threadId,
+      event_sequence AS eventSequence, job_id AS jobId,
+      attempt_sequence AS attemptSequence, event_kind AS eventKind,
+      payload_json AS payloadJson, payload_digest AS payloadDigest,
+      payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+      FROM agent_thread_events
+      WHERE workspace_id = ${workspaceId}
+        AND job_id = ${jobId}
+        AND event_kind = 'job-queued'
+      ORDER BY event_sequence`.pipe(mapPersistenceOperation("agent-job.review-budget"))
+    let reviewBudgetMillis = task.reviewProfile.budgetMillis
+    let reviewBudgetExtensionCount = 0
+    for (const unknownRow of rows) {
+      const row = Schema.decodeUnknownResult(ThreadEventRow)(unknownRow)
+      if (Result.isFailure(row)) {
+        return yield* persistedRecordError(
+          workspaceId,
+          "agent-review-budget",
+          jobId,
+          "agent-review-budget-event-schema-invalid"
+        )
+      }
+      const bytes = yield* bytesFromText(row.success.payloadJson)
+      const actualDigest = yield* digestBytes(bytes)
+      if (bytes.length !== row.success.payloadByteLength || actualDigest !== row.success.payloadDigest) {
+        return yield* persistedRecordError(
+          workspaceId,
+          "agent-review-budget",
+          jobId,
+          "agent-review-budget-event-integrity-invalid"
+        )
+      }
+      const parsed = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(row.success.payloadJson)
+      if (Result.isFailure(parsed)) {
+        return yield* persistedRecordError(
+          workspaceId,
+          "agent-review-budget",
+          jobId,
+          "agent-review-budget-event-json-invalid"
+        )
+      }
+      const decoded = Schema.decodeUnknownResult(PersistedJobQueuedPayload)(parsed.success)
+      if (Result.isFailure(decoded)) {
+        const legacy = Schema.decodeUnknownResult(JobQueuedPayload)(parsed.success)
+        if (Result.isFailure(legacy)) {
+          return yield* persistedRecordError(
+            workspaceId,
+            "agent-review-budget",
+            jobId,
+            "agent-review-budget-event-invalid"
+          )
+        }
+        continue
+      }
+      if (decoded.success.task._tag !== "pr-review") continue
+      if (decoded.success.reviewBudgetMillis !== undefined) {
+        reviewBudgetMillis = decoded.success.reviewBudgetMillis
+        reviewBudgetExtensionCount = decoded.success.reviewBudgetExtensionCount ?? 1
+      }
+    }
+    return { reviewBudgetMillis, reviewBudgetExtensionCount }
+  })
+
   const reviewContextSnapshot = Effect.fn("AgentJobRepository.reviewContextSnapshot")(function*(
     workspaceId: typeof WorkspaceId.Type,
     threadId: typeof AgentThreadId.Type
@@ -1003,7 +1080,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
       FROM agent_thread_events
       WHERE workspace_id = ${request.workspaceId}
         AND job_id = ${request.jobId}
-        AND event_kind = 'review-report'`.pipe(mapPersistenceOperation("agent-job.review-result"))
+        AND event_kind = 'review-report'
+      ORDER BY event_sequence DESC
+      LIMIT 1`.pipe(mapPersistenceOperation("agent-job.review-result"))
     if (rows.length === 0) {
       return yield* new RecordNotFoundError({
         workspaceId: request.workspaceId,
@@ -1012,7 +1091,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       })
     }
     const row = Schema.decodeUnknownResult(ThreadEventRow)(rows[0])
-    if (rows.length !== 1 || Result.isFailure(row) || row.success.attemptSequence === null) {
+    if (Result.isFailure(row) || row.success.attemptSequence === null) {
       return yield* persistedRecordError(
         request.workspaceId,
         "agent-review-result",
@@ -1179,7 +1258,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
       FROM agent_thread_events
       WHERE workspace_id = ${request.workspaceId}
         AND job_id = ${request.jobId}
-        AND event_kind = 'review-report'`.pipe(
+        AND event_kind = 'review-report'
+      ORDER BY event_sequence ASC
+      LIMIT 1`.pipe(
       mapPersistenceOperation("agent-job.original-review-result")
     )
     if (rows.length === 0) {
@@ -1191,7 +1272,6 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
     const row = Schema.decodeUnknownResult(ThreadEventRow)(rows[0])
     if (
-      rows.length !== 1 ||
       Result.isFailure(row) ||
       row.success.attemptSequence === null
     ) {
@@ -1573,6 +1653,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 fingerprint: claimed.success.contextFingerprint,
                 task
               })
+              const reviewBudget = yield* reviewBudgetState(
+                request.workspaceId,
+                candidate.jobId,
+                task
+              )
               const contextPayload = yield* encodePayload(AgentContextSnapshotRecord, context)
               let sessionRef: null | typeof ClaimedAgentJob.fields.sessionRef.Type = null
               if (candidate.attemptSequence > 0) {
@@ -1640,6 +1725,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 access: claimed.success.access,
                 prompt: claimed.success.prompt,
                 context,
+                ...(reviewBudget.reviewBudgetMillis === undefined
+                  ? {}
+                  : { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
+                reviewBudgetExtensionCount: reviewBudget.reviewBudgetExtensionCount,
                 sessionRef,
                 cancellationRequested: claimed.success.state === "cancel-requested"
               })
@@ -1849,6 +1938,63 @@ const makeAgentJobRepository = Effect.gen(function*() {
         )
         .pipe(mapPersistenceOperation("agent-job.append-event"))
     }),
+
+    recordReviewProgress: Effect.fnUntraced(function*(
+      input: typeof RecordAgentReviewProgressInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(RecordAgentReviewProgressInput))(input)
+      const report = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
+        Effect.mapError(
+          () =>
+            new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-result"
+            })
+        )
+      )
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const job = yield* getJob(request.workspaceId, request.jobId)
+          if (
+            job.state !== "running" &&
+              job.state !== "cancel-requested" ||
+            job.task._tag !== "pr-review" ||
+            !PrReviewSubjectEquivalence(job.task.subject, report.subject)
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "task-mismatch"
+            })
+          }
+          yield* validateLease({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            attemptSequence: request.attemptSequence,
+            leaseToken: request.leaseToken,
+            observedAt: request.occurredAt
+          })
+          yield* appendThreadEvent({
+            workspaceId: request.workspaceId,
+            threadId: job.threadId,
+            jobId: request.jobId,
+            attemptSequence: request.attemptSequence,
+            eventKind: "review-report",
+            payload: report,
+            payloadSchema: PrReviewReport,
+            occurredAt: request.occurredAt
+          })
+          return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            attemptSequence: request.attemptSequence,
+            report,
+            completedAt: request.occurredAt
+          })
+        })
+      ).pipe(mapPersistenceOperation("agent-job.record-review-progress"))
+    }, Effect.withTracerEnabled(false)),
 
     completeReview: Effect.fnUntraced(function*(
       input: typeof CompleteAgentReviewInput.Type
@@ -2272,6 +2418,64 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .pipe(mapPersistenceOperation("agent-job.fail-attempt"))
     }),
 
+    reviewBudget: Effect.fn("AgentJobRepository.reviewBudget")(function*(
+      input: typeof ReadReviewBudgetInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(ReadReviewBudgetInput))(input)
+      return yield* reviewBudgetState(request.workspaceId, request.jobId, request.task)
+    }),
+
+    extendReviewBudget: Effect.fn("AgentJobRepository.extendReviewBudget")(function*(
+      input: typeof ExtendReviewBudgetInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(ExtendReviewBudgetInput))(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const job = yield* getJob(request.workspaceId, request.jobId)
+          if (job.task._tag !== "pr-review" || job.state !== "running") {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          const current = yield* reviewBudgetState(request.workspaceId, request.jobId, job.task)
+          if (
+            current.reviewBudgetExtensionCount >= 1 ||
+            current.reviewBudgetMillis === undefined ||
+            current.reviewBudgetMillis + job.task.reviewProfile.budgetMillis > 3_600_000
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          const reviewBudgetMillis = current.reviewBudgetMillis + job.task.reviewProfile.budgetMillis
+          yield* appendThreadEvent({
+            workspaceId: request.workspaceId,
+            threadId: job.threadId,
+            jobId: request.jobId,
+            attemptSequence: null,
+            eventKind: "job-queued",
+            payload: {
+              access: job.access,
+              contextFingerprint: job.contextFingerprint,
+              model: job.model,
+              providerId: job.providerId,
+              subjectRevision: job.subjectRevision,
+              task: job.task,
+              reviewBudgetMillis,
+              reviewBudgetExtensionCount: 1
+            },
+            payloadSchema: PersistedJobQueuedPayload,
+            occurredAt: request.extendedAt
+          })
+          return { reviewBudgetMillis, reviewBudgetExtensionCount: 1 }
+        })
+      ).pipe(mapPersistenceOperation("agent-job.extend-review-budget"))
+    }),
+
     requestCancellation: Effect.fn("AgentJobRepository.requestCancellation")(function*(
       input: typeof RequestAgentCancellationInput.Type
     ) {
@@ -2369,12 +2573,36 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-review-subject-mismatch"
         )
       }
-      const report = row.success.state === "succeeded"
-        ? (yield* readReviewResult({
+      const reviewBudget = yield* reviewBudgetState(
+        request.workspaceId,
+        row.success.jobId,
+        task
+      )
+      const startedRows = yield* sql<Record<string, unknown>>`SELECT MAX(started_at) AS startedAt
+        FROM agent_job_attempts
+        WHERE workspace_id = ${request.workspaceId} AND job_id = ${row.success.jobId}`.pipe(
+        mapPersistenceOperation("agent-job.latest-review-started-at")
+      )
+      const startedAt = Schema.decodeUnknownResult(
+        Schema.Struct({ startedAt: Schema.NullOr(UtcTimestamp) })
+      )(startedRows[0])
+      if (startedRows.length !== 1 || Result.isFailure(startedAt)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review",
+          request.subject.pullRequestId,
+          "agent-review-started-at-schema-invalid"
+        )
+      }
+      const reviewResult = row.success.state === "succeeded" ||
+          row.success.state === "failed" ||
+          row.success.state === "cancelled"
+        ? yield* readReviewResult({
           workspaceId: request.workspaceId,
           jobId: row.success.jobId
-        })).report
+        }).pipe(Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null)))
         : null
+      const report = reviewResult === null ? null : reviewResult.report
       const activityRows = yield* sql<Record<string, unknown>>`SELECT
         workspace_id AS workspaceId, thread_id AS threadId,
         event_sequence AS eventSequence, job_id AS jobId,
@@ -2422,6 +2650,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
       }
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
+        startedAt: startedAt.success.startedAt,
+        ...(reviewBudget.reviewBudgetMillis === undefined
+          ? {}
+          : { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
+        reviewBudgetExtensionCount: reviewBudget.reviewBudgetExtensionCount,
         taskIntent: task.intent ?? null,
         report,
         reviewProfile: task.reviewProfile,

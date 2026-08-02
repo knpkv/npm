@@ -17,7 +17,7 @@ import type {
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
 import type { RateLimitedApiError } from "../../api/errors.js"
-import type { EntityId } from "../../domain/identifiers.js"
+import type { EntityId, JobId } from "../../domain/identifiers.js"
 import {
   isRecoverablePullRequestReviewFailure,
   isUnauthorizedPullRequestReviewFailure
@@ -118,6 +118,8 @@ export interface PullRequestReviewTransport {
     prompt: DurableAgentPrompt | undefined,
     signal: AbortSignal
   ) => Promise<PullRequestReviewState>
+  readonly cancel?: (entityId: EntityId, jobId: JobId, signal: AbortSignal) => Promise<PullRequestReviewState>
+  readonly extendBudget?: (entityId: EntityId, jobId: JobId, signal: AbortSignal) => Promise<PullRequestReviewState>
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
   readonly loadThread: (
     entityId: EntityId,
@@ -164,6 +166,8 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
 /** Generated-client transport for the authenticated immutable-review contract. */
 export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
   enqueue: (...args) => generatedClientTransport.then((transport) => transport.enqueue(...args)),
+  cancel: (...args) => generatedClientTransport.then((transport) => transport.cancel!(...args)),
+  extendBudget: (...args) => generatedClientTransport.then((transport) => transport.extendBudget!(...args)),
   load: (...args) => generatedClientTransport.then((transport) => transport.load(...args)),
   loadThread: (...args) => generatedClientTransport.then((transport) => transport.loadThread(...args)),
   previewPublication: (...args) => generatedClientTransport.then((transport) => transport.previewPublication(...args)),
@@ -248,7 +252,9 @@ export const usePullRequestReview = (
   onSessionExpired: (sessionKey: string) => void,
   transport: PullRequestReviewTransport = browserPullRequestReviewTransport
 ): {
+  readonly cancel: () => void
   readonly cancelPublication: () => void
+  readonly extendBudget: () => void
   readonly loadEarlier: () => void
   readonly previewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly publication: PullRequestReviewPublicationState
@@ -531,6 +537,32 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, state, transport])
 
+  const mutatePendingReview = useCallback((
+    operation: (jobId: JobId, signal: AbortSignal) => Promise<PullRequestReviewState>
+  ) => {
+    if (state._tag !== "ready") return
+    const review = state.review
+    if (review._tag !== "pending") return
+    const current = state
+    mutationAbort.current?.abort()
+    const abort = new AbortController()
+    mutationAbort.current = abort
+    operation(review.jobId, abort.signal).then(
+      (review) => {
+        if (abort.signal.aborted) return
+        setState((latest) =>
+          latest._tag === "ready" && sameReviewScope(latest, current) && matchesScope(review, current)
+            ? { ...latest, review }
+            : latest
+        )
+      },
+      (failure) => {
+        if (abort.signal.aborted) return
+        if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
+      }
+    )
+  }, [onSessionExpired, state])
+
   const previewPublication = useCallback((selection: ReviewSuggestionPublicationTarget) => {
     if (
       state._tag !== "ready" ||
@@ -646,6 +678,10 @@ export const usePullRequestReview = (
     : { _tag: "loading", ...scope }
 
   return {
+    cancel: useCallback(() => {
+      if (transport.cancel === undefined) return
+      mutatePendingReview((jobId, signal) => transport.cancel!(entityId, jobId, signal))
+    }, [entityId, mutatePendingReview, transport]),
     cancelPublication: useCallback(() => {
       mutationAbort.current?.abort()
       mutationAbort.current = null
@@ -653,6 +689,10 @@ export const usePullRequestReview = (
       publicationAbort.current = null
       setPublication({ _tag: "idle" })
     }, []),
+    extendBudget: useCallback(() => {
+      if (transport.extendBudget === undefined) return
+      mutatePendingReview((jobId, signal) => transport.extendBudget!(entityId, jobId, signal))
+    }, [entityId, mutatePendingReview, transport]),
     loadEarlier,
     previewPublication,
     publication,

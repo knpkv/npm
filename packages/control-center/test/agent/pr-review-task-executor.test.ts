@@ -747,7 +747,7 @@ describe("PR review task executor", () => {
       assert.strictEqual(setupRequest.reviewExecution, "native-codex")
       const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
       assert.include(nativeRequest.prompt ?? "", "control-center-review-base")
-      assert.strictEqual(nativeRequest.maximumDurationMillis, 30_000)
+      assert.strictEqual(nativeRequest.maximumDurationMillis, 3_570_000)
       assert.include(nativeRequest.outputSchema ?? "", "\"schemaVersion\"")
       assert.notInclude(nativeRequest.outputSchema ?? "", "\"allOf\"")
       assert.notInclude(nativeRequest.outputSchema ?? "", "\"uniqueItems\"")

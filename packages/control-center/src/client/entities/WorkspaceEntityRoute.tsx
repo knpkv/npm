@@ -269,6 +269,8 @@ const EntityContent = ({
   presentation,
   retry,
   reviewCanEnqueue,
+  reviewCancel,
+  reviewExtendBudget,
   reviewLoadEarlier,
   reviewPublication,
   reviewPublicationCancel,
@@ -288,6 +290,8 @@ const EntityContent = ({
   readonly onSessionExpired: (sessionKey: string) => void
   readonly presentation: WorkspaceEntityPresentation
   readonly reviewCanEnqueue: boolean
+  readonly reviewCancel: () => void
+  readonly reviewExtendBudget: () => void
   readonly reviewPublication: PullRequestReviewPublicationState
   readonly reviewPublicationCancel: () => void
   readonly reviewLoadEarlier: () => void
@@ -335,6 +339,8 @@ const EntityContent = ({
         <WorkspacePullRequestDetails
           approvers={presentation.collaborators.approvers}
           onSessionExpired={onSessionExpired}
+          onReviewCancel={reviewCancel}
+          onReviewExtendBudget={reviewExtendBudget}
           onReviewLoadEarlier={reviewLoadEarlier}
           onReviewPublicationCancel={reviewPublicationCancel}
           onReviewPublicationPreview={reviewPublicationPreview}
@@ -367,6 +373,8 @@ interface WorkspaceEntityViewProps {
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
   readonly reviewCanEnqueue?: boolean
+  readonly reviewCancel?: () => void
+  readonly reviewExtendBudget?: () => void
   readonly reviewLoadEarlier?: () => void
   readonly reviewPublication?: PullRequestReviewPublicationState
   readonly reviewPublicationCancel?: () => void
@@ -397,6 +405,8 @@ export const WorkspaceEntityView = ({
   originState,
   retry,
   reviewCanEnqueue = false,
+  reviewCancel = ignoreAction,
+  reviewExtendBudget = ignoreAction,
   reviewLoadEarlier = ignoreAction,
   reviewPublication = { _tag: "idle" },
   reviewPublicationCancel = ignoreAction,
@@ -482,6 +492,8 @@ export const WorkspaceEntityView = ({
             onSessionExpired={onSessionExpired}
             presentation={presentation}
             reviewCanEnqueue={reviewCanEnqueue}
+            reviewCancel={reviewCancel}
+            reviewExtendBudget={reviewExtendBudget}
             reviewPublication={reviewPublication}
             reviewPublicationCancel={reviewPublicationCancel}
             reviewLoadEarlier={reviewLoadEarlier}
@@ -595,6 +607,8 @@ const ConnectedWorkspaceEntity = ({
       originState={resolvedOrigin.origin.state}
       retry={controller.retry}
       reviewCanEnqueue={reviewCanEnqueue}
+      reviewCancel={reviewController.cancel}
+      reviewExtendBudget={reviewController.extendBudget}
       reviewPublication={reviewController.publication}
       reviewPublicationCancel={reviewController.cancelPublication}
       reviewLoadEarlier={reviewController.loadEarlier}

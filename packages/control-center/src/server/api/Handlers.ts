@@ -1303,6 +1303,52 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
           ))
+        .handle("cancelPullRequestReview", ({ params }) =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.cancel({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
+        .handle("extendPullRequestReviewBudget", ({ params }) =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.extendBudget({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("reviewSuggestionRevisions", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
