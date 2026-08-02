@@ -208,6 +208,8 @@ const makeGateway = Effect.gen(function*() {
       workspaceId: command.target.workspaceId,
       actionId: command.publicationId
     }).pipe(mapFailure)
+    const operation = command.operation ?? "create"
+    if (operation !== "create" && command.commentId === undefined) return yield* conflict()
     const expectedLocation = command.suggestion.anchor._tag === "changes"
       ? {}
       : {
@@ -220,7 +222,7 @@ const makeGateway = Effect.gen(function*() {
     const expectedRequest = yield* Schema.decodeUnknownEffect(
       ProposePluginActionRequestV1
     )({
-      actionKind: "comment",
+      actionKind: operation === "update" ? "update-comment" : operation === "reply" ? "reply-comment" : "comment",
       target: {
         entityType: "pull-request",
         vendorImmutableId: command.target.subject.pullRequestId
@@ -228,7 +230,12 @@ const makeGateway = Effect.gen(function*() {
       expectedRevision: Revision.make(command.target.sourceRevision),
       payload: {
         content: command.finalContent,
-        ...expectedLocation
+        ...(operation === "update"
+          ? { commentId: command.commentId }
+          : operation === "reply"
+          ? { commentId: command.commentId }
+          : {}),
+        ...(operation === "create" ? expectedLocation : {})
       },
       evidenceIds: [
         `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`
@@ -251,6 +258,8 @@ const makeGateway = Effect.gen(function*() {
     command: PublishReviewSuggestionCommand
   ) {
     const checkedAt = yield* DateTime.now
+    const operation = command.operation ?? "create"
+    if (operation !== "create" && command.commentId === undefined) return yield* conflict()
     if (
       !reviewPublicationSessionIsAuthorized(
         command.session,
@@ -258,7 +267,9 @@ const makeGateway = Effect.gen(function*() {
         checkedAt
       )
     ) return yield* conflict()
-    if (command.suggestion.state !== "draft") return yield* conflict()
+    if (command.suggestion.state !== (operation === "create" ? "draft" : "published")) {
+      return yield* conflict()
+    }
     const authorizedSession = command.session
 
     const prepared = yield* withProposalLease(
@@ -287,7 +298,7 @@ const makeGateway = Effect.gen(function*() {
           if (capability === undefined) return yield* conflict()
           const location = reviewSuggestionPublicationLocation(command.suggestion.anchor)
           const proposalRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
-            actionKind: "comment",
+            actionKind: operation === "update" ? "update-comment" : operation === "reply" ? "reply-comment" : "comment",
             target: {
               entityType: "pull-request",
               vendorImmutableId: command.target.subject.pullRequestId
@@ -295,7 +306,10 @@ const makeGateway = Effect.gen(function*() {
             expectedRevision: Revision.make(command.target.sourceRevision),
             payload: {
               content: command.finalContent,
-              ...(location === undefined ? {} : { location })
+              ...(operation === "update" || operation === "reply"
+                ? { commentId: command.commentId }
+                : {}),
+              ...(operation === "create" && location !== undefined ? { location } : {})
             },
             evidenceIds: [
               `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`

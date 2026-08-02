@@ -51,6 +51,10 @@ export interface PublishReviewSuggestionCommand {
   readonly revisionId: PrReviewSuggestionRevisionId
   readonly suggestion: PrReviewSuggestion
   readonly finalContent: ReviewSuggestionPublicationContent
+  /** Provider mutation selected by a confirmed local preview. */
+  readonly operation?: "create" | "update" | "reply"
+  /** Existing CodeCommit comment targeted by update/reply operations. */
+  readonly commentId?: string
   readonly authorityBinding: ReviewSuggestionPublicationAuthorityBinding
   readonly proposingAgent: ReviewAgentProfile
   readonly session: SessionSummary

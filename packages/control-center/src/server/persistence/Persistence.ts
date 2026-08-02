@@ -356,6 +356,13 @@ const makePersistence = Effect.gen(function*() {
           "agent-job.latest-review-for-pull-request",
           agentJobs.latestReview({ ...args[0], allowDifferentHead: true })
         ),
+      readReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["readReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.read-review-suggestion-publication",
+          agentJobs.readReviewSuggestionPublication(...args)
+        ),
       releaseReviewSuggestionPublication: (
         ...args: Parameters<AgentJobRepositoryService["releaseReviewSuggestionPublication"]>
       ) =>

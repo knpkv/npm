@@ -13,6 +13,7 @@ import type {
   PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor,
   ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationOperation,
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
@@ -130,7 +131,9 @@ export interface PullRequestReviewTransport {
   readonly previewPublication: (
     entityId: EntityId,
     selection: ReviewSuggestionPublicationTarget,
-    signal: AbortSignal
+    signal: AbortSignal,
+    operation?: ReviewSuggestionPublicationOperation,
+    commentId?: string
   ) => Promise<ReviewSuggestionPublicationPreview>
   readonly providers: (signal: AbortSignal) => Promise<AgentProviderCatalog>
   readonly publishSuggestion: (
@@ -138,7 +141,9 @@ export interface PullRequestReviewTransport {
     selection: ReviewSuggestionPublicationSelection,
     finalContent: ReviewSuggestionPublicationContent,
     authorityBinding: ReviewSuggestionPublicationPreview["authorityBinding"],
-    signal: AbortSignal
+    signal: AbortSignal,
+    operation?: ReviewSuggestionPublicationOperation,
+    commentId?: string
   ) => Promise<PublishedReviewComment>
 }
 

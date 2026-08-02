@@ -705,6 +705,8 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly jobId: PublishReviewSuggestionRequest["jobId"]
     readonly suggestionId: PublishReviewSuggestionRequest["suggestionId"]
     readonly revisionId: PublishReviewSuggestionRequest["revisionId"]
+    readonly operation?: PublishReviewSuggestionRequest["operation"]
+    readonly commentId?: PublishReviewSuggestionRequest["commentId"]
     readonly publishingOperator: Extract<Actor, { readonly _tag: "human" }>["personId"]
   }) => Effect.Effect<
     ReviewSuggestionPublicationPreview,

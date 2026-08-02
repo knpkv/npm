@@ -409,7 +409,7 @@ environment values, and provider-native references remain server-only.
 - Pure suggestion lifecycle and reconciliation state-machine tests.
 - Scripted fake-model tests for `@knpkv/ai-runtime`: tool calls, schema repair, output bounds, cancellation, and timeout.
 - sbx command-policy tests and an opt-in real sbx integration test when the CLI is available.
-- CodeCommit adapter contract tests for exact-head checkout and comment publication.
+- CodeCommit adapter contract tests for exact-head checkout and create, update, and reply comment publication.
 - Durable publication replay for line, file, and whole-change suggestions.
 - Browser flow: launch, live activity, inline suggestion, edit, revalidation, publication preview, staleness, and re-review.
 - Opt-in real Codex smoke test using the locally authenticated CLI.
@@ -423,7 +423,7 @@ environment values, and provider-native references remain server-only.
 5. Implement Review Thread orchestration, persistence, retention, recovery, and metadata-only telemetry.
 6. Extend `@knpkv/rly/diff` for application-rendered inline annotations.
 7. Build the integrated PR review workspace and launch/publication popups.
-8. Add CodeCommit comment create/update/reply operations and contract tests.
+8. Add grouped publication splitting and complete the CodeCommit comment create/update/reply contract journey.
 9. Add browser coverage and the opt-in real Codex smoke test.
 
 ## Decision records

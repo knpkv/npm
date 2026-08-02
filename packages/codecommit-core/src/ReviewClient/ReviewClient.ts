@@ -42,6 +42,7 @@ const RawCommentsPage = Schema.Struct({
   commentsForPullRequestData: Schema.optional(Schema.Array(Schema.Struct({
     comments: Schema.optional(Schema.Array(Schema.Struct({
       commentId: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
+      inReplyTo: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
       clientRequestToken: Schema.optional(Schema.String),
       content: Schema.optional(Schema.String)
     })))
@@ -84,7 +85,9 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
     Predicate.isTagged(cause, "InvalidFilePositionException") ||
     Predicate.isTagged(cause, "InvalidPathException") ||
     Predicate.isTagged(cause, "PathDoesNotExistException") ||
-    Predicate.isTagged(cause, "InvalidRelativeFileVersionEnumException")
+    Predicate.isTagged(cause, "InvalidRelativeFileVersionEnumException") ||
+    Predicate.isTagged(cause, "CommentDoesNotExistException") ||
+    Predicate.isTagged(cause, "InvalidCommentIdException")
   ) return "revision-changed"
   if (
     Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
@@ -156,6 +159,10 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
       return "Change request posted to the pull request"
     case "comment":
       return "Comment posted to the pull request"
+    case "update-comment":
+      return "Pull request comment updated"
+    case "reply-comment":
+      return "Reply posted to the pull request"
     case "approve":
       return "Pull request revision approved"
     case "revoke-approval":
@@ -215,6 +222,28 @@ export class CodeCommitReviewClient extends Context.Service<
               summary: commentSummary(action._tag)
             })
           }
+          case "update-comment": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.updateComment(withCommentMarker(action)).pipe(
+              Effect.mapError(mapProviderError("update-comment"))
+            )
+            const response = yield* decodeProvider("update-comment", RawCommentResponse, raw)
+            return new CodeCommitReviewReceipt({
+              operationId: `comment:${response.comment.commentId}`,
+              summary: commentSummary(action._tag)
+            })
+          }
+          case "reply-comment": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.postReply(withCommentMarker(action)).pipe(
+              Effect.mapError(mapProviderError("reply-comment"))
+            )
+            const response = yield* decodeProvider("reply-comment", RawCommentResponse, raw)
+            return new CodeCommitReviewReceipt({
+              operationId: `comment:${response.comment.commentId}`,
+              summary: commentSummary(action._tag)
+            })
+          }
           case "approve":
           case "revoke-approval": {
             yield* preflightTarget(readClient, action.target)
@@ -232,7 +261,7 @@ export class CodeCommitReviewClient extends Context.Service<
       const reconcileComment = Effect.fn("CodeCommitReviewClient.reconcileComment")(function*(
         action: Extract<
           CodeCommitReviewAction,
-          { readonly _tag: "comment" | "request-changes" | "request-review" }
+          { readonly _tag: "comment" | "request-changes" | "request-review" | "update-comment" | "reply-comment" }
         >
       ) {
         let nextToken: string | null = null
@@ -247,10 +276,17 @@ export class CodeCommitReviewClient extends Context.Service<
           )
           const comment = (page.commentsForPullRequestData ?? [])
             .flatMap(({ comments }) => comments ?? [])
-            .find(({ clientRequestToken, content }) =>
-              clientRequestToken === action.clientRequestToken ||
-              content?.includes(commentMarker(action.clientRequestToken)) === true
-            )
+            .find(({ clientRequestToken, commentId, content, inReplyTo }) => {
+              const markerMatched = content?.includes(commentMarker(action.clientRequestToken)) === true
+              if (action._tag === "update-comment") {
+                return commentId === action.commentId && markerMatched
+              }
+              if (action._tag === "reply-comment") {
+                return inReplyTo === action.commentId &&
+                  (clientRequestToken === action.clientRequestToken || markerMatched)
+              }
+              return clientRequestToken === action.clientRequestToken || markerMatched
+            })
           if (comment?.commentId !== undefined) {
             return {
               _tag: "succeeded",
@@ -271,6 +307,8 @@ export class CodeCommitReviewClient extends Context.Service<
           case "request-review":
           case "request-changes":
           case "comment":
+          case "update-comment":
+          case "reply-comment":
             return yield* reconcileComment(action)
           case "approve":
           case "revoke-approval": {

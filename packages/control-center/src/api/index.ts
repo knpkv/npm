@@ -42,6 +42,7 @@ export {
   ReviewAgentProfile,
   ReviewAgentProfileId,
   ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationOperation,
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection,
   ReviewSuggestionRevisionPage,

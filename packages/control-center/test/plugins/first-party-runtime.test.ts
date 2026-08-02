@@ -318,6 +318,8 @@ const unusedCodeCommitClients = (() => {
   })
   const reviewProvider = Layer.succeed(ReviewClient.CodeCommitReviewProvider, {
     postComment: () => Effect.die("unused postComment"),
+    updateComment: () => Effect.die("unused updateComment"),
+    postReply: () => Effect.die("unused postReply"),
     updateApprovalState: () => Effect.die("unused updateApprovalState"),
     getApprovalStates: () => Effect.die("unused getApprovalStates"),
     getCommentsPage: () => Effect.die("unused getCommentsPage")
@@ -402,6 +404,8 @@ describe("first-party plugin runtime", () => {
               }
             })
           ),
+        updateComment: () => Effect.die("unused updateComment"),
+        postReply: () => Effect.die("unused postReply"),
         updateApprovalState: () => Effect.die("unused updateApprovalState"),
         getApprovalStates: () => Effect.die("unused getApprovalStates"),
         getCommentsPage: () => Effect.die("unused getCommentsPage")
