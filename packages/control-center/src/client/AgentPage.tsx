@@ -3,7 +3,7 @@ import { Button, Field, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
@@ -29,6 +29,16 @@ import {
   submitBrowserReleasePublication
 } from "./releases/releaseAgentTransport.js"
 import styles from "./AgentPage.module.css"
+
+/** Resolve a single unambiguous release while retaining the page that launched Relay. */
+export const contextualSingleReleaseAgentPath = (
+  workspaceId: WorkspaceId,
+  releases: ReadonlyArray<PortfolioReleasePresentation>,
+  originPath: string
+): string | undefined => {
+  const release = releases.length === 1 ? releases[0] : undefined
+  return release === undefined ? undefined : contextualReleaseAgentPath(workspaceId, release.id, originPath)
+}
 
 export interface ReleaseAgentHistoryMessage {
   readonly content: string
@@ -900,6 +910,8 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
       )
     case "ready": {
       const { portfolio } = controller.state
+      const singleReleasePath = contextualSingleReleaseAgentPath(portfolio.workspaceId, portfolio.releases, originPath)
+      if (singleReleasePath !== undefined) return <Navigate replace to={singleReleasePath} />
       return (
         <section aria-labelledby="agent-title" className={styles.legacy}>
           <header className={styles.legacyHeader}>

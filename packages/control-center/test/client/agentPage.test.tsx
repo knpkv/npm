@@ -11,6 +11,7 @@ import {
   AgentPage,
   boundedReleaseAgentHistory,
   ConnectedAgentPage,
+  contextualSingleReleaseAgentPath,
   type ReleaseAgentPresetLoader,
   type ReleaseAgentTurn
 } from "../../src/client/AgentPage.js"
@@ -109,6 +110,19 @@ const renderAgentPage = (from: string): string =>
   )
 
 describe("AgentPage context", () => {
+  it("opens the only available release when Relay is launched from Timeline", () => {
+    const workspaceId = snapshot.workspaceId
+    const timelinePath = `/w/${workspaceId}/timeline`
+    const release = presentPortfolio(snapshot).releases[0]
+    if (release === undefined) throw new Error("Expected an agent-page release fixture")
+
+    expect(contextualSingleReleaseAgentPath(workspaceId, [release], timelinePath)).toBe(
+      `/w/${workspaceId}/releases/${release.id}/agent?from=${encodeURIComponent(timelinePath)}`
+    )
+    expect(contextualSingleReleaseAgentPath(workspaceId, [], timelinePath)).toBeUndefined()
+    expect(contextualSingleReleaseAgentPath(workspaceId, [release, release], timelinePath)).toBeUndefined()
+  })
+
   it("keeps the newest complete history that fits the server payload bounds", () => {
     const history = boundedReleaseAgentHistory(
       Array.from({ length: 13 }, (_, index) => ({
