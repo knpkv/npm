@@ -2431,6 +2431,7 @@ describe("Control Center API handlers", () => {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
       if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const admissions = yield* Ref.make(0)
       const submissions = yield* Ref.make<ReadonlyArray<unknown>>([])
       const publicationResults = yield* Ref.make<ReadonlyArray<string | undefined>>([])
       const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
@@ -2447,6 +2448,16 @@ describe("Control Center API handlers", () => {
             )
         })),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          admitTurn: (input) =>
+            Ref.update(admissions, (count) => count + 1).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              })
+            ),
           runTurn: (input) =>
             Ref.update(publicationResults, (items) => [...items, input.publicationResult]).pipe(
               Effect.as({
@@ -2481,11 +2492,98 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
+      assert.strictEqual(yield* Ref.get(admissions), 1)
       assert.strictEqual((yield* Ref.get(submissions)).length, 1)
       assert.deepStrictEqual(yield* Ref.get(publicationResults), [
         undefined,
         `provider=jira; state=succeeded; actionId=${actionId}`
       ])
+    }))
+
+  it.effect("admits publication turns before dispatch and preserves a succeeded action on model failure", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const rejectedSubmissions = yield* Ref.make(0)
+      const rejectedHandler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+          submit: () =>
+            Ref.update(rejectedSubmissions, (count) => count + 1).pipe(
+              Effect.as({ actionId, state: "succeeded" })
+            )
+        })),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          admitTurn: () => Effect.fail(new ApplicationInvalidRequest()),
+          runTurn: () => Effect.die("rejected provider reached generation")
+        }))
+      )
+      const rejected = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        rejectedHandler
+      ]))
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "InvalidRequestApiError")
+      }
+      assert.strictEqual(yield* Ref.get(rejectedSubmissions), 0)
+
+      const succeededSubmissions = yield* Ref.make(0)
+      const failedGenerationHandler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+          submit: () =>
+            Ref.update(succeededSubmissions, (count) => count + 1).pipe(
+              Effect.as({ actionId, state: "succeeded" })
+            )
+        })),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          admitTurn: (input) =>
+            Effect.succeed({
+              eventCursor: releaseSnapshot.eventCursor,
+              provider: input.provider,
+              release,
+              releaseId: release.releaseId,
+              workspaceId: input.workspaceId
+            }),
+          runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
+        }))
+      )
+      const recovered = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        failedGenerationHandler
+      ]))
+
+      assert.strictEqual(yield* Ref.get(succeededSubmissions), 1)
+      assert.include(recovered.reply, `actionId=${actionId}`)
+      assert.include(recovered.reply, "state=succeeded")
     }))
 
   it.effect("admits release turns only before server drain", () =>

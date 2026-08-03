@@ -25,6 +25,7 @@ import {
   GovernedActionAuthorizationId,
   GovernedActionId,
   GovernedActionTransitionId,
+  type PluginConnectionId,
   type ReleaseId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
@@ -48,7 +49,8 @@ import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 import {
   digestReleaseSourceRevisions,
   latestConfluencePublicationReference,
-  matchesConfluencePublicationReference
+  matchesConfluencePublicationReference,
+  selectReleasePublicationConnection
 } from "./releasePublicationMetadata.js"
 
 export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<ReleasePublicationSubmissionError>()(
@@ -119,24 +121,8 @@ const makeService = Effect.gen(function*() {
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)
     if (sources.length > 1) return yield* failure("conflict")
     const releaseSource = sources[0]
-    const workspaceConnections = releaseSource === undefined
-      ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
-      : []
     const workspaceEntities = yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)
-    const fallbackConnection = releaseSource === undefined
-      ? workspaceConnections.find(({ isEnabled, providerId }) => providerId === input.request.provider && isEnabled)
-      : undefined
-    const fallbackEntity = fallbackConnection === undefined
-      ? undefined
-      : workspaceEntities.find(
-        ({ sourceRevision }) =>
-          sourceRevision.providerId === input.request.provider &&
-          sourceRevision.pluginConnectionId === fallbackConnection.pluginConnectionId
-      )
-    const source = releaseSource ?? fallbackEntity?.sourceRevision
-    if (source === undefined || connections.proposalContextEffect === undefined) {
-      return yield* failure("unavailable")
-    }
+    let publicationConnectionId: PluginConnectionId | undefined
     if (
       input.request.provider === "confluence" &&
       input.request.pageId !== undefined &&
@@ -145,9 +131,7 @@ const makeService = Effect.gen(function*() {
       const actionKinds: ReadonlyArray<"create-page" | "update-page"> = ["create-page", "update-page"]
       const records = yield* Effect.forEach(
         workspaceEntities.filter(
-          ({ sourceRevision }) =>
-            sourceRevision.providerId === "confluence" &&
-            sourceRevision.pluginConnectionId === source.pluginConnectionId
+          ({ sourceRevision }) => sourceRevision.providerId === "confluence"
         ),
         ({ entityId }) =>
           Effect.forEach(
@@ -168,17 +152,46 @@ const makeService = Effect.gen(function*() {
           ? []
           : [{
             releaseId: publication.releaseId,
+            pluginConnectionId: record.envelope.pluginConnectionId,
             occurredAt: record.headTransition.occurredAt,
             providerOperationId: record.head.lineage.receipt.providerOperationId
           }]
       })
       const published = latestConfluencePublicationReference(candidates, input.releaseId)
       if (
+        published === null ||
         !matchesConfluencePublicationReference(published, {
           pageId: input.request.pageId,
           pageVersion: input.request.expectedVersion
         })
       ) return yield* failure("conflict")
+      publicationConnectionId = published.pluginConnectionId
+    }
+    const workspaceConnections = releaseSource === undefined && publicationConnectionId === undefined
+      ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
+      : []
+    const enabledFallbackConnections = workspaceConnections.filter(
+      ({ isEnabled, providerId }) => providerId === input.request.provider && isEnabled
+    )
+    const connectionSelection = selectReleasePublicationConnection({
+      enabledConnectionIds: enabledFallbackConnections.map(({ pluginConnectionId }) => pluginConnectionId),
+      ...(publicationConnectionId === undefined
+        ? {}
+        : { publicationReceiptConnectionId: publicationConnectionId }),
+      ...(releaseSource === undefined
+        ? {}
+        : { releaseSourceConnectionId: releaseSource.pluginConnectionId })
+    })
+    if (connectionSelection._tag === "ambiguous") return yield* failure("conflict")
+    if (connectionSelection._tag === "missing") return yield* failure("unavailable")
+    const fallbackEntity = workspaceEntities.find(
+      ({ sourceRevision }) =>
+        sourceRevision.providerId === input.request.provider &&
+        sourceRevision.pluginConnectionId === connectionSelection.pluginConnectionId
+    )
+    const source = releaseSource ?? fallbackEntity?.sourceRevision
+    if (source === undefined || connections.proposalContextEffect === undefined) {
+      return yield* failure("unavailable")
     }
     const lease = yield* connections.proposalContextEffect({
       workspaceId: input.workspaceId,

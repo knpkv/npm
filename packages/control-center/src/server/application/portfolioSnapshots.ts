@@ -150,6 +150,7 @@ const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness"
       ? []
       : [{
         releaseId: publication.releaseId,
+        pluginConnectionId: record.envelope.pluginConnectionId,
         occurredAt: record.headTransition.occurredAt,
         providerOperationId: record.head.lineage.receipt.providerOperationId
       }]

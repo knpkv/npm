@@ -16,11 +16,12 @@ import type {
   ReleaseAgentTurnResponse
 } from "../../api/agent.js"
 import type { PortfolioReleaseSummary } from "../../api/portfolio.js"
-import type { WorkspaceId } from "../../domain/identifiers.js"
+import type { ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   PortfolioSnapshots,
+  type ReleaseAgentTurnAdmission,
   ReleaseAgentTurns,
   WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
@@ -146,19 +147,48 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
   const processSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const processAdmission = yield* Semaphore.make(MAXIMUM_CONCURRENT_AGENT_TURNS)
 
-  return ReleaseAgentTurns.of({
-    runTurn: Effect.fn("ReleaseAgentTurns.runTurn")(function*(input) {
-      const provider = resolveProvider(options, input.provider)
-      if (provider === undefined) return yield* unavailable()
+  const admitTurn = Effect.fn("ReleaseAgentTurns.admitTurn")(function*(input: {
+    readonly provider: AgentProvider
+    readonly releaseId: ReleaseId
+    readonly workspaceId: WorkspaceId
+  }) {
+    const provider = resolveProvider(options, input.provider)
+    if (provider === undefined) return yield* unavailable()
 
-      const snapshot = yield* portfolio.snapshot(input.workspaceId)
-      const release = snapshot.releases.find(({ releaseId }) => releaseId === input.releaseId)
-      if (release === undefined) return yield* new ApplicationResourceNotFound()
+    const snapshot = yield* portfolio.snapshot(input.workspaceId)
+    const release = snapshot.releases.find(({ releaseId }) => releaseId === input.releaseId)
+    if (release === undefined) return yield* new ApplicationResourceNotFound()
+    const settings = yield* workspaceSettings.read(input.workspaceId)
+    yield* assertAgentProviderAllowed(settings.settings.agent, provider)
+    return {
+      eventCursor: snapshot.eventCursor,
+      provider,
+      release,
+      releaseId: release.releaseId,
+      workspaceId: input.workspaceId
+    } satisfies ReleaseAgentTurnAdmission
+  })
+
+  return ReleaseAgentTurns.of({
+    admitTurn,
+    runTurn: Effect.fn("ReleaseAgentTurns.runTurn")(function*(input) {
+      const admission = input.admission ?? (yield* admitTurn(input))
+      if (
+        admission.workspaceId !== input.workspaceId ||
+        admission.releaseId !== input.releaseId ||
+        admission.provider !== input.provider
+      ) return yield* unavailable()
 
       const generation = LanguageModel.generateText({
-        prompt: modelPrompt(release, input.history, input.prompt, input.originPath, input.publicationResult)
+        prompt: modelPrompt(
+          admission.release,
+          input.history,
+          input.prompt,
+          input.originPath,
+          input.publicationResult
+        )
       })
-      const modelTurn = provider === "codex"
+      const modelTurn = admission.provider === "codex"
         ? generation.pipe(
           Effect.provide(codexModel({
             access: "read-only",
@@ -186,7 +216,7 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
         )
       const response = yield* processAdmission.withPermits(1)(Effect.gen(function*() {
         const settings = yield* workspaceSettings.read(input.workspaceId)
-        yield* assertAgentProviderAllowed(settings.settings.agent, provider)
+        yield* assertAgentProviderAllowed(settings.settings.agent, admission.provider)
         return yield* modelTurn.pipe(Effect.mapError(() => unavailable()))
       }))
 
@@ -194,10 +224,10 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
       if (reply.length === 0 || reply.length > MAXIMUM_REPLY_CHARACTERS) return yield* unavailable()
 
       return {
-        eventCursor: snapshot.eventCursor,
-        provider,
-        release,
-        releaseId: release.releaseId,
+        eventCursor: admission.eventCursor,
+        provider: admission.provider,
+        release: admission.release,
+        releaseId: admission.releaseId,
         reply
       } satisfies ReleaseAgentTurnResponse
     })
@@ -219,5 +249,8 @@ export const releaseAgentTurnsLayer = (
 /** Explicit disabled runtime used when no local provider is configured. */
 export const releaseAgentUnavailableLayer: Layer.Layer<ReleaseAgentTurns> = Layer.succeed(
   ReleaseAgentTurns,
-  ReleaseAgentTurns.of({ runTurn: () => Effect.fail(unavailable()) })
+  ReleaseAgentTurns.of({
+    admitTurn: () => Effect.fail(unavailable()),
+    runTurn: () => Effect.fail(unavailable())
+  })
 )

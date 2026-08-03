@@ -4,13 +4,14 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { GovernedActionEnvelopeDigest } from "../../domain/governedAction/index.js"
-import type { ReleaseId } from "../../domain/identifiers.js"
+import type { PluginConnectionId, ReleaseId } from "../../domain/identifiers.js"
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { digestCanonicalGovernedActionJson } from "../governance/governedActionDigests.js"
 
 export interface ReleasePublicationReceiptCandidate {
   readonly releaseId: ReleaseId
+  readonly pluginConnectionId: PluginConnectionId
   readonly occurredAt: UtcTimestamp
   readonly providerOperationId: string
 }
@@ -21,7 +22,37 @@ export interface ConfluencePublicationReference {
 }
 
 export interface LatestConfluencePublicationReference extends ConfluencePublicationReference {
+  readonly pluginConnectionId: PluginConnectionId
   readonly publishedAt: UtcTimestamp
+}
+
+export type ReleasePublicationConnectionSelection =
+  | { readonly _tag: "selected"; readonly pluginConnectionId: PluginConnectionId }
+  | { readonly _tag: "ambiguous" }
+  | { readonly _tag: "missing" }
+
+/** Select one explicit publication authority without relying on display ordering. */
+export const selectReleasePublicationConnection = (input: {
+  readonly enabledConnectionIds: ReadonlyArray<PluginConnectionId>
+  readonly publicationReceiptConnectionId?: PluginConnectionId
+  readonly releaseSourceConnectionId?: PluginConnectionId
+}): ReleasePublicationConnectionSelection => {
+  if (
+    input.releaseSourceConnectionId !== undefined &&
+    input.publicationReceiptConnectionId !== undefined &&
+    input.releaseSourceConnectionId !== input.publicationReceiptConnectionId
+  ) return { _tag: "ambiguous" }
+  const boundConnectionId = input.releaseSourceConnectionId ?? input.publicationReceiptConnectionId
+  if (boundConnectionId !== undefined) {
+    return { _tag: "selected", pluginConnectionId: boundConnectionId }
+  }
+  if (input.enabledConnectionIds.length === 1) {
+    const pluginConnectionId = input.enabledConnectionIds[0]
+    return pluginConnectionId === undefined
+      ? { _tag: "missing" }
+      : { _tag: "selected", pluginConnectionId }
+  }
+  return input.enabledConnectionIds.length === 0 ? { _tag: "missing" } : { _tag: "ambiguous" }
 }
 
 /** Require a client update target to equal the exact durable publication receipt. */
@@ -53,7 +84,13 @@ export const latestConfluencePublicationReference = (
     .find(({ providerOperationId }) => decodeConfluencePublicationReference(providerOperationId) !== null)
   if (latest === undefined) return null
   const reference = decodeConfluencePublicationReference(latest.providerOperationId)
-  return reference === null ? null : { ...reference, publishedAt: latest.occurredAt }
+  return reference === null
+    ? null
+    : {
+      ...reference,
+      pluginConnectionId: latest.pluginConnectionId,
+      publishedAt: latest.occurredAt
+    }
 }
 
 /** Hash stable source identity and semantic revisions used by a release publication. */

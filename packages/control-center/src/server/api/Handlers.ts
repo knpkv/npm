@@ -1224,6 +1224,19 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                 return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
               }
               const publicationIntent = detectReleasePublicationIntent(payload.prompt)
+              const publicationAdmission = publicationIntent === undefined || publications === undefined
+                ? undefined
+                : agent.admitTurn === undefined
+                ? yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+                : yield* agent.admitTurn({
+                  workspaceId: session.workspaceId,
+                  releaseId: params.releaseId,
+                  provider: payload.provider
+                }).pipe(Effect.catchTags({
+                  ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                  ApplicationResourceNotFound: mapApplicationNotFound,
+                  ApplicationServiceUnavailable: mapApplicationUnavailable
+                }))
               const publicationResult = publicationIntent === undefined || publications === undefined
                 ? undefined
                 : yield* Effect.gen(function*() {
@@ -1246,17 +1259,40 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                 })
               return yield* agent.runTurn({
                 history: payload.history,
+                ...(publicationAdmission === undefined ? {} : { admission: publicationAdmission }),
                 ...(payload.originPath === undefined ? {} : { originPath: payload.originPath }),
                 prompt: payload.prompt,
                 provider: payload.provider,
                 ...(publicationResult === undefined ? {} : { publicationResult }),
                 releaseId: params.releaseId,
                 workspaceId: session.workspaceId
-              }).pipe(Effect.catchTags({
-                ApplicationInvalidRequest: mapApplicationInvalidRequest,
-                ApplicationResourceNotFound: mapApplicationNotFound,
-                ApplicationServiceUnavailable: mapApplicationUnavailable
-              }))
+              }).pipe(
+                Effect.catchTags({
+                  ApplicationInvalidRequest: (error) =>
+                    publicationAdmission === undefined || publicationResult === undefined
+                      ? mapApplicationInvalidRequest(error)
+                      : Effect.succeed({
+                        eventCursor: publicationAdmission.eventCursor,
+                        provider: publicationAdmission.provider,
+                        release: publicationAdmission.release,
+                        releaseId: publicationAdmission.releaseId,
+                        reply:
+                          `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
+                      }),
+                  ApplicationResourceNotFound: mapApplicationNotFound,
+                  ApplicationServiceUnavailable: (error) =>
+                    publicationAdmission === undefined || publicationResult === undefined
+                      ? mapApplicationUnavailable(error)
+                      : Effect.succeed({
+                        eventCursor: publicationAdmission.eventCursor,
+                        provider: publicationAdmission.provider,
+                        release: publicationAdmission.release,
+                        releaseId: publicationAdmission.releaseId,
+                        reply:
+                          `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
+                      })
+                })
+              )
             })
           ).pipe(
             Effect.catchTag(

@@ -563,8 +563,25 @@ export class RelationshipRepairProposals extends Context.Service<RelationshipRep
  * Release-aware conversational boundary. Implementations own context projection,
  * provider selection, prompt hardening, cancellation, and provider error redaction.
  */
+export interface ReleaseAgentTurnAdmission {
+  readonly eventCursor: ReleaseAgentTurnResponse["eventCursor"]
+  readonly provider: ReleaseAgentTurnResponse["provider"]
+  readonly release: ReleaseAgentTurnResponse["release"]
+  readonly releaseId: ReleaseAgentTurnResponse["releaseId"]
+  readonly workspaceId: WorkspaceId
+}
+
 export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
+  readonly admitTurn?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly provider: AgentProvider
+  }) => Effect.Effect<
+    ReleaseAgentTurnAdmission,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly runTurn: (input: {
+    readonly admission?: ReleaseAgentTurnAdmission
     readonly workspaceId: WorkspaceId
     readonly releaseId: ReleaseId
     readonly originPath?: string
