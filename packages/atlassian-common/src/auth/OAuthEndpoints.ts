@@ -83,6 +83,22 @@ export const JIRA_SCOPES = [
 ]
 
 /**
+ * Legacy proposal-only Jira scopes retained for public API compatibility.
+ *
+ * Control Center now requests {@link JIRA_SCOPES} for governed release-version
+ * publication; consumers that only propose Jira mutations may continue using
+ * this read-only scope set.
+ *
+ * @category Scopes
+ */
+export const JIRA_PROPOSAL_SCOPES = [
+  "read:jira-work",
+  "read:jira-user",
+  "read:me",
+  "offline_access"
+]
+
+/**
  * Options for building OAuth2 authorization URL.
  *
  * @category Types

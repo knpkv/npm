@@ -5,7 +5,7 @@
  */
 
 // Endpoints and scopes. Jira release-version publication uses the write-capable
-// JIRA_SCOPES set; Jira issue edits remain proposal-only in Control Center.
+// JIRA_SCOPES set; JIRA_PROPOSAL_SCOPES remains available to read-only consumers.
 export {
   AUTH_URL,
   buildAuthUrl,
@@ -13,6 +13,7 @@ export {
   computeCodeChallenge,
   CONFLUENCE_SCOPES,
   generateCodeVerifier,
+  JIRA_PROPOSAL_SCOPES,
   JIRA_SCOPES,
   ME_URL,
   RESOURCES_URL,

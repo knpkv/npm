@@ -18,6 +18,7 @@ import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/Applic
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
 import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
+import { latestConfluencePublicationReference } from "./releasePublicationMetadata.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_COMPACT_COLLABORATORS = 50
@@ -142,28 +143,26 @@ const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness"
           }).pipe(Effect.catch(() => Effect.succeed([])))
       )
   )
-  const publications = candidates.flat(2).filter((record) =>
-    record.envelope.releasePublication?.releaseId === release.id
-  )
-  const latest = publications.sort((left, right) =>
-    DateTime.Order(right.headTransition.occurredAt, left.headTransition.occurredAt)
-  )[0]
-  if (latest === undefined || latest.envelope.releasePublication === undefined) {
+  const records = candidates.flat(2)
+  const publications = records.flatMap((record) => {
+    const publication = record.envelope.releasePublication
+    return publication === undefined || record.head.lineage._tag !== "terminal"
+      ? []
+      : [{
+        releaseId: publication.releaseId,
+        occurredAt: record.headTransition.occurredAt,
+        providerOperationId: record.head.lineage.receipt.providerOperationId
+      }]
+  })
+  const page = latestConfluencePublicationReference(publications, release.id)
+  if (page === null) {
     return { state: "not-published", lastPublishedAt: null } satisfies PortfolioReleasePageAwareness
   }
-  const providerOperationId = latest.head.lineage._tag === "terminal"
-    ? latest.head.lineage.receipt.providerOperationId
-    : null
-  const pageMatch = providerOperationId === null
-    ? null
-    : /^confluence-page:([1-9][0-9]*)(?::v([1-9][0-9]*))?$/u.exec(providerOperationId)
   return {
-    state: classifyReleasePageAwareness(release.updatedAt, latest.headTransition.occurredAt),
-    lastPublishedAt: latest.headTransition.occurredAt,
-    ...(pageMatch === null ? {} : {
-      pageId: pageMatch[1],
-      pageVersion: Number(pageMatch[2] ?? "1")
-    })
+    state: classifyReleasePageAwareness(release.updatedAt, page.publishedAt),
+    lastPublishedAt: page.publishedAt,
+    pageId: page.pageId,
+    pageVersion: page.pageVersion
   } satisfies PortfolioReleasePageAwareness
 })
 
