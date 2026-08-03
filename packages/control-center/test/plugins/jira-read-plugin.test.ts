@@ -768,11 +768,29 @@ describe("JiraReadPlugin", () => {
             authorizedAction: authorized
           })
 
-          assert.strictEqual((yield* executor.preflight(authorized))._tag, "blocked")
+          const preflight = yield* executor.preflight(authorized)
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "A Jira project version with this name does not match the authorized release notes"
+            ])
+          }
           const executed = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
           assert.isTrue(Result.isFailure(executed))
-          if (Result.isFailure(executed)) assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
-          assert.strictEqual((yield* executor.reconcile(reconciliation))._tag, "failed")
+          if (Result.isFailure(executed)) {
+            assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
+            if (executed.failure._tag === "PluginConflictFailure") {
+              assert.strictEqual(executed.failure.diagnosticCode, "jira-release-version-name-conflict")
+            }
+          }
+          const reconciled = yield* executor.reconcile(reconciliation)
+          assert.strictEqual(reconciled._tag, "failed")
+          if (reconciled._tag === "failed") {
+            assert.strictEqual(
+              reconciled.receipt.safeSummary,
+              "A Jira release version with the authorized name has different release notes"
+            )
+          }
           assert.strictEqual(yield* Ref.get(creates), 0)
         })
       )
@@ -794,11 +812,38 @@ describe("JiraReadPlugin", () => {
           const connection = yield* PluginConnection
           const executor = yield* AuthorizedPluginExecutor
           const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const reconciliation = Schema.decodeUnknownSync(
+            Schema.toType(PluginActionReconciliationRequestV1)
+          )({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
 
-          assert.strictEqual((yield* executor.preflight(authorized))._tag, "blocked")
+          const preflight = yield* executor.preflight(authorized)
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "Multiple Jira project versions exactly match the authorized release"
+            ])
+          }
           const executed = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
           assert.isTrue(Result.isFailure(executed))
-          if (Result.isFailure(executed)) assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
+          if (Result.isFailure(executed)) {
+            assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
+            if (executed.failure._tag === "PluginConflictFailure") {
+              assert.strictEqual(executed.failure.diagnosticCode, "jira-release-version-name-duplicate")
+            }
+          }
+          const reconciled = yield* executor.reconcile(reconciliation)
+          assert.strictEqual(reconciled._tag, "failed")
+          if (reconciled._tag === "failed") {
+            assert.strictEqual(
+              reconciled.receipt.safeSummary,
+              "Multiple Jira release versions exactly match the authorized payload"
+            )
+          }
         })
       )
     }))

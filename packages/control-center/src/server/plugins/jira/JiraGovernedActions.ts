@@ -563,7 +563,15 @@ const makeReleaseVersionExecutor = (
     )
     const checkedAt = yield* DateTime.now
     const nameMatches = versions.filter((version) => version.name === payload.name)
+    const exactMatches = nameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
     const nameMatch = nameMatches[0]
+    if (exactMatches.length > 1) {
+      return {
+        _tag: "blocked",
+        reasons: ["Multiple Jira project versions exactly match the authorized release"],
+        checkedAt
+      }
+    }
     if (
       nameMatches.length > 1 ||
       (nameMatch !== undefined && !matchesAuthorizedReleaseVersion(nameMatch, payload))
@@ -592,10 +600,16 @@ const makeReleaseVersionExecutor = (
       const observedAt = yield* DateTime.now
       return { _tag: "confirmed", receipt: releaseVersionReceipt(existingMatch, observedAt, "Confirmed") }
     }
+    if (existingMatches.length > 1) {
+      return yield* new PluginConflictFailure({
+        operation: "jira-create-project-version",
+        diagnosticCode: "jira-release-version-name-duplicate"
+      })
+    }
     if (existingNameMatches.length > 0) {
       return yield* new PluginConflictFailure({
         operation: "jira-create-project-version",
-        diagnosticCode: "jira-release-version-name-ambiguous"
+        diagnosticCode: "jira-release-version-name-conflict"
       })
     }
     const result = yield* provider.createProjectVersion({
@@ -666,14 +680,17 @@ const makeReleaseVersionExecutor = (
       return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt, "Confirmed") }
     }
     if (nameMatches.length === 0) return { _tag: "pending", checkedAt }
+    const duplicate = matches.length > 1
     return {
       _tag: "failed",
       receipt: {
         status: "failed",
         providerOperationId: PluginProviderOperationId.make(
-          "jira-project-version-duplicate:" + request.payloadDigest
+          `jira-project-version-${duplicate ? "duplicate" : "conflict"}:` + request.payloadDigest
         ),
-        safeSummary: "The Jira release version does not exactly match the authorized payload",
+        safeSummary: duplicate
+          ? "Multiple Jira release versions exactly match the authorized payload"
+          : "A Jira release version with the authorized name has different release notes",
         observedAt: checkedAt
       }
     }
