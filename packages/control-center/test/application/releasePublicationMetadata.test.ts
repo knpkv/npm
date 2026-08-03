@@ -3,13 +3,14 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
+import { EntityId, PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
 import { SourceRevision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   digestReleaseSourceRevisions,
   latestConfluencePublicationReference,
   matchesConfluencePublicationReference,
+  releasePublicationTargetEntityId,
   selectReleasePublicationConnection
 } from "../../src/server/application/releasePublicationMetadata.js"
 
@@ -137,6 +138,20 @@ describe("release publication metadata", () => {
         enabledConnectionIds: [connectionA, connectionB]
       }),
       { _tag: "ambiguous" }
+    )
+  })
+
+  it("anchors the first publication to the release without requiring a synchronized destination entity", () => {
+    const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000103")
+    const connectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000102")
+
+    assert.strictEqual(
+      releasePublicationTargetEntityId(releaseId),
+      EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000103")
+    )
+    assert.deepStrictEqual(
+      selectReleasePublicationConnection({ enabledConnectionIds: [connectionId] }),
+      { _tag: "selected", pluginConnectionId: connectionId }
     )
   })
 })

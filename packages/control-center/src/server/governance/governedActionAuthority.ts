@@ -175,14 +175,6 @@ const currentTargetMismatches = (
   const { currentTarget, envelope } = input
   if (currentTarget.workspaceId !== envelope.workspaceId) mismatches.push("current-target-workspace-mismatch")
   if (currentTarget.entityId !== envelope.targetEntityId) mismatches.push("current-target-entity-mismatch")
-  // Release publications target provider destinations that are intentionally
-  // not normalized entities (Jira project versions and Confluence pages). The
-  // durable action still carries a current same-connection anchor for scope
-  // and foreign-key integrity, while the exact destination is bound by the
-  // immutable provider request and its payload digest.
-  const isPublicationDestination = envelope.proposal.request.actionKind === "create-release-version" ||
-    envelope.proposal.request.actionKind === "create-page"
-  if (isPublicationDestination) return mismatches
   if (currentTarget.entityType !== envelope.proposal.request.target.entityType) {
     mismatches.push("current-target-type-mismatch")
   }

@@ -18,7 +18,7 @@ import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/Applic
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
 import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
-import { latestConfluencePublicationReference } from "./releasePublicationMetadata.js"
+import { latestConfluencePublicationReference, releasePublicationTargetEntityId } from "./releasePublicationMetadata.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_COMPACT_COLLABORATORS = 50
@@ -125,19 +125,26 @@ const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness"
       .map(({ pluginConnectionId }) => pluginConnectionId)
   )
   const publicationActionKinds: ReadonlyArray<"create-page" | "update-page"> = ["create-page", "update-page"]
+  const publicationTargetIds = [
+    releasePublicationTargetEntityId(release.id),
+    ...entities
+      .filter(({ sourceRevision }) =>
+        sourceRevision.providerId === "confluence" &&
+        (releaseConfluenceConnections.size === 0 ||
+          releaseConfluenceConnections.has(sourceRevision.pluginConnectionId))
+      )
+      .map(({ entityId }) => entityId)
+  ]
   const candidates = yield* Effect.forEach(
-    entities.filter(({ sourceRevision }) =>
-      sourceRevision.providerId === "confluence" &&
-      (releaseConfluenceConnections.size === 0 || releaseConfluenceConnections.has(sourceRevision.pluginConnectionId))
-    ),
-    (entity) =>
+    publicationTargetIds,
+    (targetEntityId) =>
       Effect.forEach(
         publicationActionKinds,
         (actionKind) =>
           persistence.governedActions.readLatestTerminalByTarget({
             workspaceId: release.workspaceId,
             providerId: "confluence",
-            targetEntityId: entity.entityId,
+            targetEntityId,
             actionKind,
             limit: 100
           }).pipe(Effect.catch(() => Effect.succeed([])))

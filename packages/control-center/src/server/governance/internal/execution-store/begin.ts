@@ -10,9 +10,15 @@ import {
   GovernedActionCommandId,
   GovernedActionPluginConnectionAuthorityDigest,
   GovernedActionPluginConnectionRevision,
-  type GovernedActionState
+  type GovernedActionState,
+  GovernedActionTargetSnapshotV1
 } from "../../../../domain/governedAction/index.js"
-import { DomainEventId, GovernedActionAttemptId, GovernedActionTransitionId } from "../../../../domain/identifiers.js"
+import {
+  DomainEventId,
+  EntityId,
+  GovernedActionAttemptId,
+  GovernedActionTransitionId
+} from "../../../../domain/identifiers.js"
 import { AuthorizedPluginActionV1 } from "../../../../domain/plugins/actions.js"
 import type { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
@@ -197,10 +203,33 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             workspaceId: record.envelope.workspaceId,
             sessionId: record.authorization.sessionId
           })
-          const currentTarget = yield* targets.read({
-            workspaceId: record.envelope.workspaceId,
-            entityId: record.envelope.targetEntityId
-          })
+          const publication = record.envelope.releasePublication
+          // Release publication destinations do not exist as normalized
+          // entities before creation. Bind authority to the exact release and
+          // immutable provider request here; the negotiated executor preflight
+          // remains responsible for checking the live destination/version.
+          const currentTarget = publication !== undefined &&
+              record.envelope.targetEntityId === EntityId.make(publication.releaseId)
+            ? yield* Schema.decodeUnknownEffect(GovernedActionTargetSnapshotV1)({
+              workspaceId: record.envelope.workspaceId,
+              entityId: record.envelope.targetEntityId,
+              entityType: record.envelope.proposal.request.target.entityType,
+              sourceRevision: {
+                providerId: record.envelope.providerId,
+                pluginConnectionId: record.envelope.pluginConnectionId,
+                vendorImmutableId: record.envelope.proposal.request.target.vendorImmutableId,
+                revision: record.envelope.proposal.request.expectedRevision,
+                sourceUrl: null,
+                firstObservedAt: now,
+                lastObservedAt: now,
+                synchronizedAt: now,
+                normalizationSchemaVersion: 1
+              }
+            })
+            : yield* targets.read({
+              workspaceId: record.envelope.workspaceId,
+              entityId: record.envelope.targetEntityId
+            })
           const currentEvidence = yield* evidence.read({
             workspaceId: record.envelope.workspaceId,
             evidence: record.envelope.evidence,

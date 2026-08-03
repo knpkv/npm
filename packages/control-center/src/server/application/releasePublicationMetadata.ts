@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { GovernedActionEnvelopeDigest } from "../../domain/governedAction/index.js"
-import type { PluginConnectionId, ReleaseId } from "../../domain/identifiers.js"
+import { EntityId, type PluginConnectionId, type ReleaseId } from "../../domain/identifiers.js"
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { digestCanonicalGovernedActionJson } from "../governance/governedActionDigests.js"
@@ -30,6 +30,9 @@ export type ReleasePublicationConnectionSelection =
   | { readonly _tag: "selected"; readonly pluginConnectionId: PluginConnectionId }
   | { readonly _tag: "ambiguous" }
   | { readonly _tag: "missing" }
+
+/** Bind governed publication history to the exact release even before a destination contains entities. */
+export const releasePublicationTargetEntityId = (releaseId: ReleaseId): EntityId => EntityId.make(releaseId)
 
 /** Select one explicit publication authority without relying on display ordering. */
 export const selectReleasePublicationConnection = (input: {

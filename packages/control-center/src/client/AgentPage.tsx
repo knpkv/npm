@@ -464,10 +464,11 @@ const ReleaseAgentRoom = ({
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [announcement, setAnnouncement] = useState("")
-  const [publicationTitle, setPublicationTitle] = useState(release.version + " release")
-  const [publicationMarkdown, setPublicationMarkdown] = useState(
+  const publicationDefaultTitle = release.version + " release"
+  const publicationDefaultMarkdown =
     "Release " + release.version + " for " + release.serviceName + ". Published by Relay after human confirmation."
-  )
+  const [publicationTitle, setPublicationTitle] = useState(publicationDefaultTitle)
+  const [publicationMarkdown, setPublicationMarkdown] = useState(publicationDefaultMarkdown)
   const [publicationBusy, setPublicationBusy] = useState<"jira" | "confluence" | null>(null)
   const nextMessage = useRef(nextThreadSequence(messages))
   const activeTurn = useRef<AbortController | null>(null)
@@ -485,6 +486,11 @@ const ReleaseAgentRoom = ({
   useEffect(() => {
     writeReleaseAgentThread(release.id, messages)
   }, [messages, release.id])
+
+  useEffect(() => {
+    setPublicationTitle(publicationDefaultTitle)
+    setPublicationMarkdown(publicationDefaultMarkdown)
+  }, [publicationDefaultMarkdown, publicationDefaultTitle, release.releasePageAwareness?.state])
 
   const threadMessages = useMemo(() => presentMessages(messages), [messages])
   const lastProvider = [...messages].reverse().find((message) => message.provider !== undefined)?.provider

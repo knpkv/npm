@@ -21,6 +21,15 @@ import { EventCursor } from "../../src/domain/identifiers.js"
 import { ReleaseVersion } from "../../src/domain/release.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
+const submitReleasePublication = vi.hoisted(() =>
+  vi.fn(async () => ({ actionId: "01890f6f-6d6a-7cc0-98d2-000000000090", state: "succeeded" }))
+)
+
+vi.mock("../../src/client/releases/releaseAgentTransport.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  submitBrowserReleasePublication: submitReleasePublication
+}))
+
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const snapshot = makePortfolioSnapshot()
@@ -49,6 +58,7 @@ const readyContext = {
 let mountedRoot: Root | undefined
 
 beforeEach(() => {
+  submitReleasePublication.mockClear()
   sessionStorage.setItem("cc_session_id", "01890f6f-6d6a-7cc0-98d2-000000000002")
 })
 
@@ -294,6 +304,79 @@ describe("AgentPage context", () => {
     expect(codex?.disabled).toBe(true)
     expect(claude?.disabled).toBe(false)
     expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false)
+  })
+
+  it("refreshes the publication draft before confirming a stale Confluence page update", async () => {
+    const initialPortfolio = presentPortfolio(snapshot)
+    const initialRelease = initialPortfolio.releases[0]
+    if (initialRelease === undefined) throw new Error("Expected a release publication fixture")
+    const renderWithRelease = (release: typeof initialRelease) => {
+      const context = {
+        ...readyContext,
+        controller: {
+          ...readyContext.controller,
+          state: {
+            ...readyContext.controller.state,
+            portfolio: { ...initialPortfolio, releases: [release] }
+          }
+        }
+      } satisfies WorkspaceReleaseOutletContext
+      return (
+        <MemoryRouter initialEntries={[agentPath]}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route
+                path="/w/:workspaceId/releases/:releaseId/agent"
+                element={<AgentPage runTurn={async () => Promise.reject()} />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      )
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(renderWithRelease(initialRelease)))
+
+    const initialTitle = host.querySelector<HTMLInputElement>("input")
+    const initialNotes = [...host.querySelectorAll<HTMLTextAreaElement>("textarea")].find(
+      ({ value }) => value.includes("Published by Relay")
+    )
+    if (initialTitle === null || initialNotes === undefined) throw new Error("Expected publication draft controls")
+    await act(async () => {
+      initialTitle.value = "Owner-edited old title"
+      initialTitle.dispatchEvent(new Event("input", { bubbles: true }))
+      initialNotes.value = "Owner-edited old notes"
+      initialNotes.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+
+    const updatedRelease: typeof initialRelease = {
+      ...initialRelease,
+      version: ReleaseVersion.make("2.18.0-rc.2"),
+      releasePageAwareness: {
+        state: "stale",
+        lastPublishedAt: snapshot.releases[0]?.updatedAt ?? null,
+        pageId: "42",
+        pageVersion: 3
+      }
+    }
+    await act(async () => mountedRoot?.render(renderWithRelease(updatedRelease)))
+
+    const update = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Update Confluence release page"
+    )
+    if (update === undefined) throw new Error("Expected the stale-page update confirmation")
+    await act(async () => update.click())
+
+    expect(submitReleasePublication).toHaveBeenCalledWith({
+      releaseId,
+      provider: "confluence",
+      title: "2.18.0-rc.2 release",
+      markdown: "Release 2.18.0-rc.2 for payments-api. Published by Relay after human confirmation.",
+      pageId: "42",
+      expectedVersion: 3
+    })
   })
 
   const orderedProviderCases: ReadonlyArray<readonly [ReadonlyArray<"claude" | "codex">, "claude" | "codex"]> = [

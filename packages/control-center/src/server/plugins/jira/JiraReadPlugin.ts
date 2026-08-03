@@ -158,7 +158,7 @@ export const JiraReadPluginConfiguration = Schema.Struct({
 /** Decoded Jira read adapter settings. */
 export type JiraReadPluginConfiguration = typeof JiraReadPluginConfiguration.Type
 
-/** Negotiated production runtime and its scoped plugin layer. */
+/** Negotiated issue-read runtime; only create-only project-version publication crosses the execution boundary. */
 export interface JiraReadPluginRuntime {
   readonly definition: PluginDefinitionV1
   readonly layer: Layer.Layer<
