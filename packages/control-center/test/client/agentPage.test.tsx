@@ -340,8 +340,8 @@ describe("AgentPage context", () => {
     await act(async () => mountedRoot?.render(renderWithRelease(initialRelease)))
 
     const initialTitle = host.querySelector<HTMLInputElement>("input")
-    const initialNotes = [...host.querySelectorAll<HTMLTextAreaElement>("textarea")].find(
-      ({ value }) => value.includes("Published by Relay")
+    const initialNotes = [...host.querySelectorAll<HTMLTextAreaElement>("textarea")].find(({ value }) =>
+      value.includes("Published by Relay")
     )
     if (initialTitle === null || initialNotes === undefined) throw new Error("Expected publication draft controls")
     await act(async () => {
