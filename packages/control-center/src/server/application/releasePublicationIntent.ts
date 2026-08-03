@@ -16,10 +16,14 @@ export const detectReleasePublicationIntent = (prompt: string): ReleasePublicati
   const imperative = /^(?:(?:please|yes|confirmed)\s*[,!:]?\s+|relay\s*[,!:]\s+)*(?:create|publish|post|make)\s+/u
   if (!imperative.test(normalized)) return undefined
   const directObject = normalized.replace(imperative, "")
-  if (/^(?:(?:a|an|the|new)\s+)*confluence\s+(?:release\s+)?(?:page|artifact)\b/u.test(directObject)) {
+  const directConfluencePublication =
+    /^(?:(?:a|an|the|new)\s+)*confluence\s+(?:release\s+)?(?:page|artifact)(?:\s+for\s+(?:the\s+)?release)?[.!]?$/u
+  if (directConfluencePublication.test(directObject)) {
     return { provider: "confluence" }
   }
-  if (/^(?:(?:a|an|the|new)\s+)*jira\s+(?:release\s+)?(?:version|artifact)\b/u.test(directObject)) {
+  const directJiraPublication =
+    /^(?:(?:a|an|the|new)\s+)*jira\s+(?:release\s+)?(?:version|artifact)(?:\s+for\s+(?:the\s+)?release)?[.!]?$/u
+  if (directJiraPublication.test(directObject)) {
     return { provider: "jira" }
   }
   return undefined

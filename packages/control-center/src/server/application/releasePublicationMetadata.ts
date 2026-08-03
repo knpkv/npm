@@ -5,7 +5,7 @@ import * as Schema from "effect/Schema"
 
 import { GovernedActionEnvelopeDigest } from "../../domain/governedAction/index.js"
 import type { ReleaseId } from "../../domain/identifiers.js"
-import { SourceRevision } from "../../domain/sourceRevision.js"
+import type { SourceRevision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { digestCanonicalGovernedActionJson } from "../governance/governedActionDigests.js"
 
@@ -56,11 +56,19 @@ export const latestConfluencePublicationReference = (
   return reference === null ? null : { ...reference, publishedAt: latest.occurredAt }
 }
 
-/** Hash the complete encoded source-revision snapshot used by a release publication. */
+/** Hash stable source identity and semantic revisions used by a release publication. */
 export const digestReleaseSourceRevisions = Effect.fn("ReleasePublicationMetadata.digestSourceRevisions")(
   function*(sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>) {
-    const encoded = yield* Schema.encodeEffect(Schema.Array(SourceRevision))(sourceRevisions)
-    const json = yield* Schema.decodeUnknownEffect(Schema.Json)(encoded)
+    const stableRevisions = sourceRevisions
+      .map((sourceRevision) => ({
+        normalizationSchemaVersion: sourceRevision.normalizationSchemaVersion,
+        pluginConnectionId: sourceRevision.pluginConnectionId,
+        providerId: sourceRevision.providerId,
+        revision: sourceRevision.revision,
+        vendorImmutableId: sourceRevision.vendorImmutableId
+      }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+    const json = yield* Schema.decodeUnknownEffect(Schema.Json)(stableRevisions)
     const digest = yield* digestCanonicalGovernedActionJson(json)
     return GovernedActionEnvelopeDigest.make(`sha256:${digest}`)
   }

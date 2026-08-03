@@ -12,16 +12,21 @@ import {
   matchesConfluencePublicationReference
 } from "../../src/server/application/releasePublicationMetadata.js"
 
-const sourceRevision = (revision: string) =>
+const sourceRevision = (
+  revision: string,
+  timestamps = {
+    firstObservedAt: "2026-08-03T09:00:00.000Z",
+    lastObservedAt: "2026-08-03T09:00:00.000Z",
+    synchronizedAt: "2026-08-03T09:00:00.000Z"
+  }
+) =>
   Schema.decodeSync(SourceRevision)({
     providerId: "confluence",
     pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000102",
     vendorImmutableId: "space-42",
     revision,
     sourceUrl: null,
-    firstObservedAt: "2026-08-03T09:00:00.000Z",
-    lastObservedAt: "2026-08-03T09:00:00.000Z",
-    synchronizedAt: "2026-08-03T09:00:00.000Z",
+    ...timestamps,
     normalizationSchemaVersion: 1
   })
 
@@ -38,6 +43,23 @@ describe("release publication metadata", () => {
 
     assert.match(initial, /^sha256:[0-9a-f]{64}$/u)
     assert.notEqual(initial, changed)
+  })
+
+  it("keeps publication identity stable across observation-only synchronization", async () => {
+    const initial = await Effect.runPromise(
+      digestReleaseSourceRevisions([sourceRevision("page-v1")]).pipe(Effect.provide(NodeCrypto.layer))
+    )
+    const synchronizedAgain = await Effect.runPromise(
+      digestReleaseSourceRevisions([
+        sourceRevision("page-v1", {
+          firstObservedAt: "2026-08-03T09:00:00.000Z",
+          lastObservedAt: "2026-08-03T10:00:00.000Z",
+          synchronizedAt: "2026-08-03T10:01:00.000Z"
+        })
+      ]).pipe(Effect.provide(NodeCrypto.layer))
+    )
+
+    assert.strictEqual(initial, synchronizedAgain)
   })
 
   it("binds a Confluence update to the exact latest successful release-page receipt", () => {

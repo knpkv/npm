@@ -41,4 +41,19 @@ describe("release publication intent", () => {
       provider: "confluence"
     })
   })
+
+  it("rejects qualified publication commands instead of silently discarding their conditions", () => {
+    assert.strictEqual(
+      detectReleasePublicationIntent("Create a Jira release version after Jane approves it"),
+      undefined
+    )
+    assert.strictEqual(detectReleasePublicationIntent("Create a Jira release version tomorrow"), undefined)
+    assert.strictEqual(
+      detectReleasePublicationIntent("Publish the Confluence release page if the checks pass"),
+      undefined
+    )
+    assert.deepStrictEqual(detectReleasePublicationIntent("Relay: create a Jira release version!"), {
+      provider: "jira"
+    })
+  })
 })

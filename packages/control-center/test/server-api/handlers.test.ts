@@ -123,6 +123,7 @@ import {
   ClockifyActionSubmissionError,
   ClockifyActionSubmissions
 } from "../../src/server/application/clockifyActionSubmissions.js"
+import { ReleasePublicationSubmissions } from "../../src/server/application/releasePublicationSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -2423,6 +2424,68 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(yield* Ref.get(requestedWorkspace), session.workspaceId)
       assert.strictEqual(result.releaseId, release.releaseId)
       assert.strictEqual(result.reply, "The release is waiting for approval.")
+    }))
+
+  it.effect("does not submit qualified release-publication commands", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const submissions = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const publicationResults = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+          submit: (input) =>
+            Ref.update(submissions, (items) => [...items, input]).pipe(
+              Effect.as({ actionId, state: "succeeded" as const })
+            )
+        })),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: (input) =>
+            Ref.update(publicationResults, (items) => [...items, input.publicationResult]).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "Publication request evaluated."
+              })
+            )
+        }))
+      )
+
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: {
+            history: [],
+            prompt: "Create a Jira release version after Jane approves it",
+            provider: "codex"
+          }
+        })
+        yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual((yield* Ref.get(submissions)).length, 1)
+      assert.deepStrictEqual(yield* Ref.get(publicationResults), [
+        undefined,
+        `provider=jira; state=succeeded; actionId=${actionId}`
+      ])
     }))
 
   it.effect("admits release turns only before server drain", () =>
