@@ -76,6 +76,12 @@ const RECONCILIATION_PENDING_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-3300000000
 const RECONCILIATION_PENDING_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000017"
 const RECONCILIATION_SUCCEEDED_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000018"
 const RECONCILIATION_SUCCEEDED_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000019"
+const CONFLUENCE_CONNECTION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001a"
+const CONFLUENCE_TARGET_ID = "01890f6f-6d6a-7cc0-98d2-33000000001b"
+const RELEASE_ID = "01890f6f-6d6a-7cc0-98d2-33000000001c"
+const PUBLICATION_ACTION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001d"
+const PUBLICATION_SUCCEEDED_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001e"
+const PUBLICATION_SUCCEEDED_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-33000000001f"
 const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
@@ -110,12 +116,27 @@ const seedAuthorityRoots = Effect.fn("GovernedActionRepositoryTest.seedRoots")(f
     ${WORKSPACE_ID}, ${CONNECTION_ID}, 'jira', 'Payments Jira',
     1, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
+  yield* sql`INSERT INTO plugin_connections (
+    workspace_id, plugin_connection_id, provider_id, display_name,
+    revision, is_enabled, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${CONFLUENCE_CONNECTION_ID}, 'confluence', 'Release Confluence',
+    1, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
+  )`
   yield* sql`INSERT INTO entities (
     workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
     entity_type, current_revision, created_at, updated_at
   ) VALUES (
     ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, 'jira', 'PAY-42',
     'issue', 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
+  )`
+  yield* sql`INSERT INTO entities (
+    workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
+    entity_type, current_revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${CONFLUENCE_TARGET_ID}, ${CONFLUENCE_CONNECTION_ID},
+    'confluence', 'release-page-destination', 'release-page', 1,
+    '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
   yield* sql`INSERT INTO sessions (
     workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id, agent_id,
@@ -138,6 +159,16 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
     readonly policyId?: string
     readonly proposalKey?: string
     readonly proposalExpiresAt?: string
+    readonly providerId?: "jira" | "confluence"
+    readonly pluginConnectionId?: string
+    readonly releasePublication?: {
+      readonly releaseId: string
+      readonly sourceRevisionCount: number
+      readonly sourceRevisionDigest: string
+    }
+    readonly targetEntityType?: string
+    readonly targetEntityId?: string
+    readonly targetVendorImmutableId?: string
   }
 ) {
   const payload = decodePayload({
@@ -161,21 +192,24 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
     actionId,
     idempotencyKey: options?.idempotencyKey ?? "governed-action:PAY-42:done:1",
     workspaceId: WORKSPACE_ID,
-    pluginConnectionId: CONNECTION_ID,
+    pluginConnectionId: options?.pluginConnectionId ?? CONNECTION_ID,
     pluginConnectionRevision: 1,
     pluginConnectionAuthorityDigest: `sha256:${"a".repeat(64)}`,
-    pluginId: "dev.knpkv.jira",
+    pluginId: options?.providerId === "confluence" ? "dev.knpkv.confluence" : "dev.knpkv.jira",
     pluginContractVersion: { major: 1, minor: 0, patch: 0 },
     pluginAdapterVersion: { major: 1, minor: 2, patch: 3 },
-    providerId: "jira",
+    providerId: options?.providerId ?? "jira",
     capability: { capabilityId: "action.execute", version: 1 },
-    targetEntityId: ENTITY_ID,
+    targetEntityId: options?.targetEntityId ?? ENTITY_ID,
     proposal: {
       proposalKey: options?.proposalKey ?? "transition:PAY-42:done",
       capabilityVersion: 1,
       request: {
         actionKind: options?.actionKind ?? "transition",
-        target: { entityType: "issue", vendorImmutableId: "PAY-42" },
+        target: {
+          entityType: options?.targetEntityType ?? "issue",
+          vendorImmutableId: options?.targetVendorImmutableId ?? "PAY-42"
+        },
         expectedRevision: options?.expectedRevision ?? "1",
         payload,
         evidenceIds: ["provider-evidence-1"]
@@ -199,7 +233,10 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
     },
     proposalExpiresAt: options?.proposalExpiresAt ?? "2026-07-15T10:10:00.000Z",
     causationId: null,
-    correlationId: "action:PAY-42:done"
+    correlationId: "action:PAY-42:done",
+    ...(options?.releasePublication === undefined
+      ? {}
+      : { releasePublication: options.releasePublication })
   }
   const evidenceSetDigest = yield* digestGovernedActionEvidenceSet([evidence])
   const material = decodeEnvelopeMaterial({
@@ -1021,6 +1058,78 @@ describe("governed action writer", () => {
         authorizations: 1,
         evaluations: 1
       })
+    })))
+
+  it.effect("reads latest successful release publications through the indexed release projection", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(PUBLICATION_ACTION_ID, {
+        actionKind: "create-page",
+        expectedRevision: "0",
+        idempotencyKey: "release-publication:indexed-read",
+        pluginConnectionId: CONFLUENCE_CONNECTION_ID,
+        policyId: "confluence.release-publication",
+        proposalKey: "confluence-release-publication:indexed-read",
+        providerId: "confluence",
+        releasePublication: {
+          releaseId: RELEASE_ID,
+          sourceRevisionCount: 0,
+          sourceRevisionDigest: `sha256:${"d".repeat(64)}`
+        },
+        targetEntityId: CONFLUENCE_TARGET_ID,
+        targetEntityType: "release-page",
+        targetVendorImmutableId: "release-page-destination"
+      })
+      const proposal = makeProposalInput(envelope)
+      yield* repository.commit(proposal)
+      const authorizationInput = makeAuthorizationInput(proposal, makeAuthorization(envelope))
+      yield* repository.commit(authorizationInput)
+      const startInput = makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
+      yield* repository.commit(startInput)
+      yield* repository.commit(decodeCommit({
+        ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
+        expectedHeadTransitionId: START_TRANSITION_ID,
+        transitionId: PUBLICATION_SUCCEEDED_TRANSITION_ID,
+        commandId: "command:release-publication:succeeded",
+        command: {
+          _tag: "recordSucceeded",
+          receipt: {
+            observationBasis: "authorization",
+            providerOperationId: "confluence-page:page-1:v1",
+            status: "succeeded",
+            safeSummary: "Published Confluence release page",
+            observedAt: "2026-07-15T10:01:00.000Z"
+          },
+          source: { _tag: "direct" }
+        },
+        cause: { _tag: "system", component: "governed-action-engine" },
+        occurredAt: "2026-07-15T10:03:00.000Z",
+        companion: { _tag: "none" },
+        auditEventId: PUBLICATION_SUCCEEDED_AUDIT_ID
+      }))
+
+      const selected = yield* repository.readLatestTerminalReleasePublications({
+        workspaceId: WORKSPACE_ID,
+        providerId: "confluence",
+        releaseIds: [RELEASE_ID]
+      })
+      assert.deepStrictEqual(selected.map(({ envelope }) => envelope.actionId), [PUBLICATION_ACTION_ID])
+
+      const { sql } = yield* Database
+      yield* sql`DROP TRIGGER governed_action_identity_immutable`
+      yield* sql`DROP TRIGGER governed_action_head_exact_update`
+      yield* sql`UPDATE governed_actions
+        SET envelope_json = 'not-json'
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND action_id = ${PUBLICATION_ACTION_ID}`
+      const corrupted = yield* repository.readLatestTerminalReleasePublications({
+        workspaceId: WORKSPACE_ID,
+        providerId: "confluence",
+        releaseIds: [RELEASE_ID]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(corrupted))
+      if (Result.isFailure(corrupted)) assert.instanceOf(corrupted.failure, PersistedRecordError)
     })))
 
   it.effect("round-trips reconciliation by immutable idempotency identity", () =>

@@ -524,6 +524,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation(
           "governed-action.read-latest-terminal-by-target",
           governedActions.readLatestTerminalByTarget(...args)
+        ),
+      readLatestTerminalReleasePublications: (
+        ...args: Parameters<GovernedActionRepositoryService["readLatestTerminalReleasePublications"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-latest-terminal-release-publications",
+          governedActions.readLatestTerminalReleasePublications(...args)
         )
     },
     people: {

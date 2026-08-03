@@ -450,6 +450,14 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
           ${input.envelope.proposal.request.actionKind},
           ${input.envelope.proposal.request.expectedRevision}
         )`
+        if (input.envelope.releasePublication !== undefined) {
+          yield* sql`INSERT INTO governed_action_release_publications (
+            workspace_id, action_id, provider_id, release_id
+          ) VALUES (
+            ${input.envelope.workspaceId}, ${input.envelope.actionId},
+            ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId}
+          )`
+        }
       } else {
         yield* verifyRootIdentity(input, envelopeJson, root).pipe(captureMalformedGovernedActionRow(root))
         if (input.command._tag === "propose") return yield* inputError("conflicting-action-identity")
