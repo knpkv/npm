@@ -78,6 +78,7 @@ const STALE_BOUNDARY_AT = "2026-07-14T09:06:00.000Z"
 const STALE_BOUNDARY_CROSSED_AT = "2026-07-14T09:06:00.001Z"
 const STALE_FAILURE_AT = "2026-07-14T09:12:00.000Z"
 const EXISTING_PERSON_UPDATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-15T09:02:00.000Z")
+const NEWER_PERSON_UPDATED_AT = "2026-07-16T09:02:00.000Z"
 
 const epochMillis = (timestamp: string): number => DateTime.toEpochMillis(Schema.decodeSync(UtcTimestamp)(timestamp))
 
@@ -101,7 +102,8 @@ const releasePage = (
   includeApprover = true,
   checkpointAfterPage = "checkpoint-1",
   serviceName = "payments-api",
-  hasMore = false
+  hasMore = false,
+  ownerDisplayName = "Ada Lovelace"
 ) => ({
   checkpointAfterPage,
   hasMore,
@@ -144,7 +146,7 @@ const releasePage = (
       observedAt: OBSERVED_AT,
       revision: "person-r1",
       vendorPersonId: "person-ada",
-      displayName: "Ada Lovelace",
+      displayName: ownerDisplayName,
       avatarUrl: null,
       active: true
     },
@@ -628,28 +630,65 @@ describe("fake release synchronization", () => {
       ])
     })))
 
-  it.effect("enriches a newer durable person without moving its update timestamp backward", () =>
+  it.effect("merges identities without letting an older projection overwrite newer person fields", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* setup
       const existing = Schema.decodeSync(Person)({
         personId: OWNER_ID,
-        displayName: "Control Center Owner",
-        avatar: { _tag: "initials", text: derivePersonInitials("Control Center Owner") },
+        displayName: "New Owner",
+        avatar: { _tag: "initials", text: derivePersonInitials("New Owner") },
         isActive: true,
-        sourceIdentities: []
+        sourceIdentities: [{
+          pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+          providerId: "codecommit",
+          vendorPersonId: VendorImmutableId.make("codecommit-user-owner")
+        }]
       })
       yield* persistence.people.createPerson(WORKSPACE_ID, existing, EXISTING_PERSON_UPDATED_AT)
 
-      yield* runScenario(scenario(success(releasePage())))
+      yield* runScenario(scenario(success(releasePage(true, "checkpoint-1", "payments-api", false, "Old Owner"))))
 
-      const person = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
-      assert.strictEqual(person.person.displayName, "Ada Lovelace")
-      assert.strictEqual(DateTime.formatIso(person.updatedAt), DateTime.formatIso(EXISTING_PERSON_UPDATED_AT))
-      assert.deepStrictEqual(person.person.sourceIdentities, [{
-        pluginConnectionId: PLUGIN_ID,
-        providerId: "jira",
-        vendorPersonId: VendorImmutableId.make("person-ada")
-      }])
+      const afterOlderProjection = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
+      assert.strictEqual(afterOlderProjection.person.displayName, "New Owner")
+      assert.strictEqual(
+        DateTime.formatIso(afterOlderProjection.updatedAt),
+        DateTime.formatIso(EXISTING_PERSON_UPDATED_AT)
+      )
+      assert.deepStrictEqual(afterOlderProjection.person.sourceIdentities, [
+        {
+          pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+          providerId: "codecommit",
+          vendorPersonId: VendorImmutableId.make("codecommit-user-owner")
+        },
+        {
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          vendorPersonId: VendorImmutableId.make("person-ada")
+        }
+      ])
+
+      const newerPage = releasePage(true, "checkpoint-2", "payments-api", false, "Newest Owner")
+      const newerOwnerPage = {
+        ...newerPage,
+        events: newerPage.events.map((event) =>
+          event._tag === "UpsertPerson" && event.vendorPersonId === "person-ada"
+            ? {
+              ...event,
+              eventId: "person-event-3",
+              observedAt: "2026-07-16T09:01:00.000Z",
+              revision: "person-r2"
+            }
+            : event
+        )
+      }
+      yield* runScenario(scenario(
+        success(newerOwnerPage),
+        NEWER_PERSON_UPDATED_AT,
+        "checkpoint-1"
+      ))
+      const afterNewerProjection = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
+      assert.strictEqual(afterNewerProjection.person.displayName, "Newest Owner")
+      assert.strictEqual(DateTime.formatIso(afterNewerProjection.updatedAt), NEWER_PERSON_UPDATED_AT)
     })))
 
   it.effect("requires a terminal page and keeps the committed prefix as last-valid cache", () =>
