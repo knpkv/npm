@@ -239,12 +239,15 @@ const persistPerson = Effect.fn("ReleaseSynchronization.persistPerson")(function
   }
   const mergedPerson = mergePersonIdentities(current.success.person, person)
   if (yield* peopleEqual(current.success.person, mergedPerson)) return { record: current.success, changed: false }
+  const durableUpdatedAt = DateTime.Order(current.success.updatedAt, updatedAt) > 0
+    ? current.success.updatedAt
+    : updatedAt
   return {
     record: yield* persistence.people.updatePerson(
       workspaceId,
       mergedPerson,
       current.success.revision,
-      updatedAt
+      durableUpdatedAt
     ),
     changed: true
   }

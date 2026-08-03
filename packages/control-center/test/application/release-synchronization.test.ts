@@ -9,7 +9,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
-import { Person } from "../../src/domain/actors.js"
+import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
@@ -77,6 +77,7 @@ const RECENT_FAILURE_AT = "2026-07-14T09:03:00.000Z"
 const STALE_BOUNDARY_AT = "2026-07-14T09:06:00.000Z"
 const STALE_BOUNDARY_CROSSED_AT = "2026-07-14T09:06:00.001Z"
 const STALE_FAILURE_AT = "2026-07-14T09:12:00.000Z"
+const EXISTING_PERSON_UPDATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-15T09:02:00.000Z")
 
 const epochMillis = (timestamp: string): number => DateTime.toEpochMillis(Schema.decodeSync(UtcTimestamp)(timestamp))
 
@@ -625,6 +626,30 @@ describe("fake release synchronization", () => {
           vendorPersonId: VendorImmutableId.make("person-ada")
         }
       ])
+    })))
+
+  it.effect("enriches a newer durable person without moving its update timestamp backward", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      const existing = Schema.decodeSync(Person)({
+        personId: OWNER_ID,
+        displayName: "Control Center Owner",
+        avatar: { _tag: "initials", text: derivePersonInitials("Control Center Owner") },
+        isActive: true,
+        sourceIdentities: []
+      })
+      yield* persistence.people.createPerson(WORKSPACE_ID, existing, EXISTING_PERSON_UPDATED_AT)
+
+      yield* runScenario(scenario(success(releasePage())))
+
+      const person = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
+      assert.strictEqual(person.person.displayName, "Ada Lovelace")
+      assert.strictEqual(DateTime.formatIso(person.updatedAt), DateTime.formatIso(EXISTING_PERSON_UPDATED_AT))
+      assert.deepStrictEqual(person.person.sourceIdentities, [{
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        vendorPersonId: VendorImmutableId.make("person-ada")
+      }])
     })))
 
   it.effect("requires a terminal page and keeps the committed prefix as last-valid cache", () =>

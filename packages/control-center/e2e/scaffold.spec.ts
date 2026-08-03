@@ -609,7 +609,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     },
     {
       audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
-      expectOutcome: async () => expect(page.getByRole("link", { name: "Pair this browser" })).toBeVisible(),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Release context stays private" }),
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
