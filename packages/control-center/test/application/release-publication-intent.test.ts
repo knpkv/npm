@@ -18,4 +18,11 @@ describe("release publication intent", () => {
     assert.strictEqual(detectReleasePublicationIntent("Review the Jira release blockers"), undefined)
     assert.strictEqual(detectReleasePublicationIntent("Create a release note"), undefined)
   })
+
+  it("rejects negated publication commands instead of reversing the owner's refusal", () => {
+    assert.strictEqual(detectReleasePublicationIntent("Do not create a Jira release version"), undefined)
+    assert.strictEqual(detectReleasePublicationIntent("Never publish a Confluence page"), undefined)
+    assert.strictEqual(detectReleasePublicationIntent("I won't make the Jira release artifact"), undefined)
+    assert.deepStrictEqual(detectReleasePublicationIntent("Create a Jira release version"), { provider: "jira" })
+  })
 })

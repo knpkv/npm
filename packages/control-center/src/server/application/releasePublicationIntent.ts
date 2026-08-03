@@ -10,6 +10,8 @@ export const detectReleasePublicationIntent = (prompt: string): ReleasePublicati
   if (
     normalized.length === 0 ||
     /\b(how|can|could|should|what|where|why)\b/u.test(normalized) ||
+    /\b(do\s+not|don't|dont|never|not|without|avoid|refuse|cancel|cannot|can't|cant|won't|wont|mustn't|mustnt)\b/u
+      .test(normalized) ||
     !/\b(create|publish|post|make)\b/u.test(normalized)
   ) return undefined
   if (
