@@ -1,5 +1,11 @@
 # @knpkv/control-center-sql
 
+## 0.2.1
+
+### Patch Changes
+
+- [#319](https://github.com/knpkv/npm/pull/319) [`4d06229`](https://github.com/knpkv/npm/commit/4d062295393add7a6f34059041aec01403f92d4d) Thanks [@konopkov](https://github.com/konopkov)! - Add durable agent edit and targeted revalidation jobs for immutable pull-request review suggestions.
+
 ## 0.2.0
 
 ### Minor Changes
