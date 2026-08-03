@@ -25,7 +25,11 @@ import {
   ProposePluginActionRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
-import { type PluginFailure, PluginMalformedResponseFailure } from "../../src/server/plugins/failures.js"
+import {
+  type PluginFailure,
+  PluginMalformedResponseFailure,
+  PluginTimeoutFailure
+} from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import {
   JiraReadPluginConfiguration,
@@ -345,6 +349,19 @@ const transitionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)
   evidenceIds: ["jira-transition-review"]
 })
 
+const createReleaseVersionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "create-release-version",
+  target: { entityType: "jira.project-version", vendorImmutableId: configuration.projectId },
+  expectedRevision: "0",
+  payload: {
+    _tag: "create-release-version",
+    projectId: configuration.projectId,
+    name: "2.18.0",
+    description: "Payments release 2.18.0"
+  },
+  evidenceIds: []
+})
+
 const authorizeProposal = (proposal: PluginActionProposalV1) =>
   Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
     proposal,
@@ -547,6 +564,48 @@ describe("JiraReadPlugin", () => {
           assert.strictEqual(yield* Ref.get(commentReads), 0)
           assert.strictEqual(yield* Ref.get(mutations), 0)
         })
+      )
+    }))
+
+  it.effect("times out a hanging release-version recovery read with a reconciliation locator", () =>
+    Effect.gen(function*() {
+      const versionReads = yield* Ref.make(0)
+      const recoveryEntered = yield* Deferred.make<void>()
+      const provider = baseProvider({
+        getProjectVersions: () =>
+          Ref.getAndUpdate(versionReads, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 0
+                ? Effect.succeed([])
+                : Deferred.succeed(recoveryEntered, undefined).pipe(Effect.andThen(Effect.never))
+            )
+          ),
+        createProjectVersion: () => Effect.fail(new PluginTimeoutFailure({ operation: "jira-create-project-version" }))
+      })
+      return yield* withConnection(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const fiber = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result, Effect.forkChild)
+          yield* Deferred.await(recoveryEntered)
+          yield* TestClock.adjust("1 second")
+          const result = yield* Fiber.join(fiber)
+
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "PluginUnknownOutcomeFailure")
+            if (result.failure._tag === "PluginUnknownOutcomeFailure") {
+              assert.strictEqual(
+                result.failure.reconciliationKey,
+                `jira-release-version:${authorized.payloadDigest}`
+              )
+            }
+          }
+          assert.strictEqual(yield* Ref.get(versionReads), 2)
+        }),
+        { ...configuration, operationTimeoutMillis: 1_000 }
       )
     }))
 

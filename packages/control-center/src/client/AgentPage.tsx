@@ -86,7 +86,8 @@ interface AgentPageContext {
 
 type LocalThreadMessage = StoredReleaseAgentThreadMessage
 
-type TurnFailure = "blocked" | "failed" | "not-found" | "rate-limited" | "session-expired" | "timed-out" | "unavailable"
+type TurnFailure =
+  "blocked" | "conflict" | "failed" | "not-found" | "rate-limited" | "session-expired" | "timed-out" | "unavailable"
 
 const DEFAULT_CONTEXT: AgentPageContext = {
   description: "The workspace-wide view of release readiness, people, source health, and agent work.",
@@ -230,6 +231,8 @@ const classifyTurnFailure = (failure: unknown): TurnFailure => {
     case "NotFoundApiError":
     case "ApplicationResourceNotFound":
       return "not-found"
+    case "ConflictApiError":
+      return "conflict"
     case "ServiceUnavailableApiError":
     case "ApplicationServiceUnavailable":
       return "unavailable"
@@ -269,6 +272,15 @@ const failurePanel = (failure: TurnFailure): ReactElement => {
           announce="assertive"
           description="This release is no longer in the current workspace snapshot. Return to the release before asking again."
           title="Release not found"
+          tone="caution"
+        />
+      )
+    case "conflict":
+      return (
+        <StatePanel
+          announce="assertive"
+          description="The release publication state changed or its destination is ambiguous. Refresh the release context and use the explicit publication controls."
+          title="Release publication needs attention"
           tone="caution"
         />
       )

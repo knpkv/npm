@@ -515,7 +515,11 @@ const recoverAmbiguousReleaseVersion = Effect.fn("JiraGovernedActions.recoverAmb
   request: AuthorizedPluginActionV1,
   payload: typeof CreateReleaseVersionPayload.Type
 ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
-  const versions = yield* provider.getProjectVersions(configuration.projectId).pipe(
+  const versions = yield* withTimeout(
+    "jira-recover-project-versions",
+    configuration.operationTimeoutMillis,
+    provider.getProjectVersions(configuration.projectId)
+  ).pipe(
     Effect.catch(() =>
       Effect.fail(
         new PluginUnknownOutcomeFailure({

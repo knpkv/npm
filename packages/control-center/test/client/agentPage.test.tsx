@@ -35,8 +35,10 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 const snapshot = makePortfolioSnapshot()
 const historyRole = (index: number): "assistant" | "user" => (index % 2 === 0 ? "user" : "assistant")
 const failureCases: ReadonlyArray<readonly [string, string]> = [
+  ["ConflictApiError", "Release publication needs attention"],
   ["RateLimitedApiError", "Too many agent turns"],
-  ["RequestTimedOutApiError", "Relay took too long"]
+  ["RequestTimedOutApiError", "Relay took too long"],
+  ["ServiceUnavailableApiError", "Relay is unavailable"]
 ]
 const releaseId = snapshot.releases[0]?.releaseId
 if (releaseId === undefined) throw new Error("Expected an agent-page release fixture")
