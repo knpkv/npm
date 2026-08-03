@@ -90,18 +90,19 @@ export const startCallbackServer = (
     const readyDeferred = yield* Deferred.make<void, OAuthError>()
     const scope = yield* Effect.scope
 
-    const buildServer = (port: number): Effect.Effect<HttpServerInstance, OAuthError> =>
+    const buildServer = (port: number): Effect.Effect<HttpServerInstance, HttpServerError.ServeError> =>
       Layer.build(factory.createServerLayer(port)).pipe(
         Scope.provide(scope),
         Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
         Effect.catchIf(
           (error) => isAddressInUse(error) && port < MAX_PORT,
           () => buildServer(port + 1)
-        ),
-        Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+        )
       )
 
-    const server = yield* buildServer(DEFAULT_PORT)
+    const server = yield* buildServer(DEFAULT_PORT).pipe(
+      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+    )
 
     if (server.address._tag !== "TcpAddress") {
       return yield* Effect.fail(

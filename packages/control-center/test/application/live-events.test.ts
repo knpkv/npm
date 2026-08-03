@@ -130,8 +130,10 @@ const collectAfterWakeTermination = (
         Effect.provideService(PortfolioSnapshots, portfolio)
       )
       const loggedCauses: Array<Cause.Cause<unknown>> = []
+      const loggedMessages: Array<unknown> = []
       const logger = Logger.make<unknown, void>((entry) => {
         loggedCauses.push(entry.cause)
+        loggedMessages.push(entry.message)
       })
       const frames = yield* events.open({
         workspaceId: WORKSPACE_ID,
@@ -143,6 +145,7 @@ const collectAfterWakeTermination = (
       return {
         frames,
         loggedCauses,
+        loggedMessages,
         pageAfterCalls: yield* Ref.get(pageAfterCalls)
       }
     }),
@@ -330,6 +333,8 @@ describe("durable live events", () => {
       const defect = Cause.findDie(result.loggedCauses[0] ?? Cause.empty)
       assert.isTrue(Result.isSuccess(defect))
       if (Result.isSuccess(defect)) assert.strictEqual(defect.success.defect, "wake subscription defect")
+      assert.include(String(result.loggedMessages[0]), "live event stream after terminal failure")
+      assert.notInclude(String(result.loggedMessages[0]), "durable replay failure")
       assert.strictEqual(result.pageAfterCalls, 1)
     }))
 

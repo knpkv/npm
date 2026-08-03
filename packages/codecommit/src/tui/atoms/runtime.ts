@@ -1,21 +1,14 @@
 import { BunServices } from "@effect/platform-bun"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
-import type { Scope } from "effect"
-import { Context, Effect, Layer } from "effect"
+import { Layer } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Atom from "effect/unstable/reactivity/Atom"
+import { tuiApplicationScopeLayer } from "./applicationScope.js"
 
 // Leaf layers — fully closed (R = never)
 const EventsHubLive = CacheService.EventsHub.Default
 
-export class TuiApplicationScope extends Context.Service<TuiApplicationScope, Scope.Scope>()(
-  "@knpkv/codecommit/TuiApplicationScope"
-) {}
-
-const TuiApplicationScopeLive = Layer.effect(
-  TuiApplicationScope,
-  Effect.map(Effect.scope, TuiApplicationScope.of)
-)
+export { TuiApplicationScope } from "./applicationScope.js"
 
 const AwsLive = AwsClient.AwsClientLive.pipe(
   Layer.provide(FetchHttpClient.layer),
@@ -45,13 +38,14 @@ const PRLayer = PRService.PRServiceLive.pipe(
 )
 
 // Expose PRService + repos + EventsHub + AwsClient for atoms
-const MainLayer = Layer.mergeAll(PRLayer, ReposLive, EventsHubLive, AwsLive, TuiApplicationScopeLive)
+const MainLayer = (get: Atom.AtomContext) =>
+  Layer.mergeAll(PRLayer, ReposLive, EventsHubLive, AwsLive, tuiApplicationScopeLayer(get))
 
 // Merge BunServices into output for child process actions.
-const AppLayer = MainLayer.pipe(Layer.provideMerge(BunServices.layer))
+const AppLayer = (get: Atom.AtomContext) => MainLayer(get).pipe(Layer.provideMerge(BunServices.layer))
 
 /**
  * Runtime atom providing Effect services to other atoms
  * @category atoms
  */
-export const runtimeAtom = Atom.runtime(AppLayer)
+export const runtimeAtom = Atom.runtime((get) => AppLayer(get))

@@ -2,7 +2,17 @@ import { ESLint } from "eslint"
 import { fileURLToPath, URL } from "node:url"
 import fixture from "./fixtures/eslint/invalid-component.mjs"
 
-const eslint = new ESLint()
+const eslint = new ESLint({
+  errorOnUnmatchedPattern: false,
+  overrideConfig: [
+    {
+      files: ["scripts/**/*.mjs"],
+      rules: {
+        "local-rules/no-unowned-detached-fiber": "error"
+      }
+    }
+  ]
+})
 const fixturePaths = ["packages/codecommit-web/src/invalid-component.tsx", "packages/rly/src/invalid-component.tsx"]
 
 for (const filePath of fixturePaths) {
@@ -33,7 +43,11 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
   }
 }
 
-const detachedMjsResults = await eslint.lintFiles(["packages/*/scripts/**/*.mjs"])
+const detachedMjsResults = await eslint.lintFiles([
+  "scripts/**/*.mjs",
+  "packages/*/src/**/*.mjs",
+  "packages/*/scripts/**/*.mjs"
+])
 const detachedMjsViolations = detachedMjsResults.flatMap((result) =>
   result.messages
     .filter((message) => message.ruleId === "local-rules/no-unowned-detached-fiber")
@@ -1954,6 +1968,26 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import * as Fx from "effect/Effect"
+    program.pipe(Fx.forkDetach)
+  `,
+  expected: 1,
+  filePath: "scripts/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
     import * as Root from "effect"
     Fx.forkScoped(program)
     Fx.forkIn(program, applicationScope)
@@ -2091,8 +2125,10 @@ await assertRuleDiagnostics({
     Effect.map(content, (text) =>
       Effect.try({ try: () => JSON.parse(text), catch: String })
     )
-    const JSON = { parse: safeParser }
-    Effect.map(content, (text) => JSON.parse(text))
+    {
+      const JSON = { parse: safeParser }
+      Effect.map(content, (text) => JSON.parse(text))
+    }
     localEffect.map(content, (text) => globalThis.JSON.parse(text))
   `,
   expected: 0,

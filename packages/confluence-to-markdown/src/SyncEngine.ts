@@ -33,6 +33,7 @@ import { resolveMediaAttachmentReferences, resolveMediaAttachmentUrls } from "./
 import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { UserCache } from "./internal/userCache.js"
+import { lookupUserForSync } from "./internal/userLookup.js"
 import { LocalFileSystem } from "./LocalFileSystem.js"
 import { MarkdownConverter } from "./MarkdownConverter.js"
 import type { AtlassianUser, PageFrontMatter, PageListItem, PageResponse, PageVersionContent } from "./Schemas.js"
@@ -448,10 +449,8 @@ export const layer: Layer.Layer<
     /**
      * Get user info with caching.
      */
-    const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
-      userCache.get(accountId).pipe(
-        Effect.catch(() => Effect.succeed(undefined))
-      )
+    const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined> =>
+      lookupUserForSync(userCache, accountId)
 
     /**
      * Convert version content to markdown and front-matter.

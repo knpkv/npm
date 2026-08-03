@@ -28,6 +28,10 @@ export const autoRefreshLayer = Layer.effectDiscard(
       "Auto-refresh failed",
       Duration.seconds(10)
     )
+    const recoverRefreshIterationFailure = continueAfterNonInterruptFailure(
+      "Auto-refresh iteration failed",
+      Duration.seconds(10)
+    )
 
     const refresh = (successMessage: string) =>
       prService.refresh.pipe(
@@ -45,7 +49,7 @@ export const autoRefreshLayer = Layer.effectDiscard(
       } else {
         yield* Effect.sleep(Duration.seconds(30))
       }
-    })
+    }).pipe(recoverRefreshIterationFailure)
 
     yield* Effect.forkScoped(
       Effect.gen(function*() {

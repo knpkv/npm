@@ -178,7 +178,7 @@ export const makeLiveEvents = Effect.gen(function*() {
           Cause.hasInterrupts(cause)
             ? Stream.failCause(Cause.fromReasons(cause.reasons.filter(Cause.isInterruptReason)))
             : Stream.fromEffect(
-              Effect.logWarning("Closing Control Center live event stream after durable replay failure", cause)
+              Effect.logWarning("Closing Control Center live event stream after terminal failure", cause)
             ).pipe(Stream.drain)
         )
       )

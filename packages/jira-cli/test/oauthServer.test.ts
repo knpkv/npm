@@ -1,17 +1,27 @@
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import { HttpServer, HttpServerError } from "effect/unstable/http"
-import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
+import { createServer } from "node:http"
 import { makeHttpServerFactory, startCallbackServer } from "../src/internal/oauthServer.js"
+
+const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
+  () => NodeHttpServer.layerServer(createServer, { port: 0 })
+)
+const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
+  HttpServer.make({
+    address: { _tag: "TcpAddress", hostname: "127.0.0.1", port },
+    serve: () => Effect.void
+  })
 
 describe("oauth callback server lifecycle", () => {
   it.effect("releases the port when authorization exits before receiving a code", () =>
     Effect.gen(function*() {
       yield* Effect.scoped(
         startCallbackServer("first").pipe(
-          Effect.provide(HttpServerFactoryLive),
+          Effect.provide(EphemeralHttpServerFactoryLive),
           Effect.andThen(Effect.fail("browser-open-failed")),
           Effect.flip
         )
@@ -19,22 +29,49 @@ describe("oauth callback server lifecycle", () => {
 
       const port = yield* Effect.scoped(
         startCallbackServer("second").pipe(
-          Effect.provide(HttpServerFactoryLive),
+          Effect.provide(EphemeralHttpServerFactoryLive),
           Effect.map((server) => server.port)
         )
       )
-      expect(port).toBe(8585)
+      expect(port).toBeGreaterThan(0)
     }))
 
-  it.effect("retries an occupied callback port within the owning scope", () =>
+  it.effect("starts concurrent real callback servers on distinct OS-assigned ports", () =>
     Effect.scoped(
       Effect.gen(function*() {
-        const first = yield* startCallbackServer("first")
-        const second = yield* startCallbackServer("second")
-        expect(first.port).toBe(8585)
-        expect(second.port).toBe(8586)
-      }).pipe(Effect.provide(HttpServerFactoryLive))
+        const [first, second] = yield* Effect.all(
+          [startCallbackServer("first"), startCallbackServer("second")],
+          { concurrency: "unbounded" }
+        )
+        expect(first.port).toBeGreaterThan(0)
+        expect(second.port).toBeGreaterThan(0)
+        expect(first.port).not.toBe(second.port)
+      }).pipe(Effect.provide(EphemeralHttpServerFactoryLive))
     ))
+
+  it.effect("retries occupied fixed-range ports with the injected factory", () => {
+    const attempts = Ref.makeUnsafe<ReadonlyArray<number>>([])
+    const occupiedFactory = makeHttpServerFactory((port) =>
+      Layer.effect(
+        HttpServer.HttpServer,
+        Ref.update(attempts, (ports) => [...ports, port]).pipe(
+          Effect.andThen(
+            port < 8587
+              ? Effect.fail(new HttpServerError.ServeError({ cause: { code: "EADDRINUSE" } }))
+              : Effect.succeed(fakeHttpServer(port))
+          )
+        )
+      )
+    )
+
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const server = yield* startCallbackServer("state")
+        expect(server.port).toBe(8587)
+        expect(yield* Ref.get(attempts)).toEqual([8585, 8586, 8587])
+      }).pipe(Effect.provide(occupiedFactory))
+    )
+  })
 
   it.effect("does not retry a non-address-in-use server failure", () => {
     const attempts = Ref.makeUnsafe(0)

@@ -37,6 +37,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - name: Verify checkout credentials were not persisted
+        shell: bash
+        run: |
+          if git config --local --get-regexp '^http\..*\.extraheader$'; then
+            echo "actions/checkout persisted an HTTP authorization header"
+            exit 1
+          fi
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:

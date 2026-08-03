@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { classifyVisualChanges } from "./classify-changes.js"
-import { ensureBoundedGitOutput, recoverVisualGitFailure, VisualGitError } from "./classify-git-changes-effect.js"
+import { collectBoundedGitProcess, recoverVisualGitFailure, VisualGitError } from "./classify-git-changes-effect.js"
 import { parseGitNameStatus } from "./git-changes.js"
 
 const VisualCatalogJson = Schema.fromJsonString(Schema.Struct({
@@ -46,9 +46,16 @@ const program = Effect.gen(function*() {
   const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
   const workspaceRoot = path.dirname(path.dirname(packageRoot))
   const runGit = (gitArgs: ReadonlyArray<string>) =>
-    spawner.string(ChildProcess.make("git", gitArgs, { cwd: workspaceRoot })).pipe(
-      Effect.mapError(() => new VisualGitError({ reason: "Git command failed" })),
-      Effect.flatMap(ensureBoundedGitOutput)
+    Effect.scoped(
+      spawner.spawn(ChildProcess.make("git", gitArgs, {
+        cwd: workspaceRoot,
+        forceKillAfter: "2 seconds",
+        stderr: "pipe",
+        stdout: "pipe"
+      })).pipe(
+        Effect.mapError(() => new VisualGitError({ reason: "Git command failed" })),
+        Effect.flatMap(collectBoundedGitProcess)
+      )
     )
   const resolveRef = (ref: string) =>
     runGit(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).pipe(

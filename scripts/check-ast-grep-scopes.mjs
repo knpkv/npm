@@ -1,5 +1,6 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -12,6 +13,14 @@ import { URL } from "node:url"
 
 const suppression = "ast-grep-ignore: no-unowned-detached-fiber"
 const eslintSuppression = "eslint-disable-line local-rules/no-unowned-detached-fiber"
+const processCollectionTimeout = "2 minutes"
+const stderrDetails = (stderr) => {
+  const trimmed = stderr.trim()
+  if (trimmed === "") return ""
+  const excerpt = trimmed.length <= 2_000 ? trimmed : `${trimmed.slice(0, 2_000)}\n...[stderr truncated]`
+  return `\nstderr:\n${excerpt}`
+}
+const failureWithStderr = (reason, stderr) => `${reason}${stderrDetails(stderr)}`
 
 class AstGrepScopeCheckError extends Data.TaggedError("AstGrepScopeCheckError") {
   get message() {
@@ -62,48 +71,95 @@ const program = Effect.gen(function* () {
     )
   }
 
-  const scan = Effect.fn("AstGrepScopeCheck.scan")(function* (input) {
-    const handle = yield* spawner
-      .spawn(
-        ChildProcess.make(astGrep, ["scan", "--stdin", "--rule", detachedFiberRule, "--json=compact"], {
-          cwd: workspaceRoot,
-          stdin: {
-            endOnDone: true,
-            stream: Stream.make(input).pipe(Stream.encodeText)
-          }
-        })
-      )
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new AstGrepScopeCheckError({
-              cause,
-              reason: "Could not start ast-grep scope fixture"
-            })
+  const collectProcess = Effect.fn("AstGrepScopeCheck.collectProcess")(function* (command, timeout, label) {
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(command).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AstGrepScopeCheckError({
+                cause,
+                reason: `Could not start ${label}`
+              })
+          )
         )
+        return yield* Effect.all(
+          {
+            status: handle.exitCode,
+            stderr: Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+            stdout: Stream.decodeText(handle.stdout).pipe(Stream.mkString)
+          },
+          { concurrency: "unbounded" }
+        ).pipe(
+          Effect.timeout(timeout),
+          Effect.mapError(
+            (cause) =>
+              new AstGrepScopeCheckError({
+                cause,
+                reason: `Could not collect ${label} within ${timeout}`
+              })
+          )
+        )
+      })
+    )
+  })
+
+  const stderrFixture = "x".repeat(262_144)
+  const stderrFixtureProgram = [
+    `process.stderr.write("x".repeat(${stderrFixture.length}))`,
+    `process.stdout.write("fixture-stdout")`,
+    `process.exitCode = 7`
+  ].join("; ")
+  const collectionFixture = yield* collectProcess(
+    ChildProcess.make("node", ["-e", stderrFixtureProgram]),
+    processCollectionTimeout,
+    "child-process collection fixture"
+  )
+  if (
+    collectionFixture.status !== ChildProcessSpawner.ExitCode(7) ||
+    collectionFixture.stdout !== "fixture-stdout" ||
+    collectionFixture.stderr !== stderrFixture ||
+    !`fixture failed${stderrDetails(collectionFixture.stderr)}`.includes("stderr:")
+  ) {
+    return yield* fail(
+      failureWithStderr(
+        "The child-process collector must concurrently drain stdout and stderr and retain stderr for failures",
+        collectionFixture.stderr
       )
-    const [stdout, status] = yield* Effect.all(
-      [Stream.decodeText(handle.stdout).pipe(Stream.mkString), handle.exitCode],
-      { concurrency: "unbounded" }
-    ).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AstGrepScopeCheckError({
-            cause,
-            reason: "Could not collect ast-grep scope fixture result"
-          })
-      )
+    )
+  }
+
+  const timeoutFixture = yield* collectProcess(
+    ChildProcess.make("node", ["-e", "setTimeout(() => {}, 10_000)"]),
+    "25 millis",
+    "child-process timeout fixture"
+  ).pipe(Effect.flip)
+  if (!Cause.isTimeoutError(timeoutFixture.cause)) {
+    return yield* fail("The child-process collector must interrupt overall collection when its timeout expires")
+  }
+
+  const scan = Effect.fn("AstGrepScopeCheck.scan")(function* (input) {
+    const { status, stderr, stdout } = yield* collectProcess(
+      ChildProcess.make(astGrep, ["scan", "--stdin", "--rule", detachedFiberRule, "--json=compact"], {
+        cwd: workspaceRoot,
+        stdin: {
+          endOnDone: true,
+          stream: Stream.make(input).pipe(Stream.encodeText)
+        }
+      }),
+      processCollectionTimeout,
+      "ast-grep scope fixture"
     )
     const findings = yield* Schema.decodeUnknownEffect(AstGrepFindingsJson)(stdout).pipe(
       Effect.mapError(
         (cause) =>
           new AstGrepScopeCheckError({
             cause,
-            reason: "ast-grep scope fixture returned malformed JSON"
+            reason: `ast-grep scope fixture returned malformed JSON${stderrDetails(stderr)}`
           })
       )
     )
-    return { findings, status }
+    return { findings, status, stderr }
   })
 
   const withoutSuppressionTokens = (input) => input.replaceAll(suppression, "").replaceAll(eslintSuppression, "")
@@ -129,7 +185,10 @@ const program = Effect.gen(function* () {
     !actualDetachedCalls.findings[0]?.lines.includes("runDrainHooks.pipe(Effect.forkDetach)")
   ) {
     return yield* fail(
-      `ServerLifecycle's audited suppression line must contain exactly one canonical detached fiber; found ${actualDetachedCalls.findings.length}`
+      failureWithStderr(
+        `ServerLifecycle's audited suppression line must contain exactly one canonical detached fiber; found ${actualDetachedCalls.findings.length}`,
+        actualDetachedCalls.stderr
+      )
     )
   }
   const actualEslintDetachedCalls = yield* scanDetachedWithEslint(sourceWithoutSuppressions)
@@ -148,7 +207,12 @@ const program = Effect.gen(function* () {
 const audited = runDrainHooks.pipe(Effect.forkDetach) // ${suppression}
 `)
   if (auditedOnly.status !== ChildProcessSpawner.ExitCode(0) || auditedOnly.findings.length !== 0) {
-    return yield* fail("The audited detached lifecycle drain suppression is not line-scoped and effective")
+    return yield* fail(
+      failureWithStderr(
+        "The audited detached lifecycle drain suppression is not line-scoped and effective",
+        auditedOnly.stderr
+      )
+    )
   }
 
   const withSecondDetach = yield* scan(`
@@ -160,7 +224,12 @@ const leaked = anotherWorker.pipe(Effect.forkDetach)
     withSecondDetach.findings.length !== 1 ||
     withSecondDetach.findings[0]?.lines !== "const leaked = anotherWorker.pipe(Effect.forkDetach)"
   ) {
-    return yield* fail("A second detached fiber beside the audited lifecycle drain must fail the ast-grep scan")
+    return yield* fail(
+      failureWithStderr(
+        "A second detached fiber beside the audited lifecycle drain must fail the ast-grep scan",
+        withSecondDetach.stderr
+      )
+    )
   }
 
   const sameLineSecondDetach = yield* scan(
@@ -169,7 +238,12 @@ const audited = runDrainHooks.pipe(Effect.forkDetach); const leaked = anotherWor
 `)
   )
   if (sameLineSecondDetach.status !== ChildProcessSpawner.ExitCode(1) || sameLineSecondDetach.findings.length !== 2) {
-    return yield* fail("A second detached fiber on the audited suppression line must fail the scope contract")
+    return yield* fail(
+      failureWithStderr(
+        "A second detached fiber on the audited suppression line must fail the scope contract",
+        sameLineSecondDetach.stderr
+      )
+    )
   }
 
   const sameLineAliasDetach = yield* scanDetachedWithEslint(

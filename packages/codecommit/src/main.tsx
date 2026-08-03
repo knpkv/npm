@@ -1,7 +1,9 @@
+import { RegistryContext } from "@effect/atom-react"
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { Deferred, Effect } from "effect"
 import { App } from "./tui/App.js"
+import { makeTuiApplicationRegistry } from "./tui/atoms/applicationScope.js"
 import { cleanup } from "./tui/atoms/app.js"
 
 const escape = "\u001b"
@@ -30,6 +32,10 @@ const program = Effect.gen(function* makeProgram() {
     ),
     (renderer) => Effect.sync(() => renderer.destroy())
   )
+  const registry = yield* Effect.acquireRelease(
+    Effect.sync(() => makeTuiApplicationRegistry(ownerScope)),
+    (registry) => Effect.sync(() => registry.dispose())
+  )
 
   const onQuit = () => {
     // Abort pending HTTP requests
@@ -46,8 +52,17 @@ const program = Effect.gen(function* makeProgram() {
   }
 
   // Mount React app
-  const root = createRoot(renderer)
-  root.render(<App onQuit={onQuit} />)
+  const root = yield* Effect.acquireRelease(
+    Effect.sync(() => createRoot(renderer)),
+    (root) => Effect.sync(() => root.unmount())
+  )
+  yield* Effect.sync(() =>
+    root.render(
+      <RegistryContext.Provider value={registry}>
+        <App onQuit={onQuit} />
+      </RegistryContext.Provider>
+    )
+  )
 
   // Keep the process alive until quit
   yield* Deferred.await(exitSignal)
