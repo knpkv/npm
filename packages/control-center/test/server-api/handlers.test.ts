@@ -123,7 +123,10 @@ import {
   ClockifyActionSubmissionError,
   ClockifyActionSubmissions
 } from "../../src/server/application/clockifyActionSubmissions.js"
-import { ReleasePublicationSubmissions } from "../../src/server/application/releasePublicationSubmissions.js"
+import {
+  ReleasePublicationSubmissionError,
+  ReleasePublicationSubmissions
+} from "../../src/server/application/releasePublicationSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -2584,6 +2587,60 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(yield* Ref.get(succeededSubmissions), 1)
       assert.include(recovered.reply, `actionId=${actionId}`)
       assert.include(recovered.reply, "state=succeeded")
+    }))
+
+  it.effect("preserves release-publication conflict and unavailable errors in agent turns", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const attempt = (reason: ReleasePublicationSubmissionError["reason"]) => {
+        const handler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: () => Effect.fail(new ReleasePublicationSubmissionError({ reason }))
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: () => Effect.die("failed publication reached generation")
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Confluence release page", provider: "codex" }
+          }).pipe(Effect.result)
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ]))
+      }
+
+      const conflict = yield* attempt("conflict")
+      assert.isTrue(Result.isFailure(conflict))
+      if (Result.isFailure(conflict)) {
+        assert.strictEqual(conflict.failure._tag, "ConflictApiError")
+      }
+
+      const unavailable = yield* attempt("unavailable")
+      assert.isTrue(Result.isFailure(unavailable))
+      if (Result.isFailure(unavailable)) {
+        assert.strictEqual(unavailable.failure._tag, "ServiceUnavailableApiError")
+      }
     }))
 
   it.effect("admits release turns only before server drain", () =>

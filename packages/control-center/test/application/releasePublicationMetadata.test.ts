@@ -63,6 +63,21 @@ describe("release publication metadata", () => {
     assert.strictEqual(initial, synchronizedAgain)
   })
 
+  it("canonicalizes source order independently of locale-sensitive revision text", async () => {
+    const forward = await Effect.runPromise(
+      digestReleaseSourceRevisions([sourceRevision("ä"), sourceRevision("z")]).pipe(
+        Effect.provide(NodeCrypto.layer)
+      )
+    )
+    const reversed = await Effect.runPromise(
+      digestReleaseSourceRevisions([sourceRevision("z"), sourceRevision("ä")]).pipe(
+        Effect.provide(NodeCrypto.layer)
+      )
+    )
+
+    assert.strictEqual(forward, reversed)
+  })
+
   it("binds a Confluence update to the exact latest successful release-page receipt", () => {
     const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000103")
     const otherReleaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000104")

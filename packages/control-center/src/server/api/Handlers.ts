@@ -1253,7 +1253,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                     useReleaseIdentity: true
                   }).pipe(Effect.catchTag(
                     "ReleasePublicationSubmissionError",
-                    () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+                    mapReleasePublicationSubmissionError
                   ))
                   return `provider=${publicationIntent.provider}; state=${result.state}; actionId=${result.actionId}`
                 })

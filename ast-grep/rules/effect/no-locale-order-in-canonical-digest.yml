@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-locale-order-in-canonical-digest
+language: tsx
+severity: error
+message: "Use code-point ordering instead of localeCompare in canonical digest material"
+
+rule:
+  pattern: $LEFT.localeCompare($RIGHT)
+  inside:
+    pattern: $VALUES.sort($COMPARATOR)
+    stopBy: end
+
+files:
+  - "packages/control-center/src/server/application/**/*Metadata.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Canonical digest ordering must be identical across hosts and ICU locales.
+  Serialize each comparison key once and compare it with explicit `<` / `>`.

@@ -1,0 +1,11 @@
+id: no-locale-order-in-canonical-digest
+valid:
+  - |
+    values.sort((left, right) => {
+      const leftJson = JSON.stringify(left)
+      const rightJson = JSON.stringify(right)
+      return leftJson < rightJson ? -1 : leftJson > rightJson ? 1 : 0
+    })
+invalid:
+  - |
+    values.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))

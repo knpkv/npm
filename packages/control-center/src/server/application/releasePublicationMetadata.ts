@@ -104,7 +104,11 @@ export const digestReleaseSourceRevisions = Effect.fn("ReleasePublicationMetadat
         revision: sourceRevision.revision,
         vendorImmutableId: sourceRevision.vendorImmutableId
       }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      .sort((left, right) => {
+        const leftJson = JSON.stringify(left)
+        const rightJson = JSON.stringify(right)
+        return leftJson < rightJson ? -1 : leftJson > rightJson ? 1 : 0
+      })
     const json = yield* Schema.decodeUnknownEffect(Schema.Json)(stableRevisions)
     const digest = yield* digestCanonicalGovernedActionJson(json)
     return GovernedActionEnvelopeDigest.make(`sha256:${digest}`)

@@ -843,6 +843,7 @@ const turn = HttpApiEndpoint.post("turn", "/releases/:releaseId/turns", {
     InvalidRequestApiError,
     UnauthorizedApiError,
     ForbiddenApiError,
+    ConflictApiError,
     NotFoundApiError,
     RequestTimedOutApiError,
     RateLimitedApiError,
