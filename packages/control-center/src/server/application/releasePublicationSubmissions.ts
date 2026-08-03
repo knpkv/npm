@@ -191,15 +191,14 @@ const makeService = Effect.gen(function*() {
     if (sources.length > 1) return yield* failure("conflict")
     const releaseSource = sources[0]
     let publicationReceiptConnectionId: PluginConnectionId | undefined
+    let confluenceHistoryMatches = true
     if (input.request.provider === "confluence") {
       const publicationHistory = yield* loadConfluenceReleasePublicationHistory(
         persistence.governedActions,
         input.workspaceId,
         input.releaseId
       ).pipe(mapFailure)
-      if (!confluencePublicationRequestMatchesHistory(input.request, publicationHistory)) {
-        return yield* failure("conflict")
-      }
+      confluenceHistoryMatches = confluencePublicationRequestMatchesHistory(input.request, publicationHistory)
       publicationReceiptConnectionId = publicationHistory.latestReference?.pluginConnectionId
     }
     const workspaceConnections = releaseSource === undefined && publicationReceiptConnectionId === undefined
@@ -347,6 +346,7 @@ const makeService = Effect.gen(function*() {
       }).pipe(mapFailure)
       return { actionId: record.envelope.actionId, state: record.head.state }
     }
+    if (!confluenceHistoryMatches) return yield* failure("conflict")
 
     const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
 

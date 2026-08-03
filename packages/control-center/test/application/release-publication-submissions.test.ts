@@ -38,6 +38,30 @@ describe("release publication submissions", () => {
     }))
   })
 
+  it("allows Confluence updates only when the page identity and version match history", () => {
+    const history = {
+      hasBlockingPublication: true,
+      latestReference: {
+        pageId: "42",
+        pageVersion: 2,
+        pluginConnectionId: PLUGIN_CONNECTION_ID,
+        publishedAt: PUBLISHED_AT
+      }
+    }
+    assert.isTrue(confluencePublicationRequestMatchesHistory({
+      pageId: "42",
+      expectedVersion: 2
+    }, history))
+    assert.isFalse(confluencePublicationRequestMatchesHistory({
+      pageId: "99",
+      expectedVersion: 2
+    }, history))
+    assert.isFalse(confluencePublicationRequestMatchesHistory({
+      pageId: "42",
+      expectedVersion: 3
+    }, history))
+  })
+
   it.effect("uses one indexed release-history read for a Confluence update target", () =>
     Effect.gen(function*() {
       const calls: Array<GovernedActionReleasePublicationReadInput> = []

@@ -32,11 +32,11 @@ const resourceKind = (providerId: ProviderId): string => {
   }
 }
 
-const atlassianProvidersForAccount = (account: ProviderAccountSummary): AtlassianOAuthProviderIntent => {
+const atlassianProvidersForAccount = (account: ProviderAccountSummary): AtlassianOAuthProviderIntent | undefined => {
   const providers: Array<"jira" | "confluence"> = []
   if (account.resources.some(({ providerId }) => providerId === "jira")) providers.push("jira")
   if (account.resources.some(({ providerId }) => providerId === "confluence")) providers.push("confluence")
-  return providers
+  return providers.length === 0 ? undefined : providers
 }
 
 const resourceSummaryContent = (
@@ -84,7 +84,7 @@ const ConnectedProviderResource = ({
   synchronizationState,
   testState
 }: {
-  readonly atlassianOAuthProviders: AtlassianOAuthProviderIntent
+  readonly atlassianOAuthProviders?: AtlassianOAuthProviderIntent
   readonly canConfigure: boolean
   readonly connection: PluginConnectionSummary
   readonly enablementState: ConnectionEnablementState | undefined
@@ -129,7 +129,7 @@ const ConnectedProviderResource = ({
           state={synchronizationState}
         />
         <ConnectionAdministration
-          atlassianOAuthProviders={atlassianOAuthProviders}
+          {...(atlassianOAuthProviders === undefined ? {} : { atlassianOAuthProviders })}
           canConfigure={canConfigure}
           onReauthorize={(credentials) => onReauthorize(connection.pluginConnectionId, credentials)}
           onRevoke={() => onRevoke(connection.pluginConnectionId)}
@@ -301,9 +301,10 @@ export const ProviderAccountCard = ({
               </div>
             )
           }
+          const atlassianOAuthProviders = atlassianProvidersForAccount(account)
           return (
             <ConnectedProviderResource
-              atlassianOAuthProviders={atlassianProvidersForAccount(account)}
+              {...(atlassianOAuthProviders === undefined ? {} : { atlassianOAuthProviders })}
               canConfigure={canConfigure}
               connection={connection}
               administrationState={administrationStates.get(connection.pluginConnectionId)}
