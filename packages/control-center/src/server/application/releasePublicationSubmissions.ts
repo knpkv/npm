@@ -51,6 +51,7 @@ import {
   digestReleaseSourceRevisions,
   latestConfluencePublicationReference,
   matchesConfluencePublicationReference,
+  releasePublicationReceiptCandidatesFromRecords,
   releasePublicationTargetEntityId,
   selectReleasePublicationConnection
 } from "./releasePublicationMetadata.js"
@@ -60,9 +61,30 @@ export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<R
   { reason: Schema.Literals(["unauthorized", "conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}
 
-/** Resolve one release update target through the bounded indexed publication projection. */
-export const loadLatestConfluenceReleasePublication = Effect.fn(
-  "ReleasePublicationSubmissions.loadLatestConfluenceReleasePublication"
+export interface ConfluenceReleasePublicationHistory {
+  readonly hasSuccessfulPublication: boolean
+  readonly latestReference: ReturnType<typeof latestConfluencePublicationReference>
+}
+
+/** Require creates to have no history and updates to match the exact latest durable receipt. */
+export const confluencePublicationRequestMatchesHistory = (
+  request: Pick<SubmitReleasePublicationRequest, "expectedVersion" | "pageId">,
+  history: ConfluenceReleasePublicationHistory
+): boolean => {
+  const hasPageId = request.pageId !== undefined
+  const hasExpectedVersion = request.expectedVersion !== undefined
+  if (hasPageId !== hasExpectedVersion) return false
+  return request.pageId === undefined || request.expectedVersion === undefined
+    ? !history.hasSuccessfulPublication
+    : matchesConfluencePublicationReference(history.latestReference, {
+      pageId: request.pageId,
+      pageVersion: request.expectedVersion
+    })
+}
+
+/** Load enough indexed history to distinguish never-published from malformed successful receipts. */
+export const loadConfluenceReleasePublicationHistory = Effect.fn(
+  "ReleasePublicationSubmissions.loadConfluenceReleasePublicationHistory"
 )(function*(
   history: Pick<
     PersistenceService["governedActions"],
@@ -76,18 +98,27 @@ export const loadLatestConfluenceReleasePublication = Effect.fn(
     providerId: "confluence",
     releaseIds: [releaseId]
   })
-  const candidates = records.flatMap((record) => {
-    const publication = record.envelope.releasePublication
-    return publication === undefined || record.head.lineage._tag !== "terminal"
-      ? []
-      : [{
-        releaseId: publication.releaseId,
-        pluginConnectionId: record.envelope.pluginConnectionId,
-        occurredAt: record.headTransition.occurredAt,
-        providerOperationId: record.head.lineage.receipt.providerOperationId
-      }]
-  })
-  return latestConfluencePublicationReference(candidates, releaseId)
+  return {
+    hasSuccessfulPublication: records.length > 0,
+    latestReference: latestConfluencePublicationReference(
+      releasePublicationReceiptCandidatesFromRecords(records),
+      releaseId
+    )
+  }
+})
+
+/** Resolve one release update target through the bounded indexed publication projection. */
+export const loadLatestConfluenceReleasePublication = Effect.fn(
+  "ReleasePublicationSubmissions.loadLatestConfluenceReleasePublication"
+)(function*(
+  history: Pick<
+    PersistenceService["governedActions"],
+    "readLatestTerminalReleasePublications"
+  >,
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId
+) {
+  return (yield* loadConfluenceReleasePublicationHistory(history, workspaceId, releaseId)).latestReference
 })
 
 interface SubmitInput {
@@ -154,24 +185,16 @@ const makeService = Effect.gen(function*() {
     if (sources.length > 1) return yield* failure("conflict")
     const releaseSource = sources[0]
     let publicationReceiptConnectionId: PluginConnectionId | undefined
-    if (
-      input.request.provider === "confluence" &&
-      input.request.pageId !== undefined &&
-      input.request.expectedVersion !== undefined
-    ) {
-      const published = yield* loadLatestConfluenceReleasePublication(
+    if (input.request.provider === "confluence") {
+      const publicationHistory = yield* loadConfluenceReleasePublicationHistory(
         persistence.governedActions,
         input.workspaceId,
         input.releaseId
       ).pipe(mapFailure)
-      if (
-        published === null ||
-        !matchesConfluencePublicationReference(published, {
-          pageId: input.request.pageId,
-          pageVersion: input.request.expectedVersion
-        })
-      ) return yield* failure("conflict")
-      publicationReceiptConnectionId = published.pluginConnectionId
+      if (!confluencePublicationRequestMatchesHistory(input.request, publicationHistory)) {
+        return yield* failure("conflict")
+      }
+      publicationReceiptConnectionId = publicationHistory.latestReference?.pluginConnectionId
     }
     const workspaceConnections = releaseSource === undefined && publicationReceiptConnectionId === undefined
       ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)

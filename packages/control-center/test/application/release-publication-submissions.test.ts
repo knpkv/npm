@@ -2,16 +2,42 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { loadLatestConfluenceReleasePublication } from "../../src/server/application/releasePublicationSubmissions.js"
+import { PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import {
+  confluencePublicationRequestMatchesHistory,
+  loadLatestConfluenceReleasePublication
+} from "../../src/server/application/releasePublicationSubmissions.js"
 import {
   GovernedActionReleasePublicationReadInput
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-520000000001")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-520000000002")
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-520000000003")
+const PUBLISHED_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-08-03T08:00:00.000Z")
 
 describe("release publication submissions", () => {
+  it("allows Confluence creation only when indexed history proves the release was never published", () => {
+    assert.isTrue(confluencePublicationRequestMatchesHistory({}, {
+      hasSuccessfulPublication: false,
+      latestReference: null
+    }))
+    assert.isFalse(confluencePublicationRequestMatchesHistory({}, {
+      hasSuccessfulPublication: true,
+      latestReference: {
+        pageId: "42",
+        pageVersion: 2,
+        pluginConnectionId: PLUGIN_CONNECTION_ID,
+        publishedAt: PUBLISHED_AT
+      }
+    }))
+    assert.isFalse(confluencePublicationRequestMatchesHistory({}, {
+      hasSuccessfulPublication: true,
+      latestReference: null
+    }))
+  })
+
   it.effect("uses one indexed release-history read for a Confluence update target", () =>
     Effect.gen(function*() {
       const calls: Array<GovernedActionReleasePublicationReadInput> = []

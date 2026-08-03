@@ -21,7 +21,8 @@ import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/rep
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
 import {
   latestConfluencePublicationReference,
-  type ReleasePublicationReceiptCandidate
+  type ReleasePublicationReceiptCandidate,
+  releasePublicationReceiptCandidatesFromRecords
 } from "./releasePublicationMetadata.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
@@ -143,17 +144,7 @@ const releasePageAwareness = (
 ): PortfolioReleasePageAwareness =>
   classifyReleasePublicationAwareness(
     release,
-    records.flatMap((record) => {
-      const publication = record.envelope.releasePublication
-      return publication === undefined || record.head.lineage._tag !== "terminal"
-        ? []
-        : [{
-          releaseId: publication.releaseId,
-          pluginConnectionId: record.envelope.pluginConnectionId,
-          occurredAt: record.headTransition.occurredAt,
-          providerOperationId: record.head.lineage.receipt.providerOperationId
-        }]
-    })
+    releasePublicationReceiptCandidatesFromRecords(records)
   )
 
 /**

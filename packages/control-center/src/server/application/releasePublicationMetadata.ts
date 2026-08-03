@@ -8,6 +8,7 @@ import { EntityId, type PluginConnectionId, type ReleaseId } from "../../domain/
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { digestCanonicalGovernedActionJson } from "../governance/governedActionDigests.js"
+import type { GovernedActionRecord } from "../persistence/repositories/governed-action/contract.js"
 
 export interface ReleasePublicationReceiptCandidate {
   readonly releaseId: ReleaseId
@@ -30,6 +31,22 @@ export type ReleasePublicationConnectionSelection =
   | { readonly _tag: "selected"; readonly pluginConnectionId: PluginConnectionId }
   | { readonly _tag: "ambiguous" }
   | { readonly _tag: "missing" }
+
+/** Extract successful release-publication receipts from the shared durable record shape. */
+export const releasePublicationReceiptCandidatesFromRecords = (
+  records: ReadonlyArray<GovernedActionRecord>
+): ReadonlyArray<ReleasePublicationReceiptCandidate> =>
+  records.flatMap((record) => {
+    const publication = record.envelope.releasePublication
+    return publication === undefined || record.head.lineage._tag !== "terminal"
+      ? []
+      : [{
+        releaseId: publication.releaseId,
+        pluginConnectionId: record.envelope.pluginConnectionId,
+        occurredAt: record.headTransition.occurredAt,
+        providerOperationId: record.head.lineage.receipt.providerOperationId
+      }]
+  })
 
 /** Bind governed publication history to the exact release even before a destination contains entities. */
 export const releasePublicationTargetEntityId = (releaseId: ReleaseId): EntityId => EntityId.make(releaseId)

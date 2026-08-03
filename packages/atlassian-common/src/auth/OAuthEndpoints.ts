@@ -85,9 +85,9 @@ export const JIRA_SCOPES = [
 /**
  * Legacy proposal-only Jira scopes retained for public API compatibility.
  *
- * Control Center now requests {@link JIRA_SCOPES} for governed release-version
- * publication; consumers that only propose Jira mutations may continue using
- * this read-only scope set.
+ * Control Center owns a separate least-privilege release-publication scope set;
+ * {@link JIRA_SCOPES} remains the legacy write-capable set for other consumers,
+ * while proposal-only integrations may continue using this read-only set.
  *
  * @category Scopes
  */

@@ -66,21 +66,25 @@ const ensureOwnerPerson = Effect.fn("ControlCenterBootstrap.ensureOwnerPerson")(
 ) {
   if (owner._tag !== "human") return
   const persistence = yield* Persistence
-  const existing = yield* persistence.people.getPerson(workspaceId, owner.personId).pipe(Effect.result)
-  if (existing._tag === "Success") return
-  const createdAt = yield* DateTime.now
-  const displayName = "Control Center Owner"
-  yield* persistence.people.createPerson(
-    workspaceId,
-    Person.make({
-      avatar: { _tag: "initials", text: derivePersonInitials(displayName) },
-      displayName,
-      isActive: true,
-      personId: owner.personId,
-      sourceIdentities: []
-    }),
-    createdAt
-  ).pipe(Effect.catchTag("RecordAlreadyExistsError", () => Effect.void))
+  yield* persistence.people.getPerson(workspaceId, owner.personId).pipe(
+    Effect.asVoid,
+    Effect.catchTag("RecordNotFoundError", () =>
+      Effect.gen(function*() {
+        const createdAt = yield* DateTime.now
+        const displayName = "Control Center Owner"
+        yield* persistence.people.createPerson(
+          workspaceId,
+          Person.make({
+            avatar: { _tag: "initials", text: derivePersonInitials(displayName) },
+            displayName,
+            isActive: true,
+            personId: owner.personId,
+            sourceIdentities: []
+          }),
+          createdAt
+        ).pipe(Effect.catchTag("RecordAlreadyExistsError", () => Effect.void))
+      }))
+  )
 })
 
 /** Ensure the configured workspace and issue its first owner code at most once. */

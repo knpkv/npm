@@ -4,8 +4,9 @@
  * @module
  */
 
-// Endpoints and scopes. Jira release-version publication uses the write-capable
-// JIRA_SCOPES set; JIRA_PROPOSAL_SCOPES remains available to read-only consumers.
+// Endpoints and legacy public scope sets. Control Center owns a separate
+// least-privilege release-publication set; proposal-only consumers can use
+// JIRA_PROPOSAL_SCOPES and other write-capable consumers can use JIRA_SCOPES.
 export {
   AUTH_URL,
   buildAuthUrl,
