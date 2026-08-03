@@ -48,6 +48,7 @@ export type GovernedActionEnvelopeDigest = typeof GovernedActionEnvelopeDigest.T
 /** Exact release and source-revision baseline captured by a release publication. */
 export const ReleasePublicationMetadataV1 = Schema.Struct({
   releaseId: ReleaseId,
+  predecessorPublicationActionId: Schema.optionalKey(Schema.NullOr(GovernedActionId)),
   sourceRevisionDigest: GovernedActionEnvelopeDigest,
   sourceRevisionCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 })

@@ -439,6 +439,7 @@ const makeService = Effect.gen(function*() {
       correlationId: null,
       releasePublication: {
         releaseId: input.releaseId,
+        predecessorPublicationActionId: input.request.publicationActionId ?? null,
         sourceRevisionDigest,
         sourceRevisionCount: release.release.sourceRevisions.length
       }

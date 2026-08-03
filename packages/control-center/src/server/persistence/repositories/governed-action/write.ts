@@ -452,10 +452,11 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
         )`
         if (input.envelope.releasePublication !== undefined) {
           yield* sql`INSERT INTO governed_action_release_publications (
-            workspace_id, action_id, provider_id, release_id
+            workspace_id, action_id, provider_id, release_id, predecessor_action_id
           ) VALUES (
             ${input.envelope.workspaceId}, ${input.envelope.actionId},
-            ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId}
+            ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId},
+            ${input.envelope.releasePublication.predecessorPublicationActionId ?? null}
           )`
         } else {
           yield* sql`INSERT INTO governed_action_entity_targets (

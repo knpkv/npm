@@ -1098,6 +1098,29 @@ describe("governed action writer", () => {
       })
       const proposal = makeProposalInput(envelope)
       yield* repository.commit(proposal)
+      const competingEnvelope = yield* makeEnvelope("01890f6f-6d6a-7cc0-98d2-520000000099", {
+        actionKind: "create-page",
+        expectedRevision: "0",
+        idempotencyKey: "release-publication:indexed-read:competing",
+        pluginConnectionId: CONFLUENCE_CONNECTION_ID,
+        policyId: "confluence.release-publication",
+        proposalKey: "confluence-release-publication:indexed-read:competing",
+        providerId: "confluence",
+        releasePublication: {
+          releaseId: RELEASE_ID,
+          sourceRevisionCount: 0,
+          sourceRevisionDigest: `sha256:${"d".repeat(64)}`
+        },
+        targetEntityId: RELEASE_ID,
+        targetEntityType: "release-page",
+        targetVendorImmutableId: "release-page-destination"
+      })
+      const competing = yield* repository.commit(makeProposalInput(competingEnvelope, {
+        auditEventId: "01890f6f-6d6a-7cc0-98d2-52000000009a",
+        commandId: "command:release-publication:competing",
+        transitionId: "01890f6f-6d6a-7cc0-98d2-52000000009b"
+      })).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(competing))
       const authorizationInput = makeAuthorizationInput(proposal, makeAuthorization(envelope))
       yield* repository.commit(authorizationInput)
       const startInput = makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
