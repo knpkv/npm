@@ -1237,7 +1237,13 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                   ApplicationResourceNotFound: mapApplicationNotFound,
                   ApplicationServiceUnavailable: mapApplicationUnavailable
                 }))
-              const publicationResult = publicationIntent === undefined || publications === undefined
+              const releasePageAwareness = publicationAdmission?.release.releasePageAwareness
+              if (
+                publicationIntent?.provider === "confluence" &&
+                releasePageAwareness !== undefined &&
+                releasePageAwareness.state !== "not-published"
+              ) return yield* mapApplicationConflict(new ApplicationConflict())
+              const publicationSubmission = publicationIntent === undefined || publications === undefined
                 ? undefined
                 : yield* Effect.gen(function*() {
                   const result = yield* publications.submit({
@@ -1255,8 +1261,22 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                     "ReleasePublicationSubmissionError",
                     mapReleasePublicationSubmissionError
                   ))
-                  return `provider=${publicationIntent.provider}; state=${result.state}; actionId=${result.actionId}`
+                  return { provider: publicationIntent.provider, result }
                 })
+              const publicationResult = publicationSubmission === undefined
+                ? undefined
+                : `provider=${publicationSubmission.provider}; state=${publicationSubmission.result.state}; actionId=${publicationSubmission.result.actionId}`
+              const publicationFallback = publicationAdmission === undefined || publicationSubmission === undefined
+                ? undefined
+                : {
+                  eventCursor: publicationAdmission.eventCursor,
+                  provider: publicationAdmission.provider,
+                  release: publicationAdmission.release,
+                  releaseId: publicationAdmission.releaseId,
+                  reply: publicationSubmission.result.state === "succeeded"
+                    ? `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
+                    : `The governed publication did not complete (${publicationResult}); Relay could not generate its follow-up response.`
+                }
               return yield* agent.runTurn({
                 history: payload.history,
                 ...(publicationAdmission === undefined ? {} : { admission: publicationAdmission }),
@@ -1269,28 +1289,14 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               }).pipe(
                 Effect.catchTags({
                   ApplicationInvalidRequest: (error) =>
-                    publicationAdmission === undefined || publicationResult === undefined
+                    publicationFallback === undefined
                       ? mapApplicationInvalidRequest(error)
-                      : Effect.succeed({
-                        eventCursor: publicationAdmission.eventCursor,
-                        provider: publicationAdmission.provider,
-                        release: publicationAdmission.release,
-                        releaseId: publicationAdmission.releaseId,
-                        reply:
-                          `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
-                      }),
+                      : Effect.succeed(publicationFallback),
                   ApplicationResourceNotFound: mapApplicationNotFound,
                   ApplicationServiceUnavailable: (error) =>
-                    publicationAdmission === undefined || publicationResult === undefined
+                    publicationFallback === undefined
                       ? mapApplicationUnavailable(error)
-                      : Effect.succeed({
-                        eventCursor: publicationAdmission.eventCursor,
-                        provider: publicationAdmission.provider,
-                        release: publicationAdmission.release,
-                        releaseId: publicationAdmission.releaseId,
-                        reply:
-                          `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
-                      })
+                      : Effect.succeed(publicationFallback)
                 })
               )
             })

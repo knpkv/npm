@@ -52,6 +52,7 @@ import {
   WorkspaceSettingsRevision
 } from "../../src/api/workspaceSettings.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import type { GovernedActionState } from "../../src/domain/governedAction/index.js"
 import {
   AgentId,
   EntityId,
@@ -2503,7 +2504,7 @@ describe("Control Center API handlers", () => {
       ])
     }))
 
-  it.effect("admits publication turns before dispatch and preserves a succeeded action on model failure", () =>
+  it.effect("admits publication turns before dispatch and preserves action state on model failure", () =>
     Effect.gen(function*() {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
@@ -2546,47 +2547,139 @@ describe("Control Center API handlers", () => {
       }
       assert.strictEqual(yield* Ref.get(rejectedSubmissions), 0)
 
-      const succeededSubmissions = yield* Ref.make(0)
-      const failedGenerationHandler = agentHandlersLayer.pipe(
-        Layer.provide(pullRequestReviewsLayer),
-        Layer.provide(sessionMiddlewareLayer),
-        Layer.provide(mutationMiddlewareLayer),
-        Layer.provide(ServerLifecycle.layer),
-        Layer.provide(releaseAgentJobsLayer),
-        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
-          submit: () =>
-            Ref.update(succeededSubmissions, (count) => count + 1).pipe(
-              Effect.as({ actionId, state: "succeeded" })
-            )
-        })),
-        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
-          admitTurn: (input) =>
-            Effect.succeed({
-              eventCursor: releaseSnapshot.eventCursor,
-              provider: input.provider,
-              release,
-              releaseId: release.releaseId,
-              workspaceId: input.workspaceId
-            }),
-          runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
-        }))
-      )
-      const recovered = yield* Effect.gen(function*() {
-        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
-        return yield* client.agent.turn({
-          params: { releaseId: release.releaseId },
-          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
-        })
-      }).pipe(Effect.provide([
-        NodeHttpServer.layerHttpServices,
-        mutationMiddlewareLayer,
-        sessionMiddlewareLayer,
-        failedGenerationHandler
-      ]))
+      const publicationCalls = yield* Ref.make(0)
+      const recover = (state: GovernedActionState) => {
+        const failedGenerationHandler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: () =>
+              Ref.update(publicationCalls, (count) => count + 1).pipe(
+                Effect.as({ actionId, state })
+              )
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+          })
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          failedGenerationHandler
+        ]))
+      }
 
-      assert.strictEqual(yield* Ref.get(succeededSubmissions), 1)
-      assert.include(recovered.reply, `actionId=${actionId}`)
-      assert.include(recovered.reply, "state=succeeded")
+      const succeeded = yield* recover("succeeded")
+      assert.include(succeeded.reply, `actionId=${actionId}`)
+      assert.include(succeeded.reply, "state=succeeded")
+      assert.include(succeeded.reply, "publication completed")
+      const incompleteStates: ReadonlyArray<GovernedActionState> = ["failed", "unknown", "started"]
+      for (const state of incompleteStates) {
+        const incomplete = yield* recover(state)
+        assert.include(incomplete.reply, `actionId=${actionId}`)
+        assert.include(incomplete.reply, `state=${state}`)
+        assert.notInclude(incomplete.reply, "publication completed")
+      }
+      assert.strictEqual(yield* Ref.get(publicationCalls), 4)
+    }))
+
+  it.effect("rejects natural-language Confluence creation when a release page already exists", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const currentRelease = {
+        ...release,
+        releasePageAwareness: {
+          state: "current",
+          lastPublishedAt: session.lastSeenAt,
+          pageId: "42",
+          pageVersion: 3
+        }
+      } satisfies typeof release
+      const notPublishedRelease = {
+        ...release,
+        releasePageAwareness: {
+          state: "not-published",
+          lastPublishedAt: null
+        }
+      } satisfies typeof release
+      const publicationCalls = yield* Ref.make(0)
+      const attempt = (admittedRelease: typeof currentRelease | typeof notPublishedRelease) => {
+        const handler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: () =>
+              Ref.update(publicationCalls, (count) => count + 1).pipe(
+                Effect.as({ actionId, state: "succeeded" })
+              )
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release: admittedRelease,
+                releaseId: admittedRelease.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release: admittedRelease,
+                releaseId: admittedRelease.releaseId,
+                reply: "Publication request evaluated."
+              })
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Confluence release page", provider: "codex" }
+          }).pipe(Effect.result)
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ]))
+      }
+
+      const rejected = yield* attempt(currentRelease)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ConflictApiError")
+      }
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
+
+      const created = yield* attempt(notPublishedRelease)
+      assert.isTrue(Result.isSuccess(created))
+      assert.strictEqual(yield* Ref.get(publicationCalls), 1)
     }))
 
   it.effect("preserves release-publication conflict and unavailable errors in agent turns", () =>
