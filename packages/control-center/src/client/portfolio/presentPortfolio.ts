@@ -81,7 +81,7 @@ export interface PortfolioReleasePresentation {
   readonly source: PortfolioSourcePresentation
   readonly stages: ReadonlyArray<RlyStage>
   readonly targetEnvironmentIds: PortfolioSnapshot["releases"][number]["targetEnvironmentIds"]
-  readonly version: string
+  readonly version: PortfolioSnapshot["releases"][number]["version"]
 }
 
 export interface PortfolioPresentation {

@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 
 import { ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { loadLatestConfluenceReleasePublication } from "../../src/server/application/releasePublicationSubmissions.js"
-import type {
+import {
   GovernedActionReleasePublicationReadInput
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
 
@@ -18,7 +19,7 @@ describe("release publication submissions", () => {
         {
           readLatestTerminalReleasePublications: (input) =>
             Effect.sync(() => {
-              calls.push(input)
+              calls.push(Schema.decodeUnknownSync(GovernedActionReleasePublicationReadInput)(input))
               return []
             })
         },

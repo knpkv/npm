@@ -10,7 +10,7 @@ import {
   loadReleasePageAwareness
 } from "../../src/server/application/portfolioSnapshots.js"
 import { PersistedRecordError } from "../../src/server/persistence/errors.js"
-import type {
+import {
   GovernedActionReleasePublicationReadInput
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
 
@@ -84,7 +84,7 @@ describe("portfolio publication awareness", () => {
       const history: PublicationHistory = {
         readLatestTerminalReleasePublications: (input) =>
           Effect.sync(() => {
-            calls.push(input)
+            calls.push(Schema.decodeUnknownSync(GovernedActionReleasePublicationReadInput)(input))
             return []
           })
       }
