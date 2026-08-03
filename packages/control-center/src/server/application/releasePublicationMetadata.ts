@@ -4,13 +4,14 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { GovernedActionEnvelopeDigest } from "../../domain/governedAction/index.js"
-import { EntityId, type PluginConnectionId, type ReleaseId } from "../../domain/identifiers.js"
+import { EntityId, type GovernedActionId, type PluginConnectionId, type ReleaseId } from "../../domain/identifiers.js"
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { digestCanonicalGovernedActionJson } from "../governance/governedActionDigests.js"
 import type { GovernedActionRecord } from "../persistence/repositories/governed-action/contract.js"
 
 export interface ReleasePublicationReceiptCandidate {
+  readonly actionId: GovernedActionId
   readonly releaseId: ReleaseId
   readonly pluginConnectionId: PluginConnectionId
   readonly occurredAt: UtcTimestamp
@@ -23,6 +24,7 @@ export interface ConfluencePublicationReference {
 }
 
 export interface LatestConfluencePublicationReference extends ConfluencePublicationReference {
+  readonly publicationActionId: GovernedActionId
   readonly pluginConnectionId: PluginConnectionId
   readonly publishedAt: UtcTimestamp
 }
@@ -41,6 +43,7 @@ export const releasePublicationReceiptCandidatesFromRecords = (
     return publication === undefined || record.head.lineage._tag !== "terminal"
       ? []
       : [{
+        actionId: record.envelope.actionId,
         releaseId: publication.releaseId,
         pluginConnectionId: record.envelope.pluginConnectionId,
         occurredAt: record.headTransition.occurredAt,
@@ -109,6 +112,7 @@ export const latestConfluencePublicationReference = (
     : {
       ...reference,
       pluginConnectionId: latest.pluginConnectionId,
+      publicationActionId: latest.actionId,
       publishedAt: latest.occurredAt
     }
 }

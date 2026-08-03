@@ -206,10 +206,7 @@ export const SubmitReleasePublicationRequest = Schema.Struct({
   parentId: Schema.NullOr(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
   ),
-  pageId: Schema.optionalKey(
-    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64))
-  ),
-  expectedVersion: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
+  publicationActionId: Schema.optionalKey(GovernedActionId)
 })
 export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
 

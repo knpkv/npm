@@ -511,8 +511,7 @@ const ReleaseAgentRoom = ({
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
   const pageAwareness = release.releasePageAwareness
-  const confluenceUpdateReady =
-    pageAwareness?.state === "stale" && pageAwareness.pageId !== undefined && pageAwareness.pageVersion !== undefined
+  const confluenceUpdateReady = pageAwareness?.state === "stale" && pageAwareness.publicationActionId !== undefined
 
   useEffect(() => {
     if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
@@ -603,8 +602,8 @@ const ReleaseAgentRoom = ({
       provider: publicationProvider,
       title: publicationTitle.trim(),
       markdown: publicationMarkdown.trim(),
-      ...(updatingConfluence && pageAwareness?.pageId !== undefined && pageAwareness.pageVersion !== undefined
-        ? { pageId: pageAwareness.pageId, expectedVersion: pageAwareness.pageVersion }
+      ...(updatingConfluence && pageAwareness?.publicationActionId !== undefined
+        ? { publicationActionId: pageAwareness.publicationActionId }
         : {})
     })
       .then(
@@ -813,12 +812,25 @@ const ReleaseAgentRoom = ({
             Create Jira release version
           </Button>
           <Button
-            disabled={publicationBusy !== null || (pageAwareness?.state === "stale" && !confluenceUpdateReady)}
+            disabled={
+              publicationBusy !== null ||
+              pageAwareness?.state === "current" ||
+              (pageAwareness?.state === "stale" && !confluenceUpdateReady)
+            }
             loading={publicationBusy === "confluence"}
             onClick={() => publish("confluence")}
           >
-            {pageAwareness?.state === "stale" ? "Update Confluence release page" : "Create Confluence release page"}
+            {pageAwareness?.state === "stale"
+              ? "Update Confluence release page"
+              : pageAwareness?.state === "current"
+                ? "Confluence release page is current"
+                : "Create Confluence release page"}
           </Button>
+          {pageAwareness?.state === "current" ? (
+            <Text tone="secondary">
+              Relay will suggest an update after synchronized release changes make this page stale.
+            </Text>
+          ) : null}
           {pageAwareness?.state === "stale" && !confluenceUpdateReady ? (
             <Text tone="secondary">
               The existing page identity is unavailable, so Relay will not create a duplicate page.

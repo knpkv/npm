@@ -2430,7 +2430,7 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.reply, "The release is waiting for approval.")
     }))
 
-  it.effect("does not submit qualified release-publication commands", () =>
+  it.effect("keeps release-publication commands read-only until explicit confirmation", () =>
     Effect.gen(function*() {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
@@ -2496,15 +2496,12 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
-      assert.strictEqual(yield* Ref.get(admissions), 1)
-      assert.strictEqual((yield* Ref.get(submissions)).length, 1)
-      assert.deepStrictEqual(yield* Ref.get(publicationResults), [
-        undefined,
-        `provider=jira; state=succeeded; actionId=${actionId}`
-      ])
+      assert.strictEqual(yield* Ref.get(admissions), 0)
+      assert.strictEqual((yield* Ref.get(submissions)).length, 0)
+      assert.deepStrictEqual(yield* Ref.get(publicationResults), [undefined, undefined])
     }))
 
-  it.effect("admits publication turns before dispatch and preserves action state on model failure", () =>
+  it.effect("does not dispatch publications when release chat admission or generation fails", () =>
     Effect.gen(function*() {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
@@ -2525,7 +2522,14 @@ describe("Control Center API handlers", () => {
         })),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           admitTurn: () => Effect.fail(new ApplicationInvalidRequest()),
-          runTurn: () => Effect.die("rejected provider reached generation")
+          runTurn: (input) =>
+            Effect.succeed({
+              eventCursor: releaseSnapshot.eventCursor,
+              provider: input.provider,
+              release,
+              releaseId: release.releaseId,
+              reply: "Explicit publication confirmation is still required."
+            })
         }))
       )
       const rejected = yield* Effect.gen(function*() {
@@ -2541,10 +2545,7 @@ describe("Control Center API handlers", () => {
         rejectedHandler
       ]))
 
-      assert.isTrue(Result.isFailure(rejected))
-      if (Result.isFailure(rejected)) {
-        assert.strictEqual(rejected.failure._tag, "InvalidRequestApiError")
-      }
+      assert.isTrue(Result.isSuccess(rejected))
       assert.strictEqual(yield* Ref.get(rejectedSubmissions), 0)
 
       const publicationCalls = yield* Ref.make(0)
@@ -2578,7 +2579,7 @@ describe("Control Center API handlers", () => {
           return yield* client.agent.turn({
             params: { releaseId: release.releaseId },
             payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
-          })
+          }).pipe(Effect.result)
         }).pipe(Effect.provide([
           NodeHttpServer.layerHttpServices,
           mutationMiddlewareLayer,
@@ -2587,21 +2588,18 @@ describe("Control Center API handlers", () => {
         ]))
       }
 
-      const succeeded = yield* recover("succeeded")
-      assert.include(succeeded.reply, `actionId=${actionId}`)
-      assert.include(succeeded.reply, "state=succeeded")
-      assert.include(succeeded.reply, "publication completed")
-      const incompleteStates: ReadonlyArray<GovernedActionState> = ["failed", "unknown", "started"]
-      for (const state of incompleteStates) {
-        const incomplete = yield* recover(state)
-        assert.include(incomplete.reply, `actionId=${actionId}`)
-        assert.include(incomplete.reply, `state=${state}`)
-        assert.notInclude(incomplete.reply, "publication completed")
+      const states: ReadonlyArray<GovernedActionState> = ["succeeded", "failed", "unknown", "started"]
+      for (const state of states) {
+        const result = yield* recover(state)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "ServiceUnavailableApiError")
+        }
       }
-      assert.strictEqual(yield* Ref.get(publicationCalls), 4)
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
     }))
 
-  it.effect("rejects natural-language Confluence creation when a release page already exists", () =>
+  it.effect("never turns natural-language Confluence requests into publication writes", () =>
     Effect.gen(function*() {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
@@ -2612,8 +2610,7 @@ describe("Control Center API handlers", () => {
         releasePageAwareness: {
           state: "current",
           lastPublishedAt: session.lastSeenAt,
-          pageId: "42",
-          pageVersion: 3
+          publicationActionId: actionId
         }
       } satisfies typeof release
       const notPublishedRelease = {
@@ -2672,18 +2669,15 @@ describe("Control Center API handlers", () => {
       }
 
       const rejected = yield* attempt(currentRelease)
-      assert.isTrue(Result.isFailure(rejected))
-      if (Result.isFailure(rejected)) {
-        assert.strictEqual(rejected.failure._tag, "ConflictApiError")
-      }
+      assert.isTrue(Result.isSuccess(rejected))
       assert.strictEqual(yield* Ref.get(publicationCalls), 0)
 
       const created = yield* attempt(notPublishedRelease)
       assert.isTrue(Result.isSuccess(created))
-      assert.strictEqual(yield* Ref.get(publicationCalls), 1)
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
     }))
 
-  it.effect("preserves release-publication conflict and unavailable errors in agent turns", () =>
+  it.effect("does not invoke release-publication submission errors from agent turns", () =>
     Effect.gen(function*() {
       const releaseSnapshot = makeNodePortfolioSnapshot()
       const release = releaseSnapshot.releases[0]
@@ -2707,7 +2701,7 @@ describe("Control Center API handlers", () => {
                 releaseId: release.releaseId,
                 workspaceId: input.workspaceId
               }),
-            runTurn: () => Effect.die("failed publication reached generation")
+            runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
           }))
         )
         return Effect.gen(function*() {
@@ -2727,7 +2721,7 @@ describe("Control Center API handlers", () => {
       const conflict = yield* attempt("conflict")
       assert.isTrue(Result.isFailure(conflict))
       if (Result.isFailure(conflict)) {
-        assert.strictEqual(conflict.failure._tag, "ConflictApiError")
+        assert.strictEqual(conflict.failure._tag, "ServiceUnavailableApiError")
       }
 
       const unavailable = yield* attempt("unavailable")

@@ -17,7 +17,7 @@ import {
 } from "../../src/client/AgentPage.js"
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
 import type { WorkspaceReleaseOutletContext } from "../../src/client/releases/WorkspaceReleaseLayout.js"
-import { EventCursor } from "../../src/domain/identifiers.js"
+import { EventCursor, GovernedActionId } from "../../src/domain/identifiers.js"
 import { ReleaseVersion } from "../../src/domain/release.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
@@ -359,8 +359,7 @@ describe("AgentPage context", () => {
       releasePageAwareness: {
         state: "stale",
         lastPublishedAt: snapshot.releases[0]?.updatedAt ?? null,
-        pageId: "42",
-        pageVersion: 3
+        publicationActionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
       }
     }
     await act(async () => mountedRoot?.render(renderWithRelease(updatedRelease)))
@@ -376,9 +375,59 @@ describe("AgentPage context", () => {
       provider: "confluence",
       title: "2.18.0-rc.2 release",
       markdown: "Release 2.18.0-rc.2 for payments-api. Published by Relay after human confirmation.",
-      pageId: "42",
-      expectedVersion: 3
+      publicationActionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
     })
+  })
+
+  it("does not offer another Confluence creation while the release page is current", async () => {
+    const portfolio = presentPortfolio(snapshot)
+    const release = portfolio.releases[0]
+    if (release === undefined) throw new Error("Expected a current release-page fixture")
+    const context = {
+      ...readyContext,
+      controller: {
+        ...readyContext.controller,
+        state: {
+          ...readyContext.controller.state,
+          portfolio: {
+            ...portfolio,
+            releases: [
+              {
+                ...release,
+                releasePageAwareness: {
+                  state: "current",
+                  lastPublishedAt: snapshot.releases[0]?.updatedAt ?? null,
+                  publicationActionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000092")
+                }
+              }
+            ]
+          }
+        }
+      }
+    } satisfies WorkspaceReleaseOutletContext
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <MemoryRouter initialEntries={[agentPath]}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route
+                path="/w/:workspaceId/releases/:releaseId/agent"
+                element={<AgentPage runTurn={async () => Promise.reject()} />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      )
+    )
+
+    const confluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Confluence release page is current"
+    )
+    expect(confluence?.disabled).toBe(true)
+    expect(host.textContent).toContain("Relay will suggest an update")
   })
 
   const orderedProviderCases: ReadonlyArray<readonly [ReadonlyArray<"claude" | "codex">, "claude" | "codex"]> = [

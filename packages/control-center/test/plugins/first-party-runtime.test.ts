@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { JIRA_PROPOSAL_REQUIRED_SCOPES } from "@knpkv/atlassian-common/config"
 import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
@@ -268,14 +269,19 @@ const jiraOAuthDescriptorWithSiteOnly = {
   configurationFields: historicalJiraDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
 }
 
-const oauthProfile = (id: string, expiresAt: number, userName = "Avery Bell") => ({
+const oauthProfile = (
+  id: string,
+  expiresAt: number,
+  userName = "Avery Bell",
+  scopes: ReadonlyArray<string> = Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES]))
+) => ({
   id,
   name: `${id} @ knpkv.atlassian.net`,
   token: {
     access_token: `${id}-access-token`,
     refresh_token: `${id}-refresh-token`,
     expires_at: expiresAt,
-    scope: Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).join(" "),
+    scope: scopes.join(" "),
     cloud_id: "cloud-1",
     site_url: "https://knpkv.atlassian.net/",
     user: { account_id: "account-1", name: userName, email: "avery@example.com" }
@@ -2015,6 +2021,7 @@ describe("first-party plugin runtime", () => {
       const exactBoundaryUserName = `${"A".repeat(199)}B`
       const profiles = [
         oauthProfile("valid-profile", now + 60_000),
+        oauthProfile("legacy-jira-profile", now + 60_000, "Avery Bell", JIRA_PROPOSAL_REQUIRED_SCOPES),
         oauthProfile("expired-profile", now - 1),
         oauthProfile("legacy-spaced-name-profile", now + 60_000, " Avery Bell"),
         oauthProfile("long-name-profile", now + 60_000, longUserName),
@@ -2051,6 +2058,7 @@ describe("first-party plugin runtime", () => {
           readonly expectedDisplayName?: string
           readonly profileId:
             | "valid-profile"
+            | "legacy-jira-profile"
             | "expired-profile"
             | "legacy-spaced-name-profile"
             | "long-name-profile"
@@ -2060,6 +2068,12 @@ describe("first-party plugin runtime", () => {
           readonly siteId: string
         }> = [
           { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            providerId: "jira",
+            profileId: "legacy-jira-profile",
+            siteId: "cloud-1"
+          },
           { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
           {
             expectedDiagnosticCode: null,
@@ -2176,6 +2190,12 @@ describe("first-party plugin runtime", () => {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") {
               const connection = Context.get(outcome.success, PluginConnection)
+              if (testCase.profileId === "legacy-jira-profile") {
+                assert.isTrue(hasPluginCapability(connection.descriptor, "entity.read", 1))
+                assert.isTrue(hasPluginCapability(connection.descriptor, "action.propose", 1))
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+              }
               if (testCase.providerId === "confluence") {
                 const discovery = yield* connection.discover
                 assert.deepStrictEqual(discovery.account, {

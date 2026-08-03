@@ -55,6 +55,7 @@ describe("release page awareness", () => {
   it("detects a release projection that changed after publication", () => {
     assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, publicationAt), "stale")
     assert.equal(classifyReleasePageAwareness(publicationAt, releaseUpdatedAt), "current")
+    assert.equal(classifyReleasePageAwareness(publicationAt, publicationAt), "current")
     assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, null), "not-published")
   })
 })

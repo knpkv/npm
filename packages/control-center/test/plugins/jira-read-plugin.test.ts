@@ -26,6 +26,8 @@ import {
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
 import {
+  PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginTimeoutFailure
@@ -496,6 +498,60 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("keeps read and proposal capabilities for legacy Jira profiles without publication scopes", () => {
+    const runtime = makeJiraReadPluginRuntimeFromProvider(
+      baseProvider({
+        getIssue: (issueId) =>
+          Effect.succeed(Option.some(
+            issueId === issue.id
+              ? issue
+              : { ...issue, id: "10043", key: "PAY-43" }
+          )),
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some(
+            versionId === "2026.31"
+              ? { id: "2026.31", name: "August 2026", projectId: "10" }
+              : { id: "2026.30", name: "July 2026", projectId: "10" }
+          )),
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
+      }),
+      configuration,
+      configuration.siteId,
+      Effect.succeed(true),
+      false
+    )
+
+    return Effect.gen(function*() {
+      const connection = yield* PluginConnection
+
+      assert.deepStrictEqual(
+        connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
+        ["entity.read", "sync.incremental", "action.propose"]
+      )
+      yield* connection.readEntity(issueReference(issue.id))
+
+      const proposal = yield* connection.proposeAction(addCommentRequest)
+      assert.strictEqual(proposal.request.actionKind, "add-comment")
+      const retainedProposals = yield* Effect.forEach(
+        [replyCommentRequest, fixVersionRequest, linkIssueRequest],
+        (request) => connection.proposeAction(request)
+      )
+      assert.deepStrictEqual(
+        retainedProposals.map(({ request }) => request.actionKind),
+        ["reply-comment", "set-fix-versions", "link-issue"]
+      )
+
+      const publication = yield* connection.proposeAction(createReleaseVersionRequest).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(publication))
+      if (Result.isFailure(publication)) {
+        assert.strictEqual(publication.failure._tag, "PluginUnsupportedCapabilityFailure")
+      }
+    }).pipe(
+      Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
+      Effect.scoped
+    )
+  })
+
   it.effect("rejects unsafe Jira read targets before provider reads", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)
@@ -606,6 +662,181 @@ describe("JiraReadPlugin", () => {
           assert.strictEqual(yield* Ref.get(versionReads), 2)
         }),
         { ...configuration, operationTimeoutMillis: 1_000 }
+      )
+    }))
+
+  it.effect("confirms an existing Jira release version only when its release notes match", () =>
+    Effect.gen(function*() {
+      const creates = yield* Ref.make(0)
+      const exactVersion = {
+        id: "version-218",
+        name: "2.18.0",
+        description: "Payments release 2.18.0",
+        projectId: configuration.projectId
+      }
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () => Effect.succeed([exactVersion]),
+          createProjectVersion: () => Ref.update(creates, (count) => count + 1).pipe(Effect.as(exactVersion))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const reconciliation = Schema.decodeUnknownSync(
+            Schema.toType(PluginActionReconciliationRequestV1)
+          )({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+
+          assert.strictEqual((yield* executor.preflight(authorized))._tag, "ready")
+          const executed = yield* executor.executeAuthorizedAction(authorized)
+          assert.strictEqual(executed._tag, "confirmed")
+          if (executed._tag === "confirmed") assert.strictEqual(executed.receipt.status, "succeeded")
+          assert.strictEqual((yield* executor.reconcile(reconciliation))._tag, "succeeded")
+          assert.strictEqual(yield* Ref.get(creates), 0)
+        })
+      )
+    }))
+
+  it.effect("rejects release notes beyond Jira's UTF-8 byte limit before provider work", () =>
+    Effect.gen(function*() {
+      const versionReads = yield* Ref.make(0)
+      const creates = yield* Ref.make(0)
+      const oversizedRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        ...createReleaseVersionRequest,
+        payload: {
+          _tag: "create-release-version",
+          projectId: configuration.projectId,
+          name: "2.18.0",
+          description: "é".repeat(8_193)
+        }
+      })
+
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () => Ref.update(versionReads, (count) => count + 1).pipe(Effect.as([])),
+          createProjectVersion: () =>
+            Ref.update(creates, (count) => count + 1).pipe(Effect.as({
+              id: "unexpected-version",
+              name: "2.18.0",
+              description: "Payments release 2.18.0",
+              projectId: configuration.projectId
+            }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposed = yield* connection.proposeAction(oversizedRequest).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(proposed))
+          if (Result.isFailure(proposed)) {
+            assert.strictEqual(proposed.failure._tag, "PluginConfigurationFailure")
+          }
+          assert.strictEqual(yield* Ref.get(versionReads), 0)
+          assert.strictEqual(yield* Ref.get(creates), 0)
+        })
+      )
+    }))
+
+  it.effect("blocks a same-name Jira release version whose release notes differ", () =>
+    Effect.gen(function*() {
+      const creates = yield* Ref.make(0)
+      const mismatchedVersion = {
+        id: "version-218",
+        name: "2.18.0",
+        description: "Different release notes",
+        projectId: configuration.projectId
+      }
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () => Effect.succeed([mismatchedVersion]),
+          createProjectVersion: () => Ref.update(creates, (count) => count + 1).pipe(Effect.as(mismatchedVersion))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const reconciliation = Schema.decodeUnknownSync(
+            Schema.toType(PluginActionReconciliationRequestV1)
+          )({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+
+          assert.strictEqual((yield* executor.preflight(authorized))._tag, "blocked")
+          const executed = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(executed))
+          if (Result.isFailure(executed)) assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
+          assert.strictEqual((yield* executor.reconcile(reconciliation))._tag, "failed")
+          assert.strictEqual(yield* Ref.get(creates), 0)
+        })
+      )
+    }))
+
+  it.effect("recovers a duplicate-name race only from an exact Jira payload match", () =>
+    Effect.gen(function*() {
+      const reads = yield* Ref.make(0)
+      const exactVersion = {
+        id: "version-218",
+        name: "2.18.0",
+        description: "Payments release 2.18.0",
+        projectId: configuration.projectId
+      }
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () =>
+            Ref.getAndUpdate(reads, (count) => count + 1).pipe(
+              Effect.map((count) => count === 0 ? [] : [exactVersion])
+            ),
+          createProjectVersion: () =>
+            Effect.fail(
+              new PluginConflictFailure({
+                operation: "jira-create-project-version",
+                diagnosticCode: "jira-release-version-name-conflict"
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const executed = yield* executor.executeAuthorizedAction(authorized)
+
+          assert.strictEqual(executed._tag, "confirmed")
+          if (executed._tag === "confirmed") assert.strictEqual(executed.receipt.status, "succeeded")
+          assert.strictEqual(yield* Ref.get(reads), 2)
+        })
+      )
+    }))
+
+  it.effect("does not reconcile deterministic Jira release-version rejections", () =>
+    Effect.gen(function*() {
+      const reads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as([])),
+          createProjectVersion: () =>
+            Effect.fail(
+              new PluginConfigurationFailure({
+                diagnosticCode: "jira-provider-rejected-413"
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+          const executed = yield* executor.executeAuthorizedAction(authorized)
+
+          assert.strictEqual(executed._tag, "confirmed")
+          if (executed._tag === "confirmed") assert.strictEqual(executed.receipt.status, "failed")
+          assert.strictEqual(yield* Ref.get(reads), 1)
+        })
       )
     }))
 

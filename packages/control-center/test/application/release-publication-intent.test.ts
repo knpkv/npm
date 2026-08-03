@@ -1,5 +1,5 @@
+import { describe, it } from "@effect/vitest"
 import assert from "node:assert/strict"
-import { describe, it } from "vitest"
 
 import { detectReleasePublicationIntent } from "../../src/server/application/releasePublicationIntent.js"
 

@@ -12,7 +12,12 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { makeJiraReadProvider, mapJiraReadProviderFailure } from "../../src/server/plugins/jira/JiraReadProvider.js"
+import { PluginConflictFailure } from "../../src/server/plugins/failures.js"
+import {
+  makeJiraReadProvider,
+  mapJiraCreateProjectVersionFailure,
+  mapJiraReadProviderFailure
+} from "../../src/server/plugins/jira/JiraReadProvider.js"
 
 const jiraClientLayerFromResponse = (
   responseBody: (request: HttpClientRequest.HttpClientRequest) => unknown,
@@ -73,6 +78,65 @@ const mapRateLimit = Effect.fn("JiraReadProviderTest.mapRateLimit")(function*(re
 })
 
 describe("JiraReadProvider", () => {
+  it.effect("rejects an incomplete project-version list instead of treating it as absence", () =>
+    Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+      const outcome = yield* provider.getProjectVersions("10", 1).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-project-versions-response-incomplete")
+        }
+      }
+    }).pipe(Effect.provide(jiraClientLayer({
+      isLast: false,
+      total: 2,
+      values: [{ id: "1", name: "1.0.0", projectId: 10 }]
+    }, []))))
+
+  it.effect("reads one bounded complete Jira project-version page", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+      const versions = yield* provider.getProjectVersions("10", 1)
+
+      assert.deepStrictEqual(versions, [{
+        description: null,
+        id: "1",
+        name: "1.0.0",
+        projectId: "10"
+      }])
+      const requestUrl = new URL(requests[0]?.url ?? "https://invalid.test")
+      const requestParameters = new Map(requests[0]?.urlParams ?? [])
+      assert.strictEqual(requestUrl.pathname, "/rest/api/3/project/10/version")
+      assert.strictEqual(requestParameters.get("startAt"), "0")
+      assert.strictEqual(requestParameters.get("maxResults"), "2")
+    }).pipe(Effect.provide(jiraClientLayer({
+      isLast: true,
+      total: 1,
+      values: [{ id: "1", name: "1.0.0", projectId: 10 }]
+    }, requests)))
+  })
+
+  it("keeps only Jira duplicate-name conflicts eligible for ambiguous creation recovery", () => {
+    for (const status of [400, 409, 413, 422]) {
+      const mapped = mapJiraCreateProjectVersionFailure(
+        new PluginConflictFailure({
+          operation: "jira-create-project-version",
+          diagnosticCode: `jira-provider-rejected-${status}`
+        })
+      )
+      assert.strictEqual(
+        mapped._tag,
+        status === 409 ? "PluginConflictFailure" : "PluginConfigurationFailure"
+      )
+    }
+  })
+
   it.effect("normalizes nullable changelog values before OpenAPI decoding", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {
@@ -241,8 +305,8 @@ describe("JiraReadProvider", () => {
       )
 
       assert.deepStrictEqual(versions, [
-        Option.some({ id: "2026.31", name: "August 2026", projectId: "10" }),
-        Option.some({ id: "2026.30", name: "July 2026", projectId: "10" })
+        Option.some({ description: null, id: "2026.31", name: "August 2026", projectId: "10" }),
+        Option.some({ description: null, id: "2026.30", name: "July 2026", projectId: "10" })
       ])
       assert.deepStrictEqual(
         requests.map(({ url }) => new URL(url).pathname),

@@ -30,7 +30,6 @@ import {
   ClockifyActionSubmissions
 } from "../application/clockifyActionSubmissions.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
-import { detectReleasePublicationIntent } from "../application/releasePublicationIntent.js"
 import {
   type ReleasePublicationSubmissionError,
   ReleasePublicationSubmissions
@@ -1223,86 +1222,18 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               if (session.permission !== "workspace-owner") {
                 return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
               }
-              const publicationIntent = detectReleasePublicationIntent(payload.prompt)
-              const publicationAdmission = publicationIntent === undefined || publications === undefined
-                ? undefined
-                : agent.admitTurn === undefined
-                ? yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
-                : yield* agent.admitTurn({
-                  workspaceId: session.workspaceId,
-                  releaseId: params.releaseId,
-                  provider: payload.provider
-                }).pipe(Effect.catchTags({
-                  ApplicationInvalidRequest: mapApplicationInvalidRequest,
-                  ApplicationResourceNotFound: mapApplicationNotFound,
-                  ApplicationServiceUnavailable: mapApplicationUnavailable
-                }))
-              const releasePageAwareness = publicationAdmission?.release.releasePageAwareness
-              if (
-                publicationIntent?.provider === "confluence" &&
-                releasePageAwareness !== undefined &&
-                releasePageAwareness.state !== "not-published"
-              ) return yield* mapApplicationConflict(new ApplicationConflict())
-              const publicationSubmission = publicationIntent === undefined || publications === undefined
-                ? undefined
-                : yield* Effect.gen(function*() {
-                  if (publicationAdmission === undefined) {
-                    return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
-                  }
-                  const result = yield* publications.submit({
-                    workspaceId: session.workspaceId,
-                    releaseId: params.releaseId,
-                    expectedReleaseUpdatedAt: publicationAdmission.release.updatedAt,
-                    request: {
-                      markdown: "Release artifact published by Relay after human confirmation.",
-                      parentId: null,
-                      provider: publicationIntent.provider,
-                      title: publicationIntent.provider === "jira" ? "Relay Jira release" : "Relay Confluence release"
-                    },
-                    session,
-                    useReleaseIdentity: true
-                  }).pipe(Effect.catchTag(
-                    "ReleasePublicationSubmissionError",
-                    mapReleasePublicationSubmissionError
-                  ))
-                  return { provider: publicationIntent.provider, result }
-                })
-              const publicationResult = publicationSubmission === undefined
-                ? undefined
-                : `provider=${publicationSubmission.provider}; state=${publicationSubmission.result.state}; actionId=${publicationSubmission.result.actionId}`
-              const publicationFallback = publicationAdmission === undefined || publicationSubmission === undefined
-                ? undefined
-                : {
-                  eventCursor: publicationAdmission.eventCursor,
-                  provider: publicationAdmission.provider,
-                  release: publicationAdmission.release,
-                  releaseId: publicationAdmission.releaseId,
-                  reply: publicationSubmission.result.state === "succeeded"
-                    ? `The governed publication completed (${publicationResult}), but Relay could not generate its follow-up response.`
-                    : `The governed publication did not complete (${publicationResult}); Relay could not generate its follow-up response.`
-                }
               return yield* agent.runTurn({
                 history: payload.history,
-                ...(publicationAdmission === undefined ? {} : { admission: publicationAdmission }),
                 ...(payload.originPath === undefined ? {} : { originPath: payload.originPath }),
                 prompt: payload.prompt,
                 provider: payload.provider,
-                ...(publicationResult === undefined ? {} : { publicationResult }),
                 releaseId: params.releaseId,
                 workspaceId: session.workspaceId
-              }).pipe(
-                Effect.catchTags({
-                  ApplicationInvalidRequest: (error) =>
-                    publicationFallback === undefined
-                      ? mapApplicationInvalidRequest(error)
-                      : Effect.succeed(publicationFallback),
-                  ApplicationResourceNotFound: mapApplicationNotFound,
-                  ApplicationServiceUnavailable: (error) =>
-                    publicationFallback === undefined
-                      ? mapApplicationUnavailable(error)
-                      : Effect.succeed(publicationFallback)
-                })
-              )
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
             })
           ).pipe(
             Effect.catchTag(

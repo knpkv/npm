@@ -2,7 +2,14 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { Freshness } from "../domain/freshness.js"
-import { EnvironmentId, EventCursor, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import {
+  EnvironmentId,
+  EventCursor,
+  GovernedActionId,
+  PersonId,
+  ReleaseId,
+  WorkspaceId
+} from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
 import { ReadinessFinding, ReadinessStages, ReadinessVerdict } from "../domain/readiness/model.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
@@ -40,8 +47,7 @@ export type PortfolioRelationshipCounts = typeof PortfolioRelationshipCounts.Typ
 export const PortfolioReleasePageAwareness = Schema.Struct({
   state: Schema.Literals(["current", "stale", "not-published", "unknown"]),
   lastPublishedAt: Schema.NullOr(UtcTimestamp),
-  pageId: Schema.optionalKey(Schema.String),
-  pageVersion: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
+  publicationActionId: Schema.optionalKey(GovernedActionId)
 }).annotate({ identifier: "PortfolioReleasePageAwareness" })
 
 /** Decoded release-page freshness summary. */

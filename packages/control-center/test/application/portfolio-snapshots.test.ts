@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import {
@@ -51,6 +51,7 @@ describe("portfolio publication awareness", () => {
   it("fails closed for an unparseable successful receipt and accepts a canonical locator", () => {
     const release = makeRelease(0)
     const candidate = {
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-510000000003"),
       releaseId: release.id,
       pluginConnectionId: PLUGIN_CONNECTION_ID,
       occurredAt: release.updatedAt
@@ -71,8 +72,7 @@ describe("portfolio publication awareness", () => {
       {
         state: "current",
         lastPublishedAt: release.updatedAt,
-        pageId: "42",
-        pageVersion: 2
+        publicationActionId: candidate.actionId
       }
     )
   })

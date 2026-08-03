@@ -2,10 +2,12 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
+  confluencePublicationRequestContext,
   confluencePublicationRequestMatchesHistory,
+  jiraPublicationPayloadWithinLimits,
   loadLatestConfluenceReleasePublication
 } from "../../src/server/application/releasePublicationSubmissions.js"
 import {
@@ -15,9 +17,16 @@ import {
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-520000000001")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-520000000002")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-520000000003")
+const PUBLICATION_ACTION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-520000000004")
 const PUBLISHED_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-08-03T08:00:00.000Z")
 
 describe("release publication submissions", () => {
+  it("rejects Jira publication payloads beyond provider character and UTF-8 byte limits", () => {
+    assert.isTrue(jiraPublicationPayloadWithinLimits("a".repeat(255), "é".repeat(8_192)))
+    assert.isFalse(jiraPublicationPayloadWithinLimits("a".repeat(256), "Release notes"))
+    assert.isFalse(jiraPublicationPayloadWithinLimits("Release", "é".repeat(8_193)))
+  })
+
   it("allows Confluence creation only when indexed history proves the release was never published", () => {
     assert.isTrue(confluencePublicationRequestMatchesHistory({}, {
       hasBlockingPublication: false,
@@ -29,6 +38,7 @@ describe("release publication submissions", () => {
         pageId: "42",
         pageVersion: 2,
         pluginConnectionId: PLUGIN_CONNECTION_ID,
+        publicationActionId: PUBLICATION_ACTION_ID,
         publishedAt: PUBLISHED_AT
       }
     }))
@@ -45,21 +55,44 @@ describe("release publication submissions", () => {
         pageId: "42",
         pageVersion: 2,
         pluginConnectionId: PLUGIN_CONNECTION_ID,
+        publicationActionId: PUBLICATION_ACTION_ID,
         publishedAt: PUBLISHED_AT
       }
     }
     assert.isTrue(confluencePublicationRequestMatchesHistory({
-      pageId: "42",
-      expectedVersion: 2
+      publicationActionId: PUBLICATION_ACTION_ID
     }, history))
     assert.isFalse(confluencePublicationRequestMatchesHistory({
-      pageId: "99",
-      expectedVersion: 2
+      publicationActionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-520000000005")
     }, history))
-    assert.isFalse(confluencePublicationRequestMatchesHistory({
+  })
+
+  it("preserves a predecessor reference long enough to find an already-created update", () => {
+    const successorActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-520000000005")
+    const predecessor = {
       pageId: "42",
-      expectedVersion: 3
-    }, history))
+      pageVersion: 2,
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
+      publicationActionId: PUBLICATION_ACTION_ID,
+      publishedAt: PUBLISHED_AT
+    }
+    const successor = {
+      ...predecessor,
+      pageVersion: 3,
+      publicationActionId: successorActionId
+    }
+
+    assert.deepStrictEqual(
+      confluencePublicationRequestContext(
+        { publicationActionId: PUBLICATION_ACTION_ID },
+        { hasBlockingPublication: true, latestReference: successor },
+        predecessor
+      ),
+      {
+        historyMatches: false,
+        publication: predecessor
+      }
+    )
   })
 
   it.effect("uses one indexed release-history read for a Confluence update target", () =>

@@ -29,6 +29,7 @@ import {
   PluginRateLimitFailure,
   PluginTimeoutFailure
 } from "../failures.js"
+import { JiraReleaseVersionDescription, JiraReleaseVersionName } from "./JiraReleaseVersionLimits.js"
 
 /** One provider page request; limits are validated by adapter configuration. @internal */
 export interface JiraPageRequest {
@@ -143,6 +144,7 @@ export interface JiraIssueTransition {
 
 /** Stable project-version data needed by the governed proposal boundary. @internal */
 export interface JiraProjectVersion {
+  readonly description?: string | null
   readonly id: string
   readonly name: string
   readonly projectId: string | null
@@ -206,7 +208,8 @@ export interface JiraReadProvider {
     versionId: string
   ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
   readonly getProjectVersions: (
-    projectId: string
+    projectId: string,
+    maximumResults: number
   ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
   readonly createProjectVersion: (
     input: JiraProjectVersionCreation
@@ -277,6 +280,13 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
 
 /** Translate a generated-client failure at the provider boundary. @internal */
 export const mapJiraReadProviderFailure = mapFailure
+
+/** Keep only duplicate-name conflicts eligible for post-create ambiguity recovery. @internal */
+export const mapJiraCreateProjectVersionFailure = (error: PluginFailure): PluginFailure =>
+  Schema.is(PluginConflictFailure)(error) &&
+    error.diagnosticCode !== "jira-provider-rejected-409"
+    ? new PluginConfigurationFailure({ diagnosticCode: error.diagnosticCode })
+    : error
 
 const providerCall = <Value, Error>(
   operation: string,
@@ -363,12 +373,17 @@ const JiraTransitions = Schema.Struct({
   })))
 })
 const JiraProjectVersionResponse = Schema.Struct({
+  description: Schema.optionalKey(JiraReleaseVersionDescription),
   id: Schema.String,
   name: Schema.String,
   projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
   project: Schema.optionalKey(Schema.String)
 })
-const JiraProjectVersionListResponse = Schema.Array(JiraProjectVersionResponse)
+const JiraProjectVersionPageResponse = Schema.Struct({
+  isLast: Schema.optionalKey(Schema.Boolean),
+  total: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  values: Schema.optionalKey(Schema.Array(JiraProjectVersionResponse))
+})
 const JiraIssueLinkTypes = Schema.Struct({
   issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
     id: JiraProviderIdentifier,
@@ -622,6 +637,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               ),
               Effect.map((version) =>
                 Option.some({
+                  description: version.description ?? null,
                   id: version.id,
                   name: version.name,
                   projectId: version.projectId === undefined
@@ -633,17 +649,37 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         })
       )
     ),
-  getProjectVersions: (projectId) =>
+  getProjectVersions: (projectId, maximumResults) =>
     decodeJiraProviderPathIdentifier(projectId).pipe(
       Effect.flatMap((projectId) =>
         providerCall(
           "jira-get-project-versions",
-          client.getProjectVersions(projectId, undefined)
+          client.getProjectVersionsPaginated(projectId, {
+            params: {
+              startAt: 0,
+              maxResults: maximumResults + 1,
+              orderBy: "name"
+            }
+          })
         )
       ),
-      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionListResponse)),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionPageResponse)),
+      Effect.flatMap((page) => {
+        const versions = page.values ?? []
+        return page.isLast === true &&
+            versions.length <= maximumResults &&
+            (page.total === undefined || page.total <= maximumResults)
+          ? Effect.succeed(versions)
+          : Effect.fail(
+            new PluginMalformedResponseFailure({
+              operation: "jira-get-project-versions",
+              diagnosticCode: "jira-project-versions-response-incomplete"
+            })
+          )
+      }),
       Effect.map((versions) =>
         versions.map((version) => ({
+          description: version.description ?? null,
           id: version.id,
           name: version.name,
           projectId: version.projectId === undefined || version.projectId === null
@@ -669,10 +705,8 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
           })
         )
       ),
-      Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(255)))(
-        input.name
-      ),
-      Schema.decodeUnknownEffect(Schema.NullOr(Schema.String.check(Schema.isMaxLength(16_384))))(input.description)
+      Schema.decodeUnknownEffect(JiraReleaseVersionName)(input.name),
+      Schema.decodeUnknownEffect(JiraReleaseVersionDescription)(input.description)
     ]).pipe(
       Effect.flatMap(([projectId, name, description]) =>
         providerCall(
@@ -688,10 +722,11 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       ),
       Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionResponse)),
       Effect.map((version) => ({
+        description: version.description ?? null,
         id: version.id,
         name: version.name,
         projectId: version.projectId === undefined || version.projectId === null
-          ? version.project ?? input.projectId
+          ? version.project ?? null
           : String(version.projectId)
       })),
       Effect.mapError((error) =>
@@ -700,7 +735,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
             operation: "jira-create-project-version",
             diagnosticCode: "jira-created-project-version-response-invalid"
           })
-          : error
+          : mapJiraCreateProjectVersionFailure(error)
       )
     ),
   getIssueLinkTypes: providerCall(

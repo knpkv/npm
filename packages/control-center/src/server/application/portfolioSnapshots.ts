@@ -133,8 +133,7 @@ export const classifyReleasePublicationAwareness = (
   return {
     state: classifyReleasePageAwareness(release.updatedAt, page.publishedAt),
     lastPublishedAt: page.publishedAt,
-    pageId: page.pageId,
-    pageVersion: page.pageVersion
+    publicationActionId: page.publicationActionId
   }
 }
 

@@ -279,6 +279,34 @@ export const GovernedActionEnvelopeMaterialV1 = Schema.Struct(governedActionEnve
   Schema.makeFilter(
     ({ evidence, workspaceId }) => evidence.every((reference) => reference.workspaceId === workspaceId),
     { expected: "every governed-action evidence reference to belong to the action workspace" }
+  ),
+  Schema.makeFilter(
+    ({ proposal, providerId, releasePublication, targetEntityId }) =>
+      releasePublication === undefined ||
+      (
+        String(targetEntityId) === String(releasePublication.releaseId) &&
+        (
+          (
+            providerId === "jira" &&
+            proposal.request.actionKind === "create-release-version" &&
+            proposal.request.target.entityType === "jira.project-version"
+          ) ||
+          (
+            providerId === "confluence" &&
+            (
+              (
+                proposal.request.actionKind === "create-page" &&
+                proposal.request.target.entityType === "release-page"
+              ) ||
+              (
+                proposal.request.actionKind === "update-page" &&
+                proposal.request.target.entityType === "page"
+              )
+            )
+          )
+        )
+      ),
+    { expected: "release publication metadata to describe a supported release publication action" }
   )
 )
 

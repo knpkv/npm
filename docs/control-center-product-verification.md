@@ -2,18 +2,22 @@
 
 This checklist is the release gate for Relay’s cross-provider user paths.
 
-## Criteria
+## Criteria and current status
 
-- Relay can be opened from an arbitrary Control Center page and keeps the exact workspace, release, entity, and return-path context.
-- Relay answers from the exact release projection, never from demo or neighboring release data.
-- CodeCommit pull-request details load through the complete bounded diff, including indexed file content and exact base/head identity.
-- CodeCommit review remains human-confirmed and fails closed when the pull request is not connected to a release.
-- An explicit natural-language Jira publication request creates or confirms the canonical release version through a governed action and reports its durable action receipt.
-- An explicit natural-language Confluence publication request creates a release page through a governed action and reports its durable action receipt.
-- Existing Jira versions are idempotently confirmed when exactly one canonical match exists; ambiguous duplicates remain blocked.
-- Informational questions such as “How do I create a Confluence page?” do not create governed actions.
-- Jira issue edits remain proposal-only.
-- Reauthorizing the shared Atlassian connection requests both Jira and Confluence scopes, including write-capable Jira release-version scopes.
+| Criterion                                                                                                           | Status | Evidence                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| Relay opens from arbitrary Control Center pages with exact workspace, release, entity, and return-path context.     | Pass   | Safari evidence below; browser coverage exercises contextual entry and return paths.                         |
+| Relay answers from the admitted release projection, never demo or neighboring release data.                         | Pass   | Release-agent application and handler suites bind every turn to one release snapshot.                        |
+| CodeCommit pull-request details load the complete bounded diff with exact base/head identity.                       | Pass   | Safari PR #44 evidence below and CodeCommit adapter/browser suites.                                          |
+| CodeCommit review remains human-confirmed and fails closed without a connected release.                             | Pass   | Governed review tests and browser verification.                                                              |
+| Release chat may suggest Jira or Confluence publication but cannot perform the external write.                      | Pass   | The chat handler is read-only; publication uses the dedicated owner-confirmed endpoint.                      |
+| Owner-confirmed Jira publication creates or exactly confirms the canonical release version.                         | Pass   | Jira governed-action and integration suites; succeeded action evidence below.                                |
+| Owner-confirmed Confluence publication creates or updates the exact release page.                                   | Pass   | Confluence governed-action and integration suites; succeeded action evidence below.                          |
+| Existing Jira versions are confirmed only when name and release notes exactly match; ambiguity or mismatches block. | Pass   | Jira executor preflight, recovery, and reconciliation compare the complete authorized payload.               |
+| Informational or imperative chat text does not create governed actions.                                             | Pass   | Server handler regression asserts zero publication submissions from release chat.                            |
+| Jira issue edits remain proposal-only.                                                                              | Pass   | Runtime capability and governed-action tests.                                                                |
+| Standalone Atlassian reauthorization requests only its product; a proven shared account requests both products.     | Pass   | Services component tests cover Jira-only and shared-account intent.                                          |
+| Publication identity includes the exact release source digest and configured destination.                           | Pass   | Canonical identity and execution-authority checks reject changed release baselines before provider dispatch. |
 
 ## Browser evidence
 
@@ -27,6 +31,6 @@ Safari MCP verification on 2026-08-02 used the signed-in Control Center and Jira
 
 ## Automated gates
 
-- Focused Control Center tests: 164 passed.
-- Control Center type-check, lint, and production build: passed.
-- The full Control Center suite currently cannot be used as a code gate in this workspace: 1,873 passed and 392 failed because temporary test roots resolve through symlinked paths, triggering `BlobContainmentError`, `SecretProtectionError`, and private-directory validation failures. The failure is environmental and affects unrelated persistence/runtime suites.
+- Pull-request Audit, Browser, Format, Lint, Snapshot, Test, Types, Jira integration, and Confluence integration gates passed on the reviewed head.
+- Focused release-publication, portfolio, Services, agent-page, Jira, persistence, and API handler suites pass locally.
+- Local macOS persistence suites that create temporary roots still hit the known canonical-path fixture failure (`BlobContainmentError`); the equivalent Linux pull-request Test gate is authoritative and passes.

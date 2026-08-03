@@ -896,10 +896,19 @@ const makeRuntime = (
   provider: JiraReadProvider,
   configuration: unknown,
   verifiedSiteId: string | null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
+  releasePublicationEnabled: boolean
 ): JiraReadPluginRuntime => {
+  const rawDescriptor = releasePublicationEnabled
+    ? jiraReadPluginDescriptor
+    : {
+      ...jiraReadPluginDescriptor,
+      capabilities: jiraReadPluginDescriptor.capabilities.filter(
+        ({ capabilityId }) => capabilityId !== "action.execute" && capabilityId !== "action.reconcile"
+      )
+    }
   const definition = definePluginV1({
-    rawDescriptor: jiraReadPluginDescriptor,
+    rawDescriptor,
     configurationSchema: JiraReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
@@ -1005,6 +1014,8 @@ const makeRuntime = (
                 includeControlCenterAttribution,
                 request
               )
+              : request.actionKind === "create-release-version" && !releasePublicationEnabled
+              ? Effect.fail(unsupported("action.execute"))
               : governedActions.proposeAction(request)
         }
         const executor: AuthorizedPluginExecutorV1 = governedActions.executor
@@ -1021,7 +1032,8 @@ const makeRuntime = (
 export const makeJiraReadPluginRuntime = (
   configuration: unknown,
   verifiedSiteId: string | null = null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
 ): Effect.Effect<JiraReadPluginRuntime, never, JiraApiClient> =>
   Effect.map(
     JiraApiClient,
@@ -1030,7 +1042,8 @@ export const makeJiraReadPluginRuntime = (
         makeJiraReadProvider(client),
         configuration,
         verifiedSiteId,
-        includeControlCenterAttribution
+        includeControlCenterAttribution,
+        releasePublicationEnabled
       )
   )
 
@@ -1039,5 +1052,7 @@ export const makeJiraReadPluginRuntimeFromProvider = (
   provider: JiraReadProvider,
   configuration: unknown,
   verifiedSiteId: string | null = null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
-): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution)
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
+): JiraReadPluginRuntime =>
+  makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution, releasePublicationEnabled)

@@ -20,7 +20,9 @@ import {
   GovernedActionTransitionId
 } from "../../../../domain/identifiers.js"
 import { AuthorizedPluginActionV1 } from "../../../../domain/plugins/actions.js"
+import { Release } from "../../../../domain/release.js"
 import type { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
+import { digestReleaseSourceRevisions } from "../../../application/releasePublicationMetadata.js"
 import { Database } from "../../../persistence/Database.js"
 import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
@@ -42,6 +44,9 @@ const LEASE_GRACE_SECONDS = 30
 const RECOVERY_SAFETY_SECONDS = 60
 const AttemptCountRow = Schema.Struct({
   count: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
+const CurrentReleaseSnapshotRow = Schema.Struct({
+  snapshotJson: Schema.String.check(Schema.isNonEmpty())
 })
 
 const inactive = (state: GovernedActionState): GovernedActionBeginResult => ({
@@ -204,6 +209,47 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             sessionId: record.authorization.sessionId
           })
           const publication = record.envelope.releasePublication
+          if (publication !== undefined) {
+            const rows = yield* sql<Record<string, unknown>>`SELECT
+                revision.snapshot_json AS snapshotJson
+              FROM releases AS release
+              JOIN release_revisions AS revision
+                ON revision.workspace_id = release.workspace_id
+                AND revision.release_id = release.release_id
+                AND revision.revision = release.current_revision
+              WHERE release.workspace_id = ${record.envelope.workspaceId}
+                AND release.release_id = ${publication.releaseId}`
+            const row = rows[0]
+            if (row === undefined || rows.length !== 1) {
+              return yield* new GovernedActionExecutionStoreError({
+                operation: "begin",
+                reason: "authority-changed"
+              })
+            }
+            const decodedRow = yield* Schema.decodeUnknownEffect(CurrentReleaseSnapshotRow)(row).pipe(
+              Effect.mapError(() =>
+                new GovernedActionExecutionStoreError({ operation: "begin", reason: "invalid-record" })
+              )
+            )
+            const release = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Release))(decodedRow.snapshotJson)
+              .pipe(
+                Effect.mapError(() =>
+                  new GovernedActionExecutionStoreError({ operation: "begin", reason: "invalid-record" })
+                )
+              )
+            const currentSourceRevisionDigest = yield* digestReleaseSourceRevisions(release.sourceRevisions).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService),
+              Effect.mapError(() =>
+                new GovernedActionExecutionStoreError({ operation: "begin", reason: "persistence-unavailable" })
+              )
+            )
+            if (currentSourceRevisionDigest !== publication.sourceRevisionDigest) {
+              return yield* new GovernedActionExecutionStoreError({
+                operation: "begin",
+                reason: "authority-changed"
+              })
+            }
+          }
           // Release publication destinations do not exist as normalized
           // entities before creation. Bind authority to the exact release and
           // immutable provider request here; the negotiated executor preflight

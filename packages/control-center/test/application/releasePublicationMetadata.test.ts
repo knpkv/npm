@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { EntityId, PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
+import { EntityId, GovernedActionId, PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
 import { SourceRevision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
@@ -84,20 +84,26 @@ describe("release publication metadata", () => {
     const otherReleaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000104")
     const connectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000102")
     const otherConnectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000105")
+    const firstActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000106")
+    const latestActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000107")
+    const otherActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000108")
     const published = latestConfluencePublicationReference([
       {
+        actionId: firstActionId,
         releaseId,
         pluginConnectionId: connectionId,
         occurredAt: timestamp("2026-08-03T09:00:00.000Z"),
         providerOperationId: "confluence-page:42"
       },
       {
+        actionId: latestActionId,
         releaseId,
         pluginConnectionId: connectionId,
         occurredAt: timestamp("2026-08-03T10:00:00.000Z"),
         providerOperationId: "confluence-page:42:v2"
       },
       {
+        actionId: otherActionId,
         releaseId: otherReleaseId,
         pluginConnectionId: otherConnectionId,
         occurredAt: timestamp("2026-08-03T11:00:00.000Z"),
@@ -109,6 +115,7 @@ describe("release publication metadata", () => {
       pageId: "42",
       pageVersion: 2,
       pluginConnectionId: connectionId,
+      publicationActionId: latestActionId,
       publishedAt: timestamp("2026-08-03T10:00:00.000Z")
     })
     assert.isTrue(matchesConfluencePublicationReference(published, { pageId: "42", pageVersion: 2 }))
