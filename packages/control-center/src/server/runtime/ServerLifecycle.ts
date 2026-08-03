@@ -112,7 +112,12 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         (hook) =>
           hook.run.pipe(
             Effect.as(null),
-            Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(hook.hookId))
+            // Hooks are registered as infallible effects. This supervisor deliberately
+            // reduces non-interrupt defects to secret-free hook IDs for HooksFailed.
+            // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle boundary redacts hook defects; server-lifecycle.test.ts covers HooksFailed and interruption.
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.succeed(hook.hookId)
+            )
           ),
         { concurrency: 1 }
       )
@@ -143,7 +148,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void),
         // Drain is terminal: detach only after the one winning transition so direct construction
         // stays unscoped and an idle lifecycle never owns a waiting background fiber.
-        Effect.andThen(drainHooks === null ? Effect.void : runDrainHooks.pipe(Effect.forkDetach))
+        Effect.andThen(drainHooks === null ? Effect.void : runDrainHooks.pipe(Effect.forkDetach)) // eslint-disable-line local-rules/no-unowned-detached-fiber -- ast-grep-ignore: no-unowned-detached-fiber
       )
     ),
     Effect.asVoid

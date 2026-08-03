@@ -158,6 +158,7 @@ const mapBodyPolicyFailure = (
 const transformSchemaDefect = <A, E, R>(
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A, E | InvalidRequestApiError | ServiceUnavailableApiError, R> =>
+  // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The HTTP boundary translates only identified schema defects; request-boundary.test.ts covers translation and unrelated-cause preservation.
   Effect.catchCause(effect, (cause): Effect.Effect<never, E | InvalidRequestApiError | ServiceUnavailableApiError> => {
     const defect = Cause.findDefect(cause)
     if (Result.isFailure(defect) || !HttpApiError.HttpApiSchemaError.is(defect.success)) {

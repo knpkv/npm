@@ -350,7 +350,7 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     error,
     (value) => Predicate.hasProperty(value, "_tag") && value._tag === "ControlCenterCliUsageError"
   )
-  if (isUsageError) return Effect.failCause(cause)
+  if (isUsageError) return Effect.void
   const databaseInitializationError = Option.flatMap(
     error,
     (value) => Option.fromNullishOr(findDatabaseInitializationError(value))
@@ -366,8 +366,7 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
               "Automatic migrations are disabled until schema stability."
           )
           : Effect.void
-      ),
-      Effect.andThen(Effect.failCause(cause))
+      )
     )
   }
   const errorTag = Option.flatMap(
@@ -381,12 +380,12 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     onNone: () => "Control Center command failed unexpectedly.",
     onSome: (tag) => `Control Center command failed (${tag}).`
   })
-  return writeStderrLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
+  return writeStderrLine(message)
 }
 
 NodeRuntime.runMain(
   program.pipe(
-    Effect.catchCause(reportProgramFailure),
+    Effect.tapCause(reportProgramFailure),
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }

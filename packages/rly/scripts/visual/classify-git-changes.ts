@@ -1,19 +1,15 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
-import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { classifyVisualChanges, type VisualClassification } from "./classify-changes.js"
+import { classifyVisualChanges } from "./classify-changes.js"
+import { ensureBoundedGitOutput, recoverVisualGitFailure, VisualGitError } from "./classify-git-changes-effect.js"
 import { parseGitNameStatus } from "./git-changes.js"
-
-class VisualGitError extends Data.TaggedError("VisualGitError")<{
-  readonly reason: string
-}> {}
 
 const VisualCatalogJson = Schema.fromJsonString(Schema.Struct({
   components: Schema.Array(Schema.Struct({
@@ -29,9 +25,6 @@ const VisualCatalogJson = Schema.fromJsonString(Schema.Struct({
   })),
   schemaVersion: Schema.Literal(1)
 }))
-
-const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024
-const failClosed: VisualClassification = { reasons: ["git-or-catalog-failure"], scope: "full" }
 
 const option = (args: ReadonlyArray<string>, name: string): string | undefined => {
   const index = args.indexOf(name)
@@ -54,12 +47,8 @@ const program = Effect.gen(function*() {
   const workspaceRoot = path.dirname(path.dirname(packageRoot))
   const runGit = (gitArgs: ReadonlyArray<string>) =>
     spawner.string(ChildProcess.make("git", gitArgs, { cwd: workspaceRoot })).pipe(
-      Effect.flatMap((output) =>
-        output.length > MAX_GIT_OUTPUT_BYTES
-          ? Effect.fail(new VisualGitError({ reason: "Git output exceeded the classifier bound" }))
-          : Effect.succeed(output)
-      ),
-      Effect.mapError(() => new VisualGitError({ reason: "Git command failed" }))
+      Effect.mapError(() => new VisualGitError({ reason: "Git command failed" })),
+      Effect.flatMap(ensureBoundedGitOutput)
     )
   const resolveRef = (ref: string) =>
     runGit(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).pipe(
@@ -104,9 +93,7 @@ const program = Effect.gen(function*() {
 })
 
 NodeRuntime.runMain(
-  program.pipe(
-    Effect.catchCause(() => Effect.succeed(failClosed)),
+  recoverVisualGitFailure(program).pipe(
     Effect.flatMap((classification) => Console.log(JSON.stringify(classification)))
-  ).pipe(Effect.provide(NodeServices.layer)),
-  { disableErrorReporting: true }
+  ).pipe(Effect.provide(NodeServices.layer))
 )

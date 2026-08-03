@@ -81,7 +81,7 @@ export const parseMarkdown = (
         content: parsed.content.trim(),
         isNew: false
       })),
-      Effect.catchCause(() =>
+      Effect.catch(() =>
         // Try to parse as new page front-matter
         Schema.decodeUnknownEffect(NewPageFrontMatterSchema)(parsed.data).pipe(
           Effect.map((fm) => ({
@@ -89,7 +89,7 @@ export const parseMarkdown = (
             content: parsed.content.trim(),
             isNew: true
           })),
-          Effect.catchCause((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
+          Effect.catch((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
         )
       )
     )

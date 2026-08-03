@@ -3,11 +3,24 @@
  *
  * @module
  */
+import * as Cache from "effect/Cache"
 import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
-import * as Ref from "effect/Ref"
+import { ConfluenceClient } from "../ConfluenceClient.js"
+import type { ApiError, RateLimitError } from "../ConfluenceError.js"
 import type { AtlassianUser } from "../Schemas.js"
+
+const USER_CACHE_CAPACITY = 1_024
+const USER_CACHE_SUCCESS_TTL = Duration.hours(1)
+
+/** @internal */
+export interface UserCacheOptions {
+  readonly capacity?: number
+  readonly successTtl?: Duration.Duration
+}
 
 /**
  * User cache service for caching Atlassian user lookups.
@@ -17,23 +30,8 @@ import type { AtlassianUser } from "../Schemas.js"
 export class UserCache extends Context.Service<
   UserCache,
   {
-    /**
-     * Get user from cache, or fetch and cache if not present.
-     */
-    readonly getOrFetch: (
-      accountId: string,
-      loadUser: (accountId: string) => Effect.Effect<AtlassianUser, unknown>
-    ) => Effect.Effect<AtlassianUser, unknown>
-
-    /**
-     * Get user from cache only (no fetch).
-     */
-    readonly get: (accountId: string) => Effect.Effect<AtlassianUser | undefined>
-
-    /**
-     * Put user into cache.
-     */
-    readonly put: (accountId: string, user: AtlassianUser) => Effect.Effect<void>
+    /** Get user information, sharing concurrent misses for the same account. */
+    readonly get: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>
 
     /**
      * Clear the cache.
@@ -45,46 +43,37 @@ export class UserCache extends Context.Service<
 /**
  * Create the user cache service.
  */
-const make = Effect.gen(function*() {
-  const cache = yield* Ref.make<Map<string, AtlassianUser>>(new Map())
-
-  const get = (accountId: string): Effect.Effect<AtlassianUser | undefined> =>
-    Ref.get(cache).pipe(Effect.map((m) => m.get(accountId)))
-
-  const put = (accountId: string, user: AtlassianUser): Effect.Effect<void> =>
-    Ref.update(cache, (m) => {
-      const newMap = new Map(m)
-      newMap.set(accountId, user)
-      return newMap
+const make = (
+  loadUser: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>,
+  options: UserCacheOptions = {}
+) =>
+  Effect.gen(function*() {
+    const cache = yield* Cache.makeWith(loadUser, {
+      capacity: options.capacity ?? USER_CACHE_CAPACITY,
+      timeToLive: (exit) =>
+        Exit.isSuccess(exit)
+          ? options.successTtl ?? USER_CACHE_SUCCESS_TTL
+          : Duration.zero
     })
 
-  const getOrFetch = <E>(
-    accountId: string,
-    loadUser: (accountId: string) => Effect.Effect<AtlassianUser, E>
-  ): Effect.Effect<AtlassianUser, E> =>
-    Effect.gen(function*() {
-      const cached = yield* get(accountId)
-      if (cached) {
-        return cached
-      }
-      const user = yield* loadUser(accountId)
-      yield* put(accountId, user)
-      return user
+    return UserCache.of({
+      get: (accountId) => Cache.get(cache, accountId),
+      clear: () => Cache.invalidateAll(cache)
     })
-
-  const clear = (): Effect.Effect<void> => Ref.set(cache, new Map())
-
-  return UserCache.of({
-    getOrFetch,
-    get,
-    put,
-    clear
   })
-})
+
+/** @internal */
+export const UserCacheLayerWith = (
+  loadUser: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>,
+  options?: UserCacheOptions
+): Layer.Layer<UserCache> => Layer.effect(UserCache, make(loadUser, options))
 
 /**
  * Layer that provides UserCache.
  *
  * @category Layers
  */
-export const UserCacheLayer: Layer.Layer<UserCache> = Layer.effect(UserCache, make)
+export const UserCacheLayer: Layer.Layer<UserCache, never, ConfluenceClient> = Layer.effect(
+  UserCache,
+  Effect.flatMap(ConfluenceClient, (client) => make(client.getUser))
+)

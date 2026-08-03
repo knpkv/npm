@@ -1,5 +1,6 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { type ReactElement, useMemo, useState } from "react"
 
@@ -213,9 +214,11 @@ export const VersionedReviewSuggestionCard = ({
             Reason
             <select
               aria-label="Dismissal reason"
-              onChange={(event) =>
-                setDismissalReason(Schema.decodeUnknownSync(PrReviewDismissalReason)(event.target.value))
-              }
+              onChange={(event) => {
+                const reason = Schema.decodeUnknownResult(PrReviewDismissalReason)(event.currentTarget.value)
+                if (Result.isFailure(reason)) return
+                setDismissalReason(reason.success)
+              }}
               value={dismissalReason}
             >
               <option value="false-positive">False positive</option>

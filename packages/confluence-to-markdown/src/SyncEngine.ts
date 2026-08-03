@@ -449,8 +449,8 @@ export const layer: Layer.Layer<
      * Get user info with caching.
      */
     const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
-      userCache.getOrFetch(accountId, client.getUser).pipe(
-        Effect.catchCause(() => Effect.succeed(undefined))
+      userCache.get(accountId).pipe(
+        Effect.catch(() => Effect.succeed(undefined))
       )
 
     /**
@@ -764,7 +764,7 @@ export const layer: Layer.Layer<
           Effect.ensuring(
             hasRemoteBranch && originalBranch
               ? git.checkout(originalBranch).pipe(
-                Effect.catchCause((cause) =>
+                Effect.catch((cause) =>
                   Effect.logWarning(
                     `pull: could not restore branch '${originalBranch}' — the repo may still be on origin/confluence. ` +
                       `Restore manually with \`git checkout ${originalBranch}\` (stash local changes first if needed). Cause: ${

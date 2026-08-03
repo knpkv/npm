@@ -37,6 +37,7 @@ export {
   deleteToken,
   FileSystemError,
   isTokenExpired,
+  isTokenExpiredAt,
   loadOAuthConfig,
   loadToken,
   saveOAuthConfig,

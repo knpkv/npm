@@ -3,7 +3,7 @@
  * Phase 5: Calculate and store health scores.
  */
 
-import { Clock, DateTime, Effect, SubscriptionRef } from "effect"
+import { Cause, Clock, DateTime, Effect, SubscriptionRef } from "effect"
 import { type CachedPullRequest, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { scoreTotalOr } from "../HealthScore.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
@@ -18,7 +18,7 @@ export const calculateHealthScores = (
     statusDetail: "calculating health scores"
   }))
 
-  const scoredPRs = yield* prRepo.findAll().pipe(Effect.catchCause(() => Effect.succeed<Array<CachedPullRequest>>([])))
+  const scoredPRs = yield* prRepo.findAll().pipe(Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([])))
   const scoreNowMs = yield* Clock.currentTimeMillis
   const scoreNow = DateTime.toDate(DateTime.makeUnsafe(scoreNowMs))
   yield* Effect.forEach(
@@ -27,11 +27,11 @@ export const calculateHealthScores = (
       const pr = decodeCachedPR(row)
       const score = scoreTotalOr(pr, scoreNow, 0)
       return prRepo.updateHealthScore(row.awsAccountId, row.id, score).pipe(
-        Effect.catchCause(() => Effect.void)
+        Effect.catch(() => Effect.void)
       )
     },
     { discard: true }
   )
 }).pipe(
-  Effect.catchCause((cause) => Effect.logWarning("calculateHealthScores failed", cause))
+  Effect.tapCauseIf(Cause.hasDies, (cause) => Effect.logWarning("calculateHealthScores failed", cause))
 ))

@@ -1,4 +1,3 @@
-import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -271,7 +270,6 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
       references,
       (reference) =>
         run(reference).pipe(
-          Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(cause)),
           Effect.result
         ),
       { concurrency: 1 }

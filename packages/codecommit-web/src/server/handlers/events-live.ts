@@ -87,24 +87,24 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         const prState = yield* SubscriptionRef.get(prService.state)
         const pullRequests = yield* prRepo.findAll().pipe(
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-          Effect.catchCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+          Effect.catch(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
         )
         const unreadCount = refreshNotifs
           ? yield* notificationRepo.unreadCount().pipe(
             Effect.tap((c) => Ref.set(lastUnreadRef, c)),
-            Effect.catchCause(() => Ref.get(lastUnreadRef))
+            Effect.catch(() => Ref.get(lastUnreadRef))
           )
           : yield* Ref.get(lastUnreadRef)
         const notifications = refreshNotifs
           ? yield* notificationRepo.findAll({ limit: 20 }).pipe(
             Effect.tap((p) => Ref.set(lastNotificationsRef, p)),
-            Effect.catchCause(() => Ref.get(lastNotificationsRef))
+            Effect.catch(() => Ref.get(lastNotificationsRef))
           )
           : yield* Ref.get(lastNotificationsRef)
 
         const sandboxes = yield* sandboxRepo.findAll().pipe(
           Effect.map((rows) => rows.map(encodeSandbox)),
-          Effect.catchCause(() => {
+          Effect.catch(() => {
             const sandboxes: ReadonlyArray<typeof SandboxResponse.Type> = []
             return Effect.succeed(sandboxes)
           })
@@ -135,7 +135,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
 
         return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
       }).pipe(
-        Effect.catchCause((cause) =>
+        Effect.catch((cause) =>
           Effect.logWarning("SSE payload failed", cause).pipe(
             Effect.map(() => encoder.encode(":\n\n"))
           )

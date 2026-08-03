@@ -265,11 +265,12 @@ const prList = Command.make("list", {
       // FilterService draws AwsClient/ConfigService from the base layers, which
       // are also merged into the output so the single-account path keeps them.
       FilterServiceLive.pipe(
-        Layer.provideMerge(Layer.mergeAll(
-          AwsClient.AwsClientLive,
-          NodeHttpClient.layerFetch,
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-        ))
+        Layer.provideMerge(
+          Layer.mergeAll(
+            AwsClient.AwsClientLive,
+            ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
+          ).pipe(Layer.provideMerge(NodeHttpClient.layerFetch))
+        )
       )
     )
   )).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))

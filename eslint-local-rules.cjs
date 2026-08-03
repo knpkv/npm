@@ -36,6 +36,15 @@ const isNamespaceImportFrom = (context, identifier, sources) => {
   )
 }
 
+const isDefaultImportFrom = (context, identifier, sources) => {
+  const definition = importedBinding(context, identifier)
+  return (
+    isValueImport(definition) &&
+    definition.node.type === "ImportDefaultSpecifier" &&
+    sources.includes(importSource(definition))
+  )
+}
+
 const isNamedImportBindingFrom = (context, identifier, sources, importedNames) => {
   const definition = importedBinding(context, identifier)
   return (
@@ -692,11 +701,49 @@ const effectiveChildProcessOptions = (context, argument, depth = 0, knownOptionA
   return resolved
 }
 
+const objectPatternBindsPath = (context, pattern, path, variable) => {
+  const [head, ...tail] = path
+  return pattern.properties.some((property) => {
+    if (property.type !== "Property" || staticPropertyName(property.key) !== head) return false
+    const value = property.value.type === "AssignmentPattern" ? property.value.left : property.value
+    if (tail.length === 0) {
+      return value.type === "Identifier" && resolvedVariable(context, value) === variable
+    }
+    return value.type === "ObjectPattern" && objectPatternBindsPath(context, value, tail, variable)
+  })
+}
+
+const isObjectPatternBindingIdentifier = (identifier) => {
+  const value =
+    identifier.parent?.type === "AssignmentPattern" && identifier.parent.left === identifier
+      ? identifier.parent
+      : identifier
+  return (
+    value.parent?.type === "Property" && value.parent.value === value && value.parent.parent?.type === "ObjectPattern"
+  )
+}
+
+const isRootEffectNamespace = (context, expression) =>
+  expression.type === "Identifier" && isNamespaceImportFrom(context, expression, ["effect"])
+
+const isVariableDestructuredFrom = (context, identifier, sourcePredicate, path) => {
+  const variable = resolvedVariable(context, identifier)
+  return (variable?.defs ?? []).some(
+    (definition) =>
+      definition.type === "Variable" &&
+      definition.node.id.type === "ObjectPattern" &&
+      definition.node.init !== null &&
+      sourcePredicate(unwrapTypeExpression(definition.node.init)) &&
+      objectPatternBindsPath(context, definition.node.id, path, variable)
+  )
+}
+
 const isEffectModule = (context, expression) => {
   if (expression.type === "Identifier") {
     return (
       isNamespaceImportFrom(context, expression, ["effect/Effect"]) ||
-      isNamedImportFrom(context, expression, ["effect"], ["Effect"])
+      isNamedImportFrom(context, expression, ["effect"], ["Effect"]) ||
+      isVariableDestructuredFrom(context, expression, (source) => isRootEffectNamespace(context, source), ["Effect"])
     )
   }
   return (
@@ -720,6 +767,71 @@ const isSchemaModule = (context, expression) => {
     expression.object.type === "Identifier" &&
     isNamespaceImportFrom(context, expression.object, ["effect"])
   )
+}
+
+const isDestructuredEffectFunction = (context, identifier, name) => {
+  return (
+    isVariableDestructuredFrom(context, identifier, (source) => isEffectModule(context, source), [name]) ||
+    isVariableDestructuredFrom(context, identifier, (source) => isRootEffectNamespace(context, source), [
+      "Effect",
+      name
+    ])
+  )
+}
+
+const isEffectFunction = (context, expression, name) =>
+  (expression.type === "Identifier" &&
+    (isNamedImportFrom(context, expression, ["effect/Effect"], [name]) ||
+      isDestructuredEffectFunction(context, expression, name))) ||
+  (expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === name &&
+    isEffectModule(context, expression.object))
+
+const isNodeRuntimeModule = (context, expression) => {
+  if (expression.type === "Identifier") {
+    return (
+      isNamespaceImportFrom(context, expression, ["@effect/platform-node/NodeRuntime"]) ||
+      isNamedImportFrom(context, expression, ["@effect/platform-node"], ["NodeRuntime"])
+    )
+  }
+  return (
+    expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === "NodeRuntime" &&
+    expression.object.type === "Identifier" &&
+    isNamespaceImportFrom(context, expression.object, ["@effect/platform-node"])
+  )
+}
+
+const isNodeRunMainCall = (context, call) => {
+  const callee = call.callee
+  if (callee.type === "Identifier") {
+    return isNamedImportFrom(context, callee, ["@effect/platform-node/NodeRuntime"], ["runMain"])
+  }
+  return (
+    callee.type === "MemberExpression" &&
+    staticPropertyName(callee.property) === "runMain" &&
+    isNodeRuntimeModule(context, callee.object)
+  )
+}
+
+const keepsRuntimeErrorReporting = (options) => {
+  if (options === undefined) return true
+  if (options.type !== "ObjectExpression") return false
+  for (const property of options.properties) {
+    if (property.type === "SpreadElement") return false
+    const name = property.computed ? staticComputedKeyName(property.key) : staticPropertyName(property.key)
+    if (name === undefined) return false
+    if (name !== "disableErrorReporting") continue
+    if (
+      property.type !== "Property" ||
+      property.kind !== "init" ||
+      property.value.type !== "Literal" ||
+      property.value.value !== false
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 const isResultModule = (context, expression) => {
@@ -930,6 +1042,469 @@ const isRunPromiseCall = (context, expression) => {
     callee.type === "MemberExpression" &&
     staticPropertyName(callee.property) === "runPromise" &&
     isEffectModule(context, callee.object)
+  )
+}
+
+const isReactUseEffectCall = (context, expression) => {
+  if (expression.type !== "CallExpression") return false
+  const callee = expression.callee
+  if (callee.type === "Identifier") {
+    return isNamedImportFrom(context, callee, ["react"], ["useEffect"])
+  }
+  return (
+    callee.type === "MemberExpression" &&
+    staticPropertyName(callee.property) === "useEffect" &&
+    callee.object.type === "Identifier" &&
+    (isNamespaceImportFrom(context, callee.object, ["react"]) || isDefaultImportFrom(context, callee.object, ["react"]))
+  )
+}
+
+const reactUseEffectCallback = (context, node) => {
+  let current = node.parent
+  while (current !== undefined && current !== null) {
+    if (
+      (current.type === "ArrowFunctionExpression" || current.type === "FunctionExpression") &&
+      current.parent?.type === "CallExpression" &&
+      current.parent.arguments[0] === current &&
+      isReactUseEffectCall(context, current.parent)
+    ) {
+      return current
+    }
+    current = current.parent
+  }
+  return undefined
+}
+
+const runPromiseAbortController = (context, call) => {
+  const options = call.arguments[1]
+  if (options?.type !== "ObjectExpression") return undefined
+  const signalProperty = options.properties.find(
+    (property) =>
+      property.type === "Property" && property.kind === "init" && staticPropertyName(property.key) === "signal"
+  )
+  if (
+    signalProperty?.type !== "Property" ||
+    isDefinitelyUndefined(signalProperty.value) ||
+    signalProperty.value.type !== "MemberExpression" ||
+    staticPropertyName(signalProperty.value.property) !== "signal" ||
+    signalProperty.value.object.type !== "Identifier"
+  ) {
+    return undefined
+  }
+  return resolvedVariable(context, signalProperty.value.object)
+}
+
+const isFunctionNode = (node) =>
+  node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression" || node.type === "FunctionDeclaration"
+
+const isDescendantOf = (node, ancestor) => {
+  let current = node.parent
+  while (current !== undefined && current !== null) {
+    if (current === ancestor) return true
+    current = current.parent
+  }
+  return false
+}
+
+const isLocalAbortController = (context, variable, effectCallback) =>
+  variable.defs.some(
+    (definition) =>
+      definition.type === "Variable" &&
+      isDescendantOf(definition.node, effectCallback) &&
+      definition.node.init?.type === "NewExpression" &&
+      definition.node.init.callee.type === "Identifier" &&
+      definition.node.init.callee.name === "AbortController" &&
+      (resolvedVariable(context, definition.node.init.callee)?.defs.length ?? 0) === 0
+  )
+
+const cleanupFunctionsFromExpression = (context, expression) => {
+  const cleanups = []
+  const returned = unwrapTypeExpression(expression)
+  if (returned.type === "ArrowFunctionExpression" || returned.type === "FunctionExpression") {
+    cleanups.push(returned)
+    return cleanups
+  }
+  if (returned.type === "Identifier") {
+    const variable = resolvedVariable(context, returned)
+    for (const definition of variable?.defs ?? []) {
+      if (
+        definition.type === "Variable" &&
+        (definition.node.init?.type === "ArrowFunctionExpression" ||
+          definition.node.init?.type === "FunctionExpression")
+      ) {
+        cleanups.push(definition.node.init)
+      } else if (definition.type === "FunctionName" && definition.node.type === "FunctionDeclaration") {
+        cleanups.push(definition.node)
+      }
+    }
+  }
+  return cleanups
+}
+
+const cleanupFunctionsAfterCall = (context, effectCallback, call) => {
+  const cleanups = []
+  let descendant = call
+  let current = call.parent
+  while (current !== undefined && current !== null && current !== effectCallback) {
+    if (current.type === "BlockStatement" && enclosingFunction(current) === effectCallback) {
+      let directChild = descendant
+      while (directChild.parent !== current && directChild.parent !== undefined && directChild.parent !== null) {
+        directChild = directChild.parent
+      }
+      const index = current.body.indexOf(directChild)
+      if (index >= 0) {
+        for (const statement of current.body.slice(index + 1)) {
+          if (statement.type === "ReturnStatement" && statement.argument !== null) {
+            cleanups.push(...cleanupFunctionsFromExpression(context, statement.argument))
+          }
+        }
+      }
+    }
+    descendant = current
+    current = current.parent
+  }
+  return cleanups
+}
+
+const isControllerAbortCall = (context, expression, controller) =>
+  expression.type === "CallExpression" &&
+  expression.callee.type === "MemberExpression" &&
+  staticPropertyName(expression.callee.property) === "abort" &&
+  expression.callee.object.type === "Identifier" &&
+  resolvedVariable(context, expression.callee.object) === controller
+
+const containsAbruptCleanupExit = (context, root) => {
+  const visit = (node) => {
+    if (node !== root && isFunctionNode(node)) return false
+    if (node.type === "ReturnStatement" || node.type === "ThrowStatement") return true
+    const keys = context.sourceCode.visitorKeys[node.type] ?? []
+    return keys.some((key) => {
+      const child = node[key]
+      return Array.isArray(child)
+        ? child.some((entry) => entry !== null && typeof entry === "object" && visit(entry))
+        : child !== null && typeof child === "object" && visit(child)
+    })
+  }
+  return visit(root)
+}
+
+const cleanupAbortsController = (context, cleanup, controller) => {
+  if (cleanup.body.type !== "BlockStatement") {
+    return isControllerAbortCall(context, unwrapTypeExpression(cleanup.body), controller)
+  }
+  const abortIndex = cleanup.body.body.findIndex(
+    (statement) =>
+      statement.type === "ExpressionStatement" &&
+      isControllerAbortCall(context, unwrapTypeExpression(statement.expression), controller)
+  )
+  return (
+    abortIndex >= 0 &&
+    !cleanup.body.body.slice(0, abortIndex).some((statement) => containsAbruptCleanupExit(context, statement))
+  )
+}
+
+const containsEffectSleep = (context, root) => {
+  const visit = (node) => {
+    if (node !== root && isFunctionNode(node)) return false
+    if (node.type === "CallExpression" && isEffectFunction(context, node.callee, "sleep")) return true
+    const keys = context.sourceCode.visitorKeys[node.type] ?? []
+    return keys.some((key) => {
+      const child = node[key]
+      return Array.isArray(child)
+        ? child.some((entry) => entry !== null && typeof entry === "object" && visit(entry))
+        : child !== null && typeof child === "object" && visit(child)
+    })
+  }
+  return visit(root)
+}
+
+const isInsideEffectGen = (context, node) => {
+  const callback = enclosingFunction(node)
+  return (
+    callback !== undefined &&
+    callback.parent?.type === "CallExpression" &&
+    callback.parent.arguments.includes(callback) &&
+    isEffectFunction(context, callback.parent.callee, "gen")
+  )
+}
+
+const isNamedEffectLibraryModule = (context, expression, name) => {
+  if (name === "Effect") return isEffectModule(context, expression)
+  if (expression.type === "Identifier") {
+    return (
+      isNamespaceImportFrom(context, expression, [`effect/${name}`]) ||
+      isNamedImportFrom(context, expression, ["effect"], [name])
+    )
+  }
+  return (
+    expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === name &&
+    expression.object.type === "Identifier" &&
+    isNamespaceImportFrom(context, expression.object, ["effect"])
+  )
+}
+
+const catchCauseKind = (context, call) => {
+  const callee = call.callee
+  if (callee.type === "MemberExpression" && staticPropertyName(callee.property) === "catchCause") {
+    for (const name of ["Effect", "Layer", "Stream"]) {
+      if (isNamedEffectLibraryModule(context, callee.object, name)) return name
+    }
+    return undefined
+  }
+  if (callee.type !== "Identifier") return undefined
+  for (const name of ["Effect", "Layer", "Stream"]) {
+    if (isNamedImportFrom(context, callee, [`effect/${name}`], ["catchCause"])) return name
+  }
+  return undefined
+}
+
+const resolveFunction = (context, expression) => {
+  if (expression?.type === "ArrowFunctionExpression" || expression?.type === "FunctionExpression") return expression
+  if (expression?.type !== "Identifier") return undefined
+  const variable = resolvedVariable(context, expression)
+  for (const definition of variable?.defs ?? []) {
+    if (
+      definition.type === "Variable" &&
+      (definition.node.init?.type === "ArrowFunctionExpression" || definition.node.init?.type === "FunctionExpression")
+    ) {
+      return definition.node.init
+    }
+    if (definition.type === "FunctionName" && definition.node.type === "FunctionDeclaration") {
+      return definition.node
+    }
+  }
+  return undefined
+}
+
+const isCauseReasonPredicate = (context, expression, reasonBinding, name) => {
+  const candidate = unwrapTypeExpression(expression)
+  if (
+    candidate.type !== "CallExpression" ||
+    candidate.arguments.length !== 1 ||
+    candidate.arguments[0].type !== "Identifier" ||
+    resolvedVariable(context, candidate.arguments[0]) !== reasonBinding
+  ) {
+    return false
+  }
+  const callee = candidate.callee
+  return (
+    (callee.type === "Identifier" && isNamedImportFrom(context, callee, ["effect/Cause"], [name])) ||
+    (callee.type === "MemberExpression" &&
+      staticPropertyName(callee.property) === name &&
+      isNamedEffectLibraryModule(context, callee.object, "Cause"))
+  )
+}
+
+const isNonFailReasonPredicate = (context, expression) => {
+  const predicate = resolveFunction(context, expression)
+  const reasonParameter = predicate?.params[0]
+  if (predicate === undefined || reasonParameter?.type !== "Identifier" || predicate.body.type === "BlockStatement") {
+    return false
+  }
+  const reasonBinding = resolvedVariable(context, reasonParameter)
+  if (reasonBinding === undefined) return false
+  const body = unwrapTypeExpression(predicate.body)
+  if (body.type !== "LogicalExpression" || body.operator !== "||") return false
+  const names = ["isDieReason", "isInterruptReason"]
+  return names.every(
+    (name) =>
+      isCauseReasonPredicate(context, body.left, reasonBinding, name) ||
+      isCauseReasonPredicate(context, body.right, reasonBinding, name)
+  )
+}
+
+const isExactNonFailProjection = (context, expression, causeBinding) => {
+  const candidate = unwrapTypeExpression(expression)
+  if (
+    candidate.type !== "CallExpression" ||
+    candidate.arguments.length !== 1 ||
+    candidate.callee.type !== "MemberExpression" ||
+    staticPropertyName(candidate.callee.property) !== "fromReasons" ||
+    !isNamedEffectLibraryModule(context, candidate.callee.object, "Cause")
+  ) {
+    return false
+  }
+  const filteredReasons = candidate.arguments[0]
+  if (
+    filteredReasons.type !== "CallExpression" ||
+    filteredReasons.arguments.length !== 1 ||
+    filteredReasons.callee.type !== "MemberExpression" ||
+    staticPropertyName(filteredReasons.callee.property) !== "filter"
+  ) {
+    return false
+  }
+  const reasons = filteredReasons.callee.object
+  if (
+    reasons.type !== "MemberExpression" ||
+    staticPropertyName(reasons.property) !== "reasons" ||
+    reasons.object.type !== "Identifier" ||
+    resolvedVariable(context, reasons.object) !== causeBinding
+  ) {
+    return false
+  }
+  const predicate = filteredReasons.arguments[0]
+  return isNonFailReasonPredicate(context, predicate)
+}
+
+const isPreservedCauseArgument = (context, argument, causeBinding) =>
+  (argument.type === "Identifier" && resolvedVariable(context, argument) === causeBinding) ||
+  isExactNonFailProjection(context, argument, causeBinding)
+
+const isExactFailCauseCall = (context, call, kind, causeBinding) => {
+  if (
+    call.arguments.length !== 1 ||
+    call.arguments[0].type === "SpreadElement" ||
+    !isPreservedCauseArgument(context, call.arguments[0], causeBinding)
+  ) {
+    return false
+  }
+  const callee = call.callee
+  const requiredModule = kind === "Stream" ? "Stream" : "Effect"
+  if (callee.type === "Identifier") {
+    return isNamedImportFrom(context, callee, [`effect/${requiredModule}`], ["failCause"])
+  }
+  return (
+    callee.type === "MemberExpression" &&
+    staticPropertyName(callee.property) === "failCause" &&
+    isNamedEffectLibraryModule(context, callee.object, requiredModule)
+  )
+}
+
+const isCauseTest = (context, expression, causeBinding, name) => {
+  const candidate = unwrapTypeExpression(expression)
+  if (
+    candidate.type !== "CallExpression" ||
+    candidate.arguments.length !== 1 ||
+    candidate.arguments[0].type !== "Identifier" ||
+    resolvedVariable(context, candidate.arguments[0]) !== causeBinding
+  ) {
+    return false
+  }
+  const callee = candidate.callee
+  return (
+    (callee.type === "Identifier" && isNamedImportFrom(context, callee, ["effect/Cause"], [name])) ||
+    (callee.type === "MemberExpression" &&
+      staticPropertyName(callee.property) === name &&
+      isNamedEffectLibraryModule(context, callee.object, "Cause"))
+  )
+}
+
+const provesNonFailCause = (context, expression, causeBinding) => {
+  const candidate = unwrapTypeExpression(expression)
+  if (candidate.type !== "LogicalExpression" || candidate.operator !== "||") return false
+  const names = ["hasDies", "hasInterrupts"]
+  return names.every(
+    (name) =>
+      isCauseTest(context, candidate.left, causeBinding, name) ||
+      isCauseTest(context, candidate.right, causeBinding, name)
+  )
+}
+
+const expressionRethrowsPreservedCause = (context, expression, kind, causeBinding) => {
+  const candidate = unwrapTypeExpression(expression)
+  if (candidate.type === "CallExpression") {
+    if (isExactFailCauseCall(context, candidate, kind, causeBinding)) return true
+    if (
+      candidate.callee.type === "MemberExpression" &&
+      staticPropertyName(candidate.callee.property) === "effectContext" &&
+      isNamedEffectLibraryModule(context, candidate.callee.object, "Layer") &&
+      candidate.arguments.length === 1 &&
+      candidate.arguments[0].type !== "SpreadElement"
+    ) {
+      return expressionRethrowsPreservedCause(context, candidate.arguments[0], "Effect", causeBinding)
+    }
+    if (
+      candidate.callee.type === "MemberExpression" &&
+      staticPropertyName(candidate.callee.property) === "pipe" &&
+      candidate.arguments.length > 0
+    ) {
+      const finalOperator = candidate.arguments.at(-1)
+      return (
+        finalOperator?.type !== "SpreadElement" &&
+        finalOperator?.type === "CallExpression" &&
+        isEffectFunction(context, finalOperator.callee, "andThen") &&
+        finalOperator.arguments.length === 1 &&
+        finalOperator.arguments[0].type !== "SpreadElement" &&
+        expressionRethrowsPreservedCause(context, finalOperator.arguments[0], kind, causeBinding)
+      )
+    }
+    if (
+      isEffectFunction(context, candidate.callee, "andThen") &&
+      candidate.arguments.length === 2 &&
+      candidate.arguments[1].type !== "SpreadElement"
+    ) {
+      return expressionRethrowsPreservedCause(context, candidate.arguments[1], kind, causeBinding)
+    }
+  }
+  if (candidate.type !== "ConditionalExpression") return false
+  if (
+    provesNonFailCause(context, candidate.test, causeBinding) &&
+    expressionRethrowsPreservedCause(context, candidate.consequent, kind, causeBinding)
+  ) {
+    return true
+  }
+  return (
+    expressionRethrowsPreservedCause(context, candidate.consequent, kind, causeBinding) &&
+    expressionRethrowsPreservedCause(context, candidate.alternate, kind, causeBinding)
+  )
+}
+
+const statementRethrowsPreservedCause = (context, statement, kind, causeBinding) => {
+  if (statement.type === "ReturnStatement" && statement.argument !== null) {
+    return expressionRethrowsPreservedCause(context, statement.argument, kind, causeBinding)
+  }
+  if (statement.type !== "BlockStatement") return false
+  return statement.body.length === 1 && statementRethrowsPreservedCause(context, statement.body[0], kind, causeBinding)
+}
+
+const handlerPreservesNonFailCause = (context, handler, kind) => {
+  const causeParameter = handler.params[0]
+  if (causeParameter?.type !== "Identifier") return false
+  const causeBinding = resolvedVariable(context, causeParameter)
+  if (causeBinding === undefined) return false
+  if (handler.body.type !== "BlockStatement") {
+    return expressionRethrowsPreservedCause(context, handler.body, kind, causeBinding)
+  }
+  for (const statement of handler.body.body) {
+    if (
+      statement.type === "IfStatement" &&
+      statement.alternate === null &&
+      provesNonFailCause(context, statement.test, causeBinding) &&
+      statementRethrowsPreservedCause(context, statement.consequent, kind, causeBinding)
+    ) {
+      return true
+    }
+    if (statement.type === "ReturnStatement") {
+      return (
+        statement.argument !== null && expressionRethrowsPreservedCause(context, statement.argument, kind, causeBinding)
+      )
+    }
+  }
+  return false
+}
+
+const isGlobalJsonIdentifier = (context, identifier) => {
+  if (identifier.name !== "JSON") return false
+  const variable = resolvedVariable(context, identifier)
+  return variable === undefined || variable.defs.length === 0
+}
+
+const isGlobalJsonParseMember = (context, expression) =>
+  expression.type === "MemberExpression" &&
+  staticPropertyName(expression.property) === "parse" &&
+  expression.object.type === "Identifier" &&
+  isGlobalJsonIdentifier(context, expression.object)
+
+const isGlobalJsonParseCall = (context, call) => {
+  if (isGlobalJsonParseMember(context, call.callee)) return true
+  if (call.callee.type !== "Identifier") return false
+  const variable = resolvedVariable(context, call.callee)
+  return (variable?.defs ?? []).some(
+    (definition) =>
+      definition.type === "Variable" &&
+      definition.node.init !== null &&
+      isGlobalJsonParseMember(context, unwrapTypeExpression(definition.node.init))
   )
 }
 
@@ -1707,6 +2282,300 @@ module.exports = {
             method === "catch" ? node.arguments[0] : method === "then" ? node.arguments[1] : undefined
           if (!isSilentRejectionHandler(rejectionHandler)) return
           context.report({ node: rejectionHandler, messageId: "silentRejection" })
+        }
+      }
+    }
+  },
+  "require-exact-cause-rethrow": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "preserve every defect and interruption reason when catchCause owns only typed failures",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        missingExactRethrow:
+          "{{module}}.catchCause must rethrow every defect and interruption reason on every recovery path."
+      }
+    },
+    create(context) {
+      return {
+        CallExpression(node) {
+          const kind = catchCauseKind(context, node)
+          if (kind === undefined) return
+          const handlerArgument = node.arguments.length === 1 ? node.arguments[0] : node.arguments[1]
+          if (handlerArgument?.type === "SpreadElement") return
+          const handler = resolveFunction(context, handlerArgument)
+          if (handler !== undefined && handlerPreservesNonFailCause(context, handler, kind)) return
+          context.report({
+            data: { module: kind },
+            messageId: "missingExactRethrow",
+            node
+          })
+        }
+      }
+    }
+  },
+  "no-unowned-detached-fiber": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require Effect fibers to remain attached to an application, layer, or service scope",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        detachedFiber:
+          "Effect.forkDetach attaches to the global scope; use Effect.forkScoped or Effect.forkIn with the owning scope."
+      }
+    },
+    create(context) {
+      const report = (node) => context.report({ node, messageId: "detachedFiber" })
+      return {
+        CallExpression(node) {
+          if (isEffectFunction(context, node.callee, "forkDetach")) report(node)
+        },
+        MemberExpression(node) {
+          if (node.parent?.type === "CallExpression" && node.parent.callee === node) return
+          if (isEffectFunction(context, node, "forkDetach")) report(node)
+        },
+        Identifier(node) {
+          if (
+            node.parent?.type === "ImportSpecifier" ||
+            isObjectPatternBindingIdentifier(node) ||
+            (node.parent?.type === "CallExpression" && node.parent.callee === node)
+          ) {
+            return
+          }
+          if (isEffectFunction(context, node, "forkDetach")) report(node)
+        }
+      }
+    }
+  },
+  "no-ignore-cause-in-codecommit-refresh": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "keep CodeCommit refresh defects and interruption observable",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        ignoredCause:
+          "Do not use Effect.ignoreCause in refresh lifecycle code; recover typed failures or explicitly supervise non-interrupt causes."
+      }
+    },
+    create(context) {
+      const report = (node) => context.report({ node, messageId: "ignoredCause" })
+      return {
+        CallExpression(node) {
+          if (!isEffectFunction(context, node.callee, "ignoreCause")) return
+          report(node)
+        },
+        MemberExpression(node) {
+          if (node.parent?.type === "CallExpression" && node.parent.callee === node) {
+            return
+          }
+          if (isEffectFunction(context, node, "ignoreCause")) report(node)
+        },
+        Identifier(node) {
+          if (
+            node.parent?.type === "ImportSpecifier" ||
+            (node.parent?.type === "CallExpression" && node.parent.callee === node)
+          ) {
+            return
+          }
+          if (isEffectFunction(context, node, "ignoreCause")) report(node)
+        }
+      }
+    }
+  },
+  "no-throwing-json-parse-in-effect-map": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "keep raw JSON parsing out of Effect.map callbacks",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        throwingParse:
+          "JSON.parse can throw inside Effect.map; decode through Schema.fromJsonString or Effect.try instead."
+      }
+    },
+    create(context) {
+      const inspectCallback = (callback) => {
+        const visit = (node) => {
+          if (node !== callback && isFunctionNode(node)) return
+          if (node.type === "CallExpression" && isGlobalJsonParseCall(context, node)) {
+            context.report({ node, messageId: "throwingParse" })
+            return
+          }
+          const visitorKeys = context.sourceCode.visitorKeys[node.type] ?? []
+          for (const key of visitorKeys) {
+            const child = node[key]
+            if (Array.isArray(child)) {
+              for (const entry of child) {
+                if (entry !== null) visit(entry)
+              }
+            } else if (child !== null && child !== undefined) {
+              visit(child)
+            }
+          }
+        }
+        visit(callback)
+      }
+      return {
+        CallExpression(node) {
+          if (!isEffectFunction(context, node.callee, "map")) return
+          const callbackArgument = node.arguments.length === 1 ? node.arguments[0] : node.arguments[1]
+          if (callbackArgument?.type === "SpreadElement") return
+          const callback = resolveFunction(context, callbackArgument)
+          if (callback !== undefined) inspectCallback(callback)
+        }
+      }
+    }
+  },
+  "require-rly-visual-classifier-runtime-error-reporting": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "keep NodeRuntime defect reporting enabled for the Rly visual classifier",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        disabledReporting:
+          "Leave NodeRuntime error reporting enabled; expected classifier failures are already recovered to fail-closed JSON."
+      }
+    },
+    create(context) {
+      return {
+        CallExpression(node) {
+          if (!isNodeRunMainCall(context, node)) return
+          const isCurriedOptions = node.parent?.type === "CallExpression" && node.parent.callee === node
+          const options = isCurriedOptions ? node.arguments[0] : node.arguments[1]
+          if (
+            node.arguments.some((argument) => argument.type === "SpreadElement") ||
+            !keepsRuntimeErrorReporting(options)
+          ) {
+            context.report({ node, messageId: "disabledReporting" })
+          }
+        }
+      }
+    }
+  },
+  "no-manual-control-center-client-poll-loop": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require Schedule-based repetition for periodic Control Center client work",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        manualPoll: "Use Effect.repeat with a Schedule for periodic client polling."
+      }
+    },
+    create(context) {
+      return {
+        WhileStatement(node) {
+          if (!isInsideEffectGen(context, node) || !containsEffectSleep(context, node.body)) return
+          context.report({ node, messageId: "manualPoll" })
+        }
+      }
+    }
+  },
+  "no-throwing-schema-decode-in-control-center-client": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "keep client-controlled Schema decode failures out of the defect channel",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        throwingDecode: "Decode client-controlled values with Schema Effect, Result, or Option APIs."
+      }
+    },
+    create(context) {
+      const forbidden = ["decodeSync", "decodeUnknownSync"]
+      const report = (node) => context.report({ node, messageId: "throwingDecode" })
+      return {
+        ImportDeclaration(node) {
+          if (node.source.value !== "effect/Schema" || node.importKind === "type") return
+          for (const specifier of node.specifiers) {
+            if (
+              specifier.type === "ImportSpecifier" &&
+              specifier.importKind !== "type" &&
+              forbidden.includes(staticPropertyName(specifier.imported))
+            ) {
+              report(specifier)
+            }
+          }
+        },
+        ExportNamedDeclaration(node) {
+          if (node.source?.value !== "effect/Schema" || node.exportKind === "type") return
+          for (const specifier of node.specifiers) {
+            if (specifier.exportKind !== "type" && forbidden.includes(staticPropertyName(specifier.local))) {
+              report(specifier)
+            }
+          }
+        },
+        MemberExpression(node) {
+          if (forbidden.includes(staticPropertyName(node.property)) && isSchemaModule(context, node.object)) {
+            report(node)
+          }
+        },
+        VariableDeclarator(node) {
+          if (node.id.type !== "ObjectPattern" || node.init === null || !isSchemaModule(context, node.init)) return
+          for (const property of node.id.properties) {
+            if (property.type === "Property" && forbidden.includes(staticPropertyName(property.key))) {
+              report(property)
+            }
+          }
+        }
+      }
+    }
+  },
+  "require-run-promise-signal-in-react-effect": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require React effects to interrupt Effect.runPromise work during cleanup",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        missingSignal:
+          "Pass a local AbortController signal to Effect.runPromise and abort that same controller from cleanup."
+      }
+    },
+    create(context) {
+      return {
+        CallExpression(node) {
+          if (!isRunPromiseCall(context, node)) return
+          const effectCallback = reactUseEffectCallback(context, node)
+          if (effectCallback === undefined) return
+          const controller = runPromiseAbortController(context, node)
+          if (
+            controller !== undefined &&
+            isLocalAbortController(context, controller, effectCallback) &&
+            cleanupFunctionsAfterCall(context, effectCallback, node).some((cleanup) =>
+              cleanupAbortsController(context, cleanup, controller)
+            )
+          )
+            return
+          context.report({ node, messageId: "missingSignal" })
         }
       }
     }

@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { type OAuthConfig, type OAuthToken } from "../config/OAuthSchemas.js"
+import { unsafeCurrentTimeMillis } from "../internal/legacyWallClock.js"
 import { ME_URL, RESOURCES_URL, REVOKE_URL, TOKEN_URL } from "./OAuthEndpoints.js"
 import { OAuthError } from "./OAuthErrors.js"
 import {
@@ -260,14 +261,15 @@ export const revokeToken = (
  *
  * @category Utilities
  */
-export const buildOAuthToken = (
+export const buildOAuthTokenAt = (
   tokenResponse: TokenResponse,
   site: AccessibleResource,
-  user: UserInfo
+  user: UserInfo,
+  nowMs: number
 ): OAuthToken => ({
   access_token: tokenResponse.access_token,
   refresh_token: tokenResponse.refresh_token,
-  expires_at: Date.now() + tokenResponse.expires_in * 1000,
+  expires_at: nowMs + tokenResponse.expires_in * 1000,
   scope: tokenResponse.scope,
   cloud_id: site.id,
   site_url: site.url,
@@ -277,3 +279,16 @@ export const buildOAuthToken = (
     email: user.email
   }
 })
+
+/**
+ * Build an OAuth token using the host clock.
+ *
+ * @deprecated Effect workflows should call {@link buildOAuthTokenAt} with
+ * `Clock.currentTimeMillis`. This wrapper preserves the existing synchronous
+ * public API until the next major release.
+ */
+export const buildOAuthToken = (
+  tokenResponse: TokenResponse,
+  site: AccessibleResource,
+  user: UserInfo
+): OAuthToken => buildOAuthTokenAt(tokenResponse, site, user, unsafeCurrentTimeMillis())

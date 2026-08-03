@@ -56,6 +56,7 @@ const validateAdapterStream = (
   events: Stream.Stream<AgentRuntimeEvent, AgentProviderError>
 ): Stream.Stream<AgentRuntimeEvent, AgentProviderError | AgentRuntimeProtocolError> =>
   events.pipe(
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This adapter boundary deliberately normalizes defects; runtime.test.ts covers defect normalization and interruption.
     Stream.catchCause((cause) => {
       if (Cause.hasInterrupts(cause)) return Stream.failCause(cause)
       const failure = Cause.hasDies(cause) ? undefined : Option.getOrUndefined(Cause.findErrorOption(cause))

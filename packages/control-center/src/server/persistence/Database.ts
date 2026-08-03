@@ -47,7 +47,7 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
     yield* sql`PRAGMA journal_mode = WAL`
     yield* sql`PRAGMA busy_timeout = 5000`
   }).pipe(
-    Effect.catchCause(() => new DatabaseInitializationError({ operation: "configure" }))
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "configure" }))
   )
 
   yield* Effect.gen(function*() {
@@ -69,7 +69,7 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
       busyTimeout[0]?.timeout !== BUSY_TIMEOUT_MILLISECONDS
     ) return yield* Effect.fail("SQLite pragmas did not retain their required values")
   }).pipe(
-    Effect.catchCause(() => new DatabaseInitializationError({ operation: "verify-pragmas" }))
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-pragmas" }))
   )
 })
 
@@ -97,7 +97,7 @@ const checkpointBeforeSchemaChange = Effect.fn("Database.checkpointBeforeSchemaC
   sql: SqlClient.SqlClient
 ): Effect.fn.Return<void, SchemaWriteBarrierError> {
   yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`.pipe(
-    Effect.catchCause(() => new SchemaWriteBarrierError({ phase: "acquire" }))
+    Effect.mapError(() => new SchemaWriteBarrierError({ phase: "acquire" }))
   )
 })
 
@@ -118,14 +118,16 @@ const verifyCheckpointStayedQuiescent = Effect.fn("Database.verifyCheckpointStay
   }
 })
 
-/** Convert schema transaction defects and interruption into a redacted typed failure. */
+/** Convert transaction defects into a redacted failure while preserving cancellation. */
 export const sandboxSchemaTransaction = <Value, Failure, Requirements>(
   transaction: Effect.Effect<Value, Failure, Requirements>
 ): Effect.Effect<Value, Failure | SchemaWriteBarrierError, Requirements> =>
   transaction.pipe(
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The schema barrier intentionally redacts defects; database.test.ts covers redaction and interruption.
     Effect.catchCause((cause): Effect.Effect<never, Failure | SchemaWriteBarrierError> => {
+      if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
       const typedFailure = Cause.findErrorOption(cause)
-      if (Cause.hasDies(cause) || Cause.hasInterrupts(cause) || Option.isNone(typedFailure)) {
+      if (Cause.hasDies(cause) || Option.isNone(typedFailure)) {
         return Effect.fail<Failure | SchemaWriteBarrierError>(new SchemaWriteBarrierError({ phase: "verify" }))
       }
       return Effect.fail<Failure | SchemaWriteBarrierError>(typedFailure.value)
@@ -160,9 +162,20 @@ const makeClientLayer = (
     url: databaseUrl
   }
   return LibsqlClient.layer(clientConfig).pipe(
-    Layer.catchCause(() => Layer.effectContext(Effect.fail(new DatabaseInitializationError({ operation: "connect" }))))
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The database adapter redacts connection defects while retaining cancellation; database.test.ts covers both paths.
+    Layer.catchCause(handleDatabaseConnectionCause)
   )
 }
+
+/** Redact client construction defects while retaining every original interruption reason. @internal */
+export const handleDatabaseConnectionCause = <Failure>(
+  cause: Cause.Cause<Failure>
+): Layer.Layer<unknown, DatabaseInitializationError> =>
+  Cause.hasInterrupts(cause)
+    ? Layer.effectContext(
+      Effect.failCause(Cause.fromReasons(cause.reasons.filter(Cause.isInterruptReason)))
+    )
+    : Layer.effectContext(Effect.fail(new DatabaseInitializationError({ operation: "connect" })))
 
 const initializeDatabase = Effect.fn("Database.initializeDatabase")(function*(config: PersistenceConfig) {
   yield* schemaLock.withPermit(

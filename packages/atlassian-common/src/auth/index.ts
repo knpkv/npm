@@ -28,6 +28,7 @@ export { AuthMissingError, OAuthError, OAuthNotConfiguredError, type OAuthStep }
 // Operations
 export {
   buildOAuthToken,
+  buildOAuthTokenAt,
   exchangeCodeForTokens,
   type ExchangeCodeOptions,
   getAccessibleResources,

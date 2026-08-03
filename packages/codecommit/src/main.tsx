@@ -15,6 +15,8 @@ const isTerminalCapabilityResponse = (sequence: string) =>
 
 const program = Effect.gen(function* makeProgram() {
   const exitSignal = yield* Deferred.make<void>()
+  const ownerScope = yield* Effect.scope
+  const runFork = Effect.runForkWith(yield* Effect.context<never>())
 
   // Create renderer with automatic cleanup
   const renderer = yield* Effect.acquireRelease(
@@ -31,12 +33,15 @@ const program = Effect.gen(function* makeProgram() {
 
   const onQuit = () => {
     // Abort pending HTTP requests
-    Effect.runFork(
-      Effect.gen(function* quit() {
-        yield* cleanup.pipe(Effect.ignoreCause)
-        yield* Effect.sleep("100 millis")
-        yield* Deferred.succeed(exitSignal, void 0)
-      })
+    runFork(
+      Effect.forkIn(
+        Effect.gen(function* quit() {
+          yield* cleanup.pipe(Effect.ignoreCause)
+          yield* Effect.sleep("100 millis")
+          yield* Deferred.succeed(exitSignal, void 0)
+        }),
+        ownerScope
+      )
     )
   }
 
