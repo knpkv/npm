@@ -77,7 +77,7 @@ const RECONCILIATION_PENDING_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000017"
 const RECONCILIATION_SUCCEEDED_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000018"
 const RECONCILIATION_SUCCEEDED_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000019"
 const CONFLUENCE_CONNECTION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001a"
-const CONFLUENCE_TARGET_ID = "01890f6f-6d6a-7cc0-98d2-33000000001b"
+const MISSING_TARGET_ID = "01890f6f-6d6a-7cc0-98d2-33000000001b"
 const RELEASE_ID = "01890f6f-6d6a-7cc0-98d2-33000000001c"
 const PUBLICATION_ACTION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001d"
 const PUBLICATION_SUCCEEDED_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-33000000001e"
@@ -109,6 +109,11 @@ const seedAuthorityRoots = Effect.fn("GovernedActionRepositoryTest.seedRoots")(f
   yield* sql`INSERT INTO workspaces (
     workspace_id, display_name, revision, created_at, updated_at
   ) VALUES (${WORKSPACE_ID}, 'Governance', 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT})`
+  yield* sql`INSERT INTO releases (
+    workspace_id, release_id, current_revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${RELEASE_ID}, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
+  )`
   yield* sql`INSERT INTO plugin_connections (
     workspace_id, plugin_connection_id, provider_id, display_name,
     revision, is_enabled, created_at, updated_at
@@ -129,14 +134,6 @@ const seedAuthorityRoots = Effect.fn("GovernedActionRepositoryTest.seedRoots")(f
   ) VALUES (
     ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, 'jira', 'PAY-42',
     'issue', 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
-  )`
-  yield* sql`INSERT INTO entities (
-    workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
-    entity_type, current_revision, created_at, updated_at
-  ) VALUES (
-    ${WORKSPACE_ID}, ${CONFLUENCE_TARGET_ID}, ${CONFLUENCE_CONNECTION_ID},
-    'confluence', 'release-page-destination', 'release-page', 1,
-    '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
   yield* sql`INSERT INTO sessions (
     workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id, agent_id,
@@ -1060,6 +1057,24 @@ describe("governed action writer", () => {
       })
     })))
 
+  it.effect("rejects an ordinary action whose exact entity target is missing", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(CONFLICTING_ACTION_ID, {
+        targetEntityId: MISSING_TARGET_ID
+      })
+
+      const result = yield* repository.commit(makeProposalInput(envelope)).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      assert.deepStrictEqual(yield* readLedgerCounts(), {
+        actions: 0,
+        audits: 0,
+        transitions: 0
+      })
+    })))
+
   it.effect("reads latest successful release publications through the indexed release projection", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityRoots()
@@ -1077,7 +1092,7 @@ describe("governed action writer", () => {
           sourceRevisionCount: 0,
           sourceRevisionDigest: `sha256:${"d".repeat(64)}`
         },
-        targetEntityId: CONFLUENCE_TARGET_ID,
+        targetEntityId: RELEASE_ID,
         targetEntityType: "release-page",
         targetVendorImmutableId: "release-page-destination"
       })
@@ -1096,7 +1111,7 @@ describe("governed action writer", () => {
           _tag: "recordSucceeded",
           receipt: {
             observationBasis: "authorization",
-            providerOperationId: "confluence-page:page-1:v1",
+            providerOperationId: "confluence-page:42:v1",
             status: "succeeded",
             safeSummary: "Published Confluence release page",
             observedAt: "2026-07-15T10:01:00.000Z"

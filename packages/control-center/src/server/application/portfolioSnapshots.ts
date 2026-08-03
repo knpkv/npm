@@ -19,7 +19,10 @@ import { Persistence, type PersistenceService } from "../persistence/Persistence
 import type { GovernedActionRecord } from "../persistence/repositories/governed-action/contract.js"
 import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
-import { latestConfluencePublicationReference } from "./releasePublicationMetadata.js"
+import {
+  latestConfluencePublicationReference,
+  type ReleasePublicationReceiptCandidate
+} from "./releasePublicationMetadata.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_COMPACT_COLLABORATORS = 50
@@ -115,32 +118,43 @@ const unknownPageAwareness = (): PortfolioReleasePageAwareness => ({
   lastPublishedAt: null
 })
 
-const releasePageAwareness = (
+/** Fail closed when successful publication history has no supported durable receipt locator. */
+export const classifyReleasePublicationAwareness = (
   release: Release,
-  records: ReadonlyArray<GovernedActionRecord>
+  publications: ReadonlyArray<ReleasePublicationReceiptCandidate>
 ): PortfolioReleasePageAwareness => {
-  const publications = records.flatMap((record) => {
-    const publication = record.envelope.releasePublication
-    return publication === undefined || record.head.lineage._tag !== "terminal"
-      ? []
-      : [{
-        releaseId: publication.releaseId,
-        pluginConnectionId: record.envelope.pluginConnectionId,
-        occurredAt: record.headTransition.occurredAt,
-        providerOperationId: record.head.lineage.receipt.providerOperationId
-      }]
-  })
   const page = latestConfluencePublicationReference(publications, release.id)
   if (page === null) {
-    return { state: "not-published", lastPublishedAt: null } satisfies PortfolioReleasePageAwareness
+    return publications.length === 0
+      ? { state: "not-published", lastPublishedAt: null }
+      : unknownPageAwareness()
   }
   return {
     state: classifyReleasePageAwareness(release.updatedAt, page.publishedAt),
     lastPublishedAt: page.publishedAt,
     pageId: page.pageId,
     pageVersion: page.pageVersion
-  } satisfies PortfolioReleasePageAwareness
+  }
 }
+
+const releasePageAwareness = (
+  release: Release,
+  records: ReadonlyArray<GovernedActionRecord>
+): PortfolioReleasePageAwareness =>
+  classifyReleasePublicationAwareness(
+    release,
+    records.flatMap((record) => {
+      const publication = record.envelope.releasePublication
+      return publication === undefined || record.head.lineage._tag !== "terminal"
+        ? []
+        : [{
+          releaseId: publication.releaseId,
+          pluginConnectionId: record.envelope.pluginConnectionId,
+          occurredAt: record.headTransition.occurredAt,
+          providerOperationId: record.head.lineage.receipt.providerOperationId
+        }]
+    })
+  )
 
 /**
  * Load release publication awareness with one indexed history projection.

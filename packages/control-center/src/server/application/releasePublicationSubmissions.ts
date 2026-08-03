@@ -30,6 +30,7 @@ import {
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
+import { canonicalReleasePublicationTitle } from "../../domain/releasePublication.js"
 import { Revision } from "../../domain/sourceRevision.js"
 import type { SessionSummary } from "../auth/models.js"
 import {
@@ -42,7 +43,7 @@ import {
   GovernedActionProposalAuthority,
   GovernedActionSubmission
 } from "../governance/GovernedActionSubmission.js"
-import { Persistence } from "../persistence/Persistence.js"
+import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
 import { GovernedActionCommitInput } from "../persistence/repositories/governedActionRepository.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
@@ -58,6 +59,36 @@ export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<R
   "ReleasePublicationSubmissionError",
   { reason: Schema.Literals(["unauthorized", "conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}
+
+/** Resolve one release update target through the bounded indexed publication projection. */
+export const loadLatestConfluenceReleasePublication = Effect.fn(
+  "ReleasePublicationSubmissions.loadLatestConfluenceReleasePublication"
+)(function*(
+  history: Pick<
+    PersistenceService["governedActions"],
+    "readLatestTerminalReleasePublications"
+  >,
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId
+) {
+  const records = yield* history.readLatestTerminalReleasePublications({
+    workspaceId,
+    providerId: "confluence",
+    releaseIds: [releaseId]
+  })
+  const candidates = records.flatMap((record) => {
+    const publication = record.envelope.releasePublication
+    return publication === undefined || record.head.lineage._tag !== "terminal"
+      ? []
+      : [{
+        releaseId: publication.releaseId,
+        pluginConnectionId: record.envelope.pluginConnectionId,
+        occurredAt: record.headTransition.occurredAt,
+        providerOperationId: record.head.lineage.receipt.providerOperationId
+      }]
+  })
+  return latestConfluencePublicationReference(candidates, releaseId)
+})
 
 interface SubmitInput {
   readonly releaseId: ReleaseId
@@ -114,7 +145,7 @@ const makeService = Effect.gen(function*() {
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
     const publicationTitle = input.useReleaseIdentity === true
-      ? input.request.provider === "jira" ? release.release.version : `${release.release.version} release`
+      ? canonicalReleasePublicationTitle(release.release.version)
       : input.request.title
     const publicationMarkdown = input.useReleaseIdentity === true
       ? `Release ${release.release.version} for ${release.release.serviceName}. Published by Relay after human confirmation.`
@@ -122,47 +153,17 @@ const makeService = Effect.gen(function*() {
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)
     if (sources.length > 1) return yield* failure("conflict")
     const releaseSource = sources[0]
-    const workspaceEntities = yield* persistence.entities.list(input.workspaceId).pipe(mapFailure)
     let publicationReceiptConnectionId: PluginConnectionId | undefined
     if (
       input.request.provider === "confluence" &&
       input.request.pageId !== undefined &&
       input.request.expectedVersion !== undefined
     ) {
-      const actionKinds: ReadonlyArray<"create-page" | "update-page"> = ["create-page", "update-page"]
-      const publicationTargetIds = [
-        releasePublicationTargetEntityId(input.releaseId),
-        ...workspaceEntities
-          .filter(({ sourceRevision }) => sourceRevision.providerId === "confluence")
-          .map(({ entityId }) => entityId)
-      ]
-      const records = yield* Effect.forEach(
-        publicationTargetIds,
-        (targetEntityId) =>
-          Effect.forEach(
-            actionKinds,
-            (actionKind) =>
-              persistence.governedActions.readLatestTerminalByTarget({
-                workspaceId: input.workspaceId,
-                providerId: "confluence",
-                targetEntityId,
-                actionKind,
-                limit: 100
-              })
-          )
+      const published = yield* loadLatestConfluenceReleasePublication(
+        persistence.governedActions,
+        input.workspaceId,
+        input.releaseId
       ).pipe(mapFailure)
-      const candidates = records.flat(2).flatMap((record) => {
-        const publication = record.envelope.releasePublication
-        return publication === undefined || record.head.lineage._tag !== "terminal"
-          ? []
-          : [{
-            releaseId: publication.releaseId,
-            pluginConnectionId: record.envelope.pluginConnectionId,
-            occurredAt: record.headTransition.occurredAt,
-            providerOperationId: record.head.lineage.receipt.providerOperationId
-          }]
-      })
-      const published = latestConfluencePublicationReference(candidates, input.releaseId)
       if (
         published === null ||
         !matchesConfluencePublicationReference(published, {

@@ -7,6 +7,7 @@ import { Link, Navigate, useLocation, useOutletContext, useParams, useSearchPara
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { canonicalReleasePublicationTitle } from "../domain/releasePublication.js"
 import { contextualReleaseAgentPath } from "./contextualAgentPath.js"
 import { usePortfolioOverviewController } from "./portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "./portfolio/presentPortfolio.js"
@@ -476,7 +477,7 @@ const ReleaseAgentRoom = ({
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [announcement, setAnnouncement] = useState("")
-  const publicationDefaultTitle = release.version + " release"
+  const publicationDefaultTitle = canonicalReleasePublicationTitle(release.version)
   const publicationDefaultMarkdown =
     "Release " + release.version + " for " + release.serviceName + ". Published by Relay after human confirmation."
   const [publicationTitle, setPublicationTitle] = useState(publicationDefaultTitle)

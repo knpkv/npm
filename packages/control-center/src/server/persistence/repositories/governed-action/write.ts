@@ -457,6 +457,14 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
             ${input.envelope.workspaceId}, ${input.envelope.actionId},
             ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId}
           )`
+        } else {
+          yield* sql`INSERT INTO governed_action_entity_targets (
+            workspace_id, action_id, plugin_connection_id, provider_id, entity_id
+          ) VALUES (
+            ${input.envelope.workspaceId}, ${input.envelope.actionId},
+            ${input.envelope.pluginConnectionId}, ${input.envelope.providerId},
+            ${input.envelope.targetEntityId}
+          )`
         }
       } else {
         yield* verifyRootIdentity(input, envelopeJson, root).pipe(captureMalformedGovernedActionRow(root))

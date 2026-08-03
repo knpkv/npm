@@ -5,7 +5,10 @@ import * as Schema from "effect/Schema"
 import { PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
-import { loadReleasePageAwareness } from "../../src/server/application/portfolioSnapshots.js"
+import {
+  classifyReleasePublicationAwareness,
+  loadReleasePageAwareness
+} from "../../src/server/application/portfolioSnapshots.js"
 import { PersistedRecordError } from "../../src/server/persistence/errors.js"
 import type {
   GovernedActionReleasePublicationReadInput
@@ -45,6 +48,35 @@ const makeRelease = (index: number): Release => {
 type PublicationHistory = Parameters<typeof loadReleasePageAwareness>[0]
 
 describe("portfolio publication awareness", () => {
+  it("fails closed for an unparseable successful receipt and accepts a canonical locator", () => {
+    const release = makeRelease(0)
+    const candidate = {
+      releaseId: release.id,
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
+      occurredAt: release.updatedAt
+    }
+
+    assert.deepStrictEqual(
+      classifyReleasePublicationAwareness(release, [{
+        ...candidate,
+        providerOperationId: "confluence-page:page-1:v1"
+      }]),
+      { state: "unknown", lastPublishedAt: null }
+    )
+    assert.deepStrictEqual(
+      classifyReleasePublicationAwareness(release, [{
+        ...candidate,
+        providerOperationId: "confluence-page:42:v2"
+      }]),
+      {
+        state: "current",
+        lastPublishedAt: release.updatedAt,
+        pageId: "42",
+        pageVersion: 2
+      }
+    )
+  })
+
   it.effect("uses one batched history read for 200 releases without entity fan-out", () =>
     Effect.gen(function*() {
       const releases = Array.from({ length: 200 }, (_, index) => makeRelease(index))
