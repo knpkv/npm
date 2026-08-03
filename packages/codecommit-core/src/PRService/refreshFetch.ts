@@ -67,11 +67,10 @@ export const fetchAndUpsertPRs = (params: {
         const awsAccountId = accountIdMap.get(account.profile) ?? ""
         return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
           Stream.map((pr) => ({ awsAccountId, label, pr })),
-          Stream.catchCause((cause) => {
-            const squashed = Cause.squash(cause)
-            const causeStr = (Predicate.isError(squashed)
-              ? squashed.name !== "Error" ? squashed.name : squashed.message
-              : String(squashed)) || "Unknown error"
+          Stream.catch((error) => {
+            const causeStr = (Predicate.isError(error)
+              ? error.name !== "Error" ? error.name : error.message
+              : String(error)) || "Unknown error"
             const message = JSON.stringify({
               operation: "getPullRequests",
               profile: account.profile,
@@ -87,7 +86,7 @@ export const fetchAndUpsertPRs = (params: {
                   message,
                   profile: account.profile,
                   deduplicate: true
-                }).pipe(Effect.catchCause(() => Effect.void))
+                }).pipe(Effect.catch(() => Effect.void))
                 if (isAuthError) {
                   yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
                 }
@@ -106,7 +105,7 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
             const cached = yield* prRepo.findByAccountAndId(awsAccountId, pr.id).pipe(
               Effect.map((row) => Option.some(row)),
-              Effect.catchCause(() => Effect.succeed(Option.none<CachedPullRequest>()))
+              Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
             )
             if (Option.isSome(cached)) {
               const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
@@ -122,7 +121,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
                 discard: true
               }).pipe(
-                Effect.catchCause(() => Effect.void)
+                Effect.catch(() => Effect.void)
               )
             }
           }
@@ -131,12 +130,12 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId) {
             yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
-              Effect.catchCause(() => Effect.void)
+              Effect.catch(() => Effect.void)
             )
             const isAuthor = currentUser && pr.author === currentUser
             const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
             if (isAuthor || isApprover) {
-              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
+              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
             }
           }
@@ -162,16 +161,16 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
-                Effect.catchCause(() =>
-                  prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
-                )
+                Effect.catch(() => prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void)))
               ),
           { concurrency: 5, discard: true }
         )
       ),
-      Effect.catchCause(() => Effect.void)
+      Effect.catch(() => Effect.void)
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
-    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchCause(() => Effect.void))
-  }).pipe(Effect.ignoreCause({ log: "Warn", message: "fetchAndUpsertPRs failed" }))
+    yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
+  }).pipe(
+    Effect.tapCauseIf(Cause.hasDies, (cause) => Effect.logWarning("fetchAndUpsertPRs failed", cause))
+  )

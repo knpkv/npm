@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unowned-detached-fiber
+language: tsx
+severity: error
+message: "Attach background fibers to an application, layer, or service scope"
+
+rule:
+  any:
+    - pattern: Effect.forkDetach
+    - pattern: Effect.forkDetach($$$ARGS)
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  Detached fibers attach to the global scope and survive their owning layer or
+  application. Use `Effect.forkScoped` for layer workers or capture the owning
+  application/service scope and use `Effect.forkIn(scope)`.
+
+  This TSX rule deliberately covers only TypeScript. JavaScript modules use a
+  different ast-grep language and are covered by the binding-aware ESLint rule,
+  whose config check scans root scripts and package source/scripts `.mjs`
+  files, including an invalid JavaScript fixture.
+
+  ServerLifecycle's single line-scoped suppression is an audited shutdown
+  boundary: it detaches the post-shutdown drain continuation after the
+  runtime-owned main fiber has already completed. The suppression-count
+  contract prevents another detach from inheriting that exception.

@@ -2,7 +2,17 @@ import { ESLint } from "eslint"
 import { fileURLToPath, URL } from "node:url"
 import fixture from "./fixtures/eslint/invalid-component.mjs"
 
-const eslint = new ESLint()
+const eslint = new ESLint({
+  errorOnUnmatchedPattern: false,
+  overrideConfig: [
+    {
+      files: ["scripts/**/*.mjs"],
+      rules: {
+        "local-rules/no-unowned-detached-fiber": "error"
+      }
+    }
+  ]
+})
 const fixturePaths = ["packages/codecommit-web/src/invalid-component.tsx", "packages/rly/src/invalid-component.tsx"]
 
 for (const filePath of fixturePaths) {
@@ -31,6 +41,20 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
       `${ruleId} reported ${diagnostics.length} diagnostics instead of ${expected} for ${filePath} (${locations})`
     )
   }
+}
+
+const detachedMjsResults = await eslint.lintFiles([
+  "scripts/**/*.mjs",
+  "packages/*/src/**/*.mjs",
+  "packages/*/scripts/**/*.mjs"
+])
+const detachedMjsViolations = detachedMjsResults.flatMap((result) =>
+  result.messages
+    .filter((message) => message.ruleId === "local-rules/no-unowned-detached-fiber")
+    .map((message) => `${result.filePath}:${message.line}:${message.column}`)
+)
+if (detachedMjsViolations.length > 0) {
+  throw new Error(`Detached fibers found in package JavaScript source/scripts:\n${detachedMjsViolations.join("\n")}`)
 }
 
 await assertRuleDiagnostics({
@@ -1828,6 +1852,480 @@ await assertRuleDiagnostics({
   expected: 5,
   filePath: "packages/control-center/src/client/eslint-run-promise-invalid.ts",
   ruleId: "local-rules/no-silent-run-promise-rejection"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Cause from "effect/Cause"
+    import * as Fx from "effect/Effect"
+    import { Layer as Layers, Stream as Streams } from "effect"
+    import { catchCause as recoverEffect } from "effect/Effect"
+    Fx.catchCause(program, (_cause) => Fx.interrupt)
+    layer.pipe(Layers.catchCause(() => Layers.empty))
+    Streams.catchCause(stream, (_cause) => Streams.empty)
+    recoverEffect(program, (_cause) => Fx.failCause(otherCause))
+    Fx.catchCause(program, (cause) =>
+      Cause.hasInterrupts(cause)
+        ? Fx.failCause(cause)
+        : fallback
+    )
+    Fx.catchCause(program, (cause) => {
+      if (false) return Fx.failCause(cause)
+      return fallback
+    })
+    Streams.catchCause(stream, (cause) =>
+      Cause.hasInterrupts(cause)
+        ? Streams.failCause(Cause.fromReasons(
+          cause.reasons.filter(Cause.isInterruptReason)
+        ))
+        : Streams.empty
+    )
+  `,
+  expected: 7,
+  filePath: "packages/codecommit-core/src/eslint-catch-cause-invalid.ts",
+  ruleId: "local-rules/require-exact-cause-rethrow"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Cause from "effect/Cause"
+    import * as Effect from "effect/Effect"
+    import * as Layer from "effect/Layer"
+    import * as Stream from "effect/Stream"
+    import { catch as catchTyped } from "effect/Effect"
+    Effect.catchCause(program, (cause) => Effect.failCause(cause))
+    Effect.catchCause(program, (cause) =>
+      Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+        ? Effect.failCause(cause)
+        : typedFallback
+    )
+    const handleLayerCause = (cause) =>
+      Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+        ? Layer.effectContext(Effect.failCause(cause))
+        : fallbackLayer
+    layer.pipe(Layer.catchCause(handleLayerCause))
+    stream.pipe(
+      Stream.catchCause((cause) => Stream.failCause(cause))
+    )
+    stream.pipe(
+      Stream.catchCause((cause) =>
+        Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+          ? Stream.failCause(Cause.fromReasons(
+            cause.reasons.filter((reason) =>
+              Cause.isInterruptReason(reason) || Cause.isDieReason(reason)
+            )
+          ))
+          : fallbackStream
+      )
+    )
+    Effect.catchCause(program, (cause) =>
+      logCause(cause).pipe(Effect.andThen(Effect.failCause(cause)))
+    )
+    catchTyped(program, typedFailureHandler)
+    const localEffect = { catchCause: localCatchCause }
+    localEffect.catchCause(program, localHandler)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-catch-cause-valid.ts",
+  ruleId: "local-rules/require-exact-cause-rethrow"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    import { Effect as RootEffect } from "effect"
+    import { forkDetach as detach } from "effect/Effect"
+    Fx.forkDetach(program)
+    program.pipe(Fx.forkDetach)
+    Root.Effect.forkDetach(program)
+    RootEffect["forkDetach"](program)
+    detach(program)
+    program.pipe(detach)
+    const { forkDetach: namespaceDetach } = Fx
+    namespaceDetach(program)
+    const { forkDetach: rootDetach } = RootEffect
+    program.pipe(rootDetach)
+    const { Effect: { forkDetach: nestedRootDetach } } = Root
+    nestedRootDetach(program)
+    const { Effect: destructuredRootEffect } = Root
+    const { forkDetach: chainedRootDetach } = destructuredRootEffect
+    program.pipe(chainedRootDetach)
+    const { forkDetach: defaultedNamespaceDetach = fallbackDetach } = Fx
+    defaultedNamespaceDetach(program)
+    const {
+      Effect: {
+        forkDetach: defaultedNestedRootDetach = fallbackDetach
+      } = fallbackEffect
+    } = Root
+    defaultedNestedRootDetach(program)
+  `,
+  expected: 12,
+  filePath: "packages/control-center/src/eslint-detached-fiber-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    program.pipe(Fx.forkDetach)
+  `,
+  expected: 1,
+  filePath: "scripts/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    Fx.forkScoped(program)
+    Fx.forkIn(program, applicationScope)
+    Root.Effect.forkScoped(program)
+    const local = { forkDetach: (effect) => effect }
+    local.forkDetach(program)
+    const forkDetach = local.forkDetach
+    program.pipe(forkDetach)
+    const { forkDetach: localDetach } = local
+    localDetach(program)
+    const localRoot = { Effect: local }
+    const { Effect: { forkDetach: nestedLocalDetach } } = localRoot
+    nestedLocalDetach(program)
+    const { forkDetach: defaultedLocalDetach = fallbackDetach } = local
+    defaultedLocalDetach(program)
+    const {
+      Effect: {
+        forkDetach: defaultedNestedLocalDetach = fallbackDetach
+      } = fallbackEffect
+    } = localRoot
+    defaultedNestedLocalDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/eslint-detached-fiber-valid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    const { forkDetach: detach } = Fx
+    program.pipe(detach)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/scripts/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    program.pipe(Fx.forkDetach) // eslint-disable-line local-rules/no-unowned-detached-fiber -- audited lifecycle boundary
+    Fx.forkDetach(otherProgram)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/eslint-detached-fiber-suppression-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { forkDetach as detach } from "effect/Effect"
+    detach(program)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/scripts/eslint-detached-fiber-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-detached-fiber-excluded.test.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/generated/eslint-detached-fiber-excluded.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import { Effect as RootEffect } from "effect"
+    import { ignoreCause as discardCause } from "effect/Effect"
+    refresh.pipe(Fx.ignoreCause)
+    RootEffect.ignoreCause(refresh)
+    discardCause(refresh)
+    refresh.pipe(discardCause)
+    const local = { ignoreCause: (value) => value }
+    local.ignoreCause(refresh)
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/PRService/refresh-eslint-invalid.ts",
+  ruleId: "local-rules/no-ignore-cause-in-codecommit-refresh"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Cause from "effect/Cause"
+    import * as Effect from "effect/Effect"
+    refresh.pipe(
+      Effect.catch(typedFailureHandler),
+      Effect.tapCauseIf(Cause.hasDies, reportDefect)
+    )
+    const local = { ignoreCause: (value) => value }
+    local.ignoreCause(refresh)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/PRService/refresh-eslint-valid.ts",
+  ruleId: "local-rules/no-ignore-cause-in-codecommit-refresh"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import { Effect as RootEffect } from "effect"
+    import { map as transform } from "effect/Effect"
+    Fx.map(content, (text) => JSON.parse(text))
+    RootEffect.map((text) => JSON["parse"](text))
+    transform(content, function(text) { return JSON.parse(text) })
+    const parseJson = JSON.parse
+    content.pipe(Fx.map((text) => parseJson(text)))
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/PermissionService/eslint-json-map-invalid.ts",
+  ruleId: "local-rules/no-throwing-json-parse-in-effect-map"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import * as Schema from "effect/Schema"
+    const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Config))
+    Effect.flatMap(content, decodeConfig)
+    Effect.map(content, (text) =>
+      Effect.try({ try: () => JSON.parse(text), catch: String })
+    )
+    {
+      const JSON = { parse: safeParser }
+      Effect.map(content, (text) => JSON.parse(text))
+    }
+    localEffect.map(content, (text) => globalThis.JSON.parse(text))
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/PermissionService/eslint-json-map-valid.ts",
+  ruleId: "local-rules/no-throwing-json-parse-in-effect-map"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as React from "react"
+    import ReactDefault from "react"
+    import { useEffect as useLifecycle } from "react"
+    import * as Fx from "effect/Effect"
+    import { runPromise as run } from "effect/Effect"
+    useLifecycle(() => {
+      Fx.runPromise(program).then(handleSuccess, handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      run(program, {}).catch(handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      const otherRequest = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return () => otherRequest.abort()
+    })
+    const externalRequest = new AbortController()
+    React.useEffect(() => {
+      run(program, { signal: externalRequest.signal }).catch(handleFailure)
+      return () => externalRequest.abort()
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      if (enabled) return () => request.abort()
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return () => {
+        if (enabled) request.abort()
+      }
+    })
+    ReactDefault.useEffect(() => {
+      Fx.runPromise(program).catch(handleFailure)
+    })
+  `,
+  expected: 8,
+  filePath: "packages/control-center/src/client/eslint-react-run-promise-signal-invalid.ts",
+  ruleId: "local-rules/require-run-promise-signal-in-react-effect"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import ReactDefault from "react"
+    import { useEffect as useReactEffect } from "react"
+    import * as Fx from "effect/Effect"
+    useReactEffect(() => {
+      const request = new AbortController()
+      Fx.runPromise(program, { signal: request.signal }).then(handleSuccess, handleFailure)
+      return () => {
+        reportCleanupStarted()
+        request.abort()
+        reportCleanupFinished()
+      }
+    })
+    ReactDefault.useEffect(() => {
+      const request = new AbortController()
+      Fx.runPromise(program, { signal: request.signal }).catch(handleFailure)
+      return () => request.abort()
+    })
+    useReactEffect(() => {
+      if (enabled) {
+        const request = new AbortController()
+        Fx.runPromise(program, { signal: request.signal }).catch(handleFailure)
+        return () => request.abort()
+      }
+    })
+    Fx.runPromise(detachedProgram).catch(handleFailure)
+    const useEffect = (callback) => callback()
+    useEffect(() => Fx.runPromise(localProgram))
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-react-run-promise-signal-valid.ts",
+  ruleId: "local-rules/require-run-promise-signal-in-react-effect"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as S from "effect/Schema"
+    import * as Root from "effect"
+    import { decodeSync as decode } from "effect/Schema"
+    S.decodeUnknownSync(Id)(routeValue)
+    decode(Id)(filterValue)
+    Root.Schema.decodeSync(Id)(eventValue)
+    const aliasedDecoder = S.decodeSync
+    const { decodeUnknownSync: localDecode } = S
+    export { decodeSync as unsafeDecode } from "effect/Schema"
+  `,
+  expected: 6,
+  filePath: "packages/control-center/src/client/eslint-throwing-schema-decode-invalid.ts",
+  ruleId: "local-rules/no-throwing-schema-decode-in-control-center-client"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as S from "effect/Schema"
+    const effectDecoder = S.decodeUnknownEffect(Id)
+    const result = S.decodeUnknownResult(Id)(routeValue)
+    const option = S.decodeUnknownOption(Id)(filterValue)
+    const localSchema = { decodeSync: (value) => value }
+    localSchema.decodeSync(eventValue)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-throwing-schema-decode-valid.ts",
+  ruleId: "local-rules/no-throwing-schema-decode-in-control-center-client"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    import { gen as workflow, sleep as pause } from "effect/Effect"
+    Fx.gen(function*() {
+      while (active) yield* Fx.sleep("1 second")
+    })
+    workflow(function*() {
+      while (active) yield* pause("1 second")
+    })
+    Root.Effect.gen(function*() {
+      while (active) yield* Root.Effect.sleep("1 second")
+    })
+  `,
+  expected: 3,
+  filePath: "packages/control-center/src/client/eslint-manual-poll-loop-invalid.ts",
+  ruleId: "local-rules/no-manual-control-center-client-poll-loop"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import * as Schedule from "effect/Schedule"
+    const polling = Effect.repeat(resolveOnce, Schedule.spaced("30 seconds"))
+    const finite = Effect.gen(function*() {
+      while (queue.length > 0) {
+        yield* Effect.forEach(queue.takeAll(), () => Effect.sleep("1 second"))
+      }
+    })
+    const ForeignEffect = {
+      gen: (callback) => callback(),
+      sleep: () => undefined
+    }
+    ForeignEffect.gen(function*() {
+      while (active) yield* ForeignEffect.sleep()
+    })
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-manual-poll-loop-valid.ts",
+  ruleId: "local-rules/no-manual-control-center-client-poll-loop"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as NodeRunner from "@effect/platform-node/NodeRuntime"
+    import * as PlatformNode from "@effect/platform-node"
+    import { runMain as run } from "@effect/platform-node/NodeRuntime"
+    NodeRunner.runMain(main, { disableErrorReporting: true })
+    run(main, runtimeOptions)
+    PlatformNode.NodeRuntime.runMain(main, { ...runtimeOptions })
+    NodeRunner.runMain(main, { [optionName]: false })
+    run({ disableErrorReporting: true })(main)
+  `,
+  expected: 5,
+  filePath: "packages/rly/scripts/visual/classify-git-changes.ts",
+  ruleId: "local-rules/require-rly-visual-classifier-runtime-error-reporting"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as NodeRunner from "@effect/platform-node/NodeRuntime"
+    import { runMain as run } from "@effect/platform-node/NodeRuntime"
+    import * as ForeignRuntime from "foreign-runtime"
+    NodeRunner.runMain(main)
+    run(main, { disableErrorReporting: false })
+    NodeRunner.runMain(main, { teardown })
+    ForeignRuntime.runMain(main, { disableErrorReporting: true })
+  `,
+  expected: 0,
+  filePath: "packages/rly/scripts/visual/classify-git-changes.ts",
+  ruleId: "local-rules/require-rly-visual-classifier-runtime-error-reporting"
 })
 
 await assertRuleDiagnostics({

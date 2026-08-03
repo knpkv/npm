@@ -9,6 +9,7 @@ import {
   BUSY_TIMEOUT_MILLISECONDS,
   Database,
   databaseLayer,
+  handleDatabaseConnectionCause,
   sandboxSchemaTransaction,
   verifyDatabaseIntegrity,
   withSchemaWriteBarrier
@@ -237,6 +238,26 @@ describe("Database", () => {
         Effect.flip
       )
       assert.strictEqual(failure, "typed-operation-failure")
+    }))
+
+  it.effect("preserves interruption across the transaction sandbox", () =>
+    Effect.gen(function*() {
+      const exit = yield* sandboxSchemaTransaction(Effect.interrupt).pipe(Effect.exit)
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) {
+        assert.isTrue(Cause.hasInterrupts(exit.cause))
+      }
+    }))
+
+  it.effect("preserves interruption across database client layer recovery", () =>
+    Effect.gen(function*() {
+      const interruptedLayer = Layer.effectContext(Effect.interrupt).pipe(
+        Layer.catchCause(handleDatabaseConnectionCause)
+      )
+      const exit = yield* Layer.build(interruptedLayer).pipe(Effect.scoped, Effect.exit)
+
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
     }))
 
   it.effect("commits success and rolls back the outer transaction after a nested savepoint failure", () =>

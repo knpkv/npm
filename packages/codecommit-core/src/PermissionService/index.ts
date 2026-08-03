@@ -20,7 +20,7 @@ import { allOperations, getOperationMeta, type OperationName, registerOperation 
 export type { BuiltinOperation, OperationMeta, OperationName } from "./operations.js"
 export { allOperations, getOperationMeta, registerOperation }
 
-// On-disk format. Schema.decodeUnknownSync with defaults means
+// On-disk format. Schema decoding with defaults means
 // corrupt or missing files gracefully degrade to empty state (everything prompts).
 
 export const PermissionState = Schema.Literals(["always_allow", "allow", "deny"])
@@ -45,6 +45,7 @@ const PermissionsConfig = Schema.Struct({
 type PermissionsConfig = typeof PermissionsConfig.Type
 
 const decodeConfig = Schema.decodeUnknownSync(PermissionsConfig)
+const decodeConfigText = Schema.decodeUnknownEffect(Schema.fromJsonString(PermissionsConfig))
 
 // Uses Effect FileSystem — works in Bun, Node, tests.
 // Atomic write: write to .tmp, then rename. Prevents corruption on crash.
@@ -56,19 +57,19 @@ const resolvePermissionsPath = Config.string("HOME").pipe(
 
 const loadFromDisk = (fs: FileSystem.FileSystem, path: string): Effect.Effect<PermissionsConfig> =>
   fs.readFileString(path).pipe(
-    Effect.map((content) => decodeConfig(JSON.parse(content))),
+    Effect.flatMap(decodeConfigText),
     // Any failure → empty config → everything prompts
-    Effect.catchCause(() => Effect.succeed(decodeConfig({})))
+    Effect.catch(() => Effect.succeed(decodeConfig({})))
   )
 
 const saveToDisk = (fs: FileSystem.FileSystem, path: string, config: PermissionsConfig): Effect.Effect<void> =>
   Effect.gen(function*() {
     const dir = path.replace(/\/[^/]+$/, "")
-    yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catchCause(() => Effect.void))
+    yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
     const tmpPath = `${path}.tmp`
     yield* fs.writeFileString(tmpPath, JSON.stringify(config, null, 2))
     yield* fs.rename(tmpPath, path)
-  }).pipe(Effect.catchCause(() => Effect.void))
+  }).pipe(Effect.catch(() => Effect.void))
 
 export interface PermissionServiceShape {
   readonly check: (operation: OperationName) => Effect.Effect<PermissionState>
@@ -85,7 +86,7 @@ export interface PermissionServiceShape {
 const makePermissionService = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const permPath = yield* resolvePermissionsPath.pipe(
-    Effect.catchCause(() => Effect.succeed("/tmp/.codecommit/permissions.json"))
+    Effect.catch(() => Effect.succeed("/tmp/.codecommit/permissions.json"))
   )
   // In-memory state. All check() calls read from here.
   // Only set() mutates it AND writes to disk.

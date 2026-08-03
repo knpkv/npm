@@ -7,6 +7,9 @@ style preferences into noisy CI failures.
 ## Commands
 
 - `pnpm lint` runs ESLint and ast-grep.
+- `pnpm check` runs the patched TypeScript compiler with the official Effect
+  language-service diagnostics. Effect errors and warnings fail the check;
+  message-level suggestions remain visible without changing the exit status.
 - `pnpm lint:ast` first runs the rule cases in `ast-grep/tests`, then scans with
   the rules from `sgconfig.yml`, including the Effect-specific rules in
   `ast-grep/rules/effect` and TypeScript-wide rules in
@@ -14,6 +17,11 @@ style preferences into noisy CI failures.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm skills:check` verifies product-local agent skills are synced from
   `packages/agent-skills/skills`.
+
+Every Effect-using package TypeScript configuration must inherit
+`tsconfig.base.jsonc` so the diagnostics run consistently. A green package
+`tsc` invocation that does not load the Effect language-service plugin is not a
+valid Effect check.
 
 ## Hard Effect Guardrails
 
@@ -28,6 +36,37 @@ Use ast-grep for syntactic patterns that are precise without type information:
 - Do not silently discard `Effect.runPromise` rejections. The import-aware local
   ESLint rule recognizes namespace aliases, named imports, empty handlers,
   `void` returns, and rejection callbacks passed to either `catch` or `then`.
+- Preserve every defect and interruption reason across `Effect.catchCause`,
+  `Layer.catchCause`, and `Stream.catchCause` in package source. The
+  binding-aware local ESLint rule recognizes namespace aliases, named imports,
+  piped and data-first calls, and named handlers. It validates return paths
+  instead of accepting a merely nested or unreachable `failCause`. Typed-only
+  recovery must first rethrow the original Cause, or a `Cause.fromReasons`
+  projection that retains both `Cause.isDieReason` and
+  `Cause.isInterruptReason`, with the matching `failCause` constructor.
+  Boundaries that deliberately classify or redact defects use a single
+  line-level suppression with a rationale and a named focused test. Current
+  exceptions are adapter normalization, HTTP schema translation, database and
+  backup redaction, lifecycle supervision, and terminal live-event logging.
+- Keep production background fibers owned by an application, layer, or service
+  scope. The canonical `Effect.forkDetach` spelling has an ast-grep check, and
+  the binding-aware ESLint companion covers namespace aliases, root `Effect`
+  exports, named import aliases, ObjectPattern aliases (including nested and
+  chained root-namespace destructuring), and both direct and piped use in
+  TypeScript and `.mjs` package source and scripts. Prefer `Effect.forkScoped`
+  or `Effect.forkIn`. ServerLifecycle's terminal drain continuation is the
+  single audited line-level exception; the scope check requires exactly one
+  ast-grep suppression and one ESLint suppression at that boundary, then strips
+  both tokens and proves that the actual line contains exactly one canonical
+  detached call.
+- Keep CodeCommit refresh lifecycle defects and interruption observable. A
+  scoped binding-aware rule rejects imported `Effect.ignoreCause`; recover
+  typed failures with `Effect.catch`, or use an explicit supervisor whose
+  non-interrupt policy is covered by a natural lifecycle test.
+- Do not call global `JSON.parse` directly inside CodeCommit `Effect.map`
+  callbacks. The binding-aware rule also follows an aliased `JSON.parse`.
+  Decode JSON with `Schema.fromJsonString` and an Effect-returning decoder, or
+  isolate an unavoidable parser behind `Effect.try`.
 - Use Effect platform services at runtime boundaries: no raw `fs`, raw process
   access, raw `fetch`, raw crypto, or raw timer APIs in package/source Effect
   code.

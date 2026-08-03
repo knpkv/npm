@@ -15,7 +15,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Cause, Config, Duration, Effect, Layer, Predicate, Ref } from "effect"
+import { Config, Effect, Layer, Predicate, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import {
@@ -40,6 +40,8 @@ import {
   StatsLive,
   SubscriptionsLive
 } from "./handlers/index.js"
+import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
+import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
 
 // MIME types for common files
 const mimeTypes: Record<string, string> = {
@@ -121,7 +123,7 @@ const HandlersLive = Layer.mergeAll(
   StatsLive,
   PermissionsLive,
   AuditLive
-)
+).pipe(Layer.provideMerge(BackgroundScopeLive))
 
 // Platform dependencies
 const PlatformLive = Layer.mergeAll(
@@ -235,77 +237,12 @@ const AuditPrune = Layer.effectDiscard(
   })
 )
 
-// Fork auto-refresh loop: initial refresh + recurring based on config
-const AutoRefresh = Layer.effectDiscard(
-  Effect.gen(function*() {
-    const prService = yield* PRService.PRService
-    const configService = yield* ConfigService.ConfigService
-    const defaultRefreshConfig = { autoRefresh: true, refreshIntervalSeconds: 300 }
-
-    const refreshIteration = Effect.gen(function*() {
-      const config = yield* configService.load.pipe(
-        Effect.catchIf(() => true, () => Effect.succeed(defaultRefreshConfig))
-      )
-      if (config.autoRefresh) {
-        yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
-        yield* prService.refresh
-        yield* Effect.logInfo("Auto-refresh complete")
-      } else {
-        yield* Effect.sleep(Duration.seconds(30))
-      }
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logError("Auto-refresh failed", cause).pipe(
-          Effect.andThen(Effect.sleep(Duration.seconds(10)))
-        )
-      )
-    )
-
-    yield* Effect.forkDetach(
-      Effect.gen(function*() {
-        yield* prService.refresh
-        yield* Effect.logInfo("Initial PR refresh complete")
-        return yield* Effect.forever(refreshIteration)
-      })
-    )
-  })
-)
-
-// Sandbox startup: Docker check + reconcile orphans + GC daemon
-const SandboxStartup = Layer.effectDiscard(
-  Effect.gen(function*() {
-    const sandboxService = yield* SandboxService.SandboxService
-    const docker = yield* SandboxService.DockerService
-    const available = yield* docker.isAvailable()
-    if (!available) {
-      yield* Effect.logWarning("Docker not available — sandbox feature disabled")
-      return
-    }
-    yield* sandboxService.reconcile()
-    yield* Effect.logInfo("Sandbox service ready")
-
-    // GC daemon — stop idle sandboxes, cleanup stopped ones
-    yield* Effect.forkDetach(
-      Effect.forever(
-        Effect.gen(function*() {
-          yield* Effect.sleep(Duration.minutes(5))
-          yield* sandboxService.gcIdle()
-        }).pipe(Effect.catchCause((c) =>
-          Cause.hasInterruptsOnly(c)
-            ? Effect.failCause(c)
-            : Effect.logWarning("Sandbox GC failed", c)
-        ))
-      )
-    )
-  })
-)
-
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.mergeAll(
   HttpApiBuilder.layer(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
-  AutoRefresh,
+  autoRefreshLayer,
   AuditPrune,
-  SandboxStartup
+  sandboxStartupLayer
 ).pipe(
   Layer.provide(AllServicesLive),
   Layer.provide(FetchHttpClient.layer)

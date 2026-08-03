@@ -221,11 +221,58 @@ describe("AuthorizedSharePage", () => {
       await act(async () => Promise.resolve())
       expect(host.textContent).toContain(source.projection.title)
 
-      await act(async () => vi.advanceTimersByTimeAsync(30_000))
+      await act(async () => vi.advanceTimersByTimeAsync(29_999))
+      expect(transport.resolve).toHaveBeenCalledTimes(1)
+
+      await act(async () => vi.advanceTimersByTimeAsync(1))
 
       expect(transport.resolve).toHaveBeenCalledTimes(2)
       expect(host.textContent).not.toContain(source.projection.title)
       expect(host.textContent).toContain("Share unavailable")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels scheduled revalidation when the page unmounts", async () => {
+    vi.useFakeTimers()
+    try {
+      const source = releaseWorksetFixture.entityProjections[0]
+      if (source === undefined) throw new Error("Expected shared item fixture")
+      const resolution = AuthorizedShareResolution.make({
+        share: {
+          shareId,
+          entityId: source.projection.entityId,
+          granteePersonId: personId,
+          createdAt: Schema.decodeUnknownSync(UtcTimestamp)("2026-07-17T10:00:00.000Z"),
+          expiresAt: Schema.decodeUnknownSync(UtcTimestamp)("2099-07-18T10:00:00.000Z"),
+          revokedAt: null
+        },
+        item: source
+      })
+      const observedSignals: Array<AbortSignal> = []
+      const transport = {
+        create: vi.fn(() => Promise.reject(new Error("not used"))),
+        prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
+        resolve: vi.fn((_workspaceId, _shareId, signal: AbortSignal) => {
+          observedSignals.push(signal)
+          return Promise.resolve(resolution)
+        }),
+        revoke: vi.fn(() => Promise.reject(new Error("not used")))
+      } satisfies AuthorizedShareTransport
+      await renderShare(transport)
+      if (sessionControls === undefined) throw new Error("Expected browser session controls")
+
+      await act(async () => sessionControls?.establishSession(csrfToken, session))
+      await act(async () => Promise.resolve())
+      expect(transport.resolve).toHaveBeenCalledTimes(1)
+
+      await act(async () => mountedRoot?.unmount())
+      mountedRoot = undefined
+      expect(observedSignals[0]?.aborted).toBe(true)
+
+      await act(async () => vi.advanceTimersByTimeAsync(60_000))
+      expect(transport.resolve).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

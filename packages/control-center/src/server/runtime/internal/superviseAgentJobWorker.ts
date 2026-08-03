@@ -22,6 +22,7 @@ export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(fun
 ) {
   const cycle = options.worker.runOnce(options.workspaceId).pipe(
     Effect.map((result) => result._tag === "idle" ? options.idlePollInterval : Duration.zero),
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle supervisor logs defects and continues; agent-job-worker.test.ts covers retry and scoped interruption.
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
         ? Effect.failCause(cause)

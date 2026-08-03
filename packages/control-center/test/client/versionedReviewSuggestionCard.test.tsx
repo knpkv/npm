@@ -280,6 +280,14 @@ describe("VersionedReviewSuggestionCard", () => {
     expect(dismiss).not.toHaveBeenCalled()
     expect(document.body.textContent).toContain("It will remain in revision history")
 
+    const reason = document.querySelector<HTMLSelectElement>('select[aria-label="Dismissal reason"]')
+    if (reason === null) throw new Error("Dismissal reason missing")
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      setter?.call(reason, "browser-extension-value")
+      reason.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+
     await click("Dismiss finding")
     expect(dismiss).toHaveBeenCalledWith(
       expect.objectContaining({

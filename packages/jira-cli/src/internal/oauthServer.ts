@@ -3,9 +3,9 @@
  *
  * **Mental model**
  *
- * - **Deferred-coordinated lifecycle**: {@link startCallbackServer} returns a `codePromise`
- *   (Deferred) and a `shutdown` effect. The server validates the CSRF `state` parameter
- *   and resolves the Deferred with the authorization code.
+ * - **Scope-owned lifecycle**: {@link startCallbackServer} returns a `codePromise`
+ *   (Deferred). The server validates the CSRF `state` parameter, resolves the
+ *   Deferred with the authorization code, and stops when its enclosing scope closes.
  * - **Port auto-discovery**: Tries default port 8585, increments on conflict.
  *
  * @internal
@@ -14,10 +14,9 @@ import { OAuthError } from "@knpkv/atlassian-common/auth"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import * as Scope from "effect/Scope"
+import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import type * as HttpServerError from "effect/unstable/http/HttpServerError"
 
@@ -70,38 +69,42 @@ export const makeHttpServerFactory = (
 export interface CallbackServerResult {
   /** Promise that resolves with the authorization code */
   readonly codePromise: Effect.Effect<string, OAuthError>
-  /** Shutdown the callback server */
-  readonly shutdown: Effect.Effect<void, never>
   /** The port the server is listening on */
   readonly port: number
 }
+
+const AddressInUseCause = Schema.Struct({
+  code: Schema.Literal("EADDRINUSE")
+})
+
+const isAddressInUse = (error: HttpServerError.ServeError): boolean => Schema.is(AddressInUseCause)(error.cause)
 
 /**
  * Start a local HTTP server to receive OAuth callback.
  *
  * @param expectedState - The state parameter to verify against CSRF
- * @returns Server control interface with code promise, shutdown, and port
+ * @returns Server control interface with code promise and port
  *
  * @category OAuth
  */
 export const startCallbackServer = (
   expectedState: string
-): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag> =>
+): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag | Scope.Scope> =>
   Effect.gen(function*() {
     const factory = yield* HttpServerFactoryTag
     const deferred = yield* Deferred.make<string, OAuthError>()
-    const serverScope = yield* Scope.make()
+    const serverScope = yield* Effect.scope
     const buildServerContext = (port: number): Effect.Effect<
       { readonly context: Context.Context<HttpServer.HttpServer>; readonly port: number },
       OAuthError
     > =>
       Layer.buildWithScope(factory.createServerLayer(port), serverScope).pipe(
         Effect.map((context) => ({ context, port })),
-        Effect.catchCause((cause) =>
-          port < MAX_PORT
-            ? buildServerContext(port + 1)
-            : Effect.fail(new OAuthError({ step: "authorize", cause }))
-        )
+        Effect.catchIf(
+          (error) => isAddressInUse(error) && port < MAX_PORT,
+          () => buildServerContext(port + 1)
+        ),
+        Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
       )
     const { context: serverContext } = yield* buildServerContext(DEFAULT_PORT)
     const server: HttpServerInstance = Context.get(serverContext, HttpServer.HttpServer)
@@ -159,18 +162,13 @@ export const startCallbackServer = (
     )
     const app = router.asHttpEffect()
 
-    const serverFiber = yield* HttpServer.serveEffect(app).pipe(
+    yield* HttpServer.serveEffect(app).pipe(
       Effect.provide(serverContext),
-      Effect.provideService(Scope.Scope, serverScope),
-      Effect.forkIn(serverScope)
+      Effect.forkScoped
     )
 
     return {
       codePromise: Deferred.await(deferred),
-      shutdown: Effect.gen(function*() {
-        yield* Fiber.interrupt(serverFiber)
-        yield* Scope.close(serverScope, Exit.void)
-      }),
       port
     }
   })

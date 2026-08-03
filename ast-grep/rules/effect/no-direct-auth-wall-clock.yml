@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-auth-wall-clock
+language: tsx
+severity: error
+message: "Pass Clock.currentTimeMillis into OAuth token helpers"
+
+rule:
+  pattern: Date.now()
+
+files:
+  - "packages/atlassian-common/src/**/*.ts"
+  - "packages/confluence-to-markdown/src/**/*.ts"
+  - "packages/jira-cli/src/**/*.ts"
+
+ignores:
+  - "packages/atlassian-common/src/internal/legacyWallClock.ts"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+
+note: |
+  Authentication workflows must use Effect's Clock service so expiration and
+  refresh behavior is deterministic under TestClock. The one ignored file is a
+  documented synchronous compatibility boundary; new workflows must call the
+  `*At` helpers with `Clock.currentTimeMillis`.

@@ -1,7 +1,9 @@
+import { RegistryContext } from "@effect/atom-react"
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { Deferred, Effect } from "effect"
 import { App } from "./tui/App.js"
+import { makeTuiApplicationRegistry } from "./tui/atoms/applicationScope.js"
 import { cleanup } from "./tui/atoms/app.js"
 
 const escape = "\u001b"
@@ -15,6 +17,8 @@ const isTerminalCapabilityResponse = (sequence: string) =>
 
 const program = Effect.gen(function* makeProgram() {
   const exitSignal = yield* Deferred.make<void>()
+  const ownerScope = yield* Effect.scope
+  const runFork = Effect.runForkWith(yield* Effect.context<never>())
 
   // Create renderer with automatic cleanup
   const renderer = yield* Effect.acquireRelease(
@@ -28,21 +32,37 @@ const program = Effect.gen(function* makeProgram() {
     ),
     (renderer) => Effect.sync(() => renderer.destroy())
   )
+  const registry = yield* Effect.acquireRelease(
+    Effect.sync(() => makeTuiApplicationRegistry(ownerScope)),
+    (registry) => Effect.sync(() => registry.dispose())
+  )
 
   const onQuit = () => {
     // Abort pending HTTP requests
-    Effect.runFork(
-      Effect.gen(function* quit() {
-        yield* cleanup.pipe(Effect.ignoreCause)
-        yield* Effect.sleep("100 millis")
-        yield* Deferred.succeed(exitSignal, void 0)
-      })
+    runFork(
+      Effect.forkIn(
+        Effect.gen(function* quit() {
+          yield* cleanup.pipe(Effect.ignoreCause)
+          yield* Effect.sleep("100 millis")
+          yield* Deferred.succeed(exitSignal, void 0)
+        }),
+        ownerScope
+      )
     )
   }
 
   // Mount React app
-  const root = createRoot(renderer)
-  root.render(<App onQuit={onQuit} />)
+  const root = yield* Effect.acquireRelease(
+    Effect.sync(() => createRoot(renderer)),
+    (root) => Effect.sync(() => root.unmount())
+  )
+  yield* Effect.sync(() =>
+    root.render(
+      <RegistryContext.Provider value={registry}>
+        <App onQuit={onQuit} />
+      </RegistryContext.Provider>
+    )
+  )
 
   // Keep the process alive until quit
   yield* Deferred.await(exitSignal)

@@ -33,6 +33,7 @@ import { resolveMediaAttachmentReferences, resolveMediaAttachmentUrls } from "./
 import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { UserCache } from "./internal/userCache.js"
+import { lookupUserForSync } from "./internal/userLookup.js"
 import { LocalFileSystem } from "./LocalFileSystem.js"
 import { MarkdownConverter } from "./MarkdownConverter.js"
 import type { AtlassianUser, PageFrontMatter, PageListItem, PageResponse, PageVersionContent } from "./Schemas.js"
@@ -448,10 +449,8 @@ export const layer: Layer.Layer<
     /**
      * Get user info with caching.
      */
-    const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
-      userCache.getOrFetch(accountId, client.getUser).pipe(
-        Effect.catchCause(() => Effect.succeed(undefined))
-      )
+    const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined> =>
+      lookupUserForSync(userCache, accountId)
 
     /**
      * Convert version content to markdown and front-matter.
@@ -764,7 +763,7 @@ export const layer: Layer.Layer<
           Effect.ensuring(
             hasRemoteBranch && originalBranch
               ? git.checkout(originalBranch).pipe(
-                Effect.catchCause((cause) =>
+                Effect.catch((cause) =>
                   Effect.logWarning(
                     `pull: could not restore branch '${originalBranch}' — the repo may still be on origin/confluence. ` +
                       `Restore manually with \`git checkout ${originalBranch}\` (stash local changes first if needed). Cause: ${

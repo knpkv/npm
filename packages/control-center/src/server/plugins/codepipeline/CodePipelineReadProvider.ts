@@ -243,6 +243,11 @@ export class CodePipelinePreDispatchFailure extends Schema.TaggedErrorClass<Code
   { operation: Schema.String, diagnosticCode: Schema.String }
 ) {}
 
+class CodePipelineSdkFailure extends Schema.TaggedErrorClass<CodePipelineSdkFailure>()(
+  "CodePipelineSdkFailure",
+  { cause: Schema.Defect() }
+) {}
+
 /** Failures visible to the Schema-decoding read client. @internal */
 export type CodePipelineProviderFailure =
   | PluginFailure
@@ -637,7 +642,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
                 }),
                 { abortSignal: signal }
               ),
-            catch: (cause) => cause
+            catch: (cause) => new CodePipelineSdkFailure({ cause })
           }),
         (client) => Effect.sync(() => client.destroy())
       ).pipe(
@@ -645,11 +650,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
           duration: request.account.operationTimeoutMillis,
           orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
         }),
-        Effect.catch((cause): Effect.Effect<never, CodePipelineProviderFailure> =>
-          Predicate.isTagged(cause, "PluginTimeoutFailure")
-            ? Effect.fail(new PluginTimeoutFailure({ operation }))
-            : mapCodePipelineAwsFailure(operation, cause)
-        )
+        Effect.catchTag("CodePipelineSdkFailure", (failure) => mapCodePipelineAwsFailure(operation, failure.cause))
       )
       return yield* decodeCodePipelineStateProviderOutput(response)
     })

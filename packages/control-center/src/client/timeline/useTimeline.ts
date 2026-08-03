@@ -36,24 +36,27 @@ export type TimelineState =
     readonly nextCursor: TimelineCursor | null
   }
 
-const dateBoundary = (value: string, isEnd: boolean): TimelineCursor["occurredAt"] =>
-  Schema.decodeSync(UtcTimestamp)(`${value}T${isEnd ? "23:59:59.999" : "00:00:00.000"}Z`)
-
 /** Generated-client transport for the authenticated Timeline page. */
 export const browserTimelineTransport: TimelineTransport = {
   load: (signal, filters, cursor) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
+        const from = filters.from.length === 0
+          ? undefined
+          : yield* Schema.decodeUnknownEffect(UtcTimestamp)(`${filters.from}T00:00:00.000Z`)
+        const to = filters.to.length === 0
+          ? undefined
+          : yield* Schema.decodeUnknownEffect(UtcTimestamp)(`${filters.to}T23:59:59.999Z`)
         return yield* client.timeline.page({
           query: {
             ...(filters.actorKind === "all" ? {} : { actor: filters.actorKind }),
             ...(cursor === null
               ? {}
               : { beforeEventKey: cursor.eventKey, beforeOccurredAt: cursor.occurredAt }),
-            ...(filters.from.length === 0 ? {} : { from: dateBoundary(filters.from, false) }),
+            ...(from === undefined ? {} : { from }),
             limit: 50,
-            ...(filters.to.length === 0 ? {} : { to: dateBoundary(filters.to, true) })
+            ...(to === undefined ? {} : { to })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),

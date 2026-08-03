@@ -912,7 +912,7 @@ const makeExecutor = Effect.gen(function*() {
   const history = yield* PrReviewThreadHistory
 
   const executeInternal = Effect.fnUntraced(function*(
-    claim,
+    claim: ClaimedAgentJob,
     onActivity: (
       event: AgentRuntimeEvent
     ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError> = () => Effect.void
