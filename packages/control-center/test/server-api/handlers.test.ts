@@ -2443,7 +2443,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
           submit: (input) =>
             Ref.update(submissions, (items) => [...items, input]).pipe(
-              Effect.as({ actionId, state: "succeeded" as const })
+              Effect.as({ actionId, state: "succeeded" })
             )
         })),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
