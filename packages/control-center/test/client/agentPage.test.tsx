@@ -430,6 +430,100 @@ describe("AgentPage context", () => {
     expect(host.textContent).toContain("Relay will suggest an update")
   })
 
+  it("keeps Confluence creation enabled when the release page is not published", async () => {
+    const portfolio = presentPortfolio(snapshot)
+    const release = portfolio.releases[0]
+    if (release === undefined) throw new Error("Expected a not-published release-page fixture")
+    const context = {
+      ...readyContext,
+      controller: {
+        ...readyContext.controller,
+        state: {
+          ...readyContext.controller.state,
+          portfolio: {
+            ...portfolio,
+            releases: [
+              {
+                ...release,
+                releasePageAwareness: { state: "not-published", lastPublishedAt: null }
+              }
+            ]
+          }
+        }
+      }
+    } satisfies WorkspaceReleaseOutletContext
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <MemoryRouter initialEntries={[agentPath]}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route
+                path="/w/:workspaceId/releases/:releaseId/agent"
+                element={<AgentPage runTurn={async () => Promise.reject()} />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      )
+    )
+
+    const confluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Create Confluence release page"
+    )
+    expect(confluence?.disabled).toBe(false)
+  })
+
+  it("disables Confluence creation and gives recovery guidance when page awareness is unknown", async () => {
+    const portfolio = presentPortfolio(snapshot)
+    const release = portfolio.releases[0]
+    if (release === undefined) throw new Error("Expected an unknown release-page fixture")
+    const context = {
+      ...readyContext,
+      controller: {
+        ...readyContext.controller,
+        state: {
+          ...readyContext.controller.state,
+          portfolio: {
+            ...portfolio,
+            releases: [
+              {
+                ...release,
+                releasePageAwareness: { state: "unknown", lastPublishedAt: null }
+              }
+            ]
+          }
+        }
+      }
+    } satisfies WorkspaceReleaseOutletContext
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <MemoryRouter initialEntries={[agentPath]}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route
+                path="/w/:workspaceId/releases/:releaseId/agent"
+                element={<AgentPage runTurn={async () => Promise.reject()} />}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      )
+    )
+
+    const confluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Create Confluence release page"
+    )
+    expect(confluence?.disabled).toBe(true)
+    expect(host.textContent).toContain("Refresh the release context before publishing")
+    expect(submitReleasePublication).not.toHaveBeenCalled()
+  })
+
   const orderedProviderCases: ReadonlyArray<readonly [ReadonlyArray<"claude" | "codex">, "claude" | "codex"]> = [
     [["claude", "codex"], "claude"],
     [["codex", "claude"], "codex"]

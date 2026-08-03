@@ -178,6 +178,11 @@
     },
     {
       "type": "table",
+      "name": "governed_action_release_publication_slots",
+      "sql": "CREATE TABLE governed_action_release_publication_slots (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id = 'confluence'),\n    release_id TEXT NOT NULL CHECK(length(release_id) = 36),\n    predecessor_action_id TEXT CHECK(\n      predecessor_action_id IS NULL OR length(predecessor_action_id) = 36\n    ),\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_action_release_publications(workspace_id, action_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "governed_action_release_publications",
       "sql": "CREATE TABLE governed_action_release_publications (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id IN (\n      'codecommit', 'codepipeline', 'jira', 'confluence', 'clockify'\n    )),\n    release_id TEXT NOT NULL CHECK(length(release_id) = 36),\n    predecessor_action_id TEXT CHECK(\n      predecessor_action_id IS NULL OR length(predecessor_action_id) = 36\n    ),\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_actions(workspace_id, action_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id)\n      ON DELETE RESTRICT\n  )"
     },
@@ -593,8 +598,8 @@
     },
     {
       "type": "index",
-      "name": "governed_action_release_publications_confluence_slot_idx",
-      "sql": "CREATE UNIQUE INDEX governed_action_release_publications_confluence_slot_idx\n    ON governed_action_release_publications(\n      workspace_id, provider_id, release_id, COALESCE(predecessor_action_id, '')\n    )\n    WHERE provider_id = 'confluence'"
+      "name": "governed_action_release_publication_slots_unique_idx",
+      "sql": "CREATE UNIQUE INDEX governed_action_release_publication_slots_unique_idx\n    ON governed_action_release_publication_slots(\n      workspace_id, provider_id, release_id, COALESCE(predecessor_action_id, '')\n    )"
     },
     {
       "type": "index",
@@ -1175,6 +1180,16 @@
       "type": "trigger",
       "name": "governed_action_recovery_claims_no_update",
       "sql": "CREATE TRIGGER governed_action_recovery_claims_no_update\n      BEFORE UPDATE ON governed_action_recovery_claims\n      BEGIN\n        SELECT RAISE(ABORT, 'governed_action_recovery_claims is immutable');\n      END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publication_slots_exact",
+      "sql": "CREATE TRIGGER governed_action_release_publication_slots_exact\n    BEFORE INSERT ON governed_action_release_publication_slots\n    WHEN NOT EXISTS (\n      SELECT 1 FROM governed_action_release_publications publication\n      WHERE publication.workspace_id = NEW.workspace_id\n        AND publication.action_id = NEW.action_id\n        AND publication.provider_id = NEW.provider_id\n        AND publication.release_id = NEW.release_id\n        AND publication.predecessor_action_id IS NEW.predecessor_action_id\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action release publication slot must match immutable publication history');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publication_slots_release",
+      "sql": "CREATE TRIGGER governed_action_release_publication_slots_release\n    AFTER UPDATE OF state ON governed_actions\n    WHEN NEW.state IN ('denied', 'expired', 'cancelled', 'failed')\n    BEGIN\n      DELETE FROM governed_action_release_publication_slots\n      WHERE workspace_id = NEW.workspace_id AND action_id = NEW.action_id;\n    END"
     },
     {
       "type": "trigger",

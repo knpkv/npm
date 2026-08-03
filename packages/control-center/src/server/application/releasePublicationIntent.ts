@@ -6,7 +6,7 @@ export interface ReleasePublicationIntent {
 
 /** Detect only explicit imperative requests for a governed release publication. */
 export const detectReleasePublicationIntent = (prompt: string): ReleasePublicationIntent | undefined => {
-  const normalized = prompt.trim().toLocaleLowerCase()
+  const normalized = prompt.trim().toLowerCase()
   if (
     normalized.length === 0 ||
     /\b(how|can|could|should|what|where|why)\b/u.test(normalized) ||

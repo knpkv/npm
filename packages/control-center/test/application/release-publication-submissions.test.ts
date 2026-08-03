@@ -51,6 +51,13 @@ describe("release publication submissions", () => {
     }))
   })
 
+  it("allows a corrected Confluence retry after confirmed no-write history stops blocking", () => {
+    assert.isTrue(confluencePublicationRequestMatchesHistory({}, {
+      hasBlockingPublication: false,
+      latestReference: null
+    }))
+  })
+
   it("allows Confluence updates only when the page identity and version match history", () => {
     const history = {
       hasBlockingPublication: true,

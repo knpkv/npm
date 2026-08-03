@@ -225,7 +225,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
   getIssueTransitions: () => Effect.succeed([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]),
   transitionIssue: () => Effect.void,
   getProjectVersion: () => Effect.succeed(Option.none()),
-  getProjectVersions: () => Effect.succeed([]),
+  findProjectVersionsByName: () => Effect.succeed([]),
   createProjectVersion: () => Effect.die("unused createProjectVersion"),
   getIssueLinkTypes: Effect.succeed([]),
   ...overrides
@@ -628,7 +628,7 @@ describe("JiraReadPlugin", () => {
       const versionReads = yield* Ref.make(0)
       const recoveryEntered = yield* Deferred.make<void>()
       const provider = baseProvider({
-        getProjectVersions: () =>
+        findProjectVersionsByName: () =>
           Ref.getAndUpdate(versionReads, (count) => count + 1).pipe(
             Effect.flatMap((count) =>
               count === 0
@@ -676,7 +676,7 @@ describe("JiraReadPlugin", () => {
       }
       return yield* withConnection(
         baseProvider({
-          getProjectVersions: () => Effect.succeed([exactVersion]),
+          findProjectVersionsByName: () => Effect.succeed([exactVersion]),
           createProjectVersion: () => Ref.update(creates, (count) => count + 1).pipe(Effect.as(exactVersion))
         }),
         Effect.gen(function*() {
@@ -718,7 +718,7 @@ describe("JiraReadPlugin", () => {
 
       return yield* withConnection(
         baseProvider({
-          getProjectVersions: () => Ref.update(versionReads, (count) => count + 1).pipe(Effect.as([])),
+          findProjectVersionsByName: () => Ref.update(versionReads, (count) => count + 1).pipe(Effect.as([])),
           createProjectVersion: () =>
             Ref.update(creates, (count) => count + 1).pipe(Effect.as({
               id: "unexpected-version",
@@ -752,7 +752,7 @@ describe("JiraReadPlugin", () => {
       }
       return yield* withConnection(
         baseProvider({
-          getProjectVersions: () => Effect.succeed([mismatchedVersion]),
+          findProjectVersionsByName: () => Effect.succeed([mismatchedVersion]),
           createProjectVersion: () => Ref.update(creates, (count) => count + 1).pipe(Effect.as(mismatchedVersion))
         }),
         Effect.gen(function*() {
@@ -778,6 +778,31 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("keeps duplicate exact Jira release-version names in conflict", () =>
+    Effect.gen(function*() {
+      const version = {
+        id: "version-218",
+        name: "2.18.0",
+        description: "Payments release 2.18.0",
+        projectId: configuration.projectId
+      }
+      return yield* withConnection(
+        baseProvider({
+          findProjectVersionsByName: () => Effect.succeed([version, { ...version, id: "version-219" }])
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(createReleaseVersionRequest))
+
+          assert.strictEqual((yield* executor.preflight(authorized))._tag, "blocked")
+          const executed = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(executed))
+          if (Result.isFailure(executed)) assert.strictEqual(executed.failure._tag, "PluginConflictFailure")
+        })
+      )
+    }))
+
   it.effect("recovers a duplicate-name race only from an exact Jira payload match", () =>
     Effect.gen(function*() {
       const reads = yield* Ref.make(0)
@@ -789,7 +814,7 @@ describe("JiraReadPlugin", () => {
       }
       return yield* withConnection(
         baseProvider({
-          getProjectVersions: () =>
+          findProjectVersionsByName: () =>
             Ref.getAndUpdate(reads, (count) => count + 1).pipe(
               Effect.map((count) => count === 0 ? [] : [exactVersion])
             ),
@@ -819,7 +844,7 @@ describe("JiraReadPlugin", () => {
       const reads = yield* Ref.make(0)
       return yield* withConnection(
         baseProvider({
-          getProjectVersions: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as([])),
+          findProjectVersionsByName: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as([])),
           createProjectVersion: () =>
             Effect.fail(
               new PluginConfigurationFailure({

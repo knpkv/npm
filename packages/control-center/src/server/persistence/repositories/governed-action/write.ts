@@ -458,6 +458,15 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
             ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId},
             ${input.envelope.releasePublication.predecessorPublicationActionId ?? null}
           )`
+          if (input.envelope.providerId === "confluence") {
+            yield* sql`INSERT INTO governed_action_release_publication_slots (
+              workspace_id, action_id, provider_id, release_id, predecessor_action_id
+            ) VALUES (
+              ${input.envelope.workspaceId}, ${input.envelope.actionId},
+              ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId},
+              ${input.envelope.releasePublication.predecessorPublicationActionId ?? null}
+            )`
+          }
         } else {
           yield* sql`INSERT INTO governed_action_entity_targets (
             workspace_id, action_id, plugin_connection_id, provider_id, entity_id

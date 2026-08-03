@@ -1176,6 +1176,70 @@ describe("governed action writer", () => {
       if (Result.isFailure(corrupted)) assert.instanceOf(corrupted.failure, PersistedRecordError)
     })))
 
+  it.effect("releases a Confluence publication slot after a confirmed no-write expiry", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const firstEnvelope = yield* makeEnvelope(PUBLICATION_ACTION_ID, {
+        actionKind: "create-page",
+        expectedRevision: "0",
+        idempotencyKey: "release-publication:expired-slot",
+        pluginConnectionId: CONFLUENCE_CONNECTION_ID,
+        policyId: "confluence.release-publication",
+        proposalKey: "confluence-release-publication:expired-slot",
+        providerId: "confluence",
+        releasePublication: {
+          releaseId: RELEASE_ID,
+          sourceRevisionCount: 0,
+          sourceRevisionDigest: `sha256:${"d".repeat(64)}`
+        },
+        targetEntityId: RELEASE_ID,
+        targetEntityType: "release-page",
+        targetVendorImmutableId: "release-page-destination"
+      })
+      const firstProposal = makeProposalInput(firstEnvelope)
+      yield* repository.commit(firstProposal)
+      yield* repository.commit(makeDenialInput(
+        firstProposal,
+        decodeCommand({ _tag: "expire", reason: "proposal-expired" }),
+        decodeCause({ _tag: "system", component: "governed-action-engine" })
+      ))
+
+      const retryEnvelope = yield* makeEnvelope("01890f6f-6d6a-7cc0-98d2-52000000009c", {
+        actionKind: "create-page",
+        expectedRevision: "0",
+        idempotencyKey: "release-publication:expired-slot:retry",
+        pluginConnectionId: CONFLUENCE_CONNECTION_ID,
+        policyId: "confluence.release-publication",
+        proposalKey: "confluence-release-publication:expired-slot:retry",
+        providerId: "confluence",
+        releasePublication: {
+          releaseId: RELEASE_ID,
+          sourceRevisionCount: 0,
+          sourceRevisionDigest: `sha256:${"e".repeat(64)}`
+        },
+        targetEntityId: RELEASE_ID,
+        targetEntityType: "release-page",
+        targetVendorImmutableId: "release-page-destination"
+      })
+      const retry = yield* repository.commit(makeProposalInput(retryEnvelope, {
+        auditEventId: "01890f6f-6d6a-7cc0-98d2-52000000009d",
+        commandId: "command:release-publication:expired-slot:retry",
+        transitionId: "01890f6f-6d6a-7cc0-98d2-52000000009e"
+      }))
+
+      assert.strictEqual(retry._tag, "committed")
+      const selected = yield* repository.readLatestTerminalReleasePublications({
+        workspaceId: WORKSPACE_ID,
+        providerId: "confluence",
+        releaseIds: [RELEASE_ID]
+      })
+      assert.deepStrictEqual(
+        selected.map(({ envelope }) => envelope.actionId),
+        [retryEnvelope.actionId]
+      )
+    })))
+
   it.effect("round-trips reconciliation by immutable idempotency identity", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityRoots()

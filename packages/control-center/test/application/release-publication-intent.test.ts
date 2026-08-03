@@ -4,6 +4,12 @@ import assert from "node:assert/strict"
 import { detectReleasePublicationIntent } from "../../src/server/application/releasePublicationIntent.js"
 
 describe("release publication intent", () => {
+  it("normalizes ASCII command casing without changing the explicit command boundary", () => {
+    assert.deepStrictEqual(detectReleasePublicationIntent("CREATE THE CONFLUENCE RELEASE PAGE"), {
+      provider: "confluence"
+    })
+  })
+
   it("recognizes explicit Jira and Confluence publication requests", () => {
     assert.deepStrictEqual(detectReleasePublicationIntent("Create Confluence page for release"), {
       provider: "confluence"

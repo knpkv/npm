@@ -43,9 +43,7 @@ import {
 import { JiraReleaseVersionDescription, JiraReleaseVersionName } from "./JiraReleaseVersionLimits.js"
 
 interface JiraGovernedActionConfiguration {
-  readonly maximumPages: number
   readonly projectId: string
-  readonly pageSize: number
   readonly operationTimeoutMillis: number
 }
 
@@ -518,9 +516,6 @@ const matchesAuthorizedReleaseVersion = (
   payload: typeof CreateReleaseVersionPayload.Type
 ): boolean => version.name === payload.name && (version.description ?? null) === payload.description
 
-const projectVersionReadLimit = (configuration: JiraGovernedActionConfiguration): number =>
-  configuration.maximumPages * configuration.pageSize
-
 const recoverAmbiguousReleaseVersion = Effect.fn("JiraGovernedActions.recoverAmbiguousReleaseVersion")(function*(
   provider: JiraReadProvider,
   configuration: JiraGovernedActionConfiguration,
@@ -530,7 +525,7 @@ const recoverAmbiguousReleaseVersion = Effect.fn("JiraGovernedActions.recoverAmb
   const versions = yield* withTimeout(
     "jira-recover-project-versions",
     configuration.operationTimeoutMillis,
-    provider.getProjectVersions(configuration.projectId, projectVersionReadLimit(configuration))
+    provider.findProjectVersionsByName(configuration.projectId, payload.name)
   ).pipe(
     Effect.catch(() =>
       Effect.fail(
@@ -564,7 +559,7 @@ const makeReleaseVersionExecutor = (
     const versions = yield* withTimeout(
       "jira-preflight-project-versions",
       configuration.operationTimeoutMillis,
-      provider.getProjectVersions(configuration.projectId, projectVersionReadLimit(configuration))
+      provider.findProjectVersionsByName(configuration.projectId, payload.name)
     )
     const checkedAt = yield* DateTime.now
     const nameMatches = versions.filter((version) => version.name === payload.name)
@@ -588,7 +583,7 @@ const makeReleaseVersionExecutor = (
     const existingVersions = yield* withTimeout(
       "jira-pre-execute-project-versions",
       configuration.operationTimeoutMillis,
-      provider.getProjectVersions(configuration.projectId, projectVersionReadLimit(configuration))
+      provider.findProjectVersionsByName(configuration.projectId, payload.name)
     )
     const existingNameMatches = existingVersions.filter(({ name }) => name === payload.name)
     const existingMatches = existingNameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
@@ -661,7 +656,7 @@ const makeReleaseVersionExecutor = (
     const versions = yield* withTimeout(
       "jira-reconcile-project-versions",
       configuration.operationTimeoutMillis,
-      provider.getProjectVersions(payload.projectId, projectVersionReadLimit(configuration))
+      provider.findProjectVersionsByName(payload.projectId, payload.name)
     )
     const nameMatches = versions.filter((version) => version.name === payload.name)
     const matches = nameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))

@@ -511,7 +511,10 @@ const ReleaseAgentRoom = ({
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
   const pageAwareness = release.releasePageAwareness
+  const confluenceCreateReady = pageAwareness?.state === "not-published"
   const confluenceUpdateReady = pageAwareness?.state === "stale" && pageAwareness.publicationActionId !== undefined
+  const confluencePublicationReady = confluenceCreateReady || confluenceUpdateReady
+  const confluenceAwarenessUnknown = pageAwareness === undefined || pageAwareness.state === "unknown"
 
   useEffect(() => {
     if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
@@ -588,6 +591,7 @@ const ReleaseAgentRoom = ({
 
   const publish = (publicationProvider: "jira" | "confluence"): void => {
     if (publicationBusy !== null || publicationTitle.trim() === "" || publicationMarkdown.trim() === "") return
+    if (publicationProvider === "confluence" && !confluencePublicationReady) return
     setPublicationBusy(publicationProvider)
     const updatingConfluence = publicationProvider === "confluence" && confluenceUpdateReady
     setAnnouncement(
@@ -812,11 +816,7 @@ const ReleaseAgentRoom = ({
             Create Jira release version
           </Button>
           <Button
-            disabled={
-              publicationBusy !== null ||
-              pageAwareness?.state === "current" ||
-              (pageAwareness?.state === "stale" && !confluenceUpdateReady)
-            }
+            disabled={publicationBusy !== null || !confluencePublicationReady}
             loading={publicationBusy === "confluence"}
             onClick={() => publish("confluence")}
           >
@@ -834,6 +834,12 @@ const ReleaseAgentRoom = ({
           {pageAwareness?.state === "stale" && !confluenceUpdateReady ? (
             <Text tone="secondary">
               The existing page identity is unavailable, so Relay will not create a duplicate page.
+            </Text>
+          ) : null}
+          {confluenceAwarenessUnknown ? (
+            <Text tone="secondary">
+              Confluence publication status is unavailable. Refresh the release context before publishing to avoid
+              creating a duplicate page.
             </Text>
           ) : null}
         </div>
