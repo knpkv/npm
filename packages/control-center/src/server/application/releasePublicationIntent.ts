@@ -11,16 +11,16 @@ export const detectReleasePublicationIntent = (prompt: string): ReleasePublicati
     normalized.length === 0 ||
     /\b(how|can|could|should|what|where|why)\b/u.test(normalized) ||
     /\b(do\s+not|don't|dont|never|not|without|avoid|refuse|cancel|cannot|can't|cant|won't|wont|mustn't|mustnt)\b/u
-      .test(normalized) ||
-    !/\b(create|publish|post|make)\b/u.test(normalized)
+      .test(normalized)
   ) return undefined
-  if (
-    /\b(confluence)\b/u.test(normalized) &&
-    /\b(page|release|artifact)\b/u.test(normalized)
-  ) return { provider: "confluence" }
-  if (
-    /\b(jira)\b/u.test(normalized) &&
-    /\b(release|version|artifact)\b/u.test(normalized)
-  ) return { provider: "jira" }
+  const imperative = /^(?:(?:please|yes|confirmed)\s*[,!:]?\s+|relay\s*[,!:]\s+)*(?:create|publish|post|make)\s+/u
+  if (!imperative.test(normalized)) return undefined
+  const directObject = normalized.replace(imperative, "")
+  if (/^(?:(?:a|an|the|new)\s+)*confluence\s+(?:release\s+)?(?:page|artifact)\b/u.test(directObject)) {
+    return { provider: "confluence" }
+  }
+  if (/^(?:(?:a|an|the|new)\s+)*jira\s+(?:release\s+)?(?:version|artifact)\b/u.test(directObject)) {
+    return { provider: "jira" }
+  }
   return undefined
 }

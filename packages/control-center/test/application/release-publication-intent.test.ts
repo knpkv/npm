@@ -25,4 +25,20 @@ describe("release publication intent", () => {
     assert.strictEqual(detectReleasePublicationIntent("I won't make the Jira release artifact"), undefined)
     assert.deepStrictEqual(detectReleasePublicationIntent("Create a Jira release version"), { provider: "jira" })
   })
+
+  it("requires a direct imperative instead of executing quoted or descriptive text", () => {
+    assert.strictEqual(
+      detectReleasePublicationIntent(
+        "Summarize the runbook sentence: \"Create a Jira release version after approval.\""
+      ),
+      undefined
+    )
+    assert.strictEqual(
+      detectReleasePublicationIntent("Create a summary of \"Publish the Confluence release page.\""),
+      undefined
+    )
+    assert.deepStrictEqual(detectReleasePublicationIntent("Please publish the Confluence release page"), {
+      provider: "confluence"
+    })
+  })
 })
