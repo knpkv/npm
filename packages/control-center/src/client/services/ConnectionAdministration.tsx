@@ -12,8 +12,6 @@ import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentSt
 
 import styles from "./ServicesPage.module.css"
 
-const sharedAtlassianProviders: AtlassianOAuthProviderIntent = ["jira", "confluence"]
-
 export type ConnectionAdministrationViewState =
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed" }
@@ -26,12 +24,14 @@ const diagnosticTone = (
 
 /** Secret-safe connection recovery controls backed by the administration read model. */
 export const ConnectionAdministration = ({
+  atlassianOAuthProviders,
   canConfigure,
   onReauthorize,
   onRevoke,
   onStartAtlassianOAuth,
   state
 }: {
+  readonly atlassianOAuthProviders?: AtlassianOAuthProviderIntent
   readonly canConfigure: boolean
   readonly onReauthorize: (credentials: ReadonlyArray<PluginCredentialReplacement>) => Promise<boolean>
   readonly onRevoke: () => Promise<boolean>
@@ -110,10 +110,8 @@ export const ConnectionAdministration = ({
 
   const startOAuth = (configuration?: AtlassianOAuthClientConfiguration): void => {
     if (!supportsOAuthRecovery || onStartAtlassianOAuth === undefined) return
-    // Jira and Confluence share one local Atlassian OAuth profile. Re-authorizing
-    // one card must therefore request both products, otherwise the narrower token
-    // would be rejected as a destructive scope downgrade for the other card.
-    const providers = sharedAtlassianProviders
+    const providers =
+      atlassianOAuthProviders ?? (administration.connection.providerId === "jira" ? ["jira"] : ["confluence"])
     oauthRequest.current?.abort()
     const request = new AbortController()
     oauthRequest.current = request

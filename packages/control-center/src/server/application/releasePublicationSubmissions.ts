@@ -32,6 +32,7 @@ import {
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
 import { canonicalReleasePublicationTitle } from "../../domain/releasePublication.js"
 import { Revision } from "../../domain/sourceRevision.js"
+import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { SessionSummary } from "../auth/models.js"
 import {
   digestCanonicalGovernedActionJson,
@@ -62,7 +63,7 @@ export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<R
 ) {}
 
 export interface ConfluenceReleasePublicationHistory {
-  readonly hasSuccessfulPublication: boolean
+  readonly hasBlockingPublication: boolean
   readonly latestReference: ReturnType<typeof latestConfluencePublicationReference>
 }
 
@@ -75,7 +76,7 @@ export const confluencePublicationRequestMatchesHistory = (
   const hasExpectedVersion = request.expectedVersion !== undefined
   if (hasPageId !== hasExpectedVersion) return false
   return request.pageId === undefined || request.expectedVersion === undefined
-    ? !history.hasSuccessfulPublication
+    ? !history.hasBlockingPublication
     : matchesConfluencePublicationReference(history.latestReference, {
       pageId: request.pageId,
       pageVersion: request.expectedVersion
@@ -99,7 +100,7 @@ export const loadConfluenceReleasePublicationHistory = Effect.fn(
     releaseIds: [releaseId]
   })
   return {
-    hasSuccessfulPublication: records.length > 0,
+    hasBlockingPublication: records.length > 0,
     latestReference: latestConfluencePublicationReference(
       releasePublicationReceiptCandidatesFromRecords(records),
       releaseId
@@ -122,6 +123,7 @@ export const loadLatestConfluenceReleasePublication = Effect.fn(
 })
 
 interface SubmitInput {
+  readonly expectedReleaseUpdatedAt?: UtcTimestamp
   readonly releaseId: ReleaseId
   readonly request: SubmitReleasePublicationRequest
   readonly session: SessionSummary
@@ -175,6 +177,10 @@ const makeService = Effect.gen(function*() {
     ) return yield* failure("conflict")
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
+    if (
+      input.expectedReleaseUpdatedAt !== undefined &&
+      release.release.updatedAt !== input.expectedReleaseUpdatedAt
+    ) return yield* failure("conflict")
     const publicationTitle = input.useReleaseIdentity === true
       ? canonicalReleasePublicationTitle(release.release.version)
       : input.request.title

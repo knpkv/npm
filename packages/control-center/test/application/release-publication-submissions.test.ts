@@ -20,11 +20,11 @@ const PUBLISHED_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-08-03T08:00:00
 describe("release publication submissions", () => {
   it("allows Confluence creation only when indexed history proves the release was never published", () => {
     assert.isTrue(confluencePublicationRequestMatchesHistory({}, {
-      hasSuccessfulPublication: false,
+      hasBlockingPublication: false,
       latestReference: null
     }))
     assert.isFalse(confluencePublicationRequestMatchesHistory({}, {
-      hasSuccessfulPublication: true,
+      hasBlockingPublication: true,
       latestReference: {
         pageId: "42",
         pageVersion: 2,
@@ -33,7 +33,7 @@ describe("release publication submissions", () => {
       }
     }))
     assert.isFalse(confluencePublicationRequestMatchesHistory({}, {
-      hasSuccessfulPublication: true,
+      hasBlockingPublication: true,
       latestReference: null
     }))
   })

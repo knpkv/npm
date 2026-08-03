@@ -382,6 +382,7 @@ describe("ServicesPage connection tests", () => {
     await act(async () =>
       root?.render(
         <ConnectionAdministration
+          atlassianOAuthProviders={["jira", "confluence"]}
           canConfigure
           onReauthorize={() => Promise.resolve(true)}
           onRevoke={() => Promise.resolve(true)}
@@ -396,6 +397,25 @@ describe("ServicesPage connection tests", () => {
     if (button === undefined) throw new Error("Expected Atlassian reauthorization button")
     await act(async () => button.click())
     expect(onStartAtlassianOAuth).toHaveBeenCalledWith(["jira", "confluence"], expect.any(AbortSignal), undefined)
+
+    onStartAtlassianOAuth.mockClear()
+    await act(async () =>
+      root?.render(
+        <ConnectionAdministration
+          canConfigure
+          onReauthorize={() => Promise.resolve(true)}
+          onRevoke={() => Promise.resolve(true)}
+          onStartAtlassianOAuth={onStartAtlassianOAuth}
+          state={{ _tag: "ready", administration }}
+        />
+      )
+    )
+    const jiraOnlyButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+      candidate.textContent?.includes("Sign in with Atlassian")
+    )
+    if (jiraOnlyButton === undefined) throw new Error("Expected Jira reauthorization button")
+    await act(async () => jiraOnlyButton.click())
+    expect(onStartAtlassianOAuth).toHaveBeenCalledWith(["jira"], expect.any(AbortSignal), undefined)
   })
 
   it("preserves opaque secret bytes and trims textual credential locators", async () => {

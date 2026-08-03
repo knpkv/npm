@@ -2632,8 +2632,9 @@ describe("Control Center API handlers", () => {
           Layer.provide(ServerLifecycle.layer),
           Layer.provide(releaseAgentJobsLayer),
           Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
-            submit: () =>
-              Ref.update(publicationCalls, (count) => count + 1).pipe(
+            submit: (input) =>
+              Effect.sync(() => assert.strictEqual(input.expectedReleaseUpdatedAt, admittedRelease.updatedAt)).pipe(
+                Effect.andThen(Ref.update(publicationCalls, (count) => count + 1)),
                 Effect.as({ actionId, state: "succeeded" })
               )
           })),

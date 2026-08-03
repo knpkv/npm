@@ -141,11 +141,12 @@ export const classifyReleasePublicationAwareness = (
 const releasePageAwareness = (
   release: Release,
   records: ReadonlyArray<GovernedActionRecord>
-): PortfolioReleasePageAwareness =>
-  classifyReleasePublicationAwareness(
-    release,
-    releasePublicationReceiptCandidatesFromRecords(records)
-  )
+): PortfolioReleasePageAwareness => {
+  const candidates = releasePublicationReceiptCandidatesFromRecords(records)
+  return records.length > 0 && candidates.length === 0
+    ? unknownPageAwareness()
+    : classifyReleasePublicationAwareness(release, candidates)
+}
 
 /**
  * Load release publication awareness with one indexed history projection.

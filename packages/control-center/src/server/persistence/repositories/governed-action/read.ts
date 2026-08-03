@@ -718,7 +718,10 @@ export const makeGovernedActionRead = Effect.gen(function*() {
           ON requested.releaseId = publication.release_id
         WHERE publication.workspace_id = ${request.workspaceId}
           AND publication.provider_id = ${request.providerId}
-          AND action.terminal_status = 'succeeded'
+          AND action.state IN (
+            'proposed', 'authorized', 'started', 'cancel-requested',
+            'unknown', 'cancel-requested-unknown', 'succeeded'
+          )
           AND dimensions.action_kind IN ('create-page', 'update-page')
       )
       SELECT actionId, releaseId
@@ -750,8 +753,19 @@ export const makeGovernedActionRead = Effect.gen(function*() {
                 publication.releaseId === releaseId &&
                 record.envelope.providerId === request.providerId &&
                 (actionKind === "create-page" || actionKind === "update-page") &&
-                record.head.lineage._tag === "terminal" &&
-                record.head.lineage.receipt.status === "succeeded"
+                (
+                  record.head.state === "proposed" ||
+                  record.head.state === "authorized" ||
+                  record.head.state === "started" ||
+                  record.head.state === "cancel-requested" ||
+                  record.head.state === "unknown" ||
+                  record.head.state === "cancel-requested-unknown" ||
+                  (
+                    record.head.state === "succeeded" &&
+                    record.head.lineage._tag === "terminal" &&
+                    record.head.lineage.receipt.status === "succeeded"
+                  )
+                )
               ? Effect.succeed(record)
               : Effect.fail(
                 new PersistedRecordError({

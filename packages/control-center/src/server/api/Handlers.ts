@@ -1246,9 +1246,13 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               const publicationSubmission = publicationIntent === undefined || publications === undefined
                 ? undefined
                 : yield* Effect.gen(function*() {
+                  if (publicationAdmission === undefined) {
+                    return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+                  }
                   const result = yield* publications.submit({
                     workspaceId: session.workspaceId,
                     releaseId: params.releaseId,
+                    expectedReleaseUpdatedAt: publicationAdmission.release.updatedAt,
                     request: {
                       markdown: "Release artifact published by Relay after human confirmation.",
                       parentId: null,

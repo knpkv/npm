@@ -1075,7 +1075,7 @@ describe("governed action writer", () => {
       })
     })))
 
-  it.effect("reads latest successful release publications through the indexed release projection", () =>
+  it.effect("reads latest blocking release publications through the indexed release projection", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityRoots()
       const repository = yield* GovernedActionRepository
@@ -1102,6 +1102,12 @@ describe("governed action writer", () => {
       yield* repository.commit(authorizationInput)
       const startInput = makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
       yield* repository.commit(startInput)
+      const inFlight = yield* repository.readLatestTerminalReleasePublications({
+        workspaceId: WORKSPACE_ID,
+        providerId: "confluence",
+        releaseIds: [RELEASE_ID]
+      })
+      assert.deepStrictEqual(inFlight.map(({ envelope }) => envelope.actionId), [PUBLICATION_ACTION_ID])
       yield* repository.commit(decodeCommit({
         ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
         expectedHeadTransitionId: START_TRANSITION_ID,
