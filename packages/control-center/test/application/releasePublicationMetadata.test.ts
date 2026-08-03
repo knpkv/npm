@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import { GovernedActionEnvelopeDigest } from "../../src/domain/governedAction/index.js"
 import { EntityId, GovernedActionId, PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
 import { SourceRevision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -33,6 +34,7 @@ const sourceRevision = (
   })
 
 const timestamp = (value: string) => Schema.decodeSync(UtcTimestamp)(value)
+const SOURCE_REVISION_DIGEST = GovernedActionEnvelopeDigest.make(`sha256:${"a".repeat(64)}`)
 
 describe("release publication metadata", () => {
   it("binds the publication baseline to the exact source revision snapshot", async () => {
@@ -93,21 +95,24 @@ describe("release publication metadata", () => {
         releaseId,
         pluginConnectionId: connectionId,
         occurredAt: timestamp("2026-08-03T09:00:00.000Z"),
-        providerOperationId: "confluence-page:42"
+        providerOperationId: "confluence-page:42",
+        sourceRevisionDigest: SOURCE_REVISION_DIGEST
       },
       {
         actionId: latestActionId,
         releaseId,
         pluginConnectionId: connectionId,
         occurredAt: timestamp("2026-08-03T10:00:00.000Z"),
-        providerOperationId: "confluence-page:42:v2"
+        providerOperationId: "confluence-page:42:v2",
+        sourceRevisionDigest: SOURCE_REVISION_DIGEST
       },
       {
         actionId: otherActionId,
         releaseId: otherReleaseId,
         pluginConnectionId: otherConnectionId,
         occurredAt: timestamp("2026-08-03T11:00:00.000Z"),
-        providerOperationId: "confluence-page:99:v7"
+        providerOperationId: "confluence-page:99:v7",
+        sourceRevisionDigest: SOURCE_REVISION_DIGEST
       }
     ], releaseId)
 
@@ -116,7 +121,8 @@ describe("release publication metadata", () => {
       pageVersion: 2,
       pluginConnectionId: connectionId,
       publicationActionId: latestActionId,
-      publishedAt: timestamp("2026-08-03T10:00:00.000Z")
+      publishedAt: timestamp("2026-08-03T10:00:00.000Z"),
+      sourceRevisionDigest: SOURCE_REVISION_DIGEST
     })
     assert.isTrue(matchesConfluencePublicationReference(published, { pageId: "42", pageVersion: 2 }))
     assert.isFalse(matchesConfluencePublicationReference(published, { pageId: "99", pageVersion: 7 }))

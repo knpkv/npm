@@ -16,6 +16,7 @@ export interface ReleasePublicationReceiptCandidate {
   readonly pluginConnectionId: PluginConnectionId
   readonly occurredAt: UtcTimestamp
   readonly providerOperationId: string
+  readonly sourceRevisionDigest: GovernedActionEnvelopeDigest
 }
 
 export interface ConfluencePublicationReference {
@@ -27,6 +28,7 @@ export interface LatestConfluencePublicationReference extends ConfluencePublicat
   readonly publicationActionId: GovernedActionId
   readonly pluginConnectionId: PluginConnectionId
   readonly publishedAt: UtcTimestamp
+  readonly sourceRevisionDigest: GovernedActionEnvelopeDigest
 }
 
 export type ReleasePublicationConnectionSelection =
@@ -47,7 +49,8 @@ export const releasePublicationReceiptCandidatesFromRecords = (
         releaseId: publication.releaseId,
         pluginConnectionId: record.envelope.pluginConnectionId,
         occurredAt: record.headTransition.occurredAt,
-        providerOperationId: record.head.lineage.receipt.providerOperationId
+        providerOperationId: record.head.lineage.receipt.providerOperationId,
+        sourceRevisionDigest: publication.sourceRevisionDigest
       }]
   })
 
@@ -113,7 +116,8 @@ export const latestConfluencePublicationReference = (
       ...reference,
       pluginConnectionId: latest.pluginConnectionId,
       publicationActionId: latest.actionId,
-      publishedAt: latest.occurredAt
+      publishedAt: latest.occurredAt,
+      sourceRevisionDigest: latest.sourceRevisionDigest
     }
 }
 

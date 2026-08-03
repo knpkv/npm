@@ -1,7 +1,9 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import { GovernedActionEnvelopeDigest } from "../../src/domain/governedAction/index.js"
 import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
@@ -17,6 +19,7 @@ import {
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-510000000001")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-510000000002")
 const UPDATED_AT = "2026-08-03T08:00:00.000Z"
+const SOURCE_REVISION_DIGEST = GovernedActionEnvelopeDigest.make(`sha256:${"a".repeat(64)}`)
 
 const makeRelease = (index: number): Release => {
   const releaseId = ReleaseId.make(
@@ -54,26 +57,55 @@ describe("portfolio publication awareness", () => {
       actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-510000000003"),
       releaseId: release.id,
       pluginConnectionId: PLUGIN_CONNECTION_ID,
-      occurredAt: release.updatedAt
+      occurredAt: release.updatedAt,
+      sourceRevisionDigest: SOURCE_REVISION_DIGEST
     }
 
     assert.deepStrictEqual(
       classifyReleasePublicationAwareness(release, [{
         ...candidate,
         providerOperationId: "confluence-page:page-1:v1"
-      }]),
+      }], SOURCE_REVISION_DIGEST),
       { state: "unknown", lastPublishedAt: null }
     )
     assert.deepStrictEqual(
       classifyReleasePublicationAwareness(release, [{
         ...candidate,
         providerOperationId: "confluence-page:42:v2"
-      }]),
+      }], SOURCE_REVISION_DIGEST),
       {
         state: "current",
         lastPublishedAt: release.updatedAt,
         publicationActionId: candidate.actionId
       }
+    )
+  })
+
+  it("uses semantic source revisions instead of synchronization timestamps for staleness", () => {
+    const release = Release.make({
+      ...makeRelease(0),
+      updatedAt: Schema.decodeUnknownSync(Release.fields.updatedAt)("2026-08-03T09:00:00.000Z")
+    })
+    const candidate = {
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-510000000003"),
+      releaseId: release.id,
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
+      occurredAt: Schema.decodeUnknownSync(Release.fields.updatedAt)(UPDATED_AT),
+      providerOperationId: "confluence-page:42:v2",
+      sourceRevisionDigest: SOURCE_REVISION_DIGEST
+    }
+
+    assert.strictEqual(
+      classifyReleasePublicationAwareness(release, [candidate], SOURCE_REVISION_DIGEST).state,
+      "current"
+    )
+    assert.strictEqual(
+      classifyReleasePublicationAwareness(
+        release,
+        [candidate],
+        GovernedActionEnvelopeDigest.make(`sha256:${"b".repeat(64)}`)
+      ).state,
+      "stale"
     )
   })
 
@@ -95,7 +127,7 @@ describe("portfolio publication awareness", () => {
       assert.lengthOf(calls[0]?.releaseIds ?? [], 200)
       assert.strictEqual(awareness.size, 200)
       assert.isTrue(Array.from(awareness.values()).every(({ state }) => state === "not-published"))
-    }))
+    }).pipe(Effect.provide(NodeCrypto.layer)))
 
   it.effect("reports unknown when the batched publication history cannot be trusted", () =>
     Effect.gen(function*() {
@@ -120,5 +152,5 @@ describe("portfolio publication awareness", () => {
         state: "unknown",
         lastPublishedAt: null
       })
-    }))
+    }).pipe(Effect.provide(NodeCrypto.layer)))
 })

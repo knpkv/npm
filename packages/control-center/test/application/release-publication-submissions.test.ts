@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import { GovernedActionEnvelopeDigest } from "../../src/domain/governedAction/index.js"
 import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
@@ -19,6 +20,7 @@ const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-520000000002")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-520000000003")
 const PUBLICATION_ACTION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-520000000004")
 const PUBLISHED_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-08-03T08:00:00.000Z")
+const SOURCE_REVISION_DIGEST = GovernedActionEnvelopeDigest.make(`sha256:${"a".repeat(64)}`)
 
 describe("release publication submissions", () => {
   it("rejects Jira publication payloads beyond provider character and UTF-8 byte limits", () => {
@@ -39,7 +41,8 @@ describe("release publication submissions", () => {
         pageVersion: 2,
         pluginConnectionId: PLUGIN_CONNECTION_ID,
         publicationActionId: PUBLICATION_ACTION_ID,
-        publishedAt: PUBLISHED_AT
+        publishedAt: PUBLISHED_AT,
+        sourceRevisionDigest: SOURCE_REVISION_DIGEST
       }
     }))
     assert.isFalse(confluencePublicationRequestMatchesHistory({}, {
@@ -56,7 +59,8 @@ describe("release publication submissions", () => {
         pageVersion: 2,
         pluginConnectionId: PLUGIN_CONNECTION_ID,
         publicationActionId: PUBLICATION_ACTION_ID,
-        publishedAt: PUBLISHED_AT
+        publishedAt: PUBLISHED_AT,
+        sourceRevisionDigest: SOURCE_REVISION_DIGEST
       }
     }
     assert.isTrue(confluencePublicationRequestMatchesHistory({
@@ -74,7 +78,8 @@ describe("release publication submissions", () => {
       pageVersion: 2,
       pluginConnectionId: PLUGIN_CONNECTION_ID,
       publicationActionId: PUBLICATION_ACTION_ID,
-      publishedAt: PUBLISHED_AT
+      publishedAt: PUBLISHED_AT,
+      sourceRevisionDigest: SOURCE_REVISION_DIGEST
     }
     const successor = {
       ...predecessor,
