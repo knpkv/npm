@@ -9,7 +9,6 @@ import {
   generateCodeVerifier,
   getAccessibleResources,
   getUserInfo,
-  JIRA_SCOPES,
   type TokenResponse,
   type UserInfo
 } from "@knpkv/atlassian-common/auth"
@@ -19,7 +18,6 @@ import {
   getOAuthConfigPath,
   getProfilesPath,
   HomeDirectoryLive,
-  JIRA_REQUIRED_SCOPES,
   loadOAuthConfig,
   loadProfiles,
   type OAuthConfig,
@@ -60,6 +58,7 @@ import {
   ApplicationServiceUnavailable
 } from "../../api/ApplicationServices.js"
 import { ServerLifecycle } from "../../runtime/ServerLifecycle.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "./AtlassianOAuthScopes.js"
 import { CONTROL_CENTER_AUTH_STORE_NAME } from "./AtlassianProfiles.js"
 
 const ATLASSIAN_CALLBACK_PATH = "/services/oauth/atlassian/callback"
@@ -187,7 +186,7 @@ const sameOAuthConfig = (left: OAuthConfig, right: OAuthConfig): boolean =>
 const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boolean => {
   const storedScopes = new Set(stored.scope.split(/\s+/).filter((scope) => scope.length > 0))
   const replacementScopes = new Set(replacement.scope.split(/\s+/).filter((scope) => scope.length > 0))
-  const productScopes = [JIRA_REQUIRED_SCOPES, CONFLUENCE_REQUIRED_SCOPES]
+  const productScopes = [CONTROL_CENTER_JIRA_OAUTH_SCOPES, CONFLUENCE_REQUIRED_SCOPES]
   // Preserve every product capability represented by the stored profile, while
   // allowing obsolete provider scopes that are no longer requested by the
   // current proposal to disappear during recovery.
@@ -361,17 +360,17 @@ const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileM
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
 const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_SCOPES,
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_SCOPES
 }
 
 const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES.filter((scope) => scope.includes(":jira")),
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
 }
 
 const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES,
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
 }
 

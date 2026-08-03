@@ -1,11 +1,12 @@
 /** Safe discovery and server-only loading of shared local Atlassian OAuth profiles. @module */
 
-import { CONFLUENCE_REQUIRED_SCOPES, JIRA_REQUIRED_SCOPES, missingScopes } from "@knpkv/atlassian-common/config"
+import { CONFLUENCE_REQUIRED_SCOPES, missingScopes } from "@knpkv/atlassian-common/config"
 import { type AuthProfile, isTokenExpired, loadProfiles } from "@knpkv/atlassian-common/profile-storage"
 import * as Effect from "effect/Effect"
 
 import type { DiscoveredAtlassianProfile } from "../../../api/plugins.js"
 import type { ProviderId } from "../../../domain/sourceRevision.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "./AtlassianOAuthScopes.js"
 
 type AtlassianProviderId = Extract<ProviderId, "jira" | "confluence">
 
@@ -18,7 +19,7 @@ const legacyProfileStores: Readonly<Record<AtlassianProviderId, string>> = {
 }
 
 const requiredScopes: Readonly<Record<AtlassianProviderId, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES,
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
 }
 

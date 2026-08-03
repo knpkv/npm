@@ -21,6 +21,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { AtlassianOAuthGrantId, type AtlassianOAuthProviderIntent } from "../../src/api/plugins.js"
 import { SessionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { makeAtlassianOAuthGrants } from "../../src/server/plugins/atlassian/AtlassianOAuthGrants.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "../../src/server/plugins/atlassian/AtlassianOAuthScopes.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 
 const owner = {
@@ -33,14 +34,12 @@ const CONTROL_CENTER_AUTH_STORE_NAME = "control-center"
 
 describe("Atlassian OAuth scope boundaries", () => {
   it("grants Jira release-publication scopes while preserving the shared OAuth contract", () => {
-    assert.deepStrictEqual([...JIRA_SCOPES].sort(), [
-      "manage:jira-configuration",
+    assert.deepStrictEqual([...CONTROL_CENTER_JIRA_OAUTH_SCOPES].sort(), [
       "manage:jira-project",
       "offline_access",
       "read:jira-user",
       "read:jira-work",
-      "read:me",
-      "write:jira-work"
+      "read:me"
     ])
   })
 })
@@ -64,7 +63,7 @@ const providerClient = HttpClient.make((request) => {
       access_token: "access-secret",
       refresh_token: "refresh-secret",
       expires_in: 3_600,
-      scope: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
+      scope: [...CONTROL_CENTER_JIRA_OAUTH_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
       token_type: "Bearer"
     }
     : request.url.endsWith("/accessible-resources")
@@ -73,13 +72,13 @@ const providerClient = HttpClient.make((request) => {
         id: "cloud-1",
         name: "Acme Europe",
         url: "https://acme.atlassian.net/",
-        scopes: [...JIRA_SCOPES]
+        scopes: [...CONTROL_CENTER_JIRA_OAUTH_SCOPES]
       },
       {
         id: "cloud-2",
         name: "Acme Labs",
         url: "https://labs.atlassian.net/",
-        scopes: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES]
+        scopes: [...CONTROL_CENTER_JIRA_OAUTH_SCOPES, ...CONFLUENCE_SCOPES]
       }
     ]
     : { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
@@ -432,7 +431,7 @@ describe("AtlassianOAuthGrants", () => {
       const requestedScopes = new URL(ready.authorizationUrl).searchParams.get("scope")?.split(" ").sort()
       assert.deepStrictEqual(
         requestedScopes,
-        Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).sort()
+        Array.from(new Set([...CONTROL_CENTER_JIRA_OAUTH_SCOPES, ...CONFLUENCE_SCOPES])).sort()
       )
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
@@ -501,7 +500,7 @@ describe("AtlassianOAuthGrants", () => {
       if (started._tag !== "ready") return
       assert.deepStrictEqual(
         new URL(started.authorizationUrl).searchParams.get("scope")?.split(" ").sort(),
-        [...JIRA_SCOPES].sort()
+        [...CONTROL_CENTER_JIRA_OAUTH_SCOPES].sort()
       )
       const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
         new URL(started.authorizationUrl).searchParams.get("state")
