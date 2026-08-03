@@ -4,8 +4,9 @@
  * @module
  */
 
-// Endpoints and scopes. JIRA_SCOPES is the legacy CLI set and includes mutation
-// scopes; JIRA_PROPOSAL_SCOPES is the proposal-only Control Center set.
+// Endpoints and legacy public scope sets. Control Center owns a separate
+// least-privilege release-publication set; proposal-only consumers can use
+// JIRA_PROPOSAL_SCOPES and other write-capable consumers can use JIRA_SCOPES.
 export {
   AUTH_URL,
   buildAuthUrl,

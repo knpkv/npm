@@ -1,0 +1,13 @@
+id: no-zero-arg-locale-case-in-intent
+valid:
+  - |
+    const normalized = prompt.trim().toLowerCase()
+  - |
+    const normalized = prompt.trim().toLocaleLowerCase("en-US")
+  - |
+    const normalized = prompt.trim().toLocaleUpperCase(locale)
+invalid:
+  - |
+    const normalized = prompt.trim().toLocaleLowerCase()
+  - |
+    const normalized = prompt.trim().toLocaleUpperCase()

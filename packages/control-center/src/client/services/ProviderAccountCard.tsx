@@ -2,7 +2,12 @@ import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Field, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
-import type { PluginConnectionSummary, PluginCredentialReplacement, ProviderAccountSummary } from "../../api/plugins.js"
+import type {
+  AtlassianOAuthProviderIntent,
+  PluginConnectionSummary,
+  PluginCredentialReplacement,
+  ProviderAccountSummary
+} from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
@@ -25,6 +30,13 @@ const resourceKind = (providerId: ProviderId): string => {
     case "clockify":
       return "Workspace"
   }
+}
+
+const atlassianProvidersForAccount = (account: ProviderAccountSummary): AtlassianOAuthProviderIntent | undefined => {
+  const providers: Array<"jira" | "confluence"> = []
+  if (account.resources.some(({ providerId }) => providerId === "jira")) providers.push("jira")
+  if (account.resources.some(({ providerId }) => providerId === "confluence")) providers.push("confluence")
+  return providers.length === 0 ? undefined : providers
 }
 
 const resourceSummaryContent = (
@@ -57,6 +69,7 @@ const resourceSummaryContent = (
 
 const ConnectedProviderResource = ({
   administrationState,
+  atlassianOAuthProviders,
   canConfigure,
   connection,
   enablementState,
@@ -71,6 +84,7 @@ const ConnectedProviderResource = ({
   synchronizationState,
   testState
 }: {
+  readonly atlassianOAuthProviders?: AtlassianOAuthProviderIntent
   readonly canConfigure: boolean
   readonly connection: PluginConnectionSummary
   readonly enablementState: ConnectionEnablementState | undefined
@@ -115,6 +129,7 @@ const ConnectedProviderResource = ({
           state={synchronizationState}
         />
         <ConnectionAdministration
+          {...(atlassianOAuthProviders === undefined ? {} : { atlassianOAuthProviders })}
           canConfigure={canConfigure}
           onReauthorize={(credentials) => onReauthorize(connection.pluginConnectionId, credentials)}
           onRevoke={() => onRevoke(connection.pluginConnectionId)}
@@ -286,8 +301,10 @@ export const ProviderAccountCard = ({
               </div>
             )
           }
+          const atlassianOAuthProviders = atlassianProvidersForAccount(account)
           return (
             <ConnectedProviderResource
+              {...(atlassianOAuthProviders === undefined ? {} : { atlassianOAuthProviders })}
               canConfigure={canConfigure}
               connection={connection}
               administrationState={administrationStates.get(connection.pluginConnectionId)}

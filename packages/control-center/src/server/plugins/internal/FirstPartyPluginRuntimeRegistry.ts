@@ -1,3 +1,4 @@
+import { missingScopes } from "@knpkv/atlassian-common/config"
 import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
@@ -30,6 +31,7 @@ import type { StoredPluginConfiguration } from "../../persistence/repositories/p
 import type { PluginRuntimeRecord } from "../../persistence/repositories/pluginRuntimeModels.js"
 import type { SecretRef } from "../../secrets/SecretRef.js"
 import { SecretStore } from "../../secrets/SecretStore.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "../atlassian/AtlassianOAuthScopes.js"
 import { loadAtlassianProfile } from "../atlassian/AtlassianProfiles.js"
 import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
@@ -131,6 +133,15 @@ interface LoadedRuntime {
     | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
+
+const withoutReleasePublicationCapabilities = (
+  descriptor: NegotiatedPluginDescriptorV1
+): NegotiatedPluginDescriptorV1 => ({
+  ...descriptor,
+  capabilities: descriptor.capabilities.filter(
+    ({ capabilityId }) => capabilityId !== "action.execute" && capabilityId !== "action.reconcile"
+  )
+})
 
 const configurationFailure = (diagnosticCode: string): PluginConfigurationFailure =>
   new PluginConfigurationFailure({ diagnosticCode })
@@ -842,6 +853,8 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
     }
     return {
       credentialGeneration: `oauth:${profile.id}:${profile.updated_at}`,
+      releasePublicationEnabled: provider !== "jira" ||
+        missingScopes(profile.token, CONTROL_CENTER_JIRA_OAUTH_SCOPES).length === 0,
       auth: {
         type: "oauth2",
         accessToken: Redacted.make(profile.token.access_token),
@@ -856,6 +869,7 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
         }
     } satisfies {
       readonly credentialGeneration: string
+      readonly releasePublicationEnabled: boolean
       readonly auth: JiraApiConfigShape["auth"]
       readonly verifiedUser: {
         readonly accountId: string
@@ -873,10 +887,12 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   const apiToken = yield* decodeSecret(apiTokenRef)
   return {
     credentialGeneration: `api-token:${emailCredential.generation}\0${apiTokenRef}`,
+    releasePublicationEnabled: true,
     auth: { type: "basic", email, apiToken: Redacted.make(apiToken) },
     verifiedUser: null
   } satisfies {
     readonly credentialGeneration: string
+    readonly releasePublicationEnabled: boolean
     readonly auth: JiraApiConfigShape["auth"]
     readonly verifiedUser: {
       readonly accountId: string
@@ -953,13 +969,16 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(
         persistence.workspaceSettings.get(scope.workspaceId)
       ).pipe(
         Effect.map(({ settings }) => settings.jira.includeControlCenterAttribution)
-      )
+      ),
+      authentication.releasePublicationEnabled
     ).pipe(
       Effect.map(({ definition }) =>
         buildPluginDefinitionLayerFromNegotiatedDescriptor(
           definition,
           configurationInput,
-          loaded.descriptor
+          authentication.releasePublicationEnabled
+            ? loaded.descriptor
+            : withoutReleasePublicationCapabilities(loaded.descriptor)
         )
       )
     )

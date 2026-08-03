@@ -271,6 +271,7 @@ describe("ControlCenterApi contract", () => {
       "403",
       "404",
       "408",
+      "409",
       "413",
       "429",
       "503"

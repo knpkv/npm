@@ -336,6 +336,88 @@ const successfulAwsCreate = (
   })
 
 describe("ServicesPage connection tests", () => {
+  it("reauthorizes a shared Atlassian profile with both product scopes", async () => {
+    const onStartAtlassianOAuth = vi.fn().mockResolvedValue({
+      _tag: "configuration-required",
+      callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+    })
+    const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+      connection: Schema.encodeSync(PluginConnectionSummary)({ ...connection, providerId: "jira" }),
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 3,
+        values: [{ _tag: "secret-reference", key: "oauthProfileId", state: "configured" }],
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      metadata: {
+        pluginConnectionId: connection.pluginConnectionId,
+        pluginId: "dev.knpkv.jira.read",
+        contractVersion: { major: 1, minor: 0, patch: 0 },
+        adapterVersion: { major: 1, minor: 0, patch: 0 },
+        configurationFields: [],
+        capabilities: []
+      },
+      credentialFields: [
+        {
+          key: "oauthProfileId",
+          label: "OAuth profile",
+          description: "Machine-local OAuth profile.",
+          kind: "text",
+          scope: "credential",
+          required: true,
+          defaultValue: null,
+          minimum: null,
+          maximum: null,
+          isReadOnly: false
+        }
+      ],
+      permissions: [],
+      schedule: { mode: "manual", nextRunAt: null },
+      synchronization: null,
+      diagnostics: []
+    })
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <ConnectionAdministration
+          atlassianOAuthProviders={["jira", "confluence"]}
+          canConfigure
+          onReauthorize={() => Promise.resolve(true)}
+          onRevoke={() => Promise.resolve(true)}
+          onStartAtlassianOAuth={onStartAtlassianOAuth}
+          state={{ _tag: "ready", administration }}
+        />
+      )
+    )
+    const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+      candidate.textContent?.includes("Sign in with Atlassian")
+    )
+    if (button === undefined) throw new Error("Expected Atlassian reauthorization button")
+    await act(async () => button.click())
+    expect(onStartAtlassianOAuth).toHaveBeenCalledWith(["jira", "confluence"], expect.any(AbortSignal), undefined)
+
+    onStartAtlassianOAuth.mockClear()
+    await act(async () =>
+      root?.render(
+        <ConnectionAdministration
+          canConfigure
+          onReauthorize={() => Promise.resolve(true)}
+          onRevoke={() => Promise.resolve(true)}
+          onStartAtlassianOAuth={onStartAtlassianOAuth}
+          state={{ _tag: "ready", administration }}
+        />
+      )
+    )
+    const jiraOnlyButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+      candidate.textContent?.includes("Sign in with Atlassian")
+    )
+    if (jiraOnlyButton === undefined) throw new Error("Expected Jira reauthorization button")
+    await act(async () => jiraOnlyButton.click())
+    expect(onStartAtlassianOAuth).toHaveBeenCalledWith(["jira"], expect.any(AbortSignal), undefined)
+  })
+
   it("preserves opaque secret bytes and trims textual credential locators", async () => {
     const onReauthorize = vi
       .fn<(credentials: ReadonlyArray<PluginCredentialReplacement>) => Promise<boolean>>()

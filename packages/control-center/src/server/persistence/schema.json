@@ -133,6 +133,11 @@
     },
     {
       "type": "table",
+      "name": "governed_action_entity_targets",
+      "sql": "CREATE TABLE governed_action_entity_targets (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id IN (\n      'codecommit', 'codepipeline', 'jira', 'confluence', 'clockify'\n    )),\n    entity_id TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_actions(workspace_id, action_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, entity_id, plugin_connection_id, provider_id)\n      REFERENCES entities(workspace_id, entity_id, plugin_connection_id, provider_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "governed_action_execution_leases",
       "sql": "CREATE TABLE governed_action_execution_leases (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    attempt_id TEXT NOT NULL,\n    start_transition_id TEXT NOT NULL,\n    permit_token_digest TEXT NOT NULL CHECK(\n      length(permit_token_digest) = 64 AND permit_token_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    runtime_authority_token TEXT NOT NULL CHECK(length(runtime_authority_token) BETWEEN 1 AND 512),\n    recovery_capability_version INTEGER NOT NULL CHECK(recovery_capability_version = 1),\n    created_at TEXT NOT NULL,\n    dispatch_deadline TEXT NOT NULL,\n    lease_expires_at TEXT NOT NULL,\n    recovery_eligible_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, action_id),\n    UNIQUE (workspace_id, action_id, attempt_id),\n    UNIQUE (permit_token_digest),\n    UNIQUE (workspace_id, action_id, permit_token_digest),\n    FOREIGN KEY (workspace_id, action_id, attempt_id)\n      REFERENCES governed_action_attempts(workspace_id, action_id, attempt_id),\n    FOREIGN KEY (workspace_id, action_id, start_transition_id)\n      REFERENCES governed_action_transitions(workspace_id, action_id, transition_id),\n    CHECK(created_at <= dispatch_deadline),\n    CHECK(dispatch_deadline < lease_expires_at),\n    CHECK(lease_expires_at < recovery_eligible_at)\n  )"
     },
@@ -173,6 +178,16 @@
     },
     {
       "type": "table",
+      "name": "governed_action_release_publication_slots",
+      "sql": "CREATE TABLE governed_action_release_publication_slots (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id = 'confluence'),\n    release_id TEXT NOT NULL CHECK(length(release_id) = 36),\n    predecessor_action_id TEXT CHECK(\n      predecessor_action_id IS NULL OR length(predecessor_action_id) = 36\n    ),\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_action_release_publications(workspace_id, action_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
+      "name": "governed_action_release_publications",
+      "sql": "CREATE TABLE governed_action_release_publications (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id IN (\n      'codecommit', 'codepipeline', 'jira', 'confluence', 'clockify'\n    )),\n    release_id TEXT NOT NULL CHECK(length(release_id) = 36),\n    predecessor_action_id TEXT CHECK(\n      predecessor_action_id IS NULL OR length(predecessor_action_id) = 36\n    ),\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_actions(workspace_id, action_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "governed_action_target_dimensions",
       "sql": "CREATE TABLE governed_action_target_dimensions (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    action_kind TEXT NOT NULL CHECK(length(action_kind) BETWEEN 1 AND 100),\n    expected_revision TEXT NOT NULL CHECK(length(expected_revision) BETWEEN 1 AND 512),\n    PRIMARY KEY (workspace_id, action_id),\n    FOREIGN KEY (workspace_id, action_id)\n      REFERENCES governed_actions(workspace_id, action_id)\n      ON DELETE RESTRICT\n  )"
     },
@@ -184,7 +199,7 @@
     {
       "type": "table",
       "name": "governed_actions",
-      "sql": "CREATE TABLE governed_actions (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id IN (\n      'codecommit', 'codepipeline', 'jira', 'confluence', 'clockify'\n    )),\n    target_entity_id TEXT NOT NULL,\n    idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 512),\n    envelope_digest TEXT NOT NULL CHECK(\n      length(envelope_digest) = 71 AND envelope_digest GLOB 'sha256:*'\n        AND substr(envelope_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    envelope_json TEXT NOT NULL CHECK(length(envelope_json) BETWEEN 2 AND 1048576),\n    state TEXT CHECK(state IN (\n      'proposed', 'authorized', 'denied', 'expired', 'cancelled', 'started',\n      'cancel-requested', 'cancel-requested-unknown', 'succeeded', 'failed', 'unknown'\n    )),\n    lineage_json TEXT CHECK(lineage_json IS NULL OR length(lineage_json) BETWEEN 2 AND 65536),\n    lineage_kind TEXT CHECK(lineage_kind IS NULL OR lineage_kind IN (\n      'none', 'accepted', 'reconcilable', 'manual', 'terminal'\n    )),\n    provider_operation_id TEXT CHECK(\n      provider_operation_id IS NULL OR length(provider_operation_id) BETWEEN 1 AND 512\n    ),\n    reconciliation_key TEXT CHECK(\n      reconciliation_key IS NULL OR length(reconciliation_key) BETWEEN 1 AND 512\n    ),\n    terminal_status TEXT CHECK(\n      terminal_status IS NULL OR terminal_status IN ('succeeded', 'failed', 'cancelled')\n    ),\n    head_transition_id TEXT,\n    head_sequence INTEGER CHECK(head_sequence IS NULL OR head_sequence >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, action_id),\n    UNIQUE (workspace_id, plugin_connection_id, idempotency_key),\n    UNIQUE (workspace_id, action_id, envelope_digest),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, plugin_connection_id, provider_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id, provider_id),\n    FOREIGN KEY (workspace_id, target_entity_id, plugin_connection_id, provider_id)\n      REFERENCES entities(workspace_id, entity_id, plugin_connection_id, provider_id),\n    CHECK(created_at <= updated_at),\n    CHECK(\n      (state IS NULL AND lineage_json IS NULL AND lineage_kind IS NULL\n        AND provider_operation_id IS NULL AND reconciliation_key IS NULL AND terminal_status IS NULL\n        AND head_transition_id IS NULL AND head_sequence IS NULL) OR\n      (state IS NOT NULL AND lineage_json IS NOT NULL AND lineage_kind IS NOT NULL\n        AND head_transition_id IS NOT NULL AND head_sequence IS NOT NULL)\n    ),\n    CHECK(\n      lineage_kind IS NULL OR\n      (lineage_kind = 'none' AND provider_operation_id IS NULL\n        AND reconciliation_key IS NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'accepted' AND provider_operation_id IS NOT NULL\n        AND reconciliation_key IS NOT NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'reconcilable' AND reconciliation_key IS NOT NULL\n        AND terminal_status IS NULL) OR\n      (lineage_kind = 'manual' AND reconciliation_key IS NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'terminal' AND provider_operation_id IS NOT NULL\n        AND reconciliation_key IS NULL AND terminal_status IS NOT NULL)\n    ),\n    CHECK(\n      state IS NULL OR\n      (state IN ('proposed', 'authorized', 'denied', 'expired') AND lineage_kind = 'none') OR\n      (state = 'cancelled' AND (\n        lineage_kind = 'none' OR (lineage_kind = 'terminal' AND terminal_status = 'cancelled')\n      )) OR\n      (state IN ('started', 'cancel-requested') AND lineage_kind IN ('none', 'accepted')) OR\n      (state IN ('unknown', 'cancel-requested-unknown')\n        AND lineage_kind IN ('reconcilable', 'manual')) OR\n      (state = 'succeeded' AND lineage_kind = 'terminal' AND terminal_status = 'succeeded') OR\n      (state = 'failed' AND lineage_kind = 'terminal' AND terminal_status = 'failed')\n    )\n  )"
+      "sql": "CREATE TABLE governed_actions (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(provider_id IN (\n      'codecommit', 'codepipeline', 'jira', 'confluence', 'clockify'\n    )),\n    target_entity_id TEXT NOT NULL,\n    idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 512),\n    envelope_digest TEXT NOT NULL CHECK(\n      length(envelope_digest) = 71 AND envelope_digest GLOB 'sha256:*'\n        AND substr(envelope_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    envelope_json TEXT NOT NULL CHECK(length(envelope_json) BETWEEN 2 AND 1048576),\n    state TEXT CHECK(state IN (\n      'proposed', 'authorized', 'denied', 'expired', 'cancelled', 'started',\n      'cancel-requested', 'cancel-requested-unknown', 'succeeded', 'failed', 'unknown'\n    )),\n    lineage_json TEXT CHECK(lineage_json IS NULL OR length(lineage_json) BETWEEN 2 AND 65536),\n    lineage_kind TEXT CHECK(lineage_kind IS NULL OR lineage_kind IN (\n      'none', 'accepted', 'reconcilable', 'manual', 'terminal'\n    )),\n    provider_operation_id TEXT CHECK(\n      provider_operation_id IS NULL OR length(provider_operation_id) BETWEEN 1 AND 512\n    ),\n    reconciliation_key TEXT CHECK(\n      reconciliation_key IS NULL OR length(reconciliation_key) BETWEEN 1 AND 512\n    ),\n    terminal_status TEXT CHECK(\n      terminal_status IS NULL OR terminal_status IN ('succeeded', 'failed', 'cancelled')\n    ),\n    head_transition_id TEXT,\n    head_sequence INTEGER CHECK(head_sequence IS NULL OR head_sequence >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, action_id),\n    UNIQUE (workspace_id, plugin_connection_id, idempotency_key),\n    UNIQUE (workspace_id, action_id, envelope_digest),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, plugin_connection_id, provider_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id, provider_id),\n    CHECK(created_at <= updated_at),\n    CHECK(\n      (state IS NULL AND lineage_json IS NULL AND lineage_kind IS NULL\n        AND provider_operation_id IS NULL AND reconciliation_key IS NULL AND terminal_status IS NULL\n        AND head_transition_id IS NULL AND head_sequence IS NULL) OR\n      (state IS NOT NULL AND lineage_json IS NOT NULL AND lineage_kind IS NOT NULL\n        AND head_transition_id IS NOT NULL AND head_sequence IS NOT NULL)\n    ),\n    CHECK(\n      lineage_kind IS NULL OR\n      (lineage_kind = 'none' AND provider_operation_id IS NULL\n        AND reconciliation_key IS NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'accepted' AND provider_operation_id IS NOT NULL\n        AND reconciliation_key IS NOT NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'reconcilable' AND reconciliation_key IS NOT NULL\n        AND terminal_status IS NULL) OR\n      (lineage_kind = 'manual' AND reconciliation_key IS NULL AND terminal_status IS NULL) OR\n      (lineage_kind = 'terminal' AND provider_operation_id IS NOT NULL\n        AND reconciliation_key IS NULL AND terminal_status IS NOT NULL)\n    ),\n    CHECK(\n      state IS NULL OR\n      (state IN ('proposed', 'authorized', 'denied', 'expired') AND lineage_kind = 'none') OR\n      (state = 'cancelled' AND (\n        lineage_kind = 'none' OR (lineage_kind = 'terminal' AND terminal_status = 'cancelled')\n      )) OR\n      (state IN ('started', 'cancel-requested') AND lineage_kind IN ('none', 'accepted')) OR\n      (state IN ('unknown', 'cancel-requested-unknown')\n        AND lineage_kind IN ('reconcilable', 'manual')) OR\n      (state = 'succeeded' AND lineage_kind = 'terminal' AND terminal_status = 'succeeded') OR\n      (state = 'failed' AND lineage_kind = 'terminal' AND terminal_status = 'failed')\n    )\n  )"
     },
     {
       "type": "table",
@@ -580,6 +595,16 @@
       "type": "index",
       "name": "governed_action_recovery_claim_expiry_idx",
       "sql": "CREATE INDEX governed_action_recovery_claim_expiry_idx\n    ON governed_action_recovery_claims(lease_expires_at, workspace_id, action_id, claim_sequence)"
+    },
+    {
+      "type": "index",
+      "name": "governed_action_release_publication_slots_unique_idx",
+      "sql": "CREATE UNIQUE INDEX governed_action_release_publication_slots_unique_idx\n    ON governed_action_release_publication_slots(\n      workspace_id, provider_id, release_id, COALESCE(predecessor_action_id, '')\n    )"
+    },
+    {
+      "type": "index",
+      "name": "governed_action_release_publications_lookup_idx",
+      "sql": "CREATE INDEX governed_action_release_publications_lookup_idx\n    ON governed_action_release_publications(\n      workspace_id, provider_id, release_id, action_id DESC\n    )"
     },
     {
       "type": "index",
@@ -1008,6 +1033,21 @@
     },
     {
       "type": "trigger",
+      "name": "governed_action_entity_targets_exact",
+      "sql": "CREATE TRIGGER governed_action_entity_targets_exact\n    BEFORE INSERT ON governed_action_entity_targets\n    WHEN NOT EXISTS (\n      SELECT 1 FROM governed_actions action\n      WHERE action.workspace_id = NEW.workspace_id\n        AND action.action_id = NEW.action_id\n        AND action.plugin_connection_id = NEW.plugin_connection_id\n        AND action.provider_id = NEW.provider_id\n        AND action.target_entity_id = NEW.entity_id\n        AND json_type(action.envelope_json, '$.releasePublication') IS NULL\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action entity target must match the immutable envelope');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_entity_targets_no_delete",
+      "sql": "CREATE TRIGGER governed_action_entity_targets_no_delete\n    BEFORE DELETE ON governed_action_entity_targets\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action entity targets are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_entity_targets_no_update",
+      "sql": "CREATE TRIGGER governed_action_entity_targets_no_update\n    BEFORE UPDATE ON governed_action_entity_targets\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action entity targets are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
       "name": "governed_action_execution_lease_exact_start",
       "sql": "CREATE TRIGGER governed_action_execution_lease_exact_start\n    BEFORE INSERT ON governed_action_execution_leases\n    WHEN NOT EXISTS (\n      SELECT 1\n      FROM governed_actions action\n      JOIN governed_action_transitions transition_record\n        ON transition_record.workspace_id = action.workspace_id\n        AND transition_record.action_id = action.action_id\n        AND transition_record.transition_id = NEW.start_transition_id\n      WHERE action.workspace_id = NEW.workspace_id\n        AND action.action_id = NEW.action_id\n        AND action.state = 'started'\n        AND action.head_transition_id = NEW.start_transition_id\n        AND transition_record.command_tag = 'start'\n        AND transition_record.attempt_id = NEW.attempt_id\n        AND transition_record.occurred_at = NEW.created_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action execution lease requires its exact start transition');\n    END"
     },
@@ -1140,6 +1180,36 @@
       "type": "trigger",
       "name": "governed_action_recovery_claims_no_update",
       "sql": "CREATE TRIGGER governed_action_recovery_claims_no_update\n      BEFORE UPDATE ON governed_action_recovery_claims\n      BEGIN\n        SELECT RAISE(ABORT, 'governed_action_recovery_claims is immutable');\n      END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publication_slots_exact",
+      "sql": "CREATE TRIGGER governed_action_release_publication_slots_exact\n    BEFORE INSERT ON governed_action_release_publication_slots\n    WHEN NOT EXISTS (\n      SELECT 1 FROM governed_action_release_publications publication\n      WHERE publication.workspace_id = NEW.workspace_id\n        AND publication.action_id = NEW.action_id\n        AND publication.provider_id = NEW.provider_id\n        AND publication.release_id = NEW.release_id\n        AND publication.predecessor_action_id IS NEW.predecessor_action_id\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action release publication slot must match immutable publication history');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publication_slots_release",
+      "sql": "CREATE TRIGGER governed_action_release_publication_slots_release\n    AFTER UPDATE OF state ON governed_actions\n    WHEN NEW.state IN ('denied', 'expired', 'cancelled', 'failed')\n    BEGIN\n      DELETE FROM governed_action_release_publication_slots\n      WHERE workspace_id = NEW.workspace_id AND action_id = NEW.action_id;\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publications_exact",
+      "sql": "CREATE TRIGGER governed_action_release_publications_exact\n    BEFORE INSERT ON governed_action_release_publications\n    WHEN NOT EXISTS (\n      SELECT 1 FROM governed_actions action\n      WHERE action.workspace_id = NEW.workspace_id\n        AND action.action_id = NEW.action_id\n        AND action.provider_id = NEW.provider_id\n        AND json_extract(action.envelope_json, '$.releasePublication.releaseId') = NEW.release_id\n        AND json_extract(action.envelope_json, '$.releasePublication.predecessorPublicationActionId') IS NEW.predecessor_action_id\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action release publication must match the immutable envelope');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publications_no_delete",
+      "sql": "CREATE TRIGGER governed_action_release_publications_no_delete\n    BEFORE DELETE ON governed_action_release_publications\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action release publications are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_release_publications_no_update",
+      "sql": "CREATE TRIGGER governed_action_release_publications_no_update\n    BEFORE UPDATE ON governed_action_release_publications\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action release publications are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "governed_action_target_authority_exact",
+      "sql": "CREATE TRIGGER governed_action_target_authority_exact\n    BEFORE INSERT ON governed_actions\n    WHEN NOT EXISTS (\n      SELECT 1 FROM entities entity\n      WHERE entity.workspace_id = NEW.workspace_id\n        AND entity.entity_id = NEW.target_entity_id\n        AND entity.plugin_connection_id = NEW.plugin_connection_id\n        AND entity.provider_id = NEW.provider_id\n    ) AND NOT (\n      json_valid(NEW.envelope_json)\n      AND json_extract(NEW.envelope_json, '$.releasePublication.releaseId') = NEW.target_entity_id\n      AND (\n        (\n          NEW.provider_id = 'jira'\n          AND json_extract(NEW.envelope_json, '$.proposal.request.actionKind') = 'create-release-version'\n          AND json_extract(NEW.envelope_json, '$.proposal.request.target.entityType') = 'jira.project-version'\n        ) OR (\n          NEW.provider_id = 'confluence'\n          AND (\n            (\n              json_extract(NEW.envelope_json, '$.proposal.request.actionKind') = 'create-page'\n              AND json_extract(NEW.envelope_json, '$.proposal.request.target.entityType') = 'release-page'\n            ) OR (\n              json_extract(NEW.envelope_json, '$.proposal.request.actionKind') = 'update-page'\n              AND json_extract(NEW.envelope_json, '$.proposal.request.target.entityType') = 'page'\n            )\n          )\n        )\n      )\n      AND EXISTS (\n        SELECT 1 FROM releases release\n        WHERE release.workspace_id = NEW.workspace_id\n          AND release.release_id = NEW.target_entity_id\n      )\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'governed action target must be an exact entity or supported release publication');\n    END"
     },
     {
       "type": "trigger",

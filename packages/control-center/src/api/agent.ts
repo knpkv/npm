@@ -195,7 +195,7 @@ export const ReleaseAgentProvider = AgentProvider
 /** Decoded release-agent provider. */
 export type ReleaseAgentProvider = AgentProvider
 
-/** Append-only provider destination that Relay may publish after human confirmation. */
+/** Provider destination that Relay may create or update after human confirmation. */
 export const ReleasePublicationProvider = Schema.Literals(["jira", "confluence"])
 export type ReleasePublicationProvider = typeof ReleasePublicationProvider.Type
 
@@ -205,7 +205,8 @@ export const SubmitReleasePublicationRequest = Schema.Struct({
   markdown: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
   parentId: Schema.NullOr(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-  )
+  ),
+  publicationActionId: Schema.optionalKey(GovernedActionId)
 })
 export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
 
@@ -839,6 +840,7 @@ const turn = HttpApiEndpoint.post("turn", "/releases/:releaseId/turns", {
     InvalidRequestApiError,
     UnauthorizedApiError,
     ForbiddenApiError,
+    ConflictApiError,
     NotFoundApiError,
     RequestTimedOutApiError,
     RateLimitedApiError,

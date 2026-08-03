@@ -514,7 +514,7 @@ describe("manual plugin synchronization", () => {
         getIssueTransitions: () => Effect.succeed([]),
         transitionIssue: () => Effect.void,
         getProjectVersion: () => Effect.succeed(Option.none()),
-        getProjectVersions: () => Effect.succeed([]),
+        findProjectVersionsByName: () => Effect.succeed([]),
         createProjectVersion: () => Effect.die("unused createProjectVersion"),
         getIssueLinkTypes: Effect.succeed([]),
         searchProjectIssues: () =>

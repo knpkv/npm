@@ -3,10 +3,11 @@ import { Button, Field, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { canonicalReleasePublicationTitle } from "../domain/releasePublication.js"
 import { contextualReleaseAgentPath } from "./contextualAgentPath.js"
 import { usePortfolioOverviewController } from "./portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "./portfolio/presentPortfolio.js"
@@ -16,6 +17,7 @@ import {
   releaseFullPath,
   releaseTransitionNames
 } from "./releases/releaseRoutes.js"
+import { decodeEntityRouteId } from "./items/workspaceEntityRoutes.js"
 import {
   readReleaseAgentThread,
   type StoredReleaseAgentThreadMessage,
@@ -28,6 +30,16 @@ import {
   submitBrowserReleasePublication
 } from "./releases/releaseAgentTransport.js"
 import styles from "./AgentPage.module.css"
+
+/** Resolve a single unambiguous release while retaining the page that launched Relay. */
+export const contextualSingleReleaseAgentPath = (
+  workspaceId: WorkspaceId,
+  releases: ReadonlyArray<PortfolioReleasePresentation>,
+  originPath: string
+): string | undefined => {
+  const release = releases.length === 1 ? releases[0] : undefined
+  return release === undefined ? undefined : contextualReleaseAgentPath(workspaceId, release.id, originPath)
+}
 
 export interface ReleaseAgentHistoryMessage {
   readonly content: string
@@ -75,7 +87,8 @@ interface AgentPageContext {
 
 type LocalThreadMessage = StoredReleaseAgentThreadMessage
 
-type TurnFailure = "blocked" | "failed" | "not-found" | "rate-limited" | "session-expired" | "timed-out" | "unavailable"
+type TurnFailure =
+  "blocked" | "conflict" | "failed" | "not-found" | "rate-limited" | "session-expired" | "timed-out" | "unavailable"
 
 const DEFAULT_CONTEXT: AgentPageContext = {
   description: "The workspace-wide view of release readiness, people, source health, and agent work.",
@@ -142,6 +155,14 @@ export const contextFor = (path: string | null): AgentPageContext => {
     }
   }
   if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "items" && releaseId === null) {
+    const selectedEntityId = decodeEntityRouteId(contextUrl.searchParams.get("object"))
+    if (selectedEntityId !== null) {
+      return {
+        description: `Workspace item ${selectedEntityId} is selected in the normalized delivery view. Relay will keep this exact entity selection and the surrounding item filters in context.`,
+        label: `Workspace item ${selectedEntityId.slice(-6)}`,
+        path: safePath
+      }
+    }
     return {
       description: `Current normalized delivery items in workspace ${workspaceId}, including the exact active filters and selection.`,
       label: "Workspace items",
@@ -211,6 +232,8 @@ const classifyTurnFailure = (failure: unknown): TurnFailure => {
     case "NotFoundApiError":
     case "ApplicationResourceNotFound":
       return "not-found"
+    case "ConflictApiError":
+      return "conflict"
     case "ServiceUnavailableApiError":
     case "ApplicationServiceUnavailable":
       return "unavailable"
@@ -250,6 +273,15 @@ const failurePanel = (failure: TurnFailure): ReactElement => {
           announce="assertive"
           description="This release is no longer in the current workspace snapshot. Return to the release before asking again."
           title="Release not found"
+          tone="caution"
+        />
+      )
+    case "conflict":
+      return (
+        <StatePanel
+          announce="assertive"
+          description="The release publication state changed or its destination is ambiguous. Refresh the release context and use the explicit publication controls."
+          title="Release publication needs attention"
           tone="caution"
         />
       )
@@ -445,10 +477,11 @@ const ReleaseAgentRoom = ({
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [announcement, setAnnouncement] = useState("")
-  const [publicationTitle, setPublicationTitle] = useState(release.version + " release")
-  const [publicationMarkdown, setPublicationMarkdown] = useState(
+  const publicationDefaultTitle = canonicalReleasePublicationTitle(release.version)
+  const publicationDefaultMarkdown =
     "Release " + release.version + " for " + release.serviceName + ". Published by Relay after human confirmation."
-  )
+  const [publicationTitle, setPublicationTitle] = useState(publicationDefaultTitle)
+  const [publicationMarkdown, setPublicationMarkdown] = useState(publicationDefaultMarkdown)
   const [publicationBusy, setPublicationBusy] = useState<"jira" | "confluence" | null>(null)
   const nextMessage = useRef(nextThreadSequence(messages))
   const activeTurn = useRef<AbortController | null>(null)
@@ -467,11 +500,21 @@ const ReleaseAgentRoom = ({
     writeReleaseAgentThread(release.id, messages)
   }, [messages, release.id])
 
+  useEffect(() => {
+    setPublicationTitle(publicationDefaultTitle)
+    setPublicationMarkdown(publicationDefaultMarkdown)
+  }, [publicationDefaultMarkdown, publicationDefaultTitle, release.releasePageAwareness?.state])
+
   const threadMessages = useMemo(() => presentMessages(messages), [messages])
   const lastProvider = [...messages].reverse().find((message) => message.provider !== undefined)?.provider
   const runtimeUnavailable = runTurn === undefined
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
+  const pageAwareness = release.releasePageAwareness
+  const confluenceCreateReady = pageAwareness?.state === "not-published"
+  const confluenceUpdateReady = pageAwareness?.state === "stale" && pageAwareness.publicationActionId !== undefined
+  const confluencePublicationReady = confluenceCreateReady || confluenceUpdateReady
+  const confluenceAwarenessUnknown = pageAwareness === undefined || pageAwareness.state === "unknown"
 
   useEffect(() => {
     if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
@@ -548,18 +591,35 @@ const ReleaseAgentRoom = ({
 
   const publish = (publicationProvider: "jira" | "confluence"): void => {
     if (publicationBusy !== null || publicationTitle.trim() === "" || publicationMarkdown.trim() === "") return
+    if (publicationProvider === "confluence" && !confluencePublicationReady) return
     setPublicationBusy(publicationProvider)
-    setAnnouncement("Relay is creating the " + publicationProvider + " release artifact.")
+    const updatingConfluence = publicationProvider === "confluence" && confluenceUpdateReady
+    setAnnouncement(
+      "Relay is " +
+        (updatingConfluence ? "updating" : "creating") +
+        " the " +
+        publicationProvider +
+        " release artifact."
+    )
     submitBrowserReleasePublication({
       releaseId: release.id,
       provider: publicationProvider,
       title: publicationTitle.trim(),
-      markdown: publicationMarkdown.trim()
+      markdown: publicationMarkdown.trim(),
+      ...(updatingConfluence && pageAwareness?.publicationActionId !== undefined
+        ? { publicationActionId: pageAwareness.publicationActionId }
+        : {})
     })
       .then(
         (result) =>
-          setAnnouncement("Relay created a governed " + publicationProvider + " publication (" + result.state + ")."),
-        () => setAnnouncement("Relay could not create the " + publicationProvider + " publication.")
+          setAnnouncement(
+            "Relay submitted a governed " +
+              (updatingConfluence ? "Confluence page update" : publicationProvider + " publication") +
+              " (" +
+              result.state +
+              ")."
+          ),
+        () => setAnnouncement("Relay could not publish the " + publicationProvider + " release artifact.")
       )
       .finally(() => setPublicationBusy(null))
   }
@@ -720,9 +780,15 @@ const ReleaseAgentRoom = ({
           Publish a release artifact
         </Text>
         <Text tone="secondary">
-          These append-only actions use the current release context and require your workspace-owner confirmation. Jira
+          These governed actions use the current release context and require your workspace-owner confirmation. Jira
           issue edits remain proposal-only.
         </Text>
+        {pageAwareness?.state === "stale" ? (
+          <Text tone="secondary">
+            The release changed after the last successful Confluence publication. Relay suggests updating the page;
+            publishing requires an explicit owner confirmation.
+          </Text>
+        ) : null}
         <Field label="Title">
           {(controlProps) => (
             <input
@@ -750,12 +816,32 @@ const ReleaseAgentRoom = ({
             Create Jira release version
           </Button>
           <Button
-            disabled={publicationBusy !== null}
+            disabled={publicationBusy !== null || !confluencePublicationReady}
             loading={publicationBusy === "confluence"}
             onClick={() => publish("confluence")}
           >
-            Create Confluence release page
+            {pageAwareness?.state === "stale"
+              ? "Update Confluence release page"
+              : pageAwareness?.state === "current"
+                ? "Confluence release page is current"
+                : "Create Confluence release page"}
           </Button>
+          {pageAwareness?.state === "current" ? (
+            <Text tone="secondary">
+              Relay will suggest an update after synchronized release changes make this page stale.
+            </Text>
+          ) : null}
+          {pageAwareness?.state === "stale" && !confluenceUpdateReady ? (
+            <Text tone="secondary">
+              The existing page identity is unavailable, so Relay will not create a duplicate page.
+            </Text>
+          ) : null}
+          {confluenceAwarenessUnknown ? (
+            <Text tone="secondary">
+              Confluence publication status is unavailable. Refresh the release context before publishing to avoid
+              creating a duplicate page.
+            </Text>
+          ) : null}
         </div>
       </Surface>
     </article>
@@ -891,6 +977,8 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
       )
     case "ready": {
       const { portfolio } = controller.state
+      const singleReleasePath = contextualSingleReleaseAgentPath(portfolio.workspaceId, portfolio.releases, originPath)
+      if (singleReleasePath !== undefined) return <Navigate replace to={singleReleasePath} />
       return (
         <section aria-labelledby="agent-title" className={styles.legacy}>
           <header className={styles.legacyHeader}>

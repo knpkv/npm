@@ -66,6 +66,7 @@ export interface PortfolioReleasePresentation {
   readonly collaboratorCount: number
   readonly facts: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
   readonly id: PortfolioSnapshot["releases"][number]["releaseId"]
+  readonly releasePageAwareness: PortfolioSnapshot["releases"][number]["releasePageAwareness"]
   readonly lifecycleLabel: string
   readonly lifecycleTone: RlyStateTone
   readonly readinessVerdict: ReadinessVerdict | "unknown"
@@ -80,7 +81,7 @@ export interface PortfolioReleasePresentation {
   readonly source: PortfolioSourcePresentation
   readonly stages: ReadonlyArray<RlyStage>
   readonly targetEnvironmentIds: PortfolioSnapshot["releases"][number]["targetEnvironmentIds"]
-  readonly version: string
+  readonly version: PortfolioSnapshot["releases"][number]["version"]
 }
 
 export interface PortfolioPresentation {
@@ -411,6 +412,7 @@ const releasePresentation = (
     collaboratorCount: release.collaboratorCount,
     facts,
     id: release.releaseId,
+    releasePageAwareness: release.releasePageAwareness,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
     readinessVerdict: readiness?.verdict ?? "unknown",

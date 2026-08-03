@@ -36,9 +36,11 @@ import {
 import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import {
   decodeJiraProviderPathIdentifier,
+  type JiraProjectVersion,
   JiraProviderPathIdentifier,
   type JiraReadProvider
 } from "./JiraReadProvider.js"
+import { JiraReleaseVersionDescription, JiraReleaseVersionName } from "./JiraReleaseVersionLimits.js"
 
 interface JiraGovernedActionConfiguration {
   readonly projectId: string
@@ -50,8 +52,8 @@ const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()
 const JiraProviderIdentity = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const CreateReleaseVersionPayload = Schema.TaggedStruct("create-release-version", {
   projectId: JiraProjectId,
-  name: JiraProviderIdentity.pipe(Schema.check(Schema.isMaxLength(255))),
-  description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(16_384)))
+  name: JiraReleaseVersionName,
+  description: JiraReleaseVersionDescription
 })
 const CreateReleaseVersionTarget = "jira.project-version"
 const EMPTY_REVISION = "0"
@@ -218,17 +220,6 @@ const proposeReleaseVersion = Effect.fn("JiraGovernedActions.proposeReleaseVersi
     return yield* new PluginConflictFailure({
       operation: "propose-action",
       diagnosticCode: "jira-release-version-project-outside-connection"
-    })
-  }
-  const versions = yield* withTimeout(
-    "jira-get-project-versions",
-    configuration.operationTimeoutMillis,
-    provider.getProjectVersions(configuration.projectId)
-  )
-  if (versions.some((version) => version.name === payload.name)) {
-    return yield* new PluginConflictFailure({
-      operation: "propose-action",
-      diagnosticCode: "jira-release-version-name-already-exists"
     })
   }
   const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
@@ -511,12 +502,50 @@ const releaseVersionLocator = (payloadDigest: string) =>
 
 const releaseVersionReceipt = (
   version: { readonly id: string; readonly name: string },
-  observedAt: typeof UtcTimestamp.Type
+  observedAt: typeof UtcTimestamp.Type,
+  verb: "Created" | "Confirmed"
 ): PluginProviderReceiptV1 => ({
   status: "succeeded",
   providerOperationId: PluginProviderOperationId.make(`jira-project-version:${version.id}`),
-  safeSummary: `Created Jira release version ${version.name}`,
+  safeSummary: `${verb} Jira release version ${version.name}`,
   observedAt
+})
+
+const matchesAuthorizedReleaseVersion = (
+  version: JiraProjectVersion,
+  payload: typeof CreateReleaseVersionPayload.Type
+): boolean => version.name === payload.name && (version.description ?? null) === payload.description
+
+const recoverAmbiguousReleaseVersion = Effect.fn("JiraGovernedActions.recoverAmbiguousReleaseVersion")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraGovernedActionConfiguration,
+  request: AuthorizedPluginActionV1,
+  payload: typeof CreateReleaseVersionPayload.Type
+): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+  const versions = yield* withTimeout(
+    "jira-recover-project-versions",
+    configuration.operationTimeoutMillis,
+    provider.findProjectVersionsByName(configuration.projectId, payload.name)
+  ).pipe(
+    Effect.catch(() =>
+      Effect.fail(
+        new PluginUnknownOutcomeFailure({
+          operation: "jira-create-project-version",
+          reconciliationKey: releaseVersionLocator(request.payloadDigest)
+        })
+      )
+    )
+  )
+  const matches = versions.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
+  const match = matches[0]
+  if (match === undefined || matches.length !== 1) {
+    return yield* new PluginUnknownOutcomeFailure({
+      operation: "jira-create-project-version",
+      reconciliationKey: releaseVersionLocator(request.payloadDigest)
+    })
+  }
+  const observedAt = yield* DateTime.now
+  return { _tag: "confirmed", receipt: releaseVersionReceipt(match, observedAt, "Confirmed") }
 })
 
 const makeReleaseVersionExecutor = (
@@ -530,11 +559,28 @@ const makeReleaseVersionExecutor = (
     const versions = yield* withTimeout(
       "jira-preflight-project-versions",
       configuration.operationTimeoutMillis,
-      provider.getProjectVersions(configuration.projectId)
+      provider.findProjectVersionsByName(configuration.projectId, payload.name)
     )
     const checkedAt = yield* DateTime.now
-    if (versions.some((version) => version.name === payload.name)) {
-      return { _tag: "blocked", reasons: ["A Jira project version with this exact name already exists"], checkedAt }
+    const nameMatches = versions.filter((version) => version.name === payload.name)
+    const exactMatches = nameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
+    const nameMatch = nameMatches[0]
+    if (exactMatches.length > 1) {
+      return {
+        _tag: "blocked",
+        reasons: ["Multiple Jira project versions exactly match the authorized release"],
+        checkedAt
+      }
+    }
+    if (
+      nameMatches.length > 1 ||
+      (nameMatch !== undefined && !matchesAuthorizedReleaseVersion(nameMatch, payload))
+    ) {
+      return {
+        _tag: "blocked",
+        reasons: ["A Jira project version with this name does not match the authorized release notes"],
+        checkedAt
+      }
     }
     return { _tag: "ready", checkedRevision: Revision.make(EMPTY_REVISION), checkedAt }
   }),
@@ -542,6 +588,30 @@ const makeReleaseVersionExecutor = (
     request: AuthorizedPluginActionV1
   ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const payload = yield* decodeAuthorizedReleaseVersion(request, configuration.projectId)
+    const existingVersions = yield* withTimeout(
+      "jira-pre-execute-project-versions",
+      configuration.operationTimeoutMillis,
+      provider.findProjectVersionsByName(configuration.projectId, payload.name)
+    )
+    const existingNameMatches = existingVersions.filter(({ name }) => name === payload.name)
+    const existingMatches = existingNameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
+    const existingMatch = existingMatches[0]
+    if (existingMatch !== undefined && existingMatches.length === 1) {
+      const observedAt = yield* DateTime.now
+      return { _tag: "confirmed", receipt: releaseVersionReceipt(existingMatch, observedAt, "Confirmed") }
+    }
+    if (existingMatches.length > 1) {
+      return yield* new PluginConflictFailure({
+        operation: "jira-create-project-version",
+        diagnosticCode: "jira-release-version-name-duplicate"
+      })
+    }
+    if (existingNameMatches.length > 0) {
+      return yield* new PluginConflictFailure({
+        operation: "jira-create-project-version",
+        diagnosticCode: "jira-release-version-name-conflict"
+      })
+    }
     const result = yield* provider.createProjectVersion({
       name: payload.name,
       description: payload.description,
@@ -552,13 +622,9 @@ const makeReleaseVersionExecutor = (
       if (
         Schema.is(PluginTimeoutFailure)(result.failure) ||
         Schema.is(PluginOutageFailure)(result.failure) ||
-        Schema.is(PluginMalformedResponseFailure)(result.failure)
-      ) {
-        return yield* new PluginUnknownOutcomeFailure({
-          operation: "jira-create-project-version",
-          reconciliationKey: releaseVersionLocator(request.payloadDigest)
-        })
-      }
+        Schema.is(PluginMalformedResponseFailure)(result.failure) ||
+        Schema.is(PluginConflictFailure)(result.failure)
+      ) return yield* recoverAmbiguousReleaseVersion(provider, configuration, request, payload)
       if (
         Schema.is(PluginRateLimitFailure)(result.failure) ||
         Schema.is(PluginAuthenticationFailure)(result.failure) ||
@@ -576,13 +642,13 @@ const makeReleaseVersionExecutor = (
         }
       }
     }
-    if (result.success.name !== payload.name || result.success.projectId !== payload.projectId) {
-      return yield* new PluginUnknownOutcomeFailure({
-        operation: "jira-create-project-version",
-        reconciliationKey: releaseVersionLocator(request.payloadDigest)
-      })
+    if (
+      !matchesAuthorizedReleaseVersion(result.success, payload) ||
+      result.success.projectId !== payload.projectId
+    ) {
+      return yield* recoverAmbiguousReleaseVersion(provider, configuration, request, payload)
     }
-    return { _tag: "confirmed", receipt: releaseVersionReceipt(result.success, observedAt) }
+    return { _tag: "confirmed", receipt: releaseVersionReceipt(result.success, observedAt, "Created") }
   }),
   requestCancellation: () =>
     Effect.fail(
@@ -604,23 +670,27 @@ const makeReleaseVersionExecutor = (
     const versions = yield* withTimeout(
       "jira-reconcile-project-versions",
       configuration.operationTimeoutMillis,
-      provider.getProjectVersions(payload.projectId)
+      provider.findProjectVersionsByName(payload.projectId, payload.name)
     )
-    const matches = versions.filter((version) => version.name === payload.name)
+    const nameMatches = versions.filter((version) => version.name === payload.name)
+    const matches = nameMatches.filter((version) => matchesAuthorizedReleaseVersion(version, payload))
     const checkedAt = yield* DateTime.now
     const match = matches[0]
     if (match !== undefined && matches.length === 1) {
-      return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt) }
+      return { _tag: "succeeded", receipt: releaseVersionReceipt(match, checkedAt, "Confirmed") }
     }
-    if (matches.length === 0) return { _tag: "pending", checkedAt }
+    if (nameMatches.length === 0) return { _tag: "pending", checkedAt }
+    const duplicate = matches.length > 1
     return {
       _tag: "failed",
       receipt: {
         status: "failed",
         providerOperationId: PluginProviderOperationId.make(
-          "jira-project-version-duplicate:" + request.payloadDigest
+          `jira-project-version-${duplicate ? "duplicate" : "conflict"}:` + request.payloadDigest
         ),
-        safeSummary: "Multiple Jira release versions match the authorized creation name",
+        safeSummary: duplicate
+          ? "Multiple Jira release versions exactly match the authorized payload"
+          : "A Jira release version with the authorized name has different release notes",
         observedAt: checkedAt
       }
     }

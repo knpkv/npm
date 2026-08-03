@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -33,7 +34,7 @@ const eventId = (index: number) =>
   )
 
 const withLivePersistence = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, DomainEventWakeups | Persistence | Scope.Scope>
+  use: Effect.Effect<Success, Failure, Crypto.Crypto | DomainEventWakeups | Persistence | Scope.Scope>
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-live-events-")

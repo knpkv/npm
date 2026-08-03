@@ -14,6 +14,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
+import * as Stream from "effect/Stream"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -29,6 +30,7 @@ import {
   PluginRateLimitFailure,
   PluginTimeoutFailure
 } from "../failures.js"
+import { JiraReleaseVersionDescription, JiraReleaseVersionName } from "./JiraReleaseVersionLimits.js"
 
 /** One provider page request; limits are validated by adapter configuration. @internal */
 export interface JiraPageRequest {
@@ -143,6 +145,7 @@ export interface JiraIssueTransition {
 
 /** Stable project-version data needed by the governed proposal boundary. @internal */
 export interface JiraProjectVersion {
+  readonly description?: string | null
   readonly id: string
   readonly name: string
   readonly projectId: string | null
@@ -205,8 +208,9 @@ export interface JiraReadProvider {
   readonly getProjectVersion: (
     versionId: string
   ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
-  readonly getProjectVersions: (
-    projectId: string
+  readonly findProjectVersionsByName: (
+    projectId: string,
+    name: string
   ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
   readonly createProjectVersion: (
     input: JiraProjectVersionCreation
@@ -277,6 +281,13 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
 
 /** Translate a generated-client failure at the provider boundary. @internal */
 export const mapJiraReadProviderFailure = mapFailure
+
+/** Keep only duplicate-name conflicts eligible for post-create ambiguity recovery. @internal */
+export const mapJiraCreateProjectVersionFailure = (error: PluginFailure): PluginFailure =>
+  Schema.is(PluginConflictFailure)(error) &&
+    error.diagnosticCode !== "jira-provider-rejected-409"
+    ? new PluginConfigurationFailure({ diagnosticCode: error.diagnosticCode })
+    : error
 
 const providerCall = <Value, Error>(
   operation: string,
@@ -363,12 +374,20 @@ const JiraTransitions = Schema.Struct({
   })))
 })
 const JiraProjectVersionResponse = Schema.Struct({
+  description: Schema.optionalKey(JiraReleaseVersionDescription),
   id: Schema.String,
   name: Schema.String,
   projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
   project: Schema.optionalKey(Schema.String)
 })
-const JiraProjectVersionListResponse = Schema.Array(JiraProjectVersionResponse)
+const JiraProjectVersionPageResponse = Schema.Struct({
+  isLast: Schema.optionalKey(Schema.Boolean),
+  total: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  values: Schema.optionalKey(Schema.Array(JiraProjectVersionResponse))
+})
+
+const RELEASE_VERSION_LOOKUP_PAGE_SIZE = 50
+const RELEASE_VERSION_LOOKUP_MAX_PAGES = 20
 const JiraIssueLinkTypes = Schema.Struct({
   issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
     id: JiraProviderIdentifier,
@@ -622,6 +641,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               ),
               Effect.map((version) =>
                 Option.some({
+                  description: version.description ?? null,
                   id: version.id,
                   name: version.name,
                   projectId: version.projectId === undefined
@@ -633,20 +653,48 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         })
       )
     ),
-  getProjectVersions: (projectId) =>
+  findProjectVersionsByName: (projectId, name) =>
     decodeJiraProviderPathIdentifier(projectId).pipe(
       Effect.flatMap((projectId) =>
-        providerCall(
-          "jira-get-project-versions",
-          client.getProjectVersions(projectId, undefined)
-        )
+        Stream.paginate(
+          { page: 0, startAt: 0 },
+          Effect.fn("JiraReadProvider.findProjectVersionsByNamePage")(function*(state) {
+            const pageNumber = state.page + 1
+            const page = yield* providerCall(
+              "jira-find-project-versions-by-name",
+              client.getProjectVersionsPaginated(projectId, {
+                params: {
+                  startAt: state.startAt,
+                  maxResults: RELEASE_VERSION_LOOKUP_PAGE_SIZE,
+                  orderBy: "name",
+                  query: name
+                }
+              })
+            ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionPageResponse)))
+            const versions = page.values ?? []
+            const reachedTotal = page.total !== undefined && state.startAt + versions.length >= page.total
+            if (page.isLast === true || reachedTotal) {
+              return [versions, Option.none()]
+            }
+            if (versions.length === 0 || pageNumber >= RELEASE_VERSION_LOOKUP_MAX_PAGES) {
+              return yield* new PluginMalformedResponseFailure({
+                operation: "jira-find-project-versions-by-name",
+                diagnosticCode: "jira-project-version-lookup-incomplete"
+              })
+            }
+            return [
+              versions,
+              Option.some({ page: pageNumber, startAt: state.startAt + versions.length })
+            ]
+          })
+        ).pipe(Stream.runCollect, Effect.map((pages) => pages.flat()))
       ),
-      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionListResponse)),
       Effect.map((versions) =>
         versions.map((version) => ({
+          description: version.description ?? null,
           id: version.id,
           name: version.name,
-          projectId: version.projectId === undefined
+          projectId: version.projectId === undefined || version.projectId === null
             ? version.project ?? null
             : String(version.projectId)
         }))
@@ -654,7 +702,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       Effect.mapError((error) =>
         Schema.isSchemaError(error)
           ? new PluginMalformedResponseFailure({
-            operation: "jira-get-project-versions",
+            operation: "jira-find-project-versions-by-name",
             diagnosticCode: "jira-project-versions-response-invalid"
           })
           : error
@@ -669,10 +717,14 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
           })
         )
       ),
-      Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(255)))(
-        input.name
+      Schema.decodeUnknownEffect(JiraReleaseVersionName)(input.name).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-project-version-name-invalid" }))
       ),
-      Schema.decodeUnknownEffect(Schema.NullOr(Schema.String.check(Schema.isMaxLength(16_384))))(input.description)
+      Schema.decodeUnknownEffect(JiraReleaseVersionDescription)(input.description).pipe(
+        Effect.mapError(() =>
+          new PluginConfigurationFailure({ diagnosticCode: "jira-project-version-description-invalid" })
+        )
+      )
     ]).pipe(
       Effect.flatMap(([projectId, name, description]) =>
         providerCall(
@@ -688,10 +740,11 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       ),
       Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionResponse)),
       Effect.map((version) => ({
+        description: version.description ?? null,
         id: version.id,
         name: version.name,
-        projectId: version.projectId === undefined
-          ? version.project ?? input.projectId
+        projectId: version.projectId === undefined || version.projectId === null
+          ? version.project ?? null
           : String(version.projectId)
       })),
       Effect.mapError((error) =>
@@ -700,7 +753,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
             operation: "jira-create-project-version",
             diagnosticCode: "jira-created-project-version-response-invalid"
           })
-          : error
+          : mapJiraCreateProjectVersionFailure(error)
       )
     ),
   getIssueLinkTypes: providerCall(

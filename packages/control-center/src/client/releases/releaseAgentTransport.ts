@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import type { ReleasePublicationProvider } from "../../api/agent.js"
-import type { ReleaseId } from "../../domain/identifiers.js"
+import type { GovernedActionId, ReleaseId } from "../../domain/identifiers.js"
 import type { ReleaseAgentTurn } from "../AgentPage.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
@@ -12,13 +12,22 @@ export const submitBrowserReleasePublication = (input: {
   readonly provider: ReleasePublicationProvider
   readonly title: string
   readonly markdown: string
+  readonly publicationActionId?: GovernedActionId
 }): Promise<{ readonly actionId: string; readonly state: string }> =>
   Effect.runPromise(
     Effect.gen(function*() {
       const client = yield* makeAuthenticatedMutationClient
       return yield* client.agent.submitReleasePublication({
         params: { releaseId: input.releaseId },
-        payload: { provider: input.provider, title: input.title, markdown: input.markdown, parentId: null }
+        payload: {
+          provider: input.provider,
+          title: input.title,
+          markdown: input.markdown,
+          parentId: null,
+          ...(input.publicationActionId === undefined ? {} : {
+            publicationActionId: input.publicationActionId
+          })
+        }
       })
     }).pipe(Effect.provide(FetchHttpClient.layer))
   )

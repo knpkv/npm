@@ -22,15 +22,17 @@ import {
 } from "../../domain/governedAction/index.js"
 import {
   DomainEventId,
-  EntityId,
   GovernedActionAuthorizationId,
   GovernedActionId,
   GovernedActionTransitionId,
+  type PluginConnectionId,
   type ReleaseId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
+import { canonicalReleasePublicationTitle } from "../../domain/releasePublication.js"
 import { Revision } from "../../domain/sourceRevision.js"
+import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { SessionSummary } from "../auth/models.js"
 import {
   digestCanonicalGovernedActionJson,
@@ -42,20 +44,118 @@ import {
   GovernedActionProposalAuthority,
   GovernedActionSubmission
 } from "../governance/GovernedActionSubmission.js"
-import { Persistence } from "../persistence/Persistence.js"
+import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
 import { GovernedActionCommitInput } from "../persistence/repositories/governedActionRepository.js"
+import {
+  JIRA_RELEASE_VERSION_NAME_MAX_CHARACTERS,
+  jiraReleaseVersionDescriptionWithinLimit
+} from "../plugins/jira/JiraReleaseVersionLimits.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
+import {
+  digestReleaseSourceRevisions,
+  latestConfluencePublicationReference,
+  releasePublicationReceiptCandidatesFromRecords,
+  releasePublicationTargetEntityId,
+  selectReleasePublicationConnection
+} from "./releasePublicationMetadata.js"
 
 export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<ReleasePublicationSubmissionError>()(
   "ReleasePublicationSubmissionError",
   { reason: Schema.Literals(["unauthorized", "conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}
 
+export interface ConfluenceReleasePublicationHistory {
+  readonly hasBlockingPublication: boolean
+  readonly latestReference: ReturnType<typeof latestConfluencePublicationReference>
+}
+
+/** Require creates to have no history and updates to match the exact latest durable receipt. */
+export const confluencePublicationRequestMatchesHistory = (
+  request: Pick<SubmitReleasePublicationRequest, "publicationActionId">,
+  history: ConfluenceReleasePublicationHistory
+): boolean => {
+  return request.publicationActionId === undefined
+    ? !history.hasBlockingPublication
+    : history.latestReference?.publicationActionId === request.publicationActionId
+}
+
+/** Preserve the exact referenced page for idempotency while separately checking whether it is still latest. */
+export const confluencePublicationRequestContext = (
+  request: Pick<SubmitReleasePublicationRequest, "publicationActionId">,
+  history: ConfluenceReleasePublicationHistory,
+  requestedReference: ConfluenceReleasePublicationHistory["latestReference"]
+) => ({
+  historyMatches: confluencePublicationRequestMatchesHistory(request, history),
+  publication: request.publicationActionId === undefined ? null : requestedReference
+})
+
+/** Load enough indexed history to distinguish never-published from malformed successful receipts. */
+export const loadConfluenceReleasePublicationHistory = Effect.fn(
+  "ReleasePublicationSubmissions.loadConfluenceReleasePublicationHistory"
+)(function*(
+  history: Pick<
+    PersistenceService["governedActions"],
+    "readLatestTerminalReleasePublications"
+  >,
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId
+) {
+  const records = yield* history.readLatestTerminalReleasePublications({
+    workspaceId,
+    providerId: "confluence",
+    releaseIds: [releaseId]
+  })
+  return {
+    hasBlockingPublication: records.length > 0,
+    latestReference: latestConfluencePublicationReference(
+      releasePublicationReceiptCandidatesFromRecords(records),
+      releaseId
+    )
+  }
+})
+
+/** Resolve one release update target through the bounded indexed publication projection. */
+export const loadLatestConfluenceReleasePublication = Effect.fn(
+  "ReleasePublicationSubmissions.loadLatestConfluenceReleasePublication"
+)(function*(
+  history: Pick<
+    PersistenceService["governedActions"],
+    "readLatestTerminalReleasePublications"
+  >,
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId
+) {
+  return (yield* loadConfluenceReleasePublicationHistory(history, workspaceId, releaseId)).latestReference
+})
+
+/** Resolve the exact opaque publication action supplied by the client without exposing its provider locator. */
+const loadConfluenceReleasePublicationByActionId = Effect.fn(
+  "ReleasePublicationSubmissions.loadConfluenceReleasePublicationByActionId"
+)(function*(
+  history: Pick<PersistenceService["governedActions"], "read">,
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId,
+  actionId: GovernedActionId
+) {
+  const record = yield* history.read({ workspaceId, actionId }).pipe(
+    Effect.map(Option.some),
+    Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
+  )
+  if (Option.isNone(record)) return null
+  const reference = latestConfluencePublicationReference(
+    releasePublicationReceiptCandidatesFromRecords([record.value]),
+    releaseId
+  )
+  return reference?.publicationActionId === actionId ? reference : null
+})
+
 interface SubmitInput {
+  readonly expectedReleaseUpdatedAt?: UtcTimestamp
   readonly releaseId: ReleaseId
   readonly request: SubmitReleasePublicationRequest
   readonly session: SessionSummary
+  readonly useReleaseIdentity?: boolean
   readonly workspaceId: WorkspaceId
 }
 
@@ -70,6 +170,11 @@ export class ReleasePublicationSubmissions extends Context.Service<
 
 const failure = (reason: ReleasePublicationSubmissionError["reason"]) =>
   new ReleasePublicationSubmissionError({ reason })
+
+/** Match Jira's release-version name and UTF-8 description limits before provider work. */
+export const jiraPublicationPayloadWithinLimits = (title: string, markdown: string): boolean =>
+  title.length <= JIRA_RELEASE_VERSION_NAME_MAX_CHARACTERS &&
+  jiraReleaseVersionDescriptionWithinLimit(markdown)
 
 const mapFailure = Effect.catch((cause) =>
   Schema.is(ReleasePublicationSubmissionError)(cause)
@@ -97,30 +202,96 @@ const makeService = Effect.gen(function*() {
       DateTime.Order(checkedAt, input.session.absoluteExpiresAt) >= 0
     ) return yield* failure("unauthorized")
     if (input.session.permission !== "workspace-owner") return yield* failure("forbidden")
+    if (
+      input.request.provider !== "confluence" &&
+      input.request.publicationActionId !== undefined
+    ) return yield* failure("conflict")
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
+    if (
+      input.expectedReleaseUpdatedAt !== undefined &&
+      release.release.updatedAt !== input.expectedReleaseUpdatedAt
+    ) return yield* failure("conflict")
+    const publicationTitle = input.useReleaseIdentity === true
+      ? canonicalReleasePublicationTitle(release.release.version)
+      : input.request.title
+    const publicationMarkdown = input.useReleaseIdentity === true
+      ? `Release ${release.release.version} for ${release.release.serviceName}. Published by Relay after human confirmation.`
+      : input.request.markdown
+    if (
+      input.request.provider === "jira" &&
+      !jiraPublicationPayloadWithinLimits(publicationTitle, publicationMarkdown)
+    ) return yield* failure("invalid-request")
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)
-    if (sources.length !== 1) return yield* failure("conflict")
-    const source = sources[0]
-    if (source === undefined || connections.proposalContextEffect === undefined) {
+    if (sources.length > 1) return yield* failure("conflict")
+    const releaseSource = sources[0]
+    let publicationReceiptConnectionId: PluginConnectionId | undefined
+    let confluencePublication: ConfluenceReleasePublicationHistory["latestReference"] = null
+    let confluenceHistoryMatches = true
+    if (input.request.provider === "confluence") {
+      const publicationHistory = yield* loadConfluenceReleasePublicationHistory(
+        persistence.governedActions,
+        input.workspaceId,
+        input.releaseId
+      ).pipe(mapFailure)
+      const requestedReference = input.request.publicationActionId === undefined
+        ? null
+        : yield* loadConfluenceReleasePublicationByActionId(
+          persistence.governedActions,
+          input.workspaceId,
+          input.releaseId,
+          input.request.publicationActionId
+        ).pipe(mapFailure)
+      const publicationContext = confluencePublicationRequestContext(
+        input.request,
+        publicationHistory,
+        requestedReference
+      )
+      confluenceHistoryMatches = publicationContext.historyMatches
+      confluencePublication = publicationContext.publication
+      if (input.request.publicationActionId !== undefined && confluencePublication === null) {
+        return yield* failure("conflict")
+      }
+      publicationReceiptConnectionId = confluencePublication?.pluginConnectionId
+    }
+    const workspaceConnections = releaseSource === undefined && publicationReceiptConnectionId === undefined
+      ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
+      : []
+    const enabledFallbackConnections = workspaceConnections.filter(
+      ({ isEnabled, providerId }) => providerId === input.request.provider && isEnabled
+    )
+    const connectionSelection = selectReleasePublicationConnection({
+      enabledConnectionIds: enabledFallbackConnections.map(({ pluginConnectionId }) => pluginConnectionId),
+      ...(publicationReceiptConnectionId === undefined
+        ? {}
+        : { publicationReceiptConnectionId }),
+      ...(releaseSource === undefined
+        ? {}
+        : { releaseSourceConnectionId: releaseSource.pluginConnectionId })
+    })
+    if (connectionSelection._tag === "ambiguous") return yield* failure("conflict")
+    if (connectionSelection._tag === "missing") return yield* failure("unavailable")
+    const publicationConnectionId = connectionSelection.pluginConnectionId
+    if (connections.proposalContextEffect === undefined) {
       return yield* failure("unavailable")
     }
     const lease = yield* connections.proposalContextEffect({
       workspaceId: input.workspaceId,
-      pluginConnectionId: source.pluginConnectionId
+      pluginConnectionId: publicationConnectionId
     }).pipe(mapFailure)
     const connection = Context.get(lease.context, PluginConnection)
     const connectionRecord = yield* persistence.pluginConnections.get(
       input.workspaceId,
-      source.pluginConnectionId
+      publicationConnectionId
     ).pipe(mapFailure)
     if (!connectionRecord.isEnabled) return yield* failure("conflict")
+    const publicationTargetEntityId = releasePublicationTargetEntityId(input.releaseId)
     const capability = connection.descriptor.capabilities.find(({ capabilityId }) => capabilityId === "action.execute")
     if (capability === undefined) return yield* failure("conflict")
 
     const configuration = yield* persistence.pluginConfigurations.get(
       input.workspaceId,
-      source.pluginConnectionId
+      publicationConnectionId
     ).pipe(mapFailure)
     if (Option.isNone(configuration)) return yield* failure("conflict")
     const destination = configuration.value.values.find(({ key }) =>
@@ -130,24 +301,47 @@ const makeService = Effect.gen(function*() {
       return yield* failure("conflict")
     }
     const providerRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
-      actionKind: input.request.provider === "jira" ? "create-release-version" : "create-page",
+      actionKind: input.request.provider === "jira"
+        ? "create-release-version"
+        : confluencePublication !== null
+        ? "update-page"
+        : "create-page",
       target: {
-        entityType: input.request.provider === "jira" ? "jira.project-version" : "release-page",
-        vendorImmutableId: destination.value
+        entityType: input.request.provider === "jira"
+          ? "jira.project-version"
+          : confluencePublication !== null
+          ? "page"
+          : "release-page",
+        vendorImmutableId: input.request.provider === "jira" || confluencePublication === null
+          ? destination.value
+          : confluencePublication.pageId
       },
-      expectedRevision: Revision.make("0"),
+      expectedRevision: input.request.provider === "confluence" && confluencePublication !== null
+        ? Revision.make(String(confluencePublication.pageVersion))
+        // Creation actions have no provider revision; "0" is a sentinel, not a real revision.
+        : Revision.make("0"),
       payload: input.request.provider === "jira"
         ? {
           _tag: "create-release-version",
           projectId: destination.value,
-          name: input.request.title,
-          description: input.request.markdown
+          name: publicationTitle,
+          description: publicationMarkdown
+        }
+        : confluencePublication !== null
+        ? {
+          _tag: "update-page",
+          pageId: confluencePublication.pageId,
+          spaceId: destination.value,
+          title: publicationTitle,
+          markdown: publicationMarkdown,
+          expectedVersion: confluencePublication.pageVersion,
+          versionMessage: "Updated by Relay after an explicit owner confirmation."
         }
         : {
           _tag: "create-page",
           spaceId: destination.value,
-          title: input.request.title,
-          markdown: input.request.markdown,
+          title: publicationTitle,
+          markdown: publicationMarkdown,
           parentId: input.request.parentId
         },
       evidenceIds: []
@@ -158,20 +352,29 @@ const makeService = Effect.gen(function*() {
         )
       )
     )
-    const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
+    const sourceRevisionDigest = yield* digestReleaseSourceRevisions(release.release.sourceRevisions).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
     const digest = yield* digestCanonicalGovernedActionJson({
       schemaVersion: 1,
       workspaceId: input.workspaceId,
       releaseId: input.releaseId,
       provider: input.request.provider,
-      title: input.request.title,
-      markdown: input.request.markdown,
-      parentId: input.request.parentId
+      actionKind: providerRequest.actionKind,
+      title: publicationTitle,
+      markdown: publicationMarkdown,
+      parentId: input.request.parentId,
+      publicationActionId: input.request.publicationActionId ?? null,
+      pageId: confluencePublication?.pageId ?? null,
+      expectedVersion: confluencePublication?.pageVersion ?? null,
+      sourceRevisionDigest,
+      destination: destination.value,
+      targetEntityId: publicationTargetEntityId
     }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
     const idempotencyKey = GovernedActionIdempotencyKey.make("release-publication:v1:" + digest)
     const existing = yield* persistence.governedActions.readByIdempotencyKey({
       workspaceId: input.workspaceId,
-      pluginConnectionId: source.pluginConnectionId,
+      pluginConnectionId: publicationConnectionId,
       idempotencyKey
     }).pipe(
       Effect.map(Option.some),
@@ -180,8 +383,7 @@ const makeService = Effect.gen(function*() {
     )
     if (Option.isSome(existing)) {
       if (
-        existing.value.envelope.proposal.payloadDigest !== providerProposal.payloadDigest ||
-        !Equal.equals(existing.value.envelope.proposal.request, providerProposal.request)
+        !Equal.equals(existing.value.envelope.proposal.request, providerRequest)
       ) {
         return yield* failure("conflict")
       }
@@ -199,6 +401,9 @@ const makeService = Effect.gen(function*() {
       }).pipe(mapFailure)
       return { actionId: record.envelope.actionId, state: record.head.state }
     }
+    if (!confluenceHistoryMatches) return yield* failure("conflict")
+
+    const providerProposal = yield* connection.proposeAction(providerRequest).pipe(mapFailure)
 
     const actor = input.session.actor
     if (actor._tag !== "human") return yield* failure("conflict")
@@ -213,7 +418,7 @@ const makeService = Effect.gen(function*() {
       actionId,
       idempotencyKey,
       workspaceId: input.workspaceId,
-      pluginConnectionId: source.pluginConnectionId,
+      pluginConnectionId: publicationConnectionId,
       pluginConnectionRevision: GovernedActionPluginConnectionRevision.make(connectionRecord.revision),
       pluginConnectionAuthorityDigest: GovernedActionPluginConnectionAuthorityDigest.make(
         lease.runtimeAuthorityToken
@@ -223,7 +428,7 @@ const makeService = Effect.gen(function*() {
       pluginAdapterVersion: connection.descriptor.descriptor.adapterVersion,
       providerId: input.request.provider,
       capability: { capabilityId: "action.execute", version: capability.version },
-      targetEntityId: EntityId.make(input.releaseId),
+      targetEntityId: publicationTargetEntityId,
       proposal: providerProposal,
       evidence,
       evidenceSetDigest,
@@ -231,7 +436,13 @@ const makeService = Effect.gen(function*() {
       origin: { _tag: "human", actor, sessionId: input.session.sessionId },
       proposalExpiresAt: DateTime.addDuration(checkedAt, Duration.minutes(10)),
       causationId: null,
-      correlationId: null
+      correlationId: null,
+      releasePublication: {
+        releaseId: input.releaseId,
+        predecessorPublicationActionId: input.request.publicationActionId ?? null,
+        sourceRevisionDigest,
+        sourceRevisionCount: release.release.sourceRevisions.length
+      }
     })
     const envelope = (yield* makeGovernedActionEnvelope(material).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)
@@ -269,7 +480,7 @@ const makeService = Effect.gen(function*() {
       authorizationId,
       actionId,
       workspaceId: input.workspaceId,
-      pluginConnectionId: source.pluginConnectionId,
+      pluginConnectionId: publicationConnectionId,
       pluginConnectionRevision: envelope.pluginConnectionRevision,
       pluginConnectionAuthorityDigest: envelope.pluginConnectionAuthorityDigest,
       actionEnvelopeDigest: envelope.envelopeDigest,
@@ -303,7 +514,7 @@ const makeService = Effect.gen(function*() {
     yield* proposalAuthority.transactCurrent(
       {
         workspaceId: input.workspaceId,
-        pluginConnectionId: source.pluginConnectionId,
+        pluginConnectionId: publicationConnectionId,
         runtimeAuthorityToken: lease.runtimeAuthorityToken
       },
       () =>

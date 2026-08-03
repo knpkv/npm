@@ -13,6 +13,7 @@ import { QuarantineRepository } from "../quarantineRepository.js"
 import type {
   GovernedActionIdempotencyReadInput,
   GovernedActionReadInput,
+  GovernedActionReleasePublicationReadInput,
   GovernedActionTargetReadInput
 } from "./contract.js"
 import type { MalformedGovernedActionRecord } from "./quarantine.js"
@@ -97,6 +98,17 @@ export const makeGovernedActionTransaction = Effect.gen(function*() {
     reader.readLatestTerminalByTarget(request).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)
     )
+  const readLatestTerminalReleasePublications = (request: GovernedActionReleasePublicationReadInput) =>
+    reader.readLatestTerminalReleasePublications(request).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
 
-  return { capture, read, readByIdempotencyKey, readLatestTerminalByTarget, transact }
+  return {
+    capture,
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications,
+    transact
+  }
 })

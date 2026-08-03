@@ -13,6 +13,7 @@ import {
   GovernedActionId,
   JobId,
   PluginConnectionId,
+  ReleaseId,
   SessionId,
   WorkspaceId
 } from "../identifiers.js"
@@ -43,6 +44,17 @@ export const GovernedActionEnvelopeDigest = sha256Digest("GovernedActionEnvelope
 
 /** Decoded governed-action envelope digest. */
 export type GovernedActionEnvelopeDigest = typeof GovernedActionEnvelopeDigest.Type
+
+/** Exact release and source-revision baseline captured by a release publication. */
+export const ReleasePublicationMetadataV1 = Schema.Struct({
+  releaseId: ReleaseId,
+  predecessorPublicationActionId: Schema.optionalKey(Schema.NullOr(GovernedActionId)),
+  sourceRevisionDigest: GovernedActionEnvelopeDigest,
+  sourceRevisionCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
+/** Decoded release publication metadata. */
+export type ReleasePublicationMetadataV1 = typeof ReleasePublicationMetadataV1.Type
 
 /** Digest of the canonical evidence-reference set bound to an action. */
 export const GovernedActionEvidenceSetDigest = sha256Digest("GovernedActionEvidenceSetDigest")
@@ -251,7 +263,8 @@ const governedActionEnvelopeMaterialFields = {
   origin: GovernedActionProposalOrigin,
   proposalExpiresAt: UtcTimestamp,
   causationId: Schema.NullOr(DomainEventId),
-  correlationId: Schema.NullOr(DomainEventCorrelationId)
+  correlationId: Schema.NullOr(DomainEventCorrelationId),
+  releasePublication: Schema.optionalKey(ReleasePublicationMetadataV1)
 }
 
 /** Complete digest-free material used to derive an immutable action envelope identity. */
@@ -267,6 +280,34 @@ export const GovernedActionEnvelopeMaterialV1 = Schema.Struct(governedActionEnve
   Schema.makeFilter(
     ({ evidence, workspaceId }) => evidence.every((reference) => reference.workspaceId === workspaceId),
     { expected: "every governed-action evidence reference to belong to the action workspace" }
+  ),
+  Schema.makeFilter(
+    ({ proposal, providerId, releasePublication, targetEntityId }) =>
+      releasePublication === undefined ||
+      (
+        String(targetEntityId) === String(releasePublication.releaseId) &&
+        (
+          (
+            providerId === "jira" &&
+            proposal.request.actionKind === "create-release-version" &&
+            proposal.request.target.entityType === "jira.project-version"
+          ) ||
+          (
+            providerId === "confluence" &&
+            (
+              (
+                proposal.request.actionKind === "create-page" &&
+                proposal.request.target.entityType === "release-page"
+              ) ||
+              (
+                proposal.request.actionKind === "update-page" &&
+                proposal.request.target.entityType === "page"
+              )
+            )
+          )
+        )
+      ),
+    { expected: "release publication metadata to describe a supported release publication action" }
   )
 )
 
