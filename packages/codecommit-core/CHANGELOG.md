@@ -1,5 +1,16 @@
 # @knpkv/codecommit-core
 
+## 0.10.1
+
+### Patch Changes
+
+- [#328](https://github.com/knpkv/npm/pull/328) [`f35e10d`](https://github.com/knpkv/npm/commit/f35e10dcf2dc7ac50538621904f7acd4420956e6) Thanks [@konopkov](https://github.com/konopkov)! - Extend human-confirmed CodeCommit review publication with exact comment updates and replies, marker-based reconciliation, and preview-bound operation targets.
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+
 ## 0.10.0
 
 ### Minor Changes

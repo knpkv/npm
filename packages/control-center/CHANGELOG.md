@@ -1,5 +1,61 @@
 # @knpkv/control-center
 
+## 0.4.0
+
+### Minor Changes
+
+- [#326](https://github.com/knpkv/npm/pull/326) [`e49d026`](https://github.com/knpkv/npm/commit/e49d026281403d329e4a35a909e9f4910c382b22) Thanks [@konopkov](https://github.com/konopkov)! - Expose host-derived immutable-head Review Suggestion transitions on completed reports and fence prior-head lookup from the current review job.
+
+- [#321](https://github.com/knpkv/npm/pull/321) [`ec8a0a1`](https://github.com/knpkv/npm/commit/ec8a0a1f17fbac03500ff1486da5290f784d4ac0) Thanks [@konopkov](https://github.com/konopkov)! - Persist pull-request review budgets, one operator extension, and validated partial reports across cancellation and budget expiry.
+
+- [#316](https://github.com/knpkv/npm/pull/316) [`345b6f5`](https://github.com/knpkv/npm/commit/345b6f5ff5187097f7d0a7d8f7f9caeee75d261f) Thanks [@konopkov](https://github.com/konopkov)! - Add an opt-in Playwright journey for the real shared Jira and Confluence Atlassian OAuth flow.
+
+- [#325](https://github.com/knpkv/npm/pull/325) [`0c1ca75`](https://github.com/knpkv/npm/commit/0c1ca757c061efc99f11ed7291bb83ff1b872e13) Thanks [@konopkov](https://github.com/konopkov)! - Add schema-validated immutable-head suggestion transition classification for review reconciliation.
+
+- [#322](https://github.com/knpkv/npm/pull/322) [`d1cfe0d`](https://github.com/knpkv/npm/commit/d1cfe0df2a6e5961331ba479b9f278a54f0e9fb2) Thanks [@konopkov](https://github.com/konopkov)! - Keep pull-request review suggestion identities stable across changed heads, add an atomic reconciliation classifier for re-review lifecycle transitions, and retain explicit dismissal reasons.
+
+- Persist interrupted local review runs with partial evidence during startup recovery and retain live workspace-scoped review sandboxes for inspection.
+
+- [#323](https://github.com/knpkv/npm/pull/323) [`f59bc8a`](https://github.com/knpkv/npm/commit/f59bc8ace6396511667482ff05a4fb1099f2f058) Thanks [@konopkov](https://github.com/konopkov)! - Record metadata-only telemetry for local pull-request review commands without exporting prompts, source content, model output, or patches.
+
+- [#319](https://github.com/knpkv/npm/pull/319) [`4d06229`](https://github.com/knpkv/npm/commit/4d062295393add7a6f34059041aec01403f92d4d) Thanks [@konopkov](https://github.com/konopkov)! - Add durable agent edit and targeted revalidation jobs for immutable pull-request review suggestions.
+
+### Patch Changes
+
+- [#328](https://github.com/knpkv/npm/pull/328) [`f35e10d`](https://github.com/knpkv/npm/commit/f35e10dcf2dc7ac50538621904f7acd4420956e6) Thanks [@konopkov](https://github.com/konopkov)! - Extend human-confirmed CodeCommit review publication with exact comment updates and replies, marker-based reconciliation, and preview-bound operation targets.
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+
+- [#327](https://github.com/knpkv/npm/pull/327) [`73e4888`](https://github.com/knpkv/npm/commit/73e488857e6b90d89768207b04a85546b04db003) Thanks [@konopkov](https://github.com/konopkov)! - Persist stale lifecycle revisions for suggestions from older pull-request heads and block their publication.
+
+- [#339](https://github.com/knpkv/npm/pull/339) [`a9d5408`](https://github.com/knpkv/npm/commit/a9d54085f6fc25cde1d5b298f50cb6e06e2bc93f) Thanks [@konopkov](https://github.com/konopkov)! - Reconcile Control Center's Jira capability boundary with provider-enforced revision guarantees, expose the proposal-only Jira OAuth scope contract, and document the M5.6 release-gate evidence workflow.
+
+- [#335](https://github.com/knpkv/npm/pull/335) [`09ba57b`](https://github.com/knpkv/npm/commit/09ba57b6178c84b16b8a5fa35a9485f5c43d33de) Thanks [@konopkov](https://github.com/konopkov)! - Cover the browser review journey from exact-head launch through revision editing, targeted revalidation, publication preview, dismissal, and changed-head recovery.
+
+- [#336](https://github.com/knpkv/npm/pull/336) [`39bc4b3`](https://github.com/knpkv/npm/commit/39bc4b33695cb3f2cf7ab8f29b2b4131e6a5dc0d) Thanks [@konopkov](https://github.com/konopkov)! - Document and test the shared native review contract for Codex and Claude, including a credential-free full-project sandbox fixture with structured command results.
+
+- [#333](https://github.com/knpkv/npm/pull/333) [`157b9bd`](https://github.com/knpkv/npm/commit/157b9bd0e34fb1bc68809c5b997afd3512c0253b) Thanks [@konopkov](https://github.com/konopkov)! - Add lifecycle coverage proving repeated Review Sandbox recovery preserves the newest immutable attempt.
+
+- [#331](https://github.com/knpkv/npm/pull/331) [`f284ed0`](https://github.com/knpkv/npm/commit/f284ed020fb4c91b69386a5a8091b429f62dda6c) Thanks [@konopkov](https://github.com/konopkov)! - Keep durable review thread history and suggestion revisions out of automatic agent-content cleanup; only terminal jobs with no semantic review records are eligible for operational cleanup.
+
+- [#330](https://github.com/knpkv/npm/pull/330) [`89fa375`](https://github.com/knpkv/npm/commit/89fa375d2a22a28ba431c3cc753a6a08cd567d35) Thanks [@konopkov](https://github.com/konopkov)! - Remove unmatched stale Review Sandbox containers during startup recovery while retaining containers attributed to active review attempts.
+
+- [#329](https://github.com/knpkv/npm/pull/329) [`523c4b1`](https://github.com/knpkv/npm/commit/523c4b1a50b42df50f892c16879bf3bb0b62c00c) Thanks [@konopkov](https://github.com/konopkov)! - Attribute live Review Sandbox containers to durable PR-review attempts during startup recovery and interrupt only unmatched attempts.
+
+- [#332](https://github.com/knpkv/npm/pull/332) [`9ef21fd`](https://github.com/knpkv/npm/commit/9ef21fd0494c2fa957427426e1cfe7e08b7bf06c) Thanks [@konopkov](https://github.com/konopkov)! - Resume an attributed live Review Sandbox on the next immutable review attempt after a process restart without restoring provider-native hidden session state.
+
+- [#334](https://github.com/knpkv/npm/pull/334) [`b01af09`](https://github.com/knpkv/npm/commit/b01af09b2d8c08ab05d5873b5617b4d71d933c58) Thanks [@konopkov](https://github.com/konopkov)! - Expose durable targeted review-suggestion edit and revalidation actions in the browser review surface.
+
+- Updated dependencies [[`f35e10d`](https://github.com/knpkv/npm/commit/f35e10dcf2dc7ac50538621904f7acd4420956e6), [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1), [`a9d5408`](https://github.com/knpkv/npm/commit/a9d54085f6fc25cde1d5b298f50cb6e06e2bc93f), [`4d06229`](https://github.com/knpkv/npm/commit/4d062295393add7a6f34059041aec01403f92d4d)]:
+  - @knpkv/codecommit-core@0.10.1
+  - @knpkv/atlassian-common@1.3.0
+  - @knpkv/ai-runtime@0.2.1
+  - @knpkv/confluence-to-markdown@2.1.3
+  - @knpkv/control-center-sql@0.2.1
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,14 @@
 # @knpkv/ai-runtime
 
+## 0.2.1
+
+### Patch Changes
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+
 ## 0.2.0
 
 ### Minor Changes

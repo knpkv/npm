@@ -1,5 +1,17 @@
 # @knpkv/codecommit
 
+## 0.7.3
+
+### Patch Changes
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+- Updated dependencies [[`f35e10d`](https://github.com/knpkv/npm/commit/f35e10dcf2dc7ac50538621904f7acd4420956e6), [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1)]:
+  - @knpkv/codecommit-core@0.10.1
+  - @knpkv/codecommit-web@0.11.3
+
 ## 0.7.2
 
 ### Patch Changes
