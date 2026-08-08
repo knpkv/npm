@@ -384,6 +384,7 @@ describe("ControlCenterApi contract", () => {
         ["pair", "POST", "/api/v1/session/pair"],
         ["current", "GET", "/api/v1/session/current"],
         ["list", "GET", "/api/v1/session"],
+        ["issueBrowserPairingCode", "POST", "/api/v1/session/device-code"],
         ["revoke", "DELETE", "/api/v1/session/:sessionId"],
         ["logout", "POST", "/api/v1/session/logout"]
       ]
@@ -608,6 +609,7 @@ describe("ControlCenterApi contract", () => {
       pair: [],
       current: [SessionCookieAuth.key],
       list: [SessionCookieAuth.key],
+      issueBrowserPairingCode: [SessionCookieAuth.key, MutationCsrf.key],
       revoke: [SessionCookieAuth.key, MutationCsrf.key],
       logout: [SessionCookieAuth.key, MutationCsrf.key]
     })
@@ -722,6 +724,10 @@ describe("ControlCenterApi contract", () => {
     const vendorImmutableId = VendorImmutableId.make("184")
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
+    assert.strictEqual(
+      urls.session.issueBrowserPairingCode(),
+      "https://control.example/api/v1/session/device-code"
+    )
     assert.strictEqual(
       urls.session.revoke({ params: { sessionId } }),
       "https://control.example/api/v1/session/01890f6f-6d6a-7cc0-98d2-000000000091"

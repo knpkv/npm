@@ -17,6 +17,7 @@ import {
 } from "../../src/api/workspaceSettings.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { SettingsForm, WorkspaceSettingsPage } from "../../src/client/settings/WorkspaceSettingsPage.js"
+import type { BrowserSessionAdministrationTransport } from "../../src/client/settings/browserSessionTransport.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
 import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
@@ -83,9 +84,15 @@ const ThemeHarness = (): ReactElement => {
   )
 }
 
+const browserSessionTransport: BrowserSessionAdministrationTransport = {
+  issuePairingCode: () => Promise.reject(new Error("unexpected browser pairing")),
+  list: () => Promise.resolve([session]),
+  revoke: () => Promise.reject(new Error("unexpected browser revocation"))
+}
+
 const SettingsPageHarness = ({ transport }: { readonly transport: WorkspaceSettingsTransport }): ReactElement => {
   sessionControls = useBrowserSession()
-  return <WorkspaceSettingsPage transport={transport} />
+  return <WorkspaceSettingsPage browserSessionTransport={browserSessionTransport} transport={transport} />
 }
 
 const renderSettingsPage = async (transport: WorkspaceSettingsTransport): Promise<HTMLElement> =>

@@ -57,10 +57,10 @@ export const makeOpenedBlobReader = (
     }
 
     const file = opened.success
-    yield* resolveDescriptorAlias(fs, path, file.fd, reference.filePath, operation)
     const openedInfo = yield* file.stat.pipe(
       Effect.mapError((cause) => blobStoreIoError(operation, cause))
     )
+    yield* resolveDescriptorAlias(fs, path, file.fd, openedInfo, reference.filePath, operation)
 
     if (openedInfo.type !== "File" || (openedInfo.mode & 0o077) !== 0) {
       return yield* new BlobContainmentError({

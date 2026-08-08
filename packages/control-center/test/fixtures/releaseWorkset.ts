@@ -129,7 +129,11 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
         pipelineName: "payments-main",
         executionId: "1842",
         status: "running",
-        triggerRevision: "release-head"
+        triggerRevision: "release-head",
+        stages: [
+          { name: "Source", status: "succeeded", actionCount: 1, actionsTruncated: false },
+          { name: "Approval", status: "running", actionCount: 1, actionsTruncated: false }
+        ]
       }
     }),
     projection({
@@ -143,7 +147,14 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
       entityType: "page",
       displayKey: "PAY/RUNBOOK-12",
       title: "Payments release runbook",
-      details: { _tag: "page", spaceKey: "PAY", revision: "12", status: "current" }
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "12",
+        status: "current",
+        contentState: "loaded",
+        content: { representation: "safe-markdown", markdown: "Release runbook" }
+      }
     })
   ],
   nodes: [

@@ -6,9 +6,13 @@ import { type FormEvent, type ReactElement, useEffect, useMemo, useRef, useState
 import { Link, Navigate, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
-import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import type { EntityId, EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
 import { canonicalReleasePublicationTitle } from "../domain/releasePublication.js"
+import { Revision } from "../domain/sourceRevision.js"
+import { browserReadableSessionKey, useBrowserSession } from "./BrowserSession.js"
 import { contextualReleaseAgentPath } from "./contextualAgentPath.js"
+import { presentWorkspaceConfluencePage } from "./entities/presentWorkspaceConfluencePage.js"
+import { useWorkspaceEntity, type WorkspaceEntityState } from "./entities/useWorkspaceEntity.js"
 import { usePortfolioOverviewController } from "./portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "./portfolio/presentPortfolio.js"
 import {
@@ -17,12 +21,17 @@ import {
   releaseFullPath,
   releaseTransitionNames
 } from "./releases/releaseRoutes.js"
-import { decodeEntityRouteId } from "./items/workspaceEntityRoutes.js"
+import { decodeEntityRouteId, workspaceEntityTargetFromHref } from "./items/workspaceEntityRoutes.js"
 import {
   readReleaseAgentThread,
   type StoredReleaseAgentThreadMessage,
   writeReleaseAgentThread
 } from "./releases/releaseAgentThreadStorage.js"
+import {
+  type ConfluenceReleaseTemplate,
+  type ConfluenceTemplateLoader,
+  loadBrowserConfluenceTemplates
+} from "./releases/confluenceTemplateTransport.js"
 import type { WorkspaceReleaseOutletContext } from "./releases/WorkspaceReleaseLayout.js"
 import {
   loadBrowserReleaseAgentPresets,
@@ -69,6 +78,7 @@ export type ReleaseAgentTurn = (
 ) => Promise<ReleaseAgentTurnResult>
 
 export type ReleaseAgentPresetLoader = (signal: AbortSignal) => Promise<ReadonlyArray<"claude" | "codex">>
+export type { ConfluenceTemplateLoader } from "./releases/confluenceTemplateTransport.js"
 
 export interface AgentPageProps {
   /** Application-owned local runtime boundary. Omit it to render an honest unavailable state. */
@@ -77,6 +87,8 @@ export interface AgentPageProps {
   readonly availableProviders?: ReadonlyArray<"claude" | "codex">
   /** Whether the connected route is still establishing a trustworthy provider catalog. */
   readonly providerCatalogPending?: boolean
+  /** Workspace page catalog used only by the connected route's Confluence template picker. */
+  readonly loadConfluenceTemplates?: ConfluenceTemplateLoader
 }
 
 interface AgentPageContext {
@@ -166,6 +178,17 @@ export const contextFor = (path: string | null): AgentPageContext => {
     return {
       description: `Current normalized delivery items in workspace ${workspaceId}, including the exact active filters and selection.`,
       label: "Workspace items",
+      path: safePath
+    }
+  }
+  const exactEntityId =
+    routeSegments[1] === "w" && workspaceId !== null && routeKind === "items" && releaseSuffix === undefined
+      ? decodeEntityRouteId(routeSegments[4])
+      : null
+  if (exactEntityId !== null) {
+    return {
+      description: `Workspace item ${exactEntityId} is open in the normalized delivery view. Relay will keep this exact entity in context.`,
+      label: `Workspace item ${exactEntityId.slice(-6)}`,
       path: safePath
     }
   }
@@ -454,8 +477,69 @@ const ReleaseAgentComposer = ({
   </form>
 )
 
+export interface ConfluencePageDraftTarget {
+  readonly contentState: "empty" | "lazy" | "loaded"
+  readonly entityId: EntityId
+  readonly markdown: string
+  readonly revision: string
+  readonly title: string
+}
+
+type ConfluencePageDraftContext =
+  | { readonly _tag: "none" }
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "unavailable" }
+  | { readonly _tag: "ready"; readonly target: ConfluencePageDraftTarget }
+
+type ConfluenceTemplateState =
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "failed" }
+  | { readonly _tag: "ready"; readonly templates: ReadonlyArray<ConfluenceReleaseTemplate> }
+
+export const pageAwareAgentPrompt = (request: string, page: ConfluencePageDraftTarget): string => {
+  const header = [
+    "Work on the exact synchronized Confluence page below.",
+    `Page title: ${page.title}`,
+    `Current revision: ${page.revision}`,
+    page.contentState === "loaded"
+      ? "Current safe-Markdown page body:"
+      : "The current page body was not synchronized. Draft a complete replacement body."
+  ].join("\n")
+  const bodyPrefix = page.contentState === "loaded" ? "\n" : "\nNo current body is available."
+  const suffix = `\n\nUser request:\n${request}`
+  const fixedCharacters = header.length + bodyPrefix.length + suffix.length
+  // At the input limit, preserve the complete owner instruction instead of
+  // producing an invalid oversized prompt with partial page context.
+  if (fixedCharacters > 8_000) return request
+  const availableBodyCharacters = 8_000 - fixedCharacters
+  const body = page.contentState === "loaded" ? page.markdown.slice(0, availableBodyCharacters) : ""
+  return `${header}${bodyPrefix}${body}${suffix}`
+}
+
+/** Adopt only an exact synchronized Confluence page that belongs to this release. */
+export const confluencePageDraftTarget = (
+  state: WorkspaceEntityState,
+  releaseId: ReleaseId
+): ConfluencePageDraftTarget | null => {
+  if (state._tag !== "ready" && state._tag !== "stale") return null
+  const { entity, source } = state.inspection
+  const details = entity.projection.details
+  if (source.providerId !== "confluence" || details._tag !== "page" || !entity.releaseIds.includes(releaseId))
+    return null
+  const page = presentWorkspaceConfluencePage(details, state.inspection)
+  return {
+    contentState: page.contentState,
+    entityId: entity.projection.entityId,
+    markdown: page.content ?? "",
+    revision: page.revision,
+    title: entity.projection.title
+  }
+}
+
 const ReleaseAgentRoom = ({
   availableProviders,
+  confluencePage,
+  loadConfluenceTemplates,
   providerCatalogPending,
   release,
   runTurn,
@@ -464,6 +548,8 @@ const ReleaseAgentRoom = ({
   readonly release: PortfolioReleasePresentation
   readonly runTurn: ReleaseAgentTurn | undefined
   readonly availableProviders: ReadonlyArray<"claude" | "codex"> | undefined
+  readonly confluencePage: ConfluencePageDraftContext
+  readonly loadConfluenceTemplates?: ConfluenceTemplateLoader
   readonly providerCatalogPending: boolean
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
@@ -477,14 +563,21 @@ const ReleaseAgentRoom = ({
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [announcement, setAnnouncement] = useState("")
-  const publicationDefaultTitle = canonicalReleasePublicationTitle(release.version)
+  const exactPage = confluencePage._tag === "ready" ? confluencePage.target : null
+  const publicationDefaultTitle = exactPage?.title ?? canonicalReleasePublicationTitle(release.version)
   const publicationDefaultMarkdown =
+    exactPage?.markdown ??
     "Release " + release.version + " for " + release.serviceName + ". Published by Relay after human confirmation."
   const [publicationTitle, setPublicationTitle] = useState(publicationDefaultTitle)
   const [publicationMarkdown, setPublicationMarkdown] = useState(publicationDefaultMarkdown)
   const [publicationBusy, setPublicationBusy] = useState<"jira" | "confluence" | null>(null)
+  const [templateState, setTemplateState] = useState<ConfluenceTemplateState>(
+    loadConfluenceTemplates === undefined ? { _tag: "ready", templates: [] } : { _tag: "loading" }
+  )
+  const [templateEntityId, setTemplateEntityId] = useState<EntityId | null>(null)
   const nextMessage = useRef(nextThreadSequence(messages))
   const activeTurn = useRef<AbortController | null>(null)
+  const publicationRef = useRef<HTMLElement | null>(null)
   const transitionNames = releaseTransitionNames(release.id)
 
   useEffect(
@@ -503,18 +596,45 @@ const ReleaseAgentRoom = ({
   useEffect(() => {
     setPublicationTitle(publicationDefaultTitle)
     setPublicationMarkdown(publicationDefaultMarkdown)
-  }, [publicationDefaultMarkdown, publicationDefaultTitle, release.releasePageAwareness?.state])
+  }, [exactPage?.entityId, exactPage?.revision, publicationDefaultMarkdown, publicationDefaultTitle])
+
+  useEffect(() => {
+    if (exactPage !== null) publicationRef.current?.scrollIntoView({ block: "start" })
+  }, [exactPage?.entityId])
+
+  useEffect(() => {
+    if (loadConfluenceTemplates === undefined || exactPage !== null) return
+    const abort = new AbortController()
+    setTemplateState({ _tag: "loading" })
+    loadConfluenceTemplates(abort.signal).then(
+      (templates) => {
+        if (abort.signal.aborted) return
+        setTemplateState({ _tag: "ready", templates })
+      },
+      () => {
+        if (!abort.signal.aborted) setTemplateState({ _tag: "failed" })
+      }
+    )
+    return () => abort.abort()
+  }, [exactPage?.entityId, loadConfluenceTemplates])
 
   const threadMessages = useMemo(() => presentMessages(messages), [messages])
   const lastProvider = [...messages].reverse().find((message) => message.provider !== undefined)?.provider
   const runtimeUnavailable = runTurn === undefined
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
+  const providerCatalogEmpty = availableProviders?.length === 0
   const pageAwareness = release.releasePageAwareness
+  const selectedTemplate =
+    templateState._tag === "ready"
+      ? (templateState.templates.find(({ entityId }) => entityId === templateEntityId) ?? null)
+      : null
   const confluenceCreateReady = pageAwareness?.state === "not-published"
   const confluenceUpdateReady = pageAwareness?.state === "stale" && pageAwareness.publicationActionId !== undefined
-  const confluencePublicationReady = confluenceCreateReady || confluenceUpdateReady
+  const confluencePublicationReady =
+    exactPage !== null || selectedTemplate !== null || confluenceCreateReady || confluenceUpdateReady
   const confluenceAwarenessUnknown = pageAwareness === undefined || pageAwareness.state === "unknown"
+  const latestRelayAnswer = [...messages].reverse().find(({ role }) => role === "assistant")?.content
 
   useEffect(() => {
     if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
@@ -544,8 +664,20 @@ const ReleaseAgentRoom = ({
     setAnnouncement("Relay is reading the release context.")
 
     const originPath = safeOriginPath(searchParams.get("from"), `${location.pathname}${location.hash}`)
+    const modelPrompt =
+      exactPage !== null
+        ? pageAwareAgentPrompt(submittedPrompt, exactPage)
+        : selectedTemplate === null
+          ? submittedPrompt
+          : pageAwareAgentPrompt(submittedPrompt, {
+              contentState: "loaded",
+              entityId: selectedTemplate.entityId,
+              markdown: selectedTemplate.markdown,
+              revision: selectedTemplate.revision,
+              title: selectedTemplate.title
+            })
     runTurn(
-      { history, originPath, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
+      { history, originPath, prompt: modelPrompt, provider, releaseId: release.id, workspaceId },
       { signal: abortController.signal }
     )
       .then(
@@ -593,7 +725,7 @@ const ReleaseAgentRoom = ({
     if (publicationBusy !== null || publicationTitle.trim() === "" || publicationMarkdown.trim() === "") return
     if (publicationProvider === "confluence" && !confluencePublicationReady) return
     setPublicationBusy(publicationProvider)
-    const updatingConfluence = publicationProvider === "confluence" && confluenceUpdateReady
+    const updatingConfluence = publicationProvider === "confluence" && (exactPage !== null || confluenceUpdateReady)
     setAnnouncement(
       "Relay is " +
         (updatingConfluence ? "updating" : "creating") +
@@ -606,8 +738,17 @@ const ReleaseAgentRoom = ({
       provider: publicationProvider,
       title: publicationTitle.trim(),
       markdown: publicationMarkdown.trim(),
-      ...(updatingConfluence && pageAwareness?.publicationActionId !== undefined
+      ...(updatingConfluence && exactPage === null && pageAwareness?.publicationActionId !== undefined
         ? { publicationActionId: pageAwareness.publicationActionId }
+        : {}),
+      ...(publicationProvider === "confluence" && exactPage !== null
+        ? {
+            targetEntityId: exactPage.entityId,
+            targetRevision: Revision.make(exactPage.revision)
+          }
+        : {}),
+      ...(publicationProvider === "confluence" && exactPage === null && selectedTemplate !== null
+        ? { templateEntityId: selectedTemplate.entityId }
         : {})
     })
       .then(
@@ -714,7 +855,18 @@ const ReleaseAgentRoom = ({
           Prompt templates
         </Text>
         <div className={styles.suggestionList}>
-          {PROMPT_TEMPLATES.map((template) => (
+          {[
+            ...(exactPage === null
+              ? []
+              : [
+                  {
+                    label: "Draft this page",
+                    prompt:
+                      "Draft the complete updated Confluence page in Markdown for this release. Return only the page body, ready for owner review."
+                  }
+                ]),
+            ...PROMPT_TEMPLATES
+          ].map((template) => (
             <button
               className={styles.suggestion}
               disabled={runtimeUnavailable || selectedProviderUnavailable || isRunning}
@@ -734,7 +886,14 @@ const ReleaseAgentRoom = ({
           description="Connect the server to a local Codex or Claude runner. Provider credentials and repository access stay server-side; this tab stores its bounded thread locally."
           title="Local agent not connected"
         />
-      ) : providerCatalogPending ? null : selectedProviderUnavailable ? (
+      ) : providerCatalogPending ? null : providerCatalogEmpty ? (
+        <StatePanel
+          action={<Link to="/settings">Configure an agent</Link>}
+          description="Enable a local Codex or Claude runner in Settings, then return here to draft or review this release."
+          title="No agent is configured"
+          tone="caution"
+        />
+      ) : selectedProviderUnavailable ? (
         <StatePanel
           description="Choose a configured Codex or Claude preset before starting this turn."
           title="Selected agent is not configured"
@@ -772,24 +931,104 @@ const ReleaseAgentRoom = ({
       <Surface
         as="section"
         aria-labelledby="relay-publication"
-        className={styles.people}
+        className={`${styles.people} ${styles.publication}`}
         padding="spacious"
+        ref={publicationRef}
         shape="grouped"
       >
         <Text as="h2" id="relay-publication" variant="section-title">
-          Publish a release artifact
+          {exactPage === null ? "Publish a release artifact" : "Edit this Confluence page"}
         </Text>
         <Text tone="secondary">
-          These governed actions use the current release context and require your workspace-owner confirmation. Jira
-          issue edits remain proposal-only.
+          {exactPage === null
+            ? "These governed actions use the current release context and require your workspace-owner confirmation. Jira issue edits remain proposal-only."
+            : `You are editing the synchronized page at revision ${exactPage.revision}. Type directly, or ask Relay for a draft and bring its latest answer into the editor. Publishing is an explicit, revision-guarded owner action.`}
         </Text>
+        {exactPage === null ? (
+          <div className={styles.templatePicker}>
+            <div>
+              <Text as="h3" variant="card-title">
+                Start from a Confluence template
+              </Text>
+              <Text tone="secondary">
+                Choose any synchronized Confluence page. Control Center creates a separate release-owned copy; the
+                source page remains unchanged.
+              </Text>
+            </div>
+            {templateState._tag === "loading" ? <Text tone="secondary">Loading Confluence templates…</Text> : null}
+            {templateState._tag === "failed" ? (
+              <Text tone="secondary">Templates could not be loaded. You can still write a new page from scratch.</Text>
+            ) : null}
+            {templateState._tag === "ready" && templateState.templates.length === 0 ? (
+              <Text tone="secondary">
+                No synchronized page body is available yet. Synchronize Confluence, then return here.
+              </Text>
+            ) : null}
+            {templateState._tag === "ready" && templateState.templates.length > 0 ? (
+              <Field label="Existing Confluence page">
+                {(controlProps) => (
+                  <select
+                    {...controlProps}
+                    onChange={(event) => {
+                      const selected = templateState.templates.find(({ entityId }) => entityId === event.target.value)
+                      if (selected === undefined) {
+                        setTemplateEntityId(null)
+                        return
+                      }
+                      setTemplateEntityId(selected.entityId)
+                      setPublicationTitle(`${selected.title} — ${release.version}`)
+                      setPublicationMarkdown(selected.markdown)
+                      setAnnouncement("A copy of the template is now in the editor. The source page is unchanged.")
+                    }}
+                    value={templateEntityId ?? ""}
+                  >
+                    <option value="">Write a new page</option>
+                    {templateState.templates.map((template) => (
+                      <option key={template.entityId} value={template.entityId}>
+                        {template.title} · revision {template.revision}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+            ) : null}
+            {selectedTemplate === null ? null : (
+              <Button
+                disabled={runtimeUnavailable || selectedProviderUnavailable || isRunning}
+                onClick={() =>
+                  setPrompt(
+                    "Adapt the selected Confluence template for this release. Preserve its useful structure, replace placeholders with current release facts, and return only the complete Markdown body."
+                  )
+                }
+                variant="secondary"
+              >
+                Ask Relay to adapt this copy
+              </Button>
+            )}
+          </div>
+        ) : null}
+        {confluencePage._tag === "loading" ? (
+          <Text tone="secondary">Loading the exact Confluence page that opened Relay…</Text>
+        ) : null}
+        {confluencePage._tag === "unavailable" ? (
+          <Text tone="secondary">
+            The calling item is not an editable Confluence page in this release. The generic release publication
+            controls remain available.
+          </Text>
+        ) : null}
+        {exactPage?.contentState === "lazy" ? (
+          <Text tone="secondary">
+            The existing page body was not synchronized. Start from a complete Relay draft or paste the complete page
+            body before publishing; an empty replacement is blocked.
+          </Text>
+        ) : null}
         {pageAwareness?.state === "stale" ? (
           <Text tone="secondary">
             The release changed after the last successful Confluence publication. Relay suggests updating the page;
             publishing requires an explicit owner confirmation.
           </Text>
         ) : null}
-        <Field label="Title">
+        <Field label={exactPage === null ? "Title" : "Confluence page title"}>
           {(controlProps) => (
             <input
               {...controlProps}
@@ -798,33 +1037,58 @@ const ReleaseAgentRoom = ({
             />
           )}
         </Field>
-        <Field label="Release notes">
+        <Field label={exactPage === null ? "Release notes" : "Page body (Markdown)"}>
           {(controlProps) => (
             <textarea
               {...controlProps}
+              rows={exactPage === null ? 6 : 10}
               value={publicationMarkdown}
               onChange={(event) => setPublicationMarkdown(event.target.value)}
             />
           )}
         </Field>
-        <div className={styles.presetList}>
+        {(exactPage !== null || selectedTemplate !== null) && latestRelayAnswer !== undefined ? (
           <Button
             disabled={publicationBusy !== null}
-            loading={publicationBusy === "jira"}
-            onClick={() => publish("jira")}
+            onClick={() => {
+              setPublicationMarkdown(latestRelayAnswer)
+              setAnnouncement("The latest Relay answer is now in the page editor. Review it before publishing.")
+            }}
+            variant="secondary"
           >
-            Create Jira release version
+            Use latest Relay answer
           </Button>
+        ) : null}
+        <div className={exactPage === null ? styles.presetList : styles.publicationAction}>
+          {exactPage === null ? (
+            <Button
+              disabled={publicationBusy !== null}
+              loading={publicationBusy === "jira"}
+              onClick={() => publish("jira")}
+            >
+              Create Jira release version
+            </Button>
+          ) : null}
           <Button
-            disabled={publicationBusy !== null || !confluencePublicationReady}
+            disabled={
+              publicationBusy !== null ||
+              !confluencePublicationReady ||
+              confluencePage._tag === "loading" ||
+              publicationTitle.trim() === "" ||
+              publicationMarkdown.trim() === ""
+            }
             loading={publicationBusy === "confluence"}
             onClick={() => publish("confluence")}
           >
-            {pageAwareness?.state === "stale"
-              ? "Update Confluence release page"
-              : pageAwareness?.state === "current"
-                ? "Confluence release page is current"
-                : "Create Confluence release page"}
+            {exactPage !== null
+              ? "Publish page update"
+              : selectedTemplate !== null
+                ? "Create template copy in Confluence"
+                : pageAwareness?.state === "stale"
+                  ? "Update Confluence release page"
+                  : pageAwareness?.state === "current"
+                    ? "Confluence release page is current"
+                    : "Create Confluence release page"}
           </Button>
           {pageAwareness?.state === "current" ? (
             <Text tone="secondary">
@@ -845,6 +1109,41 @@ const ReleaseAgentRoom = ({
         </div>
       </Surface>
     </article>
+  )
+}
+
+type ReleaseAgentRoomProps = Omit<Parameters<typeof ReleaseAgentRoom>[0], "confluencePage">
+
+const EntityContextReleaseAgentRoom = ({
+  entityId,
+  ...roomProps
+}: ReleaseAgentRoomProps & { readonly entityId: EntityId }): ReactElement => {
+  const browserSession = useBrowserSession()
+  const sessionKey = browserReadableSessionKey(browserSession.state)
+  const controller = useWorkspaceEntity(
+    roomProps.workspaceId,
+    entityId,
+    `${roomProps.release.id}:${roomProps.release.version}`,
+    sessionKey,
+    browserSession.invalidateSession
+  )
+  const target = confluencePageDraftTarget(controller.state, roomProps.release.id)
+  const confluencePage: ConfluencePageDraftContext =
+    controller.state._tag === "idle" || controller.state._tag === "loading"
+      ? { _tag: "loading" }
+      : target === null
+        ? { _tag: "unavailable" }
+        : { _tag: "ready", target }
+  return <ReleaseAgentRoom {...roomProps} confluencePage={confluencePage} />
+}
+
+const ContextualReleaseAgentRoom = (props: ReleaseAgentRoomProps): ReactElement => {
+  const [searchParams] = useSearchParams()
+  const target = workspaceEntityTargetFromHref(searchParams.get("from") ?? "")
+  return target !== null && target.workspaceId === props.workspaceId ? (
+    <EntityContextReleaseAgentRoom {...props} entityId={target.entityId} />
+  ) : (
+    <ReleaseAgentRoom {...props} confluencePage={{ _tag: "none" }} />
   )
 }
 
@@ -1038,6 +1337,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
 /** Render an exact release-owned local agent thread, with a safe legacy context preview. */
 export const AgentPage = ({
   availableProviders,
+  loadConfluenceTemplates,
   providerCatalogPending = false,
   runTurn
 }: AgentPageProps): ReactElement => {
@@ -1079,9 +1379,10 @@ export const AgentPage = ({
     )
   }
   return (
-    <ReleaseAgentRoom
+    <ContextualReleaseAgentRoom
       availableProviders={availableProviders}
       key={release.id}
+      {...(loadConfluenceTemplates === undefined ? {} : { loadConfluenceTemplates })}
       providerCatalogPending={providerCatalogPending}
       release={release}
       runTurn={runTurn}
@@ -1097,9 +1398,11 @@ type ProviderCatalogState =
 
 /** Route entry wired to the authenticated Control Center release-agent API. */
 export const ConnectedAgentPage = ({
+  loadConfluenceTemplates = loadBrowserConfluenceTemplates,
   loadPresets = loadBrowserReleaseAgentPresets,
   runTurn = runBrowserReleaseAgentTurn
 }: {
+  readonly loadConfluenceTemplates?: ConfluenceTemplateLoader
   readonly loadPresets?: ReleaseAgentPresetLoader
   readonly runTurn?: ReleaseAgentTurn
 } = {}): ReactElement => {
@@ -1139,6 +1442,7 @@ export const ConnectedAgentPage = ({
       {isCanonicalRoute ? (
         <AgentPage
           {...(availableProviders === undefined ? {} : { availableProviders })}
+          loadConfluenceTemplates={loadConfluenceTemplates}
           providerCatalogPending={catalog._tag !== "ready"}
           runTurn={runTurn}
         />

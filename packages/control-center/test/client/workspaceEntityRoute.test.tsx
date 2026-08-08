@@ -36,10 +36,11 @@ import {
   PrReviewSuggestionRevisionSequence
 } from "../../src/domain/prReviewRevision.js"
 import { Revision } from "../../src/domain/sourceRevision.js"
+import { confluencePageDraftTarget } from "../../src/client/AgentPage.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
-import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
+import { confluenceEditHref, WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import {
   type ClockifyActionSubmissionTransport,
@@ -51,6 +52,15 @@ import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntity
 import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
+
+describe("Confluence edit links", () => {
+  it("derives an exact HTTPS editor and rejects executable source schemes", () => {
+    expect(confluenceEditHref("https://example.test/wiki/spaces/SD/pages/42/Report", "42")).toBe(
+      "https://example.test/wiki/spaces/SD/pages/edit-v2/42"
+    )
+    expect(confluenceEditHref("javascript://host/wiki/spaces/SD/pages/42", "42")).toBeNull()
+  })
+})
 
 const encodedWorkset = Schema.encodeSync(ReleaseDeliveryGraphInspection)(releaseWorksetFixture)
 const projectionEntry = encodedWorkset.entityProjections[0]
@@ -506,12 +516,21 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
     providerId: "confluence",
     vendorImmutableId: "991",
     revision: "12",
-    sourceUrl: "https://wiki.example.test/pages/991"
+    sourceUrl: "https://acme.atlassian.net/spaces/PAY/pages/991/Payments+release+runbook"
   },
   isSourceCurrent: true,
   freshness: null,
   activity: { truncated: false, events: [] }
 })
+
+const confluenceEntityState = {
+  _tag: "ready",
+  entityId: confluenceInspection.entity.projection.entityId,
+  inspection: confluenceInspection,
+  refreshKey: "fixture",
+  sessionKey: "fixture",
+  workspaceId: confluenceInspection.entity.projection.workspaceId
+} satisfies WorkspaceEntityState
 
 const relatedClockifyIssue = encodedWorkset.entityProjections[1]
 if (relatedClockifyIssue === undefined) throw new Error("Expected a related issue fixture")
@@ -867,7 +886,8 @@ const renderView = async (
   } = {
     canApprove: clockifyActionSubmit !== undefined,
     canCorrect: clockifyActionSubmit !== undefined
-  }
+  },
+  confluenceCanEdit = false
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -878,6 +898,7 @@ const renderView = async (
         <WorkspaceEntityView
           clockifyActionCanApprove={clockifyPermissions.canApprove}
           clockifyActionCanCorrect={clockifyPermissions.canCorrect}
+          confluenceCanEdit={confluenceCanEdit}
           {...(clockifyActionSubmit === undefined ? {} : { clockifyActionSubmit })}
           onAskAgent={onAskAgent}
           originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
@@ -2045,6 +2066,16 @@ describe("canonical workspace entity", () => {
     const host = await renderView(() => undefined, confluenceState)
 
     expect(host.querySelector("[data-workspace-confluence-page-detail]")).not.toBeNull()
+    expect(
+      host.querySelector<HTMLAnchorElement>(
+        'a[href="https://acme.atlassian.net/wiki/spaces/PAY/pages/991/Payments+release+runbook"]'
+      )?.textContent
+    ).toBe("View in Confluence")
+    expect(
+      host.querySelector<HTMLAnchorElement>('a[href="https://acme.atlassian.net/wiki/spaces/PAY/pages/edit-v2/991"]')
+        ?.textContent
+    ).toBe("Edit in Confluence")
+    expect(host.textContent).toContain("Draft with Relay")
     expect(host.textContent).toContain("Payments release runbook")
     expect(host.textContent).toContain("Production recovery")
     expect(host.textContent).toContain("Revision12")
@@ -2060,6 +2091,19 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector('a[href*="attachment"], a[href*="pixel.png"]')).toBeNull()
     expect(host.querySelector("textarea, input")).toBeNull()
     expect(host.textContent).not.toContain("Publish")
+  })
+
+  it("hands Relay the exact related Confluence page body and revision for owner editing", () => {
+    const releaseId = confluenceInspection.entity.releaseIds[0]
+    if (releaseId === undefined) throw new Error("Expected the page to belong to a release")
+
+    expect(confluencePageDraftTarget(confluenceEntityState, releaseId)).toMatchObject({
+      contentState: "loaded",
+      entityId: confluenceInspection.entity.projection.entityId,
+      revision: "12",
+      title: "Payments release runbook"
+    })
+    expect(confluencePageDraftTarget(confluenceEntityState, releaseId)?.markdown).toContain("Production recovery")
   })
 
   it("keeps same-name Confluence accounts distinct while collapsing an exact collaborator identity", () => {
@@ -2084,6 +2128,8 @@ describe("canonical workspace entity", () => {
     const encoded = Schema.encodeSync(WorkspaceEntityInspection)(confluenceInspection)
     const lazyInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
       ...encoded,
+      isSourceCurrent: true,
+      sourceActionsAvailable: true,
       entity: {
         ...encoded.entity,
         projection: {
@@ -2097,6 +2143,43 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Content has not been loaded")
     expect(host.textContent).toContain("Open the authenticated Confluence source")
     expect(host.querySelector("[data-workspace-rich-text]")).toBeNull()
+  })
+
+  it("requires an explicit complete-replacement choice before visually editing an unloaded page", async () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(confluenceInspection)
+    const lazyInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      isSourceCurrent: true,
+      sourceActionsAvailable: true,
+      entity: {
+        ...encoded.entity,
+        projection: {
+          ...encoded.entity.projection,
+          details: { ...encoded.entity.projection.details, content: null, contentState: "lazy" }
+        }
+      }
+    })
+    const host = await renderView(
+      () => undefined,
+      { ...confluenceState, inspection: lazyInspection },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true
+    )
+    const replace = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Write a complete replacement"
+    )
+    if (replace === undefined) throw new Error("Expected the explicit replacement control")
+
+    await act(async () => replace.click())
+
+    expect(host.textContent).toContain("Complete replacement")
+    expect(host.textContent).toContain("replaces the complete Confluence page body")
+    expect(host.querySelector('[contenteditable="true"][aria-label="Confluence page body"]')).not.toBeNull()
+    expect(host.querySelector<HTMLInputElement>("input")?.value).toBe("Payments release runbook")
   })
 
   it("renders a bounded release-membership count as a lower bound", async () => {
@@ -2141,7 +2224,9 @@ describe("canonical workspace entity", () => {
         releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
       },
       new Set([releaseWorksetFixture.releaseId]),
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      )}`
     ],
     [
       "a direct Items route with a portfolio release",
@@ -2157,7 +2242,9 @@ describe("canonical workspace entity", () => {
         releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
       },
       new Set([releaseWorksetFixture.releaseId]),
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      )}`
     ],
     [
       "a direct Items route with an out-of-portfolio release",

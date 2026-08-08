@@ -601,8 +601,8 @@ interface SyncAttributesInput {
   readonly createdAt: string
   readonly updatedAt: string
   readonly currentVersion: number
-  readonly content: null
-  readonly contentState: "lazy"
+  readonly content: { readonly representation: "safe-markdown"; readonly markdown: string } | null
+  readonly contentState: "lazy" | "loaded"
   readonly versions: ReadonlyArray<NormalizedVersion>
   readonly versionHistory: { readonly complete: boolean; readonly pagesFetched: number }
   readonly contributors: ReturnType<typeof contributorsFromUsers>
@@ -621,6 +621,8 @@ const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput
   const attachments = [...attributes.attachments]
   let compacted: SyncAttributesInput = {
     ...attributes,
+    content: null,
+    contentState: "lazy",
     versions,
     contributors,
     attachments,
@@ -855,6 +857,11 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
     Effect.fn("ConfluencePage.normalizeSyncPage")(function*(context) {
       const { history, inventory, page, versions, watchers } = context
       const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
+      const adf = page.body?.atlas_doc_format?.value
+      const converted = adf === undefined
+        ? null
+        : yield* toSafeConfluenceMarkdown(input.converter, adf)
+      const markdown = converted === null || converted.trim().length === 0 ? null : converted
       const attributesInput = fitSyncAttributes({
         schemaVersion: 1,
         status: page.status,
@@ -863,8 +870,8 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
         createdAt: page.createdAt,
         updatedAt: page.version.createdAt,
         currentVersion: page.version.number,
-        content: null,
-        contentState: "lazy",
+        content: markdown === null ? null : { representation: "safe-markdown", markdown },
+        contentState: markdown === null ? "lazy" : "loaded",
         versions: versions.map((version) => ({
           number: version.number,
           createdAt: version.createdAt,
@@ -1094,6 +1101,9 @@ const sourceUrl = (
   const candidate = Result.try(() => new URL(webui, siteBaseUrl))
   if (Result.isFailure(candidate) || candidate.success.origin !== siteBaseUrl.origin) return null
   if (candidate.success.username.length > 0 || candidate.success.password.length > 0) return null
+  if (candidate.success.pathname.startsWith("/spaces/")) {
+    candidate.success.pathname = `/wiki${candidate.success.pathname}`
+  }
   return candidate.success.toString()
 }
 
