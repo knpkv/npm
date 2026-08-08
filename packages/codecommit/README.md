@@ -55,7 +55,11 @@ navigates changed files, the center renders immutable blob diffs, and the right
 pane keeps local Relay actions separate from CodeCommit approval and
 mergeability. Relay runs the local Codex CLI in a read-only sandbox after an
 explicit preflight; worktrees are detached at the displayed head under
-`~/.codecommit/worktrees`.
+`~/.codecommit/worktrees`, with private bare repository caches retained under
+`~/.codecommit/repositories`. Both directories can grow over time. Close the TUI,
+then remove a no-longer-needed repository's matching directories from both roots;
+removing all of `~/.codecommit/worktrees` and `~/.codecommit/repositories` clears
+every retained checkout and cache, which the next checkout recreates.
 
 ### Web Mode
 

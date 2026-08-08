@@ -1,16 +1,16 @@
 /** Read-only local agent reviews for exact CodeCommit PR revisions. */
 import { streamEvents } from "@knpkv/ai-codex"
+import type { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { Effect, Option, Schema, Stream } from "effect"
 
 export type RelayReviewKind = "explain" | "review" | "security" | "tests"
 
 export interface RelayReviewRequest {
-  readonly baseCommit: string
-  readonly headCommit: string
+  readonly baseCommit: ReadClient.CodeCommitCommitId
+  readonly headCommit: ReadClient.CodeCommitCommitId
   readonly kind: RelayReviewKind
-  readonly pullRequestId: string
-  readonly repositoryName: string
-  readonly title: string
+  readonly pullRequestId: Domain.PullRequestId
+  readonly repositoryName: Domain.RepositoryName
   readonly worktreePath: string
 }
 
@@ -33,7 +33,7 @@ const focusByKind: Record<RelayReviewKind, string> = {
 
 export const makeRelayReviewPrompt = (request: RelayReviewRequest): string =>
   [
-    `Review CodeCommit PR #${request.pullRequestId}: ${request.title}`,
+    `Review CodeCommit PR #${request.pullRequestId}`,
     `Repository: ${request.repositoryName}`,
     `Immutable base: ${request.baseCommit}`,
     `Immutable head: ${request.headCommit}`,

@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect"
 import { type RelayReviewKind, runRelayReview } from "../../RelayReview.js"
 import { type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
 import {
+  blobPreviewDisposition,
   buildUnifiedDiff,
   changedFilePath,
   type FileDiffIdentity,
@@ -40,10 +41,29 @@ export interface FileDiffRequest {
 export interface RelayReviewActionInput {
   readonly kind: RelayReviewKind
   readonly plan: WorktreePlan
+  readonly requestId: string
   readonly revision: ReadClient.CodeCommitPullRequestRevision
 }
 
-const isBinary = (bytes: Uint8Array): boolean => bytes.some((byte) => byte === 0)
+export interface WorktreeActionInput {
+  readonly plan: WorktreePlan
+  readonly requestId: string
+}
+
+export type ActionOutcome<A> =
+  | { readonly _tag: "failure"; readonly requestId: string }
+  | { readonly _tag: "success"; readonly requestId: string; readonly value: A }
+
+const actionFailure = (requestId: string): ActionOutcome<never> => ({ _tag: "failure", requestId })
+const actionSuccess = <A>(requestId: string, value: A): ActionOutcome<A> => ({ _tag: "success", requestId, value })
+
+const actionOutcome = <A, E, R>(requestId: string, effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.match({
+      onFailure: () => actionFailure(requestId),
+      onSuccess: (value) => actionSuccess(requestId, value)
+    })
+  )
 
 const decodeBlob = (bytes: Uint8Array) => Stream.make(bytes).pipe(Stream.decodeText(), Stream.mkString)
 
@@ -69,23 +89,22 @@ export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullReque
 export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
   Effect.gen(function*() {
     const client = yield* ReadClient.CodeCommitReadClient
-    const beforeBytes = request.file.before === null
-      ? new Uint8Array()
-      : (yield* client.getBlob({
-        account: request.account,
-        repositoryName: request.repositoryName,
-        blobId: request.file.before.blobId
-      })).bytes
-    const afterBytes = request.file.after === null
-      ? new Uint8Array()
-      : (yield* client.getBlob({
-        account: request.account,
-        repositoryName: request.repositoryName,
-        blobId: request.file.after.blobId
-      })).bytes
+    const loadBlob = (blob: ReadClient.CodeCommitBlobMetadata | null) =>
+      blob === null
+        ? Effect.succeed(new Uint8Array())
+        : client.getBlob({
+          account: request.account,
+          repositoryName: request.repositoryName,
+          blobId: blob.blobId
+        }).pipe(Effect.map(({ bytes }) => bytes))
+    const [beforeBytes, afterBytes] = yield* Effect.all(
+      [loadBlob(request.file.before), loadBlob(request.file.after)],
+      { concurrency: 2 }
+    )
     const path = changedFilePath(request.file)
     const identity = fileDiffIdentity(request.identity, request.revision, request.file)
-    if (isBinary(beforeBytes) || isBinary(afterBytes)) {
+    const disposition = blobPreviewDisposition(beforeBytes, afterBytes)
+    if (disposition === "binary") {
       return {
         binary: true,
         diff: "",
@@ -96,7 +115,21 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
         truncated: false
       } satisfies RenderedFileDiff
     }
-    const [beforeText, afterText] = yield* Effect.all([decodeBlob(beforeBytes), decodeBlob(afterBytes)])
+    if (disposition === "too-large") {
+      return {
+        binary: false,
+        diff: "",
+        filetype: filetypeForPath(path),
+        identity,
+        metadata: null,
+        path,
+        truncated: true
+      } satisfies RenderedFileDiff
+    }
+    const [beforeText, afterText] = yield* Effect.all(
+      [decodeBlob(beforeBytes), decodeBlob(afterBytes)],
+      { concurrency: 2 }
+    )
     const rendered = buildUnifiedDiff(request.file, beforeText, afterText)
     return {
       binary: false,
@@ -112,40 +145,48 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
 
 export const preflightWorktreeAtom = runtimeAtom.fn((input: {
   readonly pr: Domain.PullRequest
+  readonly requestId: string
   readonly revision: ReadClient.CodeCommitPullRequestRevision
 }) =>
   Effect.gen(function*() {
     const service = yield* WorktreeService
-    return yield* service.preflight({
-      account: input.pr.account,
-      destinationCommit: input.revision.destinationCommit,
-      pullRequestId: input.pr.id,
-      repositoryName: input.pr.repositoryName,
-      sourceCommit: input.revision.sourceCommit
-    })
+    return yield* actionOutcome(
+      input.requestId,
+      service.preflight({
+        account: input.pr.account,
+        destinationCommit: input.revision.destinationCommit,
+        pullRequestId: input.pr.id,
+        repositoryName: input.pr.repositoryName,
+        sourceCommit: input.revision.sourceCommit
+      })
+    )
   }).pipe(Effect.withSpan("preflightWorktree", { attributes: { prId: input.pr.id } }))
 )
 
-export const checkoutWorktreeAtom = runtimeAtom.fn((plan: WorktreePlan) =>
+export const checkoutWorktreeAtom = runtimeAtom.fn((input: WorktreeActionInput) =>
   Effect.gen(function*() {
     const service = yield* WorktreeService
-    return yield* service.checkout(plan)
-  }).pipe(Effect.withSpan("checkoutWorktree", { attributes: { prId: plan.pullRequestId } }))
+    return yield* actionOutcome(input.requestId, service.checkout(input.plan))
+  }).pipe(Effect.withSpan("checkoutWorktree", { attributes: { prId: input.plan.pullRequestId } }))
 )
 
 export const runRelayReviewAtom = runtimeAtom.fn((input: RelayReviewActionInput) =>
   Effect.gen(function*() {
     const service = yield* WorktreeService
-    const worktree = yield* service.checkout(input.plan)
-    const summary = yield* runRelayReview({
-      baseCommit: input.revision.destinationCommit,
-      headCommit: input.revision.sourceCommit,
-      kind: input.kind,
-      pullRequestId: input.revision.pullRequestId,
-      repositoryName: input.revision.repositoryName,
-      title: input.revision.title,
-      worktreePath: worktree.path
-    })
-    return { kind: input.kind, summary, worktree }
+    return yield* actionOutcome(
+      input.requestId,
+      Effect.gen(function*() {
+        const worktree = yield* service.checkout(input.plan)
+        const summary = yield* runRelayReview({
+          baseCommit: input.revision.destinationCommit,
+          headCommit: input.revision.sourceCommit,
+          kind: input.kind,
+          pullRequestId: input.revision.pullRequestId,
+          repositoryName: input.revision.repositoryName,
+          worktreePath: worktree.path
+        })
+        return { kind: input.kind, summary, worktree }
+      })
+    )
   }).pipe(Effect.withSpan("runRelayReview", { attributes: { kind: input.kind } }))
 )

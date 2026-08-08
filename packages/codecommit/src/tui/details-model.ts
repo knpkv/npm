@@ -4,6 +4,22 @@ import { structuredPatch } from "diff"
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
 const DIFF_CONTEXT_LINES = 3
+const BINARY_SAMPLE_BYTES = 8_000
+const MAX_PREVIEW_BLOB_BYTES = 2_000_000
+const FILETYPE_ALIASES: Record<string, string> = {
+  cjs: "javascript",
+  js: "javascript",
+  json: "json",
+  jsx: "javascript",
+  md: "markdown",
+  mjs: "javascript",
+  py: "python",
+  rs: "rust",
+  ts: "typescript",
+  tsx: "typescript",
+  yaml: "yaml",
+  yml: "yaml"
+}
 
 export interface PullRequestWorkspaceIdentity {
   readonly profile: string
@@ -41,9 +57,10 @@ export const detailsKeyIntent = (input: {
   readonly actionReady: boolean
   readonly dialogOpen: boolean
   readonly keyName: string
+  readonly modified: boolean
   readonly tab: "comments" | "diff"
 }): DetailsKeyIntent => {
-  if (input.dialogOpen) return "yield"
+  if (input.dialogOpen || input.modified) return "yield"
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return "show-comments"
@@ -58,6 +75,21 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "x" && input.actionCancelable) return "cancel-action"
   if (input.keyName === "return" && input.actionReady) return "confirm-action"
   return "yield"
+}
+
+export type BlobPreviewDisposition = "binary" | "text" | "too-large"
+
+/** Classifies fetched blobs before allocating decoded strings for the terminal preview. */
+export const blobPreviewDisposition = (
+  beforeBytes: Uint8Array,
+  afterBytes: Uint8Array
+): BlobPreviewDisposition => {
+  const hasNullByte = (bytes: Uint8Array): boolean => bytes.subarray(0, BINARY_SAMPLE_BYTES).some((byte) => byte === 0)
+  if (hasNullByte(beforeBytes) || hasNullByte(afterBytes)) return "binary"
+  if (beforeBytes.byteLength > MAX_PREVIEW_BLOB_BYTES || afterBytes.byteLength > MAX_PREVIEW_BLOB_BYTES) {
+    return "too-large"
+  }
+  return "text"
 }
 
 export const pullRequestWorkspaceIdentity = (pr: Domain.PullRequest): PullRequestWorkspaceIdentity => ({
@@ -114,21 +146,7 @@ export const changedFilePath = (file: ReadClient.CodeCommitChangedFile): string 
 
 export const filetypeForPath = (path: string): string | undefined => {
   const extension = path.includes(".") ? path.slice(path.lastIndexOf(".") + 1).toLowerCase() : ""
-  const aliases: Record<string, string> = {
-    cjs: "javascript",
-    js: "javascript",
-    json: "json",
-    jsx: "javascript",
-    md: "markdown",
-    mjs: "javascript",
-    py: "python",
-    rs: "rust",
-    ts: "typescript",
-    tsx: "typescript",
-    yaml: "yaml",
-    yml: "yaml"
-  }
-  return aliases[extension] ?? (extension.length > 0 ? extension : undefined)
+  return FILETYPE_ALIASES[extension] ?? (extension.length > 0 ? extension : undefined)
 }
 
 const patchPath = (value: string): string => value.replace(/[\r\n\t]/g, "_")

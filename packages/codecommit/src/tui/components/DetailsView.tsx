@@ -3,6 +3,7 @@ import type { Domain } from "@knpkv/codecommit-core"
 import { parseColor, SyntaxStyle } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as Atom from "effect/unstable/reactivity/Atom"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { RelayReviewKind } from "../../RelayReview.js"
 import type { WorktreePlan } from "../../WorktreeService.js"
@@ -31,6 +32,7 @@ import { Badge } from "./Badge.js"
 
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
+let nextActionRequestSequence = 0
 
 const formatRelativeDate = (date: Date): string => {
   const diffMins = Math.floor((Date.now() - date.getTime()) / 60_000)
@@ -50,13 +52,16 @@ function CommentThread({
   readonly thread: Domain.CommentThread
 }) {
   const { theme } = useTheme()
-  if (thread.root.deleted) return null
   return (
     <box flexDirection="column" style={{ paddingLeft: depth * 2 }}>
-      <text
-        fg={theme.textMuted}
-      >{`${depth > 0 ? "│" : "┌"} ${thread.root.author} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
-      {syntaxStyle ? (
+      {thread.root.deleted ? (
+        <text fg={theme.textMuted}>{`${depth > 0 ? "│" : "┌"} comment deleted`}</text>
+      ) : (
+        <text
+          fg={theme.textMuted}
+        >{`${depth > 0 ? "│" : "┌"} ${thread.root.author} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
+      )}
+      {thread.root.deleted ? null : syntaxStyle ? (
         <markdown content={thread.root.content} syntaxStyle={syntaxStyle} style={{ paddingLeft: 2, width: "100%" }} />
       ) : (
         <text fg={theme.text} style={{ paddingLeft: 2 }}>
@@ -118,9 +123,14 @@ function CommentsPanel({
 type PendingAction = "worktree" | RelayReviewKind
 type ActionStatus =
   | { readonly _tag: "idle" }
-  | { readonly _tag: "preflight"; readonly action: PendingAction }
-  | { readonly _tag: "ready"; readonly action: PendingAction; readonly plan: WorktreePlan }
-  | { readonly _tag: "running"; readonly action: PendingAction }
+  | { readonly _tag: "preflight"; readonly action: PendingAction; readonly requestId: string }
+  | { readonly _tag: "ready"; readonly action: PendingAction; readonly plan: WorktreePlan; readonly requestId: string }
+  | {
+      readonly _tag: "running"
+      readonly action: PendingAction
+      readonly plan: WorktreePlan
+      readonly requestId: string
+    }
   | { readonly _tag: "done"; readonly action: PendingAction; readonly detail: string }
   | { readonly _tag: "failed"; readonly action: PendingAction }
 
@@ -225,39 +235,54 @@ export function DetailsView() {
 
   useEffect(() => {
     if (action._tag !== "preflight" || AsyncResult.isWaiting(preflightResult) || workspace === null) return
-    if (AsyncResult.isFailure(preflightResult)) {
+    if (!AsyncResult.isSuccess(preflightResult)) return
+    const outcome = preflightResult.value
+    if (outcome.requestId !== action.requestId) return
+    if (outcome._tag === "failure") {
       setAction({ _tag: "failed", action: action.action })
       return
     }
-    if (!AsyncResult.isSuccess(preflightResult)) return
+    const plan = outcome.value
     if (
       pr === null ||
-      preflightResult.value.account.profile !== pr.account.profile ||
-      preflightResult.value.account.region !== pr.account.region ||
-      preflightResult.value.destinationCommit !== workspace.revision.destinationCommit ||
-      preflightResult.value.pullRequestId !== pr.id ||
-      preflightResult.value.repositoryName !== workspace.revision.repositoryName ||
-      preflightResult.value.sourceCommit !== workspace.revision.sourceCommit
+      plan.account.profile !== pr.account.profile ||
+      plan.account.region !== pr.account.region ||
+      plan.destinationCommit !== workspace.revision.destinationCommit ||
+      plan.pullRequestId !== pr.id ||
+      plan.repositoryName !== workspace.revision.repositoryName ||
+      plan.sourceCommit !== workspace.revision.sourceCommit
     )
       return
-    setAction({ _tag: "ready", action: action.action, plan: preflightResult.value })
+    setAction({ _tag: "ready", action: action.action, plan, requestId: action.requestId })
   }, [action, pr, preflightResult, workspace])
 
   useEffect(() => {
     if (action._tag !== "running" || action.action !== "worktree" || AsyncResult.isWaiting(checkoutResult)) return
-    if (AsyncResult.isSuccess(checkoutResult)) {
-      setAction({ _tag: "done", action: "worktree", detail: checkoutResult.value.path })
-    } else if (AsyncResult.isFailure(checkoutResult)) {
+    if (!AsyncResult.isSuccess(checkoutResult) || checkoutResult.value.requestId !== action.requestId) return
+    const outcome = checkoutResult.value
+    if (outcome._tag === "failure") {
       setAction({ _tag: "failed", action: "worktree" })
+      return
+    }
+    if (outcome.value.path === action.plan.targetPath && outcome.value.sourceCommit === action.plan.sourceCommit) {
+      setAction({ _tag: "done", action: "worktree", detail: outcome.value.path })
     }
   }, [action, checkoutResult])
 
   useEffect(() => {
     if (action._tag !== "running" || action.action === "worktree" || AsyncResult.isWaiting(reviewResult)) return
-    if (AsyncResult.isSuccess(reviewResult)) {
-      setAction({ _tag: "done", action: action.action, detail: reviewResult.value.summary })
-    } else if (AsyncResult.isFailure(reviewResult)) {
+    if (!AsyncResult.isSuccess(reviewResult) || reviewResult.value.requestId !== action.requestId) return
+    const outcome = reviewResult.value
+    if (outcome._tag === "failure") {
       setAction({ _tag: "failed", action: action.action })
+      return
+    }
+    if (
+      outcome.value.kind === action.action &&
+      outcome.value.worktree.path === action.plan.targetPath &&
+      outcome.value.worktree.sourceCommit === action.plan.sourceCommit
+    ) {
+      setAction({ _tag: "done", action: action.action, detail: outcome.value.summary })
     }
   }, [action, reviewResult])
 
@@ -276,24 +301,30 @@ export function DetailsView() {
 
   const beginAction = (next: PendingAction) => {
     if (pr === null || workspace === null || action._tag === "running") return
-    setAction({ _tag: "preflight", action: next })
-    preflight({ pr, revision: workspace.revision })
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:${nextActionRequestSequence}`
+    setAction({ _tag: "preflight", action: next, requestId })
+    preflight({ pr, requestId, revision: workspace.revision })
   }
 
   useKeyboard((key) => {
     const intent = detailsKeyIntent({
-      actionCancelable:
-        action._tag === "preflight" || action._tag === "ready" || action._tag === "done" || action._tag === "failed",
+      actionCancelable: action._tag !== "idle",
       actionReady: action._tag === "ready" && workspace !== null,
       dialogOpen: dialog.current !== null,
       keyName: key.name,
+      modified: key.ctrl === true || key.meta === true,
       tab
     })
     if (intent === "yield") return
     key.stopPropagation()
     if (intent === "back") setView("prs")
-    else if (intent === "cancel-action") setAction({ _tag: "idle" })
-    else if (intent === "show-diff") setTab("diff")
+    else if (intent === "cancel-action") {
+      if (action._tag === "preflight") preflight(Atom.Interrupt)
+      else if (action._tag === "running" && action.action === "worktree") checkout(Atom.Interrupt)
+      else if (action._tag === "running") runReview(Atom.Interrupt)
+      setAction({ _tag: "idle" })
+    } else if (intent === "show-diff") setTab("diff")
     else if (intent === "show-comments") setTab("comments")
     else if (intent === "open-browser" && pr !== null) openPr(pr)
     else if (intent === "previous-file") {
@@ -307,9 +338,21 @@ export function DetailsView() {
     else if (intent === "explain-risk") beginAction("explain")
     else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
       const ready = action
-      setAction({ _tag: "running", action: ready.action })
-      if (ready.action === "worktree") checkout(ready.plan)
-      else runReview({ kind: ready.action, plan: ready.plan, revision: workspace.revision })
+      setAction({
+        _tag: "running",
+        action: ready.action,
+        plan: ready.plan,
+        requestId: ready.requestId
+      })
+      if (ready.action === "worktree") checkout({ plan: ready.plan, requestId: ready.requestId })
+      else {
+        runReview({
+          kind: ready.action,
+          plan: ready.plan,
+          requestId: ready.requestId,
+          revision: workspace.revision
+        })
+      }
     }
   })
 
@@ -477,7 +520,10 @@ export function DetailsView() {
               </box>
             )}
             {action._tag === "running" && (
-              <text fg={theme.textWarning}>{`${actionLabel(action.action)} · RUNNING…`}</text>
+              <box flexDirection="column">
+                <text fg={theme.textWarning}>{`${actionLabel(action.action)} · RUNNING…`}</text>
+                <text fg={theme.textMuted}>Esc/x cancel</text>
+              </box>
             )}
             {action._tag === "failed" && <text fg={theme.textError}>{`${actionLabel(action.action)} failed.`}</text>}
             {action._tag === "done" && (

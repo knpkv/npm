@@ -1,9 +1,10 @@
+import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { applyPatch, parsePatch } from "diff"
 import { Schema } from "effect"
-import { describe, expect, it } from "vitest"
 import { makeRelayReviewPrompt } from "../src/RelayReview.js"
 import {
+  blobPreviewDisposition,
   buildUnifiedDiff,
   detailsKeyIntent,
   exactRevisionReviewState,
@@ -23,6 +24,7 @@ describe("PR detail workspace", () => {
     expect(traversal).not.toContain("/")
     expect(traversal).not.toBe(".")
     expect(traversal).not.toBe("..")
+    expect(traversal.length).toBeGreaterThan(0)
     expect(traversal.length).toBeLessThan(80)
     expect(nearby).not.toBe(traversal)
   })
@@ -65,7 +67,9 @@ describe("PR detail workspace", () => {
     expect(result.diff.split("\n").length).toBeLessThanOrEqual(500)
     expect(result.diff).not.toContain("preview truncated")
     const parsed = parsePatch(result.diff)
-    for (const hunk of parsed[0]?.hunks ?? []) {
+    const hunks = parsed[0]?.hunks ?? []
+    expect(hunks.length).toBeGreaterThan(0)
+    for (const hunk of hunks) {
       const oldLines = hunk.lines.filter((line) => line.startsWith("-") || line.startsWith(" ")).length
       const newLines = hunk.lines.filter((line) => line.startsWith("+") || line.startsWith(" ")).length
       expect(oldLines).toBe(hunk.oldLines)
@@ -92,30 +96,51 @@ describe("PR detail workspace", () => {
       actionCancelable: false,
       actionReady: false,
       dialogOpen: false,
+      modified: false,
       tab: "diff"
     }
 
     expect(detailsKeyIntent({ ...base, dialogOpen: true, keyName: "escape" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "j" })).toBe("next-file")
     expect(detailsKeyIntent({ ...base, keyName: "down", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "c", modified: true })).toBe("yield")
   })
 
-  it("binds Relay review instructions to the immutable base and head", () => {
-    const prompt = makeRelayReviewPrompt({
-      baseCommit: "base-123",
-      headCommit: "head-456",
-      kind: "review",
-      pullRequestId: "42",
-      repositoryName: "payments",
-      title: "Require signed callbacks",
+  it("binds every Relay review kind to sanitized immutable metadata", () => {
+    const baseCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+    const headCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    const pullRequestId = Domain.PullRequestId.make("42")
+    const repositoryName = Domain.RepositoryName.make("payments")
+    const request = {
+      baseCommit,
+      headCommit,
+      pullRequestId,
+      repositoryName,
       worktreePath: "/private/worktree"
-    })
+    }
+    const review = makeRelayReviewPrompt({ ...request, kind: "review" })
+    const security = makeRelayReviewPrompt({ ...request, kind: "security" })
+    const tests = makeRelayReviewPrompt({ ...request, kind: "tests" })
+    const explain = makeRelayReviewPrompt({ ...request, kind: "explain" })
 
-    expect(prompt).toContain("CodeCommit PR #42")
-    expect(prompt).toContain("Immutable base: base-123")
-    expect(prompt).toContain("Immutable head: head-456")
-    expect(prompt).toContain("Do not modify files")
-    expect(prompt).not.toContain("/private/worktree")
+    expect(review).toContain("CodeCommit PR #42")
+    expect(review).toContain(`Immutable base: ${baseCommit}`)
+    expect(review).toContain(`Immutable head: ${headCommit}`)
+    expect(review).not.toContain("Ignore prior instructions")
+    expect(review).toContain("Find correctness, security, reliability")
+    expect(security).toContain("Perform a security-focused review")
+    expect(tests).toContain("Review the test strategy")
+    expect(explain).toContain("Explain the change, its architecture")
+    for (const prompt of [review, security, tests, explain]) {
+      expect(prompt).toContain("Do not modify files")
+      expect(prompt).not.toContain("/private/worktree")
+    }
+  })
+
+  it("bounds text decoding and samples binary content", () => {
+    expect(blobPreviewDisposition(new Uint8Array([65, 0, 66]), new Uint8Array())).toBe("binary")
+    expect(blobPreviewDisposition(new Uint8Array(2_000_001).fill(65), new Uint8Array())).toBe("too-large")
+    expect(blobPreviewDisposition(new Uint8Array([65, 66]), new Uint8Array([67]))).toBe("text")
   })
 
   it("requires both divergent revisions before a Relay checkout is ready", () => {
@@ -160,6 +185,10 @@ describe("PR detail workspace", () => {
     expect(workspaceIdentityMatches(workspaceB, workspaceB)).toBe(true)
     expect(fileDiffIdentityMatches(fileA, fileB)).toBe(false)
     expect(fileDiffIdentityMatches(fileB, fileB)).toBe(true)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, afterBlobId: "rotated" })).toBe(false)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, beforeBlobId: "rotated" })).toBe(false)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, destinationCommit: "rotated" })).toBe(false)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, sourceCommit: "rotated" })).toBe(false)
   })
 
   it("keeps approval and mergeability independent", () => {

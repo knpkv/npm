@@ -43,7 +43,7 @@ const ReadLayer = ReadClient.CodeCommitReadClient.live.pipe(
   Layer.provide(AwsClientConfig.Default)
 )
 
-const WorktreeLayer = WorktreeService.live.pipe(Layer.provide(BunServices.layer))
+const WorktreeLayer = WorktreeService.live
 
 // Expose PRService + repos + EventsHub + AwsClient for atoms
 const MainLayer = (get: Atom.AtomContext) =>

@@ -1,16 +1,16 @@
 import { NodeServices } from "@effect/platform-node"
+import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { ConfigProvider, Effect } from "effect"
+import { ConfigProvider, Effect, Exit } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { describe, expect, it } from "vitest"
 import { makeWorktreeService } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
-  it("repairs an incomplete cache and converges concurrent exact-head checkouts", async () => {
-    const program = Effect.gen(function*() {
+  it.live("repairs an incomplete cache and converges concurrent exact-head checkouts", () =>
+    Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -64,7 +64,11 @@ describe("WorktreeService", () => {
         })
 
         yield* fs.makeDirectory(plan.cachePath, { recursive: true })
-        yield* fs.writeFileString(path.join(plan.cachePath, "partial"), "interrupted clone")
+        yield* fs.writeFileString(path.join(plan.cachePath, "preserve-me"), "not a confirmed interrupted clone")
+        const preserved = yield* service.checkout(plan).pipe(Effect.exit)
+        expect(Exit.isFailure(preserved)).toBe(true)
+        expect(yield* fs.exists(path.join(plan.cachePath, "preserve-me"))).toBe(true)
+        yield* fs.remove(plan.cachePath, { recursive: true })
         const repaired = yield* service.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
 
@@ -95,8 +99,5 @@ describe("WorktreeService", () => {
       )
 
       yield* scenario
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
-
-    await Effect.runPromise(program)
-  }, 20_000)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 20_000)
 })

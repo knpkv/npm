@@ -237,7 +237,7 @@ export const makeWorktreeService = (
         }
       })
 
-      let cacheExists = yield* fs.exists(plan.cachePath).pipe(
+      const cacheExists = yield* fs.exists(plan.cachePath).pipe(
         Effect.mapError((cause) => commandFailure("inspect-cache", `Unable to inspect ${plan.cachePath}`, cause))
       )
       const remoteUrl = remoteUrlFor(plan)
@@ -249,42 +249,43 @@ export const makeWorktreeService = (
           "--is-bare-repository"
         ])
         if (!validCache) {
-          yield* fs.remove(plan.cachePath, { recursive: true }).pipe(
-            Effect.mapError((cause) =>
-              commandFailure("repair-cache", "Unable to remove an incomplete repository cache", cause)
-            )
+          return yield* commandFailure(
+            "validate-cache",
+            "Repository cache is unreadable; preserving it for manual recovery"
           )
-          cacheExists = false
         }
       }
 
       if (!cacheExists) {
-        const stagingRoot = yield* fs.makeTempDirectory({
-          directory: path.dirname(plan.cachePath),
-          prefix: ".clone-"
-        }).pipe(
-          Effect.mapError((cause) => commandFailure("stage-cache", "Unable to stage repository cache", cause))
-        )
-        const stagedCache = path.join(stagingRoot, "repository.git")
-        yield* runChecked(spawner, plan, "clone-cache", ["clone", "--bare", remoteUrl, stagedCache]).pipe(
-          Effect.flatMap(() =>
-            fs.rename(stagedCache, plan.cachePath).pipe(
-              Effect.catch((renameCause) =>
-                runSucceeds(spawner, plan, [
-                  `--git-dir=${plan.cachePath}`,
-                  "rev-parse",
-                  "--is-bare-repository"
-                ]).pipe(
-                  Effect.flatMap((wonByAnotherProcess) =>
-                    wonByAnotherProcess
-                      ? Effect.void
-                      : commandFailure("install-cache", "Unable to install repository cache", renameCause)
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const stagingRoot = yield* fs.makeTempDirectoryScoped({
+              directory: path.dirname(plan.cachePath),
+              prefix: ".clone-"
+            }).pipe(
+              Effect.mapError((cause) => commandFailure("stage-cache", "Unable to stage repository cache", cause))
+            )
+            const stagedCache = path.join(stagingRoot, "repository.git")
+            yield* runChecked(spawner, plan, "clone-cache", ["clone", "--bare", remoteUrl, stagedCache]).pipe(
+              Effect.flatMap(() =>
+                fs.rename(stagedCache, plan.cachePath).pipe(
+                  Effect.catch((renameCause) =>
+                    runSucceeds(spawner, plan, [
+                      `--git-dir=${plan.cachePath}`,
+                      "rev-parse",
+                      "--is-bare-repository"
+                    ]).pipe(
+                      Effect.flatMap((wonByAnotherProcess) =>
+                        wonByAnotherProcess
+                          ? Effect.void
+                          : commandFailure("install-cache", "Unable to install repository cache", renameCause)
+                      )
+                    )
                   )
                 )
               )
             )
-          ),
-          Effect.ensuring(fs.remove(stagingRoot, { force: true, recursive: true }).pipe(Effect.ignore))
+          })
         )
       } else {
         yield* runChecked(spawner, plan, "update-cache-remote", [
