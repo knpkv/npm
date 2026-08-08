@@ -6,15 +6,49 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { makeWorktreeService, repositoryLockPath, WORKTREE_LOCK_REQUIREMENT } from "../src/WorktreeService.js"
+import {
+  makeWorktreeService,
+  repositoryLockPath,
+  WORKTREE_LOCK_REQUIREMENT,
+  WorktreeError
+} from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
-  it("states every required lock-holder executable in unsupported-platform failures", () => {
-    expect(WORKTREE_LOCK_REQUIREMENT).toContain("macOS or Linux")
-    expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sh")
-    expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sleep")
-    expect(WORKTREE_LOCK_REQUIREMENT).toContain("lockf or flock")
-  })
+  it.effect("states every required lock-holder executable in unsupported-platform failures", () =>
+    Effect.gen(function*() {
+      expect(WORKTREE_LOCK_REQUIREMENT).toContain("macOS or Linux")
+      expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sh")
+      expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sleep")
+      expect(WORKTREE_LOCK_REQUIREMENT).toContain("lockf or flock")
+
+      const nativePath = yield* Path.Path
+      const windowsPath: Path.Path = { ...nativePath, sep: "\\" }
+      const service = yield* makeWorktreeService().pipe(Effect.provideService(Path.Path, windowsPath))
+      const commit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+      const error = yield* Effect.flip(service.checkout({
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("local-test"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
+        cachePath: "C:\\codecommit\\repositories\\review.git",
+        destinationCommit: commit,
+        pullRequestId: Domain.PullRequestId.make("77"),
+        repositoryName: Domain.RepositoryName.make("review-repository"),
+        sourceCommit: commit,
+        targetExists: false,
+        targetPath: "C:\\codecommit\\worktrees\\review"
+      }))
+
+      expect(error).toBeInstanceOf(WorktreeError)
+      expect(error.operation).toBe("unsupported-platform")
+      expect(error.message).toBe(WORKTREE_LOCK_REQUIREMENT)
+    }).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ HOME: "/tmp/codecommit-unsupported-platform" })
+      ),
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.live("repairs an incomplete cache and converges concurrent exact-head checkouts", () =>
     Effect.gen(function*() {
@@ -89,21 +123,23 @@ describe("WorktreeService", () => {
         const cacheParent = path.dirname(plan.cachePath)
         yield* fs.makeDirectory(path.dirname(cacheParent), { recursive: true })
         yield* fs.symlink(externalCache, cacheParent)
-        expect(Exit.isFailure(yield* firstService.checkout(plan).pipe(Effect.exit))).toBe(true)
+        const cacheSymlinkError = yield* Effect.flip(firstService.checkout(plan))
+        expect(cacheSymlinkError.operation).toBe("validate-cache-parent-before-create")
         expect(yield* fs.readDirectory(externalCache)).toEqual([])
         yield* fs.remove(cacheParent)
 
         const targetParent = path.dirname(plan.targetPath)
         yield* fs.makeDirectory(path.dirname(targetParent), { recursive: true })
         yield* fs.symlink(externalWorktree, targetParent)
-        expect(Exit.isFailure(yield* firstService.checkout(plan).pipe(Effect.exit))).toBe(true)
+        const worktreeSymlinkError = yield* Effect.flip(firstService.checkout(plan))
+        expect(worktreeSymlinkError.operation).toBe("validate-worktree-parent-before-create")
         expect(yield* fs.readDirectory(externalWorktree)).toEqual([])
         yield* fs.remove(targetParent)
 
         yield* fs.makeDirectory(plan.cachePath, { recursive: true })
         yield* fs.writeFileString(path.join(plan.cachePath, "preserve-me"), "not a confirmed interrupted clone")
-        const preserved = yield* firstService.checkout(plan).pipe(Effect.exit)
-        expect(Exit.isFailure(preserved)).toBe(true)
+        const unconfirmedCacheError = yield* Effect.flip(firstService.checkout(plan))
+        expect(unconfirmedCacheError.operation).toBe("validate-cache")
         expect(yield* fs.exists(path.join(plan.cachePath, "preserve-me"))).toBe(true)
         yield* fs.remove(plan.cachePath, { recursive: true })
         const repaired = yield* firstService.checkout(plan)
@@ -186,9 +222,16 @@ describe("WorktreeService", () => {
           firstService.checkout(plan),
           secondService.checkout(otherPlan)
         ], { concurrency: "unbounded" })
-        expect(independent.map((result) => result.sourceCommit)).toEqual([sourceCommit, sourceCommit])
-        yield* runGit([`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${destinationCommit}^{commit}`])
-        yield* runGit([`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${sourceCommit}^{commit}`])
+        expect(otherPlan.cachePath).not.toBe(plan.cachePath)
+        expect(otherPlan.targetPath).not.toBe(plan.targetPath)
+        expect(independent[0]).toMatchObject({ path: plan.targetPath, sourceCommit })
+        expect(independent[1]).toMatchObject({ path: otherPlan.targetPath, sourceCommit })
+        expect(yield* runGit(["rev-parse", "HEAD"], plan.targetPath)).toBe(sourceCommit)
+        expect(yield* runGit(["rev-parse", "HEAD"], otherPlan.targetPath)).toBe(sourceCommit)
+        for (const cachePath of [plan.cachePath, otherPlan.cachePath]) {
+          yield* runGit([`--git-dir=${cachePath}`, "cat-file", "-e", `${destinationCommit}^{commit}`])
+          yield* runGit([`--git-dir=${cachePath}`, "cat-file", "-e", `${sourceCommit}^{commit}`])
+        }
       }).pipe(
         Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({ HOME: home }))
       )

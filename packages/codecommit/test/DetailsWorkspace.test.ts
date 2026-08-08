@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { applyPatch, parsePatch } from "diff"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { makeRelayReviewPrompt } from "../src/RelayReview.js"
 import {
   blobPreviewDisposition,
@@ -15,6 +15,7 @@ import {
   terminalSafeText,
   workspaceIdentityMatches
 } from "../src/tui/details-model.js"
+import { loadFileDiff } from "../src/tui/file-diff.js"
 import { reviewRevisionSpecifiers, safePathSegment } from "../src/WorktreeService.js"
 
 const decodeChangedFile = Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)
@@ -64,6 +65,21 @@ describe("PR detail workspace", () => {
       "\tconst value = 1\n\\u{001b}[2J"
     )
     expect(terminalSafeText("\tconst value = 1")).toBe("\\u{0009}const value = 1")
+  })
+
+  it("computes changes before escaping terminal controls", () => {
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-blob", path: "src/index.ts", mode: "100644" },
+      after: { blobId: "after-blob", path: "src/index.ts", mode: "100644" }
+    })
+    const result = buildUnifiedDiff(file, "const value = '\u001b'\n", "const value = '\\u{001b}'\n")
+
+    expect(result.diff).toContain("-const value = '\\u{001b}'")
+    expect(result.diff).toContain("+const value = '\\\\u{001b}'")
+    expect(result.metadata).toBeNull()
+    expect(result.truncated).toBe(false)
+    expect(hasTerminalControl(result.diff)).toBe(false)
   })
 
   it("builds a real immutable blob patch without hiding a late changed line", () => {
@@ -203,8 +219,78 @@ describe("PR detail workspace", () => {
   it("bounds text decoding and samples binary content", () => {
     expect(blobPreviewDisposition(new Uint8Array([65, 0, 66]), new Uint8Array())).toBe("binary")
     expect(blobPreviewDisposition(new Uint8Array(2_000_001).fill(65), new Uint8Array())).toBe("too-large")
+    expect(blobPreviewDisposition(new Uint8Array([0x80]), new Uint8Array([0x81]))).toBe("binary")
+    expect(blobPreviewDisposition(new Uint8Array([0xe2, 0x82, 0xac]), new Uint8Array())).toBe("text")
     expect(blobPreviewDisposition(new Uint8Array([65, 66]), new Uint8Array([67]))).toBe("text")
   })
+
+  it.effect("renders blob-size failures as truncated while preserving other read failures", () =>
+    Effect.gen(function*() {
+      const account = new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      })
+      const repositoryName = Domain.RepositoryName.make("payments")
+      const pullRequestId = Domain.PullRequestId.make("42")
+      const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+      const file = decodeChangedFile({
+        status: "modified",
+        before: { blobId: "before-blob", path: "src/index.ts", mode: "100644" },
+        after: { blobId: "after-blob", path: "src/index.ts", mode: "100644" }
+      })
+      const request = {
+        account,
+        file,
+        identity: {
+          profile: account.profile,
+          pullRequestId,
+          region: account.region,
+          repositoryName
+        },
+        repositoryName,
+        revision: new ReadClient.CodeCommitPullRequestRevision({
+          authorArn: null,
+          creationDate: new Date(0),
+          destinationCommit,
+          destinationReference: "refs/heads/main",
+          lastActivityDate: new Date(0),
+          mergeBase: destinationCommit,
+          pullRequestId,
+          repositoryName,
+          revisionId: "revision-1",
+          sourceCommit,
+          sourceReference: "refs/heads/feature",
+          status: "OPEN",
+          title: "Review"
+        })
+      }
+      const tooLarge = new ReadClient.CodeCommitBlobTooLargeError({
+        actualBytes: null,
+        maximumBytes: ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES,
+        operation: "get-blob",
+        source: "provider"
+      })
+      const oversized = yield* loadFileDiff({ getBlob: () => Effect.fail(tooLarge) }, request)
+
+      expect(oversized).toMatchObject({ binary: false, diff: "", truncated: true })
+
+      const text = new TextEncoder().encode("before\n")
+      const rendered = yield* loadFileDiff({
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
+              bytes: blobId === file.before?.blobId ? text : new TextEncoder().encode("after\n")
+            })
+          )
+      }, request)
+      expect(rendered.diff).toContain("-before")
+      expect(rendered.diff).toContain("+after")
+
+      const notFound = new ReadClient.CodeCommitReadNotFoundError({ operation: "get-blob" })
+      expect(yield* Effect.flip(loadFileDiff({ getBlob: () => Effect.fail(notFound) }, request))).toBe(notFound)
+    }))
 
   it("requires both divergent revisions before a Relay checkout is ready", () => {
     const revisions = reviewRevisionSpecifiers({

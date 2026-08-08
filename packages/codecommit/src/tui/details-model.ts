@@ -1,11 +1,11 @@
-import type { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { structuredPatch } from "diff"
 
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
 const DIFF_CONTEXT_LINES = 3
 const BINARY_SAMPLE_BYTES = 8_000
-const MAX_PREVIEW_BLOB_BYTES = 2_000_000
+const MAX_PREVIEW_BLOB_BYTES = ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES
 const FILETYPE_ALIASES: Record<string, string> = {
   cjs: "javascript",
   js: "javascript",
@@ -88,11 +88,20 @@ export const blobPreviewDisposition = (
   beforeBytes: Uint8Array,
   afterBytes: Uint8Array
 ): BlobPreviewDisposition => {
-  const hasNullByte = (bytes: Uint8Array): boolean => bytes.subarray(0, BINARY_SAMPLE_BYTES).some((byte) => byte === 0)
-  if (hasNullByte(beforeBytes) || hasNullByte(afterBytes)) return "binary"
   if (beforeBytes.byteLength > MAX_PREVIEW_BLOB_BYTES || afterBytes.byteLength > MAX_PREVIEW_BLOB_BYTES) {
     return "too-large"
   }
+  const hasNullByte = (bytes: Uint8Array): boolean => bytes.subarray(0, BINARY_SAMPLE_BYTES).some((byte) => byte === 0)
+  if (hasNullByte(beforeBytes) || hasNullByte(afterBytes)) return "binary"
+  const isValidUtf8 = (bytes: Uint8Array): boolean => {
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (!isValidUtf8(beforeBytes) || !isValidUtf8(afterBytes)) return "binary"
   return "text"
 }
 
@@ -168,7 +177,7 @@ export const terminalSafeText = (value: string): string =>
     return codePoint !== undefined && isTerminalControl(codePoint) ? escapedCodePoint(character) : character
   }).join("")
 
-/** Preserves line separators while escaping every control byte inside rendered diff lines. */
+/** Preserves tabs and line feeds while escaping terminal controls. */
 export const terminalSafeMultilineText = (value: string): string =>
   Array.from(value, (character) => {
     const codePoint = character.codePointAt(0)
@@ -176,6 +185,8 @@ export const terminalSafeMultilineText = (value: string): string =>
       ? escapedCodePoint(character)
       : character
   }).join("")
+
+const terminalSafePatchLine = (value: string): string => terminalSafeMultilineText(value.replaceAll("\\", "\\\\"))
 
 const fileMetadata = (file: ReadClient.CodeCommitChangedFile): Array<string> => {
   const metadata: Array<string> = []
@@ -196,7 +207,7 @@ const formatHunk = (hunk: {
   readonly oldStart: number
 }): ReadonlyArray<string> => [
   `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
-  ...hunk.lines
+  ...hunk.lines.map(terminalSafePatchLine)
 ]
 
 /** Builds a bounded valid unified patch for OpenTUI's native diff renderable. */
@@ -212,8 +223,8 @@ export const buildUnifiedDiff = (
   const patch = structuredPatch(
     oldFileName,
     newFileName,
-    terminalSafeMultilineText(beforeText),
-    terminalSafeMultilineText(afterText),
+    beforeText,
+    afterText,
     "",
     "",
     {
