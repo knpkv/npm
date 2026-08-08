@@ -20,7 +20,6 @@ import {
   settingsFilterAtom,
   settingsTabAtom,
   SettingsTabs,
-  showDetailsCommentsAtom,
   themeAtom,
   themeSelectionIndexAtom,
   viewAtom
@@ -89,8 +88,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const isSettingsFiltering = useAtomValue(isSettingsFilteringAtom)
   const setIsSettingsFiltering = useAtomSet(isSettingsFilteringAtom)
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
-  const showDetailsComments = useAtomValue(showDetailsCommentsAtom)
-  const setShowDetailsComments = useAtomSet(showDetailsCommentsAtom)
   const settingsTab = useAtomValue(settingsTabAtom)
   const setSettingsTab = useAtomSet(settingsTabAtom)
   const themeSelectionIndex = useAtomValue(themeSelectionIndexAtom)
@@ -304,19 +301,8 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       }
     }
 
-    // Details view
+    // DetailsView owns its dense workspace navigation and stops propagation.
     if (view === "details") {
-      if (key.name === "escape") {
-        setView("prs")
-      } else if (key.name === "return" && currentPR && onOpenInBrowser) {
-        onOpenInBrowser(currentPR)
-      } else if (key.char === "c" || key.name === "c") {
-        setShowDetailsComments(!showDetailsComments)
-      } else if (key.name === "1") {
-        setShowDetailsComments(false)
-      } else if (key.name === "2") {
-        setShowDetailsComments(true)
-      }
       return
     }
 
