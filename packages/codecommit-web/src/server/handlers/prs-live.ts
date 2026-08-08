@@ -10,12 +10,13 @@
  *
  * @module
  */
-import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
+import { BackgroundScope } from "../internal/BackgroundScope.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -62,6 +63,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
     const notificationRepo = yield* CacheService.NotificationRepo
+    const ownerScope = yield* BackgroundScope
 
     return handlers
       .handle("list", () =>
@@ -70,7 +72,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("refresh", () =>
         prService.refresh.pipe(
-          Effect.forkDetach,
+          Effect.forkIn(ownerScope),
           Effect.map(() => "ok")
         ))
       .handle("search", ({ query }) =>
@@ -87,7 +89,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ params }) =>
         prService.refreshSinglePR(params.awsAccountId, params.prId).pipe(
-          Effect.forkDetach,
+          Effect.forkIn(ownerScope),
           Effect.map(() => "ok")
         ))
       .handle("create", ({ payload }) =>
@@ -120,9 +122,13 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const cmd = ChildProcess.make("assume", ["-cd", payload.link, payload.profile], {
             stdout: "inherit",
             stderr: "inherit",
-            env: { GRANTED_ALIAS_CONFIGURED: "true" }
+            // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
+            // flag must be merged into the inherited environment. The profile argument
+            // stays authoritative only if ambient AWS credentials are dropped.
+            env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+            extendEnv: true
           })
-          yield* Effect.forkDetach(
+          yield* Effect.forkIn(
             Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd)).pipe(
               Effect.catchIf(() => true, (e) =>
                 notificationRepo.addSystem({
@@ -130,7 +136,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
                   title: "Assume Failed",
                   message: Predicate.isError(e) ? e.message : String(e)
                 }))
-            )
+            ),
+            ownerScope
           )
           return payload.link
         }).pipe(

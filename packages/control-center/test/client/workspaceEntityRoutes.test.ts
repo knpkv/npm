@@ -139,7 +139,11 @@ describe("workspace entity routes", () => {
       },
       releaseContext([releaseId]),
       routableReleaseIds
-    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    )).toBe(
+      `/w/${workspaceId}/releases/${releaseId}/agent?from=${
+        encodeURIComponent(workspaceEntityPath(workspaceId, entityId))
+      }`
+    )
     expect(workspaceEntityAgentPath(
       releaseOrigin,
       workspaceId,
@@ -167,7 +171,11 @@ describe("workspace entity routes", () => {
       },
       releaseContext([releaseId]),
       routableReleaseIds
-    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    )).toBe(
+      `/w/${workspaceId}/releases/${releaseId}/agent?from=${
+        encodeURIComponent(workspaceEntityPath(workspaceId, entityId))
+      }`
+    )
     expect(workspaceEntityAgentPath(
       itemsOrigin,
       workspaceId,

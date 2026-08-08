@@ -212,12 +212,16 @@ const recoveryProjectionsEqual = Effect.fn("ReleaseSynchronization.recoveryProje
 const identityKey = ({ pluginConnectionId, providerId, vendorPersonId }: PersonSourceIdentity): string =>
   `${providerId}\u0000${pluginConnectionId}\u0000${vendorPersonId}`
 
-const mergePersonIdentities = (current: Person, synchronized: Person): Person => {
+const mergePersonIdentities = (
+  current: Person,
+  synchronized: Person,
+  preserveCurrentMutableFields: boolean
+): Person => {
   const identities = new Map<string, PersonSourceIdentity>()
   for (const identity of current.sourceIdentities) identities.set(identityKey(identity), identity)
   for (const identity of synchronized.sourceIdentities) identities.set(identityKey(identity), identity)
   return {
-    ...synchronized,
+    ...(preserveCurrentMutableFields ? current : synchronized),
     sourceIdentities: Array.from(identities.values()).sort((left, right) => {
       const leftKey = identityKey(left)
       const rightKey = identityKey(right)
@@ -237,14 +241,18 @@ const persistPerson = Effect.fn("ReleaseSynchronization.persistPerson")(function
     if (current.failure._tag !== "RecordNotFoundError") return yield* Effect.fail(current.failure)
     return { record: yield* persistence.people.createPerson(workspaceId, person, updatedAt), changed: true }
   }
-  const mergedPerson = mergePersonIdentities(current.success.person, person)
+  const durableRecordIsNewer = DateTime.Order(current.success.updatedAt, updatedAt) > 0
+  const mergedPerson = mergePersonIdentities(current.success.person, person, durableRecordIsNewer)
   if (yield* peopleEqual(current.success.person, mergedPerson)) return { record: current.success, changed: false }
+  const durableUpdatedAt = durableRecordIsNewer
+    ? current.success.updatedAt
+    : updatedAt
   return {
     record: yield* persistence.people.updatePerson(
       workspaceId,
       mergedPerson,
       current.success.revision,
-      updatedAt
+      durableUpdatedAt
     ),
     changed: true
   }

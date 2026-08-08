@@ -1,0 +1,13 @@
+id: no-locale-order-in-canonical-digest
+snapshots:
+  ? |
+    values.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  : labels:
+      - source: JSON.stringify(left).localeCompare(JSON.stringify(right))
+        style: primary
+        start: 29
+        end: 86
+      - source: values.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+        style: secondary
+        start: 0
+        end: 87

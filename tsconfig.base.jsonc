@@ -33,10 +33,10 @@
         "diagnosticSeverity": {
           "overriddenschemaconstructor": "off"
         },
-        "includeSuggestionsInTsc": false,
+        "includeSuggestionsInTsc": true,
         "ignoreEffectSuggestionsInTscExitCode": true,
-        "ignoreEffectWarningsInTscExitCode": true,
-        "ignoreEffectErrorsInTscExitCode": true
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
       }
     ]
   }

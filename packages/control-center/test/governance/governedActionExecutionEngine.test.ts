@@ -443,7 +443,7 @@ describe("governed action execution engine", () => {
       assert.deepStrictEqual(yield* Ref.get(recovery.events), ["inspect", "inspect"])
     }))
 
-  it.effect("continues the bounded startup batch after one provider defect", () =>
+  it.effect("preserves a provider defect instead of counting it as a recoverable candidate failure", () =>
     Effect.gen(function*() {
       const recovery = yield* makeHarness({
         reconcileDefectOnce: true,
@@ -461,19 +461,16 @@ describe("governed action execution engine", () => {
         }
       })
 
-      assert.deepStrictEqual(yield* recoverEligible(recovery.layer), {
-        attempted: 2,
-        advanced: 1,
-        inactive: 0,
-        failed: 1
-      })
-      assert.deepStrictEqual(yield* Ref.get(recovery.events), [
-        "inspect",
-        "reconcile",
-        "inspect",
-        "reconcile",
-        "record-reconciliation"
-      ])
+      const exit = yield* recoverEligible(recovery.layer).pipe(Effect.exit)
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) {
+        const defect = Cause.findDie(exit.cause)
+        assert.isTrue(Result.isSuccess(defect))
+        if (Result.isSuccess(defect)) {
+          assert.strictEqual(defect.success.defect, "injected-reconciliation-defect")
+        }
+      }
+      assert.deepStrictEqual(yield* Ref.get(recovery.events), ["inspect", "reconcile"])
     }))
 
   it.effect("does not call reconciliation after the durable recovery deadline", () =>

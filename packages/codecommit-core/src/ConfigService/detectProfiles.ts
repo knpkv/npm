@@ -15,7 +15,7 @@ export const discoverAwsProfiles = Effect.fn("ConfigService.discoverAwsProfiles"
   const configPath = path.join(home, ".aws", "config")
   const credsPath = path.join(home, ".aws", "credentials")
 
-  const read = (p: string) => fs.readFileString(p).pipe(Effect.catchCause(() => Effect.succeed("")))
+  const read = (p: string) => fs.readFileString(p).pipe(Effect.catch(() => Effect.succeed("")))
 
   const [configContent, credsContent] = yield* Effect.all([read(configPath), read(credsPath)])
 

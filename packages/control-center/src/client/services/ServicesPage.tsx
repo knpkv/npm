@@ -201,6 +201,11 @@ const ConnectionCard = ({
         state={synchronizationState}
       />
       <ConnectionAdministration
+        {...(connection.providerId === "jira"
+          ? { atlassianOAuthProviders: ["jira"] }
+          : connection.providerId === "confluence"
+            ? { atlassianOAuthProviders: ["confluence"] }
+            : {})}
         canConfigure={canConfigure}
         onReauthorize={(credentials) => onReauthorize(connection.pluginConnectionId, credentials)}
         onRevoke={() => onRevoke(connection.pluginConnectionId)}

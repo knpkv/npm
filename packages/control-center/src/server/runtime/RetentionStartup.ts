@@ -44,6 +44,7 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
   )
   const cycle = persistence.retention.sweepWorkspace(options.workspaceId).pipe(
     Effect.as(interval),
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle supervisor logs defects and continues; retention-startup.test.ts covers retry and scoped interruption.
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
         ? Effect.failCause(cause)

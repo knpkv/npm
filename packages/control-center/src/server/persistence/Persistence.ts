@@ -341,12 +341,42 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
       completeReview: (...args: Parameters<AgentJobRepositoryService["completeReview"]>) =>
         publicOperation("agent-job.complete-review", agentJobs.completeReview(...args)),
+      recordReviewProgress: (...args: Parameters<AgentJobRepositoryService["recordReviewProgress"]>) =>
+        publicOperation("agent-job.record-review-progress", agentJobs.recordReviewProgress(...args)),
       enqueue: (...args: Parameters<AgentJobRepositoryService["enqueue"]>) =>
         publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
       failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
         publicOperation("agent-job.fail-attempt", agentJobs.failAttempt(...args)),
       latestReview: (...args: Parameters<AgentJobRepositoryService["latestReview"]>) =>
         publicOperation("agent-job.latest-review", agentJobs.latestReview(...args)),
+      latestReviewForPullRequest: (
+        ...args: Parameters<AgentJobRepositoryService["latestReview"]>
+      ) =>
+        publicOperation(
+          "agent-job.latest-review-for-pull-request",
+          agentJobs.latestReview({ ...args[0], allowDifferentHead: true })
+        ),
+      listRunningPrReviewAttempts: (
+        ...args: Parameters<AgentJobRepositoryService["listRunningPrReviewAttempts"]>
+      ) =>
+        publicOperation(
+          "agent-job.list-running-pr-review-attempts",
+          agentJobs.listRunningPrReviewAttempts(...args)
+        ),
+      attachRunningPrReviewSession: (
+        ...args: Parameters<AgentJobRepositoryService["attachRunningPrReviewSession"]>
+      ) =>
+        publicOperation(
+          "agent-job.attach-running-pr-review-session",
+          agentJobs.attachRunningPrReviewSession(...args)
+        ),
+      readReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["readReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.read-review-suggestion-publication",
+          agentJobs.readReviewSuggestionPublication(...args)
+        ),
       releaseReviewSuggestionPublication: (
         ...args: Parameters<AgentJobRepositoryService["releaseReviewSuggestionPublication"]>
       ) =>
@@ -368,8 +398,19 @@ const makePersistence = Effect.gen(function*() {
           "agent-job.record-review-suggestion-publication",
           agentJobs.recordReviewSuggestionPublication(...args)
         ),
+      reviewBudget: (...args: Parameters<AgentJobRepositoryService["reviewBudget"]>) =>
+        publicOperation("agent-job.review-budget", agentJobs.reviewBudget(...args)),
       requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
+      extendReviewBudget: (...args: Parameters<AgentJobRepositoryService["extendReviewBudget"]>) =>
+        publicOperation("agent-job.extend-review-budget", agentJobs.extendReviewBudget(...args)),
+      interruptRunningReviews: (
+        ...args: Parameters<AgentJobRepositoryService["interruptRunningReviews"]>
+      ) =>
+        publicOperation(
+          "agent-job.interrupt-running-reviews",
+          agentJobs.interruptRunningReviews(...args)
+        ),
       reviewThreadAfter: (...args: Parameters<AgentJobRepositoryService["reviewThreadAfter"]>) =>
         publicOperation("agent-job.review-thread-after", agentJobs.reviewThreadAfter(...args)),
       reviewThreadBefore: (...args: Parameters<AgentJobRepositoryService["reviewThreadBefore"]>) =>
@@ -483,6 +524,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation(
           "governed-action.read-latest-terminal-by-target",
           governedActions.readLatestTerminalByTarget(...args)
+        ),
+      readLatestTerminalReleasePublications: (
+        ...args: Parameters<GovernedActionRepositoryService["readLatestTerminalReleasePublications"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-latest-terminal-release-publications",
+          governedActions.readLatestTerminalReleasePublications(...args)
         )
     },
     people: {
@@ -722,7 +770,16 @@ const makePersistence = Effect.gen(function*() {
 })
 
 /** Public repository collection exposed to authenticated server workflows. */
-export interface PersistenceService extends Success<typeof makePersistence> {}
+export interface PersistenceService extends Omit<Success<typeof makePersistence>, "agentJobs"> {
+  readonly agentJobs:
+    & Omit<Success<typeof makePersistence>["agentJobs"], "attachRunningPrReviewSession" | "interruptRunningReviews">
+    & {
+      readonly attachRunningPrReviewSession?: Success<
+        typeof makePersistence
+      >["agentJobs"]["attachRunningPrReviewSession"]
+      readonly interruptRunningReviews?: Success<typeof makePersistence>["agentJobs"]["interruptRunningReviews"]
+    }
+}
 
 /** Server-only durable state boundary; the database and filesystem stay private. */
 export class Persistence extends Context.Service<Persistence, PersistenceService>()(

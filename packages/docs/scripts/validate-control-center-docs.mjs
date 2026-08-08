@@ -1,10 +1,12 @@
 import { readFile, stat } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { validateReleaseGateEvidence } from "./release-gate-evidence.mjs"
 
 const docsRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(docsRoot, "../..")
 const sourceOnly = process.argv.includes("--source-only")
+const releaseGate = process.argv.includes("--release-gate")
 const docsFiles = [
   "control-center.mdx",
   "control-center-setup.mdx",
@@ -20,6 +22,87 @@ const docsSources = new Map(
 const allDocs = Array.from(docsSources.values()).join("\n")
 const failures = []
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"))
+
+const releaseGateEvidence = await readFile(
+  resolve(workspaceRoot, ".specs/control-center/release-gate-evidence.md"),
+  "utf8"
+)
+failures.push(...validateReleaseGateEvidence(releaseGateEvidence, { releaseGate }))
+const requiredReleaseJourneys = [
+  "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
+  "pnpm --filter @knpkv/control-center test:integration:live",
+  "pnpm --filter @knpkv/control-center test:integration:live-aws",
+  "pnpm --filter @knpkv/control-center test:sbx:real",
+  "pnpm --filter @knpkv/control-center benchmark:runtime",
+  "pnpm --filter @knpkv/ai-codex test:smoke:real"
+]
+const releaseScriptSpecs = [
+  [
+    "packages/control-center/package.json",
+    [
+      "test:e2e:atlassian-oauth",
+      "test:integration:live",
+      "test:integration:live-aws",
+      "test:sbx:real",
+      "benchmark:runtime"
+    ]
+  ],
+  ["packages/ai-codex/package.json", ["test:smoke:real"]]
+]
+for (const [manifestPath, scriptNames] of releaseScriptSpecs) {
+  const manifest = await readJson(resolve(workspaceRoot, manifestPath))
+  for (const scriptName of scriptNames) {
+    if (!manifest.scripts?.[scriptName]) failures.push(`${manifestPath} is missing release script ${scriptName}`)
+  }
+}
+const journeySection = releaseGateEvidence.match(/## Required external journeys\n([\s\S]*?)(?=\n## |$)/u)
+const journeyCommands = journeySection?.[1]?.match(/```(?:bash|sh)\n([\s\S]*?)\n```/u)?.[1] ?? ""
+for (const command of requiredReleaseJourneys) {
+  if (!journeyCommands.includes(command)) {
+    failures.push(`release-gate evidence is missing required journey ${command}`)
+  }
+}
+if (!releaseGateEvidence.includes("Product completion journey")) {
+  failures.push("release-gate evidence is missing the product completion journey")
+}
+const evidenceRow = (criterion) =>
+  releaseGateEvidence.match(new RegExp(`^\\|\\s*${criterion.replace(".", "\\.")}\\s*\\|[^\\n]*$`, "mu"))?.[0] ?? ""
+const sc723Row = evidenceRow("SC7.23")
+if (!sc723Row.includes("pnpm test --run")) {
+  failures.push("SC7.23 must record the one-shot test command pnpm test --run")
+}
+const sc722Row = evidenceRow("SC7.22")
+for (const command of [
+  "pnpm --filter @knpkv/rly test:pack",
+  "pnpm --filter @knpkv/rly test:browser",
+  "pnpm --filter @knpkv/docs validate:rly"
+]) {
+  if (!sc722Row.includes(command)) failures.push(`SC7.22 must record ${command}`)
+}
+const sc724Row = evidenceRow("SC7.24")
+for (const command of ["pnpm --filter @knpkv/ai-codex test", "pnpm --filter @knpkv/ai-claude test"]) {
+  if (!sc724Row.includes(command)) failures.push(`SC7.24 must record ${command}`)
+}
+for (const phrase of [
+  "## Canonical retained-evidence representation",
+  "reviewedHead",
+  "commandResult",
+  "cleanupResult",
+  "providerIdentity",
+  "capabilityStatus",
+  "credentialSurface",
+  "Provider-private",
+  "raw callback query data"
+]) {
+  if (!releaseGateEvidence.includes(phrase))
+    failures.push(`release-gate evidence is missing canonical field boundary ${phrase}`)
+}
+if (!releaseGateEvidence.includes("safe client-visible configuration")) {
+  failures.push("release-gate evidence must distinguish safe callback configuration from callback secrets")
+}
+if (!releaseGateEvidence.includes("raw callback query data")) {
+  failures.push("release-gate evidence must prohibit raw callback query data")
+}
 
 const controlCenterPackage = await readJson(resolve(workspaceRoot, "packages/control-center/package.json"))
 const expectedEntries = Object.keys(controlCenterPackage.exports ?? {}).map((subpath) =>

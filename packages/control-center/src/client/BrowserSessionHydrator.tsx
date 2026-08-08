@@ -22,14 +22,21 @@ const failedSessionState = (
   return { _tag: "unavailable" }
 }
 
+interface BrowserSessionHydratorProps {
+  readonly loadSession?: typeof loadBrowserSession
+}
+
 /** Recover this tab's mutation proof once, regardless of its initial route. */
-export const BrowserSessionHydrator = (): ReactElement | null => {
+export const BrowserSessionHydrator = ({
+  loadSession = loadBrowserSession
+}: BrowserSessionHydratorProps = {}): ReactElement | null => {
   const { beginHydration, completeHydration } = useBrowserSession()
 
   useEffect(() => {
     const attempt = beginHydration()
+    const request = new AbortController()
     let isCurrent = true
-    Effect.runPromise(loadBrowserSession).then(
+    Effect.runPromise(loadSession, { signal: request.signal }).then(
       (result) => {
         if (!isCurrent) return
         completeHydration(attempt, {
@@ -44,8 +51,9 @@ export const BrowserSessionHydrator = (): ReactElement | null => {
     )
     return () => {
       isCurrent = false
+      request.abort()
     }
-  }, [beginHydration, completeHydration])
+  }, [beginHydration, completeHydration, loadSession])
 
   return null
 }

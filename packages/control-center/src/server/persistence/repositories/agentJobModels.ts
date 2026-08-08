@@ -1,8 +1,9 @@
 /** Durable release-thread and local-agent job contracts. @module */
 import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 
-import { ReviewAgentProfile } from "../../../api/agent.js"
+import { ReviewAgentProfile, ReviewSuggestionPublicationOperation } from "../../../api/agent.js"
 import {
   AgentThreadId,
   GovernedActionId,
@@ -13,10 +14,11 @@ import {
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
+import { PrReviewReport, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../../domain/prReview.js"
 import {
   PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionAuthor,
+  PrReviewSuggestionRevisionPage,
   PrReviewSuggestionRevisionPageSize,
   PrReviewSuggestionRevisionSequence
 } from "../../../domain/prReviewRevision.js"
@@ -35,6 +37,12 @@ export const MAXIMUM_AGENT_JOB_PROMPT_LENGTH = 5_000
 
 /** Maximum thread events returned by one replay page. */
 export const MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE = 128
+
+/** One explicit extension is bounded to the selected profile's original budget. */
+export const MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT = 1
+
+/** Hard upper bound for one immutable review, including its single extension. */
+export const MAXIMUM_REVIEW_BUDGET_MILLIS = 3_600_000
 
 /** Positive sequence assigned to attempts within one durable job. */
 export const AgentAttemptSequence = Schema.Int.check(
@@ -95,7 +103,14 @@ const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 const PrReviewAgentJobTaskFields = {
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
-  reviewProfile: ReviewAgentProfile
+  reviewProfile: ReviewAgentProfile,
+  intent: Schema.optionalKey(Schema.Literals(["full-review", "suggestion-edit", "suggestion-revalidation"])),
+  target: Schema.optionalKey(Schema.Struct({
+    sourceJobId: JobId,
+    suggestionId: PrReviewSuggestionId,
+    selectedRevisionId: PrReviewSuggestionRevisionId,
+    history: PrReviewSuggestionRevisionPage
+  }))
 }
 
 /** Read-only review request bound to one immutable pull request head. */
@@ -111,7 +126,7 @@ const PrReviewThreadRequestSummary = Schema.Struct({
 const PrReviewThreadRunSummary = Schema.Struct({
   jobId: JobId,
   subject: PrReviewSubject,
-  state: Schema.Literals(["cancelled", "failed", "succeeded", "unknown"]),
+  state: Schema.Literals(["cancelled", "failed", "interrupted", "succeeded", "unknown"]),
   requestedAt: UtcTimestamp,
   suggestionTitles: Schema.Array(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
@@ -218,6 +233,10 @@ export const ClaimedAgentJob = Schema.Struct({
   access: Schema.Literals(["read-only", "workspace-write"]),
   prompt: AgentJobPrompt,
   context: AgentContextSnapshotRecord,
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
   sessionRef: Schema.NullOr(AgentSessionRef),
   cancellationRequested: Schema.Boolean
 })
@@ -265,11 +284,80 @@ export const CompleteAgentReviewInput = Schema.Struct({
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 
+/** Startup transition for review attempts whose owning process disappeared. */
+export const InterruptRunningReviewsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  interruptedAt: UtcTimestamp,
+  preservedAttempts: Schema.optionalKey(Schema.Array(Schema.Struct({
+    jobId: JobId,
+    attemptSequence: AgentAttemptSequence
+  })))
+})
+export type InterruptRunningReviewsInput = typeof InterruptRunningReviewsInput.Type
+
+/** Durable identity used to match a live Review Sandbox to one immutable attempt. */
+export const RunningPrReviewAttempt = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  attemptId: Schema.String.check(Schema.isPattern(/^[a-f0-9]{12}$/u)),
+  sessionRef: Schema.NullOr(AgentSessionRef)
+})
+export type RunningPrReviewAttempt = typeof RunningPrReviewAttempt.Type
+
+/** Startup handoff for a live server-private Review Sandbox. */
+export const AttachRunningPrReviewSessionInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  sessionRef: AgentSessionRef
+})
+export type AttachRunningPrReviewSessionInput = typeof AttachRunningPrReviewSessionInput.Type
+
+/** Persist the latest validated report while an immutable review is still running. */
+export const RecordAgentReviewProgressInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken,
+  report: Schema.Unknown,
+  occurredAt: UtcTimestamp
+})
+export type RecordAgentReviewProgressInput = typeof RecordAgentReviewProgressInput.Type
+
+/** Read the effective budget of one claimed immutable review. */
+export const ReadReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  task: AgentJobTask
+})
+export type ReadReviewBudgetInput = typeof ReadReviewBudgetInput.Type
+
 /** Digest binding one durable publication reservation to the exact confirmed body. */
 export const ReviewSuggestionPublicationDigest = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
 ).pipe(Schema.brand("ReviewSuggestionPublicationDigest"))
 export type ReviewSuggestionPublicationDigest = typeof ReviewSuggestionPublicationDigest.Type
+
+/** Provider comment identity retained for governed lifecycle operations. */
+export const ReviewSuggestionPublicationCommentId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+).pipe(Schema.brand("ReviewSuggestionPublicationCommentId"))
+export type ReviewSuggestionPublicationCommentId = typeof ReviewSuggestionPublicationCommentId.Type
+
+const ReviewSuggestionPublicationCommentLocatorEncoded = Schema.TemplateLiteral([
+  Schema.Literal("comment:"),
+  ReviewSuggestionPublicationCommentId
+])
+
+/** Provider receipt coordinate decoded to the persisted comment identity. */
+export const ReviewSuggestionPublicationCommentLocator = ReviewSuggestionPublicationCommentLocatorEncoded.pipe(
+  Schema.decodeTo(ReviewSuggestionPublicationCommentId, {
+    decode: SchemaGetter.transform((locator) => locator.slice("comment:".length)),
+    encode: SchemaGetter.transform((commentId): `comment:${string}` => `comment:${commentId}`)
+  })
+)
 
 /** Atomic pre-provider reservation for one suggestion and exact confirmed body. */
 export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
@@ -278,6 +366,8 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
   reservationId: ReviewSuggestionPublicationReservationId,
   reservedAt: UtcTimestamp
 })
@@ -285,16 +375,22 @@ export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSugges
 
 /** Durable result of reserving an exact publication body. */
 export const ReviewSuggestionPublicationReservation = Schema.Union([
-  Schema.TaggedStruct("acquired", {}),
-  Schema.TaggedStruct("in-progress", {}),
+  Schema.TaggedStruct("acquired", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
+  Schema.TaggedStruct("in-progress", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
   Schema.TaggedStruct("recoverable", {
     publicationId: GovernedActionId,
     publishedAt: UtcTimestamp,
-    reservationId: ReviewSuggestionPublicationReservationId
+    reservationId: ReviewSuggestionPublicationReservationId,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
   }),
   Schema.TaggedStruct("published", {
     publicationId: GovernedActionId,
-    publishedAt: UtcTimestamp
+    publishedAt: UtcTimestamp,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
   })
 ])
 export type ReviewSuggestionPublicationReservation = typeof ReviewSuggestionPublicationReservation.Type
@@ -317,12 +413,30 @@ export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
   reservationId: ReviewSuggestionPublicationReservationId,
   publicationId: GovernedActionId,
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
   publishedAt: UtcTimestamp,
   finalize: Schema.optionalKey(Schema.Boolean)
 })
 export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
+
+/** Lookup for the latest durable publication target of one exact suggestion. */
+export const ReadReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId
+})
+export type ReadReviewSuggestionPublicationInput = typeof ReadReviewSuggestionPublicationInput.Type
+
+export const ReadReviewSuggestionPublication = Schema.Struct({
+  state: Schema.Literal("published"),
+  publicationId: GovernedActionId,
+  commentId: ReviewSuggestionPublicationCommentId
+})
+export type ReadReviewSuggestionPublication = typeof ReadReviewSuggestionPublication.Type
 
 /** Workspace-scoped lookup for one durable review result. */
 export const AgentReviewResultInput = Schema.Struct({
@@ -330,6 +444,14 @@ export const AgentReviewResultInput = Schema.Struct({
   jobId: JobId
 })
 export type AgentReviewResultInput = typeof AgentReviewResultInput.Type
+
+/** Request one operator-authorized extension of a running review's budget. */
+export const ExtendReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  extendedAt: UtcTimestamp
+})
+export type ExtendReviewBudgetInput = typeof ExtendReviewBudgetInput.Type
 
 /** Sanitized durable review result attributable to one terminal attempt. */
 export const AgentReviewResultRecord = Schema.Struct({
@@ -352,6 +474,13 @@ export const ReadReviewSuggestionRevisionsInput = Schema.Struct({
 export type ReadReviewSuggestionRevisionsInput = typeof ReadReviewSuggestionRevisionsInput.Type
 
 /** Complete compare-and-append command for one immutable suggestion edit. */
+export const ReviewSuggestionRevisionLeaseFence = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken
+})
+export type ReviewSuggestionRevisionLeaseFence = typeof ReviewSuggestionRevisionLeaseFence.Type
+
 export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
@@ -359,18 +488,31 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   expectedRevisionId: PrReviewSuggestionRevisionId,
   expectedSequence: PrReviewSuggestionRevisionSequence,
   edit: PrReviewSuggestionEdit,
-  state: Schema.optionalKey(Schema.Literal("dismissed")),
+  state: Schema.optionalKey(Schema.Literals(["dismissed", "stale"])),
+  dismissalReason: Schema.optionalKey(PrReviewSuggestion.fields.dismissalReason),
+  validation: Schema.optionalKey(Schema.Literal("validated")),
   author: PrReviewSuggestionRevisionAuthor,
-  createdAt: UtcTimestamp
+  createdAt: UtcTimestamp,
+  leaseFence: Schema.optionalKey(ReviewSuggestionRevisionLeaseFence)
 })
 export type AppendReviewSuggestionRevisionInput = typeof AppendReviewSuggestionRevisionInput.Type
+
+/** Atomic targeted completion: append the source revision and terminalize the worker job together. */
+export const CompleteTargetedReviewInput = Schema.Struct({
+  source: AppendReviewSuggestionRevisionInput,
+  target: CompleteAgentReviewInput
+})
+export type CompleteTargetedReviewInput = typeof CompleteTargetedReviewInput.Type
 
 /** Exact immutable subject used to recover its newest durable review job. */
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
-  jobId: Schema.optionalKey(JobId)
+  excludeJobId: Schema.optionalKey(JobId),
+  excludeSubjectRevision: Schema.optionalKey(Schema.String),
+  jobId: Schema.optionalKey(JobId),
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 
@@ -424,9 +566,15 @@ export const LatestAgentReviewRecord = Schema.Struct({
   threadId: AgentThreadId,
   providerId: AgentProviderId,
   model: AgentModel,
-  state: AgentJobState,
+  state: Schema.Union([AgentJobState, Schema.Literal("interrupted")]),
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
+  taskIntent: Schema.optionalKey(Schema.NullOr(Schema.Literals(["suggestion-edit", "suggestion-revalidation"]))),
   report: Schema.NullOr(PrReviewReport),
   reviewProfile: ReviewAgentProfile,
   activity: Schema.Struct({
@@ -437,8 +585,10 @@ export const LatestAgentReviewRecord = Schema.Struct({
   })
 }).check(
   Schema.makeFilter(
-    ({ report, state }) => (state === "succeeded") === (report !== null),
-    { expected: "only succeeded review jobs to carry a report" }
+    ({ report, state }) =>
+      report === null || state === "succeeded" || state === "failed" ||
+      state === "cancelled" || state === "interrupted",
+    { expected: "only terminal review jobs to carry a report" }
   )
 )
 export type LatestAgentReviewRecord = typeof LatestAgentReviewRecord.Type

@@ -24,12 +24,14 @@ const diagnosticTone = (
 
 /** Secret-safe connection recovery controls backed by the administration read model. */
 export const ConnectionAdministration = ({
+  atlassianOAuthProviders,
   canConfigure,
   onReauthorize,
   onRevoke,
   onStartAtlassianOAuth,
   state
 }: {
+  readonly atlassianOAuthProviders?: AtlassianOAuthProviderIntent
   readonly canConfigure: boolean
   readonly onReauthorize: (credentials: ReadonlyArray<PluginCredentialReplacement>) => Promise<boolean>
   readonly onRevoke: () => Promise<boolean>
@@ -108,7 +110,8 @@ export const ConnectionAdministration = ({
 
   const startOAuth = (configuration?: AtlassianOAuthClientConfiguration): void => {
     if (!supportsOAuthRecovery || onStartAtlassianOAuth === undefined) return
-    const providers: AtlassianOAuthProviderIntent = [administration.connection.providerId]
+    const providers =
+      atlassianOAuthProviders ?? (administration.connection.providerId === "jira" ? ["jira"] : ["confluence"])
     oauthRequest.current?.abort()
     const request = new AbortController()
     oauthRequest.current = request

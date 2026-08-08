@@ -6,12 +6,14 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { createServer, type Server } from "node:net"
 
-import { JobId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   PrReviewSandboxSessions,
   prReviewSandboxSessionsLayer
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
+import { reviewCommandArtifactTestLayer } from "./reviewCommandArtifactTestLayer.js"
 
 const gitEnvironment = (path: string): Readonly<Record<string, string>> => ({
   GIT_AUTHOR_EMAIL: "review-sbx-smoke@example.invalid",
@@ -174,7 +176,16 @@ it.effect("runs the review session through the installed sbx runtime", () =>
         path.join(sourceRoot, "README.md"),
         "# Review sandbox smoke\n"
       )
-      yield* runGit(["-C", sourceRoot, "add", "--", "README.md"], executablePath)
+      yield* fileSystem.writeFileString(
+        path.join(sourceRoot, "package.json"),
+        "{\"name\":\"credential-free-review-fixture\",\"private\":true}\n"
+      )
+      yield* fileSystem.makeDirectory(path.join(sourceRoot, "src"))
+      yield* fileSystem.writeFileString(
+        path.join(sourceRoot, "src", "index.ts"),
+        "export const reviewFixture = true\n"
+      )
+      yield* runGit(["-C", sourceRoot, "add", "--", "."], executablePath)
       yield* runGit(
         ["-C", sourceRoot, "commit", "--quiet", "-m", "fixture"],
         executablePath
@@ -249,7 +260,9 @@ it.effect("runs the review session through the installed sbx runtime", () =>
         const sessions = yield* PrReviewSandboxSessions
         return yield* sessions.withSession({
           workspaceId: WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082"),
+          threadId: AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000080"),
           jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000081"),
+          attemptSequence: AgentAttemptSequence.make(1),
           repository: "control-center-sbx-smoke",
           attemptId: "abcdef012345",
           baseRevision: headRevision,
@@ -263,9 +276,15 @@ it.effect("runs the review session through the installed sbx runtime", () =>
             const network = yield* session.runCommand(
               `curl --fail --silent --show-error --max-time 3 http://host.docker.internal:${String(networkProbe.port)}/`
             )
+            const credentials = yield* session.runCommand(
+              "sh -c 'test -z \"${AWS_ACCESS_KEY_ID-}${AWS_SECRET_ACCESS_KEY-}${AWS_SESSION_TOKEN-}${OPENAI_API_KEY-}${ANTHROPIC_API_KEY-}\"'"
+            )
+            const structured = yield* session.runCommand(
+              "node -e 'const fs = require(\"node:fs\"); const files = fs.readdirSync(\".\").sort(); process.stdout.write(JSON.stringify({ status: \"ok\", files }))'"
+            )
             const file = yield* session.readFile(".control-center-sbx-smoke")
             const diff = yield* session.readDiff()
-            return { diff, file, network, revision, write }
+            return { credentials, diff, file, network, revision, structured, write }
           }))
       }).pipe(
         Effect.provide(prReviewSandboxSessionsLayer({
@@ -273,6 +292,7 @@ it.effect("runs the review session through the installed sbx runtime", () =>
           maximumCommandDurationMillis: 30_000,
           maximumSessionDurationMillis: 120_000
         })),
+        Effect.provide(reviewCommandArtifactTestLayer()),
         Effect.provide(sourceLayer)
       )
 
@@ -280,6 +300,14 @@ it.effect("runs the review session through the installed sbx runtime", () =>
       assert.strictEqual(observed.revision.stdout.text.trim(), headRevision)
       assert.strictEqual(observed.write.exitCode, 0)
       assert.notStrictEqual(observed.network.exitCode, 0)
+      assert.strictEqual(observed.credentials.exitCode, 0)
+      assert.strictEqual(observed.structured.exitCode, 0)
+      assert.deepStrictEqual(JSON.parse(observed.structured.stdout.text), {
+        // The real sbx clone preserves the repository metadata needed for the
+        // review session's exact-head and diff checks.
+        files: [".control-center-sbx-smoke", ".git", "README.md", "package.json", "src"],
+        status: "ok"
+      })
       assert.strictEqual(observed.file.stdout.text, "SBX_WRITE_OK\n")
       assert.include(observed.diff.stdout.text, ".control-center-sbx-smoke")
       assert.include(observed.diff.stdout.text, "+SBX_WRITE_OK")

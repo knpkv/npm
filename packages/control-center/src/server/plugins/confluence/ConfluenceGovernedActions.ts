@@ -41,11 +41,15 @@ import {
   RawConfluenceCurrentUser,
   RawConfluenceDraftPage,
   RawConfluencePage,
+  RawConfluenceSpacePage,
   RawConfluenceVersion
 } from "./ConfluencePageSchemas.js"
 
 const ACTION_KIND = "update-page"
 const ENTITY_TYPE = "page"
+const CREATE_ACTION_KIND = "create-page"
+const CREATE_ENTITY_TYPE = "release-page"
+const EMPTY_REVISION = "0"
 const PageId = Schema.String.check(
   Schema.isPattern(/^[1-9][0-9]{0,63}$/u, { expected: "a positive decimal Confluence page id" })
 )
@@ -102,6 +106,18 @@ const UpdatePageActionPayload = Schema.TaggedStruct(ACTION_KIND, {
   )
 )
 type UpdatePageActionPayload = typeof UpdatePageActionPayload.Type
+const CreatePageRequestPayload = Schema.Struct({
+  title: PageTitle,
+  markdown: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+  parentId: Schema.NullOr(PageId)
+})
+const CreatePageActionPayload = Schema.TaggedStruct(CREATE_ACTION_KIND, {
+  spaceId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  title: PageTitle,
+  adf: Schema.String.check(Schema.isMaxLength(1_048_576)),
+  parentId: Schema.NullOr(PageId)
+})
+type CreatePageActionPayload = typeof CreatePageActionPayload.Type
 
 interface GovernedActionsInput {
   readonly client: ConfluencePageClientShape
@@ -222,6 +238,94 @@ const canonicalAdf = (
     ),
     Effect.map(canonicalizeGovernedActionJson)
   )
+
+const proposeCreatePage = Effect.fn("ConfluenceGovernedActions.proposeCreatePage")(function*(
+  input: GovernedActionsInput,
+  request: ProposePluginActionRequestV1
+) {
+  if (
+    request.actionKind !== CREATE_ACTION_KIND ||
+    request.target.entityType !== CREATE_ENTITY_TYPE ||
+    request.target.vendorImmutableId !== input.spaceId ||
+    request.expectedRevision !== EMPTY_REVISION
+  ) {
+    return yield* new PluginUnsupportedCapabilityFailure({
+      capabilityId: "action.propose",
+      requestedVersion: 1,
+      diagnosticCode: "confluence-release-page-action-unsupported"
+    })
+  }
+  const requested = yield* Schema.decodeUnknownEffect(Schema.toType(CreatePageRequestPayload))(request.payload).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "confluence-release-page-payload-invalid" }))
+  )
+  const rawPages = yield* safeProviderCall(input.client.getSpacePages(input.spaceId, null))
+  const pages = yield* output("release-page-list", RawConfluenceSpacePage, rawPages)
+  if (pages._links?.next !== undefined) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "confluence-release-page-destination-not-bounded"
+    })
+  }
+  if ((pages.results ?? []).some((page) => page.title === requested.title)) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "confluence-release-page-title-already-exists"
+    })
+  }
+  const payload = yield* Schema.decodeUnknownEffect(CreatePageActionPayload)({
+    _tag: CREATE_ACTION_KIND,
+    spaceId: input.spaceId,
+    title: requested.title,
+    adf: yield* canonicalAdf(input.converter, requested.markdown),
+    parentId: requested.parentId
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({ diagnosticCode: "confluence-release-page-canonical-payload-invalid" })
+    )
+  )
+  const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
+    Effect.provideService(Crypto.Crypto, input.cryptoService),
+    Effect.mapError(() => new PluginOutageFailure({ operation: "confluence-release-page-digest" }))
+  )
+  const proposedAt = yield* DateTime.now
+  return yield* output("proposal", PluginActionProposalV1, {
+    proposalKey: "cfpg:create:" + payloadDigest,
+    capabilityVersion: 1,
+    request: { ...request, payload },
+    payloadDigest,
+    summary: `Create Confluence release page ${requested.title}`,
+    impact: {
+      level: "medium",
+      summary: "Creates one append-only Confluence page; existing pages are never updated or deleted"
+    },
+    proposedAt
+  })
+})
+
+const decodeAuthorizedCreatePage = (
+  request: AuthorizedPluginActionV1,
+  expectedSpaceId: string
+): Effect.Effect<CreatePageActionPayload, PluginConfigurationFailure> => {
+  const proposal = request.proposal
+  if (
+    proposal.request.actionKind !== CREATE_ACTION_KIND ||
+    proposal.request.target.entityType !== CREATE_ENTITY_TYPE ||
+    proposal.request.target.vendorImmutableId !== expectedSpaceId ||
+    proposal.request.expectedRevision !== EMPTY_REVISION
+  ) {
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-release-page-action-invalid" }))
+  }
+  return Schema.decodeUnknownEffect(CreatePageActionPayload)(proposal.request.payload).pipe(
+    Effect.filterOrFail(
+      (payload) => payload.spaceId === expectedSpaceId,
+      () => new PluginConfigurationFailure({ diagnosticCode: "confluence-release-page-space-mismatch" })
+    ),
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "confluence-release-page-payload-invalid" }))
+  )
+}
+
+const createPageLocator = (payloadDigest: string): PluginActionReconciliationKey =>
+  PluginActionReconciliationKey.make("cfpg:create:" + payloadDigest)
 
 const decodeAuthorizedAction = Effect.fn("ConfluenceGovernedActions.decodeAuthorized")(function*(
   request: AuthorizedPluginActionV1,
@@ -387,6 +491,9 @@ export const makeConfluenceGovernedActions = (
   const proposeAction = Effect.fn("ConfluenceGovernedActions.propose")(function*(
     request: ProposePluginActionRequestV1
   ) {
+    if (request.actionKind === CREATE_ACTION_KIND) {
+      return yield* proposeCreatePage(input, request)
+    }
     if (request.actionKind !== ACTION_KIND || request.target.entityType !== ENTITY_TYPE) {
       return yield* new PluginUnsupportedCapabilityFailure({
         capabilityId: "action.propose",
@@ -455,9 +562,147 @@ export const makeConfluenceGovernedActions = (
     })
   })
 
+  const createPreflight = Effect.fn("ConfluenceGovernedActions.createPreflight")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<PluginActionPreflightV1, PluginFailure> {
+    const payload = yield* decodeAuthorizedCreatePage(request, input.spaceId)
+    const rawPages = yield* safeProviderCall(input.client.getSpacePages(input.spaceId, null))
+    const pages = yield* output("release-page-preflight", RawConfluenceSpacePage, rawPages)
+    const checkedAt = yield* DateTime.now
+    if (pages._links?.next !== undefined) {
+      return { _tag: "blocked", reasons: ["Confluence destination listing is not complete"], checkedAt }
+    }
+    if ((pages.results ?? []).some((page) => page.title === payload.title)) {
+      return { _tag: "blocked", reasons: ["A Confluence page with this exact title already exists"], checkedAt }
+    }
+    return { _tag: "ready", checkedRevision: Revision.make(EMPTY_REVISION), checkedAt }
+  })
+
+  const createExecute = Effect.fn("ConfluenceGovernedActions.createExecute")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+    const payload = yield* decodeAuthorizedCreatePage(request, input.spaceId)
+    const result = yield* safeProviderCall(input.client.createPage({
+      spaceId: payload.spaceId,
+      title: payload.title,
+      adf: payload.adf,
+      parentId: payload.parentId
+    })).pipe(Effect.result)
+    const observedAt = yield* DateTime.now
+    if (Result.isFailure(result)) {
+      if (
+        Schema.is(PluginTimeoutFailure)(result.failure) ||
+        Schema.is(PluginOutageFailure)(result.failure) ||
+        Schema.is(PluginMalformedResponseFailure)(result.failure) ||
+        Schema.is(PluginConflictFailure)(result.failure)
+      ) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation: "confluence-create-page",
+          reconciliationKey: createPageLocator(request.payloadDigest)
+        })
+      }
+      if (
+        Schema.is(PluginRateLimitFailure)(result.failure) ||
+        Schema.is(PluginAuthenticationFailure)(result.failure) ||
+        Schema.is(PluginAuthorizationFailure)(result.failure)
+      ) return yield* result.failure
+      return {
+        _tag: "confirmed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(
+            "confluence-page-rejected:" + request.payloadDigest
+          ),
+          safeSummary: "Confluence rejected the authorized release-page creation without applying it",
+          observedAt
+        }
+      }
+    }
+    const rawPage = yield* output("create-page-response", RawConfluencePage, result.success).pipe(
+      Effect.catchTag("PluginMalformedResponseFailure", () =>
+        Effect.fail(
+          new PluginUnknownOutcomeFailure({
+            operation: "confluence-create-page",
+            reconciliationKey: createPageLocator(request.payloadDigest)
+          })
+        ))
+    )
+    const page = yield* decodePage("confluence-create-page", rawPage, rawPage.id, input.spaceId).pipe(
+      Effect.catchTag("PluginMalformedResponseFailure", () =>
+        Effect.fail(
+          new PluginUnknownOutcomeFailure({
+            operation: "confluence-create-page",
+            reconciliationKey: createPageLocator(request.payloadDigest)
+          })
+        ))
+    )
+    if (
+      page.title !== payload.title ||
+      page.spaceId !== payload.spaceId
+    ) {
+      return yield* new PluginUnknownOutcomeFailure({
+        operation: "confluence-create-page",
+        reconciliationKey: createPageLocator(request.payloadDigest)
+      })
+    }
+    return {
+      _tag: "confirmed",
+      receipt: {
+        status: "succeeded",
+        providerOperationId: PluginProviderOperationId.make(`confluence-page:${page.id}`),
+        safeSummary: `Created Confluence release page ${page.title}`,
+        observedAt
+      }
+    }
+  })
+
+  const createReconcile = Effect.fn("ConfluenceGovernedActions.createReconcile")(function*(
+    request: PluginActionReconciliationRequestV1
+  ): Effect.fn.Return<PluginActionReconciliationResultV1, PluginFailure> {
+    if (request.authorizedAction === undefined) {
+      return { _tag: "pending", checkedAt: yield* DateTime.now }
+    }
+    const payload = yield* decodeAuthorizedCreatePage(request.authorizedAction, input.spaceId)
+    const rawPages = yield* safeProviderCall(input.client.getSpacePages(input.spaceId, null))
+    const pages = yield* output("release-page-reconcile", RawConfluenceSpacePage, rawPages)
+    if (pages._links?.next !== undefined) {
+      return { _tag: "pending", checkedAt: yield* DateTime.now }
+    }
+    const matches = (pages.results ?? []).filter((page) =>
+      page.title === payload.title && page.body?.atlas_doc_format?.value === payload.adf
+    )
+    const checkedAt = yield* DateTime.now
+    if (matches.length === 0) return { _tag: "pending", checkedAt }
+    if (matches.length > 1) {
+      return {
+        _tag: "failed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(
+            "confluence-page-duplicate:" + request.payloadDigest
+          ),
+          safeSummary: "Multiple Confluence pages match the authorized release-page content",
+          observedAt: checkedAt
+        }
+      }
+    }
+    const match = matches[0]
+    if (match === undefined) return { _tag: "pending", checkedAt }
+    return {
+      _tag: "succeeded",
+      receipt: {
+        status: "succeeded",
+        providerOperationId: PluginProviderOperationId.make(`confluence-page:${match.id}`),
+        safeSummary: `Created Confluence release page ${payload.title}`,
+        observedAt: checkedAt
+      }
+    }
+  })
+
   const preflight = Effect.fn("ConfluenceGovernedActions.preflight")(function*(
     request: AuthorizedPluginActionV1
   ) {
+    if (request.proposal.request.actionKind === CREATE_ACTION_KIND) return yield* createPreflight(request)
     const payload = yield* decodeAuthorizedAction(request, input.spaceId).pipe(
       Effect.provideService(Crypto.Crypto, input.cryptoService)
     )
@@ -503,6 +748,7 @@ export const makeConfluenceGovernedActions = (
   const executeAuthorizedAction = Effect.fn("ConfluenceGovernedActions.execute")(function*(
     request: AuthorizedPluginActionV1
   ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+    if (request.proposal.request.actionKind === CREATE_ACTION_KIND) return yield* createExecute(request)
     const payload = yield* decodeAuthorizedAction(request, input.spaceId).pipe(
       Effect.provideService(Crypto.Crypto, input.cryptoService)
     )
@@ -591,6 +837,12 @@ export const makeConfluenceGovernedActions = (
   const reconcile = Effect.fn("ConfluenceGovernedActions.reconcile")(function*(
     request: PluginActionReconciliationRequestV1
   ): Effect.fn.Return<PluginActionReconciliationResultV1, PluginFailure> {
+    if (
+      request.authorizedAction?.proposal.request.actionKind === CREATE_ACTION_KIND ||
+      request.reconciliationKey?.startsWith("cfpg:create:") === true
+    ) {
+      return yield* createReconcile(request)
+    }
     const payload = request.authorizedAction === undefined
       ? null
       : yield* decodeAuthorizedAction(request.authorizedAction, input.spaceId).pipe(

@@ -18,7 +18,7 @@ allowBuilds:
 overrides:
   # GHSA-8r6m-32jq-jx6q: fast-xml-parser <5.10.1 DOCTYPE entity-expansion reset; keep scoped to 5.x
   "@distilled.cloud/aws>fast-xml-parser": ^5.10.1
-  # GHSA-7p8r-x3mc-p8w7: fast-uri 3.0.0–3.1.4 host confusion via backslash authority; keep in 3.x for ajv
+  # GHSA-v2hh-gcrm-f6hx and GHSA-7p8r-x3mc-p8w7: fast-uri <=3.1.4 host confusion; keep in 3.x for ajv
   fast-uri@>=3.0.0 <3.1.5: 3.1.5
   vitest: "catalog:"
   "@effect/vitest": 4.0.0-beta.98
@@ -31,32 +31,32 @@ overrides:
   file-type@>=13.0.0 <21.3.1: 21.3.3
   uuid@<11.1.1: 11.1.1
   read-yaml-file@<2.1.0: 2.1.0
-  # GHSA-5p4m-2wfm-xmqj: js-yaml 4.0.0–4.3.0 omap quadratic CPU consumption; keep 4.x consumers patched
-  js-yaml@>=4.0.0 <4.3.1: 4.3.1
+  # GHSA-5p4m-2wfm-xmqj: js-yaml <4.3.1 quadratic !!omap resolution
+  js-yaml@<4.3.1: 4.3.1
   # GHSA-pm4m-ph32-ghv5: js-yaml 5.0.0–5.2.1 exponential parsing; keep direct consumers on 5.x
   js-yaml@>=5.0.0 <=5.2.1: 5.2.2
   # GHSA-qwww-vcr4-c8h2: react-router 8.0.0–8.2.x RSC action CSRF; keep current consumers on 8.x
   react-router@>=8.0.0 <8.3.0: 8.3.0
-  # GHSA-fxqj-rqcc-2cmp: postcss <=8.5.22 source-map path traversal; keep the toolchain on 8.x
+  # GHSA-r28c-9q8g-f849 and GHSA-fxqj-rqcc-2cmp: postcss <=8.5.22 source-map path traversal
   postcss@>=8.0.0 <=8.5.22: 8.5.23
-  # GHSA-2v37-7h3g-55p8: nanoid custom generators can loop indefinitely on size zero; keep 3.x consumers patched
+  # GHSA-2v37-7h3g-55p8: nanoid <3.3.17 custom generators can loop for a zero size
   nanoid@<3.3.17: 3.3.17
-  # GHSA-rgw5-rvv9-x895: brace-expansion 4.0.0–5.0.8 unbounded expansion DoS; keep the toolchain on 5.x
-  brace-expansion@>=4.0.0 <5.0.9: 5.0.9
+  # GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895: brace-expansion <5.0.9 unbounded expansion DoS
+  brace-expansion@>=5.0.0 <5.0.9: 5.0.9
+  # GHSA-4cwx-7wf7-3272 and GHSA-8xcm-r25x-g524: undici <8.9.0 cache disclosure/crash and retry desync
+  undici@>=8.0.0 <8.9.0: 8.9.0
   astro@<=7.0.9: 7.1.3
   yaml@>=2.0.0 <2.8.3: 2.8.3
   linkify-it@<=5.0.1: 5.0.2
   diff@>=6.0.0 <8.0.3: 8.0.3
   svgo@>=4.0.0 <4.0.2: 4.0.2
-  # GHSA-4cwx-7wf7-3272 and related undici 8.x advisories; keep Effect Platform consumers on patched 8.x
-  undici@>=8.0.0 <8.9.0: 8.9.0
 
-# Security releases; permit pinned fixes before the age window expires.
+# Security releases for the pinned overrides above; permit fixes before the age window expires.
 minimumReleaseAgeExclude:
-  - fast-uri@3.1.5
   - js-yaml@4.3.1
   - js-yaml@5.2.2
   - nanoid@3.3.17
   - postcss@8.5.23
   - brace-expansion@5.0.9
+  - fast-uri@3.1.5
   - undici@8.9.0

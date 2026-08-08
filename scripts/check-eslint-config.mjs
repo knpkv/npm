@@ -2,7 +2,17 @@ import { ESLint } from "eslint"
 import { fileURLToPath, URL } from "node:url"
 import fixture from "./fixtures/eslint/invalid-component.mjs"
 
-const eslint = new ESLint()
+const eslint = new ESLint({
+  errorOnUnmatchedPattern: false,
+  overrideConfig: [
+    {
+      files: ["scripts/**/*.mjs"],
+      rules: {
+        "local-rules/no-unowned-detached-fiber": "error"
+      }
+    }
+  ]
+})
 const fixturePaths = ["packages/codecommit-web/src/invalid-component.tsx", "packages/rly/src/invalid-component.tsx"]
 
 for (const filePath of fixturePaths) {
@@ -31,6 +41,20 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
       `${ruleId} reported ${diagnostics.length} diagnostics instead of ${expected} for ${filePath} (${locations})`
     )
   }
+}
+
+const detachedMjsResults = await eslint.lintFiles([
+  "scripts/**/*.mjs",
+  "packages/*/src/**/*.mjs",
+  "packages/*/scripts/**/*.mjs"
+])
+const detachedMjsViolations = detachedMjsResults.flatMap((result) =>
+  result.messages
+    .filter((message) => message.ruleId === "local-rules/no-unowned-detached-fiber")
+    .map((message) => `${result.filePath}:${message.line}:${message.column}`)
+)
+if (detachedMjsViolations.length > 0) {
+  throw new Error(`Detached fibers found in package JavaScript source/scripts:\n${detachedMjsViolations.join("\n")}`)
 }
 
 await assertRuleDiagnostics({
@@ -1832,6 +1856,480 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import * as Cause from "effect/Cause"
+    import * as Fx from "effect/Effect"
+    import { Layer as Layers, Stream as Streams } from "effect"
+    import { catchCause as recoverEffect } from "effect/Effect"
+    Fx.catchCause(program, (_cause) => Fx.interrupt)
+    layer.pipe(Layers.catchCause(() => Layers.empty))
+    Streams.catchCause(stream, (_cause) => Streams.empty)
+    recoverEffect(program, (_cause) => Fx.failCause(otherCause))
+    Fx.catchCause(program, (cause) =>
+      Cause.hasInterrupts(cause)
+        ? Fx.failCause(cause)
+        : fallback
+    )
+    Fx.catchCause(program, (cause) => {
+      if (false) return Fx.failCause(cause)
+      return fallback
+    })
+    Streams.catchCause(stream, (cause) =>
+      Cause.hasInterrupts(cause)
+        ? Streams.failCause(Cause.fromReasons(
+          cause.reasons.filter(Cause.isInterruptReason)
+        ))
+        : Streams.empty
+    )
+  `,
+  expected: 7,
+  filePath: "packages/codecommit-core/src/eslint-catch-cause-invalid.ts",
+  ruleId: "local-rules/require-exact-cause-rethrow"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Cause from "effect/Cause"
+    import * as Effect from "effect/Effect"
+    import * as Layer from "effect/Layer"
+    import * as Stream from "effect/Stream"
+    import { catch as catchTyped } from "effect/Effect"
+    Effect.catchCause(program, (cause) => Effect.failCause(cause))
+    Effect.catchCause(program, (cause) =>
+      Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+        ? Effect.failCause(cause)
+        : typedFallback
+    )
+    const handleLayerCause = (cause) =>
+      Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+        ? Layer.effectContext(Effect.failCause(cause))
+        : fallbackLayer
+    layer.pipe(Layer.catchCause(handleLayerCause))
+    stream.pipe(
+      Stream.catchCause((cause) => Stream.failCause(cause))
+    )
+    stream.pipe(
+      Stream.catchCause((cause) =>
+        Cause.hasInterrupts(cause) || Cause.hasDies(cause)
+          ? Stream.failCause(Cause.fromReasons(
+            cause.reasons.filter((reason) =>
+              Cause.isInterruptReason(reason) || Cause.isDieReason(reason)
+            )
+          ))
+          : fallbackStream
+      )
+    )
+    Effect.catchCause(program, (cause) =>
+      logCause(cause).pipe(Effect.andThen(Effect.failCause(cause)))
+    )
+    catchTyped(program, typedFailureHandler)
+    const localEffect = { catchCause: localCatchCause }
+    localEffect.catchCause(program, localHandler)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-catch-cause-valid.ts",
+  ruleId: "local-rules/require-exact-cause-rethrow"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    import { Effect as RootEffect } from "effect"
+    import { forkDetach as detach } from "effect/Effect"
+    Fx.forkDetach(program)
+    program.pipe(Fx.forkDetach)
+    Root.Effect.forkDetach(program)
+    RootEffect["forkDetach"](program)
+    detach(program)
+    program.pipe(detach)
+    const { forkDetach: namespaceDetach } = Fx
+    namespaceDetach(program)
+    const { forkDetach: rootDetach } = RootEffect
+    program.pipe(rootDetach)
+    const { Effect: { forkDetach: nestedRootDetach } } = Root
+    nestedRootDetach(program)
+    const { Effect: destructuredRootEffect } = Root
+    const { forkDetach: chainedRootDetach } = destructuredRootEffect
+    program.pipe(chainedRootDetach)
+    const { forkDetach: defaultedNamespaceDetach = fallbackDetach } = Fx
+    defaultedNamespaceDetach(program)
+    const {
+      Effect: {
+        forkDetach: defaultedNestedRootDetach = fallbackDetach
+      } = fallbackEffect
+    } = Root
+    defaultedNestedRootDetach(program)
+  `,
+  expected: 12,
+  filePath: "packages/control-center/src/eslint-detached-fiber-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    program.pipe(Fx.forkDetach)
+  `,
+  expected: 1,
+  filePath: "scripts/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    Fx.forkScoped(program)
+    Fx.forkIn(program, applicationScope)
+    Root.Effect.forkScoped(program)
+    const local = { forkDetach: (effect) => effect }
+    local.forkDetach(program)
+    const forkDetach = local.forkDetach
+    program.pipe(forkDetach)
+    const { forkDetach: localDetach } = local
+    localDetach(program)
+    const localRoot = { Effect: local }
+    const { Effect: { forkDetach: nestedLocalDetach } } = localRoot
+    nestedLocalDetach(program)
+    const { forkDetach: defaultedLocalDetach = fallbackDetach } = local
+    defaultedLocalDetach(program)
+    const {
+      Effect: {
+        forkDetach: defaultedNestedLocalDetach = fallbackDetach
+      } = fallbackEffect
+    } = localRoot
+    defaultedNestedLocalDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/eslint-detached-fiber-valid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    const { forkDetach: detach } = Fx
+    program.pipe(detach)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/scripts/eslint-detached-fiber-invalid.mjs",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    program.pipe(Fx.forkDetach) // eslint-disable-line local-rules/no-unowned-detached-fiber -- audited lifecycle boundary
+    Fx.forkDetach(otherProgram)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/eslint-detached-fiber-suppression-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { forkDetach as detach } from "effect/Effect"
+    detach(program)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/scripts/eslint-detached-fiber-invalid.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-detached-fiber-excluded.test.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.forkDetach(program)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/generated/eslint-detached-fiber-excluded.ts",
+  ruleId: "local-rules/no-unowned-detached-fiber"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import { Effect as RootEffect } from "effect"
+    import { ignoreCause as discardCause } from "effect/Effect"
+    refresh.pipe(Fx.ignoreCause)
+    RootEffect.ignoreCause(refresh)
+    discardCause(refresh)
+    refresh.pipe(discardCause)
+    const local = { ignoreCause: (value) => value }
+    local.ignoreCause(refresh)
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/PRService/refresh-eslint-invalid.ts",
+  ruleId: "local-rules/no-ignore-cause-in-codecommit-refresh"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Cause from "effect/Cause"
+    import * as Effect from "effect/Effect"
+    refresh.pipe(
+      Effect.catch(typedFailureHandler),
+      Effect.tapCauseIf(Cause.hasDies, reportDefect)
+    )
+    const local = { ignoreCause: (value) => value }
+    local.ignoreCause(refresh)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/PRService/refresh-eslint-valid.ts",
+  ruleId: "local-rules/no-ignore-cause-in-codecommit-refresh"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import { Effect as RootEffect } from "effect"
+    import { map as transform } from "effect/Effect"
+    Fx.map(content, (text) => JSON.parse(text))
+    RootEffect.map((text) => JSON["parse"](text))
+    transform(content, function(text) { return JSON.parse(text) })
+    const parseJson = JSON.parse
+    content.pipe(Fx.map((text) => parseJson(text)))
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/PermissionService/eslint-json-map-invalid.ts",
+  ruleId: "local-rules/no-throwing-json-parse-in-effect-map"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import * as Schema from "effect/Schema"
+    const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Config))
+    Effect.flatMap(content, decodeConfig)
+    Effect.map(content, (text) =>
+      Effect.try({ try: () => JSON.parse(text), catch: String })
+    )
+    {
+      const JSON = { parse: safeParser }
+      Effect.map(content, (text) => JSON.parse(text))
+    }
+    localEffect.map(content, (text) => globalThis.JSON.parse(text))
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/PermissionService/eslint-json-map-valid.ts",
+  ruleId: "local-rules/no-throwing-json-parse-in-effect-map"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as React from "react"
+    import ReactDefault from "react"
+    import { useEffect as useLifecycle } from "react"
+    import * as Fx from "effect/Effect"
+    import { runPromise as run } from "effect/Effect"
+    useLifecycle(() => {
+      Fx.runPromise(program).then(handleSuccess, handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      run(program, {}).catch(handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return cleanup
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      const otherRequest = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return () => otherRequest.abort()
+    })
+    const externalRequest = new AbortController()
+    React.useEffect(() => {
+      run(program, { signal: externalRequest.signal }).catch(handleFailure)
+      return () => externalRequest.abort()
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      if (enabled) return () => request.abort()
+    })
+    React.useEffect(() => {
+      const request = new AbortController()
+      run(program, { signal: request.signal }).catch(handleFailure)
+      return () => {
+        if (enabled) request.abort()
+      }
+    })
+    ReactDefault.useEffect(() => {
+      Fx.runPromise(program).catch(handleFailure)
+    })
+  `,
+  expected: 8,
+  filePath: "packages/control-center/src/client/eslint-react-run-promise-signal-invalid.ts",
+  ruleId: "local-rules/require-run-promise-signal-in-react-effect"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import ReactDefault from "react"
+    import { useEffect as useReactEffect } from "react"
+    import * as Fx from "effect/Effect"
+    useReactEffect(() => {
+      const request = new AbortController()
+      Fx.runPromise(program, { signal: request.signal }).then(handleSuccess, handleFailure)
+      return () => {
+        reportCleanupStarted()
+        request.abort()
+        reportCleanupFinished()
+      }
+    })
+    ReactDefault.useEffect(() => {
+      const request = new AbortController()
+      Fx.runPromise(program, { signal: request.signal }).catch(handleFailure)
+      return () => request.abort()
+    })
+    useReactEffect(() => {
+      if (enabled) {
+        const request = new AbortController()
+        Fx.runPromise(program, { signal: request.signal }).catch(handleFailure)
+        return () => request.abort()
+      }
+    })
+    Fx.runPromise(detachedProgram).catch(handleFailure)
+    const useEffect = (callback) => callback()
+    useEffect(() => Fx.runPromise(localProgram))
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-react-run-promise-signal-valid.ts",
+  ruleId: "local-rules/require-run-promise-signal-in-react-effect"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as S from "effect/Schema"
+    import * as Root from "effect"
+    import { decodeSync as decode } from "effect/Schema"
+    S.decodeUnknownSync(Id)(routeValue)
+    decode(Id)(filterValue)
+    Root.Schema.decodeSync(Id)(eventValue)
+    const aliasedDecoder = S.decodeSync
+    const { decodeUnknownSync: localDecode } = S
+    export { decodeSync as unsafeDecode } from "effect/Schema"
+  `,
+  expected: 6,
+  filePath: "packages/control-center/src/client/eslint-throwing-schema-decode-invalid.ts",
+  ruleId: "local-rules/no-throwing-schema-decode-in-control-center-client"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as S from "effect/Schema"
+    const effectDecoder = S.decodeUnknownEffect(Id)
+    const result = S.decodeUnknownResult(Id)(routeValue)
+    const option = S.decodeUnknownOption(Id)(filterValue)
+    const localSchema = { decodeSync: (value) => value }
+    localSchema.decodeSync(eventValue)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-throwing-schema-decode-valid.ts",
+  ruleId: "local-rules/no-throwing-schema-decode-in-control-center-client"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import * as Root from "effect"
+    import { gen as workflow, sleep as pause } from "effect/Effect"
+    Fx.gen(function*() {
+      while (active) yield* Fx.sleep("1 second")
+    })
+    workflow(function*() {
+      while (active) yield* pause("1 second")
+    })
+    Root.Effect.gen(function*() {
+      while (active) yield* Root.Effect.sleep("1 second")
+    })
+  `,
+  expected: 3,
+  filePath: "packages/control-center/src/client/eslint-manual-poll-loop-invalid.ts",
+  ruleId: "local-rules/no-manual-control-center-client-poll-loop"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import * as Schedule from "effect/Schedule"
+    const polling = Effect.repeat(resolveOnce, Schedule.spaced("30 seconds"))
+    const finite = Effect.gen(function*() {
+      while (queue.length > 0) {
+        yield* Effect.forEach(queue.takeAll(), () => Effect.sleep("1 second"))
+      }
+    })
+    const ForeignEffect = {
+      gen: (callback) => callback(),
+      sleep: () => undefined
+    }
+    ForeignEffect.gen(function*() {
+      while (active) yield* ForeignEffect.sleep()
+    })
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-manual-poll-loop-valid.ts",
+  ruleId: "local-rules/no-manual-control-center-client-poll-loop"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as NodeRunner from "@effect/platform-node/NodeRuntime"
+    import * as PlatformNode from "@effect/platform-node"
+    import { runMain as run } from "@effect/platform-node/NodeRuntime"
+    NodeRunner.runMain(main, { disableErrorReporting: true })
+    run(main, runtimeOptions)
+    PlatformNode.NodeRuntime.runMain(main, { ...runtimeOptions })
+    NodeRunner.runMain(main, { [optionName]: false })
+    run({ disableErrorReporting: true })(main)
+  `,
+  expected: 5,
+  filePath: "packages/rly/scripts/visual/classify-git-changes.ts",
+  ruleId: "local-rules/require-rly-visual-classifier-runtime-error-reporting"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as NodeRunner from "@effect/platform-node/NodeRuntime"
+    import { runMain as run } from "@effect/platform-node/NodeRuntime"
+    import * as ForeignRuntime from "foreign-runtime"
+    NodeRunner.runMain(main)
+    run(main, { disableErrorReporting: false })
+    NodeRunner.runMain(main, { teardown })
+    ForeignRuntime.runMain(main, { disableErrorReporting: true })
+  `,
+  expected: 0,
+  filePath: "packages/rly/scripts/visual/classify-git-changes.ts",
+  ruleId: "local-rules/require-rly-visual-classifier-runtime-error-reporting"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Fx from "effect/Effect"
     Fx.runPromiseExit(program).then(handleExit)
     Fx.runPromise(program).catch(reportFailure)
@@ -2935,4 +3433,426 @@ await assertRuleDiagnostics({
   expected: 0,
   filePath: "packages/control-center/src/server/plugins/provider/eslint-opaque-locator-valid.ts",
   ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const inlineOptions = ChildProcess.make("assume", ["-cd", link, profile], {
+      stdout: "inherit",
+      env: { GRANTED_ALIAS_CONFIGURED: "true" }
+    })
+    const extracted = { env: { AWS_PROFILE: profile } }
+    const viaBinding = ChildProcess.make("git", args, extracted)
+    const frozen = Object.freeze({ env: { AWS_PROFILE: profile } })
+    const viaFrozenBinding = ChildProcess.make("git", args, frozen)
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-inheritance-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const namespaced = ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-namespace-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const augmented = ChildProcess.make("assume", ["-cd", link, profile], {
+      env: { GRANTED_ALIAS_CONFIGURED: "true" },
+      extendEnv: true
+    })
+    const isolated = { env: gitEnvironment, extendEnv: false }
+    const viaBinding = ChildProcess.make("git", args, isolated)
+    const noEnvironment = ChildProcess.make("aws", ["sso", "login", "--profile", profile], {
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+    const noOptions = ChildProcess.make("open", [url])
+    const argsOnlyBinding = ChildProcess.make("node", cliArgs)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-inheritance-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const base = { env: { AWS_PROFILE: profile } }
+    const viaSpread = ChildProcess.make("git", args, { ...base, stderr: "pipe" })
+    const frozenBase = Object.freeze({ env: { AWS_PROFILE: profile } })
+    const viaFrozenSpread = ChildProcess.make("git", args, { ...frozenBase })
+    const nestedBase = { ...base }
+    const viaNestedSpread = ChildProcess.make("git", args, { ...nestedBase, stderr: "pipe" })
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-spread-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: { AWS_PROFILE: profile }, extendEnv: true }
+    const viaSpread = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
+    const splitBase = { env: { AWS_PROFILE: profile } }
+    const viaSplitSpread = ChildProcess.make("git", args, { ...splitBase, extendEnv: false })
+    const opaque = ChildProcess.make("git", args, { ...buildOptions(), stderr: "pipe" })
+    const reassigned = ChildProcess.make("git", args, { ...mutable, stderr: "pipe" })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-spread-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    const direct = make("git", args, { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-direct-make-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make as spawn } from "effect/unstable/process/ChildProcess"
+    const aliasedBase = { env: { AWS_PROFILE: profile } }
+    const aliased = spawn("git", args, { ...aliasedBase, stderr: "pipe" })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-aliased-make-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { make as unrelatedMake } from "./unrelated.js"
+    const augmented = make("git", args, { env: { AWS_PROFILE: profile }, extendEnv: true })
+    const isolated = make("git", args, { env: gitEnvironment, extendEnv: false })
+    const foreign = unrelatedMake("git", args, { env: { AWS_PROFILE: profile } })
+    const shadowed = ((make) => make("git", args, { env: { AWS_PROFILE: profile } }))(unrelatedMake)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-direct-make-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Process from "effect/unstable/process"
+    const barrel = Process.ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
+    const barrelTwoArg = Process.ChildProcess.make("pbcopy", { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-barrel-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Process from "effect/unstable/process"
+    import * as Unrelated from "./unrelated.js"
+    const barrel = Process.ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreign = Unrelated.ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-barrel-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const completed = { env: gitEnvironment }
+    completed.extendEnv = true
+    const viaMutation = ChildProcess.make("git", args, completed)
+    const trimmed = { env: gitEnvironment, extendEnv: true }
+    delete trimmed.extendEnv
+    const viaDelete = ChildProcess.make("git", args, trimmed)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutated-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Process from "effect/unstable/process"
+    const { make } = ChildProcess
+    const destructured = make("git", args, { env: gitEnvironment })
+    const { make: spawn } = ChildProcess
+    const renamed = spawn("git", args, { env: gitEnvironment })
+    const Aliased = ChildProcess
+    const aliased = Aliased.make("git", args, { env: gitEnvironment })
+    const FromBarrel = Process.ChildProcess
+    const barrelAliased = FromBarrel.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/eslint-child-env-alias-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const Aliased = ChildProcess
+    const explicit = Aliased.make("git", args, { env: gitEnvironment, extendEnv: true })
+    let mutableAlias = ChildProcess
+    const viaMutableAlias = mutableAlias.make("git", args, { env: gitEnvironment })
+    const built = buildOptions()
+    const viaCallResult = ChildProcess.make("git", args, built)
+    const viaTernary = ChildProcess.make("git", args, ready ? { env: gitEnvironment, extendEnv: true } : baseOptions)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-alias-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const literalKey = ChildProcess.make("git", args, { ["env"]: gitEnvironment })
+    const templateKey = ChildProcess.make("git", args, { [\`env\`]: gitEnvironment })
+    const computedUndefined = ChildProcess.make("git", args, { env: gitEnvironment, ["extendEnv"]: undefined })
+    const computedVoid = ChildProcess.make("git", args, { env: gitEnvironment, [\`extendEnv\`]: void 0 })
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/eslint-child-env-computed-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Unrelated from "./unrelated-api.js"
+    const bothComputed = ChildProcess.make("git", args, { ["env"]: gitEnvironment, ["extendEnv"]: true })
+    const computedFalse = ChildProcess.make("git", args, { env: gitEnvironment, ["extendEnv"]: false })
+    const dynamicKey = ChildProcess.make("git", args, { env: gitEnvironment, [runtimeKey]: true })
+    const identifierKey = ChildProcess.make("git", args, { [env]: gitEnvironment })
+    const foreignNamespace = Unrelated.ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-computed-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const real = ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-effect-import-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "./foreign-child-process.js"
+    const foreign = ChildProcess.make("tool", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-foreign-name-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const escaping = { env: gitEnvironment }
+    configure(escaping)
+    const viaHelper = ChildProcess.make("git", args, escaping)
+    const stored = { env: gitEnvironment }
+    registry.options = stored
+    const viaStored = ChildProcess.make("git", args, stored)
+    const collected = { env: gitEnvironment }
+    const all = [collected]
+    const viaArray = ChildProcess.make("git", args, collected)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-escaping-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const contained = { env: gitEnvironment }
+    const viaContained = ChildProcess.make("git", args, contained)
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-contained-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const shared = { env: gitEnvironment }
+    const first = ChildProcess.make("a", [], shared)
+    const second = ChildProcess.make("b", [], shared)
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-shared-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const shared = { env: gitEnvironment, extendEnv: true }
+    const first = ChildProcess.make("a", [], shared)
+    const second = ChildProcess.make("b", [], shared)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-shared-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const spawn = ChildProcess.make
+    const extracted = spawn("git", args, { env: gitEnvironment })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-extracted-make-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Foreign from "./foreign-api.js"
+    const spawn = ChildProcess.make
+    const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreignSpawn = Foreign.ChildProcess.make
+    const foreign = foreignSpawn("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-extracted-make-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const explicitUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: undefined })
+    const voidUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: void 0 })
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-undefined-extendenv-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const isolated = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: false })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-undefined-extendenv-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const late = { env: gitEnvironment }
+    const afterCall = ChildProcess.make("git", args, late)
+    configure(late)
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutation-order-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const early = { env: gitEnvironment }
+    configure(early)
+    const beforeCall = ChildProcess.make("git", args, early)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutation-order-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: gitEnvironment, extendEnv: true }
+    const overridden = ChildProcess.make("git", args, { ...safeBase, extendEnv: undefined })
+    const bare = { env: gitEnvironment }
+    const stillMissing = ChildProcess.make("git", args, { ...bare, stderr: "pipe" })
+    const envArrivesLast = ChildProcess.make("git", args, { env: undefined, ...bare })
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-lastwrite-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: gitEnvironment, extendEnv: true }
+    const overriddenFalse = ChildProcess.make("git", args, { ...safeBase, extendEnv: false })
+    const inherited = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
+    const bare = { env: gitEnvironment }
+    const restored = ChildProcess.make("git", args, { ...bare, extendEnv: true })
+    const noEnvAtAll = ChildProcess.make("git", args, { env: undefined })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-lastwrite-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { ChildProcess } from "effect/unstable/process"
+    const spawn = make
+    const viaImportAlias = spawn("git", args, { env: gitEnvironment })
+    const extracted = ChildProcess.make
+    const secondLevel = extracted
+    const viaSecondAlias = secondLevel("git", args, { env: gitEnvironment })
+    const straight = { env: gitEnvironment }
+    const afterCall = ChildProcess.make("git", args, straight)
+    configure(straight)
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-makealias-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Foreign from "./foreign-api.js"
+    const spawn = make
+    const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreignMake = Foreign.make
+    const foreign = foreignMake("git", args, { env: gitEnvironment })
+    const deferredOptions = { env: gitEnvironment }
+    const run = () => ChildProcess.make("git", args, deferredOptions)
+    configure(deferredOptions)
+    run()
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-makealias-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })

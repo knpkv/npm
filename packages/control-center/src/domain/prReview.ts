@@ -139,6 +139,32 @@ export const PrReviewSuggestionState = Schema.Literals([
 /** Decoded suggestion presentation state. */
 export type PrReviewSuggestionState = typeof PrReviewSuggestionState.Type
 
+/** Human-selected reason a suggestion was dismissed. */
+export const PrReviewDismissalReason = Schema.Literals([
+  "false-positive",
+  "not-applicable",
+  "accepted-risk",
+  "duplicate",
+  "other"
+])
+
+/** Decoded dismissal reason retained with the immutable suggestion history. */
+export type PrReviewDismissalReason = typeof PrReviewDismissalReason.Type
+
+/** Explicit lifecycle result when comparing one immutable review head to another. */
+export const PrReviewSuggestionTransition = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  transition: Schema.Literals(["new", "still-present", "resolved", "reopened"]),
+  previousState: Schema.NullOr(PrReviewSuggestionState),
+  currentState: Schema.NullOr(PrReviewSuggestionState),
+  previousDismissalReason: Schema.optionalKey(PrReviewDismissalReason),
+  previousHead: Schema.NullOr(PrReviewSubject.fields.headRevision),
+  currentHead: PrReviewSubject.fields.headRevision
+})
+
+/** Decoded immutable-head suggestion transition. */
+export type PrReviewSuggestionTransition = typeof PrReviewSuggestionTransition.Type
+
 const PrReviewLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
 
 const PrReviewLocation = Schema.Struct({
@@ -318,6 +344,7 @@ export type PrReviewSuggestionDraft = typeof PrReviewSuggestionDraft.Type
 export const PrReviewSuggestion = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   state: PrReviewSuggestionState,
+  dismissalReason: Schema.optionalKey(PrReviewDismissalReason),
   ...prReviewSuggestionDraftFields,
   anchor: PrReviewSuggestionAnchor
 })
@@ -343,6 +370,28 @@ export const PrReviewSuggestion = Schema.Struct({
 
 /** Decoded PR-review suggestion. */
 export type PrReviewSuggestion = typeof PrReviewSuggestion.Type
+
+/**
+ * Canonical identity material for one suggestion across immutable review heads.
+ *
+ * Coordinates that move when a patch is edited (head revision, anchors, and
+ * line numbers) deliberately stay out of this material. The pull-request
+ * identity and the technical claim are the stable seam used by reconciliation.
+ */
+export const prReviewSuggestionIdentityMaterial = (
+  subject: PrReviewSubject,
+  suggestion: Pick<PrReviewSuggestionDraft, "title" | "problem" | "recommendation" | "evidence">
+): string =>
+  JSON.stringify([
+    subject.providerId,
+    subject.repository,
+    subject.pullRequestId,
+    suggestion.title,
+    suggestion.evidence.path,
+    suggestion.evidence.excerpt,
+    suggestion.problem,
+    suggestion.recommendation
+  ])
 
 /** Stable host-derived identity for a non-publishable review note. */
 export const PrReviewNoteId = Schema.String.check(
@@ -440,7 +489,9 @@ export const PrReviewReport = Schema.Struct({
       (notes) => new Set(notes.map(({ noteId }) => noteId)).size === notes.length,
       { expected: "unique PR review note identifiers" }
     )
-  )
+  ),
+  /** Host-derived lifecycle transitions; absent on agent-authored input. */
+  transitions: Schema.optionalKey(Schema.Array(PrReviewSuggestionTransition))
 })
   .check(
     Schema.makeFilter(
@@ -456,6 +507,57 @@ export const PrReviewReport = Schema.Struct({
 
 /** Decoded complete PR-review report. */
 export type PrReviewReport = typeof PrReviewReport.Type
+
+/** Reconcile stable suggestion identities across two immutable review heads. */
+export const reconcilePrReviewReports = (
+  previous: PrReviewReport,
+  current: PrReviewReport
+): ReadonlyArray<PrReviewSuggestionTransition> => {
+  const previousSuggestions = new Map(previous.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const currentSuggestions = new Map(current.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const transitions = new Array<PrReviewSuggestionTransition>()
+
+  for (const suggestion of current.suggestions) {
+    const prior = previousSuggestions.get(suggestion.suggestionId)
+    const materiallyChanged = prior === undefined
+      ? false
+      : prior.evidence.path !== suggestion.evidence.path ||
+        prior.evidence.startLine !== suggestion.evidence.startLine ||
+        prior.evidence.endLine !== suggestion.evidence.endLine ||
+        JSON.stringify(prior.anchor) !== JSON.stringify(suggestion.anchor)
+    const transition = prior === undefined
+      ? "new"
+      : (prior.state === "dismissed" || prior.state === "resolved") &&
+          suggestion.state === "reopened" &&
+          materiallyChanged
+      ? "reopened"
+      : "still-present"
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition,
+      previousState: prior?.state ?? null,
+      currentState: suggestion.state,
+      ...(prior?.dismissalReason === undefined ? {} : { previousDismissalReason: prior.dismissalReason }),
+      previousHead: prior === undefined ? null : previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  for (const suggestion of previous.suggestions) {
+    if (currentSuggestions.has(suggestion.suggestionId)) continue
+    if (suggestion.state === "dismissed" || suggestion.state === "resolved") continue
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition: "resolved",
+      previousState: suggestion.state,
+      currentState: null,
+      previousHead: previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  return transitions
+}
 
 /** Outcome derived by Control Center, never authored by the model. */
 export const PrReviewOutcome = Schema.Literals([

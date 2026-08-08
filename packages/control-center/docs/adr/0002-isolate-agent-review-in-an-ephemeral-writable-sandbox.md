@@ -13,3 +13,10 @@ removes only leftovers owned by the configured PR worker workspace.
 Foreign-workspace and legacy unscoped names remain untouched because ownership
 cannot be established. This amendment supersedes the global cleanup sentence
 above; the scoped per-run cleanup and isolation decision are unchanged.
+
+## Amendment: restart recovery evidence
+
+Startup now retains live, workspace-scoped sandbox names for recovery inspection. If no owned live
+sandbox remains, an active review is durably recorded as interrupted with an Unable to Conclude
+report before the worker admits later work. Provider session state is never reconstructed; a retry
+is a new immutable job and attempt. Per-run cleanup remains responsible for normal terminal runs.

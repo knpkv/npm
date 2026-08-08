@@ -9,7 +9,7 @@
  * @internal
  */
 
-import { Cause, Effect, Option, Schema, SubscriptionRef } from "effect"
+import { Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -59,7 +59,7 @@ const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: str
   Effect.gen(function*() {
     // Check other cached PRs from the same AWS account
     const allCached = yield* prRepo.findAll().pipe(
-      Effect.catchCause(() => Effect.succeed<Array<CachedPullRequest>>([]))
+      Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([]))
     )
     const sibling = allCached.find((p) => p.awsAccountId === awsAccountId)
     if (sibling) {
@@ -68,7 +68,7 @@ const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: str
 
     // Fall back to config — match by profile name (awsAccountId might be the profile name from URL)
     const configService = yield* ConfigService
-    const config = yield* configService.load.pipe(Effect.catchCause(() => Effect.succeed({ accounts: [] })))
+    const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
     if (configAccount && configAccount.regions?.[0]) {
       return resolvedAccount(configAccount.profile, configAccount.regions[0])
@@ -94,7 +94,7 @@ export const makeRefreshSinglePR = (
     // Also check cache
     const cachedPR = yield* prRepo.findByAccountAndId(awsAccountId, prId).pipe(
       Effect.map((row) => Option.some(row)),
-      Effect.catchCause(() => Effect.succeed(Option.none<CachedPullRequest>()))
+      Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
     )
 
     // Resolve account: from state PR → cached PR → any cached PR with same awsAccountId → config
@@ -110,7 +110,7 @@ export const makeRefreshSinglePR = (
     const detail = yield* awsClient.getPullRequest({
       account,
       pullRequestId: prId
-    }).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+    }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
     if (!detail) return
 
@@ -119,7 +119,7 @@ export const makeRefreshSinglePR = (
       account,
       pullRequestId: prId,
       repositoryName: detail.repositoryName
-    }).pipe(Effect.catchCause(() => Effect.succeed<Array<PRCommentLocation>>([])))
+    }).pipe(Effect.catch(() => Effect.succeed<Array<PRCommentLocation>>([])))
 
     // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
     const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
@@ -149,7 +149,7 @@ export const makeRefreshSinglePR = (
 
     // Diff for subscribed PRs
     const isSubscribed = yield* subscriptionRepo.isSubscribed(awsAccountId, prId).pipe(
-      Effect.catchCause(() => Effect.succeed(false))
+      Effect.catch(() => Effect.succeed(false))
     )
 
     if (isSubscribed && Option.isSome(cachedPR)) {
@@ -166,36 +166,29 @@ export const makeRefreshSinglePR = (
       yield* Effect.forEach([...prNotifications, ...poolNotifications], (n) => notificationRepo.add(n), {
         discard: true
       }).pipe(
-        Effect.catchCause(() => Effect.void)
+        Effect.catch(() => Effect.void)
       )
 
       // Diff comments
       const cachedComments = yield* commentRepo.find(awsAccountId, prId).pipe(
-        Effect.catchCause(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+        Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cachedComments)) {
         const commentNotifications = diffComments(cachedComments.value, locs, prId, awsAccountId)
         yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
-          Effect.catchCause(() => Effect.void)
+          Effect.catch(() => Effect.void)
         )
       }
     }
 
     // Cache comments
     yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs)).pipe(
-      Effect.catchCause(() => Effect.void)
+      Effect.catch(() => Effect.void)
     )
 
     // Always upsert fresh data to cache
-    yield* prRepo.upsert(freshUpsert).pipe(Effect.catchCause(() => Effect.void))
-  }, (effect) =>
-    effect.pipe(
-      Effect.catchCause((cause): Effect.Effect<void> =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.interrupt
-          : Effect.logWarning("refreshSinglePR failed", cause)
-      )
-    ))
+    yield* prRepo.upsert(freshUpsert).pipe(Effect.catch(() => Effect.void))
+  })
 
   return (awsAccountId: string, prId: PullRequestId): Effect.Effect<void, never, RefreshSinglePREnv> =>
     refreshSinglePR(awsAccountId, prId)

@@ -3,6 +3,7 @@
  *
  * @module
  */
+import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -22,7 +23,7 @@ import {
 } from "./AuthProfiles.js"
 import { getProfilesPath, type HomeDirectoryError, HomeDirectoryTag } from "./ConfigPaths.js"
 import { type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
-import { FileSystemError, isTokenExpired, loadOAuthConfig } from "./TokenStorage.js"
+import { FileSystemError, isTokenExpiredAt, loadOAuthConfig } from "./TokenStorage.js"
 
 export interface AtlassianToolDefinition {
   readonly toolName: string
@@ -37,6 +38,14 @@ export const JIRA_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:jira-work",
   "write:jira-work",
   "manage:jira-project",
+  "read:jira-user",
+  "read:me",
+  "offline_access"
+]
+
+/** Legacy read-only Jira requirements retained for proposal-only consumers. */
+export const JIRA_PROPOSAL_REQUIRED_SCOPES: ReadonlyArray<string> = [
+  "read:jira-work",
   "read:jira-user",
   "read:me",
   "offline_access"
@@ -135,7 +144,7 @@ const loadLegacyToken = (
     )
     const parsed = yield* Effect.try({
       try: () => JSON.parse(content),
-      catch: (cause) => cause
+      catch: (): "invalid-json" => "invalid-json"
     }).pipe(Effect.catch(() => Effect.succeed(null)))
     if (parsed === null) return null
     return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
@@ -166,12 +175,15 @@ export const inspectToolProfiles = (
     const [store, config] = yield* Effect.all([loadProfiles(storeName), loadOAuthConfig(storeName)])
     const activeProfile = store.profiles.find((profile) => profile.id === store.activeProfileId) ?? store.profiles[0] ??
       null
+    const nowMs = yield* Clock.currentTimeMillis
     return {
       tool,
       authStoreName: storeName,
       activeProfile,
       profiles: store.profiles,
-      tokenStatus: activeProfile === null ? "missing" : isTokenExpired(activeProfile.token, 0) ? "expired" : "valid",
+      tokenStatus: activeProfile === null ? "missing" : isTokenExpiredAt(activeProfile.token, nowMs, 0)
+        ? "expired"
+        : "valid",
       missingScopes: activeProfile === null ? [] : missingScopes(activeProfile.token, tool.requiredScopes),
       oauthConfigured: config !== null
     }
@@ -268,7 +280,8 @@ export const refreshActiveProfiles = (
         const store = yield* loadProfiles(storeName)
         const active = store.profiles.find((profile) => profile.id === store.activeProfileId) ?? store.profiles[0] ??
           null
-        if (!active || !isTokenExpired(active.token, 0)) return
+        const nowMs = yield* Clock.currentTimeMillis
+        if (!active || !isTokenExpiredAt(active.token, nowMs, 0)) return
         const config = yield* loadOAuthConfig(storeName)
         if (!config) {
           return yield* Effect.fail(new MissingOAuthConfigError({ authStoreName: storeName, profileId: active.id }))

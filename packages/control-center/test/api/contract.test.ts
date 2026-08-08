@@ -271,6 +271,7 @@ describe("ControlCenterApi contract", () => {
       "403",
       "404",
       "408",
+      "409",
       "413",
       "429",
       "503"
@@ -383,6 +384,7 @@ describe("ControlCenterApi contract", () => {
         ["pair", "POST", "/api/v1/session/pair"],
         ["current", "GET", "/api/v1/session/current"],
         ["list", "GET", "/api/v1/session"],
+        ["issueBrowserPairingCode", "POST", "/api/v1/session/device-code"],
         ["revoke", "DELETE", "/api/v1/session/:sessionId"],
         ["logout", "POST", "/api/v1/session/logout"]
       ]
@@ -527,6 +529,16 @@ describe("ControlCenterApi contract", () => {
         ],
         ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"],
         [
+          "cancelPullRequestReview",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/cancellation"
+        ],
+        [
+          "extendPullRequestReviewBudget",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/budget-extension"
+        ],
+        [
           "reviewSuggestionRevisions",
           "GET",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
@@ -535,6 +547,11 @@ describe("ControlCenterApi contract", () => {
           "editReviewSuggestion",
           "POST",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
+        ],
+        [
+          "targetReviewSuggestion",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/agent"
         ],
         [
           "dismissReviewSuggestion",
@@ -546,7 +563,8 @@ describe("ControlCenterApi contract", () => {
           "GET",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
         ],
-        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"]
+        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"],
+        ["submitReleasePublication", "POST", "/api/v1/agent/releases/:releaseId/publications"]
       ]
     )
   })
@@ -591,6 +609,7 @@ describe("ControlCenterApi contract", () => {
       pair: [],
       current: [SessionCookieAuth.key],
       list: [SessionCookieAuth.key],
+      issueBrowserPairingCode: [SessionCookieAuth.key, MutationCsrf.key],
       revoke: [SessionCookieAuth.key, MutationCsrf.key],
       logout: [SessionCookieAuth.key, MutationCsrf.key]
     })
@@ -670,11 +689,15 @@ describe("ControlCenterApi contract", () => {
       pullRequestReview: [SessionCookieAuth.key],
       pullRequestReviewThread: [SessionCookieAuth.key],
       enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      cancelPullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      extendPullRequestReviewBudget: [SessionCookieAuth.key, SessionMutationAuth.key],
       reviewSuggestionRevisions: [SessionCookieAuth.key],
       editReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      targetReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       dismissReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       previewReviewSuggestionPublication: [SessionCookieAuth.key],
-      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key]
+      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      submitReleasePublication: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
@@ -701,6 +724,10 @@ describe("ControlCenterApi contract", () => {
     const vendorImmutableId = VendorImmutableId.make("184")
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
+    assert.strictEqual(
+      urls.session.issueBrowserPairingCode(),
+      "https://control.example/api/v1/session/device-code"
+    )
     assert.strictEqual(
       urls.session.revoke({ params: { sessionId } }),
       "https://control.example/api/v1/session/01890f6f-6d6a-7cc0-98d2-000000000091"

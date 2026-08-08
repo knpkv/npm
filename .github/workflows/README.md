@@ -239,6 +239,24 @@ are environment secrets. The only artifact is the pre-credential runner bundle; 
 logs, credentials, and runtime evidence are never uploaded. The test prints no raw provider payloads
 and fails before allocating its scoped temporary server when configuration is incomplete. Local
 invocation and the complete variable list are documented in `packages/control-center/README.md`.
+The AWS role, CodeCommit repository, CodePipeline pipeline, and private artifact bucket are defined
+in `infra/control-center-live-aws`. Its bootstrap publishes the four non-secret AWS environment
+variables. The GitHub environment uses a custom deployment branch policy allowing only `main`, and
+the AWS trust policy independently binds the OIDC subject to this exact repository and environment.
+
+### Control Center Live AWS Probe (`control-center-live-aws-probe.yml`)
+
+**Purpose**: Prove the GitHub OIDC trust and stable AWS fixtures independently of Atlassian
+configuration.
+
+This manual workflow first builds and uploads a one-day checksum-sealed Control Center runner in an
+unprivileged `contents: read` job. The protected job contains no checkout, install, or build step;
+it verifies the runner before assuming the same temporary read-only role. A bounded CLI probe
+validates the role account, open CodeCommit pull request and exact diff, and successful CodePipeline
+execution/action history. The sealed runner then invokes the production Control Center CodeCommit
+and CodePipeline clients with profile `default` and independently proves both clients resolve the
+expected account and fixtures. It emits only success markers, not account identifiers or raw
+provider payloads.
 
 ## Dependency Install Protection
 

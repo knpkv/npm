@@ -4,7 +4,9 @@
  * @module
  */
 
-// Endpoints and scopes
+// Endpoints and legacy public scope sets. Control Center owns a separate
+// least-privilege release-publication set; proposal-only consumers can use
+// JIRA_PROPOSAL_SCOPES and other write-capable consumers can use JIRA_SCOPES.
 export {
   AUTH_URL,
   buildAuthUrl,
@@ -12,6 +14,7 @@ export {
   computeCodeChallenge,
   CONFLUENCE_SCOPES,
   generateCodeVerifier,
+  JIRA_PROPOSAL_SCOPES,
   JIRA_SCOPES,
   ME_URL,
   RESOURCES_URL,
@@ -25,6 +28,7 @@ export { AuthMissingError, OAuthError, OAuthNotConfiguredError, type OAuthStep }
 // Operations
 export {
   buildOAuthToken,
+  buildOAuthTokenAt,
   exchangeCodeForTokens,
   type ExchangeCodeOptions,
   getAccessibleResources,

@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Ref } from "effect"
+import { Cause, Context, Effect, Layer, Ref } from "effect"
 import type { Success } from "effect/Effect"
 import type { PullRequestId, RepositoryName, SandboxId } from "../Domain.js"
 
@@ -45,7 +45,10 @@ const makePluginService = Effect.gen(function*() {
             const fn = p[hook]
             if (!fn) return Effect.void
             return fn(ctx).pipe(
-              Effect.catchCause((cause) => Effect.logWarning(`Plugin ${p.name} ${hook} failed`, cause))
+              Effect.catchCauseIf(
+                (cause) => !Cause.hasInterrupts(cause),
+                (cause) => Effect.logWarning(`Plugin ${p.name} ${hook} failed`, cause)
+              )
             )
           }, { discard: true })
         ),

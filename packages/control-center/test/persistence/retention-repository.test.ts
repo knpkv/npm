@@ -10,6 +10,7 @@ import {
   persistenceLayerFromDatabase
 } from "../../src/server/persistence/Persistence.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { descriptorIt } from "../fixtures/descriptorPublication.js"
 import { fixtureWorkspaceIds, makePersistenceTestConfig } from "./fixtures.js"
 
 const WORKSPACE_ID = fixtureWorkspaceIds.alpha
@@ -169,6 +170,17 @@ const seedRetentionFixtures = Effect.gen(function*() {
       ${payload}, ${PREFIXED_DIGEST}, length(CAST(${payload} AS BLOB)),
       '2024-01-01T00:00:00.000Z'
     )`
+  yield* database.sql`INSERT INTO agent_jobs (
+      workspace_id, job_id, thread_id, release_id, provider_id, model, access,
+      prompt, context_fingerprint, subject_revision, task_context_json,
+      task_context_digest, state, created_at, cancel_requested_at, terminal_at
+    ) VALUES (
+      ${WORKSPACE_ID}, '01890f6f-6d6a-7cc0-98d2-000000000305',
+      '01890f6f-6d6a-7cc0-98d2-000000000303', 'release-retention',
+      'fake', NULL, 'read-only', 'old operational job', ${PREFIXED_DIGEST},
+      'release-revision:1', '{}', ${PREFIXED_DIGEST}, 'failed',
+      '2024-01-01T00:00:00.000Z', NULL, '2024-01-01T01:00:00.000Z'
+    )`
 })
 
 describe("RetentionRepository", () => {
@@ -180,91 +192,100 @@ describe("RetentionRepository", () => {
       assert.isTrue(Result.isSuccess(result))
     }))
 
-  it.effect("bounds cleanup, protects held/current records, and attributes every class", () =>
-    withPersistence(
-      Effect.gen(function*() {
-        yield* seedRetentionFixtures
-        yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
-        const persistence = yield* Persistence
-        const database = yield* Database
+  descriptorIt.effect(
+    "bounds cleanup, protects held/current records, and attributes every class",
+    () =>
+      withPersistence(
+        Effect.gen(function*() {
+          yield* seedRetentionFixtures
+          yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+          const persistence = yield* Persistence
+          const database = yield* Database
 
-        const runs = yield* persistence.retention.sweepWorkspace(WORKSPACE_ID)
-        assert.deepStrictEqual(
-          runs.map(({ deletedCount, retentionClass, selectedCount }) => ({
-            deletedCount,
-            retentionClass,
-            selectedCount
-          })),
-          [
-            { deletedCount: 1, retentionClass: "audit-replay", selectedCount: 1 },
-            { deletedCount: 2, retentionClass: "reproducible-content", selectedCount: 2 },
-            { deletedCount: 1, retentionClass: "evidence", selectedCount: 1 },
-            { deletedCount: 1, retentionClass: "agent-content", selectedCount: 1 }
-          ]
-        )
+          const runs = yield* persistence.retention.sweepWorkspace(WORKSPACE_ID)
+          assert.deepStrictEqual(
+            runs.map(({ deletedCount, retentionClass, selectedCount }) => ({
+              deletedCount,
+              retentionClass,
+              selectedCount
+            })),
+            [
+              { deletedCount: 1, retentionClass: "audit-replay", selectedCount: 1 },
+              { deletedCount: 2, retentionClass: "reproducible-content", selectedCount: 2 },
+              { deletedCount: 1, retentionClass: "evidence", selectedCount: 1 },
+              { deletedCount: 0, retentionClass: "sandbox-artifact", selectedCount: 0 },
+              { deletedCount: 1, retentionClass: "agent-content", selectedCount: 1 }
+            ]
+          )
 
-        const events = yield* database.sql<{ readonly eventCursor: number }>`SELECT event_cursor AS eventCursor
+          const events = yield* database.sql<{ readonly eventCursor: number }>`SELECT event_cursor AS eventCursor
         FROM domain_events ORDER BY event_cursor`
-        assert.deepStrictEqual(
-          events.map(({ eventCursor }) => eventCursor),
-          [2]
-        )
-        const streams = yield* database.sql<{ readonly prunedThroughCursor: number }>`SELECT
+          assert.deepStrictEqual(
+            events.map(({ eventCursor }) => eventCursor),
+            [2]
+          )
+          const streams = yield* database.sql<{ readonly prunedThroughCursor: number }>`SELECT
           pruned_through_cursor AS prunedThroughCursor
         FROM domain_event_streams WHERE workspace_id = ${WORKSPACE_ID}`
-        assert.strictEqual(streams[0]?.prunedThroughCursor, 1)
-        const cacheEntries = yield* database.sql`SELECT content_digest FROM diff_content_cache_entries
+          assert.strictEqual(streams[0]?.prunedThroughCursor, 1)
+          const cacheEntries = yield* database.sql`SELECT content_digest FROM diff_content_cache_entries
         WHERE workspace_id = ${WORKSPACE_ID}`
-        const cacheBlobs = yield* database.sql`SELECT digest FROM content_blobs
+          const cacheBlobs = yield* database.sql`SELECT digest FROM content_blobs
         WHERE workspace_id = ${WORKSPACE_ID}
           AND storage_class = 'reproducible-cache'`
-        const durableBlobs = yield* database.sql`SELECT digest FROM content_blobs
+          const durableBlobs = yield* database.sql`SELECT digest FROM content_blobs
         WHERE workspace_id = ${WORKSPACE_ID}
           AND storage_class = 'durable'`
-        const cleanupIntents = yield* database.sql`SELECT content_digest
+          const cleanupIntents = yield* database.sql`SELECT content_digest
         FROM diff_content_cache_cleanup
         WHERE workspace_id = ${WORKSPACE_ID}`
-        assert.lengthOf(cacheEntries, 0)
-        assert.lengthOf(cacheBlobs, 0)
-        assert.lengthOf(durableBlobs, 1)
-        assert.lengthOf(cleanupIntents, 0)
+          assert.lengthOf(cacheEntries, 0)
+          assert.lengthOf(cacheBlobs, 0)
+          assert.lengthOf(durableBlobs, 1)
+          assert.lengthOf(cleanupIntents, 0)
 
-        const evidence = yield* database.sql<{ readonly evidenceId: string }>`SELECT evidence_id AS evidenceId
+          const evidence = yield* database.sql<{ readonly evidenceId: string }>`SELECT evidence_id AS evidenceId
         FROM evidence_items ORDER BY evidence_id`
-        assert.deepStrictEqual(
-          evidence.map(({ evidenceId }) => evidenceId),
-          ["evidence-held-2", "evidence-referenced-3"]
-        )
-        const jobs = yield* database.sql`SELECT job_id FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID}`
-        const agentEvents = yield* database.sql`SELECT event_sequence FROM agent_thread_events
+          assert.deepStrictEqual(
+            evidence.map(({ evidenceId }) => evidenceId),
+            ["evidence-held-2", "evidence-referenced-3"]
+          )
+          const jobs = yield* database.sql<{ readonly jobId: string }>`SELECT job_id AS jobId
+          FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID}`
+          const agentEvents = yield* database.sql<
+            { readonly eventSequence: number }
+          >`SELECT event_sequence AS eventSequence
+        FROM agent_thread_events
         WHERE workspace_id = ${WORKSPACE_ID}`
-        assert.lengthOf(jobs, 0)
-        assert.lengthOf(agentEvents, 0)
+          assert.deepStrictEqual(jobs.map(({ jobId }) => jobId), [
+            "01890f6f-6d6a-7cc0-98d2-000000000304"
+          ])
+          assert.deepStrictEqual(agentEvents.map(({ eventSequence }) => eventSequence), [1])
 
-        const persistedRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
-        assert.lengthOf(persistedRuns, 4)
-        assert.isTrue(persistedRuns.every(({ policyRevision }) => policyRevision === 1))
-        const residualClaims = yield* database.sql`SELECT record_key
+          const persistedRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
+          assert.lengthOf(persistedRuns, 5)
+          assert.isTrue(persistedRuns.every(({ policyRevision }) => policyRevision === 1))
+          const residualClaims = yield* database.sql`SELECT record_key
         FROM retention_cleanup_claims
         WHERE workspace_id = ${WORKSPACE_ID}`
-        assert.lengthOf(residualClaims, 0)
-        const evidenceRun = persistedRuns.find(
-          ({ retentionClass }) => retentionClass === "evidence"
-        )
-        assert.isDefined(evidenceRun)
-        if (evidenceRun !== undefined) {
-          const mismatchedClaim = yield* database.sql`INSERT INTO retention_cleanup_claims (
+          assert.lengthOf(residualClaims, 0)
+          const evidenceRun = persistedRuns.find(
+            ({ retentionClass }) => retentionClass === "evidence"
+          )
+          assert.isDefined(evidenceRun)
+          if (evidenceRun !== undefined) {
+            const mismatchedClaim = yield* database.sql`INSERT INTO retention_cleanup_claims (
             workspace_id, run_id, retention_class, record_key
           ) VALUES (
             ${WORKSPACE_ID}, ${evidenceRun.runId}, 'agent-content', 'mismatched-class'
           )`.pipe(Effect.result)
-          assert.isTrue(Result.isFailure(mismatchedClaim))
-        }
-        const mutation = yield* database.sql`UPDATE retention_cleanup_runs
+            assert.isTrue(Result.isFailure(mismatchedClaim))
+          }
+          const mutation = yield* database.sql`UPDATE retention_cleanup_runs
         SET deleted_count = 0
         WHERE workspace_id = ${WORKSPACE_ID}`.pipe(Effect.result)
-        assert.isTrue(Result.isFailure(mutation))
-        yield* database.sql`INSERT INTO evidence_items (
+          assert.isTrue(Result.isFailure(mutation))
+          yield* database.sql`INSERT INTO evidence_items (
           workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
           plugin_connection_id, source_entity_id, source_entity_revision, person_id,
           agent_id, system_component, verifier_kind, verifier_person_id,
@@ -277,14 +298,15 @@ describe("RetentionRepository", () => {
           '2026-01-01T00:00:00.000Z', NULL, '{}', ${"6".repeat(64)},
           'evidence', ${EXPIRED_AT}, 0
         )`
-        const postRunDelete = yield* database.sql`DELETE FROM evidence_items
+          const postRunDelete = yield* database.sql`DELETE FROM evidence_items
         WHERE workspace_id = ${WORKSPACE_ID}
           AND evidence_id = 'evidence-expired-after-run'`.pipe(Effect.result)
-        assert.isTrue(Result.isFailure(postRunDelete))
-      })
-    ))
+          assert.isTrue(Result.isFailure(postRunDelete))
+        })
+      )
+  )
 
-  it.effect("skips mixed-age agent history without starving an eligible job", () =>
+  descriptorIt.effect("skips mixed-age agent history without starving an eligible job", () =>
     withPersistence(
       Effect.gen(function*() {
         yield* seedRetentionFixtures
@@ -359,8 +381,11 @@ describe("RetentionRepository", () => {
         )
 
         assert.deepStrictEqual(
-          remainingJobs.map(({ jobId }) => jobId),
-          [protectedJobId]
+          remainingJobs.map(({ jobId }) => jobId).sort(),
+          [
+            protectedJobId,
+            eligibleJobId
+          ].sort()
         )
         assert.lengthOf(remainingRevisions, 1)
         assert.strictEqual(agentRun?.selectedCount, 1)
@@ -368,20 +393,23 @@ describe("RetentionRepository", () => {
       })
     ))
 
-  it.effect("keeps immutable evidence and agent events protected without a cleanup run", () =>
-    withPersistence(
-      Effect.gen(function*() {
-        yield* seedRetentionFixtures
-        const database = yield* Database
-        const evidenceDelete = yield* database.sql`DELETE FROM evidence_items
+  descriptorIt.effect(
+    "keeps immutable evidence and agent events protected without a cleanup run",
+    () =>
+      withPersistence(
+        Effect.gen(function*() {
+          yield* seedRetentionFixtures
+          const database = yield* Database
+          const evidenceDelete = yield* database.sql`DELETE FROM evidence_items
         WHERE workspace_id = ${WORKSPACE_ID}
           AND evidence_id = 'evidence-expired-1'`.pipe(Effect.result)
-        const eventDelete = yield* database.sql`DELETE FROM agent_thread_events
+          const eventDelete = yield* database.sql`DELETE FROM agent_thread_events
         WHERE workspace_id = ${WORKSPACE_ID}`.pipe(Effect.result)
-        assert.isTrue(Result.isFailure(evidenceDelete))
-        assert.isTrue(Result.isFailure(eventDelete))
-      })
-    ))
+          assert.isTrue(Result.isFailure(evidenceDelete))
+          assert.isTrue(Result.isFailure(eventDelete))
+        })
+      )
+  )
 
   it.effect("prunes only the bounded contiguous replay prefix", () =>
     withPersistence(

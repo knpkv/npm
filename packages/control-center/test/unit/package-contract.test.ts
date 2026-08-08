@@ -10,6 +10,7 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
+    "@aws-sdk/client-codepipeline": "^3.1085.0",
     "@aws-sdk/credential-providers": "^3.1085.0",
     "@effect/ai-openai-compat": "4.0.0-beta.98",
     "@effect/platform-browser": "4.0.0-beta.98",
@@ -113,12 +114,14 @@ describe("package contract", () => {
         ...validManifest,
         dependencies: {
           ...validManifest.dependencies,
+          "@aws-sdk/client-codepipeline": "latest",
           "@aws-sdk/credential-providers": "latest",
           "@distilled.cloud/aws": "latest"
         }
       })
     ).toEqual(expect.arrayContaining([
       "@distilled.cloud/aws must remain on the reviewed CodePipeline client version",
+      "AWS CodePipeline client must remain on the reviewed runtime version",
       "AWS credential providers must remain on the reviewed runtime version"
     ]))
   })

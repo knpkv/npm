@@ -10,7 +10,7 @@ import {
   governedActionAuthorizationMatchesTransition,
   governedActionAuthorizationMismatches
 } from "../../../../domain/governedAction/index.js"
-import { GovernedActionId } from "../../../../domain/identifiers.js"
+import { GovernedActionId, ReleaseId } from "../../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
@@ -31,6 +31,7 @@ import type {
   GovernedActionIdempotencyReadInput,
   GovernedActionReadInput,
   GovernedActionRecord,
+  GovernedActionReleasePublicationReadInput,
   GovernedActionTargetReadInput
 } from "./contract.js"
 import { captureMalformedGovernedActionRow } from "./quarantine.js"
@@ -49,6 +50,11 @@ const TERMINAL_TARGET_PAGE_SIZE = 100
 const GovernedActionTargetCandidateIdentity = Schema.Struct({
   actionId: GovernedActionId,
   sortAt: UtcTimestamp
+})
+
+const GovernedActionReleasePublicationCandidate = Schema.Struct({
+  actionId: GovernedActionId,
+  releaseId: ReleaseId
 })
 
 const malformed = (
@@ -685,5 +691,99 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     return selectLatestTerminalByTarget(request, candidates)
   })
 
-  return { read, readByIdempotencyKey, readLatestTerminalByTarget }
+  const readLatestTerminalReleasePublications = Effect.fn(
+    "GovernedActionReader.readLatestTerminalReleasePublications"
+  )(function*(request: GovernedActionReleasePublicationReadInput) {
+    const releaseIdsJson = JSON.stringify(request.releaseIds)
+    const rows = yield* sql<Record<string, unknown>>`WITH requested_release_ids AS (
+        SELECT value AS releaseId
+        FROM json_each(${releaseIdsJson})
+      ),
+      ranked_publications AS (
+        SELECT
+          publication.action_id AS actionId,
+          publication.release_id AS releaseId,
+          ROW_NUMBER() OVER (
+            PARTITION BY publication.release_id
+            ORDER BY action.updated_at DESC, action.action_id DESC
+          ) AS candidateRank
+        FROM governed_action_release_publications AS publication
+        JOIN governed_actions AS action
+          ON action.workspace_id = publication.workspace_id
+          AND action.action_id = publication.action_id
+        JOIN governed_action_target_dimensions AS dimensions
+          ON dimensions.workspace_id = action.workspace_id
+          AND dimensions.action_id = action.action_id
+        JOIN requested_release_ids AS requested
+          ON requested.releaseId = publication.release_id
+        WHERE publication.workspace_id = ${request.workspaceId}
+          AND publication.provider_id = ${request.providerId}
+          AND action.state IN (
+            'proposed', 'authorized', 'started', 'cancel-requested',
+            'unknown', 'cancel-requested-unknown', 'succeeded'
+          )
+          AND dimensions.action_kind IN ('create-page', 'update-page')
+      )
+      SELECT actionId, releaseId
+      FROM ranked_publications
+      WHERE candidateRank = 1
+      ORDER BY releaseId`
+    const candidates = yield* Schema.decodeUnknownEffect(
+      Schema.Array(GovernedActionReleasePublicationCandidate).check(
+        Schema.isMaxLength(request.releaseIds.length)
+      )
+    )(rows).pipe(
+      Effect.mapError(() =>
+        new PersistedRecordError({
+          workspaceId: request.workspaceId,
+          recordKind: "governed-action",
+          recordKey: request.workspaceId,
+          diagnosticCode: "governed-action-schema-invalid"
+        })
+      )
+    )
+    return yield* Effect.forEach(
+      candidates,
+      ({ actionId, releaseId }) =>
+        read({ workspaceId: request.workspaceId, actionId }).pipe(
+          Effect.flatMap((record) => {
+            const publication = record.envelope.releasePublication
+            const actionKind = record.envelope.proposal.request.actionKind
+            return publication !== undefined &&
+                publication.releaseId === releaseId &&
+                record.envelope.providerId === request.providerId &&
+                (actionKind === "create-page" || actionKind === "update-page") &&
+                (
+                  record.head.state === "proposed" ||
+                  record.head.state === "authorized" ||
+                  record.head.state === "started" ||
+                  record.head.state === "cancel-requested" ||
+                  record.head.state === "unknown" ||
+                  record.head.state === "cancel-requested-unknown" ||
+                  (
+                    record.head.state === "succeeded" &&
+                    record.head.lineage._tag === "terminal" &&
+                    record.head.lineage.receipt.status === "succeeded"
+                  )
+                )
+              ? Effect.succeed(record)
+              : Effect.fail(
+                new PersistedRecordError({
+                  workspaceId: request.workspaceId,
+                  recordKind: "governed-action",
+                  recordKey: actionId,
+                  diagnosticCode: "governed-action-identity-mismatch"
+                })
+              )
+          })
+        )
+    )
+  })
+
+  return {
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications
+  }
 })

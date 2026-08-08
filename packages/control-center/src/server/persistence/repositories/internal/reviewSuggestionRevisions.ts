@@ -493,143 +493,183 @@ export const makeReviewSuggestionRevisionOperations = <
     )
   })
 
-  const append = Effect.fn("ReviewSuggestionRevisions.append")(function*(
+  const appendInTransaction = Effect.fn("ReviewSuggestionRevisions.appendInTransaction")(function*(
     input: typeof AppendReviewSuggestionRevisionInput.Type
   ) {
     const request = yield* Schema.decodeUnknownEffect(
       Schema.toType(AppendReviewSuggestionRevisionInput)
     )(input)
-    return yield* database.transaction(
-      Effect.gen(function*() {
-        const current = yield* currentRevision(
-          request.workspaceId,
-          request.jobId,
-          request.suggestionId
-        )
-        const expectedRevisionId = yield* deriveRevisionId(
-          request.jobId,
-          request.suggestionId,
-          request.expectedSequence
-        )
-        if (expectedRevisionId !== request.expectedRevisionId) {
+    return yield* Effect.gen(function*() {
+      if (request.leaseFence !== undefined) {
+        const activeFence = yield* sql`SELECT 1
+            FROM agent_jobs job
+            JOIN agent_job_leases lease
+              ON lease.workspace_id = job.workspace_id
+              AND lease.job_id = job.job_id
+              AND lease.attempt_sequence = ${request.leaseFence.attemptSequence}
+              AND lease.lease_token = ${request.leaseFence.leaseToken}
+            WHERE job.workspace_id = ${request.workspaceId}
+              AND job.job_id = ${request.leaseFence.jobId}
+              AND job.state = 'running'
+              AND job.cancel_requested_at IS NULL
+              AND lease.lease_expires_at > ${
+          Schema.encodeSync(
+            PrReviewSuggestionRevision.fields.createdAt
+          )(request.createdAt)
+        }
+            LIMIT 1`
+        if (activeFence.length !== 1) {
           return yield* new AgentJobInputError({
             workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "revision-identity-mismatch"
+            jobId: request.leaseFence.jobId,
+            reason: "cancellation-requested"
           })
         }
-        if (
-          current.revisionId !== request.expectedRevisionId ||
-          current.sequence !== request.expectedSequence
-        ) {
-          return yield* new RevisionConflictError({
-            workspaceId: request.workspaceId,
-            recordKind: "agent-review-suggestion-revision",
-            recordKey: revisionRecordKey(
-              request.jobId,
-              request.suggestionId
-            ),
-            expectedRevision: request.expectedSequence,
-            actualRevision: current.sequence
-          })
-        }
-        const currentEdit = yield* Schema.decodeUnknownEffect(
-          Schema.toType(PrReviewSuggestionEdit)
-        )(current.suggestion).pipe(
-          Effect.mapError(() =>
-            recordFailure(
-              request.workspaceId,
-              request.jobId,
-              request.suggestionId,
-              "agent-review-current-edit-invalid"
-            )
+      }
+      const current = yield* currentRevision(
+        request.workspaceId,
+        request.jobId,
+        request.suggestionId
+      )
+      const expectedRevisionId = yield* deriveRevisionId(
+        request.jobId,
+        request.suggestionId,
+        request.expectedSequence
+      )
+      if (expectedRevisionId !== request.expectedRevisionId) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "revision-identity-mismatch"
+        })
+      }
+      if (
+        current.revisionId !== request.expectedRevisionId ||
+        current.sequence !== request.expectedSequence
+      ) {
+        return yield* new RevisionConflictError({
+          workspaceId: request.workspaceId,
+          recordKind: "agent-review-suggestion-revision",
+          recordKey: revisionRecordKey(
+            request.jobId,
+            request.suggestionId
+          ),
+          expectedRevision: request.expectedSequence,
+          actualRevision: current.sequence
+        })
+      }
+      const currentEdit = yield* Schema.decodeUnknownEffect(
+        Schema.toType(PrReviewSuggestionEdit)
+      )(current.suggestion).pipe(
+        Effect.mapError(() =>
+          recordFailure(
+            request.workspaceId,
+            request.jobId,
+            request.suggestionId,
+            "agent-review-current-edit-invalid"
           )
         )
-        const currentEditJson = yield* Schema.encodeUnknownEffect(
-          Schema.fromJsonString(PrReviewSuggestionEdit)
-        )(currentEdit).pipe(
-          Effect.mapError(() => operationFailure("agent-job.encode-current-review-edit"))
-        )
-        const requestedEditJson = yield* Schema.encodeUnknownEffect(
-          Schema.fromJsonString(PrReviewSuggestionEdit)
-        )(request.edit).pipe(
-          Effect.mapError(() => operationFailure("agent-job.encode-requested-review-edit"))
-        )
-        if (currentEditJson === requestedEditJson && request.state === undefined) return current
-        const activePublication = yield* sql`SELECT 1
+      )
+      const currentEditJson = yield* Schema.encodeUnknownEffect(
+        Schema.fromJsonString(PrReviewSuggestionEdit)
+      )(currentEdit).pipe(
+        Effect.mapError(() => operationFailure("agent-job.encode-current-review-edit"))
+      )
+      const requestedEditJson = yield* Schema.encodeUnknownEffect(
+        Schema.fromJsonString(PrReviewSuggestionEdit)
+      )(request.edit).pipe(
+        Effect.mapError(() => operationFailure("agent-job.encode-requested-review-edit"))
+      )
+      if (
+        currentEditJson === requestedEditJson &&
+        request.state === undefined &&
+        request.validation === undefined
+      ) return current
+      const activePublication = yield* sql`SELECT 1
           FROM agent_review_suggestion_publications
           WHERE workspace_id = ${request.workspaceId}
             AND job_id = ${request.jobId}
             AND suggestion_id = ${request.suggestionId}
           LIMIT 1`
-        if (activePublication.length > 0) {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
-          })
-        }
-        if (
-          current.suggestion.state !== "draft" ||
-          (
-            request.edit.replacement !== undefined &&
-            request.edit.replacement.reviewedHead !==
-              current.subject.headRevision
-          ) ||
-          DateTime.Order(request.createdAt, current.createdAt) < 0
-        ) {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
-          })
-        }
-        const sequence = PrReviewSuggestionRevisionSequence.make(
-          current.sequence + 1
-        )
-        const revisionId = yield* deriveRevisionId(
-          request.jobId,
-          request.suggestionId,
-          sequence
-        )
-        const validation = hasSamePrReviewTechnicalClaim(
-            currentEdit,
-            request.edit
-          )
-          ? current.validation
-          : PrReviewSuggestionRequiresRevalidation.make({
-            reviewedHead: current.subject.headRevision,
-            sourceRevisionId: current.revisionId,
-            reason: request.author._tag === "agent"
-              ? "agent-edit-not-validated"
-              : "technical-claim-edited"
-          })
-        const suggestion = yield* Schema.decodeUnknownEffect(
-          Schema.toType(PrReviewSuggestion)
-        )({
-          suggestionId: request.suggestionId,
-          state: request.state ?? current.suggestion.state,
-          ...request.edit
-        }).pipe(
-          Effect.mapError(() => operationFailure("agent-job.review-revision-suggestion-invalid"))
-        )
-        const revision = yield* Effect.try({
-          try: () =>
-            PrReviewSuggestionRevision.make({
-              revisionId,
-              sequence,
-              predecessorRevisionId: current.revisionId,
-              sourceJobId: request.jobId,
-              subject: current.subject,
-              suggestion,
-              validation,
-              author: request.author,
-              createdAt: request.createdAt
-            }),
-          catch: () => operationFailure("agent-job.review-revision-invalid")
+      if (activePublication.length > 0) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "invalid-transition"
         })
-        const encoded = yield* encodeRevision(request.workspaceId, revision)
-        yield* sql`INSERT INTO agent_review_suggestion_revisions (
+      }
+      if (
+        (
+          current.suggestion.state !== "draft" &&
+          !(request.state === "stale" && current.suggestion.state === "published")
+        ) ||
+        (request.state === "dismissed" && request.dismissalReason === undefined) ||
+        (request.state !== "dismissed" && request.dismissalReason !== undefined) ||
+        (
+          request.edit.replacement !== undefined &&
+          request.edit.replacement.reviewedHead !==
+            current.subject.headRevision
+        ) ||
+        DateTime.Order(request.createdAt, current.createdAt) < 0
+      ) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "invalid-transition"
+        })
+      }
+      const sequence = PrReviewSuggestionRevisionSequence.make(
+        current.sequence + 1
+      )
+      const revisionId = yield* deriveRevisionId(
+        request.jobId,
+        request.suggestionId,
+        sequence
+      )
+      const isAgentValidation = request.validation === "validated" &&
+        request.author._tag === "agent"
+      const validation = isAgentValidation
+        ? PrReviewSuggestionValidated.make({
+          reviewedHead: current.subject.headRevision,
+          validatingJobId: request.author.jobId,
+          sourceRevisionId: current.revisionId
+        })
+        : hasSamePrReviewTechnicalClaim(currentEdit, request.edit)
+        ? current.validation
+        : PrReviewSuggestionRequiresRevalidation.make({
+          reviewedHead: current.subject.headRevision,
+          sourceRevisionId: current.revisionId,
+          reason: request.author._tag === "agent"
+            ? "agent-edit-not-validated"
+            : "technical-claim-edited"
+        })
+      const suggestion = yield* Schema.decodeUnknownEffect(
+        Schema.toType(PrReviewSuggestion)
+      )({
+        suggestionId: request.suggestionId,
+        state: request.state ?? current.suggestion.state,
+        ...(request.dismissalReason === undefined ? {} : { dismissalReason: request.dismissalReason }),
+        ...request.edit
+      }).pipe(
+        Effect.mapError(() => operationFailure("agent-job.review-revision-suggestion-invalid"))
+      )
+      const revision = yield* Effect.try({
+        try: () =>
+          PrReviewSuggestionRevision.make({
+            revisionId,
+            sequence,
+            predecessorRevisionId: current.revisionId,
+            sourceJobId: request.jobId,
+            subject: current.subject,
+            suggestion,
+            validation,
+            author: request.author,
+            createdAt: request.createdAt
+          }),
+        catch: () => operationFailure("agent-job.review-revision-invalid")
+      })
+      const encoded = yield* encodeRevision(request.workspaceId, revision)
+      yield* sql`INSERT INTO agent_review_suggestion_revisions (
           workspace_id, source_job_id, suggestion_id, revision_sequence,
           revision_id, predecessor_revision_id, revision_json,
           revision_digest, created_at
@@ -638,33 +678,38 @@ export const makeReviewSuggestionRevisionOperations = <
           ${sequence}, ${revisionId}, ${current.revisionId},
           ${encoded.json}, ${encoded.digest},
           ${
-          Schema.encodeSync(PrReviewSuggestionRevision.fields.createdAt)(
-            request.createdAt
-          )
-        }
+        Schema.encodeSync(PrReviewSuggestionRevision.fields.createdAt)(
+          request.createdAt
+        )
+      }
         )`
-        const job = yield* getJob(request.workspaceId, request.jobId)
-        yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: job.threadId,
-          jobId: request.jobId,
-          attemptSequence: null,
-          eventKind: "review-suggestion-revised",
-          payload: {
-            suggestionId: request.suggestionId,
-            revisionId,
-            sequence,
-            authorKind: request.author._tag,
-            validationState: validation._tag,
-            suggestionState: suggestion.state
-          },
-          payloadSchema: ReviewSuggestionRevisedPayload,
-          occurredAt: request.createdAt
-        })
-        return revision
+      const job = yield* getJob(request.workspaceId, request.jobId)
+      yield* appendThreadEvent({
+        workspaceId: request.workspaceId,
+        threadId: job.threadId,
+        jobId: request.jobId,
+        attemptSequence: null,
+        eventKind: "review-suggestion-revised",
+        payload: {
+          suggestionId: request.suggestionId,
+          revisionId,
+          sequence,
+          authorKind: request.author._tag,
+          validationState: validation._tag,
+          suggestionState: suggestion.state
+        },
+        payloadSchema: ReviewSuggestionRevisedPayload,
+        occurredAt: request.createdAt
       })
-    )
+      return revision
+    })
   })
 
-  return { append, read }
+  const append = Effect.fn("ReviewSuggestionRevisions.append")(function*(
+    input: typeof AppendReviewSuggestionRevisionInput.Type
+  ) {
+    return yield* database.transaction(appendInTransaction(input))
+  })
+
+  return { append, appendInTransaction, read }
 }

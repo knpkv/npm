@@ -69,6 +69,12 @@ export interface ConfluencePageClientShape {
       readonly versionMessage: string
     }
   ) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly createPage: (input: {
+    readonly spaceId: string
+    readonly title: string
+    readonly adf: string
+    readonly parentId: string | null
+  }) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSpacePages: (
     spaceId: string,
     cursor: string | null
@@ -216,6 +222,22 @@ export const makeConfluencePageClient = (
         Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluencePage))
       )
     ),
+  createPage: (input) =>
+    bounded(
+      "confluence-page-create",
+      api.v2.createPage({
+        payload: {
+          spaceId: input.spaceId,
+          status: "current",
+          title: input.title,
+          ...(input.parentId === null ? {} : { parentId: input.parentId }),
+          body: {
+            representation: "atlas_doc_format",
+            value: input.adf
+          }
+        }
+      })
+    ),
   getSpacePages: (spaceId, cursor) =>
     bounded(
       "confluence-space-pages",
@@ -223,6 +245,7 @@ export const makeConfluencePageClient = (
         HttpClientRequest.get(`/spaces/${encodeURIComponent(spaceId)}/pages`).pipe(
           HttpClientRequest.setUrlParams({
             ...(cursor === null ? {} : { cursor }),
+            "body-format": "atlas_doc_format",
             depth: "all",
             limit: 25,
             sort: "-modified-date",

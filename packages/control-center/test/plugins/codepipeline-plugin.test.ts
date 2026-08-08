@@ -44,6 +44,7 @@ import {
   planCodePipelineArtifactObjectIdentity,
   planCodePipelineArtifactRange
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
+import { decodeCodePipelineStateProviderOutput } from "../../src/server/plugins/codepipeline/CodePipelineStateDecoder.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -256,6 +257,42 @@ const runWithProvider = <Value, Error>(
   )
 
 describe("CodePipelinePlugin", () => {
+  it.effect("accepts live action revisions that omit optional revision metadata", () =>
+    Effect.gen(function*() {
+      const decoded = yield* decodeCodePipelineStateProviderOutput({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionId: "fixture-commit"
+            }
+          }]
+        }]
+      })
+      assert.strictEqual(
+        decoded.stageStates?.[0]?.actionStates?.[0]?.currentRevision?.revisionId,
+        "fixture-commit"
+      )
+
+      const invalid = yield* decodeCodePipelineStateProviderOutput({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionChangeId: "fixture-change"
+            }
+          }]
+        }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+    }))
+
   it.effect("stops consuming an artifact body as soon as the authorized byte bound is exceeded", () =>
     Effect.gen(function*() {
       const consumed = yield* Ref.make(0)
@@ -512,6 +549,54 @@ describe("CodePipelinePlugin", () => {
                 })
             })
           ))
+        )
+      )
+    ))
+
+  it.effect("decodes the safe CodeCommit source coordinates for private attestation", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const pipeline = yield* client.getPipeline({
+        account: { profile: "production", region: "eu-west-1", operationTimeoutMillis: 10_000 },
+        pipelineName: "release"
+      })
+      assert.deepStrictEqual(pipeline.stages[0]?.actions[0]?.codeCommitSource, {
+        repositoryName: "fixture-repository",
+        branchName: "main",
+        pollForSourceChanges: false
+      })
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(
+            Layer.succeed(
+              CodePipelineReadProvider,
+              baseProvider({
+                getPipeline: () =>
+                  Effect.succeed({
+                    ...pipelineOutput,
+                    pipeline: {
+                      ...pipelineOutput.pipeline,
+                      stages: pipelineOutput.pipeline.stages.map((stage) =>
+                        stage.name !== "Source"
+                          ? stage
+                          : {
+                            ...stage,
+                            actions: stage.actions.map((action) => ({
+                              ...action,
+                              configuration: {
+                                RepositoryName: "fixture-repository",
+                                BranchName: "main",
+                                PollForSourceChanges: "false"
+                              }
+                            }))
+                          }
+                      )
+                    }
+                  })
+              })
+            )
+          )
         )
       )
     ))

@@ -2,7 +2,7 @@
  * @internal
  */
 
-import { Cause, Clock, DateTime, Effect, Predicate, SubscriptionRef } from "effect"
+import { Clock, DateTime, Effect, Predicate, Result, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -21,6 +21,18 @@ import { calculateHealthScores } from "./refreshScore.js"
 
 const idleStatus: AppStatus = "idle"
 const errorStatus: AppStatus = "error"
+
+const refreshErrorMessage = (error: unknown): string =>
+  Result.try(() => String(Predicate.isError(error) ? error.message : error) || "Unknown error").pipe(
+    Result.getOrElse(() => "Unknown error")
+  )
+
+const transitionToRefreshError = (state: PRState, error: unknown) =>
+  SubscriptionRef.update(state, (current) => ({
+    ...current,
+    status: errorStatus,
+    error: refreshErrorMessage(error)
+  }))
 
 export type RefreshDeps =
   | ConfigService
@@ -78,10 +90,11 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
   (effect, state) =>
     effect.pipe(
       Effect.timeout("120 seconds"),
-      Effect.catchCause((cause) => {
-        const squashed = Cause.squash(cause)
-        const errorStr = (Predicate.isError(squashed) ? squashed.message : String(squashed)) || "Unknown error"
-        return SubscriptionRef.update(state, (s) => ({ ...s, status: errorStatus, error: errorStr }))
-      })
+      Effect.catch((error) => transitionToRefreshError(state, error)),
+      Effect.tapDefect((defect) =>
+        Effect.logError("PRService.refresh defect", defect).pipe(
+          Effect.andThen(transitionToRefreshError(state, defect))
+        )
+      )
     )
 )

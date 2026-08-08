@@ -23,6 +23,7 @@ export {
   PublishReviewSuggestionRequest,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
+  PullRequestReviewInterrupted,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   PullRequestReviewState,
@@ -41,6 +42,7 @@ export {
   ReviewAgentProfile,
   ReviewAgentProfileId,
   ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationOperation,
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection,
   ReviewSuggestionRevisionPage,
@@ -166,9 +168,12 @@ export {
   PortfolioSnapshot
 } from "./portfolio.js"
 export {
+  BrowserPairingPermission,
   CsrfToken,
   CurrentSession,
   CurrentSessionResponse,
+  IssueBrowserPairingCodeRequest,
+  IssueBrowserPairingCodeResponse,
   MutationCsrf,
   PairingCode,
   PairSessionRequest,

@@ -25,7 +25,9 @@ import type {
   ReleaseAgentThreadPage,
   ReleaseAgentTurnResponse,
   ReviewSuggestionPublicationPreview,
-  ReviewSuggestionRevisionPage
+  ReviewSuggestionRevisionPage,
+  TargetReviewSuggestionRequest,
+  TargetReviewSuggestionResponse
 } from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
@@ -561,13 +563,32 @@ export class RelationshipRepairProposals extends Context.Service<RelationshipRep
  * Release-aware conversational boundary. Implementations own context projection,
  * provider selection, prompt hardening, cancellation, and provider error redaction.
  */
+export interface ReleaseAgentTurnAdmission {
+  readonly eventCursor: ReleaseAgentTurnResponse["eventCursor"]
+  readonly provider: ReleaseAgentTurnResponse["provider"]
+  readonly release: ReleaseAgentTurnResponse["release"]
+  readonly releaseId: ReleaseAgentTurnResponse["releaseId"]
+  readonly workspaceId: WorkspaceId
+}
+
 export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
-  readonly runTurn: (input: {
+  readonly admitTurn?: (input: {
     readonly workspaceId: WorkspaceId
     readonly releaseId: ReleaseId
     readonly provider: AgentProvider
+  }) => Effect.Effect<
+    ReleaseAgentTurnAdmission,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly runTurn: (input: {
+    readonly admission?: ReleaseAgentTurnAdmission
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly originPath?: string
+    readonly provider: AgentProvider
     readonly prompt: AgentPrompt
     readonly history: ReadonlyArray<AgentHistoryMessage>
+    readonly publicationResult?: string
   }) => Effect.Effect<
     ReleaseAgentTurnResponse,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
@@ -629,6 +650,22 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     EnqueuePullRequestReviewResponse,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
+  readonly cancel: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly extendBudget: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly revisions: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
@@ -654,6 +691,19 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     | ApplicationResourceNotFound
     | ApplicationServiceUnavailable
   >
+  readonly targetSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: TargetReviewSuggestionRequest
+  }) => Effect.Effect<
+    TargetReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
   readonly dismissSuggestion: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
@@ -674,6 +724,8 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly jobId: PublishReviewSuggestionRequest["jobId"]
     readonly suggestionId: PublishReviewSuggestionRequest["suggestionId"]
     readonly revisionId: PublishReviewSuggestionRequest["revisionId"]
+    readonly operation?: PublishReviewSuggestionRequest["operation"]
+    readonly commentId?: PublishReviewSuggestionRequest["commentId"]
     readonly publishingOperator: Extract<Actor, { readonly _tag: "human" }>["personId"]
   }) => Effect.Effect<
     ReviewSuggestionPublicationPreview,

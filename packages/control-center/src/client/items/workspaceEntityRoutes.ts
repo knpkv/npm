@@ -9,7 +9,7 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
-import { contextualAgentPath } from "../contextualAgentPath.js"
+import { contextualAgentPath, contextualReleaseAgentPath } from "../contextualAgentPath.js"
 import { releaseAgentPath } from "../releases/releasePaths.js"
 import { type ReleaseRouteState, ReleaseRouteStateSchema, retainReleaseRouteState } from "../releases/releaseRoutes.js"
 import { workspaceEntityParentPath } from "../workspaceEntityPaths.js"
@@ -233,20 +233,22 @@ export const workspaceEntityAgentPath = (
 ): string => {
   const originRelease = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
   const canonicalReleaseId = releaseContext.canonicalReleaseId
-  const releasePath = originRelease === null
+  const releaseTargetId = originRelease === null
     ? releaseContext.releaseMembershipsTruncated ||
         releaseContext.releaseIds.length !== 1 ||
         releaseContext.releaseIds[0] !== canonicalReleaseId ||
         canonicalReleaseId === null ||
         !routableReleaseIds.has(canonicalReleaseId)
       ? null
-      : releaseAgentPath(workspaceId, canonicalReleaseId)
+      : canonicalReleaseId
     : !releaseContext.releaseMembershipsTruncated &&
         releaseContext.releaseIds.includes(originRelease.releaseId) &&
         routableReleaseIds.has(originRelease.releaseId)
-    ? releaseAgentPath(workspaceId, originRelease.releaseId)
+    ? originRelease.releaseId
     : null
-  if (releasePath !== null) return releasePath
+  if (releaseTargetId !== null) {
+    return contextualReleaseAgentPath(workspaceId, releaseTargetId, current.pathname)
+  }
 
   const entity = workspaceEntityTargetFromHref(current.pathname)
   if (entity === null || entity.workspaceId !== workspaceId) {

@@ -158,7 +158,7 @@ export const JiraReadPluginConfiguration = Schema.Struct({
 /** Decoded Jira read adapter settings. */
 export type JiraReadPluginConfiguration = typeof JiraReadPluginConfiguration.Type
 
-/** Negotiated production runtime and its scoped plugin layer. */
+/** Negotiated issue-read runtime; only create-only project-version publication crosses the execution boundary. */
 export interface JiraReadPluginRuntime {
   readonly definition: PluginDefinitionV1
   readonly layer: Layer.Layer<
@@ -173,7 +173,7 @@ export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
-  adapterVersion: { major: 0, minor: 3, patch: 0 },
+  adapterVersion: { major: 0, minor: 4, patch: 0 },
   displayName: "Jira issue reader",
   configurationFields: [
     {
@@ -254,7 +254,9 @@ export const jiraReadPluginDescriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: ["entity.read", "sync.incremental", "action.propose"].map((capabilityId) => ({
+  capabilities: ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"].map((
+    capabilityId
+  ) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -894,15 +896,26 @@ const makeRuntime = (
   provider: JiraReadProvider,
   configuration: unknown,
   verifiedSiteId: string | null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
+  releasePublicationEnabled: boolean
 ): JiraReadPluginRuntime => {
+  const rawDescriptor = releasePublicationEnabled
+    ? jiraReadPluginDescriptor
+    : {
+      ...jiraReadPluginDescriptor,
+      capabilities: jiraReadPluginDescriptor.capabilities.filter(
+        ({ capabilityId }) => capabilityId !== "action.execute" && capabilityId !== "action.reconcile"
+      )
+    }
   const definition = definePluginV1({
-    rawDescriptor: jiraReadPluginDescriptor,
+    rawDescriptor,
     configurationSchema: JiraReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
       syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
-      actionPropose: pluginCapabilityCodecsV1.actionPropose
+      actionPropose: pluginCapabilityCodecsV1.actionPropose,
+      actionExecute: pluginCapabilityCodecsV1.actionExecute,
+      actionReconcile: pluginCapabilityCodecsV1.actionReconcile
     },
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
@@ -1001,14 +1014,11 @@ const makeRuntime = (
                 includeControlCenterAttribution,
                 request
               )
+              : request.actionKind === "create-release-version" && !releasePublicationEnabled
+              ? Effect.fail(unsupported("action.execute"))
               : governedActions.proposeAction(request)
         }
-        const executor: AuthorizedPluginExecutorV1 = {
-          preflight: () => Effect.fail(unsupported("action.execute")),
-          executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-          requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-          reconcile: () => Effect.fail(unsupported("action.reconcile"))
-        }
+        const executor: AuthorizedPluginExecutorV1 = governedActions.executor
         return { connection, executor }
       })
   })
@@ -1022,7 +1032,8 @@ const makeRuntime = (
 export const makeJiraReadPluginRuntime = (
   configuration: unknown,
   verifiedSiteId: string | null = null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
 ): Effect.Effect<JiraReadPluginRuntime, never, JiraApiClient> =>
   Effect.map(
     JiraApiClient,
@@ -1031,7 +1042,8 @@ export const makeJiraReadPluginRuntime = (
         makeJiraReadProvider(client),
         configuration,
         verifiedSiteId,
-        includeControlCenterAttribution
+        includeControlCenterAttribution,
+        releasePublicationEnabled
       )
   )
 
@@ -1040,5 +1052,7 @@ export const makeJiraReadPluginRuntimeFromProvider = (
   provider: JiraReadProvider,
   configuration: unknown,
   verifiedSiteId: string | null = null,
-  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
-): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution)
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
+): JiraReadPluginRuntime =>
+  makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution, releasePublicationEnabled)

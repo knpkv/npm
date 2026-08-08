@@ -113,6 +113,10 @@ rule:
 files:
   - "packages/control-center/src/**/*.ts"
   - "packages/control-center/src/**/*.tsx"
+  - "packages/codecommit-core/src/ConfigService/load.ts"
+  - "packages/codecommit-core/src/ConfigService/reset.ts"
+  - "packages/codecommit-core/src/ConfigService/save.ts"
+  - "packages/codecommit/src/tui/atoms/actions.ts"
 
 ignores:
   - "**/*.test.ts"
@@ -120,6 +124,10 @@ ignores:
   - "**/*.spec.ts"
   - "**/*.spec.tsx"
   - "**/generated/**"
+  - "**/bin.ts"
+  - "**/main.ts"
+  - "**/main.tsx"
+  - "**/layers.ts"
 
 note: |
   Effect.fn gives named arrow functions, function expressions, and function

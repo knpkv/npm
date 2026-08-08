@@ -76,8 +76,13 @@ export interface AgentReviewContextEventsQueryInput {
 
 /** Exact immutable review subject used to recover its newest durable job. */
 export interface LatestAgentReviewQueryInput {
+  readonly allowDifferentHead?: boolean
+  readonly excludeTargeted?: boolean
+  readonly excludeJobId?: string
+  readonly excludeSubjectRevision?: string
+  readonly limit?: number
   readonly jobId?: string
-  readonly subjectRevision: string
+  readonly subjectRevision?: string
   readonly taskContextPrefix: string
   readonly workspaceId: string
 }
@@ -456,7 +461,11 @@ export const renderLatestAgentReviewQuery = (
   input: LatestAgentReviewQueryInput
 ): RenderedSql => {
   const subjectAndOptionalJob = input.jobId === undefined
-    ? Query.eq(agentJobs.subjectRevision, input.subjectRevision)
+    ? input.subjectRevision === undefined
+      ? undefined
+      : Query.eq(agentJobs.subjectRevision, input.subjectRevision)
+    : input.subjectRevision === undefined
+    ? Query.eq(agentJobs.jobId, input.jobId)
     : Query.and(
       Query.eq(agentJobs.subjectRevision, input.subjectRevision),
       Query.eq(agentJobs.jobId, input.jobId)
@@ -476,7 +485,21 @@ export const renderLatestAgentReviewQuery = (
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
-        subjectAndOptionalJob,
+        ...(input.excludeJobId === undefined ? [] : [Query.not(Query.eq(agentJobs.jobId, input.excludeJobId))]),
+        ...(input.excludeSubjectRevision === undefined
+          ? []
+          : [Query.not(Query.eq(agentJobs.subjectRevision, input.excludeSubjectRevision))]),
+        ...(subjectAndOptionalJob === undefined ? [] : [subjectAndOptionalJob]),
+        ...(input.excludeTargeted === true
+          ? [
+            Query.not(
+              Query.or(
+                Query.like(agentJobs.taskContextJson, "%\"intent\":\"suggestion-edit\"%"),
+                Query.like(agentJobs.taskContextJson, "%\"intent\":\"suggestion-revalidation\"%")
+              )
+            )
+          ]
+          : []),
         Query.eq(
           Query.cast(
             Fn.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),
@@ -488,7 +511,7 @@ export const renderLatestAgentReviewQuery = (
     ),
     Query.orderBy(agentJobs.createdAt, "desc"),
     Query.orderBy(agentJobs.jobId, "desc"),
-    Query.limit(1)
+    Query.limit(input.limit ?? 1)
   )
   const rendered = renderer.render(plan)
   return { params: rendered.params, sql: rendered.sql }

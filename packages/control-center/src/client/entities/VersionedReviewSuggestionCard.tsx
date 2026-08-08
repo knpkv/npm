@@ -1,9 +1,11 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import { type ReactElement, useMemo, useState } from "react"
 
 import type { EntityId, JobId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestion } from "../../domain/prReview.js"
+import { PrReviewDismissalReason, type PrReviewSuggestion } from "../../domain/prReview.js"
 import type { PrReviewSuggestionRevisionAuthor } from "../../domain/prReviewRevision.js"
 import { ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import { ReviewSuggestionRevisionDialog } from "./ReviewSuggestionRevisionDialog.js"
@@ -13,7 +15,7 @@ import {
   type ReviewSuggestionRevisionScope,
   type ReviewSuggestionRevisionTransport
 } from "./useReviewSuggestionRevisions.js"
-import type { ReviewSuggestionPublicationTarget } from "./usePullRequestReview.js"
+import type { ReviewSuggestionPublicationTarget, ReviewSuggestionTarget } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const authorLabel = (author: PrReviewSuggestionRevisionAuthor): string =>
@@ -27,6 +29,7 @@ export const VersionedReviewSuggestionCard = ({
   jobId,
   onPreviewPublication,
   onSuggestionRevisionAccepted,
+  onTargetSuggestion,
   revisionTransport = browserReviewSuggestionRevisionTransport,
   sessionKey,
   suggestion
@@ -36,6 +39,7 @@ export const VersionedReviewSuggestionCard = ({
   readonly isPreviewing: boolean
   readonly jobId: JobId
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
+  readonly onTargetSuggestion: (target: ReviewSuggestionTarget) => void
   readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly sessionKey: string
@@ -54,6 +58,7 @@ export const VersionedReviewSuggestionCard = ({
   const [dialogMode, setDialogMode] = useState<"edit" | "history">("history")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dismissOpen, setDismissOpen] = useState(false)
+  const [dismissalReason, setDismissalReason] = useState<typeof PrReviewDismissalReason.Type>("false-positive")
   const page =
     controller.state._tag === "ready" ||
     controller.state._tag === "dismissing" ||
@@ -107,6 +112,40 @@ export const VersionedReviewSuggestionCard = ({
             {suggestionCanMutate ? (
               <Button disabled={page === null} onClick={() => setDismissOpen(true)} variant="quiet">
                 Dismiss
+              </Button>
+            ) : null}
+            {suggestionCanMutate && current !== undefined && current.validation._tag !== "requires-revalidation" ? (
+              <Button
+                disabled={controller.state._tag === "loading"}
+                onClick={() =>
+                  onTargetSuggestion({
+                    expectedRevisionId: current.revisionId,
+                    expectedSequence: current.sequence,
+                    intent: "suggestion-edit",
+                    jobId,
+                    suggestionId: presentedSuggestion.suggestionId
+                  })
+                }
+                variant="quiet"
+              >
+                Ask agent to edit
+              </Button>
+            ) : null}
+            {canEdit && current?.validation._tag === "requires-revalidation" ? (
+              <Button
+                disabled={controller.state._tag === "loading"}
+                onClick={() =>
+                  onTargetSuggestion({
+                    expectedRevisionId: current.revisionId,
+                    expectedSequence: current.sequence,
+                    intent: "suggestion-revalidation",
+                    jobId,
+                    suggestionId: presentedSuggestion.suggestionId
+                  })
+                }
+                variant="quiet"
+              >
+                Revalidate
               </Button>
             ) : null}
             {controller.state._tag === "dismissing" ? (
@@ -171,12 +210,30 @@ export const VersionedReviewSuggestionCard = ({
           title="Dismiss finding?"
         >
           <Text>This records your decision without changing the pull request or publishing a comment.</Text>
+          <label>
+            Reason
+            <select
+              aria-label="Dismissal reason"
+              onChange={(event) => {
+                const reason = Schema.decodeUnknownResult(PrReviewDismissalReason)(event.currentTarget.value)
+                if (Result.isFailure(reason)) return
+                setDismissalReason(reason.success)
+              }}
+              value={dismissalReason}
+            >
+              <option value="false-positive">False positive</option>
+              <option value="not-applicable">Not applicable</option>
+              <option value="accepted-risk">Accepted risk</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
           <div className={styles.publicationActions}>
             <Dialog.Close>Keep finding</Dialog.Close>
             <Button
               onClick={() => {
                 setDismissOpen(false)
-                controller.dismiss()
+                controller.dismiss(dismissalReason)
               }}
             >
               Dismiss finding

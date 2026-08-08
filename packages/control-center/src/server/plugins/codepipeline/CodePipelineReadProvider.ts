@@ -1,12 +1,13 @@
 /**
  * Direct AWS CodePipeline read boundary.
  *
- * The live implementation owns credential acquisition and @distilled.cloud/aws
- * runtime provision. Every response remains `unknown` until the read client
- * applies repository-owned Schema contracts.
+ * The live implementation owns credential acquisition and AWS client runtime
+ * provision. Every response remains `unknown` until repository-owned Schema
+ * contracts decode it.
  *
  * @internal
  */
+import { CodePipelineClient, GetPipelineStateCommand } from "@aws-sdk/client-codepipeline"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import * as cloudwatchLogs from "@distilled.cloud/aws/cloudwatch-logs"
 import * as codepipeline from "@distilled.cloud/aws/codepipeline"
@@ -33,6 +34,7 @@ import {
   PluginRateLimitFailure,
   PluginTimeoutFailure
 } from "../failures.js"
+import { decodeCodePipelineStateProviderOutput } from "./CodePipelineStateDecoder.js"
 
 const RETRY_DELAY_SECONDS = 30
 
@@ -241,6 +243,11 @@ export class CodePipelinePreDispatchFailure extends Schema.TaggedErrorClass<Code
   { operation: Schema.String, diagnosticCode: Schema.String }
 ) {}
 
+class CodePipelineSdkFailure extends Schema.TaggedErrorClass<CodePipelineSdkFailure>()(
+  "CodePipelineSdkFailure",
+  { cause: Schema.Defect() }
+) {}
+
 /** Failures visible to the Schema-decoding read client. @internal */
 export type CodePipelineProviderFailure =
   | PluginFailure
@@ -330,7 +337,11 @@ const RawRuntimeIdentity = Schema.Struct({
 })
 
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
-  tags.some((tag) => Predicate.isTagged(cause, tag))
+  tags.some(
+    (tag) =>
+      Predicate.isTagged(cause, tag) ||
+      (Predicate.hasProperty(cause, "name") && typeof cause.name === "string" && cause.name === tag)
+  )
 
 const deterministicMutationRejectionTags: Readonly<Record<string, ReadonlyArray<string>>> = {
   "codepipeline-start-execution": ["ValidationException"],
@@ -586,7 +597,7 @@ export const callPinnedCodePipelineMutationProvider = Effect.fn(
   )
 })
 
-/** Live raw provider backed only by direct @distilled.cloud/aws CodePipeline and STS operations. @internal */
+/** Live raw provider backed by direct AWS CodePipeline and STS operations. @internal */
 export const CodePipelineReadProviderLive = Layer.effect(
   CodePipelineReadProvider,
   Effect.gen(function*() {
@@ -603,6 +614,46 @@ export const CodePipelineReadProviderLive = Layer.effect(
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(CodePipelineCredentialResolver, credentialResolver)
       )
+
+    const getPipelineState = Effect.fn("CodePipelineReadProvider.getPipelineState")(function*(
+      request: GetPipelineStateProviderRequest
+    ) {
+      const operation = "codepipeline-get-state"
+      const credentials = yield* credentialResolver.resolve(operation, request.account)
+      const response = yield* Effect.acquireUseRelease(
+        Effect.sync(() =>
+          new CodePipelineClient({
+            credentials: {
+              accessKeyId: credentials.accessKeyId,
+              secretAccessKey: credentials.secretAccessKey,
+              ...(credentials.sessionToken === undefined
+                ? {}
+                : { sessionToken: credentials.sessionToken })
+            },
+            region: request.account.region
+          })
+        ),
+        (client) =>
+          Effect.tryPromise({
+            try: (signal) =>
+              client.send(
+                new GetPipelineStateCommand({
+                  name: request.pipelineName
+                }),
+                { abortSignal: signal }
+              ),
+            catch: (cause) => new CodePipelineSdkFailure({ cause })
+          }),
+        (client) => Effect.sync(() => client.destroy())
+      ).pipe(
+        Effect.timeoutOrElse({
+          duration: request.account.operationTimeoutMillis,
+          orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+        }),
+        Effect.catchTag("CodePipelineSdkFailure", (failure) => mapCodePipelineAwsFailure(operation, failure.cause))
+      )
+      return yield* decodeCodePipelineStateProviderOutput(response)
+    })
 
     return {
       getCallerIdentity: (account) =>
@@ -662,14 +713,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             })
           )
         ),
-      getPipelineState: (request) =>
-        provideHttp(
-          callProvider(
-            "codepipeline-get-state",
-            request.account,
-            codepipeline.getPipelineState({ name: request.pipelineName })
-          )
-        ),
+      getPipelineState,
       getLogEventsPage: (request) =>
         provideHttp(
           callProvider(

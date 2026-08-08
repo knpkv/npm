@@ -20,9 +20,15 @@ import {
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewReport,
+  PrReviewSubject,
+  reconcilePrReviewReports
+} from "../../src/domain/prReview.js"
 import {
   MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
+  PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
   PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevisionPageSize
@@ -193,7 +199,7 @@ const nearLimitReport = (): PrReviewReport => {
       ...candidate,
       suggestions: suggestions.map((item) => ({ ...item, state: "published" }))
     })).byteLength
-  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1 - projectedBytes()
+  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1_500 - projectedBytes()
   for (const item of suggestions) {
     const available = 8_000 - item.recommendation.length
     const added = Math.min(available, remaining)
@@ -201,7 +207,7 @@ const nearLimitReport = (): PrReviewReport => {
     remaining -= added
   }
   assert.strictEqual(remaining, 0)
-  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1)
+  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1_500)
   return Schema.decodeUnknownSync(PrReviewReport)(candidate)
 }
 
@@ -279,6 +285,16 @@ const completeReview = Effect.gen(function*() {
   })
 })
 
+const incompleteReport = Schema.decodeUnknownSync(PrReviewReport)({
+  ...report,
+  completion: {
+    status: "unable-to-conclude",
+    reason: "The review stopped before the complete project was examined."
+  },
+  suggestions: [],
+  notes: []
+})
+
 const currentSuggestionRevision = (suggestionId: typeof report.suggestions[number]["suggestionId"]) =>
   Effect.gen(function*() {
     const jobs = yield* AgentJobRepository
@@ -312,6 +328,150 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("records an active review as interrupted with partial evidence on restart", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* claimReview
+
+        const first = yield* jobs.interruptRunningReviews({
+          workspaceId: WORKSPACE_ID,
+          interruptedAt: T2
+        })
+        assert.deepStrictEqual(first, { interrupted: 1 })
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.state, "interrupted")
+          assert.strictEqual(latest.value.report?.completion.status, "unable-to-conclude")
+        }
+
+        const second = yield* jobs.interruptRunningReviews({
+          workspaceId: WORKSPACE_ID,
+          interruptedAt: T3
+        })
+        assert.deepStrictEqual(second, { interrupted: 0 })
+      })
+    ))
+
+  it.effect("retains the latest validated report when interrupting an active review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          occurredAt: T1
+        })
+
+        assert.deepStrictEqual(
+          yield* jobs.interruptRunningReviews({
+            workspaceId: WORKSPACE_ID,
+            interruptedAt: T2
+          }),
+          { interrupted: 1 }
+        )
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.state, "interrupted")
+          assert.deepStrictEqual(latest.value.report, {
+            ...report,
+            completion: {
+              status: "unable-to-conclude",
+              reason: "Review interrupted because the Control Center process restarted."
+            }
+          })
+        }
+      })
+    ))
+
+  it.effect("persists one budget extension and exposes the effective value to the claim", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+
+        const extended = yield* jobs.extendReviewBudget({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          extendedAt: T2
+        })
+        assert.deepStrictEqual(extended, {
+          reviewBudgetMillis: 2_400_000,
+          reviewBudgetExtensionCount: 1
+        })
+        assert.deepStrictEqual(
+          yield* jobs.reviewBudget({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            task: claim.context.task
+          }),
+          extended
+        )
+
+        const secondExtension = yield* jobs.extendReviewBudget({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          extendedAt: T3
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(secondExtension))
+        if (Result.isFailure(secondExtension)) {
+          assert.isTrue(Schema.is(AgentJobInputError)(secondExtension.failure))
+        }
+      })
+    ))
+
+  it.effect("keeps the newest validated partial report across multiple progress checkpoints", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: incompleteReport,
+          occurredAt: T1
+        })
+        yield* jobs.recordReviewProgress({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          occurredAt: T2
+        })
+
+        const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+        assert.deepStrictEqual(persisted.report, report)
+      })
+    ))
+
   it.effect("projects the immutable report suggestion as validated revision one", () =>
     withRepository(
       Effect.gen(function*() {
@@ -356,6 +516,7 @@ describe("agent job review results", () => {
           expectedSequence: original.sequence,
           edit,
           state: "dismissed",
+          dismissalReason: "false-positive",
           author: PrReviewSuggestionOperatorAuthor.make({
             personId: PERSON_ID
           }),
@@ -484,6 +645,45 @@ describe("agent job review results", () => {
           "requires-revalidation"
         )
 
+        const humanValidationAttempt = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: technical.revisionId,
+          expectedSequence: technical.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author,
+          createdAt: T4
+        })
+        assert.strictEqual(humanValidationAttempt.sequence, 4)
+        assert.strictEqual(humanValidationAttempt.validation._tag, "requires-revalidation")
+
+        const revalidated = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidationAttempt.revisionId,
+          expectedSequence: humanValidationAttempt.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(revalidated.sequence, 5)
+        assert.strictEqual(revalidated.validation._tag, "validated")
+        if (revalidated.validation._tag !== "validated") {
+          return yield* Effect.die("expected agent revalidation metadata")
+        }
+        assert.strictEqual(revalidated.validation.validatingJobId, JOB_ID)
+        assert.strictEqual(revalidated.validation.sourceRevisionId, humanValidationAttempt.revisionId)
+        assert.strictEqual(revalidated.validation.reviewedHead, technical.subject.headRevision)
+
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
@@ -491,13 +691,13 @@ describe("agent job review results", () => {
           beforeSequence: null,
           limit: PrReviewSuggestionRevisionPageSize.make(1)
         })
-        assert.strictEqual(firstPage.current.revisionId, technical.revisionId)
+        assert.strictEqual(firstPage.current.revisionId, revalidated.revisionId)
         assert.deepStrictEqual(
           firstPage.revisions.map(({ sequence }) => sequence),
-          [2]
+          [4]
         )
         assert.isTrue(firstPage.hasMore)
-        assert.strictEqual(firstPage.nextBeforeSequence, 2)
+        assert.strictEqual(firstPage.nextBeforeSequence, 4)
 
         const secondPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -508,9 +708,29 @@ describe("agent job review results", () => {
         })
         assert.deepStrictEqual(
           secondPage.revisions.map(({ sequence }) => sequence),
-          [1]
+          [3]
         )
-        assert.isFalse(secondPage.hasMore)
+        assert.isTrue(secondPage.hasMore)
+
+        const thirdPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: secondPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(thirdPage.revisions.map(({ sequence }) => sequence), [2])
+        assert.isTrue(thirdPage.hasMore)
+
+        const fourthPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: thirdPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(fourthPage.revisions.map(({ sequence }) => sequence), [1])
+        assert.isFalse(fourthPage.hasMore)
 
         const thread = yield* jobs.reviewThreadTail({
           workspaceId: WORKSPACE_ID,
@@ -522,7 +742,7 @@ describe("agent job review results", () => {
           thread.events.filter(
             ({ eventKind }) => eventKind === "review-suggestion-revised"
           ).length,
-          2
+          4
         )
 
         const update = yield* database.sql`UPDATE agent_review_suggestion_revisions
@@ -534,6 +754,201 @@ describe("agent job review results", () => {
             AND source_job_id = ${JOB_ID}`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(update))
         assert.isTrue(Result.isFailure(deletion))
+      })
+    ))
+
+  it.effect("rolls back targeted completion when the source revision is stale", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const targetPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        const operator = PrReviewSuggestionOperatorAuthor.make({ personId: PERSON_ID })
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "The source changed while the agent was running"
+          }),
+          author: operator,
+          createdAt: T3
+        })
+        const targetJobId = SWAP_JOB_ID
+        yield* jobs.enqueue({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          jobId: targetJobId,
+          providerId: PROVIDER_ID,
+          model: "deterministic-review-model",
+          access: "read-only",
+          userPrompt: "Revalidate the selected suggestion.",
+          prompt: "Revalidate the selected suggestion.",
+          contextFingerprint: FINGERPRINT,
+          subjectRevision: subject.headRevision,
+          task: {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
+            subject,
+            reviewProfile,
+            intent: "suggestion-revalidation",
+            target: {
+              sourceJobId: JOB_ID,
+              suggestionId: suggestion.suggestionId,
+              selectedRevisionId: original.revisionId,
+              history: targetPage
+            }
+          },
+          createdAt: T3
+        })
+        yield* TestClock.setTime(DateTime.toEpochMillis(T4))
+        const claimed = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T4,
+          leaseExpiresAt: T5
+        })
+        if (Option.isNone(claimed)) return yield* Effect.die("targeted claim missing")
+        const result = yield* jobs.completeTargetedReview({
+          source: {
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            expectedRevisionId: original.revisionId,
+            expectedSequence: original.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)(edited.suggestion),
+            validation: "validated",
+            author: PrReviewSuggestionAgentAuthor.make({
+              jobId: targetJobId,
+              providerId: PROVIDER_ID,
+              model: "deterministic-review-model",
+              runtimeMetadata: null
+            }),
+            createdAt: T4,
+            leaseFence: {
+              jobId: targetJobId,
+              attemptSequence: claimed.value.attemptSequence,
+              leaseToken: SECOND_LEASE_TOKEN
+            }
+          },
+          target: {
+            workspaceId: WORKSPACE_ID,
+            jobId: targetJobId,
+            attemptSequence: claimed.value.attemptSequence,
+            leaseToken: SECOND_LEASE_TOKEN,
+            report,
+            completedAt: T4
+          }
+        }).pipe(Effect.result)
+        if (Result.isSuccess(result)) return yield* Effect.die("expected stale targeted completion")
+        if (!Schema.is(RevisionConflictError)(result.failure)) {
+          return yield* Effect.die("expected stale targeted completion")
+        }
+        assert.strictEqual(
+          (yield* jobs.reviewSuggestionRevisions({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            beforeSequence: null,
+            limit: PrReviewSuggestionRevisionPageSize.make(1)
+          })).current.sequence,
+          edited.sequence
+        )
+        const targetState = yield* database.sql`SELECT state, terminal_at AS terminalAt
+          FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${targetJobId}`
+        assert.deepStrictEqual(targetState, [{ state: "running", terminalAt: null }])
+      })
+    ))
+
+  it.effect("allows an agent validation to correct the technical claim", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const operator = PrReviewSuggestionOperatorAuthor.make({ personId: PERSON_ID })
+        const technicalEdit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...suggestion,
+          problem: "The first technical claim was incomplete."
+        })
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: technicalEdit,
+          author: operator,
+          createdAt: T3
+        })
+        const humanValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: edited.revisionId,
+          expectedSequence: edited.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: operator,
+          createdAt: T4
+        })
+        const corrected = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...technicalEdit,
+          problem: "The corrected technical claim is now complete."
+        })
+        const agentValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidation.revisionId,
+          expectedSequence: humanValidation.sequence,
+          edit: corrected,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(agentValidation.validation._tag, "validated")
+        assert.strictEqual(agentValidation.suggestion.problem, corrected.problem)
+        if (agentValidation.validation._tag !== "validated") {
+          return yield* Effect.die("expected corrected agent validation metadata")
+        }
+        assert.strictEqual(agentValidation.validation.sourceRevisionId, humanValidation.revisionId)
       })
     ))
 
@@ -982,6 +1397,58 @@ describe("agent job review results", () => {
           [AgentEventCursor.make(3), AgentEventCursor.make(4)]
         )
         assert.strictEqual(earlier.nextCursor, AgentEventCursor.make(3))
+      })
+    ))
+
+  it.effect("marks prior-head suggestions stale when a newer review completes", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const firstClaim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: firstClaim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        const secondClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T3,
+          leaseExpiresAt: T5
+        })
+        assert.isTrue(Option.isSome(secondClaim))
+        if (Option.isNone(secondClaim)) return yield* Effect.die("new-head review claim missing")
+        const advancedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          subject: advancedSubject
+        })
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: SWAP_JOB_ID,
+          attemptSequence: secondClaim.value.attemptSequence,
+          leaseToken: SECOND_LEASE_TOKEN,
+          report: advancedReport,
+          completedAt: T4
+        })
+
+        const stale = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: report.suggestions[0]!.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.strictEqual(stale.current.suggestion.state, "stale")
+        assert.strictEqual(stale.current.subject.headRevision, subject.headRevision)
       })
     ))
 
@@ -1579,7 +2046,15 @@ describe("agent job review results", () => {
           ...bounded,
           suggestions: bounded.suggestions.map((suggestion, index) =>
             index === 0
-              ? { ...suggestion, title: `${suggestion.title}xx` }
+              ? {
+                ...suggestion,
+                relatedLocations: Array.from({ length: 16 }, () => ({
+                  path: "packages/control-center/src/index.ts",
+                  startLine: 1,
+                  endLine: 1,
+                  label: "related"
+                }))
+              }
               : suggestion
           )
         }
@@ -1815,8 +2290,15 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID
         })
+        const expectedReport = PrReviewReport.make({
+          ...report,
+          transitions: reconcilePrReviewReports(
+            PrReviewReport.make({ ...report, suggestions: [], transitions: [] }),
+            report
+          )
+        })
         assert.strictEqual(persisted.attemptSequence, claim.attemptSequence)
-        assert.deepStrictEqual(persisted.report, report)
+        assert.deepStrictEqual(persisted.report, expectedReport)
         assert.isTrue(DateTime.Equivalence(persisted.completedAt, T2))
 
         const latest = yield* jobs.latestReview({
@@ -1828,7 +2310,7 @@ describe("agent job review results", () => {
         if (Option.isSome(latest)) {
           assert.strictEqual(latest.value.jobId, JOB_ID)
           assert.strictEqual(latest.value.state, "succeeded")
-          assert.deepStrictEqual(latest.value.report, report)
+          assert.deepStrictEqual(latest.value.report, expectedReport)
         }
 
         const page = yield* jobs.reviewThreadAfter({
@@ -1859,6 +2341,77 @@ describe("agent job review results", () => {
             }
           ]
         )
+      })
+    ))
+
+  it.effect("rejects agent-declared transitions without terminalizing the review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const invalidReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          transitions: [{
+            suggestionId: `sha256:${"9".repeat(64)}`,
+            transition: "new",
+            previousState: null,
+            currentState: "draft",
+            previousHead: null,
+            currentHead: subject.headRevision
+          }]
+        })
+        const result = yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: invalidReport,
+          completedAt: T2
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "invalid-result")
+        }
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) assert.strictEqual(latest.value.state, "running")
+      })
+    ))
+
+  it.effect("rejects provider-owned published and dismissed suggestion states", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const providerOwnedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          suggestions: report.suggestions.map((suggestion) => ({
+            ...suggestion,
+            state: "published"
+          }))
+        })
+        const result = yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: providerOwnedReport,
+          completedAt: T2
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "invalid-result")
+        }
       })
     ))
 
@@ -1910,7 +2463,16 @@ describe("agent job review results", () => {
           report,
           completedAt: T2
         })
-        assert.deepStrictEqual((yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })).report, report)
+        assert.deepStrictEqual(
+          (yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })).report,
+          PrReviewReport.make({
+            ...report,
+            transitions: reconcilePrReviewReports(
+              PrReviewReport.make({ ...report, suggestions: [], transitions: [] }),
+              report
+            )
+          })
+        )
       })
     ))
 

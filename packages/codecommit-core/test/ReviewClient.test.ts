@@ -24,7 +24,9 @@ import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
 import {
   CodeCommitReviewProvider,
   type CodeCommitReviewProviderService,
-  makePostCommentForPullRequestRequest
+  makePostCommentForPullRequestRequest,
+  makePostCommentReplyRequest,
+  makeUpdateCommentRequest
 } from "../src/ReviewClient/ReviewProvider.js"
 
 const account = {
@@ -83,6 +85,22 @@ const plainCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "3".repeat(64)
 })
 
+const updateCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "update-comment",
+  target: commentAction.target,
+  commentId: "comment-1",
+  content: "Updated review content.",
+  clientRequestToken: "4".repeat(64)
+})
+
+const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "reply-comment",
+  target: commentAction.target,
+  commentId: "comment-1",
+  content: "Resolution reply.",
+  clientRequestToken: "5".repeat(64)
+})
+
 const baseReadClient = (
   overrides: Partial<CodeCommitReadClientService> = {}
 ): CodeCommitReadClientService => ({
@@ -118,6 +136,14 @@ const baseProvider = (
   postComment: () =>
     Effect.succeed({
       comment: { commentId: "comment-1", clientRequestToken: "0".repeat(64) }
+    }),
+  updateComment: () =>
+    Effect.succeed({
+      comment: { commentId: "comment-1" }
+    }),
+  postReply: () =>
+    Effect.succeed({
+      comment: { commentId: "reply-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
@@ -162,6 +188,89 @@ describe("CodeCommitReviewClient", () => {
     assert.notProperty(plain, "location")
     assert.notProperty(reviewState, "location")
   })
+
+  it("maps update and reply actions to their exact provider requests", () => {
+    assert.deepStrictEqual(makeUpdateCommentRequest(updateCommentAction), {
+      commentId: "comment-1",
+      content: "Updated review content."
+    })
+    assert.deepStrictEqual(makePostCommentReplyRequest(replyCommentAction), {
+      inReplyTo: "comment-1",
+      content: "Resolution reply.",
+      clientRequestToken: "5".repeat(64)
+    })
+  })
+
+  it.effect("executes and reconciles update and reply actions without replay", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make<Array<string>>([])
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          updateComment: (action) =>
+            Ref.update(calls, (items) => [...items, `update:${action.commentId}`]).pipe(
+              Effect.as({ comment: { commentId: action.commentId } })
+            ),
+          postReply: () =>
+            Ref.update(calls, (items) => [...items, "reply"]).pipe(
+              Effect.as({ comment: { commentId: "reply-1" } })
+            ),
+          getCommentsPage: () =>
+            Effect.succeed({
+              commentsForPullRequestData: [{
+                comments: [{
+                  commentId: "comment-1",
+                  content: `updated\n\n<!-- knpkv-codecommit-review:${"4".repeat(64)} -->`
+                }, {
+                  commentId: "reply-1",
+                  inReplyTo: "comment-1",
+                  clientRequestToken: replyCommentAction.clientRequestToken
+                }]
+              }],
+              nextToken: undefined
+            })
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          const updated = yield* client.execute(updateCommentAction)
+          const replied = yield* client.execute(replyCommentAction)
+          const reconciled = yield* client.reconcile(updateCommentAction)
+          const reconciledReply = yield* client.reconcile(replyCommentAction)
+          return { updated, replied, reconciled, reconciledReply }
+        })
+      )
+
+      assert.strictEqual(result.updated.operationId, "comment:comment-1")
+      assert.strictEqual(result.replied.operationId, "comment:reply-1")
+      assert.strictEqual(result.reconciled._tag, "succeeded")
+      assert.strictEqual(result.reconciledReply._tag, "succeeded")
+      assert.deepStrictEqual(yield* Ref.get(calls), ["update:comment-1", "reply"])
+    }))
+
+  it.effect("does not reconcile a reply with the wrong parent comment", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          getCommentsPage: () =>
+            Effect.succeed({
+              commentsForPullRequestData: [{
+                comments: [{
+                  commentId: "reply-1",
+                  inReplyTo: "different-comment",
+                  clientRequestToken: replyCommentAction.clientRequestToken
+                }]
+              }]
+            })
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.reconcile(replyCommentAction)
+        })
+      )
+
+      assert.strictEqual(result._tag, "pending")
+    }))
 
   it.effect("blocks a stale immutable revision before any provider mutation", () =>
     Effect.gen(function*() {

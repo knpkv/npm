@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { AgentProviderIdentifier } from "../domain/agentProviderIdentifier.js"
+import { GovernedActionState } from "../domain/governedAction/index.js"
 import {
   EntityId,
   EventCursor,
@@ -15,6 +16,7 @@ import {
 } from "../domain/identifiers.js"
 import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
 import {
+  PrReviewDismissalReason,
   PrReviewOutcome,
   PrReviewReport,
   PrReviewSubject,
@@ -28,6 +30,7 @@ import {
   PrReviewSuggestionRevisionPageSize,
   PrReviewSuggestionRevisionSequence
 } from "../domain/prReviewRevision.js"
+import { Revision } from "../domain/sourceRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ConflictApiError,
@@ -49,6 +52,7 @@ const MAXIMUM_HISTORY_MESSAGES = 12
 const MAXIMUM_HISTORY_MESSAGE_LENGTH = 12_000
 const MAXIMUM_HISTORY_CONTENT_LENGTH = 64_000
 const MAXIMUM_REPLY_LENGTH = 32_000
+const MAXIMUM_ORIGIN_PATH_LENGTH = 2_048
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
 /** Maximum targeted request length retained in a pull-request review thread. */
 export const MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH = 2_500
@@ -192,6 +196,33 @@ export const ReleaseAgentProvider = AgentProvider
 /** Decoded release-agent provider. */
 export type ReleaseAgentProvider = AgentProvider
 
+/** Provider destination that Relay may create or update after human confirmation. */
+export const ReleasePublicationProvider = Schema.Literals(["jira", "confluence"])
+export type ReleasePublicationProvider = typeof ReleasePublicationProvider.Type
+
+export const SubmitReleasePublicationRequest = Schema.Struct({
+  provider: ReleasePublicationProvider,
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  markdown: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+  parentId: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
+  publicationActionId: Schema.optionalKey(GovernedActionId),
+  /** Exact synchronized Confluence page selected before its first governed release update. */
+  targetEntityId: Schema.optionalKey(EntityId),
+  /** Revision displayed to the owner before an exact-page update is submitted. */
+  targetRevision: Schema.optionalKey(Revision),
+  /** Existing synchronized Confluence page copied into a new release-owned page. */
+  templateEntityId: Schema.optionalKey(EntityId)
+})
+export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
+
+export const SubmitReleasePublicationResponse = Schema.Struct({
+  actionId: GovernedActionId,
+  state: GovernedActionState
+})
+export type SubmitReleasePublicationResponse = typeof SubmitReleasePublicationResponse.Type
+
 /** One bounded prior turn supplied to preserve release-thread context. */
 export const AgentHistoryMessage = Schema.Struct({
   role: Schema.Literals(["user", "assistant"]),
@@ -222,7 +253,14 @@ const ReleaseAgentHistory = Schema.Array(AgentHistoryMessage).check(
 export const ReleaseAgentTurnRequest = Schema.Struct({
   provider: AgentProvider,
   prompt: AgentPrompt,
-  history: ReleaseAgentHistory
+  history: ReleaseAgentHistory,
+  originPath: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isPattern(/^\/(?![\\/])[^\\]*$/u, { expected: "a same-origin Control Center path" }),
+      Schema.isMaxLength(MAXIMUM_ORIGIN_PATH_LENGTH)
+    )
+  )
 }).annotate({ identifier: "ReleaseAgentTurnRequest" })
 
 /** Decoded release-aware model request. */
@@ -387,6 +425,18 @@ const pullRequestReviewJob = {
     ).check(Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)),
     truncated: Schema.Boolean
   }),
+  budgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(1_200_000)),
+    Schema.withConstructorDefault(Effect.succeed(1_200_000))
+  ),
+  budgetExtensionCount: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0))
+  ),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  ),
   requestedAt: UtcTimestamp
 }
 
@@ -406,6 +456,13 @@ export class PullRequestReviewNotStarted
   extends Schema.TaggedClass<PullRequestReviewNotStarted>()("not-started", pullRequestReviewIdentity)
 {}
 
+/** A prior completed review exists, but its evidence is bound to an older head. */
+export class PullRequestReviewStale extends Schema.TaggedClass<PullRequestReviewStale>()("stale", {
+  ...pullRequestReviewIdentity,
+  previousHead: PrReviewSubject.fields.headRevision,
+  previousJobId: JobId
+}) {}
+
 /** One durable exact-head review is queued or running. */
 export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestReviewPending>()("pending", {
   ...pullRequestReviewJob,
@@ -424,16 +481,29 @@ export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestRe
 export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestReviewFailed>()("failed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
-  state: Schema.Literals(["failed", "cancelled"])
+  state: Schema.Literals(["failed", "cancelled"]),
+  report: Schema.optionalKey(Schema.NullOr(PrReviewReport)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  )
+}) {}
+
+/** Review interrupted by process restart; its partial evidence remains inspectable. */
+export class PullRequestReviewInterrupted extends Schema.TaggedClass<PullRequestReviewInterrupted>()("interrupted", {
+  ...pullRequestReviewJob,
+  completedAt: UtcTimestamp,
+  report: PrReviewReport
 }) {}
 
 /** Browser-safe current review state for one canonical pull-request entity. */
 export const PullRequestReviewState = Schema.Union([
   PullRequestReviewUnavailable,
   PullRequestReviewNotStarted,
+  PullRequestReviewStale,
   PullRequestReviewPending,
   PullRequestReviewCompleted,
-  PullRequestReviewFailed
+  PullRequestReviewFailed,
+  PullRequestReviewInterrupted
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Decoded current pull-request review state. */
@@ -519,6 +589,10 @@ const PullRequestReviewRunFailedEvent = Schema.TaggedStruct("run-failed", {
   retryable: Schema.Boolean
 })
 
+const PullRequestReviewRunInterruptedEvent = Schema.TaggedStruct("run-interrupted", {
+  ...pullRequestReviewThreadEventFields
+})
+
 const PullRequestReviewCancellationRequestedEvent = Schema.TaggedStruct(
   "cancellation-requested",
   {
@@ -539,6 +613,7 @@ export const PullRequestReviewThreadEvent = Schema.Union([
   PullRequestReviewSuggestionPublishedEvent,
   PullRequestReviewRunCompletedEvent,
   PullRequestReviewRunFailedEvent,
+  PullRequestReviewRunInterruptedEvent,
   PullRequestReviewCancellationRequestedEvent
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type PullRequestReviewThreadEvent = typeof PullRequestReviewThreadEvent.Type
@@ -576,6 +651,29 @@ export const EditReviewSuggestionRequest = Schema.Struct({
 /** Decoded manual suggestion edit. */
 export type EditReviewSuggestionRequest = typeof EditReviewSuggestionRequest.Type
 
+/** Durable targeted agent operation over one optimistic suggestion revision. */
+export const TargetReviewSuggestionRequest = Schema.Struct({
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  profile: AgentSafeProfile,
+  reviewProfileId: ReviewAgentProfileId,
+  intent: Schema.Literals(["suggestion-edit", "suggestion-revalidation"]),
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  prompt: Schema.optionalKey(
+    DurableAgentPrompt.check(Schema.isTrimmed(), Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH))
+  )
+})
+
+/** Decoded targeted agent operation request. */
+export type TargetReviewSuggestionRequest = typeof TargetReviewSuggestionRequest.Type
+
+/** Accepted targeted review job. */
+export const TargetReviewSuggestionResponse = PullRequestReviewPending
+
+/** Decoded targeted review job response. */
+export type TargetReviewSuggestionResponse = typeof TargetReviewSuggestionResponse.Type
+
 /** Browser-safe immutable suggestion revision returned after an edit. */
 export const EditReviewSuggestionResponse = PrReviewSuggestionRevision
 
@@ -585,7 +683,8 @@ export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.T
 /** Optimistic concurrency boundary for one explicit human dismissal. */
 export const DismissReviewSuggestionRequest = Schema.Struct({
   expectedRevisionId: PrReviewSuggestionRevisionId,
-  expectedSequence: PrReviewSuggestionRevisionSequence
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  reason: PrReviewDismissalReason
 })
 
 /** Decoded human dismissal request. */
@@ -625,6 +724,12 @@ export const ReviewSuggestionPublicationContent = Schema.String.check(
 /** Decoded final review-comment content. */
 export type ReviewSuggestionPublicationContent = typeof ReviewSuggestionPublicationContent.Type
 
+/** Provider comment mutation selected by an explicit local publication preview. */
+export const ReviewSuggestionPublicationOperation = Schema.Literals(["create", "update", "reply"])
+
+/** Decoded provider comment mutation. */
+export type ReviewSuggestionPublicationOperation = typeof ReviewSuggestionPublicationOperation.Type
+
 /** Exact completed review suggestion selected for publication. */
 export const ReviewSuggestionPublicationSelection = Schema.Struct({
   jobId: JobId,
@@ -658,6 +763,10 @@ export type ReviewSuggestionPublicationAuthorityBinding = typeof ReviewSuggestio
 export class ReviewSuggestionPublicationPreview
   extends Schema.Class<ReviewSuggestionPublicationPreview>("ReviewSuggestionPublicationPreview")({
     ...ReviewSuggestionPublicationSelection.fields,
+    operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+    commentId: Schema.optionalKey(
+      Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+    ),
     subject: PrReviewSubject,
     suggestionRevision: Schema.Struct({
       jobId: JobId,
@@ -688,6 +797,8 @@ export class ReviewSuggestionPublicationPreview
 /** Explicit operator confirmation containing the final editable snapshot. */
 export const PublishReviewSuggestionRequest = Schema.Struct({
   ...ReviewSuggestionPublicationSelection.fields,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))),
   finalContent: ReviewSuggestionPublicationContent,
   authorityBinding: ReviewSuggestionPublicationAuthorityBinding
 })
@@ -698,6 +809,10 @@ export type PublishReviewSuggestionRequest = typeof PublishReviewSuggestionReque
 /** Durable local snapshot of one successfully published CodeCommit comment. */
 export class PublishedReviewComment extends Schema.Class<PublishedReviewComment>("PublishedReviewComment")({
   publicationId: GovernedActionId,
+  /** Provider comment targeted by a lifecycle operation, when available. */
+  commentId: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
   ...ReviewSuggestionPublicationSelection.fields,
   subject: PrReviewSubject,
   suggestionRevision: ReviewSuggestionPublicationPreview.fields.suggestionRevision,
@@ -732,6 +847,7 @@ const turn = HttpApiEndpoint.post("turn", "/releases/:releaseId/turns", {
     InvalidRequestApiError,
     UnauthorizedApiError,
     ForbiddenApiError,
+    ConflictApiError,
     NotFoundApiError,
     RequestTimedOutApiError,
     RateLimitedApiError,
@@ -853,6 +969,48 @@ const enqueuePullRequestReview = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const cancelPullRequestReview = HttpApiEndpoint.post(
+  "cancelPullRequestReview",
+  "/pull-requests/:entityId/reviews/:jobId/cancellation",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const extendPullRequestReviewBudget = HttpApiEndpoint.post(
+  "extendPullRequestReviewBudget",
+  "/pull-requests/:entityId/reviews/:jobId/budget-extension",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const reviewSuggestionRevisions = HttpApiEndpoint.get(
   "reviewSuggestionRevisions",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
@@ -906,6 +1064,33 @@ const editReviewSuggestion = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const targetReviewSuggestion = HttpApiEndpoint.post(
+  "targetReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/agent",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: TargetReviewSuggestionRequest,
+    success: TargetReviewSuggestionResponse.pipe(HttpApiSchema.status(202)),
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const dismissReviewSuggestion = HttpApiEndpoint.post(
   "dismissReviewSuggestion",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal",
@@ -942,7 +1127,11 @@ const previewReviewSuggestionPublication = HttpApiEndpoint.get(
       suggestionId: PrReviewSuggestionId
     }),
     query: Schema.Struct({
-      revisionId: PrReviewSuggestionRevisionId
+      revisionId: PrReviewSuggestionRevisionId,
+      operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+      commentId: Schema.optionalKey(
+        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+      )
     }),
     success: ReviewSuggestionPublicationPreview,
     error: [
@@ -979,6 +1168,25 @@ const publishReviewSuggestion = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const submitReleasePublication = HttpApiEndpoint.post(
+  "submitReleasePublication",
+  "/releases/:releaseId/publications",
+  {
+    params: { releaseId: ReleaseId },
+    payload: SubmitReleasePublicationRequest,
+    success: SubmitReleasePublicationResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(providers)
@@ -988,10 +1196,14 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(pullRequestReview)
   .add(pullRequestReviewThread)
   .add(enqueuePullRequestReview)
+  .add(cancelPullRequestReview)
+  .add(extendPullRequestReviewBudget)
   .add(reviewSuggestionRevisions)
   .add(editReviewSuggestion)
+  .add(targetReviewSuggestion)
   .add(dismissReviewSuggestion)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)
+  .add(submitReleasePublication)
   .prefix("/api/v1/agent")
 {}

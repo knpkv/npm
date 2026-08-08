@@ -7,7 +7,6 @@
  * @module
  */
 import {
-  Cause,
   Clock,
   Config,
   Context,
@@ -17,6 +16,7 @@ import {
   Option,
   Predicate,
   Random,
+  Result,
   Schedule,
   Stream
 } from "effect"
@@ -24,11 +24,13 @@ import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
+import * as ChildEnv from "../ChildEnv.js"
 import { ConfigService, defaultSandboxConfig, type SandboxConfig } from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
 import { type ContainerConfig, DockerService } from "./DockerService.js"
 import { PluginService, type SandboxContext } from "./PluginService.js"
+import { SandboxWorkerScope } from "./SandboxWorkerScope.js"
 
 export interface CreateSandboxParams {
   readonly pullRequestId: string
@@ -81,6 +83,7 @@ const makeContainerConfig = (
 })
 
 const makeSandboxService = Effect.gen(function*() {
+  const ownerScope = yield* SandboxWorkerScope
   const repo = yield* SandboxRepo
   const docker = yield* DockerService
   const plugins = yield* PluginService
@@ -90,7 +93,7 @@ const makeSandboxService = Effect.gen(function*() {
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
-    Effect.catchCause(() => Effect.succeed(defaultSandboxConfig))
+    Effect.catch(() => Effect.succeed(defaultSandboxConfig))
   )
 
   const updateStatus = (
@@ -98,6 +101,20 @@ const makeSandboxService = Effect.gen(function*() {
     status: SandboxStatus,
     extra?: { containerId?: string; port?: number; error?: string }
   ) => repo.updateStatus(id, status, extra)
+
+  const recordCreationFailure = (id: SandboxId, error: unknown) =>
+    Effect.gen(function*() {
+      yield* Effect.logError(`Sandbox ${id} creation failed`, error)
+      const errorDetail = Result.try(() => String(Predicate.isError(error) ? error.message : error)).pipe(
+        Result.getOrElse(() => "Unknown error")
+      )
+      yield* updateStatus(id, "error", { error: errorDetail.slice(0, 500) }).pipe(
+        Effect.catch((statusError) => Effect.logError("Failed to update sandbox error status", statusError)),
+        Effect.catchDefect((statusDefect) =>
+          Effect.logError("Defect while updating sandbox error status", statusDefect)
+        )
+      )
+    })
 
   const progress = (id: SandboxId, detail: string) =>
     Clock.currentTimeMillis.pipe(
@@ -153,7 +170,7 @@ const makeSandboxService = Effect.gen(function*() {
         })
 
         // Fork daemon for async lifecycle
-        yield* Effect.forkDetach(
+        yield* ownerScope.fork(
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
             const log = (detail: string) => progress(id, detail)
@@ -188,7 +205,15 @@ const makeSandboxService = Effect.gen(function*() {
                   workspacePath
                 ],
                 {
-                  env: { AWS_PROFILE: params.profile, AWS_DEFAULT_REGION: params.region },
+                  // `git` and the `aws` credential helper both resolve from PATH, so the
+                  // profile overrides must extend the inherited environment. Ambient AWS
+                  // credentials would outrank them, so profileScopedEnv drops those.
+                  env: ChildEnv.profileScopedEnv({
+                    AWS_PROFILE: params.profile,
+                    AWS_DEFAULT_REGION: params.region,
+                    AWS_REGION: params.region
+                  }),
+                  extendEnv: true,
                   stderr: "pipe"
                 }
               )
@@ -286,18 +311,12 @@ const makeSandboxService = Effect.gen(function*() {
             yield* updateStatus(id, "running")
             yield* log("Sandbox ready")
           }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.gen(function*() {
-                yield* Effect.logError(`Sandbox ${id} creation failed`, cause)
-                const squashed = Cause.squash(cause)
-                const errorDetail = Predicate.isError(squashed) ? squashed.message : String(squashed)
-                yield* updateStatus(id, "error", { error: errorDetail.slice(0, 500) }).pipe(
-                  Effect.catchIf(() =>
-                    true, (statusErr) =>
-                    Effect.logError("Failed to update sandbox error status", statusErr))
-                )
-              })
-            )
+            Effect.catch((error) =>
+              recordCreationFailure(id, error)
+            ),
+            // Observe and persist unexpected defects without recovering them.
+            // `tapDefect` leaves the original Cause / Exit unchanged.
+            Effect.tapDefect((defect) => recordCreationFailure(id, defect))
           )
         )
 
@@ -396,7 +415,7 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Effect.logInfo(`Reconciled orphaned sandbox ${row.id}`)
             }
           }), { discard: true })
-      }).pipe(Effect.catchCause((cause) => Effect.logWarning("Sandbox reconcile failed", cause))),
+      }).pipe(Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause))),
 
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>
       Effect.gen(function*() {
@@ -444,7 +463,7 @@ const makeSandboxService = Effect.gen(function*() {
           },
           { discard: true }
         )
-      }).pipe(Effect.catchCause((cause) => Effect.logWarning("Sandbox GC failed", cause)))
+      }).pipe(Effect.catch((cause) => Effect.logWarning("Sandbox GC failed", cause)))
   }
   return service
 })
@@ -455,7 +474,12 @@ export class SandboxService extends Context.Service<
   SandboxService,
   SandboxServiceShape
 >()("SandboxService") {
-  static readonly Default = Layer.effect(SandboxService, makeSandboxService).pipe(
-    Layer.provide(Layer.mergeAll(SandboxRepo.Default, DockerService.Default, PluginService.Default))
+  /** Dependency-requiring layer used by composition tests and custom runtimes. @internal */
+  static readonly layer = Layer.effect(SandboxService, makeSandboxService)
+
+  static readonly Default = SandboxService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(SandboxRepo.Default, DockerService.Default, PluginService.Default, SandboxWorkerScope.Default)
+    )
   )
 }

@@ -13,12 +13,14 @@ import {
   type AgentRunRequest,
   type AgentRuntimeError,
   type AgentRuntimeEvent,
+  type AgentRuntimeMetadata,
   attachAgentRuntimeMetadata,
   makeToolAgentAdapter,
   runToolAgent
 } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
@@ -40,11 +42,14 @@ import {
   type PrReviewSuggestionAnchor,
   PrReviewSuggestionDraft,
   type PrReviewSuggestionDraft as PrReviewSuggestionDraftType,
-  PrReviewSuggestionId
+  PrReviewSuggestionId,
+  prReviewSuggestionIdentityMaterial
 } from "../../../domain/prReview.js"
+import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../../domain/prReviewRevision.js"
 import {
   type AgentJobInputError,
   type ClaimedAgentJob,
+  MAXIMUM_REVIEW_BUDGET_MILLIS,
   PrReviewThreadContextSnapshot
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
@@ -68,6 +73,36 @@ const ModelReviewReport = Schema.Struct({
   notes: Schema.Array(PrReviewNoteDraft)
 })
 
+export const TargetedSuggestionResult = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  edit: PrReviewSuggestionEdit
+})
+export type TargetedSuggestionResult = typeof TargetedSuggestionResult.Type
+
+export type PrReviewTaskExecution =
+  | { readonly _tag: "report"; readonly report: typeof PrReviewReport.Type }
+  | {
+    readonly _tag: "targeted"
+    readonly edit: typeof PrReviewSuggestionEdit.Type
+    readonly runtimeMetadata?: AgentRuntimeMetadata
+  }
+
+const reportExecution = (
+  report: typeof PrReviewReport.Type
+): Extract<PrReviewTaskExecution, { readonly _tag: "report" }> => ({
+  _tag: "report",
+  report
+})
+
+const targetedExecution = (
+  edit: typeof PrReviewSuggestionEdit.Type,
+  runtimeMetadata?: AgentRuntimeMetadata
+): Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }> => ({
+  _tag: "targeted",
+  edit,
+  ...(runtimeMetadata === undefined ? {} : { runtimeMetadata })
+})
+
 const { location: _nativeNoteLocation, ...nativeNoteDraftFields } = PrReviewNoteDraft.fields
 
 const NativeModelReviewReport = Schema.Struct({
@@ -79,6 +114,15 @@ const NativeModelReviewReport = Schema.Struct({
     replacement: Schema.NullOr(PrReviewReplacement)
   })),
   notes: Schema.Array(Schema.Struct(nativeNoteDraftFields))
+})
+
+const NativeModelTargetedSuggestion = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  edit: Schema.Struct({
+    ...PrReviewSuggestionEdit.fields,
+    prevention: Schema.NullOr(PrReviewPrevention),
+    replacement: Schema.NullOr(PrReviewReplacement)
+  })
 })
 
 const isJsonSchemaObject = (
@@ -135,6 +179,27 @@ const nativeOutputSchema = (
       )
   })
 
+const nativeTargetedOutputSchema = (
+  providerId: ClaimedAgentJob["providerId"]
+): Effect.Effect<string, AgentProviderError> =>
+  Effect.try({
+    try: () => {
+      const document = Schema.toJsonSchemaDocument(NativeModelTargetedSuggestion)
+      return JSON.stringify(flattenJsonSchemaAllOf({
+        $defs: document.definitions,
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        ...document.schema
+      }))
+    },
+    catch: () =>
+      providerFailure(
+        providerId,
+        "configuration",
+        "Targeted review output schema could not be prepared.",
+        false
+      )
+  })
+
 interface ReviewOutputAccumulator {
   readonly completed: Extract<AgentRuntimeEvent, { readonly _tag: "completed" }> | null
   readonly output: string
@@ -165,6 +230,7 @@ const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNat
       providerFailure(providerId, "protocol", "Native PR review provider returned invalid structured output.", false)
     )
   )
+
   return JSON.stringify({
     schemaVersion: nativeReport.schemaVersion,
     completion: nativeReport.completion,
@@ -226,7 +292,7 @@ const utf8Bytes = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 const textEncoder = new TextEncoder()
-const ARTIFACT_PAGE_CHARACTERS = 64 * 1_024
+const ARTIFACT_PAGE_BYTES = 64 * 1_024
 const MAXIMUM_ARTIFACT_PAGES = 1_025
 
 const diffLineIntervals = (
@@ -252,27 +318,28 @@ const rangeIsChanged = (
   endLine: number
 ): boolean => intervals.some((interval) => startLine >= interval.startLine && endLine <= interval.endLine)
 
-const completeOutputText = Effect.fn("PrReviewTaskExecutor.completeOutputText")(function*(
+const completeOutputText = Effect.fnUntraced(function*(
   session: PrReviewSandboxSession,
   output: PrReviewSandboxOutput
 ) {
-  if (!output.truncated) return output.artifactId === null ? output.text : null
-  if (output.artifactId === null) return null
+  if (!output.truncated) return output.artifact === null ? output.text : null
+  if (output.artifact === null) return null
   const pages = new Array<string>()
   let offset = 0
   for (let pageNumber = 0; pageNumber < MAXIMUM_ARTIFACT_PAGES; pageNumber += 1) {
     const page = yield* session.pageArtifact(
-      output.artifactId,
+      output.artifact,
       offset,
-      ARTIFACT_PAGE_CHARACTERS
+      ARTIFACT_PAGE_BYTES
     ).pipe(Effect.result)
     if (Result.isFailure(page)) return null
-    pages.push(page.success)
-    if (page.success.length < ARTIFACT_PAGE_CHARACTERS) return pages.join("")
-    offset += page.success.length
+    pages.push(page.success.text)
+    if (page.success.complete) return pages.join("")
+    if (page.success.nextOffset <= offset) return null
+    offset = page.success.nextOffset
   }
   return null
-})
+}, Effect.withTracerEnabled(false))
 
 const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(function*(
   providerId: ClaimedAgentJob["providerId"],
@@ -331,7 +398,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     `git show ${shellQuote(`${evidenceRevision}:${path}`)} | ` +
       `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-  if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifactId !== null) {
+  if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifact !== null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion source evidence was unavailable.", false)
   }
   const excerpt = source.stdout.text.endsWith("\n")
@@ -420,18 +487,7 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
   subject: typeof PrReviewSubject.Type,
   suggestion: PrReviewSuggestionDraftType
 ) {
-  const material = JSON.stringify([
-    subject.baseRevision,
-    subject.headRevision,
-    suggestion.title,
-    suggestion.anchor,
-    suggestion.evidence.path,
-    suggestion.evidence.startLine,
-    suggestion.evidence.endLine,
-    suggestion.evidence.excerpt,
-    suggestion.problem,
-    suggestion.recommendation
-  ])
+  const material = prReviewSuggestionIdentityMaterial(subject, suggestion)
   const bytes = yield* utf8Bytes(providerId, material)
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() =>
@@ -516,6 +572,28 @@ const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelat
     if (yield* locationIsChangedInHead(providerId, session, location)) validated.push(location)
   }
   return validated.sort((left, right) => relatedLocationKey(left).localeCompare(relatedLocationKey(right)))
+})
+
+const validateTargetedEdit = Effect.fn("PrReviewTaskExecutor.validateTargetedEdit")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  edit: typeof PrReviewSuggestionEdit.Type
+) {
+  yield* exactEvidence(providerId, session, edit)
+  const relatedLocations = yield* validatedRelatedLocations(providerId, session, edit)
+  const anchor = yield* resolveAnchor(providerId, session, {
+    ...edit,
+    relatedLocations
+  })
+  return yield* Schema.decodeUnknownEffect(PrReviewSuggestionEdit)({
+    ...edit,
+    anchor,
+    relatedLocations
+  }).pipe(
+    Effect.mapError(() =>
+      providerFailure(providerId, "protocol", "Targeted review suggestion edit was invalid.", false)
+    )
+  )
 })
 
 const validatedNoteLocation = Effect.fn("PrReviewTaskExecutor.validatedNoteLocation")(function*(
@@ -813,238 +891,357 @@ completion unable-to-conclude only when the sandbox cannot support a responsible
 complete review. Return only the structured JSON required by the output schema.
 `.trim()
 
+const TARGETED_REVIEW_INSTRUCTIONS = `
+You are performing one targeted review-suggestion operation in a disposable,
+read-only Review Sandbox. You may inspect the exact pull-request head and run
+commands, but you must not publish comments, modify repository history, change
+repository code, or access credentials/network authority.
+
+The context contains the selected suggestion's complete bounded immutable
+revision history. For suggestion-edit, return a complete replacement edit for
+the selected draft. For suggestion-revalidation, preserve the technical claim
+unless the evidence proves it is wrong, and return the complete corrected edit.
+Return only JSON with schemaVersion 1 and an edit object. The host validates the
+exact anchor and evidence before appending an immutable revision.
+`.trim()
+
 const makeExecutor = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const runtimes = yield* AgentRuntimeRegistry
   const sessions = yield* PrReviewSandboxSessions
   const history = yield* PrReviewThreadHistory
 
-  return PrReviewTaskExecutor.of({
-    execute: Effect.fn("PrReviewTaskExecutor.execute")(function*(
-      claim,
-      onActivity = () => Effect.void
+  const executeInternal = Effect.fnUntraced(function*(
+    claim: ClaimedAgentJob,
+    onActivity: (
+      event: AgentRuntimeEvent
+    ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError> = () => Effect.void
+  ): Effect.fn.Return<PrReviewTaskExecution, AgentProviderError | AgentJobInputError> {
+    if (claim.context.task._tag !== "pr-review" || claim.access !== "read-only") {
+      return yield* providerFailure(
+        claim.providerId,
+        "configuration",
+        "PR review requires an immutable read-only task.",
+        false
+      )
+    }
+    const reviewTask = claim.context.task
+    const selected = yield* runtimes.select({
+      providerId: claim.providerId,
+      model: claim.model,
+      access: "read-only",
+      capability: "pr-review"
+    })
+    const catalog = yield* runtimes.catalog()
+    const persistedProfile = claim.context.task.reviewProfile
+    const reviewBudgetMillis = MAXIMUM_REVIEW_BUDGET_MILLIS
+    const languageModel = selected.languageModel
+    const effectAiReview = selected.reviewExecution === "effect-ai" &&
+      selected.filesystemAccess === "none" &&
+      languageModel !== undefined
+    const nativeCodexReview = selected.reviewExecution === "native-codex" &&
+      persistedProfile.networkAccess === "provider-enabled" &&
+      selected.reviewExecutable !== undefined
+    const nativeClaudeReview = selected.reviewExecution === "native-claude" &&
+      persistedProfile.networkAccess === "provider-enabled" &&
+      selected.reviewExecutable !== undefined
+    const nativeReview = nativeCodexReview || nativeClaudeReview
+    const profile = catalog.providers.find(
+      ({ providerId }) => String(providerId) === String(claim.providerId)
+    )?.reviewProfile
+    if (
+      (!effectAiReview && !nativeReview) ||
+      profile === undefined ||
+      profile.profileId !== persistedProfile.profileId ||
+      profile.label !== persistedProfile.label ||
+      profile.budgetMillis !== persistedProfile.budgetMillis ||
+      profile.networkAccess !== persistedProfile.networkAccess ||
+      profile.sandbox !== persistedProfile.sandbox
     ) {
-      if (claim.context.task._tag !== "pr-review" || claim.access !== "read-only") {
-        return yield* providerFailure(
-          claim.providerId,
-          "configuration",
-          "PR review requires an immutable read-only task.",
-          false
-        )
-      }
-      const selected = yield* runtimes.select({
-        providerId: claim.providerId,
-        model: claim.model,
-        access: "read-only",
-        capability: "pr-review"
-      })
-      const catalog = yield* runtimes.catalog()
-      const persistedProfile = claim.context.task.reviewProfile
-      const languageModel = selected.languageModel
-      const effectAiReview = selected.reviewExecution === "effect-ai" &&
-        selected.filesystemAccess === "none" &&
-        languageModel !== undefined
-      const nativeCodexReview = selected.reviewExecution === "native-codex" &&
-        persistedProfile.networkAccess === "provider-enabled" &&
-        selected.reviewExecutable !== undefined
-      const nativeClaudeReview = selected.reviewExecution === "native-claude" &&
-        persistedProfile.networkAccess === "provider-enabled" &&
-        selected.reviewExecutable !== undefined
-      const nativeReview = nativeCodexReview || nativeClaudeReview
-      const profile = catalog.providers.find(
-        ({ providerId }) => String(providerId) === String(claim.providerId)
-      )?.reviewProfile
-      if (
-        (!effectAiReview && !nativeReview) ||
-        profile === undefined ||
-        profile.profileId !== persistedProfile.profileId ||
-        profile.label !== persistedProfile.label ||
-        profile.budgetMillis !== persistedProfile.budgetMillis ||
-        profile.networkAccess !== persistedProfile.networkAccess ||
-        profile.sandbox !== persistedProfile.sandbox
-      ) {
-        return yield* providerFailure(
-          claim.providerId,
-          "configuration",
-          "PR review requires an available sbx Review Agent Profile and supported review runner.",
-          false
-        )
-      }
-      const subject = claim.context.task.subject
-      const threadContext = yield* Schema.encodeUnknownEffect(
-        PrReviewThreadContextSnapshot
-      )(claim.context.task.context).pipe(
-        Effect.mapError(() =>
-          providerFailure(
-            claim.providerId,
-            "protocol",
-            "Review thread context could not be encoded.",
-            false
+      return yield* providerFailure(
+        claim.providerId,
+        "configuration",
+        "PR review requires an available sbx Review Agent Profile and supported review runner.",
+        false
+      )
+    }
+    const subject = claim.context.task.subject
+    const targeted = claim.context.task.intent === "suggestion-edit" ||
+      claim.context.task.intent === "suggestion-revalidation"
+    if (targeted && reviewTask.target === undefined) {
+      return yield* providerFailure(
+        claim.providerId,
+        "configuration",
+        "Targeted review is missing its immutable suggestion history.",
+        false
+      )
+    }
+    const encodedTarget = targeted && reviewTask.target !== undefined
+      ? {
+        ...reviewTask.target,
+        history: yield* Schema.encodeUnknownEffect(PrReviewSuggestionRevisionPage)(reviewTask.target.history).pipe(
+          Effect.mapError(() =>
+            providerFailure(claim.providerId, "protocol", "Targeted review history could not be encoded.", false)
           )
+        )
+      }
+      : undefined
+    const threadContext = yield* Schema.encodeUnknownEffect(
+      PrReviewThreadContextSnapshot
+    )(claim.context.task.context).pipe(
+      Effect.mapError(() =>
+        providerFailure(
+          claim.providerId,
+          "protocol",
+          "Review thread context could not be encoded.",
+          false
         )
       )
-      const attemptId = Encoding.encodeHex(
-        yield* cryptoService.digest(
-          "SHA-256",
-          yield* utf8Bytes(claim.providerId, `${claim.jobId}:${String(claim.attemptSequence)}`)
-        ).pipe(
-          Effect.mapError(() =>
-            providerFailure(claim.providerId, "protocol", "Review attempt identity could not be derived.", false)
-          )
+    )
+    const attemptId = Encoding.encodeHex(
+      yield* cryptoService.digest(
+        "SHA-256",
+        yield* utf8Bytes(claim.providerId, `${claim.jobId}:${String(claim.attemptSequence)}`)
+      ).pipe(
+        Effect.mapError(() =>
+          providerFailure(claim.providerId, "protocol", "Review attempt identity could not be derived.", false)
         )
-      ).slice(0, 12)
-      const onRuntimeActivity = (event: AgentRuntimeEvent) =>
-        onActivity(attachAgentRuntimeMetadata(event, selected.runtimeMetadata))
+      )
+    ).slice(0, 12)
+    const onRuntimeActivity = (event: AgentRuntimeEvent) =>
+      onActivity(attachAgentRuntimeMetadata(event, selected.runtimeMetadata))
 
-      return yield* sessions.withSession(
-        {
-          workspaceId: claim.workspaceId,
-          jobId: claim.jobId,
-          repository: subject.repository,
-          attemptId,
-          baseRevision: subject.baseRevision,
-          headRevision: subject.headRevision,
-          reviewExecution: selected.reviewExecution
-        },
-        (session) =>
-          Effect.gen(function*() {
-            if (nativeReview) {
-              const runNativeReview = nativeCodexReview
-                ? session.runNativeCodexReview
-                : session.runNativeClaudeReview
-              const nativeProviderLabel = nativeCodexReview ? "Codex" : "Claude"
-              const maximumDurationMillis = nativeReviewMaximumDurationMillis(
-                persistedProfile.budgetMillis
-              )
-              if (maximumDurationMillis === null) {
-                return yield* providerFailure(
-                  claim.providerId,
-                  "configuration",
-                  `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
-                  false
-                )
-              }
-              if (runNativeReview === undefined) {
-                return yield* providerFailure(
-                  claim.providerId,
-                  "configuration",
-                  `Native ${nativeProviderLabel} review is unavailable in the configured Review Sandbox.`,
-                  false
-                )
-              }
-              yield* onRuntimeActivity({
-                _tag: "started",
-                providerRunRef: null,
-                sessionRef: null
-              }).pipe(
-                Effect.mapError((failure) => executionFailure(claim.providerId, failure))
-              )
-              yield* onRuntimeActivity({
-                _tag: "output",
-                channel: "progress",
-                text: `Relay is reviewing the exact pull-request revision in a native ${nativeProviderLabel} sandbox.`
-              }).pipe(
-                Effect.mapError((failure) => executionFailure(claim.providerId, failure))
-              )
-              const outputSchema = yield* nativeOutputSchema(claim.providerId)
-              const nativePrompt = [
-                NATIVE_REVIEW_INSTRUCTIONS,
-                "",
-                "<review-context-json>",
-                JSON.stringify({
-                  operatorRequest: claim.prompt,
-                  subject,
-                  threadContext
-                }),
-                "</review-context-json>"
-              ].join("\n")
-              const reviewed = yield* runNativeReview({
-                executable: selected.reviewExecutable,
-                prompt: nativePrompt,
-                outputSchema,
-                maximumDurationMillis,
-                ...(String(selected.model) === "configured-default" || String(selected.model) === "default"
-                  ? {}
-                  : { model: String(selected.model) })
-              })
-              if (reviewed.exitCode !== 0) {
-                return yield* providerFailure(
-                  claim.providerId,
-                  "execution",
-                  `Native ${nativeProviderLabel} review did not complete successfully.`,
-                  true
-                )
-              }
-              const output = yield* completeOutputText(session, reviewed.stdout)
-              if (output === null || output.length === 0) {
-                return yield* providerFailure(
-                  claim.providerId,
-                  "protocol",
-                  `Native ${nativeProviderLabel} review returned no structured result.`,
-                  false
-                )
-              }
-              const normalizedOutput = yield* normalizeNativeReviewOutput(claim.providerId, output)
-              return yield* anchorReport(
-                cryptoService,
-                claim,
-                session,
-                normalizedOutput,
-                onRuntimeActivity
-              )
-            }
-            if (languageModel === undefined) {
+    return yield* sessions.withSession(
+      {
+        workspaceId: claim.workspaceId,
+        threadId: claim.threadId,
+        jobId: claim.jobId,
+        attemptSequence: claim.attemptSequence,
+        repository: subject.repository,
+        attemptId,
+        baseRevision: subject.baseRevision,
+        headRevision: subject.headRevision,
+        providerId: String(claim.providerId),
+        ...(selected.model === null ? {} : { model: String(selected.model) }),
+        reviewExecution: selected.reviewExecution,
+        ...(claim.sessionRef?.startsWith("sbx:")
+          ? { recoverySandboxName: claim.sessionRef.slice("sbx:".length) }
+          : {})
+      },
+      (session) =>
+        Effect.gen(function*() {
+          if (nativeReview) {
+            const runNativeReview = nativeCodexReview
+              ? session.runNativeCodexReview
+              : session.runNativeClaudeReview
+            const nativeProviderLabel = nativeCodexReview ? "Codex" : "Claude"
+            if (nativeReviewMaximumDurationMillis(persistedProfile.budgetMillis) === null) {
               return yield* providerFailure(
                 claim.providerId,
                 "configuration",
-                "Effect AI review model is unavailable.",
+                `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
                 false
               )
             }
-            const toolkit = yield* PrReviewTools.pipe(
-              Effect.provide(
-                Layer.merge(
-                  prReviewSandboxToolsLayer(session),
-                  prReviewThreadToolsLayer(history, claim)
-                )
+            const maximumDurationMillis = nativeReviewMaximumDurationMillis(
+              reviewBudgetMillis
+            )
+            if (maximumDurationMillis === null) {
+              return yield* providerFailure(
+                claim.providerId,
+                "configuration",
+                `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
+                false
+              )
+            }
+            if (runNativeReview === undefined) {
+              return yield* providerFailure(
+                claim.providerId,
+                "configuration",
+                `Native ${nativeProviderLabel} review is unavailable in the configured Review Sandbox.`,
+                false
+              )
+            }
+            yield* onRuntimeActivity({
+              _tag: "started",
+              providerRunRef: null,
+              sessionRef: null
+            }).pipe(
+              Effect.mapError((failure) => executionFailure(claim.providerId, failure))
+            )
+            yield* onRuntimeActivity({
+              _tag: "output",
+              channel: "progress",
+              text: `Relay is reviewing the exact pull-request revision in a native ${nativeProviderLabel} sandbox.`
+            }).pipe(
+              Effect.mapError((failure) => executionFailure(claim.providerId, failure))
+            )
+            const outputSchema = yield* (
+              targeted
+                ? nativeTargetedOutputSchema(claim.providerId)
+                : nativeOutputSchema(claim.providerId)
+            )
+            const nativePrompt = [
+              targeted ? TARGETED_REVIEW_INSTRUCTIONS : NATIVE_REVIEW_INSTRUCTIONS,
+              "",
+              "<review-context-json>",
+              JSON.stringify({
+                operatorRequest: claim.prompt,
+                subject,
+                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
+                threadContext
+              }),
+              "</review-context-json>"
+            ].join("\n")
+            const reviewed = yield* runNativeReview({
+              executable: selected.reviewExecutable,
+              prompt: nativePrompt,
+              outputSchema,
+              maximumDurationMillis,
+              ...(String(selected.model) === "configured-default" || String(selected.model) === "default"
+                ? {}
+                : { model: String(selected.model) })
+            })
+            if (reviewed.exitCode !== 0) {
+              return yield* providerFailure(
+                claim.providerId,
+                "execution",
+                `Native ${nativeProviderLabel} review did not complete successfully.`,
+                true
+              )
+            }
+            const output = yield* completeOutputText(session, reviewed.stdout)
+            if (output === null || output.length === 0) {
+              return yield* providerFailure(
+                claim.providerId,
+                "protocol",
+                `Native ${nativeProviderLabel} review returned no structured result.`,
+                false
+              )
+            }
+            if (targeted) {
+              return yield* Schema.decodeUnknownEffect(
+                Schema.fromJsonString(NativeModelTargetedSuggestion),
+                { onExcessProperty: "error" }
+              )(output).pipe(
+                Effect.mapError(() =>
+                  providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
+                ),
+                Effect.flatMap((result) => {
+                  const { prevention, replacement, ...edit } = result.edit
+                  return validateTargetedEdit(claim.providerId, session, {
+                    ...edit,
+                    ...(prevention === null ? {} : { prevention }),
+                    ...(replacement === null ? {} : { replacement })
+                  }).pipe(Effect.map((edit) => targetedExecution(edit, selected.runtimeMetadata)))
+                })
+              )
+            }
+            const normalizedOutput = yield* normalizeNativeReviewOutput(claim.providerId, output)
+            return reportExecution(
+              yield* anchorReport(cryptoService, claim, session, normalizedOutput, onRuntimeActivity)
+            )
+          }
+          if (languageModel === undefined) {
+            return yield* providerFailure(
+              claim.providerId,
+              "configuration",
+              "Effect AI review model is unavailable.",
+              false
+            )
+          }
+          const toolkit = yield* PrReviewTools.pipe(
+            Effect.provide(
+              Layer.merge(
+                prReviewSandboxToolsLayer(session),
+                prReviewThreadToolsLayer(history, claim)
               )
             )
-            const adapter = makeToolAgentAdapter((request) =>
-              runToolAgent({
-                budget: persistedProfile.budgetMillis,
-                context: {
-                  operatorRequest: request.prompt,
-                  subject,
-                  threadContext,
-                  sandbox: "sbx",
-                  networkAccess: "blocked"
-                },
-                instructions: REVIEW_INSTRUCTIONS,
-                model: languageModel,
-                outputSchema: ModelReviewReport,
-                toolkit
-              })
+          )
+          const adapter = makeToolAgentAdapter((request) =>
+            runToolAgent({
+              budget: Duration.millis(reviewBudgetMillis),
+              context: {
+                operatorRequest: request.prompt,
+                subject,
+                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
+                threadContext,
+                sandbox: "sbx",
+                networkAccess: "blocked"
+              },
+              instructions: targeted ? TARGETED_REVIEW_INSTRUCTIONS : REVIEW_INSTRUCTIONS,
+              model: languageModel,
+              outputSchema: targeted ? TargetedSuggestionResult : ModelReviewReport,
+              toolkit
+            })
+          )
+          const request: AgentRunRequest = {
+            runId: AgentRunId.make(claim.jobId),
+            providerId: claim.providerId,
+            model: selected.model,
+            access: "read-only",
+            prompt: claim.prompt,
+            context: claim.context,
+            continuation: { _tag: "fresh" }
+          }
+          const output = yield* collectReviewOutput(claim, adapter.run(request), onRuntimeActivity)
+          if (targeted) {
+            const result = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(TargetedSuggestionResult),
+              { onExcessProperty: "error" }
+            )(output).pipe(
+              Effect.mapError(() =>
+                providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
+              )
             )
-            const request: AgentRunRequest = {
-              runId: AgentRunId.make(claim.jobId),
-              providerId: claim.providerId,
-              model: selected.model,
-              access: "read-only",
-              prompt: claim.prompt,
-              context: claim.context,
-              continuation: { _tag: "fresh" }
-            }
-            const output = yield* collectReviewOutput(claim, adapter.run(request), onRuntimeActivity)
-            return yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
-          })
-      ).pipe(
-        Effect.mapError((failure) =>
-          Schema.is(PrReviewSandboxSessionError)(failure)
-            ? sandboxFailure(claim.providerId, failure)
-            : failure
+            return targetedExecution(
+              yield* validateTargetedEdit(claim.providerId, session, result.edit),
+              selected.runtimeMetadata
+            )
+          }
+          return reportExecution(
+            yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
+          )
+        })
+    ).pipe(
+      Effect.mapError((failure) =>
+        Schema.is(PrReviewSandboxSessionError)(failure)
+          ? sandboxFailure(claim.providerId, failure)
+          : failure
+      )
+    )
+  }, Effect.withTracerEnabled(false))
+  return PrReviewTaskExecutor.of({
+    execute: (claim, onActivity, _onPartialReport = () => Effect.void) =>
+      executeInternal(claim, onActivity).pipe(
+        Effect.flatMap((result) =>
+          result._tag === "report"
+            ? Effect.succeed(result.report)
+            : Effect.fail(
+              providerFailure(
+                claim.providerId,
+                "protocol",
+                "PR review provider returned a targeted result for a full review.",
+                false
+              )
+            )
+        )
+      ),
+    executeTargeted: (claim, onActivity) =>
+      executeInternal(claim, onActivity).pipe(
+        Effect.flatMap((result) =>
+          result._tag === "targeted"
+            ? Effect.succeed(result)
+            : Effect.fail(
+              providerFailure(
+                claim.providerId,
+                "protocol",
+                "PR review provider returned a full report for a targeted task.",
+                false
+              )
+            )
         )
       )
-    })
   })
 })
 
@@ -1056,8 +1253,20 @@ export class PrReviewTaskExecutor extends Context.Service<
       claim: ClaimedAgentJob,
       onActivity?: (
         event: AgentRuntimeEvent
+      ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>,
+      onPartialReport?: (
+        report: typeof PrReviewReport.Type
       ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
     ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError | AgentJobInputError>
+    readonly executeTargeted: (
+      claim: ClaimedAgentJob,
+      onActivity?: (
+        event: AgentRuntimeEvent
+      ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+    ) => Effect.Effect<
+      Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }>,
+      AgentProviderError | AgentJobInputError
+    >
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewTaskExecutor") {}
 

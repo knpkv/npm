@@ -170,17 +170,14 @@ const makeStatsService = Effect.gen(function*() {
         Effect.catchTags({
           CacheError: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback)),
           InvalidISOWeek: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback))
-        }),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("StatsService.getWeeklyStats failed", cause).pipe(Effect.as(fallback))
-        )
+        })
       )
     },
 
     syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>): Effect.Effect<void> =>
       syncWeekImpl(state, week).pipe(
         Effect.provide(depsLayer),
-        Effect.catchCause((cause) => Effect.logWarning("StatsService.syncWeek failed", cause))
+        Effect.catch((cause) => Effect.logWarning("StatsService.syncWeek failed", cause))
       ),
 
     currentWeek: () =>

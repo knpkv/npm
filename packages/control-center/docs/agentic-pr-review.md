@@ -151,6 +151,12 @@ The agent does not issue an overall verdict. Control Center derives:
 
 Validated suggestions from an incomplete run remain publishable, but the incomplete warning remains visible and the run can never yield No Issues Found.
 
+The selected Review Agent Profile budget is a durable run limit enforced by the worker, rather than a
+provider-specific process timeout. A running review may be extended once by one additional profile budget;
+the extension is recorded in the review thread so a restarted worker observes the same limit. Cancellation
+and budget expiry retain the latest validated partial report and finish the run as Unable to Conclude.
+Retained findings remain advice-only while the report explicitly marks the unexamined portion of the project.
+
 ## Suggestion lifecycle
 
 A changed pull-request head makes prior suggestions stale and blocks their publication. Re-review creates a new immutable run and performs ID-based Suggestion Reconciliation:
@@ -213,7 +219,10 @@ It does not own:
 
 Codex and Claude are real adapters at the LanguageModel seam. The package does not depend on their native tool behavior.
 
-Each tool result returned to the model is limited to 64 KiB with useful head and tail sections plus an artifact ID. Full output remains locally pageable and searchable under the retention policy.
+Each command stream returned to the model is limited to a 32 KiB UTF-8 prefix
+plus an artifact handle when more output exists, for at most 64 KiB of immediate
+stdout and stderr context combined. Full output remains locally pageable and
+searchable under the retention policy.
 
 ### Review application module
 
@@ -308,12 +317,16 @@ The AI provider process remains outside sbx. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
-output receives a session-local opaque artifact ID. A session retains at most
-64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
-pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
-host or sbx control access. File reads and listings preserve missing-path failures,
-and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
-changes.
+output receives a durable opaque artifact ID. SQLite binds each artifact to the
+exact workspace, thread, job attempt, command sequence, and output stream before
+the handle is returned. A bounded metadata operation rediscovers secret-free
+handles for the owning review job after recovery; page and search operations
+must then present the handle's original attempt, command, and stream identity.
+Both retained streams for one command commit atomically. An attempt retains at
+most 64 artifacts and 64 MiB, while any one pathological stream above 16 MiB is rejected.
+Provider CLIs never receive direct host or sbx control access. File reads and
+listings preserve missing-path failures, and temporary diffs include tracked,
+staged, unstaged, and non-ignored untracked changes.
 
 The merged provider-neutral toolkit also exposes the durable history reader.
 Its handler is bound to the claimed workspace, thread, and job on the host and
@@ -331,19 +344,21 @@ Run statuses are preparing, running, completed, cancelled, interrupted, failed, 
 
 On startup, Control Center:
 
-- Removes stale sbx sandboxes in the configured PR worker workspace's
-  `cc-pr-review-<compact-workspace-id>-` namespace.
-- Recovers durable queued or lease-expired review jobs through the worker.
-- Starts a fresh sandbox for a recovered attempt rather than simulating provider-session recovery.
+- Lists the configured PR worker workspace's server-private
+  `cc-pr-review-<compact-workspace-id>-` names and retains live entries for recovery inspection.
+- When no owned live sandbox remains, records active review jobs as interrupted with partial evidence.
+- Recovers durable queued or lease-expired review jobs through the worker and starts a fresh sandbox
+  rather than simulating provider-session recovery.
 
 Session acquisition and use are scoped. Cancellation, command or session
 timeout, copy/start failure, callback failure, and normal completion all force
 sbx sandbox removal. A command timeout fails the session before
 returning its typed failure, and model-requested timeouts cannot exceed the
 locally configured command cap. Startup reconciliation lists sbx sandboxes and
-removes only names with the exact configured workspace prefix. Names owned by
-another workspace and legacy unscoped `cc-pr-review-*` names remain untouched
-because the current worker cannot safely attribute them.
+retains live names with the exact configured workspace prefix for recovery
+inspection. Names owned by another workspace and legacy unscoped
+`cc-pr-review-*` names remain untouched because the current worker cannot safely
+attribute them.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 
@@ -353,6 +368,14 @@ Malformed tool arguments or final output receive one schema-guided repair attemp
 - Sanitized command timeline and evidence excerpts: retained for 30 days.
 - Raw command output: retained for 7 days.
 - Host staging checkout and sbx sandbox filesystem: deleted immediately after the run.
+
+Raw artifact rows are immutable and carry their expiry and owning review
+identity at creation. A bounded `sandbox-artifact` retention transaction claims
+and deletes expired rows without deleting their semantic thread, job, or
+attempt records. Raw reads fail at the recorded expiry even when physical
+cleanup has not run yet. Browser-visible metadata contains only opaque identities,
+stream, byte length, and lifecycle timestamps; command text and output remain
+behind the scoped page/search boundary.
 
 No migration or backward compatibility is required for the previous pre-stable review model.
 
@@ -369,6 +392,10 @@ OpenTelemetry contains metadata only:
 - Error types.
 
 Prompts, source, command output, model output, replacement patches, and credentials never enter traces.
+The sandbox session, typed-tool loop, raw artifact reads, provider-output
+normalization, and final report construction run with generic Effect tracing
+disabled because successful span exits retain returned values. Observability for
+this path must use explicit metadata-only spans outside that sensitive boundary.
 
 The same safe runtime identity is durable Review Thread data. For local
 providers, Control Center invokes the trusted CLI with `--version` through
@@ -382,7 +409,7 @@ environment values, and provider-native references remain server-only.
 - Pure suggestion lifecycle and reconciliation state-machine tests.
 - Scripted fake-model tests for `@knpkv/ai-runtime`: tool calls, schema repair, output bounds, cancellation, and timeout.
 - sbx command-policy tests and an opt-in real sbx integration test when the CLI is available.
-- CodeCommit adapter contract tests for exact-head checkout and comment publication.
+- CodeCommit adapter contract tests for exact-head checkout and create, update, and reply comment publication.
 - Durable publication replay for line, file, and whole-change suggestions.
 - Browser flow: launch, live activity, inline suggestion, edit, revalidation, publication preview, staleness, and re-review.
 - Opt-in real Codex smoke test using the locally authenticated CLI.
@@ -396,7 +423,7 @@ environment values, and provider-native references remain server-only.
 5. Implement Review Thread orchestration, persistence, retention, recovery, and metadata-only telemetry.
 6. Extend `@knpkv/rly/diff` for application-rendered inline annotations.
 7. Build the integrated PR review workspace and launch/publication popups.
-8. Add CodeCommit comment create/update/reply operations and contract tests.
+8. Add grouped publication splitting and complete the CodeCommit comment create/update/reply contract journey.
 9. Add browser coverage and the opt-in real Codex smoke test.
 
 ## Decision records

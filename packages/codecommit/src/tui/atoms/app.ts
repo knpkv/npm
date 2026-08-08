@@ -1,7 +1,7 @@
 import { CacheService, type Domain, PRService } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { Effect, Fiber, Stream, SubscriptionRef } from "effect"
-import { runtimeAtom } from "./runtime.js"
+import { runtimeAtom, TuiApplicationScope } from "./runtime.js"
 
 // Track active refresh fiber for cleanup
 let activeRefreshFiber: Fiber.Fiber<void, unknown> | null = null
@@ -29,7 +29,8 @@ export const refreshAtom = runtimeAtom.fn(() =>
       activeRefreshFiber = null
     }
     const prService = yield* PRService.PRService
-    activeRefreshFiber = yield* Effect.forkDetach(prService.refresh)
+    const ownerScope = yield* TuiApplicationScope
+    activeRefreshFiber = yield* Effect.forkIn(prService.refresh, ownerScope)
   })
 )
 
@@ -50,7 +51,8 @@ export const cleanup = Effect.gen(function*() {
 export const toggleAccountAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
-    yield* Effect.forkDetach(prService.toggleAccount(profile))
+    const ownerScope = yield* TuiApplicationScope
+    yield* Effect.forkIn(prService.toggleAccount(profile), ownerScope)
   })
 )
 
@@ -62,7 +64,8 @@ export const setAllAccountsAtom = runtimeAtom.fn(
   (params: { enabled: boolean; profiles?: Array<Domain.AwsProfileName> }) =>
     Effect.gen(function*() {
       const prService = yield* PRService.PRService
-      yield* Effect.forkDetach(prService.setAllAccounts(params.enabled, params.profiles))
+      const ownerScope = yield* TuiApplicationScope
+      yield* Effect.forkIn(prService.setAllAccounts(params.enabled, params.profiles), ownerScope)
     })
 )
 
@@ -87,13 +90,14 @@ export const notificationsAtom = runtimeAtom.subscriptionRef(
   Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
     const hub = yield* CacheService.EventsHub
+    const ownerScope = yield* TuiApplicationScope
 
     const initial = yield* notificationRepo.findAll({ limit: 50 }).pipe(
       Effect.catchIf(() => true, () => Effect.succeed(emptyNotifications))
     )
     const ref = yield* SubscriptionRef.make(initial)
 
-    yield* Effect.forkDetach(
+    yield* Effect.forkIn(
       Effect.scoped(
         hub.subscribe.pipe(
           Stream.filter((e) => e._tag === "Notifications" || e._tag === "SystemNotifications"),
@@ -105,7 +109,8 @@ export const notificationsAtom = runtimeAtom.subscriptionRef(
             )
           )
         )
-      )
+      ),
+      ownerScope
     )
 
     return ref

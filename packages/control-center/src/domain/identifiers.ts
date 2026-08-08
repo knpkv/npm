@@ -160,6 +160,12 @@ export const AgentThreadId = canonicalUuid7("AgentThreadId")
 /** Decoded durable agent-thread identifier. */
 export type AgentThreadId = typeof AgentThreadId.Type
 
+/** Canonical identifier of one retained Review Sandbox command artifact. */
+export const ReviewCommandArtifactId = canonicalUuid7("ReviewCommandArtifactId")
+
+/** Decoded retained Review Sandbox command-artifact identifier. */
+export type ReviewCommandArtifactId = typeof ReviewCommandArtifactId.Type
+
 /** Canonical identifier of an authenticated browser session. */
 export const SessionId = canonicalUuid7("SessionId")
 

@@ -9,12 +9,12 @@ import {
   type AgentRuntimeService,
   makeAgentRuntime
 } from "@knpkv/ai-runtime"
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream, Tracer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { AgentModelId, type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
 import { JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
+import { PrReviewReport, type PrReviewSubject, reconcilePrReviewReports } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import type { WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import {
@@ -22,13 +22,18 @@ import {
   agentJobWorkerLayer,
   agentJobWorkerWithTaskExecutorLayer
 } from "../../src/server/agent/AgentJobWorker.js"
-import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
+import { AgentRuntimeRegistry, agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
-  type AgentJobTaskExecution,
   agentJobTaskExecutorLayer,
-  type AgentJobTaskExecutorService
+  reviewEnabledTaskExecutorLayer
+} from "../../src/server/agent/internal/AgentJobTaskExecutor.js"
+import type {
+  AgentJobTaskExecution,
+  AgentJobTaskExecutor,
+  AgentJobTaskExecutorService
 } from "../../src/server/agent/internal/AgentJobTaskExecutor.js"
 import { AgentJobWorkspacePolicy } from "../../src/server/agent/internal/AgentJobWorkspacePolicy.js"
+import { PrReviewTaskExecutor } from "../../src/server/agent/internal/PrReviewTaskExecutor.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
@@ -56,6 +61,7 @@ const LEASE_OWNER = AgentLeaseOwner.make("agent-worker-test")
 const CURSOR_ZERO = AgentEventCursor.make(0)
 const PAGE_SIZE = AgentThreadEventPageSize.make(128)
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
+const REPLACEMENT_TELEMETRY_CANARY = "replacement-telemetry-canary-c7ab1164"
 type AgentOutputEvent = Extract<AgentRuntimeEvent, { readonly _tag: "output" }>
 
 const allowedPolicyLayer = Layer.succeed(
@@ -145,6 +151,23 @@ const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
     }
   ],
   notes: []
+})
+const telemetryReviewReport = Schema.decodeUnknownSync(PrReviewReport)({
+  ...reviewReport,
+  suggestions: [{
+    ...reviewReport.suggestions[0]!,
+    replacement: {
+      reviewedHead: reviewSubject.headRevision,
+      unifiedDiff: [
+        "--- a/packages/control-center/src/server/agent/AgentJobWorker.ts",
+        "+++ b/packages/control-center/src/server/agent/AgentJobWorker.ts",
+        "@@ -42,1 +42,1 @@",
+        "-const report = decodeReviewOutput(output)",
+        `+const report = decodeReviewOutput("${REPLACEMENT_TELEMETRY_CANARY}")`
+      ].join("\n"),
+      explanation: "Keep the replacement canary inside the durable review report."
+    }
+  }]
 })
 const OUTPUT_CHUNK_BYTES = 32_000
 const MAXIMUM_RUNTIME_OUTPUT_CHARACTERS = 32_768
@@ -302,8 +325,8 @@ const withWorker = <Success, Failure>(
     return yield* withDatabaseConfig(config, runtime, use)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
-const withTaskExecutor = <Success, Failure>(
-  executor: AgentJobTaskExecutorService,
+const withTaskExecutorLayer = <Success, Failure>(
+  executor: Layer.Layer<AgentJobTaskExecutor>,
   use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>,
   policy: Layer.Layer<AgentJobWorkspacePolicy> = allowedPolicyLayer
 ) =>
@@ -315,12 +338,18 @@ const withTaskExecutor = <Success, Failure>(
       leaseOwner: LEASE_OWNER,
       leaseDuration: "5 minutes"
     }).pipe(
-      Layer.provide(agentJobTaskExecutorLayer(executor)),
+      Layer.provide(executor),
       Layer.provide(policy),
       Layer.provideMerge(jobs)
     )
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+
+const withTaskExecutor = <Success, Failure>(
+  executor: AgentJobTaskExecutorService,
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>,
+  policy: Layer.Layer<AgentJobWorkspacePolicy> = allowedPolicyLayer
+) => withTaskExecutorLayer(agentJobTaskExecutorLayer(executor), use, policy)
 
 describe("agent job worker", () => {
   it.effect("persists one sanitized PR review report without durable raw model chunks", () => {
@@ -344,7 +373,9 @@ describe("agent job worker", () => {
             inputTokens: 12,
             outputTokens: 4
           })),
-          Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+          Effect.as(
+            { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+          )
         )
       }
     }
@@ -363,7 +394,14 @@ describe("agent job worker", () => {
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(claims.length, 1)
         assert.strictEqual(claims[0]?.context.task._tag, "pr-review")
-        assert.deepStrictEqual(persisted.report, reviewReport)
+        const expectedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...reviewReport,
+          transitions: reconcilePrReviewReports(
+            PrReviewReport.make({ ...reviewReport, suggestions: [], transitions: [] }),
+            reviewReport
+          )
+        })
+        assert.deepStrictEqual(persisted.report, expectedReport)
         assert.deepStrictEqual(
           events.events.map(({ eventKind }) => eventKind),
           [
@@ -392,6 +430,74 @@ describe("agent job worker", () => {
     )
   })
 
+  it.effect("keeps the durable review report out of production worker spans", () => {
+    const spans = new Array<Tracer.NativeSpan>()
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const reviews = Layer.succeed(
+      PrReviewTaskExecutor,
+      PrReviewTaskExecutor.of({
+        execute: () => Effect.succeed(telemetryReviewReport),
+        executeTargeted: () => Effect.die("targeted review must not run")
+      })
+    )
+    const registry = Layer.succeed(
+      AgentRuntimeRegistry,
+      AgentRuntimeRegistry.of({
+        catalog: () => Effect.succeed({ providers: [] }),
+        select: () => Effect.die("release-chat selection must not run for a review claim")
+      })
+    )
+    const executor = reviewEnabledTaskExecutorLayer.pipe(
+      Layer.provide(Layer.merge(reviews, registry))
+    )
+
+    return withTaskExecutorLayer(
+      executor,
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueueReview
+
+        const result = yield* runWorkerOnce(WORKSPACE_ID).pipe(
+          Effect.provideService(Tracer.Tracer, tracer)
+        )
+        const persisted = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.deepStrictEqual(result, {
+          _tag: "completed",
+          jobId: JOB_ID,
+          outcome: "success"
+        })
+        assert.include(
+          persisted.report.suggestions[0]?.replacement?.unifiedDiff ?? "",
+          REPLACEMENT_TELEMETRY_CANARY
+        )
+
+        const telemetry = JSON.stringify(
+          spans.map((span) => ({
+            attributes: Array.from(span.attributes),
+            events: span.events,
+            name: span.name,
+            status: span.status
+          })),
+          (_key, value) => typeof value === "bigint" ? value.toString() : value
+        )
+        assert.notInclude(telemetry, REPLACEMENT_TELEMETRY_CANARY)
+        assert.include(telemetry, JOB_ID)
+        assert.include(telemetry, "completed")
+      })
+    )
+  })
+
   it.effect("fails a claimed PR review before provider execution when current policy revokes it", () =>
     Effect.gen(function*() {
       const allowedProviders = yield* Ref.make<ReadonlyArray<string>>(["deterministic"])
@@ -403,7 +509,7 @@ describe("agent job worker", () => {
           return Effect.succeed(
             {
               _tag: "pr-review",
-              report: reviewReport
+              report: { _tag: "report", report: reviewReport }
             } satisfies AgentJobTaskExecution
           )
         }
@@ -481,7 +587,7 @@ describe("agent job worker", () => {
           assert.isTrue(interrupted)
           assert.deepStrictEqual(
             events.events.map(({ eventKind }) => eventKind),
-            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+            ["user-message", "job-queued", "cancel-requested", "review-report", "job-completed"]
           )
         })
       )
@@ -497,7 +603,9 @@ describe("agent job worker", () => {
         execute: () =>
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(finish)),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
       }
       return yield* withTaskExecutor(
@@ -548,7 +656,9 @@ describe("agent job worker", () => {
               outcome: "success",
               sessionRef: null
             })),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
       }
       return yield* withTaskExecutor(
@@ -576,7 +686,7 @@ describe("agent job worker", () => {
           })
           assert.deepStrictEqual(
             events.events.map(({ eventKind }) => eventKind),
-            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+            ["user-message", "job-queued", "cancel-requested", "review-report", "job-completed"]
           )
         })
       )
@@ -592,7 +702,9 @@ describe("agent job worker", () => {
           executionCount += 1
           return Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Effect.sleep("6 minutes")),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
         }
       }
@@ -622,7 +734,16 @@ describe("agent job worker", () => {
 
           assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
           assert.strictEqual(executionCount, 1)
-          assert.deepStrictEqual(persisted.report, reviewReport)
+          assert.deepStrictEqual(
+            persisted.report,
+            Schema.decodeUnknownSync(PrReviewReport)({
+              ...reviewReport,
+              transitions: reconcilePrReviewReports(
+                PrReviewReport.make({ ...reviewReport, suggestions: [], transitions: [] }),
+                reviewReport
+              )
+            })
+          )
         })
       )
     })
@@ -630,6 +751,8 @@ describe("agent job worker", () => {
 
   it.effect("terminally rejects malformed review output without persisting its raw canary", () => {
     const rawCanary = "RAW_MODEL_CANARY_MUST_NOT_PERSIST"
+    const malformedReport = Schema.decodeUnknownSync(PrReviewReport)(reviewReport)
+    Object.assign(malformedReport.suggestions[0]!.evidence, { path: `../${rawCanary}` })
     const executor: AgentJobTaskExecutorService = {
       taskTags: ["pr-review"],
       execute: () =>
@@ -637,16 +760,8 @@ describe("agent job worker", () => {
           {
             _tag: "pr-review",
             report: {
-              ...reviewReport,
-              suggestions: [
-                {
-                  ...reviewReport.suggestions[0]!,
-                  evidence: {
-                    ...reviewReport.suggestions[0]!.evidence,
-                    path: `../${rawCanary}`
-                  }
-                }
-              ]
+              _tag: "report",
+              report: malformedReport
             }
           } satisfies AgentJobTaskExecution
         )

@@ -1,6 +1,7 @@
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import type { Crypto } from "effect"
 import { Context, Effect, FileSystem, Layer, Option, Path, Predicate, Result } from "effect"
+import * as Cause from "effect/Cause"
 import type * as Scope from "effect/Scope"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
@@ -187,7 +188,14 @@ export const createOfflineVerifiedBackup = Effect.fn("BackupArchive.createOfflin
         url: `file:${snapshotDatabase}`
       }
       const context = yield* Layer.build(LibsqlClient.layer(clientConfig)).pipe(
-        Effect.catchCause((cause) => new BackupSqlError({ cause, operation: "connect-offline-snapshot" }))
+        // The client constructor exposes synchronous SDK failures as defects.
+        // This adapter owns their typed classification, but never cancellation.
+        // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The backup adapter classifies SDK defects; backup-archive.test.ts covers classification and interruption.
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : new BackupSqlError({ cause, operation: "connect-offline-snapshot" })
+        )
       )
       const sql = Context.get(context, SqlClient.SqlClient)
       yield* readDatabaseSnapshotInventory(sql)

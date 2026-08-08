@@ -1,7 +1,7 @@
-import { AwsClient, CacheService, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Predicate, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { runtimeAtom } from "./runtime.js"
+import { runtimeAtom, TuiApplicationScope } from "./runtime.js"
 
 // ---------------------------------------------------------------------------
 // Shared Helpers
@@ -21,21 +21,20 @@ export interface ListBranchesInput {
   readonly account: Domain.Account
 }
 
-const notifyError = (title: string, error: Errors.AwsClientError) =>
-  Effect.gen(function*() {
-    const notificationRepo = yield* CacheService.NotificationRepo
-    yield* notificationRepo.addSystem({
-      type: "error",
-      title,
-      message: error.message
-    })
+const notifyError = Effect.fn("notifyError")(function*(title: string, error: Errors.AwsClientError) {
+  const notificationRepo = yield* CacheService.NotificationRepo
+  yield* notificationRepo.addSystem({
+    type: "error",
+    title,
+    message: error.message
   })
+})
 
 const exitCode = (command: ChildProcess.Command) =>
   Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
 
-const copyToClipboard = (text: string) =>
-  Effect.gen(function*() {
+const copyToClipboard = Effect.fn("copyToClipboard")(
+  function*(text: string) {
     const copyWith = (command: string, args: ReadonlyArray<string> = []) =>
       exitCode(ChildProcess.make(command, args, {
         stdin: Stream.make(text).pipe(Stream.encodeText)
@@ -44,18 +43,17 @@ const copyToClipboard = (text: string) =>
     yield* copyWith("pbcopy").pipe(
       Effect.catchIf(() => true, () => copyWith("xclip", ["-selection", "clipboard"]))
     )
-  }).pipe(
-    Effect.catchIf(() => true, (error) =>
-      Effect.gen(function*() {
-        const notificationRepo = yield* CacheService.NotificationRepo
-        yield* notificationRepo.addSystem({
-          type: "error",
-          title: "Clipboard",
-          message: Predicate.isError(error) ? error.message : String(error)
-        })
-      })),
-    Effect.withSpan("copyToClipboard")
-  )
+  },
+  Effect.catchIf(() => true, (error) =>
+    Effect.gen(function*() {
+      const notificationRepo = yield* CacheService.NotificationRepo
+      yield* notificationRepo.addSystem({
+        type: "error",
+        title: "Clipboard",
+        message: Predicate.isError(error) ? error.message : String(error)
+      })
+    }))
+)
 
 // ---------------------------------------------------------------------------
 // Atoms
@@ -68,6 +66,7 @@ const copyToClipboard = (text: string) =>
 export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
   Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
+    const ownerScope = yield* TuiApplicationScope
 
     if (!profile || profile.trim() === "") {
       yield* notificationRepo.addSystem({
@@ -84,7 +83,7 @@ export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
       message: `Opening browser for ${profile}...`
     })
 
-    yield* Effect.forkDetach(
+    yield* Effect.forkIn(
       exitCode(ChildProcess.make("aws", ["sso", "login", "--profile", profile], {
         stdout: "inherit",
         stderr: "inherit"
@@ -103,7 +102,8 @@ export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
             message: Predicate.isError(e) ? e.message : String(e)
           })),
         Effect.withSpan("loginToAws", { attributes: { profile } })
-      )
+      ),
+      ownerScope
     )
   })
 )
@@ -115,6 +115,7 @@ export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
 export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
   Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
+    const ownerScope = yield* TuiApplicationScope
     const profile = pr.account.profile
 
     yield* copyToClipboard(pr.link)
@@ -125,11 +126,15 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
       message: `Opening ${profile} → PR console...`
     })
 
-    yield* Effect.forkDetach(
+    yield* Effect.forkIn(
       exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
         stdout: "inherit",
         stderr: "inherit",
-        env: { GRANTED_ALIAS_CONFIGURED: "true" }
+        // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
+        // flag must be merged into the inherited environment. The profile argument
+        // stays authoritative only if ambient AWS credentials are dropped.
+        env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+        extendEnv: true
       })).pipe(
         Effect.tap(() =>
           notificationRepo.addSystem({
@@ -145,7 +150,8 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
             message: Predicate.isError(e) ? e.message : String(e)
           })),
         Effect.withSpan("openPr", { attributes: { profile, prId: pr.id } })
-      )
+      ),
+      ownerScope
     )
   })
 )
@@ -156,6 +162,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
  */
 export const openBrowserAtom = runtimeAtom.fn((link: string) =>
   Effect.gen(function*() {
+    const ownerScope = yield* TuiApplicationScope
     const openWith = (command: string, args: ReadonlyArray<string>) =>
       exitCode(ChildProcess.make(command, args, {
         stdout: "pipe",
@@ -174,7 +181,7 @@ export const openBrowserAtom = runtimeAtom.fn((link: string) =>
             message: Predicate.isError(error) ? error.message : String(error)
           })
         })),
-      Effect.forkDetach,
+      Effect.forkIn(ownerScope),
       Effect.asVoid,
       Effect.withSpan("openBrowser")
     )

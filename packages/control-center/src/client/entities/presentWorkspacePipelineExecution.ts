@@ -129,6 +129,11 @@ const stageFor = (stage: NonNullable<PipelineDetails["stages"]>[number]): RlySta
   tone: toneFor(stage.status)
 })
 
+/** Present the provider-observed stages for one immutable pipeline execution. */
+export const presentPipelineExecutionStages = (
+  stages: PipelineDetails["stages"]
+): ReadonlyArray<RlyStage> => (stages ?? []).map(stageFor)
+
 const identityLabel = (identity: string): string => {
   const leaf = identity.split("/").filter((part) => part.length > 0).at(-1) ?? identity
   return leaf.includes("@") ? leaf : titleCase(leaf) || identity
@@ -240,7 +245,7 @@ export const presentWorkspacePipelineExecution = (
       revision: artifact.revisionId ?? "Revision unavailable",
       summary: artifact.revisionSummary
     })),
-    stages: (details.stages ?? []).map(stageFor),
+    stages: presentPipelineExecutionStages(details.stages),
     startedAt: timestampFor(details.startedAt),
     status: titleCase(details.status),
     statusSummary: details.statusSummary ?? null,

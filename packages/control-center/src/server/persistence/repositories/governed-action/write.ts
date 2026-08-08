@@ -450,6 +450,32 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
           ${input.envelope.proposal.request.actionKind},
           ${input.envelope.proposal.request.expectedRevision}
         )`
+        if (input.envelope.releasePublication !== undefined) {
+          yield* sql`INSERT INTO governed_action_release_publications (
+            workspace_id, action_id, provider_id, release_id, predecessor_action_id
+          ) VALUES (
+            ${input.envelope.workspaceId}, ${input.envelope.actionId},
+            ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId},
+            ${input.envelope.releasePublication.predecessorPublicationActionId ?? null}
+          )`
+          if (input.envelope.providerId === "confluence") {
+            yield* sql`INSERT INTO governed_action_release_publication_slots (
+              workspace_id, action_id, provider_id, release_id, predecessor_action_id
+            ) VALUES (
+              ${input.envelope.workspaceId}, ${input.envelope.actionId},
+              ${input.envelope.providerId}, ${input.envelope.releasePublication.releaseId},
+              ${input.envelope.releasePublication.predecessorPublicationActionId ?? null}
+            )`
+          }
+        } else {
+          yield* sql`INSERT INTO governed_action_entity_targets (
+            workspace_id, action_id, plugin_connection_id, provider_id, entity_id
+          ) VALUES (
+            ${input.envelope.workspaceId}, ${input.envelope.actionId},
+            ${input.envelope.pluginConnectionId}, ${input.envelope.providerId},
+            ${input.envelope.targetEntityId}
+          )`
+        }
       } else {
         yield* verifyRootIdentity(input, envelopeJson, root).pipe(captureMalformedGovernedActionRow(root))
         if (input.command._tag === "propose") return yield* inputError("conflicting-action-identity")

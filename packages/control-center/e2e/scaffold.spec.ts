@@ -609,9 +609,9 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     },
     {
       audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
-      expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
-      landmark: () => page.getByRole("heading", { name: "Ask in context." }),
-      primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Release context stays private" }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
       audit: productionRouteAuditCase(
@@ -738,16 +738,15 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
   })
   const authenticatedAgent = {
     audit: productionRouteAuditCase("scaffold", "agent", "authenticated", "agent"),
-    landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
-    primaryAction: page.getByRole("link", { name: "Return to Overview" })
+    landmark: page.getByRole("heading", { level: 2, name: "Release context unavailable" }),
+    primaryAction: page.getByRole("button", { name: "Try again" })
   }
   await resetProductionRouteEntryPresentation(page)
   await page.goto(authenticatedAgent.audit.canonicalPath)
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => primaryAction.press("Enter"),
     expectOutcome: async () => {
-      await expect(page).toHaveURL("/")
-      await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 2, name: "Release context unavailable" })).toBeVisible()
     },
     landmark: authenticatedAgent.landmark,
     primaryAction: authenticatedAgent.primaryAction
@@ -786,10 +785,8 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.getByRole("link", { name: "Ask Relay" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ask in context." })).toBeVisible()
-  await expect(page.getByText("Current context")).toBeVisible()
-  await expect(page.getByRole("heading", { level: 2, name: "Releases" })).toBeVisible()
-  await expect(page.getByText("Open Relay from a release to start an exact, release-owned thread.")).toBeVisible()
+  await expect(page.getByRole("heading", { level: 2, name: "Release context stays private" })).toBeVisible()
+  await expect(page.getByText("Pair this browser before Relay reads a workspace release.")).toBeVisible()
 })
 
 test("keeps mobile navigation clear of application identity and content", async ({ page }) => {

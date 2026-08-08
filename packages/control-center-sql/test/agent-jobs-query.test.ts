@@ -223,4 +223,44 @@ describe("durable agent job queries", () => {
     expect(rendered.params).toContain("job-secret")
     expect(rendered.sql).toContain("\"agent_jobs\".\"job_id\" = ?")
   })
+
+  it("renders a pull-request identity lookup without binding to one head", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      taskContextPrefix: "task-identity-prefix"
+    })
+
+    expect(rendered.params).toEqual([
+      "workspace-secret",
+      1,
+      "task-identity-prefix".length,
+      "task-identity-prefix",
+      1
+    ])
+    expect(rendered.sql).not.toContain("subject_revision")
+  })
+
+  it("can exclude targeted follow-up jobs from the newest full-review lookup", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      subjectRevision: "head-secret",
+      taskContextPrefix: "task-prefix",
+      excludeTargeted: true
+    })
+
+    expect(rendered.sql).toContain("not ((\"agent_jobs\".\"task_context_json\" like ?) or")
+    expect(rendered.params).toContain("%\"intent\":\"suggestion-edit\"%")
+    expect(rendered.params).toContain("%\"intent\":\"suggestion-revalidation\"%")
+  })
+
+  it("can exclude the just-completed job when finding the previous review head", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      taskContextPrefix: "task-identity-prefix",
+      excludeJobId: "current-job-secret"
+    })
+
+    expect(rendered.sql).toContain("not (\"agent_jobs\".\"job_id\" = ?)")
+    expect(rendered.params).toContain("current-job-secret")
+  })
 })

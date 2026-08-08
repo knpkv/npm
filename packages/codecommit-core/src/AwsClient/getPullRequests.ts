@@ -93,7 +93,7 @@ export const fetchApprovalEvaluation = (
       satisfiedNames: new Set(r.evaluation?.approvalRulesSatisfied ?? [])
     })),
     Effect.tapError((e) => Effect.logWarning("fetchApprovalEvaluation failed", e)),
-    Effect.catchCause(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
+    Effect.catch(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
   )
 
 /** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
@@ -181,7 +181,7 @@ export const fetchApprovers = (
         arns: approved.map((a) => a.userArn)
       }
     }),
-    Effect.catchCause(() => Effect.succeed(emptyApprovers()))
+    Effect.catch(() => Effect.succeed(emptyApprovers()))
   )
 
 /**
@@ -308,7 +308,7 @@ export const fetchRepoAccountId = (
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
-    Effect.catchCause(() => Effect.succeed(""))
+    Effect.catch(() => Effect.succeed(""))
   )
 
 const listPullRequestIds = (

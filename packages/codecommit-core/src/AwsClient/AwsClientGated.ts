@@ -92,7 +92,7 @@ export const AwsClientGatedLive: Layer.Layer<
             )
             : Effect.void
         ),
-        Effect.catchCause(() => Effect.void)
+        Effect.catch(() => Effect.void)
       )
 
     const promptUser = (params: GateParams): Effect.Effect<"always_allowed" | "allowed", AwsClientError> =>

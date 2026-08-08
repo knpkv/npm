@@ -23,7 +23,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import {
   buildAuthUrl,
-  buildOAuthToken,
+  buildOAuthTokenAt,
   computeCodeChallenge,
   exchangeCodeForTokens,
   generateCodeVerifier,
@@ -41,7 +41,7 @@ import {
   type FileSystemError,
   type HomeDirectoryError,
   HomeDirectoryLive,
-  isTokenExpired,
+  isTokenExpiredAt,
   loadActiveProfile,
   loadActiveProfileToken,
   loadOAuthConfig,
@@ -53,6 +53,7 @@ import {
   saveProfileToken,
   setActiveProfileBySelector
 } from "@knpkv/atlassian-common/config"
+import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
@@ -307,23 +308,33 @@ const make = Effect.gen(function*() {
         Effect.provideService(Crypto.Crypto, cryptoService)
       )
 
-      const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
-        Effect.provide(HttpServerFactoryLive)
-      )
-      const authUrl = buildAuthUrl({ clientId: config.clientId, state, port, scopes: JIRA_CLI_SCOPES, codeChallenge })
+      const { code, port } = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { codePromise, port } = yield* startCallbackServer(state).pipe(
+            Effect.provide(HttpServerFactoryLive)
+          )
+          const authUrl = buildAuthUrl({
+            clientId: config.clientId,
+            state,
+            port,
+            scopes: JIRA_CLI_SCOPES,
+            codeChallenge
+          })
 
-      yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
-      yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
-      yield* openBrowserImpl(authUrl)
-      yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
+          yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
+          yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
+          yield* openBrowserImpl(authUrl)
+          yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
 
-      const code = yield* codePromise.pipe(
-        Effect.timeout("5 minutes"),
-        Effect.catchTag(
-          "TimeoutError",
-          () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
-        ),
-        Effect.ensuring(shutdown)
+          const code = yield* codePromise.pipe(
+            Effect.timeout("5 minutes"),
+            Effect.catchTag(
+              "TimeoutError",
+              () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
+            )
+          )
+          return { code, port }
+        })
       )
 
       yield* Console.log("Exchanging code for tokens...")
@@ -377,7 +388,8 @@ const make = Effect.gen(function*() {
         Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
       )
 
-      const tokenData = buildOAuthToken(tokens, site, user)
+      const nowMs = yield* Clock.currentTimeMillis
+      const tokenData = buildOAuthTokenAt(tokens, site, user, nowMs)
 
       yield* saveTokenOp(tokenData)
       yield* Console.log(`Logged in as ${user.name} (${user.email})`)
@@ -416,7 +428,8 @@ const make = Effect.gen(function*() {
         return yield* Effect.fail(authMissing())
       }
 
-      if (!isTokenExpired(token)) {
+      const nowMs = yield* Clock.currentTimeMillis
+      if (!isTokenExpiredAt(token, nowMs)) {
         return Redacted.make(token.access_token)
       }
 

@@ -51,6 +51,9 @@ export const makeBlobPublisher = (
             }
 
             yield* Effect.addFinalizer(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
+            // Every child path is descriptor-relative. Identity checks remain
+            // defense in depth around the write and atomic publication.
+            yield* directory.assertIdentity
             yield* restore(opened.success.writeAll(bytes)).pipe(
               Effect.mapError((cause) => blobStoreIoError("write temporary blob", cause))
             )
@@ -58,10 +61,14 @@ export const makeBlobPublisher = (
               Effect.mapError((cause) => blobStoreIoError("sync temporary blob", cause))
             )
 
+            yield* directory.assertIdentity
             const linked = yield* (mode === "replace"
               ? fs.rename(temporary, destination)
               : fs.link(temporary, destination)).pipe(Effect.result)
-            if (Result.isSuccess(linked) && commit !== undefined) yield* commit(destination)
+            if (Result.isSuccess(linked)) {
+              yield* directory.assertIdentity
+              if (commit !== undefined) yield* commit(destination)
+            }
             return linkResult(linked)
           })
         )

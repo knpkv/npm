@@ -4,6 +4,7 @@
  */
 import { NodeRuntime, NodeStdio, NodeTerminal } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
@@ -37,8 +38,7 @@ Effect.gen(function*() {
     Effect.provide(layerForArgv(args))
   )
 }).pipe(
-  Effect.provide(NodeTerminal.layer),
-  Effect.provide(NodeStdio.layer),
+  Effect.provide(Layer.mergeAll(NodeTerminal.layer, NodeStdio.layer)),
   Effect.catchCause((cause) => handleError(cause).pipe(Effect.andThen(Effect.failCause(cause)))),
   NodeRuntime.runMain({ disableErrorReporting: true })
 )

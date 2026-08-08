@@ -26,6 +26,12 @@ export interface CodeCommitReviewProviderService {
   readonly postComment: (
     action: Extract<CodeCommitReviewAction, { readonly _tag: "comment" | "request-changes" | "request-review" }>
   ) => Effect.Effect<unknown, AwsClientError>
+  readonly updateComment: (
+    action: Extract<CodeCommitReviewAction, { readonly _tag: "update-comment" }>
+  ) => Effect.Effect<unknown, AwsClientError>
+  readonly postReply: (
+    action: Extract<CodeCommitReviewAction, { readonly _tag: "reply-comment" }>
+  ) => Effect.Effect<unknown, AwsClientError>
   readonly updateApprovalState: (
     action: Extract<CodeCommitReviewAction, { readonly _tag: "approve" | "revoke-approval" }>
   ) => Effect.Effect<unknown, AwsClientError>
@@ -77,6 +83,23 @@ export const makePostCommentForPullRequestRequest = (
     : {})
 })
 
+/** Map an update action to the exact CodeCommit comment mutation request. */
+export const makeUpdateCommentRequest = (
+  action: Extract<CodeCommitReviewAction, { readonly _tag: "update-comment" }>
+) => ({
+  commentId: action.commentId,
+  content: action.content
+})
+
+/** Map a reply action to the exact CodeCommit comment mutation request. */
+export const makePostCommentReplyRequest = (
+  action: Extract<CodeCommitReviewAction, { readonly _tag: "reply-comment" }>
+) => ({
+  inReplyTo: action.commentId,
+  content: action.content,
+  clientRequestToken: action.clientRequestToken
+})
+
 /** Live raw provider layer backed by @distilled.cloud/aws CodeCommit operations. */
 export const CodeCommitReviewProviderLive = Layer.effect(
   CodeCommitReviewProvider,
@@ -99,6 +122,18 @@ export const CodeCommitReviewProviderLive = Layer.effect(
           codecommit.postCommentForPullRequest(
             makePostCommentForPullRequestRequest(action)
           )
+        )),
+      updateComment: (action) =>
+        provideRuntime(callProvider(
+          "updateComment",
+          action.target,
+          codecommit.updateComment(makeUpdateCommentRequest(action))
+        )),
+      postReply: (action) =>
+        provideRuntime(callProvider(
+          "postCommentReply",
+          action.target,
+          codecommit.postCommentReply(makePostCommentReplyRequest(action))
         )),
       updateApprovalState: (action) =>
         provideRuntime(callProvider(

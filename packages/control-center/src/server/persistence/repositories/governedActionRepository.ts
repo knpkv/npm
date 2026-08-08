@@ -9,6 +9,7 @@ import {
   GovernedActionIdempotencyReadInput,
   GovernedActionInputError,
   GovernedActionReadInput,
+  GovernedActionReleasePublicationReadInput,
   GovernedActionTargetReadInput
 } from "./governed-action/contract.js"
 import { makeGovernedActionTransaction } from "./governed-action/transaction.js"
@@ -62,7 +63,27 @@ const makeGovernedActionRepository = Effect.gen(function*() {
     )
   })
 
-  return { commit, read, readByIdempotencyKey, readLatestTerminalByTarget }
+  const readLatestTerminalReleasePublications = Effect.fn(
+    "GovernedActionRepository.readLatestTerminalReleasePublications"
+  )(function*(input: unknown) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionReleasePublicationReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-latest-terminal-release-publications",
+      transaction.readLatestTerminalReleasePublications(request)
+    )
+  })
+
+  return {
+    commit,
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications
+  }
 })
 
 /** Deep server-only repository for governed action authority, lifecycle, and audit. */

@@ -10,6 +10,8 @@ import {
 } from "../../domain/workspaceSettings.js"
 import { useAppTheme } from "../AppProviders.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
+import { BrowserSessionsPanel } from "./BrowserSessionsPanel.js"
+import type { BrowserSessionAdministrationTransport } from "./browserSessionTransport.js"
 import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
 import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
@@ -529,8 +531,11 @@ export const SettingsForm = ({
 
 /** Concurrency-safe workspace settings with explicit stale-write recovery. */
 export const WorkspaceSettingsPage = ({
+  browserSessionTransport,
   transport = browserWorkspaceSettingsTransport
 }: {
+  /** Injectable browser boundary for component acceptance tests. @internal */
+  readonly browserSessionTransport?: BrowserSessionAdministrationTransport
   /** Injectable browser boundary for component acceptance tests. @internal */
   readonly transport?: WorkspaceSettingsTransport
 } = {}): ReactElement => {
@@ -717,6 +722,15 @@ export const WorkspaceSettingsPage = ({
           />
         </Surface>
       ) : null}
+      {session === null || sessionKey === null ? null : (
+        <BrowserSessionsPanel
+          canManage={canEdit}
+          currentSession={session}
+          onSessionExpired={browserSession.invalidateSession}
+          sessionKey={sessionKey}
+          {...(browserSessionTransport === undefined ? {} : { transport: browserSessionTransport })}
+        />
+      )}
       <Surface className={styles.theme} padding="default" shape="grouped">
         <div>
           <Text as="h2" variant="section-title">

@@ -1,9 +1,13 @@
 /** Writable, credential-free sbx session for one exact pull-request revision. @module */
+import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -12,8 +16,18 @@ import * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-import { JobId, WorkspaceId } from "../../../domain/identifiers.js"
+import { AgentThreadId, JobId, ReviewCommandArtifactId, WorkspaceId } from "../../../domain/identifiers.js"
+import { AgentAttemptSequence } from "../../persistence/repositories/agentJobModels.js"
+import {
+  ReviewCommandArtifactHandle,
+  ReviewCommandArtifactMetadata,
+  type ReviewCommandArtifactPage,
+  ReviewCommandArtifactRepository,
+  type ReviewCommandArtifactRepositoryService,
+  type ReviewCommandArtifactStream
+} from "../../persistence/repositories/reviewCommandArtifactRepository.js"
 import { PrReviewSourceError, type PrReviewSourceRequest, PrReviewSourceWorkspace } from "./PrReviewSourceWorkspace.js"
+import { emitPrReviewTelemetry } from "./PrReviewTelemetry.js"
 import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.js"
 
 const DEFAULT_SBX_EXECUTABLE = "sbx"
@@ -30,8 +44,6 @@ const MAXIMUM_COMMAND_OUTPUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_VISIBLE_OUTPUT_BYTES = 32 * 1_024
 const MAXIMUM_PATCH_BYTES = 256 * 1_024
 const MAXIMUM_ARTIFACT_PAGE_BYTES = 64 * 1_024
-const MAXIMUM_RETAINED_ARTIFACT_BYTES = 64 * 1_024 * 1_024
-const MAXIMUM_RETAINED_ARTIFACTS = 64
 const NATIVE_CODEX_BASE_REF = "control-center-review-base"
 const NATIVE_CODEX_OUTPUT_PATH = "/tmp/control-center-review-output.json"
 const NATIVE_CODEX_SCHEMA_PATH = "/tmp/control-center-review-schema.json"
@@ -49,6 +61,11 @@ const SandboxAttemptId = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{12}$/u, {
     expected: "a 12-character lowercase hexadecimal attempt identifier"
   })
+)
+
+const RecoverySandboxName = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isPattern(/^cc-pr-review-[a-f0-9]{32}-[a-f0-9]{4}-[a-f0-9]{12}$/u)
 )
 
 const Executable = Schema.String.check(
@@ -120,20 +137,27 @@ const PatchText = Schema.String.check(
   )
 )
 
-/** Opaque identifier for output retained only by one Review Sandbox session. */
-export const PrReviewCommandArtifactId = Schema.String.check(
-  Schema.isPattern(/^review-artifact-[1-9][0-9]*$/u)
-).pipe(Schema.brand("PrReviewCommandArtifactId"))
-export type PrReviewCommandArtifactId = typeof PrReviewCommandArtifactId.Type
+/** Opaque identifier for durable, expiring Review Sandbox output. */
+export const PrReviewCommandArtifactId = ReviewCommandArtifactId
+export type PrReviewCommandArtifactId = ReviewCommandArtifactId
+
+/** Durable artifact identity safe to carry across worker-attempt recovery. */
+export const PrReviewCommandArtifactHandle = ReviewCommandArtifactHandle
+export type PrReviewCommandArtifactHandle = ReviewCommandArtifactHandle
 
 const SessionRequest = Schema.Struct({
   workspaceId: WorkspaceId,
+  threadId: AgentThreadId,
   jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
   repository: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u)),
   attemptId: SandboxAttemptId,
   baseRevision: GitRevision,
   headRevision: GitRevision,
-  reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"]))
+  providerId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
+  model: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
+  reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"])),
+  recoverySandboxName: Schema.optionalKey(RecoverySandboxName)
 })
 
 const NativeCodexReviewRequest = Schema.Struct({
@@ -168,8 +192,14 @@ const SessionOptions = Schema.Struct({
 
 /** Exact review identity used to acquire a disposable writable session. */
 export interface PrReviewSandboxSessionRequest extends PrReviewSourceRequest {
+  readonly threadId: AgentThreadId
+  readonly attemptSequence: AgentAttemptSequence
   readonly attemptId: string
   readonly reviewExecution?: "effect-ai" | "native-claude" | "native-codex"
+  readonly providerId?: string
+  readonly model?: string
+  /** Server-private sandbox retained across a process restart. */
+  readonly recoverySandboxName?: string
 }
 
 /** Structured native Codex review material accepted only by Codex-backed sessions. */
@@ -225,7 +255,7 @@ const isSessionError = Schema.is(PrReviewSandboxSessionError)
 
 /** Bounded output plus an optional handle to the complete retained bytes. */
 export interface PrReviewSandboxOutput {
-  readonly artifactId: PrReviewCommandArtifactId | null
+  readonly artifact: PrReviewCommandArtifactHandle | null
   readonly byteLength: number
   readonly text: string
   readonly truncated: boolean
@@ -264,13 +294,17 @@ export interface PrReviewSandboxSession {
     patch: string
   ) => Effect.Effect<PrReviewSandboxCommandResult, PrReviewSandboxSessionError>
   readonly readDiff: () => Effect.Effect<PrReviewSandboxCommandResult, PrReviewSandboxSessionError>
+  readonly listArtifacts: () => Effect.Effect<
+    ReadonlyArray<typeof ReviewCommandArtifactMetadata.Type>,
+    PrReviewSandboxSessionError
+  >
   readonly pageArtifact: (
-    artifactId: PrReviewCommandArtifactId,
+    artifact: PrReviewCommandArtifactHandle,
     offset: number,
     limit: number
-  ) => Effect.Effect<string, PrReviewSandboxSessionError>
+  ) => Effect.Effect<ReviewCommandArtifactPage, PrReviewSandboxSessionError>
   readonly searchArtifact: (
-    artifactId: PrReviewCommandArtifactId,
+    artifact: PrReviewCommandArtifactHandle,
     query: string
   ) => Effect.Effect<ReadonlyArray<number>, PrReviewSandboxSessionError>
   readonly runNativeCodexReview?: (
@@ -285,6 +319,14 @@ export interface PrReviewSandboxSession {
 /** Startup cleanup report for stale Review Sandboxes. */
 export interface PrReviewSandboxReconciliation {
   readonly removedSandboxes: ReadonlyArray<string>
+  /** Live server-private sandboxes retained for recovery inspection. */
+  readonly reattachedSandboxes?: ReadonlyArray<string>
+  /** Parsed identity coordinates used to attribute live sandboxes to attempts. */
+  readonly reattachedSandboxIdentities?: ReadonlyArray<{
+    readonly name: string
+    readonly jobToken: string
+    readonly attemptId: string
+  }>
 }
 
 /** Session owner. The callback is scoped to the sbx sandbox lifetime. */
@@ -305,6 +347,10 @@ export class PrReviewSandboxSessions extends Context.Service<
       PrReviewSandboxReconciliation,
       PrReviewSandboxSessionError
     >
+    /** Remove only names already attributed as unmatched by startup recovery. */
+    readonly cleanupUnmatched?: (
+      names: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlyArray<string>, PrReviewSandboxSessionError>
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewSandboxSessions") {}
 
@@ -317,11 +363,6 @@ interface ProcessResult {
 interface ByteAccumulator {
   readonly chunks: Array<Uint8Array>
   readonly length: number
-}
-
-interface RetainedArtifact {
-  readonly byteLength: number
-  readonly text: string
 }
 
 const concatenate = ({ chunks, length }: ByteAccumulator): Uint8Array => {
@@ -355,42 +396,45 @@ const collectBounded = (
 
 const successful = (result: ProcessResult): boolean => result.exitCode === ChildProcessSpawner.ExitCode(0)
 
-const execute = Effect.fn("PrReviewSandboxSession.execute")(function*(
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  executable: string,
-  environment: Readonly<Record<string, string>>,
-  args: ReadonlyArray<string>,
-  maximumOutputBytes: number,
-  timeout: Duration.Input,
-  input?: Uint8Array
-) {
-  return yield* Effect.scoped(
-    Effect.gen(function*() {
-      const handle = yield* spawner.spawn(
-        ChildProcess.make(executable, args, {
-          env: environment,
-          extendEnv: false,
-          forceKillAfter: Duration.seconds(5),
-          shell: false,
-          stdin: input === undefined ? "ignore" : Stream.make(input),
-          stdout: "pipe",
-          stderr: "pipe"
-        })
-      ).pipe(Effect.mapError(() => sessionError("sandbox-unavailable")))
-      const [exitCode, stderr, stdout] = yield* Effect.all([
-        handle.exitCode.pipe(Effect.mapError(() => sessionError("sandbox-unavailable"))),
-        collectBounded(handle.stderr, maximumOutputBytes, "output-rejected"),
-        collectBounded(handle.stdout, maximumOutputBytes, "output-rejected")
-      ], { concurrency: "unbounded" })
-      return { exitCode, stderr, stdout } satisfies ProcessResult
-    })
-  ).pipe(
-    Effect.timeoutOrElse({
-      duration: timeout,
-      orElse: () => Effect.fail(sessionError("command-timeout"))
-    })
-  )
-})
+const execute = Effect.fnUntraced(
+  function*(
+    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+    executable: string,
+    environment: Readonly<Record<string, string>>,
+    args: ReadonlyArray<string>,
+    maximumOutputBytes: number,
+    timeout: Duration.Input,
+    input?: Uint8Array
+  ) {
+    return yield* Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make(executable, args, {
+            env: environment,
+            extendEnv: false,
+            forceKillAfter: Duration.seconds(5),
+            shell: false,
+            stdin: input === undefined ? "ignore" : Stream.make(input),
+            stdout: "pipe",
+            stderr: "pipe"
+          })
+        ).pipe(Effect.mapError(() => sessionError("sandbox-unavailable")))
+        const [exitCode, stderr, stdout] = yield* Effect.all([
+          handle.exitCode.pipe(Effect.mapError(() => sessionError("sandbox-unavailable"))),
+          collectBounded(handle.stderr, maximumOutputBytes, "output-rejected"),
+          collectBounded(handle.stdout, maximumOutputBytes, "output-rejected")
+        ], { concurrency: "unbounded" })
+        return { exitCode, stderr, stdout } satisfies ProcessResult
+      })
+    ).pipe(
+      Effect.timeoutOrElse({
+        duration: timeout,
+        orElse: () => Effect.fail(sessionError("command-timeout"))
+      })
+    )
+  },
+  Effect.withTracerEnabled(false)
+)
 
 const decodeUtf8 = (
   bytes: Uint8Array,
@@ -421,45 +465,66 @@ const visiblePrefix = (bytes: Uint8Array): Uint8Array => {
   return bytes.slice(0, end)
 }
 
-const makeOutput = Effect.fn("PrReviewSandboxSession.makeOutput")(function*(
-  artifacts: Ref.Ref<Map<PrReviewCommandArtifactId, RetainedArtifact>>,
-  artifactSequence: Ref.Ref<number>,
-  bytes: Uint8Array
+const makeCommandOutputs = Effect.fnUntraced(function*(
+  artifacts: ReviewCommandArtifactRepositoryService,
+  request: typeof SessionRequest.Type,
+  commandSequence: number,
+  stderrBytes: Uint8Array,
+  stdoutBytes: Uint8Array
 ) {
-  const complete = yield* decodeUtf8(bytes, "output-rejected")
-  if (bytes.byteLength <= MAXIMUM_VISIBLE_OUTPUT_BYTES) {
-    return {
-      artifactId: null,
-      byteLength: bytes.byteLength,
-      text: complete,
-      truncated: false
-    } satisfies PrReviewSandboxOutput
+  const decoded = {
+    stderr: yield* decodeUtf8(stderrBytes, "output-rejected"),
+    stdout: yield* decodeUtf8(stdoutBytes, "output-rejected")
   }
-  const next = yield* Ref.updateAndGet(artifactSequence, (current) => current + 1)
-  const artifactId = PrReviewCommandArtifactId.make(`review-artifact-${String(next)}`)
-  yield* Ref.update(artifacts, (current) => {
-    const retained = new Map(current)
-    retained.set(artifactId, { byteLength: bytes.byteLength, text: complete })
-    let totalBytes = Array.from(retained.values()).reduce((total, artifact) => total + artifact.byteLength, 0)
-    while (
-      retained.size > MAXIMUM_RETAINED_ARTIFACTS ||
-      totalBytes > MAXIMUM_RETAINED_ARTIFACT_BYTES
-    ) {
-      const oldest = retained.keys().next().value
-      if (oldest === undefined) break
-      const removed = retained.get(oldest)
-      retained.delete(oldest)
-      totalBytes -= removed?.byteLength ?? 0
-    }
-    return retained
-  })
+  const candidates: ReadonlyArray<
+    readonly [ReviewCommandArtifactStream, Uint8Array, string]
+  > = [
+    ["stderr", stderrBytes, decoded.stderr],
+    ["stdout", stdoutBytes, decoded.stdout]
+  ]
+  const retained = candidates.filter(([, bytes]) => bytes.byteLength > MAXIMUM_VISIBLE_OUTPUT_BYTES)
+  const metadata = retained.length === 0
+    ? []
+    : yield* artifacts.createCommand({
+      workspaceId: request.workspaceId,
+      threadId: request.threadId,
+      jobId: request.jobId,
+      attemptSequence: request.attemptSequence,
+      commandSequence,
+      artifacts: retained.map(([stream, , content]) => ({ stream, content }))
+    }).pipe(Effect.mapError(() => sessionError("artifact-unavailable")))
+  const output = (
+    stream: ReviewCommandArtifactStream,
+    bytes: Uint8Array,
+    complete: string
+  ): Effect.Effect<PrReviewSandboxOutput, PrReviewSandboxSessionError> =>
+    bytes.byteLength <= MAXIMUM_VISIBLE_OUTPUT_BYTES
+      ? Effect.succeed({
+        artifact: null,
+        byteLength: bytes.byteLength,
+        text: complete,
+        truncated: false
+      })
+      : Effect.gen(function*() {
+        const artifact = metadata.find((candidate) => candidate.stream === stream)
+        if (artifact === undefined) return yield* sessionError("artifact-unavailable")
+        return {
+          artifact: PrReviewCommandArtifactHandle.make({
+            artifactId: artifact.artifactId,
+            attemptSequence: artifact.attemptSequence,
+            commandSequence: artifact.commandSequence,
+            stream: artifact.stream
+          }),
+          byteLength: bytes.byteLength,
+          text: yield* decodeUtf8(visiblePrefix(bytes), "output-rejected"),
+          truncated: true
+        }
+      })
   return {
-    artifactId,
-    byteLength: bytes.byteLength,
-    text: yield* decodeUtf8(visiblePrefix(bytes), "output-rejected"),
-    truncated: true
-  } satisfies PrReviewSandboxOutput
-})
+    stderr: yield* output("stderr", stderrBytes, decoded.stderr),
+    stdout: yield* output("stdout", stdoutBytes, decoded.stdout)
+  }
+}, Effect.withTracerEnabled(false))
 
 const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   unknownOptions: PrReviewSandboxSessionOptions
@@ -468,6 +533,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     Effect.mapError(() => sessionError("invalid-configuration"))
   )
   const sourceWorkspace = yield* PrReviewSourceWorkspace
+  const artifacts = yield* ReviewCommandArtifactRepository
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const home = yield* Config.string("HOME").pipe(
     Effect.mapError(() => sessionError("invalid-configuration"))
@@ -517,7 +583,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     yield* forceRemoveSandbox(name)
   })
 
-  const withSession = Effect.fn("PrReviewSandboxSessions.withSession")(function*<
+  const withSession = Effect.fnUntraced(function*<
     Success,
     Failure,
     Requirements
@@ -528,7 +594,15 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const request = yield* Schema.decodeUnknownEffect(SessionRequest)(unknownRequest).pipe(
       Effect.mapError(() => sessionError("invalid-request"))
     )
-    const name = sandboxName(request.workspaceId, request.jobId, request.attemptId)
+    const expectedName = sandboxName(request.workspaceId, request.jobId, request.attemptId)
+    const name = request.recoverySandboxName ?? expectedName
+    const recovery = request.recoverySandboxName !== undefined
+    if (
+      recovery &&
+      !name.startsWith(`${workspaceSandboxPrefix(request.workspaceId)}${compactUuid(request.jobId).slice(-4)}-`)
+    ) {
+      return yield* sessionError("invalid-request")
+    }
     const nativeCodex = request.reviewExecution === "native-codex"
     const nativeClaude = request.reviewExecution === "native-claude"
     const nativeAgent = nativeCodex || nativeClaude
@@ -536,37 +610,51 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       request,
       (sourceRoot) =>
         Effect.acquireUseRelease(
-          runControl(
-            nativeAgent
-              ? [
-                "run",
-                nativeCodex ? "codex" : "claude",
-                sourceRoot,
-                "--clone",
-                "--name",
-                name,
-                "--detached"
-              ]
-              : [
-                "create",
-                "shell",
-                sourceRoot,
-                "--clone",
-                "--name",
-                name,
-                "--quiet",
-                ...(options.template === undefined ? [] : ["--template", options.template])
-              ],
-            SOURCE_HANDOFF_TIMEOUT,
-            hostEnvironment
-          ).pipe(
-            Effect.flatMap((created) =>
-              successful(created)
-                ? Effect.succeed(name)
-                : Effect.fail(sessionError("sandbox-unavailable"))
+          recovery
+            ? runControl(["ls", "--quiet"], SOURCE_HANDOFF_TIMEOUT, hostEnvironment).pipe(
+              Effect.flatMap((listed) =>
+                successful(listed)
+                  ? decodeUtf8(listed.stdout, "sandbox-unavailable").pipe(
+                    Effect.filterOrFail(
+                      (output) => output.split("\n").includes(name),
+                      () => sessionError("sandbox-unavailable")
+                    ),
+                    Effect.as(name)
+                  )
+                  : Effect.fail(sessionError("sandbox-unavailable"))
+              )
+            )
+            : runControl(
+              nativeAgent
+                ? [
+                  "run",
+                  nativeCodex ? "codex" : "claude",
+                  sourceRoot,
+                  "--clone",
+                  "--name",
+                  name,
+                  "--detached"
+                ]
+                : [
+                  "create",
+                  "shell",
+                  sourceRoot,
+                  "--clone",
+                  "--name",
+                  name,
+                  "--quiet",
+                  ...(options.template === undefined ? [] : ["--template", options.template])
+                ],
+              SOURCE_HANDOFF_TIMEOUT,
+              hostEnvironment
+            ).pipe(
+              Effect.flatMap((created) =>
+                successful(created)
+                  ? Effect.succeed(name)
+                  : Effect.fail(sessionError("sandbox-unavailable"))
+              ),
+              Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
             ),
-            Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
-          ),
           () =>
             Effect.gen(function*() {
               if (!nativeAgent) {
@@ -582,8 +670,78 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
               }
 
               const closed = yield* Ref.make(false)
-              const artifacts = yield* Ref.make(new Map<PrReviewCommandArtifactId, RetainedArtifact>())
-              const artifactSequence = yield* Ref.make(0)
+              const commandSequence = yield* Ref.make(0)
+
+              const executeObserved = Effect.fnUntraced(function*(
+                phase: string,
+                commandName: string,
+                args: ReadonlyArray<string>,
+                maximumOutputBytes: number,
+                timeout: Duration.Input,
+                input?: Uint8Array
+              ) {
+                const startedAt = yield* DateTime.now
+                const execution = yield* Effect.exit(execute(
+                  spawner,
+                  executable,
+                  hostEnvironment,
+                  args,
+                  maximumOutputBytes,
+                  timeout,
+                  input
+                ))
+                const completedAt = yield* DateTime.now
+                if (Exit.isFailure(execution)) {
+                  const failure = Cause.findErrorOption(execution.cause)
+                  yield* emitPrReviewTelemetry({
+                    workspaceId: request.workspaceId,
+                    jobId: request.jobId,
+                    attemptSequence: request.attemptSequence,
+                    revision: request.headRevision,
+                    provider: request.providerId ?? "unknown",
+                    model: request.model ?? null,
+                    cli: request.reviewExecution ?? "effect-ai",
+                    phase,
+                    commandName,
+                    durationMillis: Math.max(
+                      0,
+                      DateTime.toEpochMillis(completedAt) - DateTime.toEpochMillis(startedAt)
+                    ),
+                    exitStatus: null,
+                    stdoutBytes: 0,
+                    stderrBytes: 0,
+                    suggestionCount: 0,
+                    noteCount: 0,
+                    errorType: Option.isSome(failure) && isSessionError(failure.value)
+                      ? failure.value.reason
+                      : "execution-failed"
+                  })
+                  return yield* Effect.failCause(execution.cause)
+                }
+                const result = execution.value
+                yield* emitPrReviewTelemetry({
+                  workspaceId: request.workspaceId,
+                  jobId: request.jobId,
+                  attemptSequence: request.attemptSequence,
+                  revision: request.headRevision,
+                  provider: request.providerId ?? "unknown",
+                  model: request.model ?? null,
+                  cli: request.reviewExecution ?? "effect-ai",
+                  phase,
+                  commandName,
+                  durationMillis: Math.max(
+                    0,
+                    DateTime.toEpochMillis(completedAt) - DateTime.toEpochMillis(startedAt)
+                  ),
+                  exitStatus: Number(result.exitCode),
+                  stdoutBytes: result.stdout.byteLength,
+                  stderrBytes: result.stderr.byteLength,
+                  suggestionCount: 0,
+                  noteCount: 0,
+                  errorType: successful(result) ? null : "non-zero-exit"
+                })
+                return result
+              })
 
               const close = Ref.getAndSet(closed, true).pipe(
                 Effect.flatMap((wasClosed) => wasClosed ? Effect.void : removeSandbox(name))
@@ -595,15 +753,13 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 input?: Uint8Array
               ) {
                 if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
-                return yield* execute(
-                  spawner,
-                  executable,
-                  hostEnvironment,
+                return yield* executeObserved(
+                  "sandbox-command",
+                  "review-command",
                   [
                     "exec",
                     ...(input === undefined ? [] : ["--interactive"]),
-                    "--workdir",
-                    sourceRoot,
+                    ...(recovery ? [] : ["--workdir", sourceRoot]),
                     name,
                     "env",
                     "-i",
@@ -625,10 +781,16 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 "PrReviewSandboxSession.runContainedCommand"
               )(function*(commandText: string, durationMillis: number, input?: Uint8Array) {
                 const result = yield* executeContained(commandText, durationMillis, input)
+                const sequence = yield* Ref.updateAndGet(commandSequence, (current) => current + 1)
                 return {
                   exitCode: result.exitCode,
-                  stderr: yield* makeOutput(artifacts, artifactSequence, result.stderr),
-                  stdout: yield* makeOutput(artifacts, artifactSequence, result.stdout)
+                  ...yield* makeCommandOutputs(
+                    artifacts,
+                    request,
+                    sequence,
+                    result.stderr,
+                    result.stdout
+                  )
                 } satisfies PrReviewSandboxCommandResult
               })
 
@@ -665,15 +827,13 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     textEncoder.encode(nativeRequest.outputSchema)
                   )
                   if (!successful(schemaWritten)) return yield* sessionError("sandbox-unavailable")
-                  const reviewed = yield* execute(
-                    spawner,
-                    executable,
-                    hostEnvironment,
+                  const reviewed = yield* executeObserved(
+                    "native-review",
+                    "codex",
                     [
                       "exec",
                       "--interactive",
-                      "--workdir",
-                      sourceRoot,
+                      ...(recovery ? [] : ["--workdir", sourceRoot]),
                       name,
                       nativeRequest.executable,
                       "exec",
@@ -710,10 +870,16 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                         diagnostic: safeDiagnostic
                       })
                     }
+                    const sequence = yield* Ref.updateAndGet(commandSequence, (current) => current + 1)
                     return {
                       exitCode: reviewed.exitCode,
-                      stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
-                      stdout: yield* makeOutput(artifacts, artifactSequence, reviewed.stdout)
+                      ...yield* makeCommandOutputs(
+                        artifacts,
+                        request,
+                        sequence,
+                        reviewed.stderr,
+                        reviewed.stdout
+                      )
                     } satisfies PrReviewSandboxCommandResult
                   }
                   return yield* runContainedCommand(
@@ -734,15 +900,13 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     Effect.mapError(() => sessionError("invalid-request"))
                   )
                   if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
-                  const reviewed = yield* execute(
-                    spawner,
-                    executable,
-                    hostEnvironment,
+                  const reviewed = yield* executeObserved(
+                    "native-review",
+                    "claude",
                     [
                       "exec",
                       "--interactive",
-                      "--workdir",
-                      sourceRoot,
+                      ...(recovery ? [] : ["--workdir", sourceRoot]),
                       name,
                       nativeRequest.executable,
                       "-p",
@@ -772,10 +936,16 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     textEncoder.encode(nativeRequest.prompt)
                   )
                   if (!successful(reviewed)) {
+                    const sequence = yield* Ref.updateAndGet(commandSequence, (current) => current + 1)
                     return {
                       exitCode: reviewed.exitCode,
-                      stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
-                      stdout: yield* makeOutput(artifacts, artifactSequence, reviewed.stdout)
+                      ...yield* makeCommandOutputs(
+                        artifacts,
+                        request,
+                        sequence,
+                        reviewed.stderr,
+                        reviewed.stdout
+                      )
                     } satisfies PrReviewSandboxCommandResult
                   }
                   const envelope = yield* Schema.decodeUnknownEffect(
@@ -793,10 +963,16 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       () => sessionError("output-rejected")
                     )
                   )
+                  const sequence = yield* Ref.updateAndGet(commandSequence, (current) => current + 1)
                   return {
                     exitCode: reviewed.exitCode,
-                    stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
-                    stdout: yield* makeOutput(artifacts, artifactSequence, textEncoder.encode(structuredOutput))
+                    ...yield* makeCommandOutputs(
+                      artifacts,
+                      request,
+                      sequence,
+                      reviewed.stderr,
+                      textEncoder.encode(structuredOutput)
+                    )
                   } satisfies PrReviewSandboxCommandResult
                 })
                 : undefined
@@ -861,36 +1037,53 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     "git add --intent-to-add -- . && " +
                       "git -c core.quotePath=false diff --no-ext-diff --no-textconv --no-color HEAD -- ."
                   ),
-                pageArtifact: (artifactId, unknownOffset, unknownLimit) =>
+                listArtifacts: () =>
                   Effect.gen(function*() {
                     if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
+                    return yield* artifacts.list({
+                      workspaceId: request.workspaceId,
+                      threadId: request.threadId,
+                      jobId: request.jobId,
+                      limit: 256
+                    }).pipe(Effect.mapError(() => sessionError("artifact-unavailable")))
+                  }),
+                pageArtifact: (unknownArtifact, unknownOffset, unknownLimit) =>
+                  Effect.gen(function*() {
+                    if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
+                    const artifact = yield* Schema.decodeUnknownEffect(
+                      PrReviewCommandArtifactHandle
+                    )(unknownArtifact).pipe(Effect.mapError(() => sessionError("invalid-request")))
                     const offset = yield* Schema.decodeUnknownEffect(PositiveOffset)(unknownOffset).pipe(
                       Effect.mapError(() => sessionError("invalid-request"))
                     )
                     const limit = yield* Schema.decodeUnknownEffect(PositiveLimit)(unknownLimit).pipe(
                       Effect.mapError(() => sessionError("invalid-request"))
                     )
-                    const artifact = (yield* Ref.get(artifacts)).get(artifactId)
-                    if (artifact === undefined) return yield* sessionError("artifact-unavailable")
-                    return artifact.text.slice(offset, offset + limit)
+                    return yield* artifacts.page({
+                      workspaceId: request.workspaceId,
+                      threadId: request.threadId,
+                      jobId: request.jobId,
+                      ...artifact,
+                      offset,
+                      limit
+                    }).pipe(Effect.mapError(() => sessionError("artifact-unavailable")))
                   }),
-                searchArtifact: (artifactId, unknownQuery) =>
+                searchArtifact: (unknownArtifact, unknownQuery) =>
                   Effect.gen(function*() {
                     if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
+                    const artifact = yield* Schema.decodeUnknownEffect(
+                      PrReviewCommandArtifactHandle
+                    )(unknownArtifact).pipe(Effect.mapError(() => sessionError("invalid-request")))
                     const query = yield* Schema.decodeUnknownEffect(SearchText)(unknownQuery).pipe(
                       Effect.mapError(() => sessionError("invalid-request"))
                     )
-                    const artifact = (yield* Ref.get(artifacts)).get(artifactId)
-                    if (artifact === undefined) return yield* sessionError("artifact-unavailable")
-                    const matches = new Array<number>()
-                    for (
-                      let offset = artifact.text.indexOf(query);
-                      offset !== -1 && matches.length < 100;
-                      offset = artifact.text.indexOf(query, offset + 1)
-                    ) {
-                      matches.push(offset)
-                    }
-                    return matches
+                    return yield* artifacts.search({
+                      workspaceId: request.workspaceId,
+                      threadId: request.threadId,
+                      jobId: request.jobId,
+                      ...artifact,
+                      query
+                    }).pipe(Effect.mapError(() => sessionError("artifact-unavailable")))
                   }),
                 ...(runNativeCodexReview === undefined ? {} : { runNativeCodexReview }),
                 ...(runNativeClaudeReview === undefined ? {} : { runNativeClaudeReview }),
@@ -933,7 +1126,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
           : failure
       )
     )
-  })
+  }, Effect.withTracerEnabled(false))
 
   const reconcile = Effect.fn("PrReviewSandboxSessions.reconcile")(function*(
     workspaceId: WorkspaceId
@@ -945,13 +1138,28 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const names = text.split("\n")
       .filter((name) => name.startsWith(ownedPrefix))
       .sort()
-    for (const name of names) {
-      yield* forceRemoveSandbox(name)
-    }
-    return { removedSandboxes: names } satisfies PrReviewSandboxReconciliation
+    const identityPattern = new RegExp(`^${ownedPrefix}([a-f0-9]{${SANDBOX_JOB_TOKEN_LENGTH}})-([a-f0-9]{12})$`, "u")
+    const identities = names.flatMap((name) => {
+      const match = identityPattern.exec(name)
+      return match === null || match[1] === undefined || match[2] === undefined
+        ? []
+        : [{ name, jobToken: match[1], attemptId: match[2] }]
+    })
+    return {
+      removedSandboxes: [],
+      reattachedSandboxes: names,
+      reattachedSandboxIdentities: identities
+    } satisfies PrReviewSandboxReconciliation
   })
 
-  return PrReviewSandboxSessions.of({ reconcile, withSession })
+  const cleanupUnmatched = Effect.fn("PrReviewSandboxSessions.cleanupUnmatched")(function*(
+    names: ReadonlyArray<string>
+  ) {
+    yield* Effect.forEach(names, removeSandbox)
+    return names
+  })
+
+  return PrReviewSandboxSessions.of({ cleanupUnmatched, reconcile, withSession })
 })
 
 /** Production layer for scoped writable sbx Review Sandbox sessions. */
@@ -960,11 +1168,11 @@ export const prReviewSandboxSessionsLayer = (
 ): Layer.Layer<
   PrReviewSandboxSessions,
   PrReviewSandboxSessionError,
-  PrReviewSourceWorkspace | ChildProcessSpawner.ChildProcessSpawner
+  ReviewCommandArtifactRepository | PrReviewSourceWorkspace | ChildProcessSpawner.ChildProcessSpawner
 > => Layer.effect(PrReviewSandboxSessions, makeSessions(options))
 
 const ToolOutput = Schema.Struct({
-  artifactId: Schema.NullOr(PrReviewCommandArtifactId),
+  artifact: Schema.NullOr(PrReviewCommandArtifactHandle),
   byteLength: Schema.Int,
   text: Schema.String,
   truncated: Schema.Boolean
@@ -1033,24 +1241,35 @@ export const ReviewReadDiff = Tool.make("ReviewReadDiff", {
   success: ToolCommandResult
 })
 
-/** Page retained command output by opaque session-local artifact ID. */
+/** Discover safe durable artifact handles retained for the current review run. */
+export const ReviewListArtifacts = Tool.make("ReviewListArtifacts", {
+  description: "List bounded secret-free metadata for durable command output owned by this review job.",
+  failure: PrReviewSandboxSessionError,
+  success: Schema.Struct({ artifacts: Schema.Array(ReviewCommandArtifactMetadata) })
+})
+
+/** Page retained command output using its durable immutable-command handle. */
 export const ReviewPageArtifact = Tool.make("ReviewPageArtifact", {
-  description: "Read a bounded page from complete command output retained by this session.",
+  description: "Read a bounded UTF-8 byte page from durable complete command output.",
   failure: PrReviewSandboxSessionError,
   parameters: Schema.Struct({
-    artifactId: PrReviewCommandArtifactId,
+    artifact: PrReviewCommandArtifactHandle,
     offset: PositiveOffset,
     limit: PositiveLimit
   }),
-  success: Schema.Struct({ page: Schema.String })
+  success: Schema.Struct({
+    page: Schema.String,
+    nextOffset: PositiveOffset,
+    complete: Schema.Boolean
+  })
 })
 
 /** Search retained command output without returning the complete artifact. */
 export const ReviewSearchArtifact = Tool.make("ReviewSearchArtifact", {
-  description: "Find text offsets in complete command output retained by this session.",
+  description: "Find UTF-8 byte offsets in durable complete command output.",
   failure: PrReviewSandboxSessionError,
   parameters: Schema.Struct({
-    artifactId: PrReviewCommandArtifactId,
+    artifact: PrReviewCommandArtifactHandle,
     query: SearchText
   }),
   success: Schema.Struct({ offsets: Schema.Array(PositiveOffset) })
@@ -1064,6 +1283,7 @@ export const PrReviewSandboxTools = Toolkit.make(
   ReviewRunCommand,
   ReviewApplyPatch,
   ReviewReadDiff,
+  ReviewListArtifacts,
   ReviewPageArtifact,
   ReviewSearchArtifact
 )
@@ -1079,8 +1299,11 @@ export const prReviewSandboxToolsLayer = (
     ReviewRunCommand: ({ command, maximumDurationMillis }) => session.runCommand(command, maximumDurationMillis),
     ReviewApplyPatch: ({ patch }) => session.applyPatch(patch),
     ReviewReadDiff: () => session.readDiff(),
-    ReviewPageArtifact: ({ artifactId, limit, offset }) =>
-      session.pageArtifact(artifactId, offset, limit).pipe(Effect.map((page) => ({ page }))),
-    ReviewSearchArtifact: ({ artifactId, query }) =>
-      session.searchArtifact(artifactId, query).pipe(Effect.map((offsets) => ({ offsets })))
+    ReviewListArtifacts: () => session.listArtifacts().pipe(Effect.map((artifacts) => ({ artifacts }))),
+    ReviewPageArtifact: ({ artifact, limit, offset }) =>
+      session.pageArtifact(artifact, offset, limit).pipe(
+        Effect.map(({ complete, nextOffset, text: page }) => ({ complete, nextOffset, page }))
+      ),
+    ReviewSearchArtifact: ({ artifact, query }) =>
+      session.searchArtifact(artifact, query).pipe(Effect.map((offsets) => ({ offsets })))
   })

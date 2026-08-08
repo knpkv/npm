@@ -19,6 +19,7 @@ import {
   GovernedActionId,
   GovernedActionTransitionId,
   PluginConnectionId,
+  ReleaseId,
   WorkspaceId
 } from "../../../../domain/identifiers.js"
 import { ProviderId, Revision } from "../../../../domain/sourceRevision.js"
@@ -225,6 +226,20 @@ export const GovernedActionTargetReadInput = Schema.Struct({
 
 /** Decoded newest terminal target lookup. */
 export type GovernedActionTargetReadInput = typeof GovernedActionTargetReadInput.Type
+
+/** Bounded batched lookup for the latest successful publications of exact releases. */
+export const GovernedActionReleasePublicationReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  providerId: Schema.Literal("confluence"),
+  releaseIds: Schema.Array(ReleaseId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(200),
+    Schema.isUnique()
+  )
+})
+
+/** Decoded release-publication batch lookup. */
+export type GovernedActionReleasePublicationReadInput = typeof GovernedActionReleasePublicationReadInput.Type
 
 /** Trusted governed action reconstructed from its immutable ordered history. */
 export const GovernedActionRecord = Schema.Struct({

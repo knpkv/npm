@@ -11,12 +11,12 @@ import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
 import { PageId } from "../Brand.js"
-import { type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
+import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { createConfigFile, layerFromValues as ConfluenceConfigLayerFromValues } from "../ConfluenceConfig.js"
 import { ConfigError } from "../ConfluenceError.js"
 import { GitService, layer as GitServiceLayer } from "../GitService.js"
 import { writeStdout } from "../internal/stdio.js"
-import { UserCacheLayer } from "../internal/userCache.js"
+import { UserCacheLayerWith } from "../internal/userCache.js"
 import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
@@ -27,6 +27,26 @@ const ConverterPipeline = MarkdownConverterLayer.pipe(
   Layer.provide(AtlaskitTransformersLayer),
   Layer.provide(AdfSchemaValidatorLayer)
 )
+
+/** @internal */
+export const makeCloneOperationLayer = (
+  configLayer: ReturnType<typeof ConfluenceConfigLayerFromValues>,
+  clientLayer: Layer.Layer<ConfluenceClient>
+) => {
+  const operationUserCacheLayer = Layer.unwrap(
+    Effect.map(ConfluenceClient, (client) => UserCacheLayerWith(client.getUser))
+  ).pipe(Layer.provide(clientLayer))
+
+  return SyncEngineLayer.pipe(
+    Layer.provideMerge(operationUserCacheLayer),
+    Layer.provideMerge(GitServiceLayer),
+    Layer.provideMerge(clientLayer),
+    Layer.provideMerge(ConverterPipeline),
+    Layer.provideMerge(LocalFileSystemLayer),
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(NodeServices.layer)
+  )
+}
 
 const rootPageIdOption = Options.string("root-page-id").pipe(
   Options.withDescription("Confluence root page ID to sync from"),
@@ -116,19 +136,8 @@ export const cloneCommand = Command.make(
         trackedPaths: ["**/*.md"]
       })
 
-      const clientLayer = ConfluenceClientLayer(clientConfig).pipe(
-        Layer.provide(NodeHttpClient.layerFetch)
-      )
-
-      const cloneLayer = SyncEngineLayer.pipe(
-        Layer.provideMerge(UserCacheLayer),
-        Layer.provideMerge(GitServiceLayer),
-        Layer.provideMerge(clientLayer),
-        Layer.provideMerge(ConverterPipeline),
-        Layer.provideMerge(LocalFileSystemLayer),
-        Layer.provideMerge(configLayer),
-        Layer.provideMerge(NodeServices.layer)
-      )
+      const clientLayer = ConfluenceClientLayer(clientConfig).pipe(Layer.provide(NodeHttpClient.layerFetch))
+      const cloneLayer = makeCloneOperationLayer(configLayer, clientLayer)
 
       const result = yield* Effect.gen(function*() {
         const engine = yield* SyncEngine

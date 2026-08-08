@@ -2,7 +2,9 @@
  * Production CodeCommit read adapter for one configured repository.
  *
  * Owns pull-request discovery, immutable revision reads, complete paginated
- * changed-file inventory, and governed review actions. CodeCommit exposes
+ * changed-file inventory, and governed review actions. Governed review actions
+ * include exact-head create, update, and reply comment mutations alongside
+ * native approval state changes. CodeCommit exposes
  * native approval and revoke mutations; request-review and
  * request-changes are represented by idempotent comments on the exact commits
  * because the provider has no corresponding review-state API. Governed merge
@@ -361,6 +363,7 @@ const ReviewClientRequestToken = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(64)
 )
+const ReviewCommentId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 
 const CodeCommitActionPayload = Schema.Union([
   Schema.TaggedStruct("request-review", {
@@ -386,6 +389,22 @@ const CodeCommitActionPayload = Schema.Union([
     content: ReviewCommentPayload.fields.content,
     clientRequestToken: ReviewClientRequestToken
   }),
+  Schema.TaggedStruct("update-comment", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference,
+    commentId: ReviewCommentId,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
+  }),
+  Schema.TaggedStruct("reply-comment", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference,
+    commentId: ReviewCommentId,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
+  }),
   Schema.TaggedStruct("approve", {
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
@@ -404,12 +423,16 @@ const actionKinds: readonly [
   "request-review",
   "comment",
   "request-changes",
+  "update-comment",
+  "reply-comment",
   "approve",
   "revoke-approval"
 ] = [
   "request-review",
   "comment",
   "request-changes",
+  "update-comment",
+  "reply-comment",
   "approve",
   "revoke-approval"
 ]
@@ -427,6 +450,10 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
       return `Comment on CodeCommit pull request #${pullRequestId}`
     case "request-changes":
       return `Request changes on CodeCommit pull request #${pullRequestId}`
+    case "update-comment":
+      return `Update a comment on CodeCommit pull request #${pullRequestId}`
+    case "reply-comment":
+      return `Reply to a comment on CodeCommit pull request #${pullRequestId}`
     case "approve":
       return `Approve CodeCommit pull request #${pullRequestId}`
     case "revoke-approval":
@@ -440,6 +467,10 @@ const actionImpact = (
   level: "medium",
   summary: actionKind === "approve" || actionKind === "revoke-approval"
     ? "Changes the signed-in AWS identity's approval state"
+    : actionKind === "update-comment"
+    ? "Updates an existing durable review comment"
+    : actionKind === "reply-comment"
+    ? "Adds a durable reply to an existing review comment"
     : "Adds a durable review comment to the pull request"
 })
 
@@ -453,6 +484,11 @@ const decodeRequestedPayload = Effect.fn("CodeCommitPlugin.decodeRequestedPayloa
     ? InlineReviewCommentPayload
     : actionKind === "request-changes"
     ? ReviewCommentPayload
+    : actionKind === "update-comment" || actionKind === "reply-comment"
+    ? Schema.Struct({
+      ...ReviewCommentPayload.fields,
+      commentId: ReviewCommentId
+    })
     : EmptyPayload
   return yield* Schema.decodeUnknownEffect(Schema.toType(schema))(payload).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
@@ -476,11 +512,12 @@ const decodeNormalizedActionPayload = (
   )
 
 const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientRequestToken")(function*(
-  actionKind: "comment" | "request-changes" | "request-review",
+  actionKind: "comment" | "request-changes" | "request-review" | "update-comment" | "reply-comment",
   content: string,
   pullRequest: ReadClient.CodeCommitPullRequestRevision,
   cryptoService: Crypto.Crypto,
-  location?: typeof ReviewCommentLocation.Type
+  location?: typeof ReviewCommentLocation.Type,
+  commentId?: string
 ) {
   return yield* digestGovernedActionPayload({
     actionKind,
@@ -490,6 +527,7 @@ const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientReque
     sourceCommit: pullRequest.sourceCommit,
     destinationCommit: pullRequest.destinationCommit,
     content,
+    ...(commentId === undefined ? {} : { commentId }),
     ...(location === undefined ? {} : { location })
   }).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
@@ -553,6 +591,31 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         clientRequestToken: yield* commentClientRequestToken(actionKind, decoded.content, pullRequest, cryptoService)
       })
     }
+    case "update-comment":
+    case "reply-comment": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(Schema.Struct({
+        ...ReviewCommentPayload.fields,
+        commentId: ReviewCommentId
+      })))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference,
+        commentId: decoded.commentId,
+        content: decoded.content,
+        clientRequestToken: yield* commentClientRequestToken(
+          actionKind,
+          decoded.content,
+          pullRequest,
+          cryptoService,
+          undefined,
+          decoded.commentId
+        )
+      })
+    }
     case "approve":
     case "revoke-approval":
       return yield* decodeNormalizedActionPayload({
@@ -564,7 +627,7 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
   }
 })
 
-const ReconciliationLocatorWire = Schema.Tuple([
+const ReconciliationLocatorWireV1 = Schema.Tuple([
   Schema.Literals(actionKinds),
   Domain.PullRequestId.check(Schema.isMaxLength(64)),
   Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
@@ -574,10 +637,31 @@ const ReconciliationLocatorWire = Schema.Tuple([
 ]).check(
   Schema.makeFilter(
     ([actionKind, _pullRequestId, _revisionId, _sourceCommit, _destinationCommit, clientRequestToken]) =>
-      actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes"
+      actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes" ||
+        actionKind === "update-comment" || actionKind === "reply-comment"
         ? clientRequestToken !== null
         : clientRequestToken === null,
     { expected: "a comment token only for comment-backed review actions" }
+  )
+)
+
+const ReconciliationLocatorWireV2 = Schema.Tuple([
+  Schema.Literals(actionKinds),
+  Domain.PullRequestId.check(Schema.isMaxLength(64)),
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ReviewCommitId,
+  ReviewCommitId,
+  Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64))),
+  Schema.NullOr(ReviewCommentId)
+]).check(
+  Schema.makeFilter(
+    ([actionKind, _pullRequestId, _revisionId, _sourceCommit, _destinationCommit, clientRequestToken, commentId]) =>
+      (actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes" ||
+          actionKind === "update-comment" || actionKind === "reply-comment")
+        ? clientRequestToken !== null &&
+          (actionKind === "update-comment" || actionKind === "reply-comment" ? commentId !== null : commentId === null)
+        : clientRequestToken === null && commentId === null,
+    { expected: "comment identity fields must match the review action" }
   )
 )
 
@@ -588,26 +672,43 @@ interface ReconciliationLocator {
   readonly sourceCommit: ReadClient.CodeCommitCommitId
   readonly destinationCommit: ReadClient.CodeCommitCommitId
   readonly clientRequestToken: string | null
+  /**
+   * Provider-issued opaque comment coordinate. It is persisted in the local
+   * publication record and in the server-private `ccmt:v2` locator, then
+   * emitted only in authenticated server action payloads; it must not enter
+   * browser state, synchronized entities, or diff URLs.
+   */
+  readonly commentId: string | null
 }
 
 const encodeReconciliationLocator = (
   locator: ReconciliationLocator
-): PluginActionReconciliationKey =>
-  PluginActionReconciliationKey.make(`ccmt:v1:${
-    Encoding.encodeBase64Url(JSON.stringify([
-      locator.actionKind,
-      locator.pullRequestId,
-      locator.revisionId,
-      locator.sourceCommit,
-      locator.destinationCommit,
-      locator.clientRequestToken
-    ]))
-  }`)
+): PluginActionReconciliationKey => {
+  const values = [
+    locator.actionKind,
+    locator.pullRequestId,
+    locator.revisionId,
+    locator.sourceCommit,
+    locator.destinationCommit,
+    locator.clientRequestToken
+  ]
+  if (locator.commentId === null) {
+    return PluginActionReconciliationKey.make(`ccmt:v1:${Encoding.encodeBase64Url(JSON.stringify(values))}`)
+  }
+  return PluginActionReconciliationKey.make(
+    `ccmt:v2:${Encoding.encodeBase64Url(JSON.stringify([...values, locator.commentId]))}`
+  )
+}
 
 const decodeReconciliationLocator = (
   key: PluginActionReconciliationKey
 ): Effect.Effect<ReconciliationLocator, PluginConfigurationFailure> => {
-  const encoded = key.startsWith("ccmt:v1:") ? key.slice("ccmt:v1:".length) : ""
+  const isV2 = key.startsWith("ccmt:v2:")
+  const encoded = isV2
+    ? key.slice("ccmt:v2:".length)
+    : key.startsWith("ccmt:v1:")
+    ? key.slice("ccmt:v1:".length)
+    : ""
   const decoded = Encoding.decodeBase64UrlString(encoded)
   if (Result.isFailure(decoded)) {
     return Effect.fail(
@@ -616,15 +717,29 @@ const decodeReconciliationLocator = (
       })
     )
   }
-  return Schema.decodeUnknownEffect(Schema.fromJsonString(ReconciliationLocatorWire))(decoded.success).pipe(
-    Effect.map(([actionKind, pullRequestId, revisionId, sourceCommit, destinationCommit, clientRequestToken]) => ({
-      actionKind,
-      pullRequestId,
-      revisionId,
-      sourceCommit,
-      destinationCommit,
-      clientRequestToken
-    })),
+  const wire = isV2 ? ReconciliationLocatorWireV2 : ReconciliationLocatorWireV1
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(wire))(decoded.success).pipe(
+    Effect.map((value) =>
+      value.length === 7
+        ? {
+          actionKind: value[0],
+          pullRequestId: value[1],
+          revisionId: value[2],
+          sourceCommit: value[3],
+          destinationCommit: value[4],
+          clientRequestToken: value[5],
+          commentId: value[6]
+        }
+        : {
+          actionKind: value[0],
+          pullRequestId: value[1],
+          revisionId: value[2],
+          sourceCommit: value[3],
+          destinationCommit: value[4],
+          clientRequestToken: value[5],
+          commentId: null
+        }
+    ),
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-reconciliation-key-invalid" }))
   )
 }
@@ -662,6 +777,15 @@ const actionFromPayload = (
         clientRequestToken: payload.clientRequestToken,
         ...(payload.location === undefined ? {} : { location: payload.location })
       }
+    case "update-comment":
+    case "reply-comment":
+      return {
+        _tag: payload._tag,
+        target,
+        commentId: payload.commentId,
+        content: payload.content,
+        clientRequestToken: payload.clientRequestToken
+      }
     case "approve":
     case "revoke-approval":
       return { _tag: payload._tag, target }
@@ -692,6 +816,15 @@ const actionFromLocator = (
         content: "Reconcile the previously dispatched review comment",
         clientRequestToken: locator.clientRequestToken ?? "invalid-missing-client-request-token"
       }
+    case "update-comment":
+    case "reply-comment":
+      return {
+        _tag: locator.actionKind,
+        target,
+        commentId: locator.commentId ?? "invalid-missing-comment-id",
+        content: "Reconcile the previously dispatched review comment",
+        clientRequestToken: locator.clientRequestToken ?? "invalid-missing-client-request-token"
+      }
     case "approve":
     case "revoke-approval":
       return { _tag: locator.actionKind, target }
@@ -709,8 +842,13 @@ const locatorForAction = (
     destinationCommit: action.target.destinationCommit,
     clientRequestToken: action._tag === "request-review" ||
         action._tag === "comment" ||
-        action._tag === "request-changes"
+        action._tag === "request-changes" ||
+        action._tag === "update-comment" ||
+        action._tag === "reply-comment"
       ? action.clientRequestToken
+      : null,
+    commentId: action._tag === "update-comment" || action._tag === "reply-comment"
+      ? action.commentId
       : null
   })
 

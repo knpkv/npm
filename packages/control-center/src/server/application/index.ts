@@ -43,6 +43,10 @@ export {
   releaseAgentJobsUnavailableLayer
 } from "./releaseAgentJobs.js"
 export {
+  releasePublicationSubmissionsLayer,
+  releasePublicationSubmissionsUnavailableLayer
+} from "./releasePublicationSubmissions.js"
+export {
   reconcileFakeReleaseProjection,
   reconcileFakeReleaseSyncAttempts,
   recoverFakeReleaseProjection,

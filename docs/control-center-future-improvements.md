@@ -27,14 +27,14 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Pull-request review threads
 
-- Persist large command artifacts under the documented retention policy and expose explicit page/search tools across recovered runs. Current sbx command artifacts are deliberately session-local and disappear with the sandbox.
 - Virtualize very long browser review threads after several explicitly loaded backward pages. The current browser keeps prior history visible across pull-request heads and temporary launch ineligibility, but intentionally renders the expanded in-memory history without virtualization.
 
 ## Review-suggestion revisions
 
-- Add a browser-backed edit/conflict/history/publication journey and Storybook state matrix, including keyboard focus and reduced-motion coverage. The MVP has focused component coverage, but not a Playwright journey for this surface.
-- Add explicit durable `suggestion-edit` and `suggestion-revalidation` task intents beneath the existing `pr-review` worker route. The task—not prompt text—must bind the source job, stable suggestion, selected revision, and exact immutable head.
+- Sequence the remaining agentic review work as durable task identities and one private lifecycle fold first, then targeted edit/revalidation execution, recovery and retention convergence, and only then the broader agentic review release gate. Do not duplicate lifecycle transitions across dispatch and reconciliation adapters.
+- Add a browser-backed edit/conflict/history/publication journey and Storybook state matrix, including keyboard focus and reduced-motion coverage. The MVP has focused component coverage, but not a Playwright journey for this surface; the browser now exposes the durable targeted controls.
+- The durable `suggestion-edit` and `suggestion-revalidation` task intents beneath the existing `pr-review` worker route are implemented. The task—not prompt text—binds the source job, stable suggestion, selected revision, and exact immutable head.
 - Give targeted `sbx` runs the selected revision plus its complete bounded immutable history. Split structured output into edit, validated revalidation, and unable-to-conclude protocols; decode and re-anchor all output on the host.
 - Fold a successful targeted result and the terminal job transition through one durable repository transaction. Agent edits must append `requires-revalidation`; successful revalidation must append a new `validated` revision. Failed, cancelled, inconclusive, or superseded runs append no revision.
-- Add **Ask agent to edit** and **Revalidate** controls only after that durable protocol exists. Do not implement either control as a free-form full-review prompt, because prompt text is not an authority boundary.
+- Keep **Ask agent to edit** and **Revalidate** bound to the durable targeted protocol. Do not regress either control into a free-form full-review prompt, because prompt text is not an authority boundary.
 - Add the opt-in real Codex-through-`sbx` targeted edit/revalidation smoke fixture. Assert exact-head provenance, file exploration and test execution, structured revision output, and absence of push, comment, approval, database, credential, and network authority.

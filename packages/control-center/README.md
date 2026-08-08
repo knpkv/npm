@@ -31,7 +31,7 @@ delivery evidence as one connected release.
 
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
-| Client | generated API client chunk  |    221,593 / 66,543 bytes |         235,000 / 70,000 bytes |
+| Client | generated API client chunk  |    251,169 / 74,462 bytes |         260,000 / 80,000 bytes |
 | Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
@@ -48,6 +48,34 @@ pnpm --filter @knpkv/control-center start
 ```
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+
+### Real Atlassian OAuth acceptance journey
+
+The full interactive Jira + Confluence OAuth journey is opt-in because it requires a human Atlassian
+consent and access to a real site. Register the callback URL
+`http://127.0.0.1:<temporary-port>/services/oauth/atlassian/callback` in the OAuth app, then run:
+
+```sh
+CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 \
+CONTROL_CENTER_TEST_ATLASSIAN_PORT=4173 \
+CONTROL_CENTER_TEST_ATLASSIAN_CLIENT_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_CLIENT_SECRET=... \
+CONTROL_CENTER_TEST_ATLASSIAN_PROJECT_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_SPACE_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_PAGE_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_EXPECTED_ACCOUNT_EMAIL=... \
+CONTROL_CENTER_TEST_ATLASSIAN_EXPECTED_SITE_URL=https://example.atlassian.net/ \
+pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth
+```
+
+The command starts a fresh temporary server and data root on the configured fixed port, pairs through
+the browser, waits for the operator to complete Atlassian sign-in and consent, selects one site, creates
+both provider connections, and runs both connection checks. Register the callback using the same port
+before starting the command. The client secret is used only as masked form input; the test disables
+screenshots and traces, verifies the canonical profile contains credentials, and checks browser
+storage, SQL/WAL/journal files, Playwright artifacts, and server output for the client/provider
+credentials. It removes the temporary data, auth, and configuration roots on success or failure.
+Provider tokens remain server-private and are never returned to browser storage or SQL.
 
 ### Local OpenTelemetry
 
@@ -183,16 +211,31 @@ and uses only the disposable clone. Codex disables project-document and exec-pol
 reviewed head; Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
 review content rather than executable instructions, and safe mode disables automatic project-memory
 discovery. Every path validates structured output and exact
-diff evidence on the trusted host. Sandbox names are server-private, remain within sbx's 63-character
+diff evidence on the trusted host. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
 limit, and begin with the configured worker workspace's
-`cc-pr-review-<compact-workspace-id>-` prefix. Startup removes only crash leftovers in that owned
-namespace; foreign-workspace and legacy unscoped names are not removed automatically.
+`cc-pr-review-<compact-workspace-id>-` prefix. Startup retains live names in that owned namespace
+for recovery inspection and never removes foreign-workspace or legacy unscoped names automatically.
+When no owned live sandbox remains, active review jobs receive a durable interrupted result with
+partial evidence and a later operator retry creates a new immutable run.
 While a review is running, the worker renews its durable lease and
 observes cancellation; cancellation
 interrupts the scoped checkout, sandbox, and model work before durably completing the job as cancelled.
 `CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS` and
 `CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` both default to 1,200,000 milliseconds. The maximum
 session duration should be at least the selected Review Agent Profile budget.
+The worker enforces the selected budget independently of provider process limits. An operator may extend
+one running review once by one profile budget; the extension is durable and visible to the worker after
+restart. Cancellation and budget expiry retain the last validated partial report, mark the run unable to
+conclude, and leave any retained suggestions as advice-only because unexplored project areas remain.
+
+Provider parity is enforced at the Review Sandbox boundary: native Codex and Claude receive the same
+immutable checkout, bounded review prompt, structured report schema, exact diff anchoring, activity,
+and cleanup contract. The deterministic executor tests exercise that shared request shape for both
+providers; the installed-runtime fixture additionally runs full-project discovery, a command, a write,
+diff generation, and a structured JSON result without credentials. Run that fixture deliberately with
+`pnpm --filter @knpkv/control-center test:sbx:real`; it requires Docker and `sbx`, but does not require
+AWS, Codex, Claude, or provider API credentials. The real authenticated Codex CLI smoke remains an
+explicit separate opt-in in `@knpkv/ai-codex`.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, network policy, and sbx
 runtime before enqueue. The selected model explores the complete project inside the Review Sandbox.
@@ -296,7 +339,7 @@ Normal startup verifies SQLite's integrity, required pragmas, and the exact unst
 
 For an explicitly bootstrapped workspace, startup applies one bounded pass of the governed retention settings and repeats it daily under the graceful-drain lifecycle. Replay retention advances the durable pruned cursor while removing only old domain-event projection rows. Content retention removes reproducible diff-cache mappings through the existing durable cleanup-intent protocol. Evidence retention requires expiry, no legal hold, and no authoritative references. Agent retention requires terminal, unpublished, unreferenced work and deletes its private dependent history in one transaction. Canonical governed-action, settings, export, and cleanup audit records remain immutable.
 
-Every committed pass appends an immutable summary with the exact workspace, retention class, settings policy revision, cutoff, batch limit, selected count, deleted count, and completion time. Evidence and agent deletion triggers accept only exact transient claims belonging to that cleanup transaction. PR-review startup records successful stale-sandbox reconciliation in the same bounded audit stream; sandbox command artifacts remain process-local and are destroyed with their session.
+Every committed pass appends an immutable summary with the exact workspace, retention class, settings policy revision, cutoff, batch limit, selected count, deleted count, and completion time. Evidence, agent, and Review Sandbox artifact deletion triggers accept only exact transient claims belonging to that cleanup transaction. PR-review startup records successful stale-sandbox reconciliation in the same bounded audit stream. Large command output is stored as an immutable, expiring artifact scoped to its workspace, thread, job attempt, command sequence, and stream; bounded secret-free metadata discovery plus exact-handle page/search reads survive worker recovery, while redacted metadata contains no command text or output. Raw reads fail at the declared expiry even before physical cleanup runs. Each command’s retained stdout and stderr commit atomically, each attempt is capped at 64 artifacts and 64 MiB, each artifact is capped at 16 MiB, and expiry never cascades into semantic review history.
 
 The Vite development server stays loopback-only and is not the production application server. A new remote browser must pair over trusted HTTPS. The simplest supported setup keeps Control Center on loopback and puts a TLS reverse proxy on the same machine. Configure the proxy to serve a hostname and certificate trusted by the second machine, forward to `http://127.0.0.1:4173`, and overwrite `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`. `X-Forwarded-For` must contain exactly the browser's IP literal: do not append a chain or forward the incoming header. Then start Control Center with the proxy's exact address:
 
@@ -384,11 +427,11 @@ The exported `PluginConnection` service contains reads, health, sync, complete-d
 
 ### CodeCommit read adapter
 
-The production CodeCommit adapter exports an opaque `CodeCommitPluginDefinition` from `@knpkv/control-center/server`. One connection configures an AWS profile, region, and repository name. It negotiates `entity.read@1`, `sync.incremental@1`, `diff.inventory@2`, and `diff.content@2` (while retaining the v1 codecs for persisted descriptors), then normalizes pull requests with immutable PR/base/head revisions and complete cursor-based changed-file pages. Diff v2 requires the synchronized provider revision and immutable base/head commits; the authenticated application resolves those coordinates from the workspace-scoped canonical projection rather than accepting them from the browser. Provider output is decoded by `@knpkv/codecommit-core` before it enters the vendor-neutral plugin contract; raw AWS types and causes do not cross the adapter.
+The production CodeCommit adapter exports an opaque `CodeCommitPluginDefinition` from `@knpkv/control-center/server`. One connection configures an AWS profile, region, and repository name. It negotiates `entity.read@1`, `sync.incremental@1`, `diff.inventory@2`, and `diff.content@2` (while retaining the v1 codecs for persisted descriptors), then normalizes pull requests with immutable PR/base/head revisions and complete cursor-based changed-file pages. Its governed review actions support exact-head create, update, and reply comment mutations plus native approval state changes; every mutation remains behind the human-confirmed action flow. Diff v2 requires the synchronized provider revision and immutable base/head commits; the authenticated application resolves those coordinates from the workspace-scoped canonical projection rather than accepting them from the browser. Provider output is decoded by `@knpkv/codecommit-core` before it enters the vendor-neutral plugin contract; raw AWS types and causes do not cross the adapter.
 
 Authenticated diff APIs collect at most 500 files and 100 provider pages before returning `ready`; partial inventories never masquerade as complete. Every file receives a stable exact-revision anchor. Content reads resubmit that anchor with the normalized status and previous path in a bounded read-only POST payload, keeping maximum-length rename identities out of the request URL. The application verifies the canonical identity before the provider selects the exact entry from the stored commits, so synchronized historical revisions remain readable after the live pull request advances. Text content is fetched only for the selected before/after side in ranges of at most one MiB. Binary, generated, oversized, and missing content remain explicit inventory/workbench states; authentication, throttling, timeout, and provider outages remain typed failures and retain the normal safe-read retry policy.
 
-This milestone remains read-only. It does not expose comments, commits/history, checks, merge, or any ungoverned provider mutation capability. Provider credentials and AWS response types stay behind the scoped server runtime and never enter browser state or diff URLs.
+This milestone's synchronized entity data remains read-only and does not expose comment reads, commits/history, checks, or merge. Only the governed create, update, and reply comment mutations and approval actions described above are exposed; no ungoverned provider mutation capability exists. Provider credentials and AWS response types stay behind the scoped server runtime and never enter browser state or diff URLs.
 
 ### AWS CodePipeline adapter
 
@@ -404,7 +447,7 @@ The canonical CodePipeline entity page is a read-first execution flight recorder
 
 ### Jira issue adapter
 
-`makeJiraReadPluginRuntime` from `@knpkv/control-center/server` builds the production Jira adapter around the shared Schema-validated `JiraApiClient`. It negotiates bounded project synchronization, `entity.read` for `jira.issue`, and revision-inspected governed proposals for comments, reply fallbacks, exact fix-version assignments, and typed issue links. Every proposal preserves the exact `jira.issue` target identity and records the inspected issue revision. Jira provider writes are unnegotiated until Jira offers atomic provider revision guards or the product adopts explicit append-only authorization semantics.
+`makeJiraReadPluginRuntime` from `@knpkv/control-center/server` builds the production Jira adapter around the shared Schema-validated `JiraApiClient`. It negotiates bounded project synchronization, `entity.read` for `jira.issue`, revision-inspected governed proposals for comments, reply fallbacks, exact fix-version assignments, and typed issue links, plus a separately governed `create-release-version` action. Every issue proposal preserves the exact `jira.issue` target identity and records the inspected issue revision. Jira issue provider writes remain disabled until Jira offers a documented, verified provider-enforced atomic revision precondition for the exact target revision; append-only authorization is not a substitute for that guard. The release-version action is create-only and project-scoped: it never edits an existing issue or version, checks for an exact existing name before dispatch, and reconciles ambiguous outcomes by that name. Its durable canonical request is the governed-action `envelope_json`: the payload persists only `projectId`, exact `name`, and release `description`; the production identity also binds the workspace, selected connection and its verified Atlassian site, release, source-revision digest, immutable project destination, and canonical payload digest. Provider credentials remain server-private and are never durable payload fields.
 
 The secret-free runtime configuration requires an HTTPS Jira Cloud tenant root `webBaseUrl` under `atlassian.net`, its stable Atlassian cloud `siteId`, the immutable `projectId` followed by this connection, an activity `pageSize` from 1 to 50, a `maximumPages` limit from 1 to 5, and a per-request `operationTimeoutMillis` from 1,000 to 120,000. Discovery verifies the project through Jira before it can become a followed resource, and entity reads fail closed when an issue belongs to another project. Authentication remains in the externally supplied `JiraApiClient` layer, so tokens never enter plugin configuration.
 
@@ -412,17 +455,21 @@ OAuth profiles provide the verified cloud ID used to share one Atlassian site ac
 
 An issue read fetches the issue, comments, and changelog through interruptible Effect operations. Pagination stops at the configured bound and records explicit comment/history truncation flags. The normalized issue attributes include description and environment text, workflow metadata, release versions, parent and subtasks, comments, history, and deduplicated collaborators with roles and avatar URLs. If fixed issue fields would cross the payload cap, optional arrays and presentation fields are omitted deterministically and named in `truncatedFields`. OpenAPI, HTTP, timeout, authentication, authorization, rate-limit, outage, and adapter-schema failures are translated to the closed plugin failure taxonomy without retaining raw provider causes.
 
-These proposals are useful for review and authorization workflows, but this adapter does not execute or reconcile them. Jira Cloud's issue-comment API does not expose portable threaded replies, so a reply proposal is rendered as a normal comment headed with the inspected parent comment ID; a missing parent blocks the proposal. Issue-link proposals require an explicit direction and retain Jira's canonical inward and outward labels: `outward` means the target issue points to the linked issue, while `inward` means the linked issue points to the target issue. Workflow transitions and description replacement remain unsupported, and all comment, fix-version, and issue-link provider mutations stay disabled behind the proposal boundary.
+The issue-targeted proposals are useful for review and authorization workflows, but this adapter does not execute or reconcile them. Jira Cloud's issue-comment API does not expose portable threaded replies, so a reply proposal is rendered as a normal comment headed with the inspected parent comment ID; a missing parent blocks the proposal. Issue-link proposals require an explicit direction and retain Jira's canonical inward and outward labels: `outward` means the target issue points to the linked issue, while `inward` means the linked issue points to the target issue. Workflow transitions and description replacement remain unsupported, and all comment, fix-version, and issue-link provider mutations stay disabled behind the proposal boundary. Separately, Relay can execute and reconcile create-only Jira project-version publication after an explicit workspace-owner confirmation.
 
 ### Confluence page adapter
 
 The production Confluence adapter negotiates `entity.read@1`, bounded `sync.incremental@1` for the `pages` stream, and governed `action.propose@1`, `action.execute@1`, and `action.reconcile@1` page publication. Each connection is pinned to one immutable space ID under its verified Atlassian site. Space iteration and actions always send that exact ID to Confluence and reject any returned page belonging to another space, so followed spaces sharing one OAuth site remain isolated.
 
-Synchronization retains current page and bounded revision metadata, owner/author/contributor/watcher roles, and at most two pages each of watcher and attachment metadata without loading attachment bytes. Page bodies remain `contentState: "lazy"`; `entity.read` loads and safely converts ADF only when the page is opened. Titles containing operational runbook terms emit explicit `confluence.runbook-candidate` evidence rather than silently classifying a page as authoritative documentation.
+Synchronization retains current page and bounded revision metadata, owner/author/contributor/watcher roles, safely converted current page text, and at most two pages each of watcher and attachment metadata without loading attachment bytes. When the normalized payload would exceed its bound, content is dropped first and explicitly remains `contentState: "lazy"`; `entity.read` can still load and safely convert the exact page. Titles containing operational runbook terms emit explicit `confluence.runbook-candidate` evidence rather than silently classifying a page as authoritative documentation.
 
 One invocation reads at most five provider pages and persists a resumable `bounded:<cursor>` checkpoint when more work exists. Large provider pages are deterministically divided into contract-sized atomic pages. Intermediate chunks use a restart checkpoint for the current provider page so interruption replays stable event identities instead of skipping uncommitted entities.
 
 An `update-page` proposal accepts bounded Markdown, converts it through the owning package's strict outgoing ADF validator, and freezes the canonical ADF, title, space, expected version, and exact next version in the authorized payload. Final preflight blocks a changed revision or a visible unpublished draft before dispatch, and dispatch checks for a draft again immediately before mutation. The provider update then supplies only `expectedVersion + 1`, so Confluence's atomic version check prevents a superseded authorization from overwriting newer published content. The draft probes are defense in depth rather than an atomic guarantee: Confluence exposes no conditional update that prevents a draft created after the final probe from being merged or overwritten, so callers that require draft-atomic publication must not use this action. Each published version carries a bounded Control Center idempotency-and-payload marker. A timeout, conflict, outage, or malformed post-write response becomes an unknown outcome, while a provider-declared invalid request is a confirmed rejection. Reconciliation reads the exact authorized version for that marker without replaying the mutation, so recovery can find it after arbitrarily many later edits. Because Confluence uses the same exact-version 404 for an absent version, a vanished page, and lost permission, and may omit version messages, those ambiguous observations remain pending instead of producing a false terminal failure. The retained marker keeps historical publication evidence attributable after later edits. Cancellation remains unsupported because the provider update is synchronous.
+
+The canonical item page presents synchronized safe Markdown as an in-place visual editor for workspace owners. Saving always targets the exact normalized page and revision; Relay can draft against that same page before the owner confirms publication. Markdown task checkboxes on pages related directly to a release are counted in the release workset and can be ticked through the same exact-revision governed update without entering edit mode. Unchecked tasks, lazy page bodies, a truncated release graph, or an affected CodePipeline execution that is not waiting at an observed approval stage block a new Jira release-version publication. Every pipeline reached by a current pull-request `delivered-by` relationship is affected; each must expose a manual approval action or an approval-named stage and keep that stage running while the release is prepared.
+
+Confluence release templates are synchronized pages whose title contains the word `template`. Classification happens before the bounded 50-template hydration limit, so unrelated pages cannot hide a later template. The release agent loads only classified pages with exact readable content, places a copy in the release editor, and creates a separate Confluence page while the source remains unchanged. The durable canonical request is the governed-action `envelope_json`; its `releasePublication` structure persists the release ID, predecessor publication action, optional `templateSourceEntityId`, source-revision digest, and source-revision count. The publication idempotency digest binds workspace, release, provider and action kind, title, Markdown, parent, predecessor, source entity, Confluence page and expected version, source-revision digest, destination, and target entity. Provider credentials and private locators remain server-private and are never canonical payload fields.
 
 Unbounded watcher/activity history, authoritative deletion evidence, scheduled or webhook synchronization, and content search remain deferred to later Confluence milestones.
 
@@ -460,7 +507,7 @@ Secure blob reads and publication require the host to expose opened files and di
 
 ## Local authentication
 
-`Auth` uses ten-minute, single-use pairing codes to create browser sessions. The first code for a workspace is unique and creates its owner; further device codes, session listing, and targeted revocation require an active owner session. Sessions have a twelve-hour sliding idle limit, a thirty-day absolute limit, and a separate CSRF credential for mutations. SQLite contains only SHA-256 credential digests. Invalid, expired, replayed, revoked, and malformed stored credentials share the same public rejection shape.
+`Auth` uses ten-minute, single-use pairing codes to create browser sessions. The first code for a workspace is unique and creates its owner. An owner can use the **Browsers** section in workspace settings to add further owner or approver browsers, inspect every independent session, and revoke a selected browser without disrupting the current one. The displayed device code is returned once with `private, no-store` response policy and is never persisted by the browser. Sessions have a twelve-hour sliding idle limit, a thirty-day absolute limit, and a separate CSRF credential for mutations. SQLite contains only SHA-256 credential digests. Invalid, expired, replayed, revoked, and malformed stored credentials share the same public rejection shape.
 
 Use `authLayer(persistenceConfig)` from `@knpkv/control-center/server` for standalone composition. `TerminalRecovery` is a separate, terminal-only service: it derives the exact canonical `0700` directory from the configured database, requires an exact confirmation phrase, and proves that the running process owns the descriptor-pinned directory before it can issue an owner recovery code. Each successful recovery creates a durable audit event. Recovery is deliberately absent from the HTTP-facing `Auth` service.
 
@@ -475,13 +522,20 @@ An owner can run a live connection test from the Services page. The CSRF-protect
 The opt-in four-provider acceptance command is `pnpm --filter @knpkv/control-center test:integration:live`.
 It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixture configuration:
 
-- AWS: `CONTROL_CENTER_TEST_AWS_REGION`, `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
+- AWS: `CONTROL_CENTER_TEST_AWS_ROLE_ARN`, `CONTROL_CENTER_TEST_AWS_REGION`,
+  `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
   `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
-  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. Region,
-  repository name, and pipeline name are non-secret owner-visible discovery/configuration fields.
-  The selected coordinates are persisted as safe adapter settings and may cross the authenticated
-  owner configuration boundary. They never enter public health responses or CI evidence, which
-  retains only provider taxonomy.
+  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. The role
+  ARN is persisted as an owner-visible GitHub environment variable that repository and environment
+  administrators may read. At workflow runtime its security boundary is server-private, and its
+  permitted authenticated exposure is limited to GitHub environment configuration, protected role
+  assumption, and server-side account comparison. Region, repository name, and pipeline name are owner-visible fixture
+  coordinates; their persistence is allowed as safe adapter settings, and their permitted
+  authenticated exposure is owner configuration and discovery. Forbidden surfaces for all four
+  are logs, workflow artifacts, and public responses; the role ARN is also forbidden from Control
+  Center authenticated API responses and every client-facing or normalized payload.
+  Supported role partitions are `aws` and `aws-us-gov`; aws-cn is intentionally rejected until
+  the workflow, provider client ID, and trust policy support the China STS audience.
 - Atlassian locators: `CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL`,
   `CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID`, `CONTROL_CENTER_TEST_JIRA_PROJECT_ID`,
   `CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID`, and `CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID`.
@@ -509,8 +563,18 @@ that environment, and pin the AWS role trust policy to the repository, `main` re
 OIDC subject. A branch-authored workflow-level `if` is only defense in depth because a selected ref
 can change its own YAML. The short-lived runner artifact contains code and dependencies only;
 provider credentials, results, logs, and runtime evidence are never uploaded. Ordinary pull-request
-tests never select this entry. External read-only AWS role and fixture provisioning remains tracked
-by issue #241, while interactive Atlassian OAuth consent remains tracked by #242.
+tests never select this entry. The external read-only AWS role and stable provider fixtures are
+defined in `infra/control-center-live-aws`; interactive Atlassian OAuth consent remains tracked by
+#242.
+
+The smaller AWS-only acceptance command is
+`pnpm --filter @knpkv/control-center test:integration:live-aws`. It requires
+`CONTROL_CENTER_LIVE_AWS_PROBE=1`, the four AWS fixture variables above including
+`CONTROL_CENTER_TEST_AWS_ROLE_ARN`, and temporary credentials resolvable through profile
+`default`. It uses the production Schema-decoded clients to compare both discovered STS accounts
+with the configured role ARN, then reads the stable pull request and exact diff plus the pipeline,
+successful execution, action history, and current state. The protected AWS probe workflow runs
+this command from a checksum-sealed runner after its independent CLI probe.
 
 Fresh workspaces also see the fixed CodeCommit, CodePipeline, Jira, Confluence, and Clockify catalog. The safe provider identities are visible before pairing; choosing one carries that selection through pairing and opens its setup form immediately. `GET /api/v1/plugins` retains its original connection-summary array for existing v1 clients; after pairing, the Services page reads the additive `{ catalog, connections }` response from `GET /api/v1/plugins/overview`. A workspace owner can submit one bounded CSRF-protected setup request whose browser-generated connection ID, typed adapter settings, and transport-only credential strings are validated before writes. Secret strings are converted to opaque `SecretStore` references; the canonical SQL configuration contains references only. The application creates disabled metadata, inserts configuration with expected revision zero, accepts the catalog descriptor, enables with metadata CAS, invalidates the scoped connection map, and then runs the live identity test. Provider authentication or health failure is returned as the usable test result and does not roll back the enabled connection. Failure before configuration removes newly created secrets; later setup failure retains a visible disabled draft.
 
@@ -518,7 +582,7 @@ Configured connections can be enabled or disabled directly from Services through
 
 Catalog field metadata marks adapter settings separately from credential fields. Jira and Confluence prefer one shared local Atlassian OAuth profile. An owner can start PKCE-protected Atlassian sign-in for the intended provider set from Services, return to the session-bound callback route, and explicitly choose one accessible site. Control Center requests only the intended providers' scope union and writes the selected token once to its canonical machine-local `control-center` profile store; both Jira and Confluence runtimes resolve that same credential record when its granted scopes support them. Before writing, it rechecks the canonical store's OAuth client configuration. A populated canonical store with a missing or different client configuration rejects completion without changing the store, while an empty canonical store receives the shared configuration and token. The first-run client secret crosses one bounded CSRF-protected request and is never returned, persisted in browser storage, or written to SQL; provider tokens never enter the browser or SQL. Existing `jira-cli` and `confluence-to-markdown` profiles remain discoverable as provider-specific legacy profiles rather than being merged into a shared credential, and an explicit API-token fallback retains the `email` and `apiToken` secret-store path. OAuth fills the stable Atlassian cloud ID automatically; API-token setup requires the same site ID explicitly.
 
-Create one shared Atlassian OAuth app for Control Center on the server machine. Add `<public-origin>/services/oauth/atlassian/callback` as its callback URL and enable the complete scope union requested by the Jira and Confluence integrations: `read:jira-work`, `write:jira-work`, `read:jira-user`, `manage:jira-project`, `manage:jira-configuration`, `read:page:confluence`, `write:page:confluence`, `delete:page:confluence`, `read:attachment:confluence`, `write:attachment:confluence`, `read:me`, and `offline_access`.
+Create one shared Atlassian OAuth app for Control Center on the server machine. Add `<public-origin>/services/oauth/atlassian/callback` as its callback URL. Enable Jira's governed release-version publication scopes (`read:jira-work`, `manage:jira-project`, `read:jira-user`, `read:me`, `offline_access`) and the Confluence integration's documented scopes (`read:page:confluence`, `write:page:confluence`, `delete:page:confluence`, `read:attachment:confluence`, `write:attachment:confluence`). Jira authority is limited to create-only project-version publication; Jira issue edits remain proposal-only.
 
 Choose **Sign in with Atlassian** in Services. When no OAuth app has been configured, Control Center shows its exact callback URL and accepts the client ID and secret inline. The CSRF-protected server stores them directly in the machine-local `control-center` auth store before continuing sign-in; neither the Jira nor Confluence CLI needs to be installed or configured. Credentials can be corrected after a failed first exchange while the canonical store has no profiles. Once a profile is saved, the existing configuration is reused and cannot be silently replaced. Matching legacy CLI configurations remain a compatibility fallback only. Non-loopback callbacks use the trusted HTTPS proxy or direct-TLS setup described above; insecure LAN mode cannot configure providers. A grant expires after ten minutes, is bound to the initiating workspace and browser session, and is consumed once at code exchange and once at site selection. Token expiry remains anchored to the provider exchange response even when site selection or a safe completion retry occurs later.
 

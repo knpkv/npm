@@ -9,7 +9,8 @@ import {
   PrReviewRelatedLocation,
   PrReviewReport,
   PrReviewSubject,
-  PrReviewSuggestion
+  PrReviewSuggestion,
+  prReviewSuggestionIdentityMaterial
 } from "../../src/domain/prReview.js"
 
 const subject = Schema.decodeUnknownSync(PrReviewSubject)({
@@ -69,6 +70,35 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
 })
 
 describe("PR review domain", () => {
+  it("keeps suggestion identity stable when the head and line anchor move", () => {
+    const movedSubject = Schema.decodeUnknownSync(PrReviewSubject)({
+      ...subject,
+      headRevision: "3".repeat(40)
+    })
+    const movedSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+      ...suggestion,
+      anchor: { _tag: "line", path: suggestion.evidence.path, line: 73 },
+      evidence: { ...suggestion.evidence, startLine: 73, endLine: 76 }
+    })
+
+    assert.strictEqual(
+      prReviewSuggestionIdentityMaterial(subject, suggestion),
+      prReviewSuggestionIdentityMaterial(movedSubject, movedSuggestion)
+    )
+  })
+
+  it("changes suggestion identity when stable finding content changes", () => {
+    const changedSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+      ...suggestion,
+      recommendation: "Use the typed decoder at the persistence boundary."
+    })
+
+    assert.notStrictEqual(
+      prReviewSuggestionIdentityMaterial(subject, suggestion),
+      prReviewSuggestionIdentityMaterial(subject, changedSuggestion)
+    )
+  })
+
   it("rejects pre-stable schema v2 reports instead of guessing a migration", () => {
     assert.isTrue(
       Result.isFailure(

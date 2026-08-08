@@ -103,6 +103,19 @@ export const inspectBuildGraph = (graph: ControlCenterBuildGraph): ReadonlyArray
     for (const entry of expectedEntries) {
       if (!entryIds.includes(entry)) violations.push(`server graph is missing ${entry}`)
     }
+    const codePipelineProvider = graph.modules.find(
+      ({ id }) => id === "src/server/plugins/codepipeline/CodePipelineReadProvider.ts"
+    )
+    if (!codePipelineProvider?.imports.includes("@aws-sdk/client-codepipeline")) {
+      violations.push("server CodePipeline provider is missing the official AWS SDK")
+    }
+    if (
+      !codePipelineProvider?.imports.includes(
+        "src/server/plugins/codepipeline/CodePipelineStateDecoder.ts"
+      )
+    ) {
+      violations.push("server CodePipeline provider is missing the shipped state decoder")
+    }
     if (ids.some((id) => id.includes("src/client/"))) violations.push("server graph contains client source")
     if (ids.some((id) => id === "@knpkv/rly" || id.includes("@knpkv/rly/"))) {
       violations.push("server graph contains rly")

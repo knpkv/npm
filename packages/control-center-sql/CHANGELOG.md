@@ -1,5 +1,42 @@
 # @knpkv/control-center-sql
 
+## 0.2.1
+
+### Patch Changes
+
+- [#319](https://github.com/knpkv/npm/pull/319) [`4d06229`](https://github.com/knpkv/npm/commit/4d062295393add7a6f34059041aec01403f92d4d) Thanks [@konopkov](https://github.com/konopkov)! - Add durable agent edit and targeted revalidation jobs for immutable pull-request review suggestions.
+
+## 0.2.0
+
+### Minor Changes
+
+- [#270](https://github.com/knpkv/npm/pull/270) [`f7ffb0f`](https://github.com/knpkv/npm/commit/f7ffb0f834bf368598019fe7b3c1e05029c8a88e) Thanks [@konopkov](https://github.com/konopkov)! - Add host-side pull-request review orchestration that routes an explicitly selected Effect AI model through typed sbx tools, validates structured suggestions against exact added-line evidence, derives stable identities before durable persistence, and keeps release-chat workers independent from opt-in sandbox configuration. Add task-scoped agent-job dispatch query inputs to the SQL package.
+
+- [#271](https://github.com/knpkv/npm/pull/271) [`30eda5a`](https://github.com/knpkv/npm/commit/30eda5a171909a1c3339a8d5307771a1f14401c7) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated exact-head pull-request review state and enqueue APIs, durable latest-review lookup, provider capability discovery, and a compact PR-page review surface for pending, failed, and completed findings. Split the agent API contract into its own lazy browser chunk so the generated client remains within its enforced artifact budget.
+
+- [#292](https://github.com/knpkv/npm/pull/292) [`33c07d3`](https://github.com/knpkv/npm/commit/33c07d35c98464ba2ec3af925057b6e660851786) Thanks [@konopkov](https://github.com/konopkov)! - Give each CodeCommit pull request one durable review thread across changing
+  heads. Persist bounded prior-run context into immutable review jobs, expose
+  cursor-paged browser-safe activity, and let the Local Operator launch targeted
+  follow-up reviews from the pull-request UI.
+
+- [#295](https://github.com/knpkv/npm/pull/295) [`6b46053`](https://github.com/knpkv/npm/commit/6b460535e9bc7f4df6704dc053411f9a3aa5aa70) Thanks [@konopkov](https://github.com/konopkov)! - Let operators page backward through durable pull-request review activity while
+  live updates continue from an independent tail cursor.
+
+- [#293](https://github.com/knpkv/npm/pull/293) [`5528922`](https://github.com/knpkv/npm/commit/5528922b052bece4fe782b170cc80dd7bd6230d9) Thanks [@konopkov](https://github.com/konopkov)! - Let pull-request review agents page bounded projections of prior durable thread
+  events through a cursor API fenced before the current immutable run.
+
+- [#267](https://github.com/knpkv/npm/pull/267) [`e0d7e9a`](https://github.com/knpkv/npm/commit/e0d7e9a4153a97f3cedaac3b41e7e2790170317c) Thanks [@konopkov](https://github.com/konopkov)! - Add bounded, durable pull-request review task results with structured prevention proposals.
+
+- [#289](https://github.com/knpkv/npm/pull/289) [`1bb31f5`](https://github.com/knpkv/npm/commit/1bb31f51e4df1aa12e760aa8db99cf459e680dac) Thanks [@konopkov](https://github.com/konopkov)! - Replace the capped analyzer report with an sbx-only full-project Review Agent
+  flow. Launches now disclose the exact head, Review Agent Profile, budget,
+  blocked network, and sandbox; Effect AI models explore through typed sandbox
+  tools; only schema-valid suggestions anchored to exact added-line evidence are
+  persisted and rendered inline. Control Center derives the review outcome and
+  retains bounded live exploration activity. Include the durable thread identity
+  in latest-review SQL projections.
+
+- [#290](https://github.com/knpkv/npm/pull/290) [`b97fd1b`](https://github.com/knpkv/npm/commit/b97fd1b2433bcaef600e5470e2ce92d7edc71f94) Thanks [@konopkov](https://github.com/konopkov)! - Add human-confirmed publication of agent review suggestions as exact-line CodeCommit comments, including AWS identity and immutable revision previews, editable content, durable governed-action receipts, retry-safe idempotency recovery, and the corresponding operator UI. Preserve inline review locations in the CodeCommit action contract and add a typed effect-qb lookup for governed action recovery.
+
 ## 0.1.0
 
 ### Minor Changes

@@ -502,8 +502,7 @@ const make = (
     })
 
     const apiClient = yield* ConfluenceApiClient.pipe(
-      Effect.provide(ConfluenceApiClient.layer),
-      Effect.provide(apiConfigLayer)
+      Effect.provide(ConfluenceApiClient.layer.pipe(Layer.provide(apiConfigLayer)))
     )
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       apiClient.v2.getPageById(id, {
@@ -756,7 +755,7 @@ const make = (
               (candidate.filename === decodedAttachment.filename && candidate.fileId !== undefined)
             ) ?? decodedAttachment
           ),
-          Effect.catchCause(() => Effect.succeed(decodedAttachment))
+          Effect.catch(() => Effect.succeed(decodedAttachment))
         )
       })
 

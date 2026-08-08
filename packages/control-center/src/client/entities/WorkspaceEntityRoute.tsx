@@ -33,13 +33,15 @@ import styles from "./WorkspaceEntityRoute.module.css"
 import { WorkspaceClockifyTimeEntryDetails } from "./WorkspaceClockifyTimeEntryDetails.js"
 import { type ClockifyActionSubmissionState, useClockifyActionSubmission } from "./useClockifyActionSubmission.js"
 import { WorkspaceConfluencePageDetails } from "./WorkspaceConfluencePageDetails.js"
+import type { WorkspaceConfluenceVisualEditorProps } from "./WorkspaceConfluenceVisualEditor.js"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
 import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionDetails.js"
 import {
   usePullRequestReview,
   type PullRequestReviewControllerState,
   type PullRequestReviewPublicationState,
-  type ReviewSuggestionPublicationTarget
+  type ReviewSuggestionPublicationTarget,
+  type ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
@@ -109,6 +111,36 @@ const PrincipalAction = ({
     <Link className={styles.principalAction} to={action.href}>
       {action.label}
     </Link>
+  )
+}
+
+/** Derive Confluence's authenticated editor only from one canonical same-page source link. */
+export const confluenceEditHref = (sourceHref: string | null, pageId: string): string | null => {
+  if (sourceHref === null) return null
+  const source = URL.parse(sourceHref)
+  if (source === null || source.protocol !== "https:") return null
+  const match = /^\/wiki\/spaces\/([^/]+)\/pages\/([^/]+)(?:\/|$)/u.exec(source.pathname)
+  if (match?.[1] === undefined || match[2] !== encodeURIComponent(pageId)) return null
+  source.pathname = `/wiki/spaces/${match[1]}/pages/edit-v2/${encodeURIComponent(pageId)}`
+  source.search = ""
+  source.hash = ""
+  return source.href
+}
+
+const EntityActions = ({ presentation }: { readonly presentation: WorkspaceEntityPresentation }): ReactElement => {
+  const editHref =
+    presentation.confluencePage === null
+      ? null
+      : confluenceEditHref(presentation.primaryAction.href, presentation.displayKey)
+  return (
+    <div className={styles.entityActions}>
+      <PrincipalAction action={presentation.primaryAction} />
+      {editHref === null ? null : (
+        <a className={styles.secondaryAction} href={editHref} rel="noreferrer" target="_blank">
+          Edit in Confluence
+        </a>
+      )}
+    </div>
   )
 }
 
@@ -265,10 +297,13 @@ const EntityContent = ({
   clockifyActionCanCorrect,
   clockifyActionState,
   clockifyActionSubmit,
+  confluenceEditor,
   onSessionExpired,
   presentation,
   retry,
   reviewCanEnqueue,
+  reviewCancel,
+  reviewExtendBudget,
   reviewLoadEarlier,
   reviewPublication,
   reviewPublicationCancel,
@@ -278,6 +313,7 @@ const EntityContent = ({
   reviewState,
   reviewSuggestionPublish,
   reviewSuggestionRevisionTransport,
+  reviewTargetSuggestion,
   sessionKey,
   stale
 }: {
@@ -285,9 +321,12 @@ const EntityContent = ({
   readonly clockifyActionCanCorrect: boolean
   readonly clockifyActionState: ClockifyActionSubmissionState
   readonly clockifyActionSubmit: (request: SubmitClockifyActionRequest) => void
+  readonly confluenceEditor: Omit<WorkspaceConfluenceVisualEditorProps, "page">
   readonly onSessionExpired: (sessionKey: string) => void
   readonly presentation: WorkspaceEntityPresentation
   readonly reviewCanEnqueue: boolean
+  readonly reviewCancel: () => void
+  readonly reviewExtendBudget: () => void
   readonly reviewPublication: PullRequestReviewPublicationState
   readonly reviewPublicationCancel: () => void
   readonly reviewLoadEarlier: () => void
@@ -295,6 +334,7 @@ const EntityContent = ({
   readonly reviewRetry: () => void
   readonly reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
   readonly reviewSuggestionPublish: (finalContent: string) => void
+  readonly reviewTargetSuggestion: (target: ReviewSuggestionTarget) => void
   readonly reviewStart: (prompt?: DurableAgentPrompt) => void
   readonly reviewState: PullRequestReviewControllerState
   readonly retry: () => void
@@ -325,7 +365,7 @@ const EntityContent = ({
     )}
     {presentation.issue === null ? null : <WorkspaceIssueDetails issue={presentation.issue} />}
     {presentation.confluencePage === null ? null : (
-      <WorkspaceConfluencePageDetails page={presentation.confluencePage} />
+      <WorkspaceConfluencePageDetails editor={confluenceEditor} page={presentation.confluencePage} />
     )}
     {presentation.pipelineExecution === null ? null : (
       <WorkspacePipelineExecutionDetails pipeline={presentation.pipelineExecution} />
@@ -335,11 +375,14 @@ const EntityContent = ({
         <WorkspacePullRequestDetails
           approvers={presentation.collaborators.approvers}
           onSessionExpired={onSessionExpired}
+          onReviewCancel={reviewCancel}
+          onReviewExtendBudget={reviewExtendBudget}
           onReviewLoadEarlier={reviewLoadEarlier}
           onReviewPublicationCancel={reviewPublicationCancel}
           onReviewPublicationPreview={reviewPublicationPreview}
           onReviewRetry={reviewRetry}
           onReviewSuggestionPublish={reviewSuggestionPublish}
+          onReviewTargetSuggestion={reviewTargetSuggestion}
           onReviewStart={reviewStart}
           pullRequest={presentation.pullRequest}
           reviewCanEnqueue={reviewCanEnqueue}
@@ -360,6 +403,7 @@ interface WorkspaceEntityViewProps {
   readonly clockifyActionCanCorrect?: boolean
   readonly clockifyActionState?: ClockifyActionSubmissionState
   readonly clockifyActionSubmit?: (request: SubmitClockifyActionRequest) => void
+  readonly confluenceCanEdit?: boolean
   readonly onAskAgent: () => void
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly originHref: string
@@ -367,6 +411,8 @@ interface WorkspaceEntityViewProps {
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
   readonly reviewCanEnqueue?: boolean
+  readonly reviewCancel?: () => void
+  readonly reviewExtendBudget?: () => void
   readonly reviewLoadEarlier?: () => void
   readonly reviewPublication?: PullRequestReviewPublicationState
   readonly reviewPublicationCancel?: () => void
@@ -374,6 +420,7 @@ interface WorkspaceEntityViewProps {
   readonly reviewRetry?: () => void
   readonly reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
   readonly reviewSuggestionPublish?: (finalContent: string) => void
+  readonly reviewTargetSuggestion?: (target: ReviewSuggestionTarget) => void
   readonly reviewStart?: (prompt?: DurableAgentPrompt) => void
   readonly reviewState?: PullRequestReviewControllerState
   readonly state: WorkspaceEntityState
@@ -390,6 +437,7 @@ export const WorkspaceEntityView = ({
   clockifyActionCanCorrect = false,
   clockifyActionState = { _tag: "idle" },
   clockifyActionSubmit = ignoreAction,
+  confluenceCanEdit = false,
   onAskAgent,
   onSessionExpired = ignoreSessionExpiration,
   originHref,
@@ -397,6 +445,8 @@ export const WorkspaceEntityView = ({
   originState,
   retry,
   reviewCanEnqueue = false,
+  reviewCancel = ignoreAction,
+  reviewExtendBudget = ignoreAction,
   reviewLoadEarlier = ignoreAction,
   reviewPublication = { _tag: "idle" },
   reviewPublicationCancel = ignoreAction,
@@ -406,6 +456,7 @@ export const WorkspaceEntityView = ({
   reviewState = { _tag: "idle" },
   reviewSuggestionPublish = ignoreAction,
   reviewSuggestionRevisionTransport,
+  reviewTargetSuggestion = ignoreAction,
   sessionKey = null,
   state,
   workspaceId
@@ -459,11 +510,11 @@ export const WorkspaceEntityView = ({
   return (
     <LinkProvider component={WorkspaceEntityLink}>
       <EntityShell
-        actions={<PrincipalAction action={presentation.primaryAction} />}
+        actions={<EntityActions presentation={presentation} />}
         activity={<EntityActivity presentation={presentation} />}
         agentEntry={
           <AgentContextButton
-            actionLabel="Ask about this object"
+            actionLabel={presentation.confluencePage === null ? "Ask about this object" : "Draft with Relay"}
             agentName="Relay"
             context={presentation.agentContext}
             onClick={onAskAgent}
@@ -479,9 +530,23 @@ export const WorkspaceEntityView = ({
             clockifyActionCanCorrect={clockifyActionsCurrent && clockifyActionCanCorrect}
             clockifyActionState={clockifyActionState}
             clockifyActionSubmit={clockifyActionSubmit}
+            confluenceEditor={{
+              canEdit:
+                confluenceCanEdit &&
+                state._tag === "ready" &&
+                state.inspection.isSourceCurrent &&
+                state.inspection.sourceActionsAvailable,
+              entityId: state.inspection.entity.projection.entityId,
+              onAskAgent,
+              onSaved: retry,
+              releaseId: state.inspection.entity.canonicalReleaseId,
+              title: presentation.title
+            }}
             onSessionExpired={onSessionExpired}
             presentation={presentation}
             reviewCanEnqueue={reviewCanEnqueue}
+            reviewCancel={reviewCancel}
+            reviewExtendBudget={reviewExtendBudget}
             reviewPublication={reviewPublication}
             reviewPublicationCancel={reviewPublicationCancel}
             reviewLoadEarlier={reviewLoadEarlier}
@@ -489,6 +554,7 @@ export const WorkspaceEntityView = ({
             reviewRetry={reviewRetry}
             {...(reviewSuggestionRevisionTransport === undefined ? {} : { reviewSuggestionRevisionTransport })}
             reviewSuggestionPublish={reviewSuggestionPublish}
+            reviewTargetSuggestion={reviewTargetSuggestion}
             reviewStart={reviewStart}
             reviewState={reviewState}
             retry={retry}
@@ -588,6 +654,9 @@ const ConnectedWorkspaceEntity = ({
       }
       clockifyActionState={clockifyActions.state}
       clockifyActionSubmit={clockifyActions.submit}
+      confluenceCanEdit={
+        browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
+      }
       onAskAgent={() => navigate(agentPath, { state: location.state })}
       onSessionExpired={browserSession.invalidateSession}
       originHref={resolvedOriginHref}
@@ -595,12 +664,15 @@ const ConnectedWorkspaceEntity = ({
       originState={resolvedOrigin.origin.state}
       retry={controller.retry}
       reviewCanEnqueue={reviewCanEnqueue}
+      reviewCancel={reviewController.cancel}
+      reviewExtendBudget={reviewController.extendBudget}
       reviewPublication={reviewController.publication}
       reviewPublicationCancel={reviewController.cancelPublication}
       reviewLoadEarlier={reviewController.loadEarlier}
       reviewPublicationPreview={reviewController.previewPublication}
       reviewRetry={reviewController.retry}
       reviewSuggestionPublish={reviewController.publishSuggestion}
+      reviewTargetSuggestion={reviewController.targetSuggestion}
       reviewStart={reviewController.start}
       reviewState={reviewController.state}
       state={controller.state}

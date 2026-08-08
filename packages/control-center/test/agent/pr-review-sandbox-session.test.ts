@@ -1,17 +1,21 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Result, Sink, Stream } from "effect"
+import { DateTime, Effect, Layer, Logger, Ref, Result, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-import { JobId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   PrReviewSandboxSessions,
   prReviewSandboxSessionsLayer
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
+import { reviewCommandArtifactTestLayer } from "./reviewCommandArtifactTestLayer.js"
 
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
+const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000070")
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000072")
 const FOREIGN_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000073")
 const ATTEMPT_ID = "0123456789ab"
@@ -24,6 +28,9 @@ const SANDBOX_NAME = `${WORKSPACE_SANDBOX_PREFIX}${compactUuid(JOB_ID).slice(-4)
 const UNBOUNDED_SANDBOX_NAME = `cc-pr-review-${WORKSPACE_ID}-${JOB_ID}-${ATTEMPT_ID}`
 const CODEX_API_KEY_CANARY = "codex-api-key-canary"
 const ANTHROPIC_API_KEY_CANARY = "anthropic-api-key-canary"
+const SOURCE_OUTPUT_CANARY = "source-output-canary-41a078c3"
+const CREDENTIAL_OUTPUT_CANARY = "credential-output-canary-c20c9fb6"
+const ARTIFACT_QUERY_CANARY = "artifact-query-canary-4de6a23b"
 const encoder = new TextEncoder()
 
 interface FakeResponse {
@@ -105,16 +112,21 @@ const testLayer = (
     template: "review-template"
   }).pipe(
     Layer.provide(fakeSbxLayer(calls, responseRules, listedSandboxes)),
+    Layer.provide(reviewCommandArtifactTestLayer()),
     Layer.provide(sourceLayer)
   )
 
 const request = {
   workspaceId: WORKSPACE_ID,
+  threadId: THREAD_ID,
   jobId: JOB_ID,
+  attemptSequence: AgentAttemptSequence.make(1),
   repository: "control-center",
   attemptId: ATTEMPT_ID,
   baseRevision: BASE_REVISION,
-  headRevision: HEAD_REVISION
+  headRevision: HEAD_REVISION,
+  providerId: "codex",
+  model: "gpt-review"
 }
 
 describe("PrReviewSandboxSessions", () => {
@@ -150,6 +162,46 @@ describe("PrReviewSandboxSessions", () => {
         })
       )
     )
+  })
+
+  it.effect("reattaches a retained sandbox for a new immutable attempt", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const recoveredSandbox = SANDBOX_NAME
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      yield* sessions.withSession(
+        {
+          ...request,
+          attemptSequence: AgentAttemptSequence.make(2),
+          attemptId: "abcdef012345",
+          recoverySandboxName: recoveredSandbox
+        },
+        () => Effect.void
+      )
+
+      assert.isFalse(calls.some(({ args }) => args[0] === "create" || args[0] === "run"))
+      const contained = calls.filter(({ args }) => args[0] === "exec")
+      assert.isAtLeast(contained.length, 1)
+      assert.isTrue(contained.every(({ args }) => !args.includes("--workdir")))
+      assert.isTrue(calls.some(({ args }) => args[0] === "ls" && args[1] === "--quiet"))
+      assert.isTrue(calls.some(({ args }) => args[0] === "rm" && args.at(-1) === recoveredSandbox))
+    }).pipe(Effect.provide(testLayer(calls)))
+  })
+
+  it.effect("fails when the retained recovery sandbox is missing", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const result = yield* sessions.withSession(
+        { ...request, recoverySandboxName: SANDBOX_NAME },
+        () => Effect.void
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.reason, "sandbox-unavailable")
+      }
+    }).pipe(Effect.provide(testLayer(calls, [], "cc-pr-review-missing")))
   })
 
   it.effect("runs native Codex review in the exact cloned sbx workspace", () => {
@@ -390,6 +442,7 @@ describe("PrReviewSandboxSessions", () => {
   it.effect("creates one cloned sbx sandbox, blocks its network, and exposes only contained commands", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const largeOutput = "🙂".repeat(10_000)
+    const largeError = "e".repeat(40_000)
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
       const observed = yield* sessions.withSession(request, (session) =>
@@ -398,9 +451,9 @@ describe("PrReviewSandboxSessions", () => {
           const tested = yield* session.runCommand("pnpm test")
           const large = yield* session.runCommand("emit-large")
           const read = yield* session.readFile("README.md", 4, 10)
-          const page = yield* large.stdout.artifactId === null
+          const page = yield* large.stdout.artifact === null
             ? Effect.die("expected retained output")
-            : session.pageArtifact(large.stdout.artifactId, 0, 8)
+            : session.pageArtifact(large.stdout.artifact, 0, 8)
           const unsafe = yield* session.readFile("../secret").pipe(Effect.result)
           return { large, listed, page, read, tested, unsafe }
         }))
@@ -409,7 +462,14 @@ describe("PrReviewSandboxSessions", () => {
       assert.strictEqual(observed.tested.stdout.text, "tests passed\n")
       assert.strictEqual(observed.read.stdout.text, "bounded\n")
       assert.isTrue(observed.large.stdout.truncated)
-      assert.strictEqual(observed.page, "🙂🙂🙂🙂")
+      assert.isTrue(observed.large.stderr.truncated)
+      assert.strictEqual(encoder.encode(observed.large.stdout.text).byteLength, 32_768)
+      assert.strictEqual(encoder.encode(observed.large.stderr.text).byteLength, 32_768)
+      assert.deepStrictEqual(observed.page, {
+        complete: false,
+        nextOffset: 8,
+        text: "🙂🙂"
+      })
       assert.isTrue(Result.isFailure(observed.unsafe))
       if (Result.isFailure(observed.unsafe)) {
         assert.strictEqual(observed.unsafe.failure.reason, "invalid-request")
@@ -461,7 +521,7 @@ describe("PrReviewSandboxSessions", () => {
         },
         {
           matches: ({ args }) => args.at(-1) === "emit-large",
-          response: { stdout: largeOutput }
+          response: { stderr: largeError, stdout: largeOutput }
         },
         {
           matches: ({ args }) => args.at(-1) === "test -f 'README.md' && tail -c +5 -- 'README.md' | head -c 10",
@@ -471,31 +531,222 @@ describe("PrReviewSandboxSessions", () => {
     )
   })
 
+  it.effect("keeps raw command and artifact content out of enclosing spans", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const spans = new Array<Tracer.NativeSpan>()
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const sensitiveOutput = `${SOURCE_OUTPUT_CANARY}\n${"x".repeat(40_000)}\n${CREDENTIAL_OUTPUT_CANARY}`
+    return Effect.gen(function*() {
+      const logsRef = yield* Ref.make<Array<unknown>>([])
+      const logger = Logger.make<unknown, void>((entry) => {
+        Effect.runSync(Ref.update(logsRef, (items) => [...items, entry.message]))
+      })
+      const sessions = yield* PrReviewSandboxSessions
+      const observed = yield* sessions.withSession(request, (session) =>
+        Effect.gen(function*() {
+          const command = yield* session.runCommand("emit-sensitive")
+          if (command.stdout.artifact === null) {
+            return yield* Effect.die("expected retained sensitive output")
+          }
+          const page = yield* session.pageArtifact(command.stdout.artifact, 0, 128)
+          const matches = yield* session.searchArtifact(
+            command.stdout.artifact,
+            ARTIFACT_QUERY_CANARY
+          )
+          return { command, matches, page }
+        })).pipe(Effect.withLogger(logger))
+      assert.isTrue(observed.command.stdout.truncated)
+      assert.include(observed.page.text, SOURCE_OUTPUT_CANARY)
+
+      const telemetry = JSON.stringify(
+        spans.map((span) => ({
+          attributes: Array.from(span.attributes),
+          events: span.events,
+          name: span.name,
+          status: span.status
+        })),
+        (_key, value) => typeof value === "bigint" ? value.toString() : value
+      )
+      for (
+        const canary of [
+          SOURCE_OUTPUT_CANARY,
+          CREDENTIAL_OUTPUT_CANARY,
+          ARTIFACT_QUERY_CANARY
+        ]
+      ) {
+        assert.notInclude(telemetry, canary)
+      }
+      const logText = JSON.stringify(yield* Ref.get(logsRef))
+      assert.include(logText, "pr-review.telemetry")
+      assert.include(logText, "\"provider\":\"codex\"")
+      assert.include(logText, "\"model\":\"gpt-review\"")
+      assert.include(logText, `"revision":"${HEAD_REVISION}"`)
+      assert.include(logText, "\"phase\":\"sandbox-command\"")
+      assert.include(logText, "\"cli\":\"effect-ai\"")
+      assert.include(logText, "\"commandName\":\"review-command\"")
+      assert.include(logText, "\"durationMillis\":")
+      assert.include(logText, "\"exitStatus\":0")
+      assert.include(logText, "\"stdoutBytes\":")
+      assert.include(logText, "\"stderrBytes\":0")
+      assert.include(logText, "\"suggestionCount\":0")
+      assert.include(logText, "\"noteCount\":0")
+      assert.include(logText, "\"errorType\":null")
+      assert.notInclude(logText, "emit-sensitive")
+      assert.notInclude(logText, SOURCE_OUTPUT_CANARY)
+      assert.notInclude(logText, CREDENTIAL_OUTPUT_CANARY)
+      assert.notInclude(logText, ARTIFACT_QUERY_CANARY)
+    }).pipe(
+      Effect.provide(testLayer(calls, [{
+        matches: ({ args }) => args.at(-1) === "emit-sensitive",
+        response: { stdout: sensitiveOutput }
+      }])),
+      Effect.provideService(Tracer.Tracer, tracer),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({
+          HOME: "/home/test",
+          PATH: "/usr/local/bin:/usr/bin:/bin"
+        })
+      )
+    )
+  })
+
+  it.effect("reads an exact durable artifact handle after worker-attempt recovery", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const largeOutput = "a".repeat(32_768) + "🙂recovered"
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        DateTime.makeUnsafe("2026-07-31T10:00:00.000Z")
+      ))
+      const sessions = yield* PrReviewSandboxSessions
+      yield* sessions.withSession(request, (session) =>
+        session.runCommand("emit-recoverable").pipe(
+          Effect.filterOrFail(
+            ({ stdout }) => stdout.artifact !== null,
+            () => new Error("expected retained output")
+          ),
+          Effect.asVoid
+        ))
+      const recoveredRequest = {
+        ...request,
+        attemptId: "abcdef012345",
+        attemptSequence: AgentAttemptSequence.make(2)
+      }
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        DateTime.makeUnsafe("2026-08-07T09:59:59.999Z")
+      ))
+      const recovered = yield* sessions.withSession(recoveredRequest, (session) =>
+        Effect.gen(function*() {
+          const listed = yield* session.listArtifacts()
+          const metadata = listed[0]
+          if (metadata === undefined) return yield* Effect.die("expected discoverable artifact")
+          const artifact = {
+            artifactId: metadata.artifactId,
+            attemptSequence: metadata.attemptSequence,
+            commandSequence: metadata.commandSequence,
+            stream: metadata.stream
+          }
+          const page = yield* session.pageArtifact(artifact, 32_768, 13)
+          const undersizedUnicodePage = yield* session.pageArtifact(
+            artifact,
+            32_768,
+            1
+          ).pipe(Effect.result)
+          const continuationOffset = yield* session.pageArtifact(
+            artifact,
+            32_769,
+            4
+          ).pipe(Effect.result)
+          const mismatchedCommand = yield* session.pageArtifact(
+            { ...artifact, commandSequence: artifact.commandSequence + 1 },
+            0,
+            8
+          ).pipe(Effect.result)
+          yield* TestClock.setTime(DateTime.toEpochMillis(
+            DateTime.makeUnsafe("2026-08-07T10:00:00.000Z")
+          ))
+          const expiredList = yield* session.listArtifacts()
+          const expiredPage = yield* session.pageArtifact(artifact, 0, 4).pipe(Effect.result)
+          const expiredSearch = yield* session.searchArtifact(artifact, "recovered").pipe(Effect.result)
+          return {
+            continuationOffset,
+            expiredList,
+            expiredPage,
+            expiredSearch,
+            mismatchedCommand,
+            page,
+            undersizedUnicodePage
+          }
+        }))
+
+      assert.deepStrictEqual(recovered.page, {
+        complete: true,
+        nextOffset: 32_781,
+        text: "🙂recovered"
+      })
+      assert.isTrue(Result.isFailure(recovered.undersizedUnicodePage))
+      assert.isTrue(Result.isFailure(recovered.continuationOffset))
+      assert.isTrue(Result.isFailure(recovered.mismatchedCommand))
+      assert.deepStrictEqual(recovered.expiredList, [])
+      assert.isTrue(Result.isFailure(recovered.expiredPage))
+      assert.isTrue(Result.isFailure(recovered.expiredSearch))
+    }).pipe(
+      Effect.provide(testLayer(calls, [{
+        matches: ({ args }) => args.at(-1) === "emit-recoverable",
+        response: { stdout: largeOutput }
+      }]))
+    )
+  })
+
   it.effect("reconciles only stale review sandboxes owned by the requested workspace", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const ownedA = `${WORKSPACE_SANDBOX_PREFIX}a`
     const ownedB = `${WORKSPACE_SANDBOX_PREFIX}b`
+    const ownedLive = `${WORKSPACE_SANDBOX_PREFIX}1234-abcdef012345`
     const foreign = `cc-pr-review-${compactUuid(FOREIGN_WORKSPACE_ID)}-a`
     const legacy = "cc-pr-review-legacy"
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
       const reconciliation = yield* sessions.reconcile(WORKSPACE_ID)
-      assert.deepStrictEqual(reconciliation.removedSandboxes, [
-        ownedA,
-        ownedB
-      ])
+      assert.deepStrictEqual(reconciliation.removedSandboxes, [])
+      assert.deepStrictEqual(reconciliation.reattachedSandboxes, [ownedLive, ownedA, ownedB])
+      assert.deepStrictEqual(reconciliation.reattachedSandboxIdentities, [{
+        name: ownedLive,
+        jobToken: "1234",
+        attemptId: "abcdef012345"
+      }])
       assert.deepStrictEqual(
         calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
-        [ownedA, ownedB]
+        []
       )
       assert.strictEqual(calls.filter(({ args }) => args[0] === "ls").length, 1)
     }).pipe(
       Effect.provide(testLayer(
         calls,
         [],
-        `unrelated\n${foreign}\n${ownedB}\n${legacy}\n${ownedA}`
+        `unrelated\n${foreign}\n${ownedB}\n${legacy}\n${ownedA}\n${ownedLive}`
       ))
     )
+  })
+
+  it.effect("removes only explicitly unmatched owned sandboxes", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const owned = `${WORKSPACE_SANDBOX_PREFIX}1234-abcdef012345`
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const removed = yield* sessions.cleanupUnmatched?.([owned]) ?? Effect.die("cleanup is unavailable")
+      assert.deepStrictEqual(removed, [owned])
+      assert.deepStrictEqual(
+        calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
+        [owned]
+      )
+    }).pipe(Effect.provide(testLayer(calls, [], owned)))
   })
 
   it.effect("assigns distinct retained-artifact identities to overlapping commands", () => {
@@ -511,8 +762,8 @@ describe("PrReviewSandboxSessions", () => {
             { concurrency: "unbounded" }
           )
       )
-      const artifactIds = outputs.map(({ stdout }) => stdout.artifactId)
-      assert.isTrue(artifactIds.every((artifactId) => artifactId !== null))
+      const artifactIds = outputs.map(({ stdout }) => stdout.artifact?.artifactId)
+      assert.isTrue(artifactIds.every((artifactId) => artifactId !== undefined))
       assert.strictEqual(new Set(artifactIds).size, 2)
     }).pipe(
       Effect.provide(testLayer(calls, [

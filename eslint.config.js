@@ -152,13 +152,45 @@ export default tseslint.config(
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
-      "local-rules/require-bounded-base64-schema": "error"
+      "local-rules/require-bounded-base64-schema": "error",
+      "local-rules/require-exact-cause-rethrow": "error"
+    }
+  },
+  {
+    files: ["packages/*/src/**/*.{ts,tsx,mjs}", "packages/*/scripts/**/*.{ts,tsx,mjs}"],
+    rules: {
+      "local-rules/no-unowned-detached-fiber": "error"
+    }
+  },
+  {
+    files: ["packages/codecommit-core/src/PRService/refresh*.ts"],
+    rules: {
+      "local-rules/no-ignore-cause-in-codecommit-refresh": "error"
+    }
+  },
+  {
+    files: [
+      "packages/codecommit-core/src/**/*.{ts,tsx}",
+      "packages/codecommit-web/src/**/*.{ts,tsx}"
+    ],
+    rules: {
+      "local-rules/no-throwing-json-parse-in-effect-map": "error"
     }
   },
   {
     files: ["packages/ai-claude/src/**/*.{ts,tsx}", "packages/ai-codex/src/**/*.{ts,tsx}"],
     rules: {
       "local-rules/require-isolated-agent-child-environment": "error"
+    }
+  },
+  {
+    files: [
+      "packages/*/src/**/*.{ts,tsx}",
+      "packages/*/test/**/*.{ts,tsx}",
+      "packages/*/scripts/**/*.ts"
+    ],
+    rules: {
+      "local-rules/require-explicit-child-process-env-inheritance": "error"
     }
   },
   {
@@ -177,7 +209,16 @@ export default tseslint.config(
     files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-direct-mutation-proof-read": "error",
-      "local-rules/no-ad-hoc-workspace-entity-path": "error"
+      "local-rules/no-ad-hoc-workspace-entity-path": "error",
+      "local-rules/no-manual-control-center-client-poll-loop": "error",
+      "local-rules/no-throwing-schema-decode-in-control-center-client": "error",
+      "local-rules/require-run-promise-signal-in-react-effect": "error"
+    }
+  },
+  {
+    files: ["packages/rly/scripts/visual/classify-git-changes.ts"],
+    rules: {
+      "local-rules/require-rly-visual-classifier-runtime-error-reporting": "error"
     }
   },
   {
@@ -231,7 +272,7 @@ export default tseslint.config(
   {
     // Prettier formats root JavaScript utilities; ESLint still enforces their
     // semantic and safety rules.
-    files: ["scripts/check-security-doc-examples.mjs"],
+    files: ["scripts/check-{control-center-live-aws,security-doc-examples}.mjs"],
     rules: {
       "@effect/dprint": "off"
     }

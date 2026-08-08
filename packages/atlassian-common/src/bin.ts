@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { NodeFileSystem, NodeHttpClient, NodePath, NodeRuntime, NodeServices, NodeStdio } from "@effect/platform-node"
+import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -99,12 +99,9 @@ const program = Effect.gen(function*() {
   const args = yield* stdio.args
   return yield* cli(args)
 }).pipe(
-  Effect.provide(NodeStdio.layer),
   Effect.provide(
     Layer.mergeAll(
       NodeServices.layer,
-      NodeFileSystem.layer,
-      NodePath.layer,
       NodeHttpClient.layerFetch,
       HomeDirectoryLive
     )
