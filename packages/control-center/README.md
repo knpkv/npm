@@ -559,13 +559,12 @@ interruption. The scheduled/manual workflow builds a checksum-sealed runner in a
 then verifies it in the protected `control-center-live-integration` execution job before assuming the
 AWS role. That GitHub environment is the non-mutable trust boundary for manual `workflow_dispatch
 --ref` runs: keep its deployment branch policy limited to `main`, store the Atlassian secrets only in
-that environment, and pin the AWS role trust policy to the repository, `main` ref, and environment
-OIDC subject. A branch-authored workflow-level `if` is only defense in depth because a selected ref
-can change its own YAML. The short-lived runner artifact contains code and dependencies only;
-provider credentials, results, logs, and runtime evidence are never uploaded. Ordinary pull-request
-tests never select this entry. The external read-only AWS role and stable provider fixtures are
-defined in `infra/control-center-live-aws`; interactive Atlassian OAuth consent remains tracked by
-#242.
+that environment, and pin the AWS role trust policy to the repository and environment OIDC subject.
+A branch-authored workflow-level `if` is only defense in depth because a selected ref can change its
+own YAML. The short-lived runner artifact contains code and dependencies only; provider
+credentials, results, logs, and runtime evidence are never uploaded. Ordinary pull-request tests
+never select this entry. The external read-only AWS role and stable provider fixtures are defined in
+`infra/control-center-live-aws`; interactive Atlassian OAuth consent remains tracked by issue `#242`.
 
 The smaller AWS-only acceptance command is
 `pnpm --filter @knpkv/control-center test:integration:live-aws`. It requires

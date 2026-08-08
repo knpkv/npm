@@ -1,50 +1,110 @@
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import { parse } from "yaml"
 
-const trustedRefCondition = "if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'"
-const protectedEnvironment = "environment: control-center-live-integration"
-const idTokenPermission = "id-token: write"
+const trustedRefExpression = "github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'"
+const protectedEnvironment = "control-center-live-integration"
+const idTokenPermission = "write"
+const trustedOidcSubject = "repo:knpkv/npm:environment:control-center-live-integration"
 
-const hasExactLine = (source: string, expected: string) => source.split("\n").some((line) => line.trim() === expected)
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
-const hasTrustedRefCondition = (job: string) => hasExactLine(job, trustedRefCondition)
+const parseRecord = (source: string, label: string): Record<string, unknown> => {
+  const parsed = parse(source)
 
-const workflow = readFileSync(
-  fileURLToPath(new URL("../../../../.github/workflows/control-center-live-integration.yml", import.meta.url)),
-  "utf8"
-)
-
-const jobDefinition = (name: string) => {
-  const match = workflow.match(new RegExp(`^  ${name}:\\n(?<definition>(?: {4}.*(?:\\n|$))+)`, "m"))
-
-  expect(match, `expected workflow job ${name}`).not.toBeNull()
-  return match?.groups?.definition ?? ""
+  if (!isRecord(parsed)) throw new Error(`${label} should parse to a mapping`)
+  return parsed
 }
 
+const fieldRecord = (source: Record<string, unknown>, key: string, label: string): Record<string, unknown> => {
+  const value = source[key]
+
+  if (!isRecord(value)) throw new Error(`${label}.${key} should be a mapping`)
+  return value
+}
+
+const workflowJob = (workflowSource: string, name: string) => {
+  const workflow = parseRecord(workflowSource, "workflow")
+  const jobs = fieldRecord(workflow, "jobs", "workflow")
+  return fieldRecord(jobs, name, "workflow.jobs")
+}
+
+const loadContracts = Effect.gen(function*() {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const workflowPath = yield* path.fromFileUrl(
+    new URL("../../../../.github/workflows/control-center-live-integration.yml", import.meta.url)
+  )
+  const workflowReadmePath = yield* path.fromFileUrl(
+    new URL("../../../../.github/workflows/README.md", import.meta.url)
+  )
+  const packageReadmePath = yield* path.fromFileUrl(new URL("../../README.md", import.meta.url))
+  const awsTemplatePath = yield* path.fromFileUrl(
+    new URL("../../../../infra/control-center-live-aws/template.json", import.meta.url)
+  )
+
+  return {
+    awsTemplate: yield* fileSystem.readFileString(awsTemplatePath),
+    packageReadme: yield* fileSystem.readFileString(packageReadmePath),
+    workflow: yield* fileSystem.readFileString(workflowPath),
+    workflowReadme: yield* fileSystem.readFileString(workflowReadmePath)
+  }
+}).pipe(Effect.provide(NodeServices.layer))
+
 describe("Control Center live workflow trust boundary", () => {
-  it("rejects an untrusted-ref job fixture and accepts the trusted condition", () => {
-    expect(hasTrustedRefCondition("    runs-on: ubuntu-latest")).toBe(false)
-    expect(hasTrustedRefCondition(`    ${trustedRefCondition}\n    runs-on: ubuntu-latest`)).toBe(true)
-  })
+  it.effect("rejects nested guard fixtures and accepts job-level trusted fields", () =>
+    Effect.gen(function*() {
+      const tamperedDispatchRefWorkflow = `
+        jobs:
+          live-provider-journey:
+            runs-on: ubuntu-latest
+            permissions: {}
+            steps:
+              - if: ${trustedRefExpression}
+                environment: ${protectedEnvironment}
+                permissions:
+                  id-token: ${idTokenPermission}
+                run: echo nested fields cannot protect the job
+      `
+      const tamperedJob = workflowJob(tamperedDispatchRefWorkflow, "live-provider-journey")
+      const { workflow } = yield* loadContracts
+      const protectedProviderJob = workflowJob(workflow, "live-provider-journey")
 
-  it("restricts both the branch-built runner and privileged journey to the trusted repository main branch", () => {
-    expect(hasTrustedRefCondition(jobDefinition("prepare-live-runner"))).toBe(true)
-    expect(hasTrustedRefCondition(jobDefinition("live-provider-journey"))).toBe(true)
-  })
+      expect(tamperedJob.if).toBeUndefined()
+      expect(tamperedJob.environment).toBeUndefined()
+      expect(fieldRecord(tamperedJob, "permissions", "tampered job")["id-token"]).toBeUndefined()
+      expect(protectedProviderJob.if).toBe(trustedRefExpression)
+      expect(protectedProviderJob.environment).toBe(protectedEnvironment)
+      expect(fieldRecord(protectedProviderJob, "permissions", "live-provider-journey")["id-token"]).toBe(
+        idTokenPermission
+      )
+    }))
 
-  it("keeps provider credentials behind the externally branch-protected environment boundary", () => {
-    const tamperedDispatchRefJob = `
-      runs-on: ubuntu-latest
-      permissions:
-        id-token: write
-      steps:
-        - run: echo can request cloud credentials without environment deployment-branch approval
-    `
-    const protectedProviderJob = jobDefinition("live-provider-journey")
+  it.effect("restricts both the branch-built runner and privileged journey to the trusted repository main branch", () =>
+    Effect.gen(function*() {
+      const { workflow } = yield* loadContracts
 
-    expect(hasExactLine(tamperedDispatchRefJob, protectedEnvironment)).toBe(false)
-    expect(hasExactLine(protectedProviderJob, protectedEnvironment)).toBe(true)
-    expect(hasExactLine(protectedProviderJob, idTokenPermission)).toBe(true)
-  })
+      expect(workflowJob(workflow, "prepare-live-runner").if).toBe(trustedRefExpression)
+      expect(workflowJob(workflow, "live-provider-journey").if).toBe(trustedRefExpression)
+    }))
+
+  it.effect("keeps documentation aligned with the environment branch policy and OIDC subject split", () =>
+    Effect.gen(function*() {
+      const { awsTemplate, packageReadme, workflowReadme } = yield* loadContracts
+      const template = parseRecord(awsTemplate, "live AWS template")
+      const templateJson = JSON.stringify(template)
+
+      expect(templateJson).toContain(trustedOidcSubject)
+      expect(templateJson).not.toContain("repo:knpkv/npm:ref:refs/heads/main")
+      expect(packageReadme).toContain("deployment branch policy limited to `main`")
+      expect(packageReadme).toContain("pin the AWS role trust policy to the repository and environment OIDC subject")
+      expect(packageReadme).not.toContain("repository, `main` ref, and environment OIDC subject")
+      expect(packageReadme).toContain("issue `#242`.")
+      expect(workflowReadme).toContain("custom deployment branch policy allowing only `main`")
+      expect(workflowReadme).toContain("OIDC subject to this exact repository and environment")
+    }))
 })
