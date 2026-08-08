@@ -10,6 +10,77 @@ const DEFAULT_MAX_STDERR_BYTES = 65_536
 const DEFAULT_TIMEOUT = "2 minutes"
 const textEncoder = new TextEncoder()
 
+/**
+ * Codex capabilities that can discover host configuration, invoke tools, or
+ * contact external systems. Prompt-only turns receive supplied text and must
+ * never gain one of these capabilities from a user's Codex installation.
+ *
+ * Keep this list synchronized with `codex features list`; new host-facing
+ * features require an explicit classification before prompt-only use.
+ */
+export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freeze([
+  "apply_patch_freeform",
+  "apply_patch_streaming_events",
+  "apps",
+  "artifact",
+  "auth_elicitation",
+  "browser_use",
+  "browser_use_external",
+  "browser_use_full_cdp_access",
+  "code_mode",
+  "code_mode_buffered_exec",
+  "code_mode_host",
+  "code_mode_only",
+  "computer_use",
+  "codex_git_commit",
+  "default_mode_request_user_input",
+  "deferred_executor",
+  "deferred_tool_world_state",
+  "enable_mcp_apps",
+  "exec_permission_approvals",
+  "executor_capability_discovery",
+  "external_agent_memory_import",
+  "goals",
+  "hooks",
+  "image_generation",
+  "in_app_browser",
+  "js_repl",
+  "js_repl_tools_only",
+  "memories",
+  "multi_agent",
+  "multi_agent_v2",
+  "network_proxy",
+  "non_prefixed_mcp_tool_names",
+  "plugin_hooks",
+  "plugin_sharing",
+  "plugins",
+  "remote_control",
+  "remote_plugin",
+  "request_permissions_tool",
+  "respect_system_proxy",
+  "search_tool",
+  "shell_snapshot",
+  "shell_tool",
+  "shell_zsh_fork",
+  "skill_env_var_dependency_prompt",
+  "skill_mcp_dependency_install",
+  "skill_search",
+  "standalone_web_search",
+  "tool_call_mcp_elicitation",
+  "tool_search",
+  "tool_search_always_defer_mcp_tools",
+  "tool_suggest",
+  "tui_app_server",
+  "unavailable_dummy_tools",
+  "undo",
+  "unified_exec",
+  "unified_exec_zsh_fork",
+  "use_agent_identity",
+  "web_search_cached",
+  "web_search_request",
+  "workspace_dependencies"
+])
+
 const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
 
 const reviewedChildEnvironment = Config.all({
@@ -139,25 +210,7 @@ export const makeArguments = (
       "-c",
       "shell_environment_policy.inherit=none"
     )
-    for (
-      const feature of [
-        "apps",
-        "browser_use",
-        "browser_use_external",
-        "browser_use_full_cdp_access",
-        "code_mode",
-        "code_mode_host",
-        "computer_use",
-        "in_app_browser",
-        "js_repl",
-        "js_repl_tools_only",
-        "multi_agent",
-        "multi_agent_v2",
-        "shell_tool",
-        "unified_exec",
-        "workspace_dependencies"
-      ]
-    ) {
+    for (const feature of PROMPT_ONLY_DISABLED_FEATURES) {
       args.push("--disable", feature)
     }
   }

@@ -32,3 +32,9 @@ export const isolated = (): Record<string, string | undefined> => {
   }
   return environment
 }
+
+/** Repository isolation plus fail-closed, non-interactive authentication. */
+export const nonInteractive = (): Record<string, string | undefined> => ({
+  ...isolated(),
+  GIT_TERMINAL_PROMPT: "0"
+})

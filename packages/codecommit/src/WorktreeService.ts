@@ -100,7 +100,7 @@ const gitEnvironment = (request: WorktreeRequest) => ({
     AWS_PROFILE: request.account.profile,
     AWS_REGION: request.account.region
   }),
-  ...GitEnvironment.isolated()
+  ...GitEnvironment.nonInteractive()
 })
 
 const gitCommand = (
@@ -110,10 +110,11 @@ const gitCommand = (
 ) => {
   const { captureStdout = false, cwd } = options
   return (
-    ChildProcess.make("git", args, {
+    ChildProcess.make("git", ["-c", "core.hooksPath=/dev/null", ...args], {
       ...(cwd === undefined ? {} : { cwd }),
       env: gitEnvironment(request),
       extendEnv: true,
+      stdin: "ignore",
       stderr: "ignore",
       stdout: captureStdout ? "pipe" : "ignore"
     })

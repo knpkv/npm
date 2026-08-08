@@ -62,8 +62,11 @@ exact-commit patch with Git hooks disabled, then runs the local Codex CLI in
 prompt-only mode. Prompt-only mode disables user and repository instructions,
 host tools, and inherited shell variables, so repository-authored text cannot
 read other files. Relay and worktree Git commands also clear inherited
-repository-local `GIT_*` variables, so invocation from a Git hook cannot redirect
-them into the caller's repository. Worktrees are detached at the displayed head under
+repository-local `GIT_*` variables, suppress configured Git hooks, close stdin,
+and disable terminal credential prompts. Invocation from a Git hook therefore
+cannot redirect commands into the caller's repository, and authentication
+failures return to the TUI instead of waiting on an invisible prompt. Worktrees
+are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
 `~/.codecommit/repositories`. Both storage roots are enforced as user-only
 directories (`0700`) before checkout. Cache and worktree coordinates include the

@@ -21,4 +21,11 @@ describe("GitEnvironment", () => {
       GIT_WORK_TREE: undefined
     })
   })
+
+  it("disables terminal authentication without dropping repository tombstones", () => {
+    expect(GitEnvironment.nonInteractive()).toEqual({
+      ...GitEnvironment.isolated(),
+      GIT_TERMINAL_PROMPT: "0"
+    })
+  })
 })

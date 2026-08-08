@@ -5,6 +5,7 @@ import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { model } from "../src/index.js"
+import { PROMPT_ONLY_DISABLED_FEATURES } from "../src/internal/configuration.js"
 
 interface FakeProcessOptions {
   readonly exitCode?: number
@@ -79,6 +80,7 @@ describe("model", () => {
         expect(command.command).toBe("codex")
         expect(command.args).toContain("--ephemeral")
         expect(command.args).not.toContain("--ignore-user-config")
+        expect(command.args).not.toContain("--disable")
         expect(command.args).toContain("read-only")
         expect(command.args).not.toContain("--cd")
         expect(command.options.cwd).toBe("/workspace")
@@ -103,24 +105,17 @@ describe("model", () => {
         expect(command.args).toContain("--ignore-rules")
         expect(command.args).toContain("project_doc_max_bytes=0")
         expect(command.args).toContain("shell_environment_policy.inherit=none")
-        for (
-          const feature of [
-            "apps",
-            "browser_use",
-            "code_mode_host",
-            "computer_use",
-            "in_app_browser",
-            "js_repl",
-            "multi_agent",
-            "shell_tool",
-            "unified_exec",
-            "workspace_dependencies"
-          ]
-        ) {
+        for (const feature of PROMPT_ONLY_DISABLED_FEATURES) {
           const index = command.args.indexOf(feature)
           expect(index).toBeGreaterThan(0)
           expect(command.args[index - 1]).toBe("--disable")
         }
+        expect(PROMPT_ONLY_DISABLED_FEATURES).toEqual(expect.arrayContaining([
+          "hooks",
+          "plugins",
+          "skill_mcp_dependency_install",
+          "skill_search"
+        ]))
       }
     }))
 

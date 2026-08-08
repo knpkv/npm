@@ -307,8 +307,23 @@ describe("WorktreeService", () => {
         expect(yield* fs.exists(path.join(plan.cachePath, "preserve-non-bare"))).toBe(true)
         yield* fs.remove(plan.cachePath, { recursive: true })
 
+        const hooks = path.join(root, "hooks")
+        const hookSentinel = path.join(root, "post-checkout-ran")
+        yield* fs.makeDirectory(hooks, { recursive: true })
+        const postCheckoutHook = path.join(hooks, "post-checkout")
+        yield* fs.writeFileString(postCheckoutHook, `#!/bin/sh\nprintf ran > '${hookSentinel}'\n`)
+        yield* fs.chmod(postCheckoutHook, 0o700)
+        yield* runGit(["clone", "--bare", origin, plan.cachePath], root)
+        yield* runGit([
+          `--git-dir=${plan.cachePath}`,
+          "config",
+          "core.hooksPath",
+          hooks
+        ])
+
         const repaired = yield* firstService.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
+        expect(yield* fs.exists(hookSentinel)).toBe(false)
 
         yield* fs.writeFileString(path.join(plan.targetPath, "feature.txt"), "locally modified\n")
         yield* fs.writeFileString(path.join(plan.targetPath, "untracked.txt"), "preserve me\n")
