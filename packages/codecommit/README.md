@@ -10,12 +10,19 @@ CLI and TUI for AWS CodeCommit pull requests.
 - Health score ranking (staleness, review urgency)
 - SSO login/logout management
 - Full-text search across cached PRs
+- Exact-revision PR workspace with changed-file navigation and native diff previews
+- Read-only local Codex Relay passes for review, security, tests, and risk explanation
+- Deterministic detached worktree checkout for the selected PR head
 
 ## Prerequisites
 
 - AWS SSO configured (`~/.aws/config`)
+- Git with the AWS CodeCommit credential helper configured for HTTPS checkout
+- A locally authenticated `codex` executable for optional Relay actions
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest` — list/view
+  - `codecommit:GetDifferences`, `codecommit:GetBlob` — exact-revision changed files and diff previews
+  - `codecommit:GitPull` — detached worktree checkout and Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export
@@ -42,6 +49,13 @@ codecommit
 # or
 codecommit tui
 ```
+
+Open a pull request to enter the exact-revision review workspace. The left pane
+navigates changed files, the center renders immutable blob diffs, and the right
+pane keeps local Relay actions separate from CodeCommit approval and
+mergeability. Relay runs the local Codex CLI in a read-only sandbox after an
+explicit preflight; worktrees are detached at the displayed head under
+`~/.codecommit/worktrees`.
 
 ### Web Mode
 

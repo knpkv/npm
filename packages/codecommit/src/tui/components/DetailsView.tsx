@@ -15,7 +15,14 @@ import {
   preflightWorktreeAtom,
   runRelayReviewAtom
 } from "../atoms/details.js"
-import { changedFilePath } from "../details-model.js"
+import {
+  changedFilePath,
+  fileDiffIdentity,
+  fileDiffIdentityMatches,
+  humanReviewState,
+  pullRequestWorkspaceIdentity,
+  workspaceIdentityMatches
+} from "../details-model.js"
 import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { Badge } from "./Badge.js"
@@ -161,12 +168,28 @@ export function DetailsView() {
       selectedPrId === null ? null : (appState.pullRequests.find((candidate) => candidate.id === selectedPrId) ?? null),
     [appState.pullRequests, selectedPrId]
   )
-  const workspace =
+  const workspaceCandidate =
     AsyncResult.isSuccess(workspaceResult) && !AsyncResult.isWaiting(workspaceResult) ? workspaceResult.value : null
+  const expectedWorkspaceIdentity = pr === null ? null : pullRequestWorkspaceIdentity(pr)
+  const workspace =
+    workspaceCandidate !== null &&
+    expectedWorkspaceIdentity !== null &&
+    workspaceIdentityMatches(workspaceCandidate.identity, expectedWorkspaceIdentity) &&
+    workspaceCandidate.revision.pullRequestId === expectedWorkspaceIdentity.pullRequestId &&
+    workspaceCandidate.revision.repositoryName === expectedWorkspaceIdentity.repositoryName
+      ? workspaceCandidate
+      : null
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
   const selectedPath = selectedFile === null ? null : changedFilePath(selectedFile)
+  const expectedFileIdentity =
+    workspace === null || selectedFile === null
+      ? null
+      : fileDiffIdentity(workspace.identity, workspace.revision, selectedFile)
   const renderedDiff =
-    AsyncResult.isSuccess(diffResult) && !AsyncResult.isWaiting(diffResult) && diffResult.value.path === selectedPath
+    AsyncResult.isSuccess(diffResult) &&
+    !AsyncResult.isWaiting(diffResult) &&
+    expectedFileIdentity !== null &&
+    fileDiffIdentityMatches(diffResult.value.identity, expectedFileIdentity)
       ? diffResult.value
       : null
 
@@ -180,7 +203,13 @@ export function DetailsView() {
 
   useEffect(() => {
     if (pr === null || workspace === null || selectedFile === null) return
-    loadDiff({ account: pr.account, file: selectedFile, repositoryName: workspace.revision.repositoryName })
+    loadDiff({
+      account: pr.account,
+      file: selectedFile,
+      identity: workspace.identity,
+      repositoryName: workspace.revision.repositoryName,
+      revision: workspace.revision
+    })
   }, [loadDiff, pr, selectedFile, workspace])
 
   useEffect(() => {
@@ -190,9 +219,18 @@ export function DetailsView() {
       return
     }
     if (!AsyncResult.isSuccess(preflightResult)) return
-    if (preflightResult.value.sourceCommit !== workspace.revision.sourceCommit) return
+    if (
+      pr === null ||
+      preflightResult.value.account.profile !== pr.account.profile ||
+      preflightResult.value.account.region !== pr.account.region ||
+      preflightResult.value.destinationCommit !== workspace.revision.destinationCommit ||
+      preflightResult.value.pullRequestId !== pr.id ||
+      preflightResult.value.repositoryName !== workspace.revision.repositoryName ||
+      preflightResult.value.sourceCommit !== workspace.revision.sourceCommit
+    )
+      return
     setAction({ _tag: "ready", action: action.action, plan: preflightResult.value })
-  }, [action, preflightResult, workspace])
+  }, [action, pr, preflightResult, workspace])
 
   useEffect(() => {
     if (action._tag !== "running" || action.action !== "worktree" || AsyncResult.isWaiting(checkoutResult)) return
@@ -268,8 +306,7 @@ export function DetailsView() {
   }
 
   const revision = workspace?.revision
-  const humanState = pr.isApproved ? "APPROVED" : pr.isMergeable ? "NEEDS REVIEW" : "BLOCKED"
-  const statusColor = pr.isApproved ? theme.textSuccess : pr.isMergeable ? theme.textWarning : theme.textError
+  const humanState = humanReviewState(pr)
 
   return (
     <box flexDirection="column" style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1, width: "100%" }}>
@@ -279,7 +316,11 @@ export function DetailsView() {
       >
         <box flexDirection="row" justifyContent="space-between">
           <text fg={theme.textAccent}>{`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`}</text>
-          <text fg={statusColor}>{humanState}</text>
+          <box flexDirection="row">
+            <text fg={pr.isApproved ? theme.textSuccess : theme.textWarning}>{`APPROVAL ${humanState.approval}`}</text>
+            <text fg={theme.textMuted}> · </text>
+            <text fg={pr.isMergeable ? theme.textSuccess : theme.textError}>{humanState.mergeability}</text>
+          </box>
         </box>
         <text fg={theme.textMuted}>{`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`}</text>
         <text fg={theme.textMuted}>
@@ -342,7 +383,15 @@ export function DetailsView() {
             {renderedDiff?.binary && (
               <text fg={theme.textMuted}> Binary file changed. Checkout the worktree to inspect it locally.</text>
             )}
-            {renderedDiff !== null && !renderedDiff.binary && (
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.truncated && (
+              <text fg={theme.textWarning}>
+                Diff preview bounded to complete hunks. Checkout the exact head for omitted content.
+              </text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length === 0 && (
+              <text fg={theme.textMuted}> This change is too large for a safe terminal preview.</text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && (
               <diff
                 addedSignColor={theme.textSuccess}
                 diff={renderedDiff.diff}

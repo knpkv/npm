@@ -25,6 +25,7 @@ export class WorktreeError extends Schema.TaggedErrorClass<WorktreeError>()(
 
 export interface WorktreeRequest {
   readonly account: Domain.Account
+  readonly destinationCommit: ReadClient.CodeCommitCommitId
   readonly pullRequestId: Domain.PullRequestId
   readonly repositoryName: Domain.RepositoryName
   readonly sourceCommit: ReadClient.CodeCommitCommitId
@@ -42,6 +43,12 @@ export interface WorktreeResult {
   readonly sourceCommit: ReadClient.CodeCommitCommitId
 }
 
+/** Immutable revisions that must exist before Relay can inspect a checkout. */
+export const reviewRevisionSpecifiers = (request: WorktreeRequest): ReadonlyArray<ReadClient.CodeCommitCommitId> => [
+  request.destinationCommit,
+  request.sourceCommit
+]
+
 export interface WorktreeServiceShape {
   readonly preflight: (request: WorktreeRequest) => Effect.Effect<WorktreePlan, WorktreeError>
   readonly checkout: (plan: WorktreePlan) => Effect.Effect<WorktreeResult, WorktreeError>
@@ -58,6 +65,7 @@ const WorktreeCoordinates = Schema.Struct({
     Schema.isPattern(/^[A-Za-z0-9._-]+$/),
     Schema.isMaxLength(100)
   ),
+  destinationCommit: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/)),
   sourceCommit: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/))
 })
 
@@ -117,6 +125,19 @@ const runChecked = Effect.fn("WorktreeService.runChecked")(function*(
   }
 })
 
+const runSucceeds = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  request: WorktreeRequest,
+  args: ReadonlyArray<string>,
+  options?: { readonly cwd?: string }
+) =>
+  spawner.exitCode(gitCommand(request, args, options)).pipe(
+    Effect.match({
+      onFailure: () => false,
+      onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
+    })
+  )
+
 const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   request: WorktreeRequest,
@@ -136,105 +157,226 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   return headBeforeTarget && targetBeforeHead
 })
 
-const makeService = Effect.gen(function*() {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const home = yield* homeDirectory.pipe(
-    Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
-  )
+const codeCommitRemoteUrl = (request: WorktreeRequest): string =>
+  `https://git-codecommit.${request.account.region}.amazonaws.com/v1/repos/${
+    encodeURIComponent(request.repositoryName)
+  }`
 
-  const preflight = Effect.fn("WorktreeService.preflight")(function*(request: WorktreeRequest) {
-    yield* Schema.decodeUnknownEffect(WorktreeCoordinates)({
-      region: request.account.region,
-      repositoryName: request.repositoryName,
-      sourceCommit: request.sourceCommit
-    }).pipe(
-      Effect.mapError((cause) =>
-        commandFailure("validate-coordinates", "Invalid CodeCommit worktree coordinates", cause)
-      )
+/** Builds the worktree service; the URL seam keeps transport tests local. */
+export const makeWorktreeService = (
+  remoteUrlFor: (request: WorktreeRequest) => string = codeCommitRemoteUrl
+) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const home = yield* homeDirectory.pipe(
+      Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
     )
-    const accountSegment = safePathSegment("account", `${request.account.profile}-${request.account.region}`)
-    const repositorySegment = safePathSegment("repo", request.repositoryName)
-    const revisionSegment = safePathSegment(
-      `pr-${request.pullRequestId}`,
-      `${request.pullRequestId}-${request.sourceCommit}`
-    )
-    const root = path.join(home, ".codecommit")
-    const cachePath = path.join(root, "repositories", accountSegment, `${repositorySegment}.git`)
-    const targetPath = path.join(root, "worktrees", accountSegment, repositorySegment, revisionSegment)
-    const targetExists = yield* fs.exists(targetPath).pipe(
-      Effect.mapError((cause) => commandFailure("inspect-target", `Unable to inspect ${targetPath}`, cause))
-    )
-    return { ...request, cachePath, targetPath, targetExists } satisfies WorktreePlan
-  })
 
-  const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
-    const targetExists = yield* fs.exists(plan.targetPath).pipe(
-      Effect.mapError((cause) => commandFailure("inspect-target", `Unable to inspect ${plan.targetPath}`, cause))
-    )
-    if (targetExists) {
-      const exact = yield* isExactHead(spawner, plan, plan.targetPath)
-      if (!exact) {
-        return yield* commandFailure(
-          "validate-existing-target",
-          `Worktree path exists but is not at ${plan.sourceCommit}`
+    const preflight = Effect.fn("WorktreeService.preflight")(function*(request: WorktreeRequest) {
+      yield* Schema.decodeUnknownEffect(WorktreeCoordinates)({
+        destinationCommit: request.destinationCommit,
+        region: request.account.region,
+        repositoryName: request.repositoryName,
+        sourceCommit: request.sourceCommit
+      }).pipe(
+        Effect.mapError((cause) =>
+          commandFailure("validate-coordinates", "Invalid CodeCommit worktree coordinates", cause)
         )
-      }
-      return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
-    }
-
-    yield* fs.makeDirectory(path.dirname(plan.cachePath), { recursive: true }).pipe(
-      Effect.mapError((cause) => commandFailure("create-cache-directory", "Unable to create repository cache", cause))
-    )
-    yield* fs.makeDirectory(path.dirname(plan.targetPath), { recursive: true }).pipe(
-      Effect.mapError((cause) =>
-        commandFailure("create-worktree-directory", "Unable to create worktree directory", cause)
       )
-    )
+      const accountSegment = safePathSegment("account", `${request.account.profile}-${request.account.region}`)
+      const repositorySegment = safePathSegment("repo", request.repositoryName)
+      const revisionSegment = safePathSegment(
+        `pr-${request.pullRequestId}`,
+        `${request.pullRequestId}-${request.sourceCommit}`
+      )
+      const root = path.join(home, ".codecommit")
+      const cachePath = path.join(root, "repositories", accountSegment, `${repositorySegment}.git`)
+      const targetPath = path.join(root, "worktrees", accountSegment, repositorySegment, revisionSegment)
+      const targetExists = yield* fs.exists(targetPath).pipe(
+        Effect.mapError((cause) => commandFailure("inspect-target", `Unable to inspect ${targetPath}`, cause))
+      )
+      return { ...request, cachePath, targetPath, targetExists } satisfies WorktreePlan
+    })
 
-    const cacheExists = yield* fs.exists(plan.cachePath).pipe(
-      Effect.mapError((cause) => commandFailure("inspect-cache", `Unable to inspect ${plan.cachePath}`, cause))
-    )
-    const remoteUrl = `https://git-codecommit.${plan.account.region}.amazonaws.com/v1/repos/${
-      encodeURIComponent(plan.repositoryName)
-    }`
-    if (!cacheExists) {
-      yield* runChecked(spawner, plan, "clone-cache", ["clone", "--bare", remoteUrl, plan.cachePath])
-    } else {
-      yield* runChecked(spawner, plan, "update-cache-remote", [
-        `--git-dir=${plan.cachePath}`,
-        "remote",
-        "set-url",
-        "origin",
-        remoteUrl
+    const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
+      yield* fs.makeDirectory(path.dirname(plan.cachePath), { recursive: true }).pipe(
+        Effect.mapError((cause) => commandFailure("create-cache-directory", "Unable to create repository cache", cause))
+      )
+      yield* fs.makeDirectory(path.dirname(plan.targetPath), { recursive: true }).pipe(
+        Effect.mapError((cause) =>
+          commandFailure("create-worktree-directory", "Unable to create worktree directory", cause)
+        )
+      )
+      const repositoriesRoot = path.join(home, ".codecommit", "repositories")
+      const worktreesRoot = path.join(home, ".codecommit", "worktrees")
+      const canonicalRepositoriesRoot = yield* fs.realPath(repositoriesRoot).pipe(
+        Effect.mapError((cause) =>
+          commandFailure("resolve-cache-root", "Unable to resolve repository cache root", cause)
+        )
+      )
+      const canonicalWorktreesRoot = yield* fs.realPath(worktreesRoot).pipe(
+        Effect.mapError((cause) => commandFailure("resolve-worktree-root", "Unable to resolve worktree root", cause))
+      )
+
+      const assertCanonical = Effect.fn("WorktreeService.assertCanonical")(function*(
+        operation: string,
+        root: string,
+        canonicalRoot: string,
+        candidate: string
+      ) {
+        const expected = path.join(canonicalRoot, path.relative(root, candidate))
+        const actual = yield* fs.realPath(candidate).pipe(
+          Effect.mapError((cause) => commandFailure(operation, `Unable to resolve ${candidate}`, cause))
+        )
+        if (actual !== expected) {
+          return yield* commandFailure(operation, `Refusing non-canonical CodeCommit path ${candidate}`)
+        }
+      })
+
+      let cacheExists = yield* fs.exists(plan.cachePath).pipe(
+        Effect.mapError((cause) => commandFailure("inspect-cache", `Unable to inspect ${plan.cachePath}`, cause))
+      )
+      const remoteUrl = remoteUrlFor(plan)
+      if (cacheExists) {
+        yield* assertCanonical("validate-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
+        const validCache = yield* runSucceeds(spawner, plan, [
+          `--git-dir=${plan.cachePath}`,
+          "rev-parse",
+          "--is-bare-repository"
+        ])
+        if (!validCache) {
+          yield* fs.remove(plan.cachePath, { recursive: true }).pipe(
+            Effect.mapError((cause) =>
+              commandFailure("repair-cache", "Unable to remove an incomplete repository cache", cause)
+            )
+          )
+          cacheExists = false
+        }
+      }
+
+      if (!cacheExists) {
+        const stagingRoot = yield* fs.makeTempDirectory({
+          directory: path.dirname(plan.cachePath),
+          prefix: ".clone-"
+        }).pipe(
+          Effect.mapError((cause) => commandFailure("stage-cache", "Unable to stage repository cache", cause))
+        )
+        const stagedCache = path.join(stagingRoot, "repository.git")
+        yield* runChecked(spawner, plan, "clone-cache", ["clone", "--bare", remoteUrl, stagedCache]).pipe(
+          Effect.flatMap(() =>
+            fs.rename(stagedCache, plan.cachePath).pipe(
+              Effect.catch((renameCause) =>
+                runSucceeds(spawner, plan, [
+                  `--git-dir=${plan.cachePath}`,
+                  "rev-parse",
+                  "--is-bare-repository"
+                ]).pipe(
+                  Effect.flatMap((wonByAnotherProcess) =>
+                    wonByAnotherProcess
+                      ? Effect.void
+                      : commandFailure("install-cache", "Unable to install repository cache", renameCause)
+                  )
+                )
+              )
+            )
+          ),
+          Effect.ensuring(fs.remove(stagingRoot, { force: true, recursive: true }).pipe(Effect.ignore))
+        )
+      } else {
+        yield* runChecked(spawner, plan, "update-cache-remote", [
+          `--git-dir=${plan.cachePath}`,
+          "remote",
+          "set-url",
+          "origin",
+          remoteUrl
+        ])
+      }
+
+      yield* assertCanonical("validate-ready-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
+
+      const [baseAvailable, headAvailable] = yield* Effect.all([
+        runSucceeds(spawner, plan, [
+          `--git-dir=${plan.cachePath}`,
+          "cat-file",
+          "-e",
+          `${plan.destinationCommit}^{commit}`
+        ]),
+        runSucceeds(spawner, plan, [`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${plan.sourceCommit}^{commit}`])
       ])
-    }
+      if (!baseAvailable || !headAvailable) {
+        const revisions = reviewRevisionSpecifiers(plan)
+        yield* runChecked(spawner, plan, "fetch-review-revisions", [
+          `--git-dir=${plan.cachePath}`,
+          "fetch",
+          "--no-tags",
+          "--no-write-fetch-head",
+          "origin",
+          ...revisions
+        ])
+      }
+      yield* Effect.all([
+        runChecked(spawner, plan, "verify-base", [
+          `--git-dir=${plan.cachePath}`,
+          "cat-file",
+          "-e",
+          `${plan.destinationCommit}^{commit}`
+        ]),
+        runChecked(spawner, plan, "verify-head", [
+          `--git-dir=${plan.cachePath}`,
+          "cat-file",
+          "-e",
+          `${plan.sourceCommit}^{commit}`
+        ])
+      ])
 
-    yield* runChecked(spawner, plan, "fetch-head", [
-      `--git-dir=${plan.cachePath}`,
-      "fetch",
-      "--no-tags",
-      "origin",
-      plan.sourceCommit
-    ])
-    yield* runChecked(spawner, plan, "add-worktree", [
-      `--git-dir=${plan.cachePath}`,
-      "worktree",
-      "add",
-      "--detach",
-      plan.targetPath,
-      plan.sourceCommit
-    ])
+      const targetExists = yield* fs.exists(plan.targetPath).pipe(
+        Effect.mapError((cause) => commandFailure("inspect-target", `Unable to inspect ${plan.targetPath}`, cause))
+      )
+      if (targetExists) {
+        yield* assertCanonical("validate-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
+        const exact = yield* isExactHead(spawner, plan, plan.targetPath)
+        if (!exact) {
+          return yield* commandFailure(
+            "validate-existing-target",
+            `Worktree path exists but is not at ${plan.sourceCommit}`
+          )
+        }
+        return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+      }
 
-    return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+      const addExitCode = yield* spawner.exitCode(gitCommand(plan, [
+        `--git-dir=${plan.cachePath}`,
+        "worktree",
+        "add",
+        "--detach",
+        plan.targetPath,
+        plan.sourceCommit
+      ])).pipe(
+        Effect.mapError((cause) => commandFailure("add-worktree", "Unable to run git", cause))
+      )
+      if (addExitCode !== ChildProcessSpawner.ExitCode(0)) {
+        const racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
+          Effect.mapError((cause) => commandFailure("inspect-raced-target", "Unable to inspect raced worktree", cause))
+        )
+        if (racedTargetExists) {
+          yield* assertCanonical("validate-raced-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
+          if (yield* isExactHead(spawner, plan, plan.targetPath)) {
+            return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+          }
+        }
+        return yield* commandFailure("add-worktree", `git exited with code ${addExitCode}`)
+      }
+
+      return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+    })
+
+    return { checkout, preflight } satisfies WorktreeServiceShape
   })
-
-  return { checkout, preflight } satisfies WorktreeServiceShape
-})
 
 export class WorktreeService extends Context.Service<WorktreeService, WorktreeServiceShape>()(
   "@knpkv/codecommit/WorktreeService"
 ) {
-  static readonly live = Layer.effect(WorktreeService, makeService)
+  static readonly live = Layer.effect(WorktreeService, makeWorktreeService())
 }

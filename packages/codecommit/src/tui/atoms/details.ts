@@ -2,10 +2,19 @@ import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { Effect, Stream } from "effect"
 import { type RelayReviewKind, runRelayReview } from "../../RelayReview.js"
 import { type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
-import { buildUnifiedDiff, changedFilePath, filetypeForPath } from "../details-model.js"
+import {
+  buildUnifiedDiff,
+  changedFilePath,
+  type FileDiffIdentity,
+  fileDiffIdentity,
+  filetypeForPath,
+  type PullRequestWorkspaceIdentity,
+  pullRequestWorkspaceIdentity
+} from "../details-model.js"
 import { runtimeAtom } from "./runtime.js"
 
 export interface PullRequestWorkspace {
+  readonly identity: PullRequestWorkspaceIdentity
   readonly revision: ReadClient.CodeCommitPullRequestRevision
   readonly files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
 }
@@ -14,6 +23,7 @@ export interface RenderedFileDiff {
   readonly binary: boolean
   readonly diff: string
   readonly filetype: string | undefined
+  readonly identity: FileDiffIdentity
   readonly path: string
   readonly truncated: boolean
 }
@@ -21,7 +31,9 @@ export interface RenderedFileDiff {
 export interface FileDiffRequest {
   readonly account: Domain.Account
   readonly file: ReadClient.CodeCommitChangedFile
+  readonly identity: PullRequestWorkspaceIdentity
   readonly repositoryName: Domain.RepositoryName
+  readonly revision: ReadClient.CodeCommitPullRequestRevision
 }
 
 export interface RelayReviewActionInput {
@@ -45,7 +57,11 @@ export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullReque
       beforeCommitSpecifier: revision.destinationCommit,
       afterCommitSpecifier: revision.sourceCommit
     }).pipe(Stream.runCollect)
-    return { revision, files: Array.from(files) } satisfies PullRequestWorkspace
+    return {
+      identity: pullRequestWorkspaceIdentity(pr),
+      revision,
+      files: Array.from(files)
+    } satisfies PullRequestWorkspace
   }).pipe(Effect.withSpan("loadPullRequestWorkspace", { attributes: { prId: pr.id } }))
 )
 
@@ -67,8 +83,16 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
         blobId: request.file.after.blobId
       })).bytes
     const path = changedFilePath(request.file)
+    const identity = fileDiffIdentity(request.identity, request.revision, request.file)
     if (isBinary(beforeBytes) || isBinary(afterBytes)) {
-      return { binary: true, diff: "", filetype: undefined, path, truncated: false } satisfies RenderedFileDiff
+      return {
+        binary: true,
+        diff: "",
+        filetype: undefined,
+        identity,
+        path,
+        truncated: false
+      } satisfies RenderedFileDiff
     }
     const [beforeText, afterText] = yield* Effect.all([decodeBlob(beforeBytes), decodeBlob(afterBytes)])
     const rendered = buildUnifiedDiff(request.file, beforeText, afterText)
@@ -76,6 +100,7 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
       binary: false,
       diff: rendered.diff,
       filetype: filetypeForPath(path),
+      identity,
       path,
       truncated: rendered.truncated
     } satisfies RenderedFileDiff
@@ -90,6 +115,7 @@ export const preflightWorktreeAtom = runtimeAtom.fn((input: {
     const service = yield* WorktreeService
     return yield* service.preflight({
       account: input.pr.account,
+      destinationCommit: input.revision.destinationCommit,
       pullRequestId: input.pr.id,
       repositoryName: input.pr.repositoryName,
       sourceCommit: input.revision.sourceCommit

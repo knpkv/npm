@@ -241,6 +241,10 @@ When writing Effect code:
   caller's shell. Use `ChildEnv.profileScopedEnv` in the `codecommit` packages
   rather than rebuilding the exclusion list; it documents which variables are
   deliberately left alone and why.
+- When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
+  required local executable, update `packages/codecommit/README.md` in the same
+  change with the corresponding IAM action and runtime prerequisite. Pure
+  presentation changes do not require a capability update.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime
