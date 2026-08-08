@@ -19,6 +19,47 @@ export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly sourceCommit: string
 }
 
+export type DetailsKeyIntent =
+  | "back"
+  | "cancel-action"
+  | "checkout-worktree"
+  | "confirm-action"
+  | "explain-risk"
+  | "next-file"
+  | "open-browser"
+  | "previous-file"
+  | "review-pr"
+  | "review-security"
+  | "review-tests"
+  | "show-comments"
+  | "show-diff"
+  | "yield"
+
+/** Decides whether the exact-head workspace consumes a key or yields it to dialogs/focused controls. */
+export const detailsKeyIntent = (input: {
+  readonly actionCancelable: boolean
+  readonly actionReady: boolean
+  readonly dialogOpen: boolean
+  readonly keyName: string
+  readonly tab: "comments" | "diff"
+}): DetailsKeyIntent => {
+  if (input.dialogOpen) return "yield"
+  if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
+  if (input.keyName === "1") return "show-diff"
+  if (input.keyName === "2" || input.keyName === "c") return "show-comments"
+  if (input.keyName === "o") return "open-browser"
+  if (input.tab === "diff" && (input.keyName === "up" || input.keyName === "k")) return "previous-file"
+  if (input.tab === "diff" && (input.keyName === "down" || input.keyName === "j")) return "next-file"
+  if (input.keyName === "w") return "checkout-worktree"
+  if (input.keyName === "r") return "review-pr"
+  if (input.keyName === "s") return "review-security"
+  if (input.keyName === "t") return "review-tests"
+  if (input.keyName === "e") return "explain-risk"
+  if (input.keyName === "x" && input.actionCancelable) return "cancel-action"
+  if (input.keyName === "return" && input.actionReady) return "confirm-action"
+  return "yield"
+}
+
 export const pullRequestWorkspaceIdentity = (pr: Domain.PullRequest): PullRequestWorkspaceIdentity => ({
   profile: pr.account.profile,
   pullRequestId: pr.id,
@@ -57,6 +98,15 @@ export const fileDiffIdentityMatches = (actual: FileDiffIdentity, expected: File
 export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "isMergeable">) => ({
   approval: pr.isApproved ? "APPROVED" : "NEEDS REVIEW",
   mergeability: pr.isMergeable ? "MERGEABLE" : "CONFLICTS"
+})
+
+/** Cached list decisions have no revision identifier, so they cannot label an exact-head workspace. */
+export const exactRevisionReviewState = (): {
+  readonly approval: "UNVERIFIED"
+  readonly mergeability: "UNVERIFIED"
+} => ({
+  approval: "UNVERIFIED",
+  mergeability: "UNVERIFIED"
 })
 
 export const changedFilePath = (file: ReadClient.CodeCommitChangedFile): string =>
@@ -99,7 +149,7 @@ export const buildUnifiedDiff = (
   file: ReadClient.CodeCommitChangedFile,
   beforeText: string,
   afterText: string
-): { readonly diff: string; readonly truncated: boolean } => {
+): { readonly diff: string; readonly metadata: string | null; readonly truncated: boolean } => {
   const beforePath = patchPath(file.before?.path ?? "/dev/null")
   const afterPath = patchPath(file.after?.path ?? "/dev/null")
   const oldFileName = file.before === null ? "/dev/null" : `a/${beforePath}`
@@ -109,7 +159,21 @@ export const buildUnifiedDiff = (
     maxEditLength: 20_000,
     timeout: 1_000
   })
-  if (patch === undefined) return { diff: "", truncated: true }
+  if (patch === undefined) return { diff: "", metadata: null, truncated: true }
+
+  if (patch.hunks.length === 0) {
+    const metadata: Array<string> = []
+    if (file.before === null && file.after !== null) metadata.push("empty file added")
+    if (file.before !== null && file.after === null) metadata.push("empty file deleted")
+    if (file.before?.path !== undefined && file.after?.path !== undefined && file.before.path !== file.after.path) {
+      metadata.push(`rename ${file.before.path} → ${file.after.path}`)
+    }
+    if (file.before?.mode !== undefined && file.after?.mode !== undefined && file.before.mode !== file.after.mode) {
+      metadata.push(`mode ${file.before.mode} → ${file.after.mode}`)
+    }
+    if (metadata.length === 0) metadata.push("No textual changes")
+    return { diff: "", metadata: metadata.join("\n"), truncated: false }
+  }
 
   const lines = [`--- ${oldFileName}`, `+++ ${newFileName}`]
   let retainedHunks = 0
@@ -123,5 +187,5 @@ export const buildUnifiedDiff = (
   }
 
   const truncated = retainedHunks < patch.hunks.length
-  return { diff: retainedHunks === 0 && truncated ? "" : lines.join("\n"), truncated }
+  return { diff: retainedHunks === 0 && truncated ? "" : lines.join("\n"), metadata: null, truncated }
 }

@@ -68,6 +68,13 @@ describe("WorktreeService", () => {
         const repaired = yield* service.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
 
+        const missingTarget = `${plan.targetPath}-moved`
+        yield* fs.rename(plan.targetPath, missingTarget)
+        const recovered = yield* service.checkout(plan)
+        expect(recovered.path).toBe(plan.targetPath)
+        expect(recovered.reused).toBe(false)
+        expect(yield* runGit(["rev-parse", "HEAD"], plan.targetPath)).toBe(sourceCommit)
+
         yield* runGit([
           `--git-dir=${plan.cachePath}`,
           "worktree",

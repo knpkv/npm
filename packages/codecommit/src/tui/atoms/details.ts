@@ -24,6 +24,7 @@ export interface RenderedFileDiff {
   readonly diff: string
   readonly filetype: string | undefined
   readonly identity: FileDiffIdentity
+  readonly metadata: string | null
   readonly path: string
   readonly truncated: boolean
 }
@@ -90,6 +91,7 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
         diff: "",
         filetype: undefined,
         identity,
+        metadata: null,
         path,
         truncated: false
       } satisfies RenderedFileDiff
@@ -101,6 +103,7 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
       diff: rendered.diff,
       filetype: filetypeForPath(path),
       identity,
+      metadata: rendered.metadata,
       path,
       truncated: rendered.truncated
     } satisfies RenderedFileDiff

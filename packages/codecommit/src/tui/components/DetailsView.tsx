@@ -17,13 +17,15 @@ import {
 } from "../atoms/details.js"
 import {
   changedFilePath,
+  detailsKeyIntent,
+  exactRevisionReviewState,
   fileDiffIdentity,
   fileDiffIdentityMatches,
-  humanReviewState,
   pullRequestWorkspaceIdentity,
   workspaceIdentityMatches
 } from "../details-model.js"
 import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { Badge } from "./Badge.js"
 
@@ -79,16 +81,24 @@ function CommentsPanel({
   const fetchComments = useAtomSet(fetchPrCommentsAtom)
   const result = useAtomValue(fetchPrCommentsAtom)
   const fetchedRef = useRef<string | null>(null)
+  const expectedIdentity = pullRequestWorkspaceIdentity(pr)
+  const requestKey = `${expectedIdentity.profile}:${expectedIdentity.region}:${expectedIdentity.repositoryName}:${expectedIdentity.pullRequestId}`
   useEffect(() => {
-    if (fetchedRef.current === pr.id) return
-    fetchedRef.current = pr.id
+    if (fetchedRef.current === requestKey) return
+    fetchedRef.current = requestKey
     fetchComments(pr)
-  }, [fetchComments, pr])
-  const comments = AsyncResult.getOrElse(result, emptyCommentLocations)
+  }, [fetchComments, pr, requestKey])
+  const commentsResult =
+    AsyncResult.isSuccess(result) &&
+    !AsyncResult.isWaiting(result) &&
+    workspaceIdentityMatches(result.value.identity, expectedIdentity)
+      ? result.value.comments
+      : null
+  const comments = commentsResult ?? emptyCommentLocations()
   return (
     <scrollbox focused style={{ flexGrow: 1, padding: 2, width: "100%" }}>
-      {AsyncResult.isInitial(result) && <text fg={theme.textMuted}>Loading review thread…</text>}
-      {!AsyncResult.isInitial(result) && comments.length === 0 && <text fg={theme.textMuted}>No comments</text>}
+      {commentsResult === null && <text fg={theme.textMuted}>Loading review thread…</text>}
+      {commentsResult !== null && comments.length === 0 && <text fg={theme.textMuted}>No comments</text>}
       {comments.map((location, locationIndex) => (
         <box
           flexDirection="column"
@@ -144,6 +154,7 @@ function ActionKey({
 /** Exact-head PR workspace: files, native diff, human state, and preflighted local actions. */
 export function DetailsView() {
   const { theme } = useTheme()
+  const dialog = useDialog()
   const selectedPrId = useAtomValue(selectedPrIdAtom)
   const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
   const setView = useAtomSet(viewAtom)
@@ -270,26 +281,31 @@ export function DetailsView() {
   }
 
   useKeyboard((key) => {
+    const intent = detailsKeyIntent({
+      actionCancelable:
+        action._tag === "preflight" || action._tag === "ready" || action._tag === "done" || action._tag === "failed",
+      actionReady: action._tag === "ready" && workspace !== null,
+      dialogOpen: dialog.current !== null,
+      keyName: key.name,
+      tab
+    })
+    if (intent === "yield") return
     key.stopPropagation()
-    if (key.name === "escape") {
-      if (action._tag === "preflight" || action._tag === "ready") setAction({ _tag: "idle" })
-      else setView("prs")
-      return
-    }
-    if (key.name === "1") setTab("diff")
-    else if (key.name === "2" || key.name === "c") setTab("comments")
-    else if (key.name === "o" && pr !== null) openPr(pr)
-    else if (tab === "diff" && (key.name === "up" || key.name === "k")) {
+    if (intent === "back") setView("prs")
+    else if (intent === "cancel-action") setAction({ _tag: "idle" })
+    else if (intent === "show-diff") setTab("diff")
+    else if (intent === "show-comments") setTab("comments")
+    else if (intent === "open-browser" && pr !== null) openPr(pr)
+    else if (intent === "previous-file") {
       setSelectedFileIndex((index) => Math.max(0, index - 1))
-    } else if (tab === "diff" && (key.name === "down" || key.name === "j")) {
+    } else if (intent === "next-file") {
       setSelectedFileIndex((index) => Math.min(Math.max(0, (workspace?.files.length ?? 1) - 1), index + 1))
-    } else if (key.name === "w") beginAction("worktree")
-    else if (key.name === "r") beginAction("review")
-    else if (key.name === "s") beginAction("security")
-    else if (key.name === "t") beginAction("tests")
-    else if (key.name === "e") beginAction("explain")
-    else if (key.name === "x" && action._tag !== "running") setAction({ _tag: "idle" })
-    else if (key.name === "return" && action._tag === "ready" && workspace !== null) {
+    } else if (intent === "checkout-worktree") beginAction("worktree")
+    else if (intent === "review-pr") beginAction("review")
+    else if (intent === "review-security") beginAction("security")
+    else if (intent === "review-tests") beginAction("tests")
+    else if (intent === "explain-risk") beginAction("explain")
+    else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
       const ready = action
       setAction({ _tag: "running", action: ready.action })
       if (ready.action === "worktree") checkout(ready.plan)
@@ -306,7 +322,7 @@ export function DetailsView() {
   }
 
   const revision = workspace?.revision
-  const humanState = humanReviewState(pr)
+  const humanState = exactRevisionReviewState()
 
   return (
     <box flexDirection="column" style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1, width: "100%" }}>
@@ -317,9 +333,9 @@ export function DetailsView() {
         <box flexDirection="row" justifyContent="space-between">
           <text fg={theme.textAccent}>{`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`}</text>
           <box flexDirection="row">
-            <text fg={pr.isApproved ? theme.textSuccess : theme.textWarning}>{`APPROVAL ${humanState.approval}`}</text>
+            <text fg={theme.textMuted}>{`APPROVAL ${humanState.approval}`}</text>
             <text fg={theme.textMuted}> · </text>
-            <text fg={pr.isMergeable ? theme.textSuccess : theme.textError}>{humanState.mergeability}</text>
+            <text fg={theme.textMuted}>{`MERGEABILITY ${humanState.mergeability}`}</text>
           </box>
         </box>
         <text fg={theme.textMuted}>{`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`}</text>
@@ -389,7 +405,11 @@ export function DetailsView() {
               </text>
             )}
             {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length === 0 && (
-              <text fg={theme.textMuted}> This change is too large for a safe terminal preview.</text>
+              <text fg={renderedDiff.metadata === null ? theme.textMuted : theme.textAccent}>
+                {renderedDiff.metadata === null
+                  ? " This change is too large for a safe terminal preview."
+                  : ` ${renderedDiff.metadata}`}
+              </text>
             )}
             {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && (
               <diff

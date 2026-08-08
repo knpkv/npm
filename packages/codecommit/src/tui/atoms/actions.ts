@@ -241,8 +241,7 @@ const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
 export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient.AwsClient
-
-    return yield* awsClient.getCommentsForPullRequest({
+    const comments = yield* awsClient.getCommentsForPullRequest({
       account: { profile: pr.account.profile, region: pr.account.region },
       pullRequestId: pr.id,
       repositoryName: pr.repositoryName
@@ -253,6 +252,15 @@ export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
       Effect.catchTag("AwsThrottleError", () => Effect.succeed(emptyCommentLocations())),
       Effect.withSpan("fetchPrComments", { attributes: { prId: pr.id } })
     )
+    return {
+      comments,
+      identity: {
+        profile: pr.account.profile,
+        pullRequestId: pr.id,
+        region: pr.account.region,
+        repositoryName: pr.repositoryName
+      }
+    }
   })
 )
 

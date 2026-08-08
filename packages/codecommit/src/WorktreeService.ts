@@ -11,6 +11,7 @@ import { ChildEnv, type Domain, type ReadClient } from "@knpkv/codecommit-core"
 import { Config, Context, Effect, Layer, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Semaphore from "effect/Semaphore"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
@@ -170,6 +171,7 @@ export const makeWorktreeService = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const checkoutSemaphore = yield* Semaphore.make(1)
     const home = yield* homeDirectory.pipe(
       Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
     )
@@ -200,7 +202,7 @@ export const makeWorktreeService = (
       return { ...request, cachePath, targetPath, targetExists } satisfies WorktreePlan
     })
 
-    const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
+    const checkoutUnlocked = Effect.fn("WorktreeService.checkoutUnlocked")(function*(plan: WorktreePlan) {
       yield* fs.makeDirectory(path.dirname(plan.cachePath), { recursive: true }).pipe(
         Effect.mapError((cause) => commandFailure("create-cache-directory", "Unable to create repository cache", cause))
       )
@@ -357,7 +359,7 @@ export const makeWorktreeService = (
         Effect.mapError((cause) => commandFailure("add-worktree", "Unable to run git", cause))
       )
       if (addExitCode !== ChildProcessSpawner.ExitCode(0)) {
-        const racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
+        let racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
           Effect.mapError((cause) => commandFailure("inspect-raced-target", "Unable to inspect raced worktree", cause))
         )
         if (racedTargetExists) {
@@ -365,11 +367,77 @@ export const makeWorktreeService = (
           if (yield* isExactHead(spawner, plan, plan.targetPath)) {
             return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
           }
+          return yield* commandFailure(
+            "validate-raced-target",
+            `Concurrent worktree path is not at ${plan.sourceCommit}`
+          )
+        }
+
+        // A concurrent `git worktree add` can register the path just before its
+        // directory becomes visible. Give that winner time to materialize before
+        // treating the registration as stale and removing it.
+        yield* Effect.sleep("50 millis")
+        racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
+          Effect.mapError((cause) => commandFailure("wait-for-raced-target", "Unable to inspect raced worktree", cause))
+        )
+        if (racedTargetExists) {
+          yield* assertCanonical("validate-waited-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
+          if (yield* isExactHead(spawner, plan, plan.targetPath)) {
+            return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+          }
+          return yield* commandFailure(
+            "validate-waited-target",
+            `Concurrent worktree path is not at ${plan.sourceCommit}`
+          )
+        }
+
+        const removedStaleRegistration = yield* runSucceeds(spawner, plan, [
+          `--git-dir=${plan.cachePath}`,
+          "worktree",
+          "remove",
+          "--force",
+          plan.targetPath
+        ])
+        if (removedStaleRegistration) {
+          const retryExitCode = yield* spawner.exitCode(gitCommand(plan, [
+            `--git-dir=${plan.cachePath}`,
+            "worktree",
+            "add",
+            "--detach",
+            plan.targetPath,
+            plan.sourceCommit
+          ])).pipe(
+            Effect.mapError((cause) => commandFailure("retry-add-worktree", "Unable to run git", cause))
+          )
+          if (retryExitCode === ChildProcessSpawner.ExitCode(0)) {
+            return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+          }
+          racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
+            Effect.mapError((cause) =>
+              commandFailure("inspect-retried-target", "Unable to inspect retried worktree", cause)
+            )
+          )
+          if (racedTargetExists) {
+            yield* assertCanonical(
+              "validate-retried-target-path",
+              worktreesRoot,
+              canonicalWorktreesRoot,
+              plan.targetPath
+            )
+            if (yield* isExactHead(spawner, plan, plan.targetPath)) {
+              return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+            }
+          }
+          return yield* commandFailure("retry-add-worktree", `git exited with code ${retryExitCode}`)
         }
         return yield* commandFailure("add-worktree", `git exited with code ${addExitCode}`)
       }
 
       return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
+    })
+
+    const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
+      return yield* checkoutSemaphore.withPermits(1)(checkoutUnlocked(plan))
     })
 
     return { checkout, preflight } satisfies WorktreeServiceShape

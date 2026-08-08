@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest"
 import { makeRelayReviewPrompt } from "../src/RelayReview.js"
 import {
   buildUnifiedDiff,
+  detailsKeyIntent,
+  exactRevisionReviewState,
   fileDiffIdentityMatches,
   humanReviewState,
   workspaceIdentityMatches
@@ -69,6 +71,33 @@ describe("PR detail workspace", () => {
       expect(oldLines).toBe(hunk.oldLines)
       expect(newLines).toBe(hunk.newLines)
     }
+  })
+
+  it("surfaces rename and mode metadata when blob text is unchanged", () => {
+    const file = decodeChangedFile({
+      status: "renamed",
+      before: { blobId: "same-blob", path: "src/old-name.ts", mode: "100644" },
+      after: { blobId: "same-blob", path: "src/new-name.ts", mode: "100755" }
+    })
+    const result = buildUnifiedDiff(file, "export const value = 1\n", "export const value = 1\n")
+
+    expect(result.diff).toBe("")
+    expect(result.metadata).toContain("rename src/old-name.ts → src/new-name.ts")
+    expect(result.metadata).toContain("mode 100644 → 100755")
+    expect(result.truncated).toBe(false)
+  })
+
+  it("yields keyboard events to dialogs and focused comments while retaining file navigation", () => {
+    const base: Omit<Parameters<typeof detailsKeyIntent>[0], "keyName"> = {
+      actionCancelable: false,
+      actionReady: false,
+      dialogOpen: false,
+      tab: "diff"
+    }
+
+    expect(detailsKeyIntent({ ...base, dialogOpen: true, keyName: "escape" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "j" })).toBe("next-file")
+    expect(detailsKeyIntent({ ...base, keyName: "down", tab: "comments" })).toBe("yield")
   })
 
   it("binds Relay review instructions to the immutable base and head", () => {
@@ -141,6 +170,10 @@ describe("PR detail workspace", () => {
     expect(humanReviewState({ isApproved: false, isMergeable: true })).toEqual({
       approval: "NEEDS REVIEW",
       mergeability: "MERGEABLE"
+    })
+    expect(exactRevisionReviewState()).toEqual({
+      approval: "UNVERIFIED",
+      mergeability: "UNVERIFIED"
     })
   })
 })
