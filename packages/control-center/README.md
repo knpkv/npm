@@ -503,10 +503,14 @@ the normalized provider identities and account/resource bindings. Scope finaliza
 server and removes the database, blob, static, and secret roots after success, failure, timeout, or
 interruption. The scheduled/manual workflow builds a checksum-sealed runner in a job without OIDC,
 then verifies it in the protected `control-center-live-integration` execution job before assuming the
-AWS role. The short-lived runner artifact contains code and dependencies only; provider credentials,
-results, logs, and runtime evidence are never uploaded. Ordinary pull-request tests never select
-this entry. External read-only AWS role and fixture provisioning remains tracked by issue #241,
-while interactive Atlassian OAuth consent remains tracked by #242.
+AWS role. That GitHub environment is the non-mutable trust boundary for manual `workflow_dispatch
+--ref` runs: keep its deployment branch policy limited to `main`, store the Atlassian secrets only in
+that environment, and pin the AWS role trust policy to the repository, `main` ref, and environment
+OIDC subject. A branch-authored workflow-level `if` is only defense in depth because a selected ref
+can change its own YAML. The short-lived runner artifact contains code and dependencies only;
+provider credentials, results, logs, and runtime evidence are never uploaded. Ordinary pull-request
+tests never select this entry. External read-only AWS role and fixture provisioning remains tracked
+by issue #241, while interactive Atlassian OAuth consent remains tracked by #242.
 
 Fresh workspaces also see the fixed CodeCommit, CodePipeline, Jira, Confluence, and Clockify catalog. The safe provider identities are visible before pairing; choosing one carries that selection through pairing and opens its setup form immediately. `GET /api/v1/plugins` retains its original connection-summary array for existing v1 clients; after pairing, the Services page reads the additive `{ catalog, connections }` response from `GET /api/v1/plugins/overview`. A workspace owner can submit one bounded CSRF-protected setup request whose browser-generated connection ID, typed adapter settings, and transport-only credential strings are validated before writes. Secret strings are converted to opaque `SecretStore` references; the canonical SQL configuration contains references only. The application creates disabled metadata, inserts configuration with expected revision zero, accepts the catalog descriptor, enables with metadata CAS, invalidates the scoped connection map, and then runs the live identity test. Provider authentication or health failure is returned as the usable test result and does not roll back the enabled connection. Failure before configuration removes newly created secrets; later setup failure retains a visible disabled draft.
 

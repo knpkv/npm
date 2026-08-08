@@ -3,8 +3,12 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const trustedRefCondition = "if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'"
+const protectedEnvironment = "environment: control-center-live-integration"
+const idTokenPermission = "id-token: write"
 
-const hasTrustedRefCondition = (job: string) => job.split("\n").some((line) => line.trim() === trustedRefCondition)
+const hasExactLine = (source: string, expected: string) => source.split("\n").some((line) => line.trim() === expected)
+
+const hasTrustedRefCondition = (job: string) => hasExactLine(job, trustedRefCondition)
 
 const workflow = readFileSync(
   fileURLToPath(new URL("../../../../.github/workflows/control-center-live-integration.yml", import.meta.url)),
@@ -27,5 +31,20 @@ describe("Control Center live workflow trust boundary", () => {
   it("restricts both the branch-built runner and privileged journey to the trusted repository main branch", () => {
     expect(hasTrustedRefCondition(jobDefinition("prepare-live-runner"))).toBe(true)
     expect(hasTrustedRefCondition(jobDefinition("live-provider-journey"))).toBe(true)
+  })
+
+  it("keeps provider credentials behind the externally branch-protected environment boundary", () => {
+    const tamperedDispatchRefJob = `
+      runs-on: ubuntu-latest
+      permissions:
+        id-token: write
+      steps:
+        - run: echo can request cloud credentials without environment deployment-branch approval
+    `
+    const protectedProviderJob = jobDefinition("live-provider-journey")
+
+    expect(hasExactLine(tamperedDispatchRefJob, protectedEnvironment)).toBe(false)
+    expect(hasExactLine(protectedProviderJob, protectedEnvironment)).toBe(true)
+    expect(hasExactLine(protectedProviderJob, idTokenPermission)).toBe(true)
   })
 })
