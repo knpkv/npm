@@ -8,10 +8,9 @@
  * @module
  */
 import { ChildEnv, type Domain, type ReadClient } from "@knpkv/codecommit-core"
-import { Config, Context, Effect, Layer, Schema } from "effect"
+import { Config, Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as Semaphore from "effect/Semaphore"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
@@ -85,8 +84,9 @@ const stableHash = (value: string): string => {
 
 /** Produces one bounded, traversal-safe path segment while retaining identity. */
 export const safePathSegment = (label: string, value: string): string => {
+  const safeLabel = label.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 24) || "item"
   const readable = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 48) || "item"
-  return `${label}-${readable}-${stableHash(value)}`
+  return `${safeLabel}-${readable}-${stableHash(`${label}\u0000${value}`)}`
 }
 
 const gitEnvironment = (request: WorktreeRequest) =>
@@ -158,6 +158,50 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   return headBeforeTarget && targetBeforeHead
 })
 
+const isCleanWorktree = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  request: WorktreeRequest,
+  targetPath: string
+) =>
+  spawner.string(ChildProcess.make("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+    cwd: targetPath,
+    env: gitEnvironment(request),
+    extendEnv: true,
+    stderr: "ignore",
+    stdout: "pipe"
+  })).pipe(
+    Effect.match({
+      onFailure: () => false,
+      onSuccess: (output) => output.length === 0
+    })
+  )
+
+const isReusableWorktree = Effect.fn("WorktreeService.isReusableWorktree")(function*(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  request: WorktreeRequest,
+  targetPath: string
+) {
+  const exact = yield* isExactHead(spawner, request, targetPath)
+  return exact && (yield* isCleanWorktree(spawner, request, targetPath))
+})
+
+const LOCK_READY_LINE = "knpkv-codecommit-lock-ready"
+const LOCK_HOLDER_SCRIPT = `printf '${LOCK_READY_LINE}\\n'; exec /bin/sleep 2147483647`
+
+/** Sidecar advisory lock shared by every process operating on one repository cache. */
+export const repositoryLockPath = (cachePath: string): string => `${cachePath}.knpkv.lock`
+
+const lockHolderCommands = (lockPath: string): ReadonlyArray<ChildProcess.Command> => [
+  ChildProcess.make("lockf", ["-k", lockPath, "/bin/sh", "-c", LOCK_HOLDER_SCRIPT], {
+    stderr: "pipe",
+    stdout: "pipe"
+  }),
+  ChildProcess.make("flock", ["-F", "-x", lockPath, "/bin/sh", "-c", LOCK_HOLDER_SCRIPT], {
+    stderr: "pipe",
+    stdout: "pipe"
+  })
+]
+
 const codeCommitRemoteUrl = (request: WorktreeRequest): string =>
   `https://git-codecommit.${request.account.region}.amazonaws.com/v1/repos/${
     encodeURIComponent(request.repositoryName)
@@ -171,7 +215,6 @@ export const makeWorktreeService = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const checkoutSemaphore = yield* Semaphore.make(1)
     const home = yield* homeDirectory.pipe(
       Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
     )
@@ -202,40 +245,199 @@ export const makeWorktreeService = (
       return { ...request, cachePath, targetPath, targetExists } satisfies WorktreePlan
     })
 
-    const checkoutUnlocked = Effect.fn("WorktreeService.checkoutUnlocked")(function*(plan: WorktreePlan) {
-      yield* fs.makeDirectory(path.dirname(plan.cachePath), { recursive: true }).pipe(
+    interface CheckoutPaths {
+      readonly canonicalRepositoriesRoot: string
+      readonly canonicalWorktreesRoot: string
+      readonly repositoriesRoot: string
+      readonly worktreesRoot: string
+    }
+
+    const assertContained = (
+      operation: string,
+      root: string,
+      candidate: string
+    ): Effect.Effect<void, WorktreeError> => {
+      const relative = path.relative(root, candidate)
+      const segments = relative.split(/[\\/]/u)
+      return path.isAbsolute(relative) || segments[0] === ".."
+        ? commandFailure(operation, `Refusing CodeCommit path outside ${root}`)
+        : Effect.void
+    }
+
+    const assertCanonical = Effect.fn("WorktreeService.assertCanonical")(function*(
+      operation: string,
+      root: string,
+      canonicalRoot: string,
+      candidate: string
+    ) {
+      yield* assertContained(operation, root, candidate)
+      const expected = path.join(canonicalRoot, path.relative(root, candidate))
+      const actual = yield* fs.realPath(candidate).pipe(
+        Effect.mapError((cause) => commandFailure(operation, `Unable to resolve ${candidate}`, cause))
+      )
+      if (actual !== expected) {
+        return yield* commandFailure(operation, `Refusing non-canonical CodeCommit path ${candidate}`)
+      }
+    })
+
+    const assertNearestExistingParent = Effect.fn("WorktreeService.assertNearestExistingParent")(function*(
+      operation: string,
+      root: string,
+      canonicalRoot: string,
+      candidate: string
+    ) {
+      yield* assertContained(operation, root, candidate)
+      let cursor = candidate
+      while (
+        !(yield* fs.exists(cursor).pipe(
+          Effect.mapError((cause) => commandFailure(operation, `Unable to inspect ${cursor}`, cause))
+        ))
+      ) {
+        const parent = path.dirname(cursor)
+        if (parent === cursor) return yield* commandFailure(operation, `Unable to locate parent for ${candidate}`)
+        cursor = parent
+      }
+      yield* assertCanonical(operation, root, canonicalRoot, cursor)
+    })
+
+    const prepareCheckoutPaths = Effect.fn("WorktreeService.prepareCheckoutPaths")(function*(plan: WorktreePlan) {
+      const repositoriesRoot = path.join(home, ".codecommit", "repositories")
+      const worktreesRoot = path.join(home, ".codecommit", "worktrees")
+      yield* Effect.all([
+        fs.makeDirectory(repositoriesRoot, { recursive: true }).pipe(
+          Effect.mapError((cause) => commandFailure("create-cache-root", "Unable to create repository root", cause))
+        ),
+        fs.makeDirectory(worktreesRoot, { recursive: true }).pipe(
+          Effect.mapError((cause) => commandFailure("create-worktree-root", "Unable to create worktree root", cause))
+        )
+      ])
+      const [canonicalRepositoriesRoot, canonicalWorktreesRoot] = yield* Effect.all([
+        fs.realPath(repositoriesRoot).pipe(
+          Effect.mapError((cause) => commandFailure("resolve-cache-root", "Unable to resolve repository root", cause))
+        ),
+        fs.realPath(worktreesRoot).pipe(
+          Effect.mapError((cause) => commandFailure("resolve-worktree-root", "Unable to resolve worktree root", cause))
+        )
+      ])
+      const cacheParent = path.dirname(plan.cachePath)
+      const targetParent = path.dirname(plan.targetPath)
+      yield* assertNearestExistingParent(
+        "validate-cache-parent-before-create",
+        repositoriesRoot,
+        canonicalRepositoriesRoot,
+        cacheParent
+      )
+      yield* assertNearestExistingParent(
+        "validate-worktree-parent-before-create",
+        worktreesRoot,
+        canonicalWorktreesRoot,
+        targetParent
+      )
+      yield* fs.makeDirectory(cacheParent, { recursive: true }).pipe(
         Effect.mapError((cause) => commandFailure("create-cache-directory", "Unable to create repository cache", cause))
       )
-      yield* fs.makeDirectory(path.dirname(plan.targetPath), { recursive: true }).pipe(
+      yield* fs.makeDirectory(targetParent, { recursive: true }).pipe(
         Effect.mapError((cause) =>
           commandFailure("create-worktree-directory", "Unable to create worktree directory", cause)
         )
       )
-      const repositoriesRoot = path.join(home, ".codecommit", "repositories")
-      const worktreesRoot = path.join(home, ".codecommit", "worktrees")
-      const canonicalRepositoriesRoot = yield* fs.realPath(repositoriesRoot).pipe(
-        Effect.mapError((cause) =>
-          commandFailure("resolve-cache-root", "Unable to resolve repository cache root", cause)
-        )
+      yield* assertCanonical(
+        "validate-cache-parent-after-create",
+        repositoriesRoot,
+        canonicalRepositoriesRoot,
+        cacheParent
       )
-      const canonicalWorktreesRoot = yield* fs.realPath(worktreesRoot).pipe(
-        Effect.mapError((cause) => commandFailure("resolve-worktree-root", "Unable to resolve worktree root", cause))
+      yield* assertCanonical(
+        "validate-worktree-parent-after-create",
+        worktreesRoot,
+        canonicalWorktreesRoot,
+        targetParent
+      )
+      const lockPath = repositoryLockPath(plan.cachePath)
+      if (
+        yield* fs.exists(lockPath).pipe(
+          Effect.mapError((cause) => commandFailure("inspect-repository-lock", `Unable to inspect ${lockPath}`, cause))
+        )
+      ) {
+        yield* assertCanonical("validate-repository-lock", repositoriesRoot, canonicalRepositoriesRoot, lockPath)
+      }
+      return {
+        canonicalRepositoriesRoot,
+        canonicalWorktreesRoot,
+        repositoriesRoot,
+        worktreesRoot
+      } satisfies CheckoutPaths
+    })
+
+    const spawnLockHolder = (lockPath: string) => {
+      const [lockf, flock] = lockHolderCommands(lockPath)
+      return spawner.spawn(lockf!).pipe(
+        Effect.catch(() => spawner.spawn(flock!)),
+        Effect.mapError((cause) => commandFailure("acquire-repository-lock", `Unable to lock ${lockPath}`, cause))
+      )
+    }
+
+    const releaseLockHolder = (handle: ChildProcessSpawner.ChildProcessHandle) =>
+      handle.isRunning.pipe(
+        Effect.flatMap((running) => running ? handle.kill() : Effect.void),
+        Effect.ignore
       )
 
-      const assertCanonical = Effect.fn("WorktreeService.assertCanonical")(function*(
-        operation: string,
-        root: string,
-        canonicalRoot: string,
-        candidate: string
-      ) {
-        const expected = path.join(canonicalRoot, path.relative(root, candidate))
-        const actual = yield* fs.realPath(candidate).pipe(
-          Effect.mapError((cause) => commandFailure(operation, `Unable to resolve ${candidate}`, cause))
+    const withRepositoryLock = <A>(plan: WorktreePlan, effect: Effect.Effect<A, WorktreeError>) =>
+      Effect.scoped(
+        Effect.acquireUseRelease(
+          spawnLockHolder(repositoryLockPath(plan.cachePath)),
+          (handle) =>
+            handle.stdout.pipe(
+              Stream.decodeText(),
+              Stream.splitLines,
+              Stream.runHead,
+              Effect.mapError((cause) =>
+                commandFailure("acquire-repository-lock", "Unable to read repository lock readiness", cause)
+              ),
+              Effect.flatMap((line) =>
+                Option.isSome(line) && line.value === LOCK_READY_LINE
+                  ? Effect.raceFirst(
+                    effect,
+                    handle.exitCode.pipe(
+                      Effect.mapError((cause) =>
+                        commandFailure("hold-repository-lock", "Repository lock holder failed", cause)
+                      ),
+                      Effect.flatMap((exitCode) =>
+                        commandFailure("hold-repository-lock", `Repository lock holder exited with code ${exitCode}`)
+                      )
+                    )
+                  )
+                  : commandFailure("acquire-repository-lock", "Repository lock holder exited before acquisition")
+              )
+            ),
+          releaseLockHolder
         )
-        if (actual !== expected) {
-          return yield* commandFailure(operation, `Refusing non-canonical CodeCommit path ${candidate}`)
-        }
-      })
+      )
+
+    const checkoutUnlocked = Effect.fn("WorktreeService.checkoutUnlocked")(function*(
+      plan: WorktreePlan,
+      paths: CheckoutPaths
+    ) {
+      const { canonicalRepositoriesRoot, canonicalWorktreesRoot, repositoriesRoot, worktreesRoot } = paths
+      yield* assertCanonical(
+        "revalidate-cache-parent",
+        repositoriesRoot,
+        canonicalRepositoriesRoot,
+        path.dirname(plan.cachePath)
+      )
+      yield* assertCanonical(
+        "validate-acquired-repository-lock",
+        repositoriesRoot,
+        canonicalRepositoriesRoot,
+        repositoryLockPath(plan.cachePath)
+      )
+      yield* assertCanonical(
+        "revalidate-worktree-parent",
+        worktreesRoot,
+        canonicalWorktreesRoot,
+        path.dirname(plan.targetPath)
+      )
 
       const cacheExists = yield* fs.exists(plan.cachePath).pipe(
         Effect.mapError((cause) => commandFailure("inspect-cache", `Unable to inspect ${plan.cachePath}`, cause))
@@ -339,11 +541,11 @@ export const makeWorktreeService = (
       )
       if (targetExists) {
         yield* assertCanonical("validate-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-        const exact = yield* isExactHead(spawner, plan, plan.targetPath)
-        if (!exact) {
+        const reusable = yield* isReusableWorktree(spawner, plan, plan.targetPath)
+        if (!reusable) {
           return yield* commandFailure(
             "validate-existing-target",
-            `Worktree path exists but is not at ${plan.sourceCommit}`
+            `Worktree path is dirty or is not at ${plan.sourceCommit}; preserving it for manual recovery`
           )
         }
         return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
@@ -365,30 +567,12 @@ export const makeWorktreeService = (
         )
         if (racedTargetExists) {
           yield* assertCanonical("validate-raced-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-          if (yield* isExactHead(spawner, plan, plan.targetPath)) {
+          if (yield* isReusableWorktree(spawner, plan, plan.targetPath)) {
             return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
           }
           return yield* commandFailure(
             "validate-raced-target",
-            `Concurrent worktree path is not at ${plan.sourceCommit}`
-          )
-        }
-
-        // A concurrent `git worktree add` can register the path just before its
-        // directory becomes visible. Give that winner time to materialize before
-        // treating the registration as stale and removing it.
-        yield* Effect.sleep("50 millis")
-        racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
-          Effect.mapError((cause) => commandFailure("wait-for-raced-target", "Unable to inspect raced worktree", cause))
-        )
-        if (racedTargetExists) {
-          yield* assertCanonical("validate-waited-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-          if (yield* isExactHead(spawner, plan, plan.targetPath)) {
-            return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
-          }
-          return yield* commandFailure(
-            "validate-waited-target",
-            `Concurrent worktree path is not at ${plan.sourceCommit}`
+            `Concurrent worktree path is dirty or is not at ${plan.sourceCommit}`
           )
         }
 
@@ -411,6 +595,18 @@ export const makeWorktreeService = (
             Effect.mapError((cause) => commandFailure("retry-add-worktree", "Unable to run git", cause))
           )
           if (retryExitCode === ChildProcessSpawner.ExitCode(0)) {
+            yield* assertCanonical(
+              "validate-retried-target-path",
+              worktreesRoot,
+              canonicalWorktreesRoot,
+              plan.targetPath
+            )
+            if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath))) {
+              return yield* commandFailure(
+                "validate-retried-target",
+                "Retried worktree is not a clean exact-head checkout"
+              )
+            }
             return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
           }
           racedTargetExists = yield* fs.exists(plan.targetPath).pipe(
@@ -425,7 +621,7 @@ export const makeWorktreeService = (
               canonicalWorktreesRoot,
               plan.targetPath
             )
-            if (yield* isExactHead(spawner, plan, plan.targetPath)) {
+            if (yield* isReusableWorktree(spawner, plan, plan.targetPath)) {
               return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
             }
           }
@@ -434,11 +630,16 @@ export const makeWorktreeService = (
         return yield* commandFailure("add-worktree", `git exited with code ${addExitCode}`)
       }
 
+      yield* assertCanonical("validate-created-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
+      if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath))) {
+        return yield* commandFailure("validate-created-target", "New worktree is not a clean exact-head checkout")
+      }
       return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
     })
 
     const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
-      return yield* checkoutSemaphore.withPermits(1)(checkoutUnlocked(plan))
+      const paths = yield* prepareCheckoutPaths(plan)
+      return yield* withRepositoryLock(plan, checkoutUnlocked(plan, paths))
     })
 
     return { checkout, preflight } satisfies WorktreeServiceShape

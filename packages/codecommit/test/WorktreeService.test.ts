@@ -1,12 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { ConfigProvider, Effect, Exit } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, Option, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { makeWorktreeService } from "../src/WorktreeService.js"
+import { makeWorktreeService, repositoryLockPath } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
   it.live("repairs an incomplete cache and converges concurrent exact-head checkouts", () =>
@@ -16,9 +16,12 @@ describe("WorktreeService", () => {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "codecommit-worktree-" })
       const home = path.join(root, "home")
+      const dataRoot = path.join(root, "codecommit-data")
       const seed = path.join(root, "seed")
       const origin = path.join(root, "origin.git")
       yield* fs.makeDirectory(home, { recursive: true })
+      yield* fs.makeDirectory(dataRoot, { recursive: true })
+      yield* fs.symlink(dataRoot, path.join(home, ".codecommit"))
       yield* fs.makeDirectory(seed, { recursive: true })
 
       const runGit = Effect.fn("WorktreeServiceTest.runGit")(function*(
@@ -51,8 +54,9 @@ describe("WorktreeService", () => {
       yield* runGit(["clone", "--bare", seed, origin], root)
 
       const scenario = Effect.gen(function*() {
-        const service = yield* makeWorktreeService(() => origin)
-        const plan = yield* service.preflight({
+        const firstService = yield* makeWorktreeService(() => origin)
+        const secondService = yield* makeWorktreeService(() => origin)
+        const request = {
           account: new Domain.Account({
             profile: Domain.AwsProfileName.make("local-test"),
             region: Domain.AwsRegion.make("eu-west-1")
@@ -61,20 +65,56 @@ describe("WorktreeService", () => {
           pullRequestId: Domain.PullRequestId.make("77"),
           repositoryName: Domain.RepositoryName.make("review-repository"),
           sourceCommit: ReadClient.CodeCommitCommitId.make(sourceCommit)
+        }
+        const plan = yield* firstService.preflight(request)
+
+        const escapedPlan = yield* firstService.preflight({
+          ...request,
+          pullRequestId: Domain.PullRequestId.make("../../../../../tmp\\escape")
         })
+        expect(escapedPlan.targetPath.startsWith(path.join(home, ".codecommit", "worktrees"))).toBe(true)
+        expect(path.relative(path.join(home, ".codecommit", "worktrees"), escapedPlan.targetPath)).not.toMatch(/^\.\./u)
+
+        const externalCache = path.join(root, "external-cache")
+        const externalWorktree = path.join(root, "external-worktree")
+        yield* fs.makeDirectory(externalCache, { recursive: true })
+        yield* fs.makeDirectory(externalWorktree, { recursive: true })
+        const cacheParent = path.dirname(plan.cachePath)
+        yield* fs.makeDirectory(path.dirname(cacheParent), { recursive: true })
+        yield* fs.symlink(externalCache, cacheParent)
+        expect(Exit.isFailure(yield* firstService.checkout(plan).pipe(Effect.exit))).toBe(true)
+        expect(yield* fs.readDirectory(externalCache)).toEqual([])
+        yield* fs.remove(cacheParent)
+
+        const targetParent = path.dirname(plan.targetPath)
+        yield* fs.makeDirectory(path.dirname(targetParent), { recursive: true })
+        yield* fs.symlink(externalWorktree, targetParent)
+        expect(Exit.isFailure(yield* firstService.checkout(plan).pipe(Effect.exit))).toBe(true)
+        expect(yield* fs.readDirectory(externalWorktree)).toEqual([])
+        yield* fs.remove(targetParent)
 
         yield* fs.makeDirectory(plan.cachePath, { recursive: true })
         yield* fs.writeFileString(path.join(plan.cachePath, "preserve-me"), "not a confirmed interrupted clone")
-        const preserved = yield* service.checkout(plan).pipe(Effect.exit)
+        const preserved = yield* firstService.checkout(plan).pipe(Effect.exit)
         expect(Exit.isFailure(preserved)).toBe(true)
         expect(yield* fs.exists(path.join(plan.cachePath, "preserve-me"))).toBe(true)
         yield* fs.remove(plan.cachePath, { recursive: true })
-        const repaired = yield* service.checkout(plan)
+        const repaired = yield* firstService.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
+
+        yield* fs.writeFileString(path.join(plan.targetPath, "feature.txt"), "locally modified\n")
+        yield* fs.writeFileString(path.join(plan.targetPath, "untracked.txt"), "preserve me\n")
+        const dirty = yield* secondService.checkout(plan).pipe(Effect.exit)
+        expect(Exit.isFailure(dirty)).toBe(true)
+        expect(yield* fs.readFileString(path.join(plan.targetPath, "feature.txt"))).toBe("locally modified\n")
+        expect(yield* fs.readFileString(path.join(plan.targetPath, "untracked.txt"))).toBe("preserve me\n")
+        yield* runGit(["restore", "feature.txt"], plan.targetPath)
+        yield* fs.remove(path.join(plan.targetPath, "untracked.txt"))
+        expect((yield* secondService.checkout(plan)).reused).toBe(true)
 
         const missingTarget = `${plan.targetPath}-moved`
         yield* fs.rename(plan.targetPath, missingTarget)
-        const recovered = yield* service.checkout(plan)
+        const recovered = yield* secondService.checkout(plan)
         expect(recovered.path).toBe(plan.targetPath)
         expect(recovered.reused).toBe(false)
         expect(yield* runGit(["rev-parse", "HEAD"], plan.targetPath)).toBe(sourceCommit)
@@ -86,12 +126,60 @@ describe("WorktreeService", () => {
           "--force",
           plan.targetPath
         ])
-        const raced = yield* Effect.all([service.checkout(plan), service.checkout(plan)], { concurrency: "unbounded" })
+        const raced = yield* Effect.all([firstService.checkout(plan), secondService.checkout(plan)], {
+          concurrency: "unbounded"
+        })
 
         expect(raced[0].path).toBe(plan.targetPath)
         expect(raced[1].path).toBe(plan.targetPath)
         expect(raced.some((result) => result.reused)).toBe(true)
         expect(yield* runGit(["rev-parse", "HEAD"], plan.targetPath)).toBe(sourceCommit)
+
+        const lockPath = repositoryLockPath(plan.cachePath)
+        const lockScript = "printf 'test-lock-ready\\n'; exec /bin/sleep 2147483647"
+        const spawnHolder = spawner.spawn(ChildProcess.make("lockf", [
+          "-k",
+          lockPath,
+          "/bin/sh",
+          "-c",
+          lockScript
+        ], { stderr: "pipe", stdout: "pipe" })).pipe(
+          Effect.catch(() =>
+            spawner.spawn(ChildProcess.make("flock", [
+              "-F",
+              "-x",
+              lockPath,
+              "/bin/sh",
+              "-c",
+              lockScript
+            ], { stderr: "pipe", stdout: "pipe" }))
+          )
+        )
+        const holder = yield* spawnHolder
+        yield* Effect.addFinalizer(() =>
+          holder.isRunning.pipe(
+            Effect.flatMap((running) => running ? holder.kill({ killSignal: "SIGKILL" }) : Effect.void),
+            Effect.ignore
+          )
+        )
+        const holderReady = yield* holder.stdout.pipe(Stream.decodeText(), Stream.splitLines, Stream.runHead)
+        expect(Option.getOrUndefined(holderReady)).toBe("test-lock-ready")
+        const waitingCheckout = yield* secondService.checkout(plan).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Effect.yieldNow
+        expect(waitingCheckout.pollUnsafe()).toBeUndefined()
+        yield* holder.kill({ killSignal: "SIGKILL" })
+        expect((yield* Fiber.join(waitingCheckout)).reused).toBe(true)
+
+        const otherPlan = yield* firstService.preflight({
+          ...request,
+          pullRequestId: Domain.PullRequestId.make("78"),
+          repositoryName: Domain.RepositoryName.make("review-repository-two")
+        })
+        const independent = yield* Effect.all([
+          firstService.checkout(plan),
+          secondService.checkout(otherPlan)
+        ], { concurrency: "unbounded" })
+        expect(independent.map((result) => result.sourceCommit)).toEqual([sourceCommit, sourceCommit])
         yield* runGit([`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${destinationCommit}^{commit}`])
         yield* runGit([`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${sourceCommit}^{commit}`])
       }).pipe(
@@ -99,5 +187,5 @@ describe("WorktreeService", () => {
       )
 
       yield* scenario
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 20_000)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 30_000)
 })

@@ -23,6 +23,8 @@ import {
   fileDiffIdentity,
   fileDiffIdentityMatches,
   pullRequestWorkspaceIdentity,
+  terminalSafeMultilineText,
+  terminalSafeText,
   workspaceIdentityMatches
 } from "../details-model.js"
 import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
@@ -59,13 +61,17 @@ function CommentThread({
       ) : (
         <text
           fg={theme.textMuted}
-        >{`${depth > 0 ? "│" : "┌"} ${thread.root.author} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
+        >{`${depth > 0 ? "│" : "┌"} ${terminalSafeText(thread.root.author)} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
       )}
       {thread.root.deleted ? null : syntaxStyle ? (
-        <markdown content={thread.root.content} syntaxStyle={syntaxStyle} style={{ paddingLeft: 2, width: "100%" }} />
+        <markdown
+          content={terminalSafeMultilineText(thread.root.content)}
+          syntaxStyle={syntaxStyle}
+          style={{ paddingLeft: 2, width: "100%" }}
+        />
       ) : (
         <text fg={theme.text} style={{ paddingLeft: 2 }}>
-          {thread.root.content}
+          {terminalSafeMultilineText(thread.root.content)}
         </text>
       )}
       {thread.replies.map((reply) => (
@@ -110,7 +116,7 @@ function CommentsPanel({
           key={`${location.filePath ?? "general"}-${locationIndex}`}
           style={{ paddingBottom: 1 }}
         >
-          <text fg={theme.textAccent}>{location.filePath ?? "General review"}</text>
+          <text fg={theme.textAccent}>{terminalSafeText(location.filePath ?? "General review")}</text>
           {location.comments.map((thread) => (
             <CommentThread depth={0} key={thread.root.id} syntaxStyle={syntaxStyle} thread={thread} />
           ))}
@@ -374,14 +380,16 @@ export function DetailsView() {
         style={{ backgroundColor: theme.backgroundElement, height: 4, paddingLeft: 2, paddingRight: 2 }}
       >
         <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textAccent}>{`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`}</text>
+          <text fg={theme.textAccent}>{terminalSafeText(`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`)}</text>
           <box flexDirection="row">
             <text fg={theme.textMuted}>{`APPROVAL ${humanState.approval}`}</text>
             <text fg={theme.textMuted}> · </text>
             <text fg={theme.textMuted}>{`MERGEABILITY ${humanState.mergeability}`}</text>
           </box>
         </box>
-        <text fg={theme.textMuted}>{`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`}</text>
+        <text fg={theme.textMuted}>
+          {terminalSafeText(`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`)}
+        </text>
         <text fg={theme.textMuted}>
           {revision === undefined
             ? "Loading exact revision…"
@@ -426,7 +434,7 @@ export function DetailsView() {
                     fg={index === selectedFileIndex ? theme.selectedText : theme.textMuted}
                     key={`${changedFilePath(file)}-${index}`}
                   >
-                    {` ${status} ${changedFilePath(file)}`}
+                    {` ${status} ${terminalSafeText(changedFilePath(file))}`}
                   </text>
                 )
               })}
@@ -434,7 +442,7 @@ export function DetailsView() {
           </box>
 
           <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, flexGrow: 1 }}>
-            <text fg={theme.textAccent}>{` ${selectedPath ?? "Select a changed file"}`}</text>
+            <text fg={theme.textAccent}>{` ${terminalSafeText(selectedPath ?? "Select a changed file")}`}</text>
             {selectedFile !== null && renderedDiff === null && (
               <text fg={theme.textMuted}> Loading immutable blobs…</text>
             )}
@@ -453,6 +461,9 @@ export function DetailsView() {
                   ? " This change is too large for a safe terminal preview."
                   : ` ${renderedDiff.metadata}`}
               </text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && renderedDiff.metadata && (
+              <text fg={theme.textAccent}>{` ${terminalSafeMultilineText(renderedDiff.metadata)}`}</text>
             )}
             {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && (
               <diff
@@ -514,7 +525,7 @@ export function DetailsView() {
                 <text fg={theme.textMuted}>
                   {action.plan.targetExists ? "validate existing worktree" : "create detached worktree"}
                 </text>
-                <text fg={theme.textMuted}>{action.plan.targetPath}</text>
+                <text fg={theme.textMuted}>{terminalSafeText(action.plan.targetPath)}</text>
                 {action.action !== "worktree" && <text fg={theme.textMuted}>sandbox read-only · local Codex</text>}
                 <text fg={theme.textSuccess}>Enter run · x cancel</text>
               </box>
@@ -529,7 +540,7 @@ export function DetailsView() {
             {action._tag === "done" && (
               <scrollbox style={{ flexGrow: 1, width: "100%" }}>
                 <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
-                <text fg={theme.text}>{action.detail}</text>
+                <text fg={theme.text}>{terminalSafeMultilineText(action.detail)}</text>
               </scrollbox>
             )}
           </box>

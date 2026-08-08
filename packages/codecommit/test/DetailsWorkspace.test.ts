@@ -10,23 +10,51 @@ import {
   exactRevisionReviewState,
   fileDiffIdentityMatches,
   humanReviewState,
+  terminalSafeText,
   workspaceIdentityMatches
 } from "../src/tui/details-model.js"
 import { reviewRevisionSpecifiers, safePathSegment } from "../src/WorktreeService.js"
 
 const decodeChangedFile = Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)
+const hasTerminalControl = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint !== undefined && codePoint !== 0x0a &&
+      ((codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f))
+  })
 
 describe("PR detail workspace", () => {
   it("keeps local path segments bounded, traversal-safe, and identity-sensitive", () => {
-    const traversal = safePathSegment("repo", "../../production/secrets")
+    const traversal = safePathSegment("../../../../../tmp", "../../production/secrets")
     const nearby = safePathSegment("repo", "../../production/secretz")
 
     expect(traversal).not.toContain("/")
+    expect(traversal).not.toContain("\\")
     expect(traversal).not.toBe(".")
     expect(traversal).not.toBe("..")
     expect(traversal.length).toBeGreaterThan(0)
     expect(traversal.length).toBeLessThan(80)
     expect(nearby).not.toBe(traversal)
+  })
+
+  it("escapes C0 and C1 controls in terminal text and unified diff metadata", () => {
+    const file = decodeChangedFile({
+      status: "renamed",
+      before: { blobId: "before-blob", path: "src/old\u001b[31m\t.ts", mode: "100644\u0085" },
+      after: { blobId: "after-blob", path: "src/new\r\n.ts", mode: "100755\u009b" }
+    })
+    const result = buildUnifiedDiff(file, "const value = '\u0007old'\n", "const value = '\u001bnew'\n")
+
+    expect(terminalSafeText("a\u0000\u001b\u007f\u009fb")).toBe(
+      "a\\u{0000}\\u{001b}\\u{007f}\\u{009f}b"
+    )
+    expect(result.diff).toContain("--- a/src/old\\u{001b}[31m\\u{0009}.ts")
+    expect(result.diff).toContain("+++ b/src/new\\u{000d}\\u{000a}.ts")
+    expect(result.diff).toContain("\\u{0007}old")
+    expect(result.diff).toContain("\\u{001b}new")
+    expect(result.metadata).toContain("mode 100644\\u{0085} → 100755\\u{009b}")
+    expect(hasTerminalControl(result.diff)).toBe(false)
+    expect(hasTerminalControl(result.metadata ?? "")).toBe(false)
   })
 
   it("builds a real immutable blob patch without hiding a late changed line", () => {
@@ -89,6 +117,19 @@ describe("PR detail workspace", () => {
     expect(result.metadata).toContain("rename src/old-name.ts → src/new-name.ts")
     expect(result.metadata).toContain("mode 100644 → 100755")
     expect(result.truncated).toBe(false)
+  })
+
+  it("keeps mode metadata when content changes", () => {
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-blob", path: "script.sh", mode: "100644" },
+      after: { blobId: "after-blob", path: "script.sh", mode: "100755" }
+    })
+    const result = buildUnifiedDiff(file, "echo before\n", "echo after\n")
+
+    expect(result.diff).toContain("-echo before")
+    expect(result.diff).toContain("+echo after")
+    expect(result.metadata).toBe("mode 100644 → 100755")
   })
 
   it("yields keyboard events to dialogs and focused comments while retaining file navigation", () => {

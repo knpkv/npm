@@ -149,7 +149,38 @@ export const filetypeForPath = (path: string): string | undefined => {
   return FILETYPE_ALIASES[extension] ?? (extension.length > 0 ? extension : undefined)
 }
 
-const patchPath = (value: string): string => value.replace(/[\r\n\t]/g, "_")
+const escapedCodePoint = (character: string): string =>
+  `\\u{${character.codePointAt(0)?.toString(16).padStart(4, "0") ?? "fffd"}}`
+
+const isTerminalControl = (codePoint: number): boolean =>
+  (codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f)
+
+/** Makes an untrusted single-line value visibly safe for terminal rendering. */
+export const terminalSafeText = (value: string): string =>
+  Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint !== undefined && isTerminalControl(codePoint) ? escapedCodePoint(character) : character
+  }).join("")
+
+/** Preserves line separators while escaping every control byte inside rendered diff lines. */
+export const terminalSafeMultilineText = (value: string): string =>
+  Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint !== undefined && codePoint !== 0x0a && isTerminalControl(codePoint)
+      ? escapedCodePoint(character)
+      : character
+  }).join("")
+
+const fileMetadata = (file: ReadClient.CodeCommitChangedFile): Array<string> => {
+  const metadata: Array<string> = []
+  if (file.before?.path !== undefined && file.after?.path !== undefined && file.before.path !== file.after.path) {
+    metadata.push(`rename ${terminalSafeText(file.before.path)} → ${terminalSafeText(file.after.path)}`)
+  }
+  if (file.before?.mode !== undefined && file.after?.mode !== undefined && file.before.mode !== file.after.mode) {
+    metadata.push(`mode ${terminalSafeText(file.before.mode)} → ${terminalSafeText(file.after.mode)}`)
+  }
+  return metadata
+}
 
 const formatHunk = (hunk: {
   readonly lines: ReadonlyArray<string>
@@ -168,27 +199,29 @@ export const buildUnifiedDiff = (
   beforeText: string,
   afterText: string
 ): { readonly diff: string; readonly metadata: string | null; readonly truncated: boolean } => {
-  const beforePath = patchPath(file.before?.path ?? "/dev/null")
-  const afterPath = patchPath(file.after?.path ?? "/dev/null")
+  const beforePath = terminalSafeText(file.before?.path ?? "/dev/null")
+  const afterPath = terminalSafeText(file.after?.path ?? "/dev/null")
   const oldFileName = file.before === null ? "/dev/null" : `a/${beforePath}`
   const newFileName = file.after === null ? "/dev/null" : `b/${afterPath}`
-  const patch = structuredPatch(oldFileName, newFileName, beforeText, afterText, "", "", {
-    context: DIFF_CONTEXT_LINES,
-    maxEditLength: 20_000,
-    timeout: 1_000
-  })
+  const patch = structuredPatch(
+    oldFileName,
+    newFileName,
+    terminalSafeMultilineText(beforeText),
+    terminalSafeMultilineText(afterText),
+    "",
+    "",
+    {
+      context: DIFF_CONTEXT_LINES,
+      maxEditLength: 20_000,
+      timeout: 1_000
+    }
+  )
   if (patch === undefined) return { diff: "", metadata: null, truncated: true }
 
   if (patch.hunks.length === 0) {
-    const metadata: Array<string> = []
+    const metadata = fileMetadata(file)
     if (file.before === null && file.after !== null) metadata.push("empty file added")
     if (file.before !== null && file.after === null) metadata.push("empty file deleted")
-    if (file.before?.path !== undefined && file.after?.path !== undefined && file.before.path !== file.after.path) {
-      metadata.push(`rename ${file.before.path} → ${file.after.path}`)
-    }
-    if (file.before?.mode !== undefined && file.after?.mode !== undefined && file.before.mode !== file.after.mode) {
-      metadata.push(`mode ${file.before.mode} → ${file.after.mode}`)
-    }
     if (metadata.length === 0) metadata.push("No textual changes")
     return { diff: "", metadata: metadata.join("\n"), truncated: false }
   }
@@ -205,5 +238,10 @@ export const buildUnifiedDiff = (
   }
 
   const truncated = retainedHunks < patch.hunks.length
-  return { diff: retainedHunks === 0 && truncated ? "" : lines.join("\n"), metadata: null, truncated }
+  const metadata = fileMetadata(file)
+  return {
+    diff: retainedHunks === 0 && truncated ? "" : lines.join("\n"),
+    metadata: metadata.length === 0 ? null : metadata.join("\n"),
+    truncated
+  }
 }
