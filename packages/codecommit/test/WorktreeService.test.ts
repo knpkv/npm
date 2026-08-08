@@ -73,6 +73,23 @@ describe("WorktreeService", () => {
       expect(calls).toEqual(["lockf"])
     })))
 
+  it.live("releases the repository lock when its owner pipe closes", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "codecommit-owner-lock-" })
+      const lockPath = path.join(root, "repository.lock")
+
+      const holder = yield* acquireReadyLockHolder(spawner, lockPath)
+      yield* Stream.empty.pipe(Stream.run(holder.stdin))
+      expect(yield* holder.exitCode).toBe(ChildProcessSpawner.ExitCode(0))
+
+      const replacement = yield* acquireReadyLockHolder(spawner, lockPath)
+      expect(yield* replacement.isRunning).toBe(true)
+      yield* replacement.kill()
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
   it.effect("isolates repository accounts and resolves partition-aware Git endpoints", () =>
     Effect.gen(function*() {
       const service = yield* makeWorktreeService()
@@ -164,7 +181,7 @@ describe("WorktreeService", () => {
     Effect.gen(function*() {
       expect(WORKTREE_LOCK_REQUIREMENT).toContain("macOS or Linux")
       expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sh")
-      expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sleep")
+      expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/cat")
       expect(WORKTREE_LOCK_REQUIREMENT).toContain("lockf or flock")
 
       const nativePath = yield* Path.Path

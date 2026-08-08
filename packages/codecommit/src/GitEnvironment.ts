@@ -36,5 +36,9 @@ export const isolated = (): Record<string, string | undefined> => {
 /** Repository isolation plus fail-closed, non-interactive authentication. */
 export const nonInteractive = (): Record<string, string | undefined> => ({
   ...isolated(),
-  GIT_TERMINAL_PROMPT: "0"
+  GCM_INTERACTIVE: "never",
+  GIT_ASKPASS: "/bin/false",
+  GIT_TERMINAL_PROMPT: "0",
+  SSH_ASKPASS: "/bin/false",
+  SSH_ASKPASS_REQUIRE: "never"
 })

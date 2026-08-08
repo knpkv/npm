@@ -19,7 +19,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - AWS SSO configured (`~/.aws/config`)
 - Git with the AWS CodeCommit credential helper configured for HTTPS checkout
 - A locally authenticated `codex` executable for optional Relay actions
-- On macOS or Linux, `/bin/sh`, `/bin/sleep`, and either `lockf` or `flock` for
+- On macOS or Linux, `/bin/sh`, `/bin/cat`, and either `lockf` or `flock` for
   owner-death-safe repository/worktree locking. Checkout and Relay actions fail
   closed when neither locking command is installed; those actions are not
   currently supported on Windows.

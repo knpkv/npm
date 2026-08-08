@@ -25,7 +25,11 @@ describe("GitEnvironment", () => {
   it("disables terminal authentication without dropping repository tombstones", () => {
     expect(GitEnvironment.nonInteractive()).toEqual({
       ...GitEnvironment.isolated(),
-      GIT_TERMINAL_PROMPT: "0"
+      GCM_INTERACTIVE: "never",
+      GIT_ASKPASS: "/bin/false",
+      GIT_TERMINAL_PROMPT: "0",
+      SSH_ASKPASS: "/bin/false",
+      SSH_ASKPASS_REQUIRE: "never"
     })
   })
 })
