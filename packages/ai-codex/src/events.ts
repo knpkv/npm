@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import type * as AiError from "effect/unstable/ai/AiError"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -11,6 +11,14 @@ import type { CodexModelOptions } from "./model.js"
 export interface CodexEventStreamOptions extends CodexModelOptions {
   /** Prompt sent to the ephemeral Codex turn over stdin. */
   readonly prompt: string
+}
+
+type OrdinaryEventStreamOptions = Omit<CodexEventStreamOptions, "promptOnly"> & {
+  readonly promptOnly?: false
+}
+
+type PromptOnlyEventStreamOptions = Omit<CodexEventStreamOptions, "promptOnly"> & {
+  readonly promptOnly: true
 }
 
 const decodeJsonEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ type: Schema.String })))
@@ -33,11 +41,34 @@ const validateEvent = Effect.fn("CodexEvents.validateEvent")(function*(line: str
  *
  * Records are validated as Codex event JSON but otherwise returned unchanged,
  * so callers can observe native events such as command execution and agent messages.
+ * A literal `promptOnly: true` additionally requires `FileSystem`; omitted or
+ * literal `false` keeps the original spawner-only environment requirement.
  */
-export const streamEvents = (
+export function streamEvents(
+  options: PromptOnlyEventStreamOptions
+): Stream.Stream<
+  string,
+  AiError.AiError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+>
+export function streamEvents(
+  options: OrdinaryEventStreamOptions
+): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner>
+export function streamEvents(
   options: CodexEventStreamOptions
-): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Stream.unwrap(Effect.gen(function*() {
+): Stream.Stream<
+  string,
+  AiError.AiError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+>
+export function streamEvents(
+  options: CodexEventStreamOptions
+): Stream.Stream<
+  string,
+  AiError.AiError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+> {
+  return Stream.unwrap(Effect.gen(function*() {
     if (options.prompt.trim().length === 0) {
       return yield* invalidRequest("streamEvents", "prompt", "must not be empty")
     }
@@ -47,11 +78,8 @@ export const streamEvents = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const promptOnlyDisabledFeatures = normalized.promptOnly
       ? yield* Effect.gen(function*() {
-        const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
-        if (Option.isNone(fileSystem)) {
-          return yield* invalidRequest("streamEvents", "promptOnly", "requires a FileSystem service")
-        }
-        return yield* resolvePromptOnlyDisabledFeatures(normalized, spawner, fileSystem.value, "streamEvents")
+        const fileSystem = yield* FileSystem.FileSystem
+        return yield* resolvePromptOnlyDisabledFeatures(normalized, spawner, fileSystem, "streamEvents")
       })
       : []
 
@@ -70,3 +98,4 @@ export const streamEvents = (
       Stream.mapError((error) => transportToAiError("streamEvents", error))
     )
   }))
+}

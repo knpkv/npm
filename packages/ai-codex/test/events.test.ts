@@ -66,7 +66,7 @@ const expectProviderPhase = (
 }
 
 describe("streamEvents", () => {
-  it.effect("keeps ordinary streams filesystem-free and fails prompt-only streams without one", () =>
+  it.effect("keeps ordinary streams filesystem-free", () =>
     Effect.gen(function*() {
       const ordinaryCalls: Array<ChildProcess.Command> = []
       yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
@@ -76,17 +76,7 @@ describe("streamEvents", () => {
         )),
         Stream.runDrain
       )
-
-      const promptOnlyCalls: Array<ChildProcess.Command> = []
-      const error = yield* streamEvents({ cwd: "/workspace", prompt: "Start", promptOnly: true }).pipe(
-        Stream.provide(fakeProcessLayer(promptOnlyCalls, Stream.empty)),
-        Stream.runDrain,
-        Effect.flip
-      )
-
       expect(ordinaryCalls).toHaveLength(1)
-      expect(error.reason).toMatchObject({ _tag: "InvalidRequestError" })
-      expect(promptOnlyCalls).toHaveLength(0)
     }))
 
   it.effect("streams every validated raw event including native tool calls", () =>
