@@ -12,6 +12,7 @@ import {
   changedFileRowId,
   currentFileDiffOutcome,
   currentRevisionCommentLocations,
+  currentWorkspaceSelection,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentityMatches,
@@ -579,6 +580,24 @@ describe("PR detail workspace", () => {
 
     expect(workspaceIdentityMatches(workspaceA, workspaceB)).toBe(false)
     expect(workspaceIdentityMatches(workspaceB, workspaceB)).toBe(true)
+    expect(currentWorkspaceSelection(null, workspaceB)).toEqual({ _tag: "loading" })
+    expect(currentWorkspaceSelection({ identity: workspaceA, revision: workspaceA }, workspaceB)).toEqual({
+      _tag: "stale"
+    })
+    const currentWorkspace = { identity: workspaceB, revision: workspaceB }
+    expect(currentWorkspaceSelection(currentWorkspace, workspaceB)).toEqual({
+      _tag: "ready",
+      value: currentWorkspace
+    })
+    expect(
+      currentWorkspaceSelection(
+        {
+          identity: workspaceB,
+          revision: { ...workspaceB, repositoryName: "renamed-payments" }
+        },
+        workspaceB
+      )
+    ).toEqual({ _tag: "stale" })
     expect(fileDiffIdentityMatches(fileA, fileB)).toBe(false)
     expect(fileDiffIdentityMatches(fileB, fileB)).toBe(true)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, afterBlobId: "rotated" })).toBe(false)

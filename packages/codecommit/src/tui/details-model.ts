@@ -50,6 +50,13 @@ export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly sourceCommit: string
 }
 
+export type WorkspaceSelection<A> =
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "ready"; readonly value: A }
+  | {
+    readonly _tag: "stale"
+  }
+
 export interface ActionDiagnostic {
   readonly message: string
   readonly operation: string
@@ -220,6 +227,27 @@ export const workspaceIdentityMatches = (
   actual.region === expected.region &&
   actual.repositoryName === expected.repositoryName
 
+/** Makes a completed response terminal even when CodeCommit reports a renamed repository. */
+export const currentWorkspaceSelection = <
+  A extends {
+    readonly identity: PullRequestWorkspaceIdentity
+    readonly revision: {
+      readonly pullRequestId: string
+      readonly repositoryName: string
+    }
+  }
+>(
+  candidate: A | null,
+  expected: PullRequestWorkspaceIdentity | null
+): WorkspaceSelection<A> => {
+  if (candidate === null || expected === null) return { _tag: "loading" }
+  return workspaceIdentityMatches(candidate.identity, expected) &&
+      candidate.revision.pullRequestId === expected.pullRequestId &&
+      candidate.revision.repositoryName === expected.repositoryName
+    ? { _tag: "ready", value: candidate }
+    : { _tag: "stale" }
+}
+
 /** Keeps exact-pair threads plus explicitly commitless general PR comments. */
 export const currentRevisionCommentLocations = (
   locations: ReadonlyArray<Domain.PRCommentLocation>,
@@ -309,7 +337,10 @@ export const revisionHeaderText = (
 ): string =>
   terminalSafeText(
     `head ${revision.sourceCommit.slice(0, 12)}  ·  base ${revision.destinationCommit.slice(0, 12)}  ·  revision ${
-      revision.revisionId.slice(0, 10)
+      revision.revisionId.slice(
+        0,
+        10
+      )
     }`
   )
 

@@ -22,6 +22,7 @@ import {
   changedFileRowId,
   currentFileDiffOutcome,
   currentRevisionCommentLocations,
+  currentWorkspaceSelection,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
@@ -240,14 +241,8 @@ export function DetailsView() {
   const workspaceCandidate =
     AsyncResult.isSuccess(workspaceResult) && !AsyncResult.isWaiting(workspaceResult) ? workspaceResult.value : null
   const expectedWorkspaceIdentity = pr === null ? null : pullRequestWorkspaceIdentity(pr)
-  const workspace =
-    workspaceCandidate !== null &&
-    expectedWorkspaceIdentity !== null &&
-    workspaceIdentityMatches(workspaceCandidate.identity, expectedWorkspaceIdentity) &&
-    workspaceCandidate.revision.pullRequestId === expectedWorkspaceIdentity.pullRequestId &&
-    workspaceCandidate.revision.repositoryName === expectedWorkspaceIdentity.repositoryName
-      ? workspaceCandidate
-      : null
+  const workspaceSelection = currentWorkspaceSelection(workspaceCandidate, expectedWorkspaceIdentity)
+  const workspace = workspaceSelection._tag === "ready" ? workspaceSelection.value : null
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
   const selectedPath = selectedFile === null ? null : changedFilePath(selectedFile)
   const expectedFileIdentity =
@@ -259,7 +254,9 @@ export function DetailsView() {
   const diffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
   const renderedDiff = diffOutcome?._tag === "success" ? diffOutcome.value : null
   const diffFailed = diffOutcome?._tag === "failure"
-  const workspaceFailed = AsyncResult.isFailure(workspaceResult) && !AsyncResult.isWaiting(workspaceResult)
+  const workspaceFailed =
+    workspaceSelection._tag === "stale" ||
+    (AsyncResult.isFailure(workspaceResult) && !AsyncResult.isWaiting(workspaceResult))
   const workspaceReloadKey = pr === null ? null : pullRequestWorkspaceReloadKey(pr)
 
   useEffect(() => {
