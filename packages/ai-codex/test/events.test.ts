@@ -1,7 +1,5 @@
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Sink, Stream } from "effect"
-import type * as FileSystem from "effect/FileSystem"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -17,47 +15,44 @@ const fakeProcessLayer = (
     readonly running?: { value: boolean }
     readonly stderr?: Stream.Stream<Uint8Array>
   }
-): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem> =>
-  Layer.merge(
-    NodeFileSystem.layer,
-    Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        calls.push(command)
-        const handle = ChildProcessSpawner.makeHandle({
-          all: stdout,
-          exitCode,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-          isRunning: Effect.sync(() => options?.running?.value ?? false),
-          kill: () =>
-            Effect.sync(() => {
-              if (options?.running !== undefined) options.running.value = false
-              options?.kills?.push("killed")
-            }),
-          pid: ChildProcessSpawner.ProcessId(42),
-          reref: Effect.void,
-          stderr: options?.stderr ?? Stream.empty,
-          stdin: Sink.drain,
-          stdout,
-          unref: Effect.succeed(Effect.void)
-        })
-        const acquire = Effect.sync(() => {
-          if (options?.running !== undefined) options.running.value = true
-          return handle
-        })
-        return options?.releases === undefined
-          ? acquire
-          : Effect.acquireRelease(
-            acquire,
-            () =>
-              handle.isRunning.pipe(
-                Effect.flatMap((running) => running ? handle.kill() : Effect.void),
-                Effect.andThen(Effect.sync(() => options.releases?.push("released")))
-              )
-          )
+): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      calls.push(command)
+      const handle = ChildProcessSpawner.makeHandle({
+        all: stdout,
+        exitCode,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        isRunning: Effect.sync(() => options?.running?.value ?? false),
+        kill: () =>
+          Effect.sync(() => {
+            if (options?.running !== undefined) options.running.value = false
+            options?.kills?.push("killed")
+          }),
+        pid: ChildProcessSpawner.ProcessId(42),
+        reref: Effect.void,
+        stderr: options?.stderr ?? Stream.empty,
+        stdin: Sink.drain,
+        stdout,
+        unref: Effect.succeed(Effect.void)
       })
-    )
+      const acquire = Effect.sync(() => {
+        if (options?.running !== undefined) options.running.value = true
+        return handle
+      })
+      return options?.releases === undefined
+        ? acquire
+        : Effect.acquireRelease(
+          acquire,
+          () =>
+            handle.isRunning.pipe(
+              Effect.flatMap((running) => running ? handle.kill() : Effect.void),
+              Effect.andThen(Effect.sync(() => options.releases?.push("released")))
+            )
+        )
+    })
   )
 
 const expectProviderPhase = (
@@ -71,6 +66,29 @@ const expectProviderPhase = (
 }
 
 describe("streamEvents", () => {
+  it.effect("keeps ordinary streams filesystem-free and fails prompt-only streams without one", () =>
+    Effect.gen(function*() {
+      const ordinaryCalls: Array<ChildProcess.Command> = []
+      yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(
+          ordinaryCalls,
+          Stream.make("{\"type\":\"turn.completed\"}\n").pipe(Stream.encodeText)
+        )),
+        Stream.runDrain
+      )
+
+      const promptOnlyCalls: Array<ChildProcess.Command> = []
+      const error = yield* streamEvents({ cwd: "/workspace", prompt: "Start", promptOnly: true }).pipe(
+        Stream.provide(fakeProcessLayer(promptOnlyCalls, Stream.empty)),
+        Stream.runDrain,
+        Effect.flip
+      )
+
+      expect(ordinaryCalls).toHaveLength(1)
+      expect(error.reason).toMatchObject({ _tag: "InvalidRequestError" })
+      expect(promptOnlyCalls).toHaveLength(0)
+    }))
+
   it.effect("streams every validated raw event including native tool calls", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
