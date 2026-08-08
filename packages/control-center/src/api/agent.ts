@@ -206,7 +206,11 @@ export const SubmitReleasePublicationRequest = Schema.Struct({
   parentId: Schema.NullOr(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
   ),
-  publicationActionId: Schema.optionalKey(GovernedActionId)
+  publicationActionId: Schema.optionalKey(GovernedActionId),
+  /** Exact synchronized Confluence page selected before its first governed release update. */
+  targetEntityId: Schema.optionalKey(EntityId),
+  /** Existing synchronized Confluence page copied into a new release-owned page. */
+  templateEntityId: Schema.optionalKey(EntityId)
 })
 export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
 

@@ -922,9 +922,12 @@ describe("Confluence page adapter", () => {
 
       assert.deepStrictEqual(spaces, ["space-payments"])
       assert.deepStrictEqual(attachmentCursors, [null, "attachments+2"])
-      assert.strictEqual(conversions, 0)
-      assert.strictEqual(attributes.content, null)
-      assert.strictEqual(attributes.contentState, "lazy")
+      assert.strictEqual(conversions, 1)
+      assert.deepStrictEqual(attributes.content, {
+        representation: "safe-markdown",
+        markdown: "Runbook\n"
+      })
+      assert.strictEqual(attributes.contentState, "loaded")
       assert.deepStrictEqual(attributes.versions.map(({ number }) => number), [3, 2])
       assert.deepStrictEqual(attributes.versionHistory, { complete: true, pagesFetched: 1 })
       assert.deepStrictEqual(attributes.attachmentInventory, { complete: true, pagesFetched: 2 })
@@ -1906,6 +1909,25 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(
         relative.event.sourceUrl?.toString(),
         `https://acme.atlassian.net/wiki/spaces/PAY/pages/${PAGE_ID}`
+      )
+    }))
+
+  it.effect("restores the Confluence context path when webui omits wiki", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.succeed({
+            ...currentPage,
+            _links: { webui: `/spaces/PAY/pages/${PAGE_ID}/Payments+release+runbook` }
+          })
+      }))
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      assert.strictEqual(
+        result.event.sourceUrl?.toString(),
+        `https://acme.atlassian.net/wiki/spaces/PAY/pages/${PAGE_ID}/Payments+release+runbook`
       )
     }))
 

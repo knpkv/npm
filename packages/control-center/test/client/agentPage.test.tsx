@@ -11,6 +11,7 @@ import {
   AgentPage,
   boundedReleaseAgentHistory,
   ConnectedAgentPage,
+  contextFor,
   contextualSingleReleaseAgentPath,
   type ReleaseAgentPresetLoader,
   type ReleaseAgentTurn
@@ -122,6 +123,15 @@ const renderAgentPage = (from: string): string =>
   )
 
 describe("AgentPage context", () => {
+  it("keeps an exact workspace entity as the return path for a release-owned Relay thread", () => {
+    const entityPath = `/w/${snapshot.workspaceId}/items/01890f6f-6d6a-7cc0-98d2-000000000099`
+
+    expect(contextFor(entityPath)).toMatchObject({
+      label: "Workspace item 000099",
+      path: entityPath
+    })
+  })
+
   it("opens the only available release when Relay is launched from Timeline", () => {
     const workspaceId = snapshot.workspaceId
     const timelinePath = `/w/${workspaceId}/timeline`

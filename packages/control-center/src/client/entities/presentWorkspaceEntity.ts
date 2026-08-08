@@ -132,7 +132,14 @@ const kindNames = {
 const readableTimestamp = (timestamp: DateTime.DateTime): string =>
   timestampFormatter.format(DateTime.toDateUtc(timestamp))
 
-const sourceHref = (source: SourceRevision): string | null => source.sourceUrl === null ? null : source.sourceUrl.href
+const sourceHref = (source: SourceRevision): string | null => {
+  if (source.sourceUrl === null) return null
+  const href = new URL(source.sourceUrl.href)
+  if (source.providerId === "confluence" && href.pathname.startsWith("/spaces/")) {
+    href.pathname = `/wiki${href.pathname}`
+  }
+  return href.href
+}
 
 const releaseHref = (workspaceId: WorkspaceId, releaseId: ReleaseId): string =>
   `/w/${encodeURIComponent(workspaceId)}/releases/${encodeURIComponent(releaseId)}`
@@ -441,7 +448,13 @@ const primaryActionFor = (
   serviceName: string
 ): WorkspaceEntityActionPresentation => {
   const href = sourceHref(inspection.source)
-  if (href !== null) return { external: true, href, label: `Open in ${serviceName}` }
+  if (href !== null) {
+    return {
+      external: true,
+      href,
+      label: inspection.source.providerId === "confluence" ? "View in Confluence" : `Open in ${serviceName}`
+    }
+  }
   const releaseId = inspection.entity.canonicalReleaseId
   return releaseId === null
     ? { external: false, href: null, label: "Source link unavailable" }
