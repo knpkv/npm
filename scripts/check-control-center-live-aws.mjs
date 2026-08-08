@@ -230,7 +230,7 @@ const validateProbeWorkflow = (workflow) => {
       },
       {
         name: "Assume read-only live-test role",
-        uses: "aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885",
+        uses: "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c",
         with: {
           "aws-region": "${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}",
           "role-to-assume": "${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}",
@@ -289,7 +289,7 @@ const validateProbeWorkflow = (workflow) => {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-    "aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885"
+    "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
   ])
   for (const action of externalActions) {
     assert.match(action, /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/u)
