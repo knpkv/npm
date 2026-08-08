@@ -204,11 +204,14 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
         onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
       })
     )
-  const [headBeforeTarget, targetBeforeHead] = yield* Effect.all([
+  const [headBeforeTarget, targetBeforeHead, symbolicHeadExitCode] = yield* Effect.all([
     isAncestor("HEAD", request.sourceCommit),
-    isAncestor(request.sourceCommit, "HEAD")
+    isAncestor(request.sourceCommit, "HEAD"),
+    spawner.exitCode(gitCommand(request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })).pipe(
+      Effect.orElseSucceed(() => ChildProcessSpawner.ExitCode(128))
+    )
   ])
-  return headBeforeTarget && targetBeforeHead
+  return headBeforeTarget && targetBeforeHead && symbolicHeadExitCode === ChildProcessSpawner.ExitCode(1)
 })
 
 const isCleanWorktree = (

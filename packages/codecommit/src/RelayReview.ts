@@ -29,6 +29,8 @@ const AgentMessageEvent = Schema.fromJsonString(Schema.Struct({
 const decodeAgentMessage = Schema.decodeUnknownOption(AgentMessageEvent)
 const isWorktreeError = Schema.is(WorktreeError)
 const MAX_RELAY_PATCH_BYTES = 786_432
+export const MAX_RELAY_PROMPT_BYTES = 1_048_576
+const textEncoder = new TextEncoder()
 
 interface PatchAccumulator {
   readonly bytes: number
@@ -108,7 +110,15 @@ export const collectRelayPatch = (request: RelayReviewRequest) =>
     if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
       return yield* new WorktreeError({ operation: "relay-diff", message: `git diff exited with code ${exitCode}` })
     }
-    return yield* Stream.fromIterable(accumulator.chunks).pipe(Stream.decodeText(), Stream.mkString)
+    const patch = yield* Stream.fromIterable(accumulator.chunks).pipe(Stream.decodeText(), Stream.mkString)
+    const promptBytes = textEncoder.encode(makeRelayReviewPrompt(request, patch)).byteLength
+    if (promptBytes > MAX_RELAY_PROMPT_BYTES) {
+      return yield* new WorktreeError({
+        operation: "relay-diff",
+        message: `Decoded Relay prompt exceeds the ${MAX_RELAY_PROMPT_BYTES}-byte limit`
+      })
+    }
+    return patch
   }))
 
 /** Runs an ephemeral, read-only Codex review and returns its final agent message. */
@@ -119,6 +129,7 @@ export const runRelayReview = (request: RelayReviewRequest) =>
         streamEvents({
           access: "read-only",
           cwd: request.worktreePath,
+          maxPromptBytes: MAX_RELAY_PROMPT_BYTES,
           prompt: makeRelayReviewPrompt(request, patch),
           promptOnly: true,
           timeout: "5 minutes"

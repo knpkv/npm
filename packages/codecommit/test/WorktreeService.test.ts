@@ -379,6 +379,13 @@ describe("WorktreeService", () => {
         expect(yield* fs.exists(filterSentinel)).toBe(false)
         expect(yield* fs.readFileString(path.join(plan.targetPath, "feature.txt"))).toBe("feature\n")
 
+        yield* runGit(["switch", "-c", "retained-review-branch"], plan.targetPath)
+        const attached = yield* secondService.checkout(plan).pipe(Effect.exit)
+        expect(Exit.isFailure(attached)).toBe(true)
+        expect(yield* runGit(["symbolic-ref", "HEAD"], plan.targetPath)).toBe("refs/heads/retained-review-branch")
+        yield* runGit(["switch", "--detach", sourceCommit], plan.targetPath)
+        expect((yield* secondService.checkout(plan)).reused).toBe(true)
+
         yield* fs.writeFileString(path.join(plan.targetPath, "feature.txt"), "locally modified\n")
         yield* fs.writeFileString(path.join(plan.targetPath, "untracked.txt"), "preserve me\n")
         const dirty = yield* secondService.checkout(plan).pipe(Effect.exit)
