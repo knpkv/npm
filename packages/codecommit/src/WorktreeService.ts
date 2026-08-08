@@ -167,7 +167,12 @@ const isCleanWorktree = (
   request: WorktreeRequest,
   targetPath: string
 ) =>
-  spawner.string(ChildProcess.make("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+  spawner.string(ChildProcess.make("git", [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignored=matching"
+  ], {
     cwd: targetPath,
     env: gitEnvironment(request),
     extendEnv: true,

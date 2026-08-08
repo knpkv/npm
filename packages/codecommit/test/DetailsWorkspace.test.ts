@@ -382,6 +382,11 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "up" })).toBe("scroll-content-up")
     expect(detailsKeyIntent({ ...base, keyName: "down", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "c", modified: true })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "r" })).toBe("review-pr")
+    expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "2" })).toBe("yield")
   })
 
   it("gives every selected file a stable scroll target", () => {
@@ -531,14 +536,18 @@ describe("PR detail workspace", () => {
     const fileA = {
       ...workspaceA,
       afterBlobId: "after-a",
+      afterPath: "src/a.ts",
       beforeBlobId: "before-a",
+      beforePath: "src/a.ts",
       destinationCommit: "base-a",
       sourceCommit: "head-a"
     }
     const fileB = {
       ...workspaceB,
       afterBlobId: "after-b",
+      afterPath: "src/b.ts",
       beforeBlobId: "before-b",
+      beforePath: "src/b.ts",
       destinationCommit: "base-b",
       sourceCommit: "head-b"
     }
@@ -548,13 +557,30 @@ describe("PR detail workspace", () => {
     expect(fileDiffIdentityMatches(fileA, fileB)).toBe(false)
     expect(fileDiffIdentityMatches(fileB, fileB)).toBe(true)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, afterBlobId: "rotated" })).toBe(false)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, afterPath: "src/c.ts" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, beforeBlobId: "rotated" })).toBe(false)
+    expect(fileDiffIdentityMatches(fileB, { ...fileB, beforePath: "src/c.ts" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, destinationCommit: "rotated" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, sourceCommit: "rotated" })).toBe(false)
     const failureA: { readonly _tag: "failure"; readonly identity: typeof fileA } = { _tag: "failure", identity: fileA }
     const failureB: { readonly _tag: "failure"; readonly identity: typeof fileB } = { _tag: "failure", identity: fileB }
     expect(currentFileDiffOutcome(failureA, fileB)).toBeNull()
     expect(currentFileDiffOutcome(failureB, fileB)).toBe(failureB)
+
+    const identicalContentA = {
+      ...fileB,
+      afterBlobId: "shared-blob",
+      afterPath: "src/identical-a.ts",
+      beforeBlobId: null,
+      beforePath: null
+    }
+    const identicalContentB = { ...identicalContentA, afterPath: "src/identical-b.ts" }
+    const retainedA: { readonly _tag: "success"; readonly identity: typeof identicalContentA } = {
+      _tag: "success",
+      identity: identicalContentA
+    }
+    expect(currentFileDiffOutcome(retainedA, identicalContentB)).toBeNull()
+    expect(currentFileDiffOutcome({ ...retainedA, identity: identicalContentB }, identicalContentB)).not.toBeNull()
   })
 
   it("keeps approval and mergeability independent", () => {

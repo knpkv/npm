@@ -151,8 +151,9 @@ describe("WorktreeService", () => {
       yield* runGit(["init", "-b", "main"], seed)
       yield* runGit(["config", "user.email", "relay@example.invalid"], seed)
       yield* runGit(["config", "user.name", "Relay Test"], seed)
+      yield* fs.writeFileString(path.join(seed, ".gitignore"), ".env\n")
       yield* fs.writeFileString(path.join(seed, "review.txt"), "shared\n")
-      yield* runGit(["add", "review.txt"], seed)
+      yield* runGit(["add", ".gitignore", "review.txt"], seed)
       yield* runGit(["commit", "-m", "base"], seed)
       yield* runGit(["checkout", "-b", "feature"], seed)
       yield* fs.writeFileString(path.join(seed, "feature.txt"), "feature\n")
@@ -228,6 +229,13 @@ describe("WorktreeService", () => {
         expect(yield* fs.readFileString(path.join(plan.targetPath, "untracked.txt"))).toBe("preserve me\n")
         yield* runGit(["restore", "feature.txt"], plan.targetPath)
         yield* fs.remove(path.join(plan.targetPath, "untracked.txt"))
+        expect((yield* secondService.checkout(plan)).reused).toBe(true)
+
+        yield* fs.writeFileString(path.join(plan.targetPath, ".env"), "LOCAL_SECRET=preserve-me\n")
+        const ignored = yield* secondService.checkout(plan).pipe(Effect.exit)
+        expect(Exit.isFailure(ignored)).toBe(true)
+        expect(yield* fs.readFileString(path.join(plan.targetPath, ".env"))).toBe("LOCAL_SECRET=preserve-me\n")
+        yield* fs.remove(path.join(plan.targetPath, ".env"))
         expect((yield* secondService.checkout(plan)).reused).toBe(true)
 
         const missingTarget = `${plan.targetPath}-moved`

@@ -43,7 +43,9 @@ export type WorkspaceLifecycleTransition =
 
 export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly afterBlobId: string | null
+  readonly afterPath: string | null
   readonly beforeBlobId: string | null
+  readonly beforePath: string | null
   readonly destinationCommit: string
   readonly sourceCommit: string
 }
@@ -122,19 +124,19 @@ export const detailsKeyIntent = (input: {
   if (input.dialogOpen || input.modified) return "yield"
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (input.keyName === "1") return "show-diff"
-  if (input.keyName === "2" || input.keyName === "c") return "show-comments"
+  if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
   if (input.tab === "diff" && input.keyName === "k") return "previous-file"
   if (input.tab === "diff" && input.keyName === "j") return "next-file"
   if (input.tab === "diff" && input.keyName === "up") return "scroll-content-up"
   if (input.tab === "diff" && input.keyName === "down") return "scroll-content-down"
-  if (input.keyName === "w") return "checkout-worktree"
-  if (input.keyName === "r") return "review-pr"
-  if (input.keyName === "s") return "review-security"
-  if (input.keyName === "t") return "review-tests"
-  if (input.keyName === "e") return "explain-risk"
+  if (input.tab === "diff" && input.keyName === "w") return "checkout-worktree"
+  if (input.tab === "diff" && input.keyName === "r") return "review-pr"
+  if (input.tab === "diff" && input.keyName === "s") return "review-security"
+  if (input.tab === "diff" && input.keyName === "t") return "review-tests"
+  if (input.tab === "diff" && input.keyName === "e") return "explain-risk"
   if (input.keyName === "x" && input.actionCancelable) return "cancel-action"
-  if (input.keyName === "return" && input.actionReady) return "confirm-action"
+  if (input.tab === "diff" && input.keyName === "return" && input.actionReady) return "confirm-action"
   return "yield"
 }
 
@@ -236,7 +238,9 @@ export const fileDiffIdentity = (
 ): FileDiffIdentity => ({
   ...identity,
   afterBlobId: file.after?.blobId ?? null,
+  afterPath: file.after?.path ?? null,
   beforeBlobId: file.before?.blobId ?? null,
+  beforePath: file.before?.path ?? null,
   destinationCommit: revision.destinationCommit,
   sourceCommit: revision.sourceCommit
 })
@@ -244,7 +248,9 @@ export const fileDiffIdentity = (
 export const fileDiffIdentityMatches = (actual: FileDiffIdentity, expected: FileDiffIdentity): boolean =>
   workspaceIdentityMatches(actual, expected) &&
   actual.afterBlobId === expected.afterBlobId &&
+  actual.afterPath === expected.afterPath &&
   actual.beforeBlobId === expected.beforeBlobId &&
+  actual.beforePath === expected.beforePath &&
   actual.destinationCommit === expected.destinationCommit &&
   actual.sourceCommit === expected.sourceCommit
 
