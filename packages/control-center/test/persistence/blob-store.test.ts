@@ -735,8 +735,8 @@ describe("BlobStore", () => {
       )
   )
 
-  descriptorIt.effect(
-    "pins publication when a validated shard is actively replaced",
+  it.effect(
+    "fails before publication when descriptor-relative shard traversal is unavailable",
     () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
@@ -778,8 +778,10 @@ describe("BlobStore", () => {
 
         assert.isTrue(Result.isFailure(result))
         if (Result.isFailure(result)) assert.instanceOf(result.failure, BlobContainmentError)
+        assert.isFalse(yield* Ref.get(swapped))
         assert.deepEqual(yield* fs.readDirectory(outside), [])
-        assert.deepEqual(yield* fs.readDirectory(displacedShard), [])
+        assert.isFalse(yield* fs.exists(displacedShard))
+        assert.deepEqual(yield* fs.readDirectory(derived.objectDirectory), [])
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
   )
 
