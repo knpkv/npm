@@ -10,12 +10,23 @@ CLI and TUI for AWS CodeCommit pull requests.
 - Health score ranking (staleness, review urgency)
 - SSO login/logout management
 - Full-text search across cached PRs
+- Exact-revision PR workspace with changed-file navigation and native diff previews
+- Prompt-only local Codex Relay passes for review, security, tests, and risk explanation
+- Deterministic detached worktree checkout for the selected PR head
 
 ## Prerequisites
 
 - AWS SSO configured (`~/.aws/config`)
+- Git with the AWS CodeCommit credential helper configured for HTTPS checkout
+- A locally authenticated `codex` executable for optional Relay actions
+- On macOS or Linux, `/bin/sh`, `/bin/cat`, and either `lockf` or `flock` for
+  owner-death-safe repository/worktree locking. Checkout and Relay actions fail
+  closed when neither locking command is installed; those actions are not
+  currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
-  - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest` — list/view
+  - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
+  - `codecommit:GetDifferences`, `codecommit:GetBlob` — exact-revision changed files and diff previews
+  - `codecommit:GitPull` — detached worktree checkout and Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export
@@ -42,6 +53,38 @@ codecommit
 # or
 codecommit tui
 ```
+
+Open a pull request to enter the exact-revision review workspace. The left pane
+navigates changed files, the center renders immutable blob diffs, and the right
+pane keeps local Relay actions separate from CodeCommit approval and
+mergeability. After explicit preflight, Relay has the host produce a bounded
+exact-commit patch with Git hooks disabled, then runs the local Codex CLI in
+prompt-only mode. Prompt-only mode disables user and repository instructions,
+host tools, and inherited shell variables, so repository-authored text cannot
+read other files. Relay and worktree Git commands also clear inherited
+repository-local `GIT_*` variables, suppress configured Git hooks, close stdin,
+and disable terminal credential prompts. Worktree population also ignores
+global and system Git configuration and attributes, preventing repository
+`.gitattributes` from selecting host-configured smudge or process filters; Git
+credential configuration remains available only to the separate clone/fetch
+transport steps. Missing immutable commits are fetched through the pull
+request's advertised source and destination branch refs, then verified by exact
+commit ID before checkout; raw commit IDs are never used as fetch refspecs.
+Invocation from a Git hook therefore cannot redirect commands
+into the caller's repository, and authentication failures return to the TUI
+instead of waiting on an invisible prompt. Worktrees are detached at the displayed head under
+`~/.codecommit/worktrees`, with private bare repository caches retained under
+`~/.codecommit/repositories`. Both storage roots are enforced as user-only
+directories (`0700`) before checkout. Cache and worktree coordinates include the
+repository's AWS account ID, profile, region, and immutable head using
+collision-resistant identity digests, and HTTPS Git
+hosts are resolved for the region's AWS partition. Actions fail closed when the
+repository account identity is unavailable. Both directories can grow over time.
+Close the TUI, then remove a no-longer-needed repository's matching directories
+from both roots; removing all of `~/.codecommit/worktrees` and
+`~/.codecommit/repositories` clears every retained checkout and cache, which the
+next checkout recreates. The comments tab shows only general comments without a
+revision locator and threads attached to the displayed base/head pair.
 
 ### Web Mode
 

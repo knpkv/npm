@@ -20,13 +20,13 @@ import {
   settingsFilterAtom,
   settingsTabAtom,
   SettingsTabs,
-  showDetailsCommentsAtom,
   themeAtom,
   themeSelectionIndexAtom,
   viewAtom
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { extractScope } from "../ListBuilder.js"
+import { shouldOpenPullRequestFilter } from "../navigation-model.js"
 import { themes } from "../theme/themes.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
 
@@ -89,8 +89,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const isSettingsFiltering = useAtomValue(isSettingsFilteringAtom)
   const setIsSettingsFiltering = useAtomSet(isSettingsFilteringAtom)
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
-  const showDetailsComments = useAtomValue(showDetailsCommentsAtom)
-  const setShowDetailsComments = useAtomSet(showDetailsCommentsAtom)
   const settingsTab = useAtomValue(settingsTabAtom)
   const setSettingsTab = useAtomSet(settingsTabAtom)
   const themeSelectionIndex = useAtomValue(themeSelectionIndexAtom)
@@ -210,7 +208,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     if (key.name === "/" || key.char === "/" || key.name === "f") {
       if (view === "settings" && settingsTab === "accounts") {
         setIsSettingsFiltering(true)
-      } else if (view !== "settings") {
+      } else if (shouldOpenPullRequestFilter(view)) {
         setIsFiltering(true)
         setView("prs")
       }
@@ -304,19 +302,8 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       }
     }
 
-    // Details view
+    // DetailsView owns its dense workspace navigation and stops propagation.
     if (view === "details") {
-      if (key.name === "escape") {
-        setView("prs")
-      } else if (key.name === "return" && currentPR && onOpenInBrowser) {
-        onOpenInBrowser(currentPR)
-      } else if (key.char === "c" || key.name === "c") {
-        setShowDetailsComments(!showDetailsComments)
-      } else if (key.name === "1") {
-        setShowDetailsComments(false)
-      } else if (key.name === "2") {
-        setShowDetailsComments(true)
-      }
       return
     }
 

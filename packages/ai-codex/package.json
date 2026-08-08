@@ -31,9 +31,9 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force && node scripts/validate-dist.mjs",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p tsconfig.dtslint.json",
     "clean": "rimraf dist *.tsbuildinfo",
-    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run",
     "test:smoke:real": "AI_CODEX_REAL_SMOKE=1 vitest run --config vitest.smoke.config.ts"
   },

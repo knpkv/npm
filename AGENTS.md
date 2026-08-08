@@ -130,6 +130,7 @@ Every provider fixture-locator list must classify each coordinate as server-priv
 ### Versioning and Publishing
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
+- **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 ### Agent Management
@@ -241,6 +242,10 @@ When writing Effect code:
   caller's shell. Use `ChildEnv.profileScopedEnv` in the `codecommit` packages
   rather than rebuilding the exclusion list; it documents which variables are
   deliberately left alone and why.
+- When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
+  required local executable, update `packages/codecommit/README.md` in the same
+  change with the corresponding IAM action and runtime prerequisite. Pure
+  presentation changes do not require a capability update.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

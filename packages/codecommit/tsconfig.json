@@ -10,5 +10,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler"
   },
+  "references": [{ "path": "../ai-codex/tsconfig.build.json" }],
   "include": ["src", "test", "src/**/*.json", "package.json"]
 }

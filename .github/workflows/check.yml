@@ -85,7 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 10
+    # Recent successful baseline runs need almost the full ten minutes; leave
+    # enough runner variance for teardown to complete after assertions pass.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Install dependencies

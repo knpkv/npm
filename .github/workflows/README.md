@@ -51,7 +51,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 - Runs test suite
 - **Command**: `pnpm test`
-- **Timeout**: 10 minutes
+- **Timeout**: 15 minutes
 - **Node Version**: 24.10.0
 
 #### Browser

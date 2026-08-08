@@ -23,6 +23,16 @@ authentication, state-location, certificate, path, and temporary-directory
 variables are forwarded. Use the explicit `environment` option for a custom
 provider key named by Codex `env_key` configuration.
 
+Set `promptOnly: true` when the complete input is already present in the prompt.
+This mode ignores user configuration, repository instructions, and command
+rules; removes inherited shell variables; and disables the CLI's shell, code,
+browser, app, plugin, skill, workspace, and sub-agent capabilities. Before the
+turn starts it negotiates the installed CLI feature inventory, passes only
+supported disables, and rejects any feature this package has not explicitly
+classified. Inventory discovery must exit successfully and uses the turn's
+timeout and output limits. It is intended for reviewing untrusted text without
+granting that text a host-read path.
+
 Structured output uses Codex's `--output-schema` support:
 
 ```ts
@@ -68,4 +78,8 @@ pnpm --filter @knpkv/ai-codex test:smoke:real
 ```
 
 This is deliberately separate from `pnpm test`. Once invoked it does not skip
-when Codex or authentication is unavailable.
+when Codex or authentication is unavailable. The smoke suite pins the reviewed
+Codex CLI version and verifies that prompt-only turns cannot emit web-search or
+local-image tool events. Prompt-only invocations disable those non-feature tools
+with `web_search="disabled"` and `tools.view_image=false` in addition to the
+negotiated feature denylist.

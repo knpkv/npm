@@ -6,7 +6,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import type { CodexModelOptions } from "../model.js"
 import { makeArguments, normalizeOptions, validatePrompt } from "./configuration.js"
 import { CodexTransportError, invalidRequest, transportToAiError } from "./errors.js"
-import { runCodex } from "./process.js"
+import { resolvePromptOnlyDisabledFeatures, runCodex } from "./process.js"
 import { renderPrompt } from "./prompt.js"
 import { type CodexTurn, decodeTranscript } from "./protocol.js"
 
@@ -131,11 +131,17 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
   yield* validatePrompt(prompt, options.maxPromptBytes, method)
 
   return yield* Effect.scoped(Effect.gen(function*() {
+    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(
+      options,
+      dependencies.spawner,
+      dependencies.fileSystem,
+      method
+    )
     const schemaFile = providerOptions.responseFormat.type === "json"
       ? yield* makeSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
       : undefined
     const stdout = yield* runCodex({
-      args: makeArguments(options, schemaFile),
+      args: makeArguments(options, schemaFile, promptOnlyDisabledFeatures),
       cwd: options.cwd,
       environment: options.environment,
       executable: options.executable,

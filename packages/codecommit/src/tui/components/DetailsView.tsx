@@ -1,317 +1,622 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { Domain } from "@knpkv/codecommit-core"
-import { DateUtils } from "@knpkv/codecommit-core"
-import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
-import { parseColor, SyntaxStyle } from "@opentui/core"
-import { Option } from "effect"
+import type { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { type DiffRenderable, parseColor, type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core"
+import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import { useEffect, useMemo, useRef, useState } from "react"
-import { fetchPrCommentsAtom } from "../atoms/actions.js"
+import * as Atom from "effect/unstable/reactivity/Atom"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import type { RelayReviewKind } from "../../RelayReview.js"
+import type { WorktreePlan } from "../../WorktreeService.js"
+import { fetchPrCommentsAtom, openPrAtom } from "../atoms/actions.js"
 import { type AppState, appStateAtom } from "../atoms/app.js"
-import { selectedPrIdAtom, showDetailsCommentsAtom } from "../atoms/ui.js"
+import {
+  checkoutWorktreeAtom,
+  loadFileDiffAtom,
+  loadPullRequestWorkspaceAtom,
+  preflightWorktreeAtom,
+  runRelayReviewAtom
+} from "../atoms/details.js"
+import {
+  type ActionDiagnostic,
+  changedFilePath,
+  changedFileRowId,
+  currentFileDiffOutcome,
+  currentRevisionCommentLocations,
+  currentWorkspaceSelection,
+  detailsKeyIntent,
+  exactRevisionReviewState,
+  fileDiffIdentity,
+  pullRequestCommentsRequestKey,
+  pullRequestWorkspaceReloadKey,
+  pullRequestWorkspaceIdentity,
+  revisionHeaderText,
+  terminalSafeMultilineText,
+  terminalSafeText,
+  type WorkspaceActionPhase,
+  workspaceLifecycleTransition,
+  workspaceIdentityMatches
+} from "../details-model.js"
+import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { Badge } from "./Badge.js"
-import type { BadgeVariant } from "./Badge.js"
-import { StatusRow } from "./StatusRow.js"
 
-const defaultState: AppState = {
-  status: "loading",
-  pullRequests: [],
-  accounts: []
-}
-
+const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
-const successVariant: BadgeVariant = "success"
-const warningVariant: BadgeVariant = "warning"
-const neutralVariant: BadgeVariant = "neutral"
-const errorVariant: BadgeVariant = "error"
+let nextActionRequestSequence = 0
+
+const hasVerticalScroll = (value: object): value is object & { scrollY: number } =>
+  "scrollY" in value && typeof value.scrollY === "number"
+
+const scrollDiffBy = (diff: DiffRenderable | null, lines: number): void => {
+  if (diff === null) return
+  const pending = [...diff.getChildren()]
+  while (pending.length > 0) {
+    const renderable = pending.pop()
+    if (renderable === undefined) continue
+    if (hasVerticalScroll(renderable)) renderable.scrollY += lines
+    for (const child of renderable.getChildren()) pending.push(child)
+  }
+}
 
 const formatRelativeDate = (date: Date): string => {
-  const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-  const diffMs = Date.now() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return `${abs} \u00B7 just now`
-  if (diffMins < 60) return `${abs} \u00B7 ${diffMins}m ago`
+  const diffMins = Math.floor((Date.now() - date.getTime()) / 60_000)
+  if (diffMins < 1) return "just now"
+  if (diffMins < 60) return `${diffMins}m ago`
   const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${abs} \u00B7 ${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${abs} \u00B7 ${diffDays}d ago`
+  return diffHours < 24 ? `${diffHours}h ago` : `${Math.floor(diffHours / 24)}d ago`
 }
-
-const earliestLocDate = (loc: Domain.PRCommentLocation): number =>
-  loc.comments.length === 0 ? 0 : Math.min(...loc.comments.map((t) => t.root.creationDate.getTime()))
-
-const countThread = (t: Domain.CommentThread): number => 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
 
 function CommentThread({
   depth,
   syntaxStyle,
   thread
 }: {
-  readonly thread: Domain.CommentThread
   readonly depth: number
   readonly syntaxStyle: SyntaxStyle | null
+  readonly thread: Domain.CommentThread
 }) {
   const { theme } = useTheme()
-  const indent = depth * 2
-  const prefix = depth > 0 ? "\u2502 ".repeat(depth) : "\u250C "
-
-  if (thread.root.deleted) return null
-
   return (
-    <box flexDirection="column" style={{ paddingLeft: indent }}>
-      <text fg={theme.textMuted}>
-        {`${prefix}${thread.root.author} \u00B7 ${formatRelativeDate(thread.root.creationDate)}`}
-      </text>
-      {syntaxStyle ? (
+    <box flexDirection="column" style={{ paddingLeft: depth * 2 }}>
+      {thread.root.deleted ? (
+        <text fg={theme.textMuted}>{`${depth > 0 ? "│" : "┌"} comment deleted`}</text>
+      ) : (
+        <text
+          fg={theme.textMuted}
+        >{`${depth > 0 ? "│" : "┌"} ${terminalSafeText(thread.root.author)} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
+      )}
+      {thread.root.deleted ? null : syntaxStyle ? (
         <markdown
-          style={{ width: "100%", paddingLeft: indent + 2 }}
+          content={terminalSafeMultilineText(thread.root.content)}
           syntaxStyle={syntaxStyle}
-          content={thread.root.content}
+          style={{ paddingLeft: 2, width: "100%" }}
         />
       ) : (
-        <text fg={theme.text} style={{ paddingLeft: indent + 2 }}>
-          {thread.root.content}
+        <text fg={theme.text} style={{ paddingLeft: 2 }}>
+          {terminalSafeMultilineText(thread.root.content)}
         </text>
       )}
       {thread.replies.map((reply) => (
-        <CommentThread key={reply.root.id} thread={reply} depth={depth + 1} syntaxStyle={syntaxStyle} />
+        <CommentThread depth={depth + 1} key={reply.root.id} syntaxStyle={syntaxStyle} thread={reply} />
       ))}
     </box>
   )
 }
 
-function CommentsSection({
+function CommentsPanel({
   pr,
-  syntaxStyle
+  revision,
+  syntaxStyle,
+  workspaceFailed
 }: {
   readonly pr: Domain.PullRequest
+  readonly revision: ReadClient.CodeCommitPullRequestRevision | null
   readonly syntaxStyle: SyntaxStyle | null
+  readonly workspaceFailed: boolean
 }) {
   const { theme } = useTheme()
   const fetchComments = useAtomSet(fetchPrCommentsAtom)
-  const commentsResult = useAtomValue(fetchPrCommentsAtom)
+  const result = useAtomValue(fetchPrCommentsAtom)
   const fetchedRef = useRef<string | null>(null)
-
+  const expectedIdentity = pullRequestWorkspaceIdentity(pr)
+  const requestKey = revision === null ? null : pullRequestCommentsRequestKey(pr, revision)
   useEffect(() => {
-    if (fetchedRef.current === pr.id) return
-    fetchedRef.current = pr.id
+    if (requestKey === null) return
+    if (fetchedRef.current === requestKey) return
+    fetchedRef.current = requestKey
     fetchComments(pr)
-  }, [pr, fetchComments])
-
-  const loading = AsyncResult.isInitial(commentsResult)
-  const comments = AsyncResult.getOrElse(commentsResult, emptyCommentLocations)
-  const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
-
+  }, [fetchComments, pr, requestKey])
+  const commentsResult =
+    AsyncResult.isSuccess(result) &&
+    !AsyncResult.isWaiting(result) &&
+    workspaceIdentityMatches(result.value.identity, expectedIdentity)
+      ? result.value.comments
+      : null
+  const comments =
+    commentsResult === null || revision === null
+      ? emptyCommentLocations()
+      : currentRevisionCommentLocations(commentsResult, revision)
   return (
-    <box flexDirection="column">
-      {loading && <text fg={theme.textMuted}>Loading comments...</text>}
-      {comments.length === 0 && !loading && <text fg={theme.textMuted}>No comments</text>}
-      {!loading &&
-        totalCount > 0 &&
-        [...comments]
-          .sort((a, b) => earliestLocDate(b) - earliestLocDate(a))
-          .map((loc, i) => (
-            <box key={i} flexDirection="column" style={{ paddingBottom: 1 }}>
-              {loc.filePath && <text fg={theme.textAccent}>{loc.filePath}</text>}
-              {loc.comments.map((thread) => (
-                <CommentThread key={thread.root.id} thread={thread} depth={0} syntaxStyle={syntaxStyle} />
-              ))}
-            </box>
+    <scrollbox focused style={{ flexGrow: 1, padding: 2, width: "100%" }}>
+      {workspaceFailed ? (
+        <text fg={theme.textError}>Exact-head read failed.</text>
+      ) : commentsResult === null || revision === null ? (
+        <text fg={theme.textMuted}>Loading review thread…</text>
+      ) : null}
+      {!workspaceFailed && commentsResult !== null && revision !== null && comments.length === 0 && (
+        <text fg={theme.textMuted}>No comments for this revision</text>
+      )}
+      {comments.map((location, locationIndex) => (
+        <box
+          flexDirection="column"
+          key={`${location.filePath ?? "general"}-${locationIndex}`}
+          style={{ paddingBottom: 1 }}
+        >
+          <text fg={theme.textAccent}>{terminalSafeText(location.filePath ?? "General review")}</text>
+          {location.comments.map((thread) => (
+            <CommentThread depth={0} key={thread.root.id} syntaxStyle={syntaxStyle} thread={thread} />
           ))}
-    </box>
+        </box>
+      ))}
+    </scrollbox>
   )
 }
 
-/**
- * PR details view showing full PR information
- * @category components
- */
+type PendingAction = "worktree" | RelayReviewKind
+type ActionStatus =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "preflight"; readonly action: PendingAction; readonly requestId: string }
+  | { readonly _tag: "ready"; readonly action: PendingAction; readonly plan: WorktreePlan; readonly requestId: string }
+  | {
+      readonly _tag: "running"
+      readonly action: PendingAction
+      readonly plan: WorktreePlan
+      readonly requestId: string
+    }
+  | { readonly _tag: "done"; readonly action: PendingAction; readonly detail: string }
+  | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
+
+const actionLabel = (action: PendingAction): string =>
+  ({
+    review: "Review PR",
+    security: "Security pass",
+    tests: "Review tests",
+    explain: "Explain risk",
+    worktree: "Checkout worktree"
+  })[action]
+
+function ActionKey({
+  active,
+  keyName,
+  label
+}: {
+  readonly active: boolean
+  readonly keyName: string
+  readonly label: string
+}) {
+  const { theme } = useTheme()
+  return (
+    <text fg={active ? theme.textWarning : theme.textMuted}>
+      <span fg={active ? theme.textWarning : theme.textAccent}>{keyName}</span>
+      {` ${label}`}
+    </text>
+  )
+}
+
+/** Exact-head PR workspace: files, native diff, human state, and preflighted local actions. */
 export function DetailsView() {
   const { theme } = useTheme()
+  const dialog = useDialog()
   const selectedPrId = useAtomValue(selectedPrIdAtom)
-  const appStateResult = useAtomValue(appStateAtom)
-  const appState = AsyncResult.getOrElse(appStateResult, () => defaultState)
-  const showComments = useAtomValue(showDetailsCommentsAtom)
-  const setShowComments = useAtomSet(showDetailsCommentsAtom)
-
-  // Find PR by ID directly - stable even when items reorder
-  const pr = useMemo(() => {
-    if (!selectedPrId) return null
-    return appState.pullRequests.find((p) => p.id === selectedPrId) ?? null
-  }, [selectedPrId, appState.pullRequests])
+  const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
+  const setView = useAtomSet(viewAtom)
+  const openPr = useAtomSet(openPrAtom)
+  const loadWorkspace = useAtomSet(loadPullRequestWorkspaceAtom)
+  const workspaceResult = useAtomValue(loadPullRequestWorkspaceAtom)
+  const loadDiff = useAtomSet(loadFileDiffAtom)
+  const diffResult = useAtomValue(loadFileDiffAtom)
+  const preflight = useAtomSet(preflightWorktreeAtom)
+  const preflightResult = useAtomValue(preflightWorktreeAtom)
+  const checkout = useAtomSet(checkoutWorktreeAtom)
+  const checkoutResult = useAtomValue(checkoutWorktreeAtom)
+  const runReview = useAtomSet(runRelayReviewAtom)
+  const reviewResult = useAtomValue(runRelayReviewAtom)
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
+  const [tab, setTab] = useState<"comments" | "diff">("diff")
+  const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
+  const actionScrollRef = useRef<ScrollBoxRenderable>(null)
+  const actionRef = useRef<ActionStatus>(action)
+  const diffRef = useRef<DiffRenderable>(null)
+  const filesScrollRef = useRef<ScrollBoxRenderable>(null)
+  const loadedWorkspaceKeyRef = useRef<string | null>(null)
+  actionRef.current = action
 
-  const score: HealthScore | undefined = useMemo(
-    () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
-    [pr]
+  const pr = useMemo(
+    () =>
+      selectedPrId === null ? null : (appState.pullRequests.find((candidate) => candidate.id === selectedPrId) ?? null),
+    [appState.pullRequests, selectedPrId]
   )
-  const tier = score ? getScoreTier(score.total) : undefined
-  const scoreBadgeVariant =
-    tier === "green"
-      ? successVariant
-      : tier === "yellow"
-        ? warningVariant
-        : tier === undefined
-          ? neutralVariant
-          : errorVariant
+  const workspaceCandidate =
+    AsyncResult.isSuccess(workspaceResult) && !AsyncResult.isWaiting(workspaceResult) ? workspaceResult.value : null
+  const expectedWorkspaceIdentity = pr === null ? null : pullRequestWorkspaceIdentity(pr)
+  const workspaceSelection = currentWorkspaceSelection(workspaceCandidate, expectedWorkspaceIdentity)
+  const workspace = workspaceSelection._tag === "ready" ? workspaceSelection.value : null
+  const selectedFile = workspace?.files[selectedFileIndex] ?? null
+  const selectedPath = selectedFile === null ? null : changedFilePath(selectedFile)
+  const expectedFileIdentity =
+    workspace === null || selectedFile === null
+      ? null
+      : fileDiffIdentity(workspace.identity, workspace.revision, selectedFile)
+  const retainedDiffOutcome =
+    AsyncResult.isSuccess(diffResult) && !AsyncResult.isWaiting(diffResult) ? diffResult.value : null
+  const diffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
+  const renderedDiff = diffOutcome?._tag === "success" ? diffOutcome.value : null
+  const diffFailed = diffOutcome?._tag === "failure"
+  const workspaceFailed =
+    workspaceSelection._tag === "stale" ||
+    (AsyncResult.isFailure(workspaceResult) && !AsyncResult.isWaiting(workspaceResult))
+  const workspaceReloadKey = pr === null ? null : pullRequestWorkspaceReloadKey(pr)
 
-  // Reset comments visibility on PR change
   useEffect(() => {
-    if (selectedPrId) setShowComments(false)
-  }, [selectedPrId, setShowComments])
+    const currentAction = actionRef.current
+    const phase: WorkspaceActionPhase =
+      currentAction._tag === "running"
+        ? currentAction.action === "worktree"
+          ? "running-worktree"
+          : "running-review"
+        : currentAction._tag === "done" || currentAction._tag === "failed"
+          ? "terminal"
+          : currentAction._tag
+    const transition = workspaceLifecycleTransition(loadedWorkspaceKeyRef.current, workspaceReloadKey, phase)
+    if (transition._tag === "preserve") return
+    loadedWorkspaceKeyRef.current = workspaceReloadKey
+    if (transition.interrupt === "preflight") preflight(Atom.Interrupt)
+    else if (transition.interrupt === "checkout") checkout(Atom.Interrupt)
+    else if (transition.interrupt === "review") runReview(Atom.Interrupt)
+    setSelectedFileIndex(0)
+    setTab("diff")
+    setAction({ _tag: "idle" })
+    if (pr !== null) loadWorkspace(pr)
+  }, [checkout, loadWorkspace, preflight, pr, runReview, workspaceReloadKey])
+
+  useEffect(() => {
+    if (pr === null || workspace === null || selectedFile === null) return
+    loadDiff({
+      account: pr.account,
+      file: selectedFile,
+      identity: workspace.identity,
+      repositoryName: workspace.revision.repositoryName,
+      revision: workspace.revision
+    })
+  }, [loadDiff, pr, selectedFile, workspace])
+
+  useLayoutEffect(() => {
+    filesScrollRef.current?.scrollChildIntoView(changedFileRowId(selectedFileIndex))
+  }, [selectedFileIndex, workspace?.files.length])
+
+  useEffect(() => {
+    if (action._tag !== "preflight" || AsyncResult.isWaiting(preflightResult) || workspace === null) return
+    if (!AsyncResult.isSuccess(preflightResult)) return
+    const outcome = preflightResult.value
+    if (outcome.requestId !== action.requestId) return
+    if (outcome._tag === "failure") {
+      setAction({ _tag: "failed", action: action.action, diagnostic: outcome.diagnostic })
+      return
+    }
+    const plan = outcome.value
+    if (
+      pr === null ||
+      plan.account.profile !== pr.account.profile ||
+      plan.account.region !== pr.account.region ||
+      plan.destinationCommit !== workspace.revision.destinationCommit ||
+      plan.pullRequestId !== pr.id ||
+      plan.repositoryName !== workspace.revision.repositoryName ||
+      plan.sourceCommit !== workspace.revision.sourceCommit
+    )
+      return
+    setAction({ _tag: "ready", action: action.action, plan, requestId: action.requestId })
+  }, [action, pr, preflightResult, workspace])
+
+  useEffect(() => {
+    if (action._tag !== "running" || action.action !== "worktree" || AsyncResult.isWaiting(checkoutResult)) return
+    if (!AsyncResult.isSuccess(checkoutResult) || checkoutResult.value.requestId !== action.requestId) return
+    const outcome = checkoutResult.value
+    if (outcome._tag === "failure") {
+      setAction({ _tag: "failed", action: "worktree", diagnostic: outcome.diagnostic })
+      return
+    }
+    if (outcome.value.path === action.plan.targetPath && outcome.value.sourceCommit === action.plan.sourceCommit) {
+      setAction({ _tag: "done", action: "worktree", detail: outcome.value.path })
+    }
+  }, [action, checkoutResult])
+
+  useEffect(() => {
+    if (action._tag !== "running" || action.action === "worktree" || AsyncResult.isWaiting(reviewResult)) return
+    if (!AsyncResult.isSuccess(reviewResult) || reviewResult.value.requestId !== action.requestId) return
+    const outcome = reviewResult.value
+    if (outcome._tag === "failure") {
+      setAction({ _tag: "failed", action: action.action, diagnostic: outcome.diagnostic })
+      return
+    }
+    if (
+      outcome.value.kind === action.action &&
+      outcome.value.worktree.path === action.plan.targetPath &&
+      outcome.value.worktree.sourceCommit === action.plan.sourceCommit
+    ) {
+      setAction({ _tag: "done", action: action.action, detail: outcome.value.summary })
+    }
+  }, [action, reviewResult])
 
   useEffect(() => {
     const style = SyntaxStyle.fromStyles({
       default: { fg: parseColor(theme.markdownText) },
       "markup.heading": { fg: parseColor(theme.markdownHeading), bold: true },
       "markup.link": { fg: parseColor(theme.markdownLink), underline: true },
-      "markup.link.label": { fg: parseColor(theme.markdownLinkText), underline: true },
-      "markup.link.url": { fg: parseColor(theme.markdownLink), underline: true },
       "markup.raw": { fg: parseColor(theme.markdownCode) },
       "markup.quote": { fg: parseColor(theme.markdownBlockQuote), italic: true },
-      "punctuation.special": { fg: parseColor(theme.markdownBlockQuote) },
-      "markup.strong": { fg: parseColor(theme.markdownStrong), bold: true },
-      "markup.bold": { fg: parseColor(theme.markdownStrong), bold: true },
-      "markup.italic": { fg: parseColor(theme.markdownEmph), italic: true },
-      "markup.list": { fg: parseColor(theme.markdownListItem) }
+      "markup.strong": { fg: parseColor(theme.markdownStrong), bold: true }
     })
     setSyntaxStyle(style)
     return () => style.destroy()
   }, [theme])
 
-  if (!pr) {
+  const beginAction = (next: PendingAction) => {
+    if (pr === null || workspace === null || action._tag === "running") return
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:${nextActionRequestSequence}`
+    setAction({ _tag: "preflight", action: next, requestId })
+    preflight({ pr, requestId, revision: workspace.revision })
+  }
+
+  useKeyboard((key) => {
+    const intent = detailsKeyIntent({
+      actionCancelable: action._tag !== "idle",
+      actionReady: action._tag === "ready" && workspace !== null,
+      dialogOpen: dialog.current !== null,
+      keyName: key.name,
+      modified: key.ctrl === true || key.meta === true,
+      tab
+    })
+    if (intent === "yield") return
+    key.stopPropagation()
+    if (intent === "back") setView("prs")
+    else if (intent === "cancel-action") {
+      if (action._tag === "preflight") preflight(Atom.Interrupt)
+      else if (action._tag === "running" && action.action === "worktree") checkout(Atom.Interrupt)
+      else if (action._tag === "running") runReview(Atom.Interrupt)
+      setAction({ _tag: "idle" })
+    } else if (intent === "show-diff") setTab("diff")
+    else if (intent === "show-comments") setTab("comments")
+    else if (intent === "open-browser" && pr !== null) openPr(pr)
+    else if (intent === "previous-file") {
+      setSelectedFileIndex((index) => Math.max(0, index - 1))
+    } else if (intent === "next-file") {
+      setSelectedFileIndex((index) => Math.min(Math.max(0, (workspace?.files.length ?? 1) - 1), index + 1))
+    } else if (intent === "scroll-content-up" || intent === "scroll-content-down") {
+      const lines = intent === "scroll-content-up" ? -3 : 3
+      scrollDiffBy(diffRef.current, lines)
+      actionScrollRef.current?.scrollBy({ x: 0, y: lines })
+    } else if (intent === "checkout-worktree") beginAction("worktree")
+    else if (intent === "review-pr") beginAction("review")
+    else if (intent === "review-security") beginAction("security")
+    else if (intent === "review-tests") beginAction("tests")
+    else if (intent === "explain-risk") beginAction("explain")
+    else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
+      const ready = action
+      setAction({
+        _tag: "running",
+        action: ready.action,
+        plan: ready.plan,
+        requestId: ready.requestId
+      })
+      if (ready.action === "worktree") checkout({ plan: ready.plan, requestId: ready.requestId })
+      else {
+        runReview({
+          kind: ready.action,
+          plan: ready.plan,
+          requestId: ready.requestId,
+          revision: workspace.revision
+        })
+      }
+    }
+  })
+
+  if (pr === null) {
     return (
-      <box
-        style={{
-          flexGrow: 1,
-          width: "100%",
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: theme.backgroundPanel
-        }}
-      >
+      <box alignItems="center" justifyContent="center" style={{ flexGrow: 1, width: "100%" }}>
         <text fg={theme.textMuted}>No PR selected</text>
       </box>
     )
   }
 
-  const commentLabel =
-    pr.commentCount !== undefined && pr.commentCount > 0 ? `Comments (${pr.commentCount})` : "Comments"
+  const revision = workspace?.revision
+  const humanState = exactRevisionReviewState()
 
   return (
-    <box
-      style={{
-        flexGrow: 1,
-        width: "100%",
-        flexDirection: "column",
-        backgroundColor: theme.backgroundPanel
-      }}
-    >
+    <box flexDirection="column" style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1, width: "100%" }}>
       <box
-        style={{
-          height: 3,
-          width: "100%",
-          backgroundColor: theme.backgroundPanel,
-          paddingLeft: 2,
-          paddingRight: 2,
-          justifyContent: "center",
-          alignItems: "center"
-        }}
+        flexDirection="column"
+        style={{ backgroundColor: theme.backgroundElement, height: 4, paddingLeft: 2, paddingRight: 2 }}
       >
-        <text fg={theme.textAccent}>{`  PR: ${pr.repositoryName} > ${pr.title}`}</text>
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={theme.textAccent}>{terminalSafeText(`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`)}</text>
+          <box flexDirection="row">
+            <text fg={theme.textMuted}>{`APPROVAL ${humanState.approval}`}</text>
+            <text fg={theme.textMuted}> · </text>
+            <text fg={theme.textMuted}>{`MERGEABILITY ${humanState.mergeability}`}</text>
+          </box>
+        </box>
+        <text fg={theme.textMuted}>
+          {terminalSafeText(`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`)}
+        </text>
+        <text fg={theme.textMuted}>
+          {revision === undefined ? "Loading exact revision…" : revisionHeaderText(revision)}
+        </text>
       </box>
-      <box flexDirection="row" style={{ paddingLeft: 2, paddingBottom: 1, alignItems: "center" }}>
-        <Badge variant={!showComments ? "info" : "neutral"} minWidth={8}>
-          1 Info
+
+      <box flexDirection="row" style={{ height: 2, paddingLeft: 2, alignItems: "center" }}>
+        <Badge minWidth={10} variant={tab === "diff" ? "info" : "neutral"}>
+          1 Changes
         </Badge>
         <box style={{ width: 1 }} />
-        <Badge variant={showComments ? "info" : "neutral"} minWidth={16}>{`2 ${commentLabel}`}</Badge>
+        <Badge
+          minWidth={14}
+          variant={tab === "comments" ? "info" : "neutral"}
+        >{`2 Comments${pr.commentCount ? ` (${pr.commentCount})` : ""}`}</Badge>
       </box>
-      <box style={{ paddingLeft: 2 }}>
-        <text fg={theme.textMuted}>{"\u2500".repeat(42)}</text>
-      </box>
-      <scrollbox
-        focused
-        style={{
-          flexGrow: 1,
-          width: "100%",
-          padding: 2,
-          rootOptions: { backgroundColor: theme.backgroundPanel },
-          viewportOptions: { backgroundColor: theme.backgroundPanel },
-          contentOptions: { backgroundColor: theme.backgroundPanel }
-        }}
-      >
-        {!showComments ? (
-          <box flexDirection="column">
-            <StatusRow label="Score:">
-              <Badge variant={scoreBadgeVariant} minWidth={14}>
-                {score ? score.total.toFixed(1) : "---"}
-              </Badge>
-            </StatusRow>
-            <StatusRow label="Merge:">
-              {!pr.isMergeable ? (
-                <Badge variant="error" minWidth={14}>
-                  CONFLICT
-                </Badge>
-              ) : (
-                <Badge variant="success" minWidth={14}>
-                  MERGEABLE
-                </Badge>
-              )}
-            </StatusRow>
-            <StatusRow label="Approval:">
-              {pr.isApproved ? (
-                <Badge variant="success" minWidth={14}>
-                  APPROVED
-                </Badge>
-              ) : (
-                <Badge variant="neutral" minWidth={14}>
-                  PENDING
-                </Badge>
-              )}
-            </StatusRow>
-            <StatusRow label="State:">
-              <text fg={theme.text}>{pr.status.toUpperCase()}</text>
-            </StatusRow>
 
-            <box style={{ height: 1 }} />
+      {tab === "comments" ? (
+        <CommentsPanel
+          pr={pr}
+          revision={revision ?? null}
+          syntaxStyle={syntaxStyle}
+          workspaceFailed={workspaceFailed}
+        />
+      ) : (
+        <box flexDirection="row" style={{ flexGrow: 1, width: "100%" }}>
+          <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, width: "25%" }}>
+            <text fg={theme.textMuted}>{` FILES · ${workspace?.files.length ?? "…"}`}</text>
+            <scrollbox ref={filesScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+              {workspace === null && !workspaceFailed && <text fg={theme.textMuted}> Loading changed files…</text>}
+              {workspaceFailed && <text fg={theme.textError}> Exact-head read failed.</text>}
+              {workspace?.files.map((file, index) => {
+                const status =
+                  file.status === "added"
+                    ? "+"
+                    : file.status === "deleted"
+                      ? "−"
+                      : file.status === "renamed"
+                        ? "R"
+                        : "M"
+                return (
+                  <text
+                    {...(index === selectedFileIndex ? { bg: theme.selectedBackground } : {})}
+                    fg={index === selectedFileIndex ? theme.selectedText : theme.textMuted}
+                    key={`${changedFilePath(file)}-${index}`}
+                    id={changedFileRowId(index)}
+                  >
+                    {` ${status} ${terminalSafeText(changedFilePath(file))}`}
+                  </text>
+                )
+              })}
+            </scrollbox>
+          </box>
 
-            <StatusRow label="Author:">
-              <text fg={theme.text}>{pr.author}</text>
-            </StatusRow>
-            <StatusRow label="Created:">
-              <text fg={theme.text}>{DateUtils.formatDateTime(pr.creationDate)}</text>
-            </StatusRow>
-            <StatusRow label="Branch:">
-              <text fg={theme.text}>{`${pr.sourceBranch} -> ${pr.destinationBranch}`}</text>
-            </StatusRow>
-
-            <box style={{ height: 1 }} />
-            <text fg={theme.textMuted}>{"\u2500".repeat(42)}</text>
-            <box style={{ height: 1 }} />
-
-            <text fg={theme.text}>DESCRIPTION</text>
-            <box style={{ height: 1 }} />
-            {syntaxStyle && (
-              <markdown
-                style={{ width: "100%" }}
-                syntaxStyle={syntaxStyle}
-                content={pr.description || "No description provided."}
+          <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, flexGrow: 1 }}>
+            <text fg={theme.textAccent}>{` ${terminalSafeText(selectedPath ?? "Select a changed file")}`}</text>
+            {selectedFile !== null && diffOutcome === null && (
+              <text fg={theme.textMuted}> Loading immutable blobs…</text>
+            )}
+            {diffFailed && <text fg={theme.textError}> Unable to load this file preview.</text>}
+            {renderedDiff?.binary && (
+              <text fg={theme.textMuted}> Binary file changed. Checkout the worktree to inspect it locally.</text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.truncated && (
+              <text fg={theme.textWarning}>
+                Diff preview bounded to complete hunks. Checkout the exact head for omitted content.
+              </text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length === 0 && (
+              <text fg={renderedDiff.metadata === null ? theme.textMuted : theme.textAccent}>
+                {renderedDiff.metadata === null
+                  ? " This change is too large for a safe terminal preview."
+                  : ` ${terminalSafeMultilineText(renderedDiff.metadata)}`}
+              </text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && renderedDiff.metadata && (
+              <text fg={theme.textAccent}>{` ${terminalSafeMultilineText(renderedDiff.metadata)}`}</text>
+            )}
+            {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && (
+              <diff
+                addedSignColor={theme.textSuccess}
+                diff={renderedDiff.diff}
+                ref={diffRef}
+                fg={theme.text}
+                {...(renderedDiff.filetype === undefined ? {} : { filetype: renderedDiff.filetype })}
+                removedSignColor={theme.textError}
+                showLineNumbers
+                style={{ flexGrow: 1, width: "100%" }}
+                {...(syntaxStyle === null ? {} : { syntaxStyle })}
+                view="unified"
+                wrapMode="none"
               />
             )}
-
-            <box style={{ height: 1 }} />
-            <text fg={theme.textMuted}>{"\u2500".repeat(42)}</text>
-            <box style={{ height: 1 }} />
-
-            <text fg={theme.text}>LINK</text>
-            <text fg={theme.textAccent}>{`URL: ${pr.link}`}</text>
           </box>
-        ) : (
-          <CommentsSection key={pr.id} pr={pr} syntaxStyle={syntaxStyle} />
-        )}
-      </scrollbox>
+
+          <box
+            flexDirection="column"
+            style={{
+              border: true,
+              borderColor: theme.backgroundElement,
+              paddingLeft: 1,
+              paddingRight: 1,
+              width: "28%"
+            }}
+          >
+            <text fg={theme.text}>ACTIONS · EXACT HEAD</text>
+            <ActionKey active={action._tag !== "idle" && action.action === "review"} keyName="r" label="Review PR" />
+            <ActionKey
+              active={action._tag !== "idle" && action.action === "security"}
+              keyName="s"
+              label="Security pass"
+            />
+            <ActionKey active={action._tag !== "idle" && action.action === "tests"} keyName="t" label="Review tests" />
+            <ActionKey
+              active={action._tag !== "idle" && action.action === "explain"}
+              keyName="e"
+              label="Explain risk"
+            />
+            <ActionKey
+              active={action._tag !== "idle" && action.action === "worktree"}
+              keyName="w"
+              label="Checkout worktree"
+            />
+            <box style={{ height: 1 }} />
+            {action._tag === "idle" && (
+              <text fg={theme.textMuted}>
+                Relay uses local Codex in a read-only sandbox. Human approval stays separate.
+              </text>
+            )}
+            {action._tag === "preflight" && (
+              <text fg={theme.textWarning}>{`Preparing ${actionLabel(action.action)} preflight…`}</text>
+            )}
+            {action._tag === "ready" && (
+              <box flexDirection="column">
+                <text fg={theme.textWarning}>{`${actionLabel(action.action)} · READY`}</text>
+                <text fg={theme.textMuted}>{`head ${action.plan.sourceCommit.slice(0, 12)}`}</text>
+                <text fg={theme.textMuted}>
+                  {action.plan.targetExists ? "validate existing worktree" : "create detached worktree"}
+                </text>
+                <text fg={theme.textMuted}>{terminalSafeText(action.plan.targetPath)}</text>
+                {action.action !== "worktree" && <text fg={theme.textMuted}>sandbox read-only · local Codex</text>}
+                <text fg={theme.textSuccess}>Enter run · x cancel</text>
+              </box>
+            )}
+            {action._tag === "running" && (
+              <box flexDirection="column">
+                <text fg={theme.textWarning}>{`${actionLabel(action.action)} · RUNNING…`}</text>
+                <text fg={theme.textMuted}>Esc/x cancel</text>
+              </box>
+            )}
+            {action._tag === "failed" && (
+              <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+                <text
+                  fg={theme.textError}
+                >{`${actionLabel(action.action)} failed · ${terminalSafeText(action.diagnostic.operation)}`}</text>
+                <text fg={theme.textMuted}>{terminalSafeMultilineText(action.diagnostic.message)}</text>
+              </scrollbox>
+            )}
+            {action._tag === "done" && (
+              <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+                <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
+                <text fg={theme.text}>{terminalSafeMultilineText(action.detail)}</text>
+              </scrollbox>
+            )}
+          </box>
+        </box>
+      )}
     </box>
   )
 }

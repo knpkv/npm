@@ -31,8 +31,8 @@
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/jira-cli": "workspace:^",
-    "@opentui/core": "https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e",
-    "@opentui/react": "https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e",
+    "@opentui/core": "0.5.1",
+    "@opentui/react": "0.5.1",
     "effect": "4.0.0-beta.98",
     "react": "^19.2.7"
   },
