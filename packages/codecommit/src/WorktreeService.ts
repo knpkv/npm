@@ -106,16 +106,19 @@ const gitEnvironment = (request: WorktreeRequest) => ({
 const gitCommand = (
   request: WorktreeRequest,
   args: ReadonlyArray<string>,
-  options: { readonly cwd?: string } = {}
-) =>
-  ChildProcess.make("git", args, {
-    ...options,
-    env: gitEnvironment(request),
-    extendEnv: true,
-    stderr: "ignore",
-    stdout: "ignore"
-  })
-
+  options: { readonly captureStdout?: boolean; readonly cwd?: string } = {}
+) => {
+  const { captureStdout = false, cwd } = options
+  return (
+    ChildProcess.make("git", args, {
+      ...(cwd === undefined ? {} : { cwd }),
+      env: gitEnvironment(request),
+      extendEnv: true,
+      stderr: "ignore",
+      stdout: captureStdout ? "pipe" : "ignore"
+    })
+  )
+}
 const commandFailure = (operation: string, message: string, cause?: unknown) =>
   new WorktreeError({ operation, message, ...(cause === undefined ? {} : { cause }) })
 
@@ -144,6 +147,22 @@ const runSucceeds = (
     Effect.match({
       onFailure: () => false,
       onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
+    })
+  )
+
+const isBareRepository = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  request: WorktreeRequest,
+  repositoryPath: string
+) =>
+  spawner.string(gitCommand(request, [
+    `--git-dir=${repositoryPath}`,
+    "rev-parse",
+    "--is-bare-repository"
+  ], { captureStdout: true })).pipe(
+    Effect.match({
+      onFailure: () => false,
+      onSuccess: (output) => output.trim() === "true"
     })
   )
 
@@ -518,11 +537,7 @@ export const makeWorktreeService = (
       const remoteUrl = yield* remoteUrlFor(plan)
       if (cacheExists) {
         yield* assertCanonical("validate-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
-        const validCache = yield* runSucceeds(spawner, plan, [
-          `--git-dir=${plan.cachePath}`,
-          "rev-parse",
-          "--is-bare-repository"
-        ])
+        const validCache = yield* isBareRepository(spawner, plan, plan.cachePath)
         if (!validCache) {
           return yield* commandFailure(
             "validate-cache",
@@ -545,11 +560,7 @@ export const makeWorktreeService = (
               Effect.flatMap(() =>
                 fs.rename(stagedCache, plan.cachePath).pipe(
                   Effect.catch((renameCause) =>
-                    runSucceeds(spawner, plan, [
-                      `--git-dir=${plan.cachePath}`,
-                      "rev-parse",
-                      "--is-bare-repository"
-                    ]).pipe(
+                    isBareRepository(spawner, plan, plan.cachePath).pipe(
                       Effect.flatMap((wonByAnotherProcess) =>
                         wonByAnotherProcess
                           ? Effect.void

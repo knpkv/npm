@@ -298,6 +298,15 @@ describe("WorktreeService", () => {
         expect(unconfirmedCacheError.operation).toBe("validate-cache")
         expect(yield* fs.exists(path.join(plan.cachePath, "preserve-me"))).toBe(true)
         yield* fs.remove(plan.cachePath, { recursive: true })
+
+        yield* fs.makeDirectory(plan.cachePath, { recursive: true })
+        yield* runGit(["init"], plan.cachePath)
+        yield* fs.writeFileString(path.join(plan.cachePath, "preserve-non-bare"), "not a cache")
+        const nonBareCacheError = yield* Effect.flip(firstService.checkout(plan))
+        expect(nonBareCacheError.operation).toBe("validate-cache")
+        expect(yield* fs.exists(path.join(plan.cachePath, "preserve-non-bare"))).toBe(true)
+        yield* fs.remove(plan.cachePath, { recursive: true })
+
         const repaired = yield* firstService.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
 
