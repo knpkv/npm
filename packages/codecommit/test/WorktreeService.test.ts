@@ -7,6 +7,7 @@ import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import {
+  codeCommitRemoteUrl,
   makeWorktreeService,
   repositoryLockPath,
   WORKTREE_LOCK_REQUIREMENT,
@@ -14,6 +15,73 @@ import {
 } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
+  it.effect("isolates repository accounts and resolves partition-aware Git endpoints", () =>
+    Effect.gen(function*() {
+      const service = yield* makeWorktreeService()
+      const request = {
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("shared-profile"),
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repoAccountId: "111122223333"
+        }),
+        destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+        pullRequestId: Domain.PullRequestId.make("77"),
+        repositoryName: Domain.RepositoryName.make("review-repository"),
+        sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      }
+      const first = yield* service.preflight(request)
+      const sameAccount = yield* service.preflight({
+        ...request,
+        account: new Domain.Account({
+          profile: request.account.profile,
+          region: request.account.region,
+          repoAccountId: request.account.repoAccountId
+        })
+      })
+      const otherAccount = yield* service.preflight({
+        ...request,
+        account: new Domain.Account({
+          profile: request.account.profile,
+          region: request.account.region,
+          repoAccountId: "999900001111"
+        })
+      })
+
+      expect(sameAccount.cachePath).toBe(first.cachePath)
+      expect(sameAccount.targetPath).toBe(first.targetPath)
+      expect(otherAccount.cachePath).not.toBe(first.cachePath)
+      expect(otherAccount.targetPath).not.toBe(first.targetPath)
+
+      const missingIdentity = yield* service.preflight({
+        ...request,
+        account: new Domain.Account({
+          profile: request.account.profile,
+          region: request.account.region
+        })
+      }).pipe(Effect.flip)
+      expect(missingIdentity.operation).toBe("validate-coordinates")
+
+      expect(yield* codeCommitRemoteUrl(request)).toBe(
+        "https://git-codecommit.eu-west-1.amazonaws.com/v1/repos/review-repository"
+      )
+      expect(
+        yield* codeCommitRemoteUrl({
+          ...request,
+          account: new Domain.Account({
+            profile: request.account.profile,
+            region: Domain.AwsRegion.make("cn-north-1"),
+            repoAccountId: request.account.repoAccountId
+          })
+        })
+      ).toBe("https://git-codecommit.cn-north-1.amazonaws.com.cn/v1/repos/review-repository")
+    }).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ HOME: "/tmp/codecommit-worktree-coordinate-test" })
+      ),
+      Effect.provide(NodeServices.layer)
+    ))
+
   it.effect("states every required lock-holder executable in unsupported-platform failures", () =>
     Effect.gen(function*() {
       expect(WORKTREE_LOCK_REQUIREMENT).toContain("macOS or Linux")
@@ -95,12 +163,13 @@ describe("WorktreeService", () => {
       yield* runGit(["clone", "--bare", seed, origin], root)
 
       const scenario = Effect.gen(function*() {
-        const firstService = yield* makeWorktreeService(() => origin)
-        const secondService = yield* makeWorktreeService(() => origin)
+        const firstService = yield* makeWorktreeService(() => Effect.succeed(origin))
+        const secondService = yield* makeWorktreeService(() => Effect.succeed(origin))
         const request = {
           account: new Domain.Account({
             profile: Domain.AwsProfileName.make("local-test"),
-            region: Domain.AwsRegion.make("eu-west-1")
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repoAccountId: "111122223333"
           }),
           destinationCommit: ReadClient.CodeCommitCommitId.make(destinationCommit),
           pullRequestId: Domain.PullRequestId.make("77"),

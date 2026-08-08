@@ -1,5 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { Domain } from "@knpkv/codecommit-core"
+import type { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { type DiffRenderable, parseColor, type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
@@ -21,6 +21,7 @@ import {
   changedFilePath,
   changedFileRowId,
   currentFileDiffOutcome,
+  currentRevisionCommentLocations,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
@@ -99,9 +100,11 @@ function CommentThread({
 
 function CommentsPanel({
   pr,
+  revision,
   syntaxStyle
 }: {
   readonly pr: Domain.PullRequest
+  readonly revision: ReadClient.CodeCommitPullRequestRevision | null
   readonly syntaxStyle: SyntaxStyle | null
 }) {
   const { theme } = useTheme()
@@ -121,11 +124,16 @@ function CommentsPanel({
     workspaceIdentityMatches(result.value.identity, expectedIdentity)
       ? result.value.comments
       : null
-  const comments = commentsResult ?? emptyCommentLocations()
+  const comments =
+    commentsResult === null || revision === null
+      ? emptyCommentLocations()
+      : currentRevisionCommentLocations(commentsResult, revision)
   return (
     <scrollbox focused style={{ flexGrow: 1, padding: 2, width: "100%" }}>
-      {commentsResult === null && <text fg={theme.textMuted}>Loading review thread…</text>}
-      {commentsResult !== null && comments.length === 0 && <text fg={theme.textMuted}>No comments</text>}
+      {(commentsResult === null || revision === null) && <text fg={theme.textMuted}>Loading review thread…</text>}
+      {commentsResult !== null && revision !== null && comments.length === 0 && (
+        <text fg={theme.textMuted}>No comments for this revision</text>
+      )}
       {comments.map((location, locationIndex) => (
         <box
           flexDirection="column"
@@ -434,7 +442,7 @@ export function DetailsView() {
       </box>
 
       {tab === "comments" ? (
-        <CommentsPanel pr={pr} syntaxStyle={syntaxStyle} />
+        <CommentsPanel pr={pr} revision={revision ?? null} syntaxStyle={syntaxStyle} />
       ) : (
         <box flexDirection="row" style={{ flexGrow: 1, width: "100%" }}>
           <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, width: "25%" }}>

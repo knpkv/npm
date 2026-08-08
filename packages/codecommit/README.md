@@ -24,7 +24,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   closed when neither locking command is installed; those actions are not
   currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
-  - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest` — list/view
+  - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
   - `codecommit:GetDifferences`, `codecommit:GetBlob` — exact-revision changed files and diff previews
   - `codecommit:GitPull` — detached worktree checkout and Relay review
   - `codecommit:CreatePullRequest` — create
@@ -60,10 +60,15 @@ pane keeps local Relay actions separate from CodeCommit approval and
 mergeability. Relay runs the local Codex CLI in a read-only sandbox after an
 explicit preflight; worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
-`~/.codecommit/repositories`. Both directories can grow over time. Close the TUI,
-then remove a no-longer-needed repository's matching directories from both roots;
-removing all of `~/.codecommit/worktrees` and `~/.codecommit/repositories` clears
-every retained checkout and cache, which the next checkout recreates.
+`~/.codecommit/repositories`. Cache and worktree coordinates include the
+repository's AWS account ID, profile, region, and immutable head, and HTTPS Git
+hosts are resolved for the region's AWS partition. Actions fail closed when the
+repository account identity is unavailable. Both directories can grow over time.
+Close the TUI, then remove a no-longer-needed repository's matching directories
+from both roots; removing all of `~/.codecommit/worktrees` and
+`~/.codecommit/repositories` clears every retained checkout and cache, which the
+next checkout recreates. The comments tab shows only general comments without a
+revision locator and threads attached to the displayed base/head pair.
 
 ### Web Mode
 

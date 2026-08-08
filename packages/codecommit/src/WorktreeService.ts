@@ -55,6 +55,10 @@ export interface WorktreeServiceShape {
 }
 
 const WorktreeCoordinates = Schema.Struct({
+  repositoryAccountId: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isPattern(/^[0-9]{12}$/)
+  ),
   region: Schema.String.check(
     Schema.isTrimmed(),
     Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)+$/),
@@ -204,14 +208,35 @@ const lockHolderCommands = (lockPath: string): ReadonlyArray<ChildProcess.Comman
   })
 ]
 
-const codeCommitRemoteUrl = (request: WorktreeRequest): string =>
-  `https://git-codecommit.${request.account.region}.amazonaws.com/v1/repos/${
-    encodeURIComponent(request.repositoryName)
-  }`
+const AWS_PARTITION_DNS_SUFFIXES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^us-isob-[a-z0-9-]+-\d+$/u, "sc2s.sgov.gov"],
+  [/^us-isof-[a-z0-9-]+-\d+$/u, "csp.hci.ic.gov"],
+  [/^us-iso-[a-z0-9-]+-\d+$/u, "c2s.ic.gov"],
+  [/^eu-isoe-[a-z0-9-]+-\d+$/u, "cloud.adc-e.uk"],
+  [/^eusc-de-[a-z0-9-]+-\d+$/u, "amazonaws.eu"],
+  [/^cn-[a-z0-9-]+-\d+$/u, "amazonaws.com.cn"],
+  [/^us-gov-[a-z0-9-]+-\d+$/u, "amazonaws.com"],
+  [/^(?:us|eu|ap|sa|ca|me|af|il|mx)-[a-z0-9-]+-\d+$/u, "amazonaws.com"]
+]
+
+const awsPartitionDnsSuffix = (region: string): string | null =>
+  AWS_PARTITION_DNS_SUFFIXES.find(([pattern]) => pattern.test(region))?.[1] ?? null
+
+/** Resolves CodeCommit's HTTPS Git endpoint through AWS partition metadata. */
+export const codeCommitRemoteUrl = (request: WorktreeRequest): Effect.Effect<string, WorktreeError> => {
+  const suffix = awsPartitionDnsSuffix(request.account.region)
+  return suffix === null
+    ? commandFailure("resolve-git-endpoint", `Unsupported AWS region ${request.account.region}`)
+    : Effect.succeed(
+      `https://git-codecommit.${request.account.region}.${suffix}/v1/repos/${
+        encodeURIComponent(request.repositoryName)
+      }`
+    )
+}
 
 /** Builds the worktree service; the URL seam keeps transport tests local. */
 export const makeWorktreeService = (
-  remoteUrlFor: (request: WorktreeRequest) => string = codeCommitRemoteUrl
+  remoteUrlFor: (request: WorktreeRequest) => Effect.Effect<string, WorktreeError> = codeCommitRemoteUrl
 ) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -222,8 +247,10 @@ export const makeWorktreeService = (
     )
 
     const preflight = Effect.fn("WorktreeService.preflight")(function*(request: WorktreeRequest) {
+      const repositoryAccountId = request.account.repoAccountId
       yield* Schema.decodeUnknownEffect(WorktreeCoordinates)({
         destinationCommit: request.destinationCommit,
+        repositoryAccountId,
         region: request.account.region,
         repositoryName: request.repositoryName,
         sourceCommit: request.sourceCommit
@@ -232,7 +259,11 @@ export const makeWorktreeService = (
           commandFailure("validate-coordinates", "Invalid CodeCommit worktree coordinates", cause)
         )
       )
-      const accountSegment = safePathSegment("account", `${request.account.profile}-${request.account.region}`)
+      yield* remoteUrlFor(request).pipe(Effect.asVoid)
+      const accountSegment = safePathSegment(
+        "account",
+        `${repositoryAccountId}-${request.account.profile}-${request.account.region}`
+      )
       const repositorySegment = safePathSegment("repo", request.repositoryName)
       const revisionSegment = safePathSegment(
         `pr-${request.pullRequestId}`,
@@ -446,7 +477,7 @@ export const makeWorktreeService = (
       const cacheExists = yield* fs.exists(plan.cachePath).pipe(
         Effect.mapError((cause) => commandFailure("inspect-cache", `Unable to inspect ${plan.cachePath}`, cause))
       )
-      const remoteUrl = remoteUrlFor(plan)
+      const remoteUrl = yield* remoteUrlFor(plan)
       if (cacheExists) {
         yield* assertCanonical("validate-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
         const validCache = yield* runSucceeds(spawner, plan, [

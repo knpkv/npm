@@ -169,6 +169,17 @@ export const workspaceIdentityMatches = (
   actual.region === expected.region &&
   actual.repositoryName === expected.repositoryName
 
+/** Keeps exact-pair threads plus explicitly commitless general PR comments. */
+export const currentRevisionCommentLocations = (
+  locations: ReadonlyArray<Domain.PRCommentLocation>,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
+): ReadonlyArray<Domain.PRCommentLocation> =>
+  locations.filter((location) => {
+    const commitless = location.beforeCommitId === undefined && location.afterCommitId === undefined
+    if (commitless) return location.filePath === undefined
+    return location.beforeCommitId === revision.destinationCommit && location.afterCommitId === revision.sourceCommit
+  })
+
 export const fileDiffIdentity = (
   identity: PullRequestWorkspaceIdentity,
   revision: ReadClient.CodeCommitPullRequestRevision,

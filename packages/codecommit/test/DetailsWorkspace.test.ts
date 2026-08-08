@@ -10,6 +10,7 @@ import {
   buildUnifiedDiff,
   changedFileRowId,
   currentFileDiffOutcome,
+  currentRevisionCommentLocations,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentityMatches,
@@ -35,6 +36,32 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("shows only current-revision and commitless general comments", () => {
+    const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+    const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    const locations: ReadonlyArray<Domain.PRCommentLocation> = [
+      {
+        afterCommitId: sourceCommit,
+        beforeCommitId: destinationCommit,
+        comments: [],
+        filePath: "src/current.ts"
+      },
+      {
+        afterCommitId: "d".repeat(40),
+        beforeCommitId: "c".repeat(40),
+        comments: [],
+        filePath: "src/historical.ts"
+      },
+      { comments: [] },
+      { comments: [], filePath: "src/ambiguous.ts" }
+    ]
+
+    expect(currentRevisionCommentLocations(locations, { destinationCommit, sourceCommit })).toEqual([
+      locations[0],
+      locations[2]
+    ])
+  })
+
   it("keeps local path segments bounded, traversal-safe, and identity-sensitive", () => {
     const traversal = safePathSegment("../../../../../tmp", "../../production/secrets")
     const nearby = safePathSegment("repo", "../../production/secretz")
