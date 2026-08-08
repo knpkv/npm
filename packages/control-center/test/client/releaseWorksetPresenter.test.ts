@@ -1,4 +1,3 @@
-import type { RlyStage } from "@knpkv/rly/patterns"
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
@@ -7,15 +6,9 @@ import { presentReleaseWorkset, selectReleaseWorksetObject } from "../../src/cli
 import { EntityId, GraphNodeId, RelationshipId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
-const stages: ReadonlyArray<RlyStage> = [
-  { id: "build", name: "Build", state: "Passed", tone: "positive" },
-  { id: "verify", name: "Verify", state: "Running", tone: "progress" },
-  { id: "production", name: "Production", state: "Waiting", tone: "neutral" }
-]
-
 describe("release workset presenter", () => {
   it("keeps all six Jira items in one dimension and groups five under exactly two PRs", () => {
-    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 
     expect(workset.jiraItems.map(({ key }) => key)).toEqual([
       "OPS-428",
@@ -52,13 +45,13 @@ describe("release workset presenter", () => {
       )
     }
 
-    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID)
 
     expect(workset.pullRequestGroups[0]?.linkedJiraKeys).toEqual(["OPS-428", "OPS-429", "OPS-430"])
   })
 
   it("keeps the unlinked item, pipeline stages, runbook, and navigable object identities explicit", () => {
-    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 
     expect(workset.gaps).toEqual([expect.objectContaining({
       label: "OPS-433 has no CodeCommit pull request",
@@ -68,11 +61,16 @@ describe("release workset presenter", () => {
     expect(workset.pipelines).toEqual([expect.objectContaining({
       reference: "payments-main/1842",
       state: "Running",
-      stages
+      stages: [
+        { id: "Source", name: "Source", reason: "1 action", state: "Succeeded", tone: "positive" },
+        { id: "Approval", name: "Approval", reason: "1 action", state: "Running", tone: "progress" }
+      ]
     })])
     expect(workset.runbooks).toEqual([expect.objectContaining({
+      completedTasks: 0,
       reference: "PAY/RUNBOOK-12",
-      state: "current"
+      state: "current",
+      totalTasks: 0
     })])
     for (const item of [...workset.jiraItems, ...workset.pullRequestGroups, ...workset.pipelines]) {
       expect(item.href).toMatch(/^\/w\/[^/]+\/items\/[^/?#]+$/u)
@@ -80,8 +78,44 @@ describe("release workset presenter", () => {
     expect(workset.runbooks[0]?.href).toMatch(/^\/w\/[^/]+\/items\/[^/?#]+$/u)
   })
 
+  it("counts Confluence tasks and exposes every unchecked task as a release gap", () => {
+    const page = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.details._tag === "page"
+    )
+    if (page?.projection.details._tag !== "page") throw new Error("Expected a Confluence page fixture")
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.entityId === page.projection.entityId
+          ? {
+            ...entry,
+            projection: {
+              ...page.projection,
+              details: {
+                ...page.projection.details,
+                contentState: "loaded",
+                content: {
+                  representation: "safe-markdown",
+                  markdown: "- [x] Test report\n- [ ] Release notes\n- [ ] Verbal risk assessment"
+                }
+              }
+            }
+          }
+          : entry
+      )
+    }
+
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID)
+
+    expect(workset.runbooks[0]).toEqual(expect.objectContaining({ completedTasks: 1, totalTasks: 3 }))
+    expect(workset.gaps.filter(({ service }) => service === "confluence")).toEqual([
+      expect.objectContaining({ label: "Release notes" }),
+      expect.objectContaining({ label: "Verbal risk assessment" })
+    ])
+  })
+
   it("maps the OPS-428 review lifecycle and provider states without copying portfolio labels", () => {
-    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 
     expect(workset.jiraItems[0]).toEqual(expect.objectContaining({
       key: "OPS-428",
@@ -121,7 +155,7 @@ describe("release workset presenter", () => {
       )
     }
 
-    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID)
     const selected = selectReleaseWorksetObject(inspection, pullRequest.projection.entityId)
 
     expect(workset.pullRequestGroups[0]).toEqual(expect.objectContaining({ state: "Closed", tone: "positive" }))
@@ -143,7 +177,7 @@ describe("release workset presenter", () => {
       )
     }
 
-    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID)
 
     expect(workset.pullRequestGroups[0]?.linkedJiraKeys).toEqual(["OPS-428", "OPS-429", "OPS-430"])
     expect(workset.gaps).toEqual([expect.objectContaining({ label: "OPS-433 has no CodeCommit pull request" })])
@@ -201,7 +235,7 @@ describe("release workset presenter", () => {
       ]
     }
 
-    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID)
 
     expect(workset.runbooks.map(({ reference }) => reference)).toEqual(["PAY/RUNBOOK-12"])
   })

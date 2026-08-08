@@ -129,7 +129,11 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
         pipelineName: "payments-main",
         executionId: "1842",
         status: "running",
-        triggerRevision: "release-head"
+        triggerRevision: "release-head",
+        stages: [
+          { name: "Source", status: "succeeded", actionCount: 1, actionsTruncated: false },
+          { name: "Approval", status: "running", actionCount: 1, actionsTruncated: false }
+        ]
       }
     }),
     projection({

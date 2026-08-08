@@ -1,6 +1,5 @@
 import type {
   RlyService,
-  RlyStage,
   RlyWorksetGap,
   RlyWorksetJiraItem,
   RlyWorksetPipeline,
@@ -9,6 +8,7 @@ import type {
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 
 import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
+import { confluenceTaskSummary } from "../../domain/confluenceTasks.js"
 import type {
   DeliveryEntityDetails,
   DeliveryEntityProjection,
@@ -23,6 +23,7 @@ import type {
   ReleaseId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import { presentPipelineExecutionStages } from "../entities/presentWorkspacePipelineExecution.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 type Projection = ReleaseDeliveryGraphInspection["entityProjections"][number]["projection"]
@@ -31,11 +32,13 @@ type ProjectionWithDetails<Tag extends DeliveryEntityDetails["_tag"]> = Projecti
 }
 
 export interface ReleaseWorksetRunbook {
+  readonly completedTasks: number
   readonly href: string
   readonly id: EntityId
   readonly reference: string
   readonly state: string
   readonly title: string
+  readonly totalTasks: number
 }
 
 export interface SelectedReleaseWorksetObject {
@@ -521,8 +524,7 @@ const gapLabel = (
 /** Present one bounded graph inspection as three explicit release-work dimensions. */
 export const presentReleaseWorkset = (
   inspection: ReleaseDeliveryGraphInspection,
-  workspaceId: WorkspaceId,
-  stages: ReadonlyArray<RlyStage>
+  workspaceId: WorkspaceId
 ): ReleaseWorksetPresentation => {
   const projections = entityProjectionByNode(inspection)
   const runbookEntityIds = releaseRunbookEntityIds(inspection, projections)
@@ -554,6 +556,26 @@ export const presentReleaseWorkset = (
       projection.entityState === "present" &&
       runbookEntityIds.has(projection.entityId)
     )
+  const confluenceTaskGaps = pages.flatMap((page): ReadonlyArray<RlyWorksetGap> => {
+    if (page.details.contentState === "lazy") {
+      return [{
+        id: `${page.entityId}:confluence-tasks-unavailable`,
+        label: `${page.title} tasks are not synchronized`,
+        reason: "Release readiness cannot be verified until the Confluence page body is synchronized.",
+        service: "confluence"
+      }]
+    }
+    return confluenceTaskSummary(page.details.content?.markdown ?? "").tasks.flatMap((task) =>
+      task.checked
+        ? []
+        : [{
+          id: `${page.entityId}:confluence-task:${String(task.lineNumber)}`,
+          label: task.label,
+          reason: `Confluence task on ${page.title} is not complete.`,
+          service: "confluence"
+        }]
+    )
+  })
 
   return {
     jiraItems: issues.map((issue) => ({
@@ -592,16 +614,19 @@ export const presentReleaseWorkset = (
         linkedJiraKeys
       }
     }),
-    gaps: inspection.relationships.flatMap((relationship): ReadonlyArray<RlyWorksetGap> =>
-      relationship.lifecycle._tag === "missing"
-        ? [{
-          id: relationship.relationshipId,
-          label: gapLabel(relationship, projections),
-          reason: relationship.lifecycle.reason,
-          service: gapService(relationship)
-        }]
-        : []
-    ),
+    gaps: [
+      ...inspection.relationships.flatMap((relationship): ReadonlyArray<RlyWorksetGap> =>
+        relationship.lifecycle._tag === "missing"
+          ? [{
+            id: relationship.relationshipId,
+            label: gapLabel(relationship, projections),
+            reason: relationship.lifecycle.reason,
+            service: gapService(relationship)
+          }]
+          : []
+      ),
+      ...confluenceTaskGaps
+    ],
     pipelines: pipelineExecutions.map((pipeline) => {
       const state = pipelineStateLabel(pipeline.details.status)
       return {
@@ -611,16 +636,21 @@ export const presentReleaseWorkset = (
         state,
         tone: statusTone(state),
         href: href(pipeline),
-        stages
+        stages: presentPipelineExecutionStages(pipeline.details.stages)
       }
     }),
-    runbooks: pages.map((page) => ({
-      href: href(page),
-      id: page.entityId,
-      reference: page.displayKey,
-      state: page.details.status,
-      title: page.title
-    })),
+    runbooks: pages.map((page) => {
+      const tasks = confluenceTaskSummary(page.details.content?.markdown ?? "")
+      return {
+        completedTasks: tasks.completed,
+        href: href(page),
+        id: page.entityId,
+        reference: page.displayKey,
+        state: page.details.status,
+        title: page.title,
+        totalTasks: tasks.total
+      }
+    }),
     truncated: inspection.truncated
   }
 }
