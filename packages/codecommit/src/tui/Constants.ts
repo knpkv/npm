@@ -12,5 +12,5 @@ export const HINTS: Record<string, string> = {
   settings: "Tab: Switch Section | 1-4: Jump | Esc: Back | [:] Commands",
   notifications: "Enter: Action | r: Refresh | Esc: Back | [:] Commands",
   details:
-    "j/k: Files | 1/2: Changes/Comments | r/s/t/e: Relay | w: Worktree | Enter: Run | x: Cancel | o: Open | Esc: Back"
+    "j/k: Files | ↑/↓: Scroll panes | 1/2: Changes/Comments | r/s/t/e: Relay | w: Worktree | Enter: Run | x: Cancel | o: Open | Esc: Back"
 }

@@ -47,6 +47,8 @@ export type DetailsKeyIntent =
   | "review-pr"
   | "review-security"
   | "review-tests"
+  | "scroll-content-down"
+  | "scroll-content-up"
   | "show-comments"
   | "show-diff"
   | "yield"
@@ -65,8 +67,10 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return "show-comments"
   if (input.keyName === "o") return "open-browser"
-  if (input.tab === "diff" && (input.keyName === "up" || input.keyName === "k")) return "previous-file"
-  if (input.tab === "diff" && (input.keyName === "down" || input.keyName === "j")) return "next-file"
+  if (input.tab === "diff" && input.keyName === "k") return "previous-file"
+  if (input.tab === "diff" && input.keyName === "j") return "next-file"
+  if (input.tab === "diff" && input.keyName === "up") return "scroll-content-up"
+  if (input.tab === "diff" && input.keyName === "down") return "scroll-content-down"
   if (input.keyName === "w") return "checkout-worktree"
   if (input.keyName === "r") return "review-pr"
   if (input.keyName === "s") return "review-security"
@@ -144,6 +148,8 @@ export const exactRevisionReviewState = (): {
 export const changedFilePath = (file: ReadClient.CodeCommitChangedFile): string =>
   file.after?.path ?? file.before?.path ?? "unknown"
 
+export const changedFileRowId = (index: number): string => `changed-file-${index}`
+
 export const filetypeForPath = (path: string): string | undefined => {
   const extension = path.includes(".") ? path.slice(path.lastIndexOf(".") + 1).toLowerCase() : ""
   return FILETYPE_ALIASES[extension] ?? (extension.length > 0 ? extension : undefined)
@@ -166,7 +172,7 @@ export const terminalSafeText = (value: string): string =>
 export const terminalSafeMultilineText = (value: string): string =>
   Array.from(value, (character) => {
     const codePoint = character.codePointAt(0)
-    return codePoint !== undefined && codePoint !== 0x0a && isTerminalControl(codePoint)
+    return codePoint !== undefined && codePoint !== 0x09 && codePoint !== 0x0a && isTerminalControl(codePoint)
       ? escapedCodePoint(character)
       : character
   }).join("")

@@ -6,9 +6,16 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { makeWorktreeService, repositoryLockPath } from "../src/WorktreeService.js"
+import { makeWorktreeService, repositoryLockPath, WORKTREE_LOCK_REQUIREMENT } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
+  it("states every required lock-holder executable in unsupported-platform failures", () => {
+    expect(WORKTREE_LOCK_REQUIREMENT).toContain("macOS or Linux")
+    expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sh")
+    expect(WORKTREE_LOCK_REQUIREMENT).toContain("/bin/sleep")
+    expect(WORKTREE_LOCK_REQUIREMENT).toContain("lockf or flock")
+  })
+
   it.live("repairs an incomplete cache and converges concurrent exact-head checkouts", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -165,7 +172,7 @@ describe("WorktreeService", () => {
         const holderReady = yield* holder.stdout.pipe(Stream.decodeText(), Stream.splitLines, Stream.runHead)
         expect(Option.getOrUndefined(holderReady)).toBe("test-lock-ready")
         const waitingCheckout = yield* secondService.checkout(plan).pipe(Effect.forkChild({ startImmediately: true }))
-        yield* Effect.yieldNow
+        for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
         expect(waitingCheckout.pollUnsafe()).toBeUndefined()
         yield* holder.kill({ killSignal: "SIGKILL" })
         expect((yield* Fiber.join(waitingCheckout)).reused).toBe(true)

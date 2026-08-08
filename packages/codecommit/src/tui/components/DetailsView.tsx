@@ -1,10 +1,10 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
-import { parseColor, SyntaxStyle } from "@opentui/core"
+import { type DiffRenderable, parseColor, type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { RelayReviewKind } from "../../RelayReview.js"
 import type { WorktreePlan } from "../../WorktreeService.js"
 import { fetchPrCommentsAtom, openPrAtom } from "../atoms/actions.js"
@@ -18,6 +18,7 @@ import {
 } from "../atoms/details.js"
 import {
   changedFilePath,
+  changedFileRowId,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
@@ -35,6 +36,20 @@ import { Badge } from "./Badge.js"
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
 let nextActionRequestSequence = 0
+
+const hasVerticalScroll = (value: object): value is object & { scrollY: number } =>
+  "scrollY" in value && typeof value.scrollY === "number"
+
+const scrollDiffBy = (diff: DiffRenderable | null, lines: number): void => {
+  if (diff === null) return
+  const pending = [...diff.getChildren()]
+  while (pending.length > 0) {
+    const renderable = pending.pop()
+    if (renderable === undefined) continue
+    if (hasVerticalScroll(renderable)) renderable.scrollY += lines
+    for (const child of renderable.getChildren()) pending.push(child)
+  }
+}
 
 const formatRelativeDate = (date: Date): string => {
   const diffMins = Math.floor((Date.now() - date.getTime()) / 60_000)
@@ -189,6 +204,9 @@ export function DetailsView() {
   const [tab, setTab] = useState<"comments" | "diff">("diff")
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
+  const actionScrollRef = useRef<ScrollBoxRenderable>(null)
+  const diffRef = useRef<DiffRenderable>(null)
+  const filesScrollRef = useRef<ScrollBoxRenderable>(null)
 
   const pr = useMemo(
     () =>
@@ -238,6 +256,10 @@ export function DetailsView() {
       revision: workspace.revision
     })
   }, [loadDiff, pr, selectedFile, workspace])
+
+  useLayoutEffect(() => {
+    filesScrollRef.current?.scrollChildIntoView(changedFileRowId(selectedFileIndex))
+  }, [selectedFileIndex, workspace?.files.length])
 
   useEffect(() => {
     if (action._tag !== "preflight" || AsyncResult.isWaiting(preflightResult) || workspace === null) return
@@ -337,6 +359,10 @@ export function DetailsView() {
       setSelectedFileIndex((index) => Math.max(0, index - 1))
     } else if (intent === "next-file") {
       setSelectedFileIndex((index) => Math.min(Math.max(0, (workspace?.files.length ?? 1) - 1), index + 1))
+    } else if (intent === "scroll-content-up" || intent === "scroll-content-down") {
+      const lines = intent === "scroll-content-up" ? -3 : 3
+      scrollDiffBy(diffRef.current, lines)
+      actionScrollRef.current?.scrollBy({ x: 0, y: lines })
     } else if (intent === "checkout-worktree") beginAction("worktree")
     else if (intent === "review-pr") beginAction("review")
     else if (intent === "review-security") beginAction("security")
@@ -414,7 +440,7 @@ export function DetailsView() {
         <box flexDirection="row" style={{ flexGrow: 1, width: "100%" }}>
           <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, width: "25%" }}>
             <text fg={theme.textMuted}>{` FILES · ${workspace?.files.length ?? "…"}`}</text>
-            <scrollbox style={{ flexGrow: 1, width: "100%" }}>
+            <scrollbox ref={filesScrollRef} style={{ flexGrow: 1, width: "100%" }}>
               {workspace === null && !AsyncResult.isFailure(workspaceResult) && (
                 <text fg={theme.textMuted}> Loading changed files…</text>
               )}
@@ -433,6 +459,7 @@ export function DetailsView() {
                     {...(index === selectedFileIndex ? { bg: theme.selectedBackground } : {})}
                     fg={index === selectedFileIndex ? theme.selectedText : theme.textMuted}
                     key={`${changedFilePath(file)}-${index}`}
+                    id={changedFileRowId(index)}
                   >
                     {` ${status} ${terminalSafeText(changedFilePath(file))}`}
                   </text>
@@ -469,6 +496,7 @@ export function DetailsView() {
               <diff
                 addedSignColor={theme.textSuccess}
                 diff={renderedDiff.diff}
+                ref={diffRef}
                 fg={theme.text}
                 {...(renderedDiff.filetype === undefined ? {} : { filetype: renderedDiff.filetype })}
                 removedSignColor={theme.textError}
@@ -538,7 +566,7 @@ export function DetailsView() {
             )}
             {action._tag === "failed" && <text fg={theme.textError}>{`${actionLabel(action.action)} failed.`}</text>}
             {action._tag === "done" && (
-              <scrollbox style={{ flexGrow: 1, width: "100%" }}>
+              <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
                 <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
                 <text fg={theme.text}>{terminalSafeMultilineText(action.detail)}</text>
               </scrollbox>

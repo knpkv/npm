@@ -6,10 +6,12 @@ import { makeRelayReviewPrompt } from "../src/RelayReview.js"
 import {
   blobPreviewDisposition,
   buildUnifiedDiff,
+  changedFileRowId,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentityMatches,
   humanReviewState,
+  terminalSafeMultilineText,
   terminalSafeText,
   workspaceIdentityMatches
 } from "../src/tui/details-model.js"
@@ -55,6 +57,13 @@ describe("PR detail workspace", () => {
     expect(result.metadata).toContain("mode 100644\\u{0085} → 100755\\u{009b}")
     expect(hasTerminalControl(result.diff)).toBe(false)
     expect(hasTerminalControl(result.metadata ?? "")).toBe(false)
+  })
+
+  it("preserves multiline indentation while escaping terminal sequences", () => {
+    expect(terminalSafeMultilineText("\tconst value = 1\n\u001b[2J")).toBe(
+      "\tconst value = 1\n\\u{001b}[2J"
+    )
+    expect(terminalSafeText("\tconst value = 1")).toBe("\\u{0009}const value = 1")
   })
 
   it("builds a real immutable blob patch without hiding a late changed line", () => {
@@ -143,8 +152,21 @@ describe("PR detail workspace", () => {
 
     expect(detailsKeyIntent({ ...base, dialogOpen: true, keyName: "escape" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "j" })).toBe("next-file")
+    expect(detailsKeyIntent({ ...base, keyName: "down" })).toBe("scroll-content-down")
+    expect(detailsKeyIntent({ ...base, keyName: "up" })).toBe("scroll-content-up")
     expect(detailsKeyIntent({ ...base, keyName: "down", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "c", modified: true })).toBe("yield")
+  })
+
+  it("gives every selected file a stable scroll target", () => {
+    expect(Array.from({ length: 6 }, (_, index) => changedFileRowId(index))).toEqual([
+      "changed-file-0",
+      "changed-file-1",
+      "changed-file-2",
+      "changed-file-3",
+      "changed-file-4",
+      "changed-file-5"
+    ])
   })
 
   it("binds every Relay review kind to sanitized immutable metadata", () => {

@@ -187,6 +187,8 @@ const isReusableWorktree = Effect.fn("WorktreeService.isReusableWorktree")(funct
 
 const LOCK_READY_LINE = "knpkv-codecommit-lock-ready"
 const LOCK_HOLDER_SCRIPT = `printf '${LOCK_READY_LINE}\\n'; exec /bin/sleep 2147483647`
+export const WORKTREE_LOCK_REQUIREMENT =
+  "Checkout requires macOS or Linux with /bin/sh, /bin/sleep, and either lockf or flock"
 
 /** Sidecar advisory lock shared by every process operating on one repository cache. */
 export const repositoryLockPath = (cachePath: string): string => `${cachePath}.knpkv.lock`
@@ -373,7 +375,9 @@ export const makeWorktreeService = (
       const [lockf, flock] = lockHolderCommands(lockPath)
       return spawner.spawn(lockf!).pipe(
         Effect.catch(() => spawner.spawn(flock!)),
-        Effect.mapError((cause) => commandFailure("acquire-repository-lock", `Unable to lock ${lockPath}`, cause))
+        Effect.mapError((cause) =>
+          commandFailure("acquire-repository-lock", `${WORKTREE_LOCK_REQUIREMENT}; unable to lock ${lockPath}`, cause)
+        )
       )
     }
 
@@ -638,6 +642,7 @@ export const makeWorktreeService = (
     })
 
     const checkout = Effect.fn("WorktreeService.checkout")(function*(plan: WorktreePlan) {
+      if (path.sep === "\\") return yield* commandFailure("unsupported-platform", WORKTREE_LOCK_REQUIREMENT)
       const paths = yield* prepareCheckoutPaths(plan)
       return yield* withRepositoryLock(plan, checkoutUnlocked(plan, paths))
     })
