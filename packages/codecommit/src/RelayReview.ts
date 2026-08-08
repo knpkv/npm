@@ -45,11 +45,13 @@ const focusByKind: Record<RelayReviewKind, string> = {
 }
 
 const untrustedPatchDelimiter = (patch: string): string => {
+  const occupiedSuffixes = new Set<string>()
+  for (const match of patch.matchAll(/<\/?untrusted_patch_([0-9]+)>/gu)) {
+    const suffix = match[1]
+    if (suffix !== undefined) occupiedSuffixes.add(suffix)
+  }
   let suffix = 0
-  while (
-    patch.includes(`<untrusted_patch_${suffix}>`) ||
-    patch.includes(`</untrusted_patch_${suffix}>`)
-  ) suffix += 1
+  while (occupiedSuffixes.has(String(suffix))) suffix += 1
   return `untrusted_patch_${suffix}`
 }
 

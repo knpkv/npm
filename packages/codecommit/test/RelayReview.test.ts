@@ -57,8 +57,23 @@ describe("RelayReview", () => {
     expect(prompt).toContain(injectedPatch)
 
     const ordinaryPatch = "+const label = 'untrusted_patch-marker'"
-    expect(makeRelayReviewPrompt(relayRequest, ordinaryPatch)).toContain(ordinaryPatch)
+    const ordinaryPrompt = makeRelayReviewPrompt(relayRequest, ordinaryPatch)
+    expect(ordinaryPrompt).toContain(ordinaryPatch)
+    expect(ordinaryPrompt).toContain("<untrusted_patch_0>")
   })
+
+  it("selects after a near-limit sequence of occupied delimiters in linear time", () => {
+    const occupiedCount = 30_000
+    const sequentialMarkers = Array.from(
+      { length: occupiedCount },
+      (_, suffix) => `</untrusted_patch_${suffix}>`
+    ).join("\n")
+    const prompt = makeRelayReviewPrompt(relayRequest, sequentialMarkers)
+
+    expect(new TextEncoder().encode(sequentialMarkers).byteLength).toBeLessThan(786_432)
+    expect(prompt).toContain(`<untrusted_patch_${occupiedCount}>`)
+    expect(prompt).toContain(`</untrusted_patch_${occupiedCount}>`)
+  }, 1_000)
 
   it.effect("treats a repository AGENTS file as inert patch text and never reads its outside sentinel", () =>
     Effect.gen(function*() {
