@@ -25,9 +25,12 @@ import {
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
+  pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   terminalSafeMultilineText,
   terminalSafeText,
+  type WorkspaceActionPhase,
+  workspaceLifecycleTransition,
   workspaceIdentityMatches
 } from "../details-model.js"
 import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
@@ -101,11 +104,13 @@ function CommentThread({
 function CommentsPanel({
   pr,
   revision,
-  syntaxStyle
+  syntaxStyle,
+  workspaceFailed
 }: {
   readonly pr: Domain.PullRequest
   readonly revision: ReadClient.CodeCommitPullRequestRevision | null
   readonly syntaxStyle: SyntaxStyle | null
+  readonly workspaceFailed: boolean
 }) {
   const { theme } = useTheme()
   const fetchComments = useAtomSet(fetchPrCommentsAtom)
@@ -130,8 +135,12 @@ function CommentsPanel({
       : currentRevisionCommentLocations(commentsResult, revision)
   return (
     <scrollbox focused style={{ flexGrow: 1, padding: 2, width: "100%" }}>
-      {(commentsResult === null || revision === null) && <text fg={theme.textMuted}>Loading review thread…</text>}
-      {commentsResult !== null && revision !== null && comments.length === 0 && (
+      {workspaceFailed ? (
+        <text fg={theme.textError}>Exact-head read failed.</text>
+      ) : commentsResult === null || revision === null ? (
+        <text fg={theme.textMuted}>Loading review thread…</text>
+      ) : null}
+      {!workspaceFailed && commentsResult !== null && revision !== null && comments.length === 0 && (
         <text fg={theme.textMuted}>No comments for this revision</text>
       )}
       {comments.map((location, locationIndex) => (
@@ -214,8 +223,11 @@ export function DetailsView() {
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
+  const actionRef = useRef<ActionStatus>(action)
   const diffRef = useRef<DiffRenderable>(null)
   const filesScrollRef = useRef<ScrollBoxRenderable>(null)
+  const loadedWorkspaceKeyRef = useRef<string | null>(null)
+  actionRef.current = action
 
   const pr = useMemo(
     () =>
@@ -244,14 +256,31 @@ export function DetailsView() {
   const diffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
   const renderedDiff = diffOutcome?._tag === "success" ? diffOutcome.value : null
   const diffFailed = diffOutcome?._tag === "failure"
+  const workspaceFailed = AsyncResult.isFailure(workspaceResult) && !AsyncResult.isWaiting(workspaceResult)
+  const workspaceReloadKey = pr === null ? null : pullRequestWorkspaceReloadKey(pr)
 
   useEffect(() => {
-    if (pr === null) return
+    if (pr === null || workspaceReloadKey === null) return
+    const currentAction = actionRef.current
+    const phase: WorkspaceActionPhase =
+      currentAction._tag === "running"
+        ? currentAction.action === "worktree"
+          ? "running-worktree"
+          : "running-review"
+        : currentAction._tag === "done" || currentAction._tag === "failed"
+          ? "terminal"
+          : currentAction._tag
+    const transition = workspaceLifecycleTransition(loadedWorkspaceKeyRef.current, workspaceReloadKey, phase)
+    if (transition._tag === "preserve") return
+    loadedWorkspaceKeyRef.current = workspaceReloadKey
+    if (transition.interrupt === "preflight") preflight(Atom.Interrupt)
+    else if (transition.interrupt === "checkout") checkout(Atom.Interrupt)
+    else if (transition.interrupt === "review") runReview(Atom.Interrupt)
     setSelectedFileIndex(0)
     setTab("diff")
     setAction({ _tag: "idle" })
     loadWorkspace(pr)
-  }, [loadWorkspace, pr])
+  }, [checkout, loadWorkspace, preflight, pr, runReview, workspaceReloadKey])
 
   useEffect(() => {
     if (pr === null || workspace === null || selectedFile === null) return
@@ -442,16 +471,19 @@ export function DetailsView() {
       </box>
 
       {tab === "comments" ? (
-        <CommentsPanel pr={pr} revision={revision ?? null} syntaxStyle={syntaxStyle} />
+        <CommentsPanel
+          pr={pr}
+          revision={revision ?? null}
+          syntaxStyle={syntaxStyle}
+          workspaceFailed={workspaceFailed}
+        />
       ) : (
         <box flexDirection="row" style={{ flexGrow: 1, width: "100%" }}>
           <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, width: "25%" }}>
             <text fg={theme.textMuted}>{` FILES · ${workspace?.files.length ?? "…"}`}</text>
             <scrollbox ref={filesScrollRef} style={{ flexGrow: 1, width: "100%" }}>
-              {workspace === null && !AsyncResult.isFailure(workspaceResult) && (
-                <text fg={theme.textMuted}> Loading changed files…</text>
-              )}
-              {AsyncResult.isFailure(workspaceResult) && <text fg={theme.textError}> Exact-head read failed.</text>}
+              {workspace === null && !workspaceFailed && <text fg={theme.textMuted}> Loading changed files…</text>}
+              {workspaceFailed && <text fg={theme.textError}> Exact-head read failed.</text>}
               {workspace?.files.map((file, index) => {
                 const status =
                   file.status === "added"

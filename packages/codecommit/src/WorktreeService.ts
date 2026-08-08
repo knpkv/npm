@@ -337,12 +337,26 @@ export const makeWorktreeService = (
       const repositoriesRoot = path.join(home, ".codecommit", "repositories")
       const worktreesRoot = path.join(home, ".codecommit", "worktrees")
       yield* Effect.all([
-        fs.makeDirectory(repositoriesRoot, { recursive: true }).pipe(
-          Effect.mapError((cause) => commandFailure("create-cache-root", "Unable to create repository root", cause))
-        ),
-        fs.makeDirectory(worktreesRoot, { recursive: true }).pipe(
-          Effect.mapError((cause) => commandFailure("create-worktree-root", "Unable to create worktree root", cause))
-        )
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(repositoriesRoot, { mode: 0o700, recursive: true }).pipe(
+            Effect.mapError((cause) => commandFailure("create-cache-root", "Unable to create repository root", cause))
+          )
+          yield* fs.chmod(repositoriesRoot, 0o700).pipe(
+            Effect.mapError((cause) =>
+              commandFailure("restrict-cache-root", "Unable to restrict repository root", cause)
+            )
+          )
+        }),
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(worktreesRoot, { mode: 0o700, recursive: true }).pipe(
+            Effect.mapError((cause) => commandFailure("create-worktree-root", "Unable to create worktree root", cause))
+          )
+          yield* fs.chmod(worktreesRoot, 0o700).pipe(
+            Effect.mapError((cause) =>
+              commandFailure("restrict-worktree-root", "Unable to restrict worktree root", cause)
+            )
+          )
+        })
       ])
       const [canonicalRepositoriesRoot, canonicalWorktreesRoot] = yield* Effect.all([
         fs.realPath(repositoriesRoot).pipe(

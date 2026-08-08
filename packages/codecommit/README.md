@@ -60,7 +60,8 @@ pane keeps local Relay actions separate from CodeCommit approval and
 mergeability. Relay runs the local Codex CLI in a read-only sandbox after an
 explicit preflight; worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
-`~/.codecommit/repositories`. Cache and worktree coordinates include the
+`~/.codecommit/repositories`. Both storage roots are enforced as user-only
+directories (`0700`) before checkout. Cache and worktree coordinates include the
 repository's AWS account ID, profile, region, and immutable head, and HTTPS Git
 hosts are resolved for the region's AWS partition. Actions fail closed when the
 repository account identity is unavailable. Both directories can grow over time.

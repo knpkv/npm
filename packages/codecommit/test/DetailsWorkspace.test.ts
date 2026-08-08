@@ -15,9 +15,11 @@ import {
   exactRevisionReviewState,
   fileDiffIdentityMatches,
   humanReviewState,
+  pullRequestWorkspaceReloadKey,
   terminalSafeMultilineText,
   terminalSafeText,
-  workspaceIdentityMatches
+  workspaceIdentityMatches,
+  workspaceLifecycleTransition
 } from "../src/tui/details-model.js"
 import { loadFileDiff } from "../src/tui/file-diff.js"
 import {
@@ -100,6 +102,55 @@ describe("PR detail workspace", () => {
       "\tconst value = 1\n\\u{001b}[2J"
     )
     expect(terminalSafeText("\tconst value = 1")).toBe("\\u{0009}const value = 1")
+    expect(terminalSafeMultilineText("first\r\nsecond\r\n")).toBe("first\nsecond\n")
+  })
+
+  it("preserves actions across semantic no-op refreshes and interrupts real workspace changes", () => {
+    const base = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1"),
+        repoAccountId: "111122223333"
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "arn:aws:iam::111122223333:user/reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: false,
+      isMergeable: true,
+      lastModifiedDate: new Date(1_000),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature",
+      status: "OPEN",
+      title: "Review"
+    })
+    const replacement = new Domain.PullRequest({ ...base })
+    const key = pullRequestWorkspaceReloadKey(base)
+
+    expect(pullRequestWorkspaceReloadKey(replacement)).toBe(key)
+    expect(workspaceLifecycleTransition(key, pullRequestWorkspaceReloadKey(replacement), "running-review")).toEqual({
+      _tag: "preserve"
+    })
+    expect(
+      workspaceLifecycleTransition(
+        key,
+        pullRequestWorkspaceReloadKey(new Domain.PullRequest({ ...base, lastModifiedDate: new Date(2_000) })),
+        "running-worktree"
+      )
+    ).toEqual({ _tag: "reset", interrupt: "checkout" })
+    expect(workspaceLifecycleTransition(key, `${key}-different-pr`, "preflight")).toEqual({
+      _tag: "reset",
+      interrupt: "preflight"
+    })
+    expect(workspaceLifecycleTransition(key, `${key}-idle-refresh`, "idle")).toEqual({
+      _tag: "reset",
+      interrupt: "none"
+    })
   })
 
   it("renders bidi controls visibly without changing ordinary international text", () => {
@@ -160,6 +211,19 @@ describe("PR detail workspace", () => {
     expect(result.metadata).toBeNull()
     expect(result.truncated).toBe(false)
     expect(hasTerminalControl(result.diff)).toBe(false)
+  })
+
+  it("normalizes CRLF diff lines without exposing carriage-return escapes", () => {
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-blob", path: "src/index.ts", mode: "100644" },
+      after: { blobId: "after-blob", path: "src/index.ts", mode: "100644" }
+    })
+    const result = buildUnifiedDiff(file, "const value = 'before'\r\n", "const value = 'after'\r\n")
+
+    expect(result.diff).toContain("-const value = 'before'")
+    expect(result.diff).toContain("+const value = 'after'")
+    expect(result.diff).not.toContain("\\u{000d}")
   })
 
   it("builds a real immutable blob patch without hiding a late changed line", () => {

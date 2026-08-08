@@ -131,6 +131,10 @@ describe("WorktreeService", () => {
       yield* fs.makeDirectory(home, { recursive: true })
       yield* fs.makeDirectory(dataRoot, { recursive: true })
       yield* fs.symlink(dataRoot, path.join(home, ".codecommit"))
+      const repositoriesRoot = path.join(home, ".codecommit", "repositories")
+      const worktreesRoot = path.join(home, ".codecommit", "worktrees")
+      yield* fs.makeDirectory(repositoriesRoot, { mode: 0o755, recursive: true })
+      yield* fs.chmod(repositoriesRoot, 0o755)
       yield* fs.makeDirectory(seed, { recursive: true })
 
       const runGit = Effect.fn("WorktreeServiceTest.runGit")(function*(
@@ -195,6 +199,8 @@ describe("WorktreeService", () => {
         const cacheSymlinkError = yield* Effect.flip(firstService.checkout(plan))
         expect(cacheSymlinkError.operation).toBe("validate-cache-parent-before-create")
         expect(yield* fs.readDirectory(externalCache)).toEqual([])
+        expect((yield* fs.stat(repositoriesRoot)).mode & 0o777).toBe(0o700)
+        expect((yield* fs.stat(worktreesRoot)).mode & 0o777).toBe(0o700)
         yield* fs.remove(cacheParent)
 
         const targetParent = path.dirname(plan.targetPath)

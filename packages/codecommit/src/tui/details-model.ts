@@ -32,6 +32,21 @@ export interface PullRequestWorkspaceIdentity {
   readonly repositoryName: string
 }
 
+export type WorkspaceActionPhase =
+  | "idle"
+  | "preflight"
+  | "ready"
+  | "running-review"
+  | "running-worktree"
+  | "terminal"
+
+export type WorkspaceLifecycleTransition =
+  | { readonly _tag: "preserve" }
+  | {
+    readonly _tag: "reset"
+    readonly interrupt: "checkout" | "none" | "preflight" | "review"
+  }
+
 export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly afterBlobId: string | null
   readonly beforeBlobId: string | null
@@ -160,6 +175,34 @@ export const pullRequestWorkspaceIdentity = (pr: Domain.PullRequest): PullReques
   repositoryName: pr.repositoryName
 })
 
+/** Stable refresh key for every PR field that can change exact-head loading or local actions. */
+export const pullRequestWorkspaceReloadKey = (pr: Domain.PullRequest): string =>
+  [
+    pr.account.profile,
+    pr.account.region,
+    pr.account.repoAccountId ?? "",
+    pr.repositoryName,
+    pr.id,
+    pr.lastModifiedDate.getTime()
+  ].join("\u0000")
+
+/** Preserves semantic no-op refreshes and identifies the atom to interrupt before a real reset. */
+export const workspaceLifecycleTransition = (
+  previousKey: string | null,
+  nextKey: string,
+  phase: WorkspaceActionPhase
+): WorkspaceLifecycleTransition => {
+  if (previousKey === nextKey) return { _tag: "preserve" }
+  const interrupt = phase === "preflight"
+    ? "preflight"
+    : phase === "running-worktree"
+    ? "checkout"
+    : phase === "running-review"
+    ? "review"
+    : "none"
+  return { _tag: "reset", interrupt }
+}
+
 export const workspaceIdentityMatches = (
   actual: PullRequestWorkspaceIdentity,
   expected: PullRequestWorkspaceIdentity
@@ -248,16 +291,17 @@ export const terminalSafeText = (value: string): string =>
     return codePoint !== undefined && isTerminalUnsafe(character, codePoint) ? escapedCodePoint(character) : character
   }).join("")
 
-/** Preserves tabs and line feeds while escaping terminal controls. */
+/** Normalizes CRLF and preserves tabs and line feeds while escaping terminal controls. */
 export const terminalSafeMultilineText = (value: string): string =>
-  Array.from(value, (character) => {
+  Array.from(value.replaceAll("\r\n", "\n"), (character) => {
     const codePoint = character.codePointAt(0)
     return codePoint !== undefined && codePoint !== 0x09 && codePoint !== 0x0a && isTerminalUnsafe(character, codePoint)
       ? escapedCodePoint(character)
       : character
   }).join("")
 
-const terminalSafePatchLine = (value: string): string => terminalSafeMultilineText(value.replaceAll("\\", "\\\\"))
+const terminalSafePatchLine = (value: string): string =>
+  terminalSafeMultilineText(value.replace(/\r$/u, "").replaceAll("\\", "\\\\"))
 
 const fileMetadata = (file: ReadClient.CodeCommitChangedFile): Array<string> => {
   const metadata: Array<string> = []
