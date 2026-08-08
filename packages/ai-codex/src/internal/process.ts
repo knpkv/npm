@@ -98,6 +98,23 @@ const makeCommand = (options: RunCodexOptions) =>
 
 const FEATURE_NAME = /^[a-z][a-z0-9_]*$/u
 
+const CONFIGURATION_HOME_VARIABLES = new Set([
+  "CODEX_HOME",
+  "CODEX_SQLITE_HOME",
+  "HOME",
+  "USERPROFILE",
+  "XDG_CONFIG_HOME"
+])
+
+/**
+ * Feature discovery must describe the executable, not the user's configuration.
+ * The actual turn keeps the reviewed environment so authentication still works.
+ */
+const featureInventoryEnvironment = (
+  environment: Readonly<Record<string, string>>
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(Object.entries(environment).filter(([name]) => !CONFIGURATION_HOME_VARIABLES.has(name)))
+
 /** Negotiates the installed Codex manifest and rejects every unclassified feature. */
 export const resolvePromptOnlyDisabledFeatures = Effect.fn(
   "CodexProcess.resolvePromptOnlyDisabledFeatures"
@@ -111,7 +128,7 @@ export const resolvePromptOnlyDisabledFeatures = Effect.fn(
   const output = yield* runCodex({
     args: ["features", "list"],
     cwd: options.cwd,
-    environment: options.environment,
+    environment: featureInventoryEnvironment(options.environment),
     executable: options.executable,
     maxOutputBytes: options.maxOutputBytes,
     maxStderrBytes: options.maxStderrBytes,

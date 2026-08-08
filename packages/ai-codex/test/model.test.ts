@@ -214,6 +214,60 @@ describe("model", () => {
       }
     }))
 
+  it.effect("isolates feature discovery from user config without dropping turn authentication", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("clean") })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                CODEX_ACCESS_TOKEN: "codex-access-token",
+                CODEX_API_KEY: "codex-api-key",
+                CODEX_HOME: "/home/reviewer/.codex",
+                CODEX_SQLITE_HOME: "/home/reviewer/.codex/sqlite",
+                HOME: "/home/reviewer",
+                PATH: "/reviewed/bin",
+                USERPROFILE: "C:\\Users\\reviewer",
+                XDG_CONFIG_HOME: "/home/reviewer/.config"
+              }
+            })
+          )
+        )
+      )
+
+      expect(calls).toHaveLength(2)
+      const inventory = calls[0]
+      const turn = calls[1]
+      expect(inventory !== undefined && ChildProcess.isStandardCommand(inventory)).toBe(true)
+      expect(turn !== undefined && ChildProcess.isStandardCommand(turn)).toBe(true)
+      if (
+        inventory !== undefined &&
+        ChildProcess.isStandardCommand(inventory) &&
+        turn !== undefined &&
+        ChildProcess.isStandardCommand(turn)
+      ) {
+        expect(inventory.options.env).toEqual({
+          CODEX_ACCESS_TOKEN: "codex-access-token",
+          CODEX_API_KEY: "codex-api-key",
+          PATH: "/reviewed/bin"
+        })
+        expect(turn.options.env).toEqual({
+          CODEX_ACCESS_TOKEN: "codex-access-token",
+          CODEX_API_KEY: "codex-api-key",
+          CODEX_HOME: "/home/reviewer/.codex",
+          CODEX_SQLITE_HOME: "/home/reviewer/.codex/sqlite",
+          HOME: "/home/reviewer",
+          PATH: "/reviewed/bin",
+          USERPROFILE: "C:\\Users\\reviewer",
+          XDG_CONFIG_HOME: "/home/reviewer/.config"
+        })
+      }
+    }))
+
   it.effect("keeps normal turns eligible for configured Codex tools", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
