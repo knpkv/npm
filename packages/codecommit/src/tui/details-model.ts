@@ -407,7 +407,7 @@ export const buildUnifiedDiff = (
   for (const hunk of patch.hunks) {
     const formatted = formatHunk(hunk)
     const fitsBudget = lines.length + formatted.length <= MAX_RENDERED_LINES
-    const hasBoundedLines = hunk.lines.every((line) => line.length <= MAX_RENDERED_LINE_LENGTH)
+    const hasBoundedLines = formatted.every((line) => line.length <= MAX_RENDERED_LINE_LENGTH)
     if (!fitsBudget || !hasBoundedLines) break
     for (const line of formatted) lines.push(line)
     retainedHunks += 1

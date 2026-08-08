@@ -358,6 +358,22 @@ describe("PR detail workspace", () => {
     }
   })
 
+  it("bounds diff lines after terminal controls are escaped", () => {
+    const file = decodeChangedFile({
+      status: "added",
+      before: null,
+      after: { blobId: "after-blob", path: "src/large.ts", mode: "100644" }
+    })
+    const hostile = buildUnifiedDiff(file, "", "\u001b".repeat(1_999))
+    const printable = buildUnifiedDiff(file, "", "a".repeat(1_999))
+
+    expect(hostile.truncated).toBe(true)
+    expect(hostile.diff).toBe("")
+    expect(printable.truncated).toBe(false)
+    expect(printable.diff).toContain(`+${"a".repeat(1_999)}`)
+    expect(printable.diff.split("\n").every((line) => line.length <= 2_000)).toBe(true)
+  })
+
   it("surfaces rename and mode metadata when blob text is unchanged", () => {
     const file = decodeChangedFile({
       status: "renamed",
