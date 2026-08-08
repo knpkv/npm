@@ -63,10 +63,13 @@ prompt-only mode. Prompt-only mode disables user and repository instructions,
 host tools, and inherited shell variables, so repository-authored text cannot
 read other files. Relay and worktree Git commands also clear inherited
 repository-local `GIT_*` variables, suppress configured Git hooks, close stdin,
-and disable terminal credential prompts. Invocation from a Git hook therefore
-cannot redirect commands into the caller's repository, and authentication
-failures return to the TUI instead of waiting on an invisible prompt. Worktrees
-are detached at the displayed head under
+and disable terminal credential prompts. Worktree population also ignores
+global and system Git configuration and attributes, preventing repository
+`.gitattributes` from selecting host-configured smudge or process filters; Git
+credential configuration remains available only to the separate clone/fetch
+transport steps. Invocation from a Git hook therefore cannot redirect commands
+into the caller's repository, and authentication failures return to the TUI
+instead of waiting on an invisible prompt. Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
 `~/.codecommit/repositories`. Both storage roots are enforced as user-only
 directories (`0700`) before checkout. Cache and worktree coordinates include the

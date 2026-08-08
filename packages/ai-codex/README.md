@@ -29,8 +29,9 @@ rules; removes inherited shell variables; and disables the CLI's shell, code,
 browser, app, plugin, skill, workspace, and sub-agent capabilities. Before the
 turn starts it negotiates the installed CLI feature inventory, passes only
 supported disables, and rejects any feature this package has not explicitly
-classified. It is intended for reviewing untrusted text without granting that
-text a host-read path.
+classified. Inventory discovery must exit successfully and uses the turn's
+timeout and output limits. It is intended for reviewing untrusted text without
+granting that text a host-read path.
 
 Structured output uses Codex's `--output-schema` support:
 

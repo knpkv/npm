@@ -234,11 +234,12 @@ describe("WorktreeService", () => {
 
       const runGit = Effect.fn("WorktreeServiceTest.runGit")(function*(
         args: ReadonlyArray<string>,
-        cwd?: string
+        cwd?: string,
+        environment: Readonly<Record<string, string | undefined>> = GitEnvironment.isolated()
       ) {
         return yield* spawner.string(ChildProcess.make("git", args, {
           ...(cwd === undefined ? {} : { cwd }),
-          env: GitEnvironment.isolated(),
+          env: environment,
           extendEnv: true,
           stderr: "pipe",
           stdout: "pipe"
@@ -253,8 +254,9 @@ describe("WorktreeService", () => {
       yield* runGit(["add", ".gitignore", "review.txt"], seed)
       yield* runGit(["commit", "-m", "base"], seed)
       yield* runGit(["checkout", "-b", "feature"], seed)
+      yield* fs.writeFileString(path.join(seed, ".gitattributes"), "* filter=review\n")
       yield* fs.writeFileString(path.join(seed, "feature.txt"), "feature\n")
-      yield* runGit(["add", "feature.txt"], seed)
+      yield* runGit(["add", ".gitattributes", "feature.txt"], seed)
       yield* runGit(["commit", "-m", "feature"], seed)
       const sourceCommit = yield* runGit(["rev-parse", "HEAD"], seed)
       yield* runGit(["checkout", "main"], seed)
@@ -326,11 +328,43 @@ describe("WorktreeService", () => {
 
         const hooks = path.join(root, "hooks")
         const hookSentinel = path.join(root, "post-checkout-ran")
+        const filterSentinel = path.join(root, "smudge-filter-ran")
+        const filterScript = path.join(root, "review-smudge")
         yield* fs.makeDirectory(hooks, { recursive: true })
         const postCheckoutHook = path.join(hooks, "post-checkout")
         yield* fs.writeFileString(postCheckoutHook, `#!/bin/sh\nprintf ran > '${hookSentinel}'\n`)
         yield* fs.chmod(postCheckoutHook, 0o700)
+        yield* fs.writeFileString(
+          filterScript,
+          `#!/bin/sh\nprintf ran > '${filterSentinel}'\nexec /bin/cat\n`
+        )
+        yield* fs.chmod(filterScript, 0o700)
+        yield* runGit(["config", "--file", path.join(home, ".gitconfig"), "filter.review.smudge", filterScript])
+        yield* runGit(["config", "--file", path.join(home, ".gitconfig"), "filter.review.required", "true"])
         yield* runGit(["clone", "--bare", origin, plan.cachePath], root)
+        const filterControl = path.join(root, "filter-control")
+        const configuredHome = { ...GitEnvironment.isolated(), HOME: home }
+        yield* runGit(
+          [
+            `--git-dir=${plan.cachePath}`,
+            "worktree",
+            "add",
+            "--detach",
+            filterControl,
+            sourceCommit
+          ],
+          root,
+          configuredHome
+        )
+        expect(yield* fs.exists(filterSentinel)).toBe(true)
+        yield* runGit([
+          `--git-dir=${plan.cachePath}`,
+          "worktree",
+          "remove",
+          "--force",
+          filterControl
+        ])
+        yield* fs.remove(filterSentinel)
         yield* runGit([
           `--git-dir=${plan.cachePath}`,
           "config",
@@ -341,6 +375,8 @@ describe("WorktreeService", () => {
         const repaired = yield* firstService.checkout(plan)
         expect(repaired.sourceCommit).toBe(sourceCommit)
         expect(yield* fs.exists(hookSentinel)).toBe(false)
+        expect(yield* fs.exists(filterSentinel)).toBe(false)
+        expect(yield* fs.readFileString(path.join(plan.targetPath, "feature.txt"))).toBe("feature\n")
 
         yield* fs.writeFileString(path.join(plan.targetPath, "feature.txt"), "locally modified\n")
         yield* fs.writeFileString(path.join(plan.targetPath, "untracked.txt"), "preserve me\n")

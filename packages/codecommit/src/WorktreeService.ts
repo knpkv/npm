@@ -103,12 +103,31 @@ const gitEnvironment = (request: WorktreeRequest) => ({
   ...GitEnvironment.nonInteractive()
 })
 
+/**
+ * Worktree population must not load host-configured filters. A repository can
+ * select any configured smudge/process driver through its `.gitattributes`.
+ * Remote transport keeps the normal Git configuration for the credential
+ * helper, while the local materialization step has no authentication need.
+ */
+const materializationGitEnvironment = (request: WorktreeRequest, home: string) => ({
+  ...gitEnvironment(request),
+  GIT_ATTR_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  HOME: home
+})
+
 const gitCommand = (
   request: WorktreeRequest,
   args: ReadonlyArray<string>,
-  options: { readonly captureStdout?: boolean; readonly cwd?: string } = {}
+  options: {
+    readonly captureStdout?: boolean
+    readonly cwd?: string
+    readonly environment?: Readonly<Record<string, string | undefined>>
+  } = {}
 ) => {
-  const { captureStdout = false, cwd } = options
+  const { captureStdout = false, cwd, environment } = options
   return (
     ChildProcess.make("git", [
       "-c",
@@ -118,7 +137,7 @@ const gitCommand = (
       ...args
     ], {
       ...(cwd === undefined ? {} : { cwd }),
-      env: gitEnvironment(request),
+      env: environment ?? gitEnvironment(request),
       extendEnv: true,
       stdin: "ignore",
       stderr: "ignore",
@@ -649,7 +668,7 @@ export const makeWorktreeService = (
         "--detach",
         plan.targetPath,
         plan.sourceCommit
-      ])).pipe(
+      ], { environment: materializationGitEnvironment(plan, home) })).pipe(
         Effect.mapError((cause) => commandFailure("add-worktree", "Unable to run git", cause))
       )
       if (addExitCode !== ChildProcessSpawner.ExitCode(0)) {
@@ -682,7 +701,7 @@ export const makeWorktreeService = (
             "--detach",
             plan.targetPath,
             plan.sourceCommit
-          ])).pipe(
+          ], { environment: materializationGitEnvironment(plan, home) })).pipe(
             Effect.mapError((cause) => commandFailure("retry-add-worktree", "Unable to run git", cause))
           )
           if (retryExitCode === ChildProcessSpawner.ExitCode(0)) {

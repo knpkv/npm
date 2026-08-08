@@ -9,6 +9,7 @@ import { PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE_FEATURES } from "../src
 
 interface FakeProcessOptions {
   readonly exitCode?: number
+  readonly featureExitCode?: number
   readonly featureInventory?: string
   readonly stderr?: string
   readonly stdout: string
@@ -33,7 +34,9 @@ const fakeProcessLayer = (
       const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
         all: Stream.concat(stdout, stderr),
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(
+          isFeatureInventory ? options.featureExitCode ?? 0 : options.exitCode ?? 0
+        )),
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
         isRunning: Effect.succeed(false),
@@ -128,6 +131,41 @@ describe("model", () => {
         Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
         Effect.provide(fakeProcessLayer(calls, {
           featureInventory: `${completeFeatureInventory}\nfuture_host_tool stable true`,
+          stdout: successTranscript("must not run")
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(1)
+    }))
+
+  it.effect("rejects an incomplete feature inventory from an unsuccessful process", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, {
+          featureExitCode: 1,
+          featureInventory: completeFeatureInventory.split("\n").slice(0, 4).join("\n"),
+          stdout: successTranscript("must not run")
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(1)
+    }))
+
+  it.effect("bounds feature inventory output before starting the turn", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", maxOutputBytes: 32, promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, {
+          featureInventory: completeFeatureInventory,
           stdout: successTranscript("must not run")
         })),
         Effect.provide(NodeFileSystem.layer),

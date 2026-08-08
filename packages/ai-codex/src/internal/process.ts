@@ -7,9 +7,9 @@ import { type NormalizedOptions, PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE
 import {
   CodexFailureCause,
   CodexTransportError,
-  configurationFailure,
   invalidRequest,
-  sanitizeDiagnostic
+  sanitizeDiagnostic,
+  transportToAiError
 } from "./errors.js"
 
 interface ByteAccumulator {
@@ -108,7 +108,7 @@ export const resolvePromptOnlyDisabledFeatures = Effect.fn(
 ) {
   if (!options.promptOnly) return []
 
-  const output = yield* spawner.string(makeCommand({
+  const output = yield* runCodex({
     args: ["features", "list"],
     cwd: options.cwd,
     environment: options.environment,
@@ -118,9 +118,7 @@ export const resolvePromptOnlyDisabledFeatures = Effect.fn(
     prompt: "",
     spawner,
     timeout: options.timeout
-  })).pipe(
-    Effect.mapError((cause) => configurationFailure(method, cause))
-  )
+  }).pipe(Effect.mapError((error) => transportToAiError(method, error)))
   const installed = new Set(
     output.split(/\r?\n/u)
       .map((line) => line.trim().split(/\s+/u)[0] ?? "")
