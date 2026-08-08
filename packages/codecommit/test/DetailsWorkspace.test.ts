@@ -15,7 +15,9 @@ import {
   exactRevisionReviewState,
   fileDiffIdentityMatches,
   humanReviewState,
+  pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
+  revisionHeaderText,
   terminalSafeMultilineText,
   terminalSafeText,
   workspaceIdentityMatches,
@@ -33,8 +35,11 @@ const decodeChangedFile = Schema.decodeUnknownSync(ReadClient.CodeCommitChangedF
 const hasTerminalControl = (value: string): boolean =>
   Array.from(value).some((character) => {
     const codePoint = character.codePointAt(0)
-    return codePoint !== undefined && codePoint !== 0x0a &&
+    return (
+      codePoint !== undefined &&
+      codePoint !== 0x0a &&
       ((codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f))
+    )
   })
 
 describe("PR detail workspace", () => {
@@ -85,9 +90,7 @@ describe("PR detail workspace", () => {
     })
     const result = buildUnifiedDiff(file, "const value = '\u0007old'\n", "const value = '\u001bnew'\n")
 
-    expect(terminalSafeText("a\u0000\u001b\u007f\u009fb")).toBe(
-      "a\\u{0000}\\u{001b}\\u{007f}\\u{009f}b"
-    )
+    expect(terminalSafeText("a\u0000\u001b\u007f\u009fb")).toBe("a\\u{0000}\\u{001b}\\u{007f}\\u{009f}b")
     expect(result.diff).toContain("--- a/src/old\\u{001b}[31m\\u{0009}.ts")
     expect(result.diff).toContain("+++ b/src/new\\u{000d}\\u{000a}.ts")
     expect(result.diff).toContain("\\u{0007}old")
@@ -98,9 +101,7 @@ describe("PR detail workspace", () => {
   })
 
   it("preserves multiline indentation while escaping terminal sequences", () => {
-    expect(terminalSafeMultilineText("\tconst value = 1\n\u001b[2J")).toBe(
-      "\tconst value = 1\n\\u{001b}[2J"
-    )
+    expect(terminalSafeMultilineText("\tconst value = 1\n\u001b[2J")).toBe("\tconst value = 1\n\\u{001b}[2J")
     expect(terminalSafeText("\tconst value = 1")).toBe("\\u{0009}const value = 1")
     expect(terminalSafeMultilineText("first\r\nsecond\r\n")).toBe("first\nsecond\n")
   })
@@ -151,13 +152,80 @@ describe("PR detail workspace", () => {
       _tag: "reset",
       interrupt: "none"
     })
+    expect(workspaceLifecycleTransition(key, null, "running-review")).toEqual({
+      _tag: "reset",
+      interrupt: "review"
+    })
+    expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
+  })
+
+  it("keys comments by the exact revision pair", () => {
+    const pr = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1"),
+        repoAccountId: "111122223333"
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: false,
+      isMergeable: true,
+      lastModifiedDate: new Date(1_000),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature",
+      status: "OPEN",
+      title: "Review"
+    })
+    const revision = {
+      destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    }
+    const key = pullRequestCommentsRequestKey(pr, revision)
+
+    expect(pullRequestCommentsRequestKey(pr, { ...revision })).toBe(key)
+    expect(
+      pullRequestCommentsRequestKey(pr, {
+        ...revision,
+        sourceCommit: ReadClient.CodeCommitCommitId.make("c".repeat(40))
+      })
+    ).not.toBe(key)
+    expect(
+      pullRequestCommentsRequestKey(pr, {
+        ...revision,
+        destinationCommit: ReadClient.CodeCommitCommitId.make("d".repeat(40))
+      })
+    ).not.toBe(key)
+  })
+
+  it("renders revision metadata without terminal controls", () => {
+    const ordinary = revisionHeaderText({
+      destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+      revisionId: "revision-1",
+      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    })
+    const hostile = revisionHeaderText({
+      destinationCommit: ReadClient.CodeCommitCommitId.make(`a\u001b[2J${"a".repeat(32)}`),
+      revisionId: "rev\u202eexe",
+      sourceCommit: ReadClient.CodeCommitCommitId.make(`b\u009b${"b".repeat(38)}`)
+    })
+
+    expect(ordinary).toBe(`head ${"b".repeat(12)}  ·  base ${"a".repeat(12)}  ·  revision revision-1`)
+    expect(hostile).toContain("\\u{001b}")
+    expect(hostile).toContain("\\u{009b}")
+    expect(hostile).toContain("\\u{202e}")
+    expect(hasTerminalControl(hostile)).toBe(false)
   })
 
   it("renders bidi controls visibly without changing ordinary international text", () => {
     expect(terminalSafeText("src/\u202ecod.exe")).toBe("src/\\u{202e}cod.exe")
-    expect(terminalSafeMultilineText("\u2067review\u2069\nשלום/café.ts")).toBe(
-      "\\u{2067}review\\u{2069}\nשלום/café.ts"
-    )
+    expect(terminalSafeMultilineText("\u2067review\u2069\nשלום/café.ts")).toBe("\\u{2067}review\\u{2069}\nשלום/café.ts")
     expect(terminalSafeText("café/שלום.ts")).toBe("café/שלום.ts")
   })
 
@@ -254,10 +322,8 @@ describe("PR detail workspace", () => {
       after: { blobId: "after-blob", path: "src/large.ts", mode: "100644" }
     })
     const before = Array.from({ length: 2_000 }, (_, index) => `shared ${index}`).join("\n")
-    const after = Array.from(
-      { length: 2_000 },
-      (_, index) => index % 12 === 0 ? `changed ${index}` : `shared ${index}`
-    ).join("\n")
+    const after = Array.from({ length: 2_000 }, (_, index) => index % 12 === 0 ? `changed ${index}` : `shared ${index}`)
+      .join("\n")
     const result = buildUnifiedDiff(file, before, after)
 
     expect(result.truncated).toBe(true)
@@ -420,15 +486,18 @@ describe("PR detail workspace", () => {
       expect(oversized).toMatchObject({ binary: false, diff: "", truncated: true })
 
       const text = new TextEncoder().encode("before\n")
-      const rendered = yield* loadFileDiff({
-        getBlob: ({ blobId }) =>
-          Effect.succeed(
-            new ReadClient.CodeCommitBlobContent({
-              blobId: ReadClient.CodeCommitBlobId.make(blobId),
-              bytes: blobId === file.before?.blobId ? text : new TextEncoder().encode("after\n")
-            })
-          )
-      }, request)
+      const rendered = yield* loadFileDiff(
+        {
+          getBlob: ({ blobId }) =>
+            Effect.succeed(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: blobId === file.before?.blobId ? text : new TextEncoder().encode("after\n")
+              })
+            )
+        },
+        request
+      )
       expect(rendered.diff).toContain("-before")
       expect(rendered.diff).toContain("+after")
 

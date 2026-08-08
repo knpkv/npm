@@ -25,8 +25,10 @@ import {
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
+  pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
+  revisionHeaderText,
   terminalSafeMultilineText,
   terminalSafeText,
   type WorkspaceActionPhase,
@@ -117,8 +119,9 @@ function CommentsPanel({
   const result = useAtomValue(fetchPrCommentsAtom)
   const fetchedRef = useRef<string | null>(null)
   const expectedIdentity = pullRequestWorkspaceIdentity(pr)
-  const requestKey = `${expectedIdentity.profile}:${expectedIdentity.region}:${expectedIdentity.repositoryName}:${expectedIdentity.pullRequestId}`
+  const requestKey = revision === null ? null : pullRequestCommentsRequestKey(pr, revision)
   useEffect(() => {
+    if (requestKey === null) return
     if (fetchedRef.current === requestKey) return
     fetchedRef.current = requestKey
     fetchComments(pr)
@@ -260,7 +263,6 @@ export function DetailsView() {
   const workspaceReloadKey = pr === null ? null : pullRequestWorkspaceReloadKey(pr)
 
   useEffect(() => {
-    if (pr === null || workspaceReloadKey === null) return
     const currentAction = actionRef.current
     const phase: WorkspaceActionPhase =
       currentAction._tag === "running"
@@ -279,7 +281,7 @@ export function DetailsView() {
     setSelectedFileIndex(0)
     setTab("diff")
     setAction({ _tag: "idle" })
-    loadWorkspace(pr)
+    if (pr !== null) loadWorkspace(pr)
   }, [checkout, loadWorkspace, preflight, pr, runReview, workspaceReloadKey])
 
   useEffect(() => {
@@ -453,9 +455,7 @@ export function DetailsView() {
           {terminalSafeText(`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`)}
         </text>
         <text fg={theme.textMuted}>
-          {revision === undefined
-            ? "Loading exact revision…"
-            : `head ${revision.sourceCommit.slice(0, 12)}  ·  base ${revision.destinationCommit.slice(0, 12)}  ·  revision ${revision.revisionId.slice(0, 10)}`}
+          {revision === undefined ? "Loading exact revision…" : revisionHeaderText(revision)}
         </text>
       </box>
 

@@ -32,13 +32,7 @@ export interface PullRequestWorkspaceIdentity {
   readonly repositoryName: string
 }
 
-export type WorkspaceActionPhase =
-  | "idle"
-  | "preflight"
-  | "ready"
-  | "running-review"
-  | "running-worktree"
-  | "terminal"
+export type WorkspaceActionPhase = "idle" | "preflight" | "ready" | "running-review" | "running-worktree" | "terminal"
 
 export type WorkspaceLifecycleTransition =
   | { readonly _tag: "preserve" }
@@ -147,10 +141,7 @@ export const detailsKeyIntent = (input: {
 export type BlobPreviewDisposition = "binary" | "text" | "too-large"
 
 /** Classifies fetched blobs before allocating decoded strings for the terminal preview. */
-export const blobPreviewDisposition = (
-  beforeBytes: Uint8Array,
-  afterBytes: Uint8Array
-): BlobPreviewDisposition => {
+export const blobPreviewDisposition = (beforeBytes: Uint8Array, afterBytes: Uint8Array): BlobPreviewDisposition => {
   if (beforeBytes.byteLength > MAX_PREVIEW_BLOB_BYTES || afterBytes.byteLength > MAX_PREVIEW_BLOB_BYTES) {
     return "too-large"
   }
@@ -186,10 +177,25 @@ export const pullRequestWorkspaceReloadKey = (pr: Domain.PullRequest): string =>
     pr.lastModifiedDate.getTime()
   ].join("\u0000")
 
+/** Stable comment request key for one PR and its exact provider revision pair. */
+export const pullRequestCommentsRequestKey = (
+  pr: Domain.PullRequest,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
+): string =>
+  [
+    pr.account.profile,
+    pr.account.region,
+    pr.account.repoAccountId ?? "",
+    pr.repositoryName,
+    pr.id,
+    revision.destinationCommit,
+    revision.sourceCommit
+  ].join("\u0000")
+
 /** Preserves semantic no-op refreshes and identifies the atom to interrupt before a real reset. */
 export const workspaceLifecycleTransition = (
   previousKey: string | null,
-  nextKey: string,
+  nextKey: string | null,
   phase: WorkspaceActionPhase
 ): WorkspaceLifecycleTransition => {
   if (previousKey === nextKey) return { _tag: "preserve" }
@@ -291,6 +297,16 @@ export const terminalSafeText = (value: string): string =>
     return codePoint !== undefined && isTerminalUnsafe(character, codePoint) ? escapedCodePoint(character) : character
   }).join("")
 
+/** Formats untrusted provider revision metadata for a single terminal-safe header. */
+export const revisionHeaderText = (
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "revisionId" | "sourceCommit">
+): string =>
+  terminalSafeText(
+    `head ${revision.sourceCommit.slice(0, 12)}  ·  base ${revision.destinationCommit.slice(0, 12)}  ·  revision ${
+      revision.revisionId.slice(0, 10)
+    }`
+  )
+
 /** Normalizes CRLF and preserves tabs and line feeds while escaping terminal controls. */
 export const terminalSafeMultilineText = (value: string): string =>
   Array.from(value.replaceAll("\r\n", "\n"), (character) => {
@@ -335,19 +351,11 @@ export const buildUnifiedDiff = (
   const afterPath = terminalSafeText(file.after?.path ?? "/dev/null")
   const oldFileName = file.before === null ? "/dev/null" : `a/${beforePath}`
   const newFileName = file.after === null ? "/dev/null" : `b/${afterPath}`
-  const patch = structuredPatch(
-    oldFileName,
-    newFileName,
-    beforeText,
-    afterText,
-    "",
-    "",
-    {
-      context: DIFF_CONTEXT_LINES,
-      maxEditLength: 20_000,
-      timeout: 1_000
-    }
-  )
+  const patch = structuredPatch(oldFileName, newFileName, beforeText, afterText, "", "", {
+    context: DIFF_CONTEXT_LINES,
+    maxEditLength: 20_000,
+    timeout: 1_000
+  })
   if (patch === undefined) return { diff: "", metadata: null, truncated: true }
 
   if (patch.hunks.length === 0) {
