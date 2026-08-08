@@ -87,6 +87,43 @@ describe("model", () => {
       }
     }))
 
+  it.effect("removes every host-capable input for prompt-only turns", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("clean") })),
+        Effect.provide(NodeFileSystem.layer)
+      )
+
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args).toContain("--ignore-user-config")
+        expect(command.args).toContain("--ignore-rules")
+        expect(command.args).toContain("project_doc_max_bytes=0")
+        expect(command.args).toContain("shell_environment_policy.inherit=none")
+        for (
+          const feature of [
+            "apps",
+            "browser_use",
+            "code_mode_host",
+            "computer_use",
+            "in_app_browser",
+            "js_repl",
+            "multi_agent",
+            "shell_tool",
+            "unified_exec",
+            "workspace_dependencies"
+          ]
+        ) {
+          const index = command.args.indexOf(feature)
+          expect(index).toBeGreaterThan(0)
+          expect(command.args[index - 1]).toBe("--disable")
+        }
+      }
+    }))
+
   it.effect("uses a scoped output schema for structured output", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []

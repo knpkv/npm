@@ -59,6 +59,7 @@ export interface NormalizedOptions {
   readonly maxPromptBytes: number
   readonly maxStderrBytes: number
   readonly model: string | undefined
+  readonly promptOnly: boolean
   readonly timeout: NonNullable<CodexModelOptions["timeout"]>
 }
 
@@ -96,6 +97,7 @@ export const normalizeOptions = (
       maxPromptBytes,
       maxStderrBytes,
       model: options.model,
+      promptOnly: options.promptOnly ?? false,
       timeout: options.timeout ?? DEFAULT_TIMEOUT
     }
   })
@@ -128,6 +130,37 @@ export const makeArguments = (
     options.access,
     "--skip-git-repo-check"
   ]
+  if (options.promptOnly) {
+    args.push(
+      "--ignore-user-config",
+      "--ignore-rules",
+      "-c",
+      "project_doc_max_bytes=0",
+      "-c",
+      "shell_environment_policy.inherit=none"
+    )
+    for (
+      const feature of [
+        "apps",
+        "browser_use",
+        "browser_use_external",
+        "browser_use_full_cdp_access",
+        "code_mode",
+        "code_mode_host",
+        "computer_use",
+        "in_app_browser",
+        "js_repl",
+        "js_repl_tools_only",
+        "multi_agent",
+        "multi_agent_v2",
+        "shell_tool",
+        "unified_exec",
+        "workspace_dependencies"
+      ]
+    ) {
+      args.push("--disable", feature)
+    }
+  }
   if (options.model !== undefined) args.push("--model", options.model)
   if (schemaFile !== undefined) args.push("--output-schema", schemaFile)
   args.push("-")

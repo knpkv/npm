@@ -23,6 +23,12 @@ authentication, state-location, certificate, path, and temporary-directory
 variables are forwarded. Use the explicit `environment` option for a custom
 provider key named by Codex `env_key` configuration.
 
+Set `promptOnly: true` when the complete input is already present in the prompt.
+This mode ignores user configuration, repository instructions, and command
+rules; removes inherited shell variables; and disables the CLI's shell, code,
+browser, app, workspace, and sub-agent capabilities. It is intended for
+reviewing untrusted text without granting that text a host-read path.
+
 Structured output uses Codex's `--output-schema` support:
 
 ```ts

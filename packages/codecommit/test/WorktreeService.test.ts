@@ -1,12 +1,14 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { ConfigProvider, Effect, Exit, Fiber, Option, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, Option, Sink, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as GitEnvironment from "../src/GitEnvironment.js"
 import {
+  acquireReadyLockHolder,
   codeCommitRemoteUrl,
   makeWorktreeService,
   repositoryLockPath,
@@ -15,6 +17,62 @@ import {
 } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
+  it.effect("falls back when lockf starts but exits before readiness", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const calls: Array<string> = []
+      const makeHandle = (stdoutText: string, running: boolean) =>
+        ChildProcessSpawner.makeHandle({
+          all: Stream.empty,
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(running ? 0 : 1)),
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          isRunning: Effect.succeed(running),
+          kill: () => Effect.void,
+          pid: ChildProcessSpawner.ProcessId(42),
+          stderr: Stream.empty,
+          stdin: Sink.drain,
+          stdout: Stream.make(stdoutText).pipe(Stream.encodeText),
+          unref: Effect.succeed(Effect.void)
+        })
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (!ChildProcess.isStandardCommand(command)) return Effect.die("expected a standard lock command")
+        calls.push(command.command)
+        return Effect.succeed(
+          command.command === "lockf"
+            ? makeHandle("", false)
+            : makeHandle("knpkv-codecommit-lock-ready\n", true)
+        )
+      })
+
+      yield* acquireReadyLockHolder(spawner, "/tmp/review.lock")
+      expect(calls).toEqual(["lockf", "flock"])
+    })))
+
+  it.effect("does not invoke flock after lockf reports readiness", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const calls: Array<string> = []
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (!ChildProcess.isStandardCommand(command)) return Effect.die("expected a standard lock command")
+        calls.push(command.command)
+        return Effect.succeed(ChildProcessSpawner.makeHandle({
+          all: Stream.empty,
+          exitCode: Effect.never,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          isRunning: Effect.succeed(true),
+          kill: () => Effect.void,
+          pid: ChildProcessSpawner.ProcessId(43),
+          stderr: Stream.empty,
+          stdin: Sink.drain,
+          stdout: Stream.make("knpkv-codecommit-lock-ready\n").pipe(Stream.encodeText),
+          unref: Effect.succeed(Effect.void)
+        }))
+      })
+
+      yield* acquireReadyLockHolder(spawner, "/tmp/review.lock")
+      expect(calls).toEqual(["lockf"])
+    })))
+
   it.effect("isolates repository accounts and resolves partition-aware Git endpoints", () =>
     Effect.gen(function*() {
       const service = yield* makeWorktreeService()
@@ -51,6 +109,26 @@ describe("WorktreeService", () => {
       expect(sameAccount.targetPath).toBe(first.targetPath)
       expect(otherAccount.cachePath).not.toBe(first.cachePath)
       expect(otherAccount.targetPath).not.toBe(first.targetPath)
+
+      const firstCollision = yield* service.preflight({
+        ...request,
+        repositoryName: Domain.RepositoryName.make(
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-12dqrwm0ys00a5"
+        )
+      })
+      const secondCollision = yield* service.preflight({
+        ...request,
+        repositoryName: Domain.RepositoryName.make(
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0mqk6t416poynr"
+        )
+      })
+      expect(firstCollision.cachePath).not.toBe(secondCollision.cachePath)
+      expect(
+        (yield* service.preflight({
+          ...request,
+          repositoryName: firstCollision.repositoryName
+        })).cachePath
+      ).toBe(firstCollision.cachePath)
 
       const missingIdentity = yield* service.preflight({
         ...request,
@@ -143,6 +221,8 @@ describe("WorktreeService", () => {
       ) {
         return yield* spawner.string(ChildProcess.make("git", args, {
           ...(cwd === undefined ? {} : { cwd }),
+          env: GitEnvironment.isolated(),
+          extendEnv: true,
           stderr: "pipe",
           stdout: "pipe"
         })).pipe(Effect.map((output) => output.trim()))

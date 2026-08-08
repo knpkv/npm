@@ -8,11 +8,12 @@
  * @module
  */
 import { ChildEnv, type Domain, type ReadClient } from "@knpkv/codecommit-core"
-import { Config, Context, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Config, Context, Crypto, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as GitEnvironment from "./GitEnvironment.js"
 
 export class WorktreeError extends Schema.TaggedErrorClass<WorktreeError>()(
   "WorktreeError",
@@ -77,27 +78,30 @@ const homeDirectory = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
 )
 
-const stableHash = (value: string): string => {
-  let hash = 2_166_136_261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16_777_619)
-  }
-  return (hash >>> 0).toString(36)
-}
+const textEncoder = new TextEncoder()
+
+const stableIdentityDigest = (digestService: Crypto.Crypto, value: string) =>
+  digestService.digest("SHA-256", textEncoder.encode(value)).pipe(
+    Effect.map((digest) => Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")),
+    Effect.mapError((cause) => commandFailure("path-identity", "Unable to digest CodeCommit path identity", cause))
+  )
 
 /** Produces one bounded, traversal-safe path segment while retaining identity. */
-export const safePathSegment = (label: string, value: string): string => {
-  const safeLabel = label.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 24) || "item"
-  const readable = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 48) || "item"
-  return `${safeLabel}-${readable}-${stableHash(`${label}\u0000${value}`)}`
-}
+export const safePathSegment = Effect.fn("WorktreeService.safePathSegment")(function*(label: string, value: string) {
+  const digestService = yield* Crypto.Crypto
+  const safeLabel = label.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 16) || "item"
+  const readable = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 24) || "item"
+  const digest = yield* stableIdentityDigest(digestService, `${label}\u0000${value}`)
+  return `${safeLabel}-${readable}-${digest}`
+})
 
-const gitEnvironment = (request: WorktreeRequest) =>
-  ChildEnv.profileScopedEnv({
+const gitEnvironment = (request: WorktreeRequest) => ({
+  ...ChildEnv.profileScopedEnv({
     AWS_PROFILE: request.account.profile,
     AWS_REGION: request.account.region
-  })
+  }),
+  ...GitEnvironment.isolated()
+})
 
 const gitCommand = (
   request: WorktreeRequest,
@@ -202,7 +206,7 @@ export const WORKTREE_LOCK_REQUIREMENT =
 /** Sidecar advisory lock shared by every process operating on one repository cache. */
 export const repositoryLockPath = (cachePath: string): string => `${cachePath}.knpkv.lock`
 
-const lockHolderCommands = (lockPath: string): ReadonlyArray<ChildProcess.Command> => [
+const lockHolderCommands = (lockPath: string): readonly [ChildProcess.Command, ChildProcess.Command] => [
   ChildProcess.make("lockf", ["-k", lockPath, "/bin/sh", "-c", LOCK_HOLDER_SCRIPT], {
     stderr: "pipe",
     stdout: "pipe"
@@ -212,6 +216,46 @@ const lockHolderCommands = (lockPath: string): ReadonlyArray<ChildProcess.Comman
     stdout: "pipe"
   })
 ]
+
+const releaseLockHolder = (handle: ChildProcessSpawner.ChildProcessHandle) =>
+  handle.isRunning.pipe(
+    Effect.flatMap((running) => running ? handle.kill() : Effect.void),
+    Effect.ignore
+  )
+
+const acquireLockCommand = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  command: ChildProcess.Command
+) =>
+  spawner.spawn(command).pipe(
+    Effect.flatMap((handle) =>
+      handle.stdout.pipe(
+        Stream.decodeText(),
+        Stream.splitLines,
+        Stream.runHead,
+        Effect.flatMap((line) =>
+          Option.isSome(line) && line.value === LOCK_READY_LINE
+            ? Effect.succeed(handle)
+            : commandFailure("acquire-repository-lock", "Repository lock holder exited before acquisition")
+        ),
+        Effect.tapError(() => releaseLockHolder(handle))
+      )
+    )
+  )
+
+/** Acquires the first lock implementation that both starts and reports readiness. */
+export const acquireReadyLockHolder = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  lockPath: string
+) => {
+  const [lockf, flock] = lockHolderCommands(lockPath)
+  return acquireLockCommand(spawner, lockf).pipe(
+    Effect.catch(() => acquireLockCommand(spawner, flock)),
+    Effect.mapError((cause) =>
+      commandFailure("acquire-repository-lock", `${WORKTREE_LOCK_REQUIREMENT}; unable to lock ${lockPath}`, cause)
+    )
+  )
+}
 
 const AWS_PARTITION_DNS_SUFFIXES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^us-isob-[a-z0-9-]+-\d+$/u, "sc2s.sgov.gov"],
@@ -247,6 +291,7 @@ export const makeWorktreeService = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const digestService = yield* Crypto.Crypto
     const home = yield* homeDirectory.pipe(
       Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
     )
@@ -265,15 +310,17 @@ export const makeWorktreeService = (
         )
       )
       yield* remoteUrlFor(request).pipe(Effect.asVoid)
-      const accountSegment = safePathSegment(
+      const accountSegment = yield* safePathSegment(
         "account",
         `${repositoryAccountId}-${request.account.profile}-${request.account.region}`
+      ).pipe(Effect.provideService(Crypto.Crypto, digestService))
+      const repositorySegment = yield* safePathSegment("repo", request.repositoryName).pipe(
+        Effect.provideService(Crypto.Crypto, digestService)
       )
-      const repositorySegment = safePathSegment("repo", request.repositoryName)
-      const revisionSegment = safePathSegment(
+      const revisionSegment = yield* safePathSegment(
         `pr-${request.pullRequestId}`,
         `${request.pullRequestId}-${request.sourceCommit}`
-      )
+      ).pipe(Effect.provideService(Crypto.Crypto, digestService))
       const root = path.join(home, ".codecommit")
       const cachePath = path.join(root, "repositories", accountSegment, `${repositorySegment}.git`)
       const targetPath = path.join(root, "worktrees", accountSegment, repositorySegment, revisionSegment)
@@ -421,48 +468,20 @@ export const makeWorktreeService = (
       } satisfies CheckoutPaths
     })
 
-    const spawnLockHolder = (lockPath: string) => {
-      const [lockf, flock] = lockHolderCommands(lockPath)
-      return spawner.spawn(lockf!).pipe(
-        Effect.catch(() => spawner.spawn(flock!)),
-        Effect.mapError((cause) =>
-          commandFailure("acquire-repository-lock", `${WORKTREE_LOCK_REQUIREMENT}; unable to lock ${lockPath}`, cause)
-        )
-      )
-    }
-
-    const releaseLockHolder = (handle: ChildProcessSpawner.ChildProcessHandle) =>
-      handle.isRunning.pipe(
-        Effect.flatMap((running) => running ? handle.kill() : Effect.void),
-        Effect.ignore
-      )
-
     const withRepositoryLock = <A>(plan: WorktreePlan, effect: Effect.Effect<A, WorktreeError>) =>
       Effect.scoped(
         Effect.acquireUseRelease(
-          spawnLockHolder(repositoryLockPath(plan.cachePath)),
+          acquireReadyLockHolder(spawner, repositoryLockPath(plan.cachePath)),
           (handle) =>
-            handle.stdout.pipe(
-              Stream.decodeText(),
-              Stream.splitLines,
-              Stream.runHead,
-              Effect.mapError((cause) =>
-                commandFailure("acquire-repository-lock", "Unable to read repository lock readiness", cause)
-              ),
-              Effect.flatMap((line) =>
-                Option.isSome(line) && line.value === LOCK_READY_LINE
-                  ? Effect.raceFirst(
-                    effect,
-                    handle.exitCode.pipe(
-                      Effect.mapError((cause) =>
-                        commandFailure("hold-repository-lock", "Repository lock holder failed", cause)
-                      ),
-                      Effect.flatMap((exitCode) =>
-                        commandFailure("hold-repository-lock", `Repository lock holder exited with code ${exitCode}`)
-                      )
-                    )
-                  )
-                  : commandFailure("acquire-repository-lock", "Repository lock holder exited before acquisition")
+            Effect.raceFirst(
+              effect,
+              handle.exitCode.pipe(
+                Effect.mapError((cause) =>
+                  commandFailure("hold-repository-lock", "Repository lock holder failed", cause)
+                ),
+                Effect.flatMap((exitCode) =>
+                  commandFailure("hold-repository-lock", `Repository lock holder exited with code ${exitCode}`)
+                )
               )
             ),
           releaseLockHolder

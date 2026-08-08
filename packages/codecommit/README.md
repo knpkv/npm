@@ -11,7 +11,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - SSO login/logout management
 - Full-text search across cached PRs
 - Exact-revision PR workspace with changed-file navigation and native diff previews
-- Read-only local Codex Relay passes for review, security, tests, and risk explanation
+- Prompt-only local Codex Relay passes for review, security, tests, and risk explanation
 - Deterministic detached worktree checkout for the selected PR head
 
 ## Prerequisites
@@ -57,12 +57,18 @@ codecommit tui
 Open a pull request to enter the exact-revision review workspace. The left pane
 navigates changed files, the center renders immutable blob diffs, and the right
 pane keeps local Relay actions separate from CodeCommit approval and
-mergeability. Relay runs the local Codex CLI in a read-only sandbox after an
-explicit preflight; worktrees are detached at the displayed head under
+mergeability. After explicit preflight, Relay has the host produce a bounded
+exact-commit patch with Git hooks disabled, then runs the local Codex CLI in
+prompt-only mode. Prompt-only mode disables user and repository instructions,
+host tools, and inherited shell variables, so repository-authored text cannot
+read other files. Relay and worktree Git commands also clear inherited
+repository-local `GIT_*` variables, so invocation from a Git hook cannot redirect
+them into the caller's repository. Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
 `~/.codecommit/repositories`. Both storage roots are enforced as user-only
 directories (`0700`) before checkout. Cache and worktree coordinates include the
-repository's AWS account ID, profile, region, and immutable head, and HTTPS Git
+repository's AWS account ID, profile, region, and immutable head using
+collision-resistant identity digests, and HTTPS Git
 hosts are resolved for the region's AWS partition. Actions fail closed when the
 repository account identity is unavailable. Both directories can grow over time.
 Close the TUI, then remove a no-longer-needed repository's matching directories
