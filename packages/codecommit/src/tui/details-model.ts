@@ -322,8 +322,7 @@ export const terminalSafeMultilineText = (value: string): string =>
       : character
   }).join("")
 
-const terminalSafePatchLine = (value: string): string =>
-  terminalSafeMultilineText(value.replace(/\r$/u, "").replaceAll("\\", "\\\\"))
+const terminalSafePatchLine = (value: string): string => terminalSafeMultilineText(value.replace(/\r$/u, ""))
 
 const fileMetadata = (file: ReadClient.CodeCommitChangedFile): Array<string> => {
   const metadata: Array<string> = []

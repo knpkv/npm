@@ -9,7 +9,7 @@ it.effect("calls the real authenticated Codex CLI through the public model", () 
     const response = yield* LanguageModel.generateText({
       prompt: "Reply with exactly CODEX_SMOKE_OK and nothing else."
     }).pipe(
-      Effect.provide(model({ cwd: ".", model: "gpt-5.6-luna", timeout: "2 minutes" })),
+      Effect.provide(model({ cwd: ".", model: "gpt-5.6-luna", promptOnly: true, timeout: "2 minutes" })),
       Effect.provide(NodeServices.layer)
     )
 

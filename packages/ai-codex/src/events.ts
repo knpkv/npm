@@ -3,7 +3,7 @@ import type * as AiError from "effect/unstable/ai/AiError"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { makeArguments, normalizeOptions, validatePrompt } from "./internal/configuration.js"
 import { CodexTransportError, invalidRequest, transportToAiError } from "./internal/errors.js"
-import { streamCodexLines } from "./internal/process.js"
+import { resolvePromptOnlyDisabledFeatures, streamCodexLines } from "./internal/process.js"
 import type { CodexModelOptions } from "./model.js"
 
 /** Configuration for streaming the Codex CLI's raw JSONL events. */
@@ -44,9 +44,10 @@ export const streamEvents = (
     const normalized = yield* normalizeOptions(options, "streamEvents")
     yield* validatePrompt(options.prompt, normalized.maxPromptBytes, "streamEvents")
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(normalized, spawner, "streamEvents")
 
     return streamCodexLines({
-      args: makeArguments(normalized, undefined),
+      args: makeArguments(normalized, undefined, promptOnlyDisabledFeatures),
       cwd: normalized.cwd,
       environment: normalized.environment,
       executable: normalized.executable,

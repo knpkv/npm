@@ -277,10 +277,25 @@ describe("PR detail workspace", () => {
     const result = buildUnifiedDiff(file, "const value = '\u001b'\n", "const value = '\\u{001b}'\n")
 
     expect(result.diff).toContain("-const value = '\\u{001b}'")
-    expect(result.diff).toContain("+const value = '\\\\u{001b}'")
+    expect(result.diff).toContain("+const value = '\\u{001b}'")
     expect(result.metadata).toBeNull()
     expect(result.truncated).toBe(false)
     expect(hasTerminalControl(result.diff)).toBe(false)
+  })
+
+  it("preserves printable backslashes in immutable source lines", () => {
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-blob", path: "src/path.ts", mode: "100644" },
+      after: { blobId: "after-blob", path: "src/path.ts", mode: "100644" }
+    })
+    const before = String.raw`const path = "C:\old"`
+    const after = String.raw`const path = "C:\tmp"`
+    const result = buildUnifiedDiff(file, `${before}\n`, `${after}\n`)
+
+    expect(result.diff).toContain(`-${before}`)
+    expect(result.diff).toContain(`+${after}`)
+    expect(applyPatch(`${before}\n`, result.diff)).toBe(`${after}\n`)
   })
 
   it("normalizes CRLF diff lines without exposing carriage-return escapes", () => {

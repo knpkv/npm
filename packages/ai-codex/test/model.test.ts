@@ -5,13 +5,18 @@ import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { model } from "../src/index.js"
-import { PROMPT_ONLY_DISABLED_FEATURES } from "../src/internal/configuration.js"
+import { PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE_FEATURES } from "../src/internal/configuration.js"
 
 interface FakeProcessOptions {
   readonly exitCode?: number
+  readonly featureInventory?: string
   readonly stderr?: string
   readonly stdout: string
 }
+
+const completeFeatureInventory = [...PROMPT_ONLY_DISABLED_FEATURES, ...PROMPT_ONLY_SAFE_FEATURES]
+  .map((feature) => `${feature} stable false`)
+  .join("\n")
 
 const fakeProcessLayer = (
   calls: Array<ChildProcess.Command>,
@@ -21,7 +26,10 @@ const fakeProcessLayer = (
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       calls.push(command)
-      const stdout = Stream.make(options.stdout).pipe(Stream.encodeText)
+      const isFeatureInventory = ChildProcess.isStandardCommand(command) && command.args.join(" ") === "features list"
+      const stdout = Stream.make(
+        isFeatureInventory ? options.featureInventory ?? completeFeatureInventory : options.stdout
+      ).pipe(Stream.encodeText)
       const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
         all: Stream.concat(stdout, stderr),
@@ -89,6 +97,47 @@ describe("model", () => {
       }
     }))
 
+  it.effect("passes disables only for unsafe features supported by the installed Codex", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const olderInventory = completeFeatureInventory
+        .split("\n")
+        .filter((line) => !line.startsWith("skill_search "))
+        .join("\n")
+      yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, {
+          featureInventory: olderInventory,
+          stdout: successTranscript("clean")
+        })),
+        Effect.provide(NodeFileSystem.layer)
+      )
+
+      expect(calls).toHaveLength(2)
+      const command = calls[1]
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args).not.toContain("skill_search")
+        expect(command.args).toContain("plugins")
+      }
+    }))
+
+  it.effect("rejects an unclassified installed Codex feature before starting the turn", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, {
+          featureInventory: `${completeFeatureInventory}\nfuture_host_tool stable true`,
+          stdout: successTranscript("must not run")
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(1)
+    }))
+
   it.effect("removes every host-capable input for prompt-only turns", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -98,7 +147,8 @@ describe("model", () => {
         Effect.provide(NodeFileSystem.layer)
       )
 
-      const command = calls[0]
+      expect(calls).toHaveLength(2)
+      const command = calls[1]
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(command.args).toContain("--ignore-user-config")

@@ -22,6 +22,7 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "apply_patch_freeform",
   "apply_patch_streaming_events",
   "apps",
+  "apps_mcp_path_override",
   "artifact",
   "auth_elicitation",
   "browser_use",
@@ -37,6 +38,7 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "deferred_executor",
   "deferred_tool_world_state",
   "enable_mcp_apps",
+  "enable_fanout",
   "exec_permission_approvals",
   "executor_capability_discovery",
   "external_agent_memory_import",
@@ -46,17 +48,21 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "in_app_browser",
   "js_repl",
   "js_repl_tools_only",
+  "mcp_2026_07_28",
   "memories",
   "multi_agent",
   "multi_agent_v2",
+  "multi_agent_mode",
   "network_proxy",
   "non_prefixed_mcp_tool_names",
   "plugin_hooks",
   "plugin_sharing",
   "plugins",
   "remote_control",
+  "remote_models",
   "remote_plugin",
   "request_permissions_tool",
+  "request_rule",
   "respect_system_proxy",
   "search_tool",
   "shell_snapshot",
@@ -79,6 +85,44 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "web_search_cached",
   "web_search_request",
   "workspace_dependencies"
+])
+
+/** Installed features that do not add a host or external capability. */
+export const PROMPT_ONLY_SAFE_FEATURES: ReadonlyArray<string> = Object.freeze([
+  "chronicle",
+  "collaboration_modes",
+  "concurrent_reasoning_summaries",
+  "current_time_reminder",
+  "elevated_windows_sandbox",
+  "enable_request_compression",
+  "experimental_windows_sandbox",
+  "external_migration",
+  "fast_mode",
+  "guardian_approval",
+  "guardianv2",
+  "image_detail_original",
+  "in_app_updates",
+  "item_ids",
+  "local_thread_store_compression",
+  "mentions_v2",
+  "personality",
+  "prevent_idle_sleep",
+  "realtime_conversation",
+  "remote_compaction_v2",
+  "resize_all_images",
+  "responses_websockets",
+  "responses_websockets_v2",
+  "rollout_budget",
+  "runtime_metrics",
+  "secret_auth_storage",
+  "sqlite",
+  "steer",
+  "terminal_resize_reflow",
+  "terminal_visualization_instructions",
+  "token_budget",
+  "use_legacy_landlock",
+  "use_linux_sandbox_bwrap",
+  "workspace_owner_usage_nudge"
 ])
 
 const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
@@ -191,7 +235,8 @@ export const validatePrompt = Effect.fn("CodexConfiguration.validatePrompt")(fun
 
 export const makeArguments = (
   options: NormalizedOptions,
-  schemaFile: string | undefined
+  schemaFile: string | undefined,
+  promptOnlyDisabledFeatures: ReadonlyArray<string> = []
 ): ReadonlyArray<string> => {
   const args = [
     "exec",
@@ -210,7 +255,7 @@ export const makeArguments = (
       "-c",
       "shell_environment_policy.inherit=none"
     )
-    for (const feature of PROMPT_ONLY_DISABLED_FEATURES) {
+    for (const feature of promptOnlyDisabledFeatures) {
       args.push("--disable", feature)
     }
   }

@@ -3,7 +3,14 @@ import type * as Duration from "effect/Duration"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { CodexFailureCause, CodexTransportError, sanitizeDiagnostic } from "./errors.js"
+import { type NormalizedOptions, PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE_FEATURES } from "./configuration.js"
+import {
+  CodexFailureCause,
+  CodexTransportError,
+  configurationFailure,
+  invalidRequest,
+  sanitizeDiagnostic
+} from "./errors.js"
 
 interface ByteAccumulator {
   readonly bytes: number
@@ -88,6 +95,52 @@ const makeCommand = (options: RunCodexOptions) =>
       stdout: "pipe"
     })
   ))
+
+const FEATURE_NAME = /^[a-z][a-z0-9_]*$/u
+
+/** Negotiates the installed Codex manifest and rejects every unclassified feature. */
+export const resolvePromptOnlyDisabledFeatures = Effect.fn(
+  "CodexProcess.resolvePromptOnlyDisabledFeatures"
+)(function*(
+  options: NormalizedOptions,
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  method: string
+) {
+  if (!options.promptOnly) return []
+
+  const output = yield* spawner.string(makeCommand({
+    args: ["features", "list"],
+    cwd: options.cwd,
+    environment: options.environment,
+    executable: options.executable,
+    maxOutputBytes: options.maxOutputBytes,
+    maxStderrBytes: options.maxStderrBytes,
+    prompt: "",
+    spawner,
+    timeout: options.timeout
+  })).pipe(
+    Effect.mapError((cause) => configurationFailure(method, cause))
+  )
+  const installed = new Set(
+    output.split(/\r?\n/u)
+      .map((line) => line.trim().split(/\s+/u)[0] ?? "")
+      .filter((name) => FEATURE_NAME.test(name))
+  )
+  if (installed.size === 0) {
+    return yield* invalidRequest(method, "promptOnly", "installed Codex feature inventory is empty")
+  }
+
+  const classified = new Set([...PROMPT_ONLY_DISABLED_FEATURES, ...PROMPT_ONLY_SAFE_FEATURES])
+  const unclassified = [...installed].filter((feature) => !classified.has(feature)).sort()
+  if (unclassified.length > 0) {
+    return yield* invalidRequest(
+      method,
+      "promptOnly",
+      `installed Codex has unclassified features: ${unclassified.join(", ")}`
+    )
+  }
+  return PROMPT_ONLY_DISABLED_FEATURES.filter((feature) => installed.has(feature))
+})
 
 const boundedStdout = (
   stdout: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
