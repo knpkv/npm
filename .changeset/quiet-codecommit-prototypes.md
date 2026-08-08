@@ -1,6 +1,6 @@
 ---
-"@knpkv/codecommit": patch
-"@knpkv/ai-codex": patch
+"@knpkv/codecommit": minor
+"@knpkv/ai-codex": minor
 "@knpkv/jira-clockify": patch
 ---
 
