@@ -522,7 +522,7 @@ export function DetailsView() {
               <text fg={renderedDiff.metadata === null ? theme.textMuted : theme.textAccent}>
                 {renderedDiff.metadata === null
                   ? " This change is too large for a safe terminal preview."
-                  : ` ${renderedDiff.metadata}`}
+                  : ` ${terminalSafeMultilineText(renderedDiff.metadata)}`}
               </text>
             )}
             {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && renderedDiff.metadata && (

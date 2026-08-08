@@ -1,5 +1,6 @@
 import { Effect, Fiber, Schema, Stream } from "effect"
 import type * as Duration from "effect/Duration"
+import type * as FileSystem from "effect/FileSystem"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -96,8 +97,6 @@ const makeCommand = (options: RunCodexOptions) =>
     })
   ))
 
-const FEATURE_NAME = /^[a-z][a-z0-9_]*$/u
-
 const CONFIGURATION_HOME_VARIABLES = new Set([
   "CODEX_HOME",
   "CODEX_SQLITE_HOME",
@@ -111,9 +110,12 @@ const CONFIGURATION_HOME_VARIABLES = new Set([
  * The actual turn keeps the reviewed environment so authentication still works.
  */
 const featureInventoryEnvironment = (
-  environment: Readonly<Record<string, string>>
-): Readonly<Record<string, string>> =>
-  Object.fromEntries(Object.entries(environment).filter(([name]) => !CONFIGURATION_HOME_VARIABLES.has(name)))
+  environment: Readonly<Record<string, string>>,
+  configHome: string
+): Readonly<Record<string, string>> => ({
+  ...Object.fromEntries(Object.entries(environment).filter(([name]) => !CONFIGURATION_HOME_VARIABLES.has(name))),
+  CODEX_HOME: configHome
+})
 
 /** Negotiates the installed Codex manifest and rejects every unclassified feature. */
 export const resolvePromptOnlyDisabledFeatures = Effect.fn(
@@ -121,40 +123,51 @@ export const resolvePromptOnlyDisabledFeatures = Effect.fn(
 )(function*(
   options: NormalizedOptions,
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  fileSystem: FileSystem.FileSystem,
   method: string
 ) {
   if (!options.promptOnly) return []
 
-  const output = yield* runCodex({
-    args: ["features", "list"],
-    cwd: options.cwd,
-    environment: featureInventoryEnvironment(options.environment),
-    executable: options.executable,
-    maxOutputBytes: options.maxOutputBytes,
-    maxStderrBytes: options.maxStderrBytes,
-    prompt: "",
-    spawner,
-    timeout: options.timeout
-  }).pipe(Effect.mapError((error) => transportToAiError(method, error)))
-  const installed = new Set(
-    output.split(/\r?\n/u)
-      .map((line) => line.trim().split(/\s+/u)[0] ?? "")
-      .filter((name) => FEATURE_NAME.test(name))
-  )
-  if (installed.size === 0) {
-    return yield* invalidRequest(method, "promptOnly", "installed Codex feature inventory is empty")
-  }
-
-  const classified = new Set([...PROMPT_ONLY_DISABLED_FEATURES, ...PROMPT_ONLY_SAFE_FEATURES])
-  const unclassified = [...installed].filter((feature) => !classified.has(feature)).sort()
-  if (unclassified.length > 0) {
-    return yield* invalidRequest(
-      method,
-      "promptOnly",
-      `installed Codex has unclassified features: ${unclassified.join(", ")}`
+  return yield* Effect.scoped(Effect.gen(function*() {
+    const configHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "ai-codex-feature-inventory-" }).pipe(
+      Effect.mapError((cause) =>
+        transportToAiError(
+          method,
+          transportError("process", "Unable to create isolated Codex feature inventory home", cause)
+        )
+      )
     )
-  }
-  return PROMPT_ONLY_DISABLED_FEATURES.filter((feature) => installed.has(feature))
+    const output = yield* runCodex({
+      args: ["features", "list"],
+      cwd: options.cwd,
+      environment: featureInventoryEnvironment(options.environment, configHome),
+      executable: options.executable,
+      maxOutputBytes: options.maxOutputBytes,
+      maxStderrBytes: options.maxStderrBytes,
+      prompt: "",
+      spawner,
+      timeout: options.timeout
+    }).pipe(Effect.mapError((error) => transportToAiError(method, error)))
+    const installed = new Set(
+      output.split(/\r?\n/u)
+        .map((line) => line.trim().split(/\s+/u)[0] ?? "")
+        .filter((name) => name.length > 0)
+    )
+    if (installed.size === 0) {
+      return yield* invalidRequest(method, "promptOnly", "installed Codex feature inventory is empty")
+    }
+
+    const classified = new Set([...PROMPT_ONLY_DISABLED_FEATURES, ...PROMPT_ONLY_SAFE_FEATURES])
+    const unclassified = [...installed].filter((feature) => !classified.has(feature)).sort()
+    if (unclassified.length > 0) {
+      return yield* invalidRequest(
+        method,
+        "promptOnly",
+        `installed Codex has unclassified features: ${unclassified.join(", ")}`
+      )
+    }
+    return PROMPT_ONLY_DISABLED_FEATURES.filter((feature) => installed.has(feature))
+  }))
 })
 
 const boundedStdout = (

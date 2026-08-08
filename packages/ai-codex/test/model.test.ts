@@ -1,6 +1,6 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Schema, Sink, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -145,6 +145,25 @@ describe("model", () => {
       expect(calls).toHaveLength(1)
     }))
 
+  it.effect("rejects malformed feature names instead of filtering them out", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(
+          fakeProcessLayer(calls, {
+            featureInventory: `${completeFeatureInventory}\nfeature-alpha stable true`,
+            stdout: successTranscript("must not run")
+          })
+        ),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(1)
+    }))
+
   it.effect("rejects an incomplete feature inventory from an unsuccessful process", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -216,6 +235,7 @@ describe("model", () => {
 
   it.effect("isolates feature discovery from user config without dropping turn authentication", () =>
     Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
       const calls: Array<ChildProcess.Command> = []
       yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
         Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
@@ -253,8 +273,13 @@ describe("model", () => {
         expect(inventory.options.env).toEqual({
           CODEX_ACCESS_TOKEN: "codex-access-token",
           CODEX_API_KEY: "codex-api-key",
+          CODEX_HOME: expect.stringContaining("ai-codex-feature-inventory-"),
           PATH: "/reviewed/bin"
         })
+        const inventoryHome = inventory.options.env?.CODEX_HOME
+        expect(inventoryHome).not.toBe("/home/reviewer/.codex")
+        expect(inventoryHome).toBeDefined()
+        if (inventoryHome !== undefined) expect(yield* fileSystem.exists(inventoryHome)).toBe(false)
         expect(turn.options.env).toEqual({
           CODEX_ACCESS_TOKEN: "codex-access-token",
           CODEX_API_KEY: "codex-api-key",
@@ -266,7 +291,7 @@ describe("model", () => {
           XDG_CONFIG_HOME: "/home/reviewer/.config"
         })
       }
-    }))
+    }).pipe(Effect.provide(NodeFileSystem.layer)))
 
   it.effect("keeps normal turns eligible for configured Codex tools", () =>
     Effect.gen(function*() {

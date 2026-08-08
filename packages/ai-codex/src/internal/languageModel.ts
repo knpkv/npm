@@ -129,9 +129,14 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
   const options = yield* normalizeOptions(modelOptions, method)
   const prompt = yield* renderPrompt(method, providerOptions.prompt)
   yield* validatePrompt(prompt, options.maxPromptBytes, method)
-  const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(options, dependencies.spawner, method)
 
   return yield* Effect.scoped(Effect.gen(function*() {
+    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(
+      options,
+      dependencies.spawner,
+      dependencies.fileSystem,
+      method
+    )
     const schemaFile = providerOptions.responseFormat.type === "json"
       ? yield* makeSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
       : undefined

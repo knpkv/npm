@@ -228,7 +228,7 @@ export const validatePrompt = Effect.fn("CodexConfiguration.validatePrompt")(fun
 export const makeArguments = (
   options: NormalizedOptions,
   schemaFile: string | undefined,
-  promptOnlyDisabledFeatures: ReadonlyArray<string> = []
+  promptOnlyDisabledFeatures: ReadonlyArray<string>
 ): ReadonlyArray<string> => {
   const args = ["exec", "--json", "--ephemeral", "--sandbox", options.access, "--skip-git-repo-check"]
   if (options.promptOnly) {

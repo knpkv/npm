@@ -1,4 +1,5 @@
 import { Effect, Schema, Stream } from "effect"
+import * as FileSystem from "effect/FileSystem"
 import type * as AiError from "effect/unstable/ai/AiError"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { makeArguments, normalizeOptions, validatePrompt } from "./internal/configuration.js"
@@ -35,7 +36,7 @@ const validateEvent = Effect.fn("CodexEvents.validateEvent")(function*(line: str
  */
 export const streamEvents = (
   options: CodexEventStreamOptions
-): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner> =>
+): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem> =>
   Stream.unwrap(Effect.gen(function*() {
     if (options.prompt.trim().length === 0) {
       return yield* invalidRequest("streamEvents", "prompt", "must not be empty")
@@ -44,7 +45,13 @@ export const streamEvents = (
     const normalized = yield* normalizeOptions(options, "streamEvents")
     yield* validatePrompt(options.prompt, normalized.maxPromptBytes, "streamEvents")
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(normalized, spawner, "streamEvents")
+    const fileSystem = yield* FileSystem.FileSystem
+    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(
+      normalized,
+      spawner,
+      fileSystem,
+      "streamEvents"
+    )
 
     return streamCodexLines({
       args: makeArguments(normalized, undefined, promptOnlyDisabledFeatures),

@@ -3,7 +3,7 @@ import * as GitEnvironment from "../src/GitEnvironment.js"
 
 describe("GitEnvironment", () => {
   it("clears every repository-local variable reported by Git", () => {
-    expect(GitEnvironment.isolated()).toEqual({
+    expect(GitEnvironment.isolated()).toStrictEqual({
       GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
       GIT_COMMON_DIR: undefined,
       GIT_CONFIG: undefined,
@@ -23,7 +23,7 @@ describe("GitEnvironment", () => {
   })
 
   it("disables terminal authentication without dropping repository tombstones", () => {
-    expect(GitEnvironment.nonInteractive()).toEqual({
+    expect(GitEnvironment.nonInteractive()).toStrictEqual({
       ...GitEnvironment.isolated(),
       GCM_INTERACTIVE: "never",
       GIT_ASKPASS: "/bin/false",
