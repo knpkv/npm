@@ -6,6 +6,7 @@ describe("GitEnvironment", () => {
     expect(GitEnvironment.isolated()).toStrictEqual({
       GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
       GIT_COMMON_DIR: undefined,
+      GIT_CEILING_DIRECTORIES: undefined,
       GIT_CONFIG: undefined,
       GIT_CONFIG_COUNT: undefined,
       GIT_CONFIG_PARAMETERS: undefined,
@@ -14,6 +15,7 @@ describe("GitEnvironment", () => {
       GIT_IMPLICIT_WORK_TREE: undefined,
       GIT_INDEX_FILE: undefined,
       GIT_NO_REPLACE_OBJECTS: undefined,
+      GIT_NAMESPACE: undefined,
       GIT_OBJECT_DIRECTORY: undefined,
       GIT_PREFIX: undefined,
       GIT_REPLACE_REF_BASE: undefined,

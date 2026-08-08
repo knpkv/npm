@@ -79,9 +79,11 @@ export const preflightWorktreeAtom = runtimeAtom.fn((input: {
       service.preflight({
         account: input.pr.account,
         destinationCommit: input.revision.destinationCommit,
+        destinationReference: input.pr.destinationBranch,
         pullRequestId: input.pr.id,
         repositoryName: input.pr.repositoryName,
-        sourceCommit: input.revision.sourceCommit
+        sourceCommit: input.revision.sourceCommit,
+        sourceReference: input.pr.sourceBranch
       })
     )
   }).pipe(Effect.withSpan("preflightWorktree", { attributes: { prId: input.pr.id } }))

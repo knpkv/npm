@@ -26,6 +26,7 @@ import {
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { extractScope } from "../ListBuilder.js"
+import { shouldOpenPullRequestFilter } from "../navigation-model.js"
 import { themes } from "../theme/themes.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
 
@@ -207,7 +208,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     if (key.name === "/" || key.char === "/" || key.name === "f") {
       if (view === "settings" && settingsTab === "accounts") {
         setIsSettingsFiltering(true)
-      } else if (view !== "settings") {
+      } else if (shouldOpenPullRequestFilter(view)) {
         setIsFiltering(true)
         setView("prs")
       }

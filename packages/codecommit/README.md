@@ -67,7 +67,10 @@ and disable terminal credential prompts. Worktree population also ignores
 global and system Git configuration and attributes, preventing repository
 `.gitattributes` from selecting host-configured smudge or process filters; Git
 credential configuration remains available only to the separate clone/fetch
-transport steps. Invocation from a Git hook therefore cannot redirect commands
+transport steps. Missing immutable commits are fetched through the pull
+request's advertised source and destination branch refs, then verified by exact
+commit ID before checkout; raw commit IDs are never used as fetch refspecs.
+Invocation from a Git hook therefore cannot redirect commands
 into the caller's repository, and authentication failures return to the TUI
 instead of waiting on an invisible prompt. Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under

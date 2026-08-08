@@ -100,9 +100,11 @@ describe("WorktreeService", () => {
           repoAccountId: "111122223333"
         }),
         destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+        destinationReference: "main",
         pullRequestId: Domain.PullRequestId.make("77"),
         repositoryName: Domain.RepositoryName.make("review-repository"),
-        sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+        sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
+        sourceReference: "feature/review"
       }
       const first = yield* service.preflight(request)
       const sameAccount = yield* service.preflight({
@@ -156,6 +158,12 @@ describe("WorktreeService", () => {
       }).pipe(Effect.flip)
       expect(missingIdentity.operation).toBe("validate-coordinates")
 
+      const invalidReference = yield* service.preflight({
+        ...request,
+        sourceReference: " feature/review"
+      }).pipe(Effect.flip)
+      expect(invalidReference.operation).toBe("validate-coordinates")
+
       expect(yield* codeCommitRemoteUrl(request)).toBe(
         "https://git-codecommit.eu-west-1.amazonaws.com/v1/repos/review-repository"
       )
@@ -195,9 +203,11 @@ describe("WorktreeService", () => {
         }),
         cachePath: "C:\\codecommit\\repositories\\review.git",
         destinationCommit: commit,
+        destinationReference: "main",
         pullRequestId: Domain.PullRequestId.make("77"),
         repositoryName: Domain.RepositoryName.make("review-repository"),
         sourceCommit: commit,
+        sourceReference: "feature/review",
         targetExists: false,
         targetPath: "C:\\codecommit\\worktrees\\review"
       }))
@@ -276,9 +286,11 @@ describe("WorktreeService", () => {
             repoAccountId: "111122223333"
           }),
           destinationCommit: ReadClient.CodeCommitCommitId.make(destinationCommit),
+          destinationReference: "main",
           pullRequestId: Domain.PullRequestId.make("77"),
           repositoryName: Domain.RepositoryName.make("review-repository"),
-          sourceCommit: ReadClient.CodeCommitCommitId.make(sourceCommit)
+          sourceCommit: ReadClient.CodeCommitCommitId.make(sourceCommit),
+          sourceReference: "feature"
         }
         const plan = yield* firstService.preflight(request)
 

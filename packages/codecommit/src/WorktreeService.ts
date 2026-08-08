@@ -27,9 +27,11 @@ export class WorktreeError extends Schema.TaggedErrorClass<WorktreeError>()(
 export interface WorktreeRequest {
   readonly account: Domain.Account
   readonly destinationCommit: ReadClient.CodeCommitCommitId
+  readonly destinationReference: string
   readonly pullRequestId: Domain.PullRequestId
   readonly repositoryName: Domain.RepositoryName
   readonly sourceCommit: ReadClient.CodeCommitCommitId
+  readonly sourceReference: string
 }
 
 export interface WorktreePlan extends WorktreeRequest {
@@ -44,10 +46,13 @@ export interface WorktreeResult {
   readonly sourceCommit: ReadClient.CodeCommitCommitId
 }
 
-/** Immutable revisions that must exist before Relay can inspect a checkout. */
-export const reviewRevisionSpecifiers = (request: WorktreeRequest): ReadonlyArray<ReadClient.CodeCommitCommitId> => [
-  request.destinationCommit,
-  request.sourceCommit
+const advertisedBranchReference = (reference: string): string =>
+  reference.startsWith("refs/heads/") ? reference : `refs/heads/${reference}`
+
+/** Advertised refs fetched so the immutable reviewed commits become available locally. */
+export const reviewRevisionSpecifiers = (request: WorktreeRequest): ReadonlyArray<string> => [
+  advertisedBranchReference(request.destinationReference),
+  advertisedBranchReference(request.sourceReference)
 ]
 
 export interface WorktreeServiceShape {
@@ -71,6 +76,8 @@ const WorktreeCoordinates = Schema.Struct({
     Schema.isMaxLength(100)
   ),
   destinationCommit: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/)),
+  destinationReference: Schema.String.check(Schema.isTrimmed(), Schema.isMinLength(1), Schema.isMaxLength(1024)),
+  sourceReference: Schema.String.check(Schema.isTrimmed(), Schema.isMinLength(1), Schema.isMaxLength(1024)),
   sourceCommit: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/))
 })
 
@@ -350,10 +357,12 @@ export const makeWorktreeService = (
       const repositoryAccountId = request.account.repoAccountId
       yield* Schema.decodeUnknownEffect(WorktreeCoordinates)({
         destinationCommit: request.destinationCommit,
+        destinationReference: request.destinationReference,
         repositoryAccountId,
         region: request.account.region,
         repositoryName: request.repositoryName,
-        sourceCommit: request.sourceCommit
+        sourceCommit: request.sourceCommit,
+        sourceReference: request.sourceReference
       }).pipe(
         Effect.mapError((cause) =>
           commandFailure("validate-coordinates", "Invalid CodeCommit worktree coordinates", cause)
@@ -627,6 +636,10 @@ export const makeWorktreeService = (
       ])
       if (!baseAvailable || !headAvailable) {
         const revisions = reviewRevisionSpecifiers(plan)
+        yield* Effect.forEach(
+          revisions,
+          (reference) => runChecked(spawner, plan, "validate-review-reference", ["check-ref-format", reference])
+        )
         yield* runChecked(spawner, plan, "fetch-review-revisions", [
           `--git-dir=${plan.cachePath}`,
           "fetch",

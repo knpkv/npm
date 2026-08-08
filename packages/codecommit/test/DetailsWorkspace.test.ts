@@ -26,6 +26,7 @@ import {
   workspaceLifecycleTransition
 } from "../src/tui/details-model.js"
 import { loadFileDiff } from "../src/tui/file-diff.js"
+import { shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
 import {
   reviewRevisionSpecifiers,
   safePathSegment,
@@ -45,6 +46,13 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("keeps global filter shortcuts out of the details workspace", () => {
+    expect(shouldOpenPullRequestFilter("details")).toBe(false)
+    expect(shouldOpenPullRequestFilter("settings")).toBe(false)
+    expect(shouldOpenPullRequestFilter("prs")).toBe(true)
+    expect(shouldOpenPullRequestFilter("notifications")).toBe(true)
+  })
+
   it("shows only current-revision and commitless general comments", () => {
     const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
     const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
@@ -566,19 +574,21 @@ describe("PR detail workspace", () => {
       expect(yield* Effect.flip(loadFileDiff({ getBlob: () => Effect.fail(notFound) }, request))).toBe(notFound)
     }))
 
-  it("requires both divergent revisions before a Relay checkout is ready", () => {
+  it("uses advertised branch refs to acquire both divergent revisions", () => {
     const revisions = reviewRevisionSpecifiers({
       account: new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
         region: Domain.AwsRegion.make("eu-west-1")
       }),
       destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+      destinationReference: "refs/heads/main",
       pullRequestId: Domain.PullRequestId.make("42"),
       repositoryName: Domain.RepositoryName.make("payments"),
-      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
+      sourceReference: "feature/review"
     })
 
-    expect(revisions).toEqual(["a".repeat(40), "b".repeat(40)])
+    expect(revisions).toEqual(["refs/heads/main", "refs/heads/feature/review"])
   })
 
   it("rejects stale workspace and blob identities across PR transitions", () => {
