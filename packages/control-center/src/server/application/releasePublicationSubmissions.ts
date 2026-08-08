@@ -10,6 +10,8 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 import type { SubmitReleasePublicationRequest, SubmitReleasePublicationResponse } from "../../api/agent.js"
+import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
+import { confluenceTaskSummary } from "../../domain/confluenceTasks.js"
 import {
   GovernedActionAuthorizationV1,
   GovernedActionCommandId,
@@ -22,6 +24,7 @@ import {
 } from "../../domain/governedAction/index.js"
 import {
   DomainEventId,
+  type EntityId,
   GovernedActionAuthorizationId,
   GovernedActionId,
   GovernedActionTransitionId,
@@ -30,6 +33,7 @@ import {
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
+import { releasePipelineApprovalReadiness } from "../../domain/releasePipelineApproval.js"
 import { canonicalReleasePublicationTitle } from "../../domain/releasePublication.js"
 import { Revision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -68,6 +72,31 @@ export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<R
 export interface ConfluenceReleasePublicationHistory {
   readonly hasBlockingPublication: boolean
   readonly latestReference: ReturnType<typeof latestConfluencePublicationReference>
+}
+
+export interface ConfluenceEntityPublicationTarget {
+  readonly pageId: string
+  readonly pageVersion: number
+  readonly pluginConnectionId: PluginConnectionId
+}
+
+interface ConfluenceTemplatePublicationSource {
+  readonly pluginConnectionId: PluginConnectionId
+}
+
+/** Bind an explicitly selected related page, continuing its chain only when the latest receipt is for that page. */
+export const confluenceEntityPublicationContext = (
+  history: ConfluenceReleasePublicationHistory,
+  target: ConfluenceEntityPublicationTarget
+) => {
+  const predecessor = history.latestReference?.pageId === target.pageId
+    ? history.latestReference.publicationActionId
+    : null
+  return {
+    historyMatches: true,
+    predecessorPublicationActionId: predecessor,
+    publication: target
+  }
 }
 
 /** Require creates to have no history and updates to match the exact latest durable receipt. */
@@ -171,10 +200,80 @@ export class ReleasePublicationSubmissions extends Context.Service<
 const failure = (reason: ReleasePublicationSubmissionError["reason"]) =>
   new ReleasePublicationSubmissionError({ reason })
 
+const ConfluencePageVersionFromRevision = Schema.FiniteFromString.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 1, maximum: 2_147_483_646 })
+)
+
+/** Require the provider revision reviewed by the owner to remain current at submission time. */
+export const confluenceTargetRevisionMatches = (
+  currentRevision: Revision,
+  requestedRevision: Revision
+): boolean => currentRevision === requestedRevision
+
 /** Match Jira's release-version name and UTF-8 description limits before provider work. */
 export const jiraPublicationPayloadWithinLimits = (title: string, markdown: string): boolean =>
   title.length <= JIRA_RELEASE_VERSION_NAME_MAX_CHARACTERS &&
   jiraReleaseVersionDescriptionWithinLimit(markdown)
+
+const currentRelationship = (
+  lifecycle: ReleaseDeliveryGraphInspection["relationships"][number]["lifecycle"]
+): boolean => lifecycle._tag !== "missing" && lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
+
+/** Prove every task on a directly release-related Confluence page is complete. */
+export const releaseConfluenceTaskReadiness = (inspection: ReleaseDeliveryGraphInspection) => {
+  const nodeById = new Map(inspection.nodes.map((node) => [node.nodeId, node]))
+  const projectionByEntityId = new Map(
+    inspection.entityProjections.map(({ projection }) => [projection.entityId, projection])
+  )
+  const releasePageIds = new Set(
+    inspection.relationships.flatMap((relationship): ReadonlyArray<EntityId> => {
+      if (
+        relationship.kind !== "documented-by" ||
+        relationship.sourceNodeKind !== "release" ||
+        relationship.targetNodeKind !== "page" ||
+        !currentRelationship(relationship.lifecycle)
+      ) return []
+      const source = nodeById.get(relationship.sourceNodeId)
+      const target = nodeById.get(relationship.targetNodeId)
+      return source?.resolution._tag === "resolved" &&
+          source.resolution.target._tag === "release" &&
+          source.resolution.target.releaseId === inspection.releaseId &&
+          target?.resolution._tag === "resolved" &&
+          target.resolution.target._tag === "entity"
+        ? [target.resolution.target.entityId]
+        : []
+    })
+  )
+  let completed = 0
+  let outstanding = 0
+  let unverifiablePages = 0
+  for (const entityId of releasePageIds) {
+    const projection = projectionByEntityId.get(entityId)
+    if (
+      projection?.entityState !== "present" ||
+      projection.entityType !== "page" ||
+      projection.details._tag !== "page"
+    ) {
+      unverifiablePages += 1
+      continue
+    }
+    if (projection.details.contentState !== "loaded") {
+      unverifiablePages += 1
+      continue
+    }
+    const summary = confluenceTaskSummary(projection.details.content?.markdown ?? "")
+    completed += summary.completed
+    outstanding += summary.outstanding
+  }
+  return {
+    completed,
+    outstanding,
+    ready: !inspection.truncated && unverifiablePages === 0 && outstanding === 0,
+    total: completed + outstanding,
+    unverifiablePages
+  }
+}
 
 const mapFailure = Effect.catch((cause) =>
   Schema.is(ReleasePublicationSubmissionError)(cause)
@@ -192,6 +291,61 @@ const makeService = Effect.gen(function*() {
   const policies = yield* GovernedActionPolicyBindingSource
   const submission = yield* GovernedActionSubmission
 
+  const loadConfluenceEntityPublicationTarget = Effect.fn(
+    "ReleasePublicationSubmissions.loadConfluenceEntityPublicationTarget"
+  )(function*(
+    workspaceId: WorkspaceId,
+    releaseId: ReleaseId,
+    entityId: NonNullable<SubmitReleasePublicationRequest["targetEntityId"]>,
+    targetRevision: NonNullable<SubmitReleasePublicationRequest["targetRevision"]>
+  ) {
+    const entity = yield* persistence.entities.get(workspaceId, entityId).pipe(mapFailure)
+    const graph = yield* persistence.deliveryGraph.read(workspaceId, {
+      _tag: "entitySlice",
+      entityId,
+      limit: 1
+    }).pipe(mapFailure)
+    if (
+      graph._tag !== "entitySlice" ||
+      !graph.value.entity.releaseIds.includes(releaseId) ||
+      graph.value.entity.projection.entityType !== "page" ||
+      graph.value.entity.projection.details._tag !== "page" ||
+      entity.sourceRevision.providerId !== "confluence" ||
+      !confluenceTargetRevisionMatches(entity.sourceRevision.revision, targetRevision)
+    ) return yield* failure("conflict")
+    const pageVersion = yield* Schema.decodeUnknownEffect(ConfluencePageVersionFromRevision)(
+      entity.sourceRevision.revision
+    ).pipe(Effect.mapError(() => failure("invalid-request")))
+    return {
+      pageId: entity.sourceRevision.vendorImmutableId,
+      pageVersion,
+      pluginConnectionId: entity.sourceRevision.pluginConnectionId
+    } satisfies ConfluenceEntityPublicationTarget
+  })
+
+  const loadConfluenceTemplatePublicationSource = Effect.fn(
+    "ReleasePublicationSubmissions.loadConfluenceTemplatePublicationSource"
+  )(function*(
+    workspaceId: WorkspaceId,
+    entityId: NonNullable<SubmitReleasePublicationRequest["templateEntityId"]>
+  ) {
+    const entity = yield* persistence.entities.get(workspaceId, entityId).pipe(mapFailure)
+    const graph = yield* persistence.deliveryGraph.read(workspaceId, {
+      _tag: "entitySlice",
+      entityId,
+      limit: 1
+    }).pipe(mapFailure)
+    if (
+      graph._tag !== "entitySlice" ||
+      graph.value.entity.projection.entityType !== "page" ||
+      graph.value.entity.projection.details._tag !== "page" ||
+      entity.sourceRevision.providerId !== "confluence"
+    ) return yield* failure("conflict")
+    return {
+      pluginConnectionId: entity.sourceRevision.pluginConnectionId
+    } satisfies ConfluenceTemplatePublicationSource
+  })
+
   const submit = Effect.fn("ReleasePublicationSubmissions.submit")(function*(input: SubmitInput) {
     const checkedAt = yield* DateTime.now
     if (
@@ -204,8 +358,22 @@ const makeService = Effect.gen(function*() {
     if (input.session.permission !== "workspace-owner") return yield* failure("forbidden")
     if (
       input.request.provider !== "confluence" &&
-      input.request.publicationActionId !== undefined
+      (
+        input.request.publicationActionId !== undefined ||
+        input.request.targetEntityId !== undefined ||
+        input.request.targetRevision !== undefined ||
+        input.request.templateEntityId !== undefined
+      )
     ) return yield* failure("conflict")
+    const confluenceTargetCount = [
+      input.request.publicationActionId,
+      input.request.targetEntityId,
+      input.request.templateEntityId
+    ].filter((value) => value !== undefined).length
+    if (confluenceTargetCount > 1) return yield* failure("conflict")
+    if ((input.request.targetEntityId === undefined) !== (input.request.targetRevision === undefined)) {
+      return yield* failure("invalid-request")
+    }
 
     const release = yield* persistence.releases.get(input.workspaceId, input.releaseId).pipe(mapFailure)
     if (
@@ -222,37 +390,73 @@ const makeService = Effect.gen(function*() {
       input.request.provider === "jira" &&
       !jiraPublicationPayloadWithinLimits(publicationTitle, publicationMarkdown)
     ) return yield* failure("invalid-request")
+    if (input.request.provider === "jira") {
+      const taskInspection = yield* persistence.deliveryGraph.read(input.workspaceId, {
+        _tag: "releaseSlice",
+        releaseId: input.releaseId,
+        environmentId: null,
+        limit: 500
+      }).pipe(mapFailure)
+      if (taskInspection._tag !== "releaseSlice") return yield* failure("conflict")
+      if (
+        !releaseConfluenceTaskReadiness(taskInspection.value).ready ||
+        !releasePipelineApprovalReadiness(taskInspection.value).ready
+      ) return yield* failure("conflict")
+    }
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)
     if (sources.length > 1) return yield* failure("conflict")
     const releaseSource = sources[0]
     let publicationReceiptConnectionId: PluginConnectionId | undefined
-    let confluencePublication: ConfluenceReleasePublicationHistory["latestReference"] = null
+    let confluencePublication: ConfluenceEntityPublicationTarget | null = null
     let confluenceHistoryMatches = true
+    let predecessorPublicationActionId = input.request.publicationActionId ?? null
     if (input.request.provider === "confluence") {
       const publicationHistory = yield* loadConfluenceReleasePublicationHistory(
         persistence.governedActions,
         input.workspaceId,
         input.releaseId
       ).pipe(mapFailure)
-      const requestedReference = input.request.publicationActionId === undefined
-        ? null
-        : yield* loadConfluenceReleasePublicationByActionId(
-          persistence.governedActions,
+      if (input.request.templateEntityId !== undefined) {
+        const template = yield* loadConfluenceTemplatePublicationSource(
+          input.workspaceId,
+          input.request.templateEntityId
+        )
+        confluenceHistoryMatches = true
+        predecessorPublicationActionId = null
+        publicationReceiptConnectionId = template.pluginConnectionId
+      } else if (input.request.targetEntityId !== undefined) {
+        if (input.request.targetRevision === undefined) return yield* failure("invalid-request")
+        const target = yield* loadConfluenceEntityPublicationTarget(
           input.workspaceId,
           input.releaseId,
-          input.request.publicationActionId
-        ).pipe(mapFailure)
-      const publicationContext = confluencePublicationRequestContext(
-        input.request,
-        publicationHistory,
-        requestedReference
-      )
-      confluenceHistoryMatches = publicationContext.historyMatches
-      confluencePublication = publicationContext.publication
-      if (input.request.publicationActionId !== undefined && confluencePublication === null) {
-        return yield* failure("conflict")
+          input.request.targetEntityId,
+          input.request.targetRevision
+        )
+        const publicationContext = confluenceEntityPublicationContext(publicationHistory, target)
+        confluenceHistoryMatches = publicationContext.historyMatches
+        confluencePublication = publicationContext.publication
+        predecessorPublicationActionId = publicationContext.predecessorPublicationActionId
+      } else {
+        const requestedReference = input.request.publicationActionId === undefined
+          ? null
+          : yield* loadConfluenceReleasePublicationByActionId(
+            persistence.governedActions,
+            input.workspaceId,
+            input.releaseId,
+            input.request.publicationActionId
+          ).pipe(mapFailure)
+        const publicationContext = confluencePublicationRequestContext(
+          input.request,
+          publicationHistory,
+          requestedReference
+        )
+        confluenceHistoryMatches = publicationContext.historyMatches
+        confluencePublication = publicationContext.publication
+        if (input.request.publicationActionId !== undefined && confluencePublication === null) {
+          return yield* failure("conflict")
+        }
       }
-      publicationReceiptConnectionId = confluencePublication?.pluginConnectionId
+      publicationReceiptConnectionId ??= confluencePublication?.pluginConnectionId
     }
     const workspaceConnections = releaseSource === undefined && publicationReceiptConnectionId === undefined
       ? yield* persistence.pluginConnections.list(input.workspaceId).pipe(mapFailure)
@@ -364,7 +568,8 @@ const makeService = Effect.gen(function*() {
       title: publicationTitle,
       markdown: publicationMarkdown,
       parentId: input.request.parentId,
-      publicationActionId: input.request.publicationActionId ?? null,
+      publicationActionId: predecessorPublicationActionId,
+      sourceEntityId: input.request.targetEntityId ?? input.request.templateEntityId ?? null,
       pageId: confluencePublication?.pageId ?? null,
       expectedVersion: confluencePublication?.pageVersion ?? null,
       sourceRevisionDigest,
@@ -439,7 +644,10 @@ const makeService = Effect.gen(function*() {
       correlationId: null,
       releasePublication: {
         releaseId: input.releaseId,
-        predecessorPublicationActionId: input.request.publicationActionId ?? null,
+        predecessorPublicationActionId,
+        ...(input.request.templateEntityId === undefined
+          ? {}
+          : { templateSourceEntityId: input.request.templateEntityId }),
         sourceRevisionDigest,
         sourceRevisionCount: release.release.sourceRevisions.length
       }

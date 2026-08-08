@@ -49,6 +49,8 @@ export type GovernedActionEnvelopeDigest = typeof GovernedActionEnvelopeDigest.T
 export const ReleasePublicationMetadataV1 = Schema.Struct({
   releaseId: ReleaseId,
   predecessorPublicationActionId: Schema.optionalKey(Schema.NullOr(GovernedActionId)),
+  /** Normalized workspace identity of the Confluence page copied for this publication. */
+  templateSourceEntityId: Schema.optionalKey(EntityId),
   sourceRevisionDigest: GovernedActionEnvelopeDigest,
   sourceRevisionCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 })

@@ -3,8 +3,11 @@ import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, type ReactNode, useState } from "react"
 
 import type { WorkspaceConfluencePagePresentation } from "./presentWorkspaceConfluencePage.js"
-import { WorkspaceRichText } from "./WorkspaceRichText.js"
 import styles from "./WorkspaceConfluencePageDetails.module.css"
+import {
+  WorkspaceConfluenceVisualEditor,
+  type WorkspaceConfluenceVisualEditorProps
+} from "./WorkspaceConfluenceVisualEditor.js"
 
 const Section = ({
   children,
@@ -30,8 +33,10 @@ const Section = ({
 
 /** Render one canonical Confluence page without exposing provider media or write controls. */
 export const WorkspaceConfluencePageDetails = ({
+  editor,
   page
 }: {
+  readonly editor: Omit<WorkspaceConfluenceVisualEditorProps, "page">
   readonly page: WorkspaceConfluencePagePresentation
 }): ReactElement => {
   const [peopleExpanded, setPeopleExpanded] = useState(false)
@@ -77,20 +82,7 @@ export const WorkspaceConfluencePageDetails = ({
       </section>
 
       <Section heading="Document" meta="Safely converted text; raw provider markup and media stay outside this view">
-        {page.contentState === "loaded" && page.content !== null ? (
-          <WorkspaceRichText className={styles.richText} value={page.content} />
-        ) : (
-          <div className={styles.contentState} data-content-state={page.contentState}>
-            <strong>
-              {page.contentState === "lazy" ? "Content has not been loaded" : "No readable body was returned"}
-            </strong>
-            <Text tone="secondary">
-              {page.contentState === "lazy"
-                ? "The page is synchronized lazily. Open the authenticated Confluence source to read it now."
-                : "Revision metadata remains available in this read-only view."}
-            </Text>
-          </div>
-        )}
+        <WorkspaceConfluenceVisualEditor {...editor} page={page} />
       </Section>
 
       <Section heading="People" meta={page.watcherInventoryLabel}>

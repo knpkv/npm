@@ -9,6 +9,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as TestClock from "effect/testing/TestClock"
 
+import { descriptorIt } from "../fixtures/descriptorPublication.js"
+
 import {
   AtlassianOAuthGrantId,
   type CreatePluginConnectionRequest,
@@ -4288,60 +4290,63 @@ describe("application adapters", () => {
       }
     })))
 
-  it.effect("resolves only workspace-owned, bounded safe raster media", () =>
-    withApplication(Effect.gen(function*() {
-      const persistence = yield* setup
-      const media = yield* makeMediaReads
-      const png = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array([137, 80, 78, 71]),
-        classification: "reproducible-cache",
-        mimeType: "image/png",
-        createdAt: T0
-      })
-      const mediaId = OpaqueMediaId.make(`media_${png.metadata.digest}`)
-      assert.instanceOf(
-        mapPersistenceReadError(new BlobNotFoundError({ digest: png.metadata.digest })),
-        ApplicationServiceUnavailable
-      )
-      const opened = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId })
-      assert.strictEqual(opened.contentType, "image/png")
-      const chunks = yield* Stream.runCollect(opened.body)
-      assert.deepStrictEqual(
-        Array.from(chunks[0] ?? []),
-        [137, 80, 78, 71]
-      )
+  descriptorIt.effect(
+    "resolves only workspace-owned, bounded safe raster media",
+    () =>
+      withApplication(Effect.gen(function*() {
+        const persistence = yield* setup
+        const media = yield* makeMediaReads
+        const png = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array([137, 80, 78, 71]),
+          classification: "reproducible-cache",
+          mimeType: "image/png",
+          createdAt: T0
+        })
+        const mediaId = OpaqueMediaId.make(`media_${png.metadata.digest}`)
+        assert.instanceOf(
+          mapPersistenceReadError(new BlobNotFoundError({ digest: png.metadata.digest })),
+          ApplicationServiceUnavailable
+        )
+        const opened = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId })
+        assert.strictEqual(opened.contentType, "image/png")
+        const chunks = yield* Stream.runCollect(opened.body)
+        assert.deepStrictEqual(
+          Array.from(chunks[0] ?? []),
+          [137, 80, 78, 71]
+        )
 
-      const crossWorkspace = yield* media.read({ workspaceId: OTHER_WORKSPACE_ID, mediaId }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(crossWorkspace))
-      if (Result.isFailure(crossWorkspace)) {
-        assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
-      }
+        const crossWorkspace = yield* media.read({ workspaceId: OTHER_WORKSPACE_ID, mediaId }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(crossWorkspace))
+        if (Result.isFailure(crossWorkspace)) {
+          assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
+        }
 
-      const text = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array([60, 115, 118, 103, 62]),
-        classification: "reproducible-cache",
-        mimeType: "image/svg+xml",
-        createdAt: T0
-      })
-      const unsafeMediaId = OpaqueMediaId.make(`media_${text.metadata.digest}`)
-      const unsafe = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId: unsafeMediaId }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(unsafe))
-      if (Result.isFailure(unsafe)) assert.instanceOf(unsafe.failure, ApplicationResourceNotFound)
+        const text = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array([60, 115, 118, 103, 62]),
+          classification: "reproducible-cache",
+          mimeType: "image/svg+xml",
+          createdAt: T0
+        })
+        const unsafeMediaId = OpaqueMediaId.make(`media_${text.metadata.digest}`)
+        const unsafe = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId: unsafeMediaId }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(unsafe))
+        if (Result.isFailure(unsafe)) assert.instanceOf(unsafe.failure, ApplicationResourceNotFound)
 
-      const oversized = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array((8 * 1024 * 1024) + 1),
-        classification: "reproducible-cache",
-        mimeType: "image/png",
-        createdAt: T0
-      })
-      const oversizedMediaId = OpaqueMediaId.make(`media_${oversized.metadata.digest}`)
-      const rejectedSize = yield* media.read({
-        workspaceId: WORKSPACE_ID,
-        mediaId: oversizedMediaId
-      }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(rejectedSize))
-      if (Result.isFailure(rejectedSize)) {
-        assert.instanceOf(rejectedSize.failure, ApplicationResourceNotFound)
-      }
-    })))
+        const oversized = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array((8 * 1024 * 1024) + 1),
+          classification: "reproducible-cache",
+          mimeType: "image/png",
+          createdAt: T0
+        })
+        const oversizedMediaId = OpaqueMediaId.make(`media_${oversized.metadata.digest}`)
+        const rejectedSize = yield* media.read({
+          workspaceId: WORKSPACE_ID,
+          mediaId: oversizedMediaId
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(rejectedSize))
+        if (Result.isFailure(rejectedSize)) {
+          assert.instanceOf(rejectedSize.failure, ApplicationResourceNotFound)
+        }
+      }))
+  )
 })

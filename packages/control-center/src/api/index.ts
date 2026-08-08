@@ -168,9 +168,12 @@ export {
   PortfolioSnapshot
 } from "./portfolio.js"
 export {
+  BrowserPairingPermission,
   CsrfToken,
   CurrentSession,
   CurrentSessionResponse,
+  IssueBrowserPairingCodeRequest,
+  IssueBrowserPairingCodeResponse,
   MutationCsrf,
   PairingCode,
   PairSessionRequest,

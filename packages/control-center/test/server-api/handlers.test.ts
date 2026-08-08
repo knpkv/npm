@@ -4292,6 +4292,18 @@ describe("Control Center API handlers", () => {
           403
         ],
         [
+          new Request(`${origin}/api/v1/session/device-code`, {
+            method: "POST",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              "x-csrf-token": recoveredCsrf
+            },
+            body: JSON.stringify({ permission: "workspace-approver" })
+          }),
+          403
+        ],
+        [
           new Request(`${origin}/api/v1/session/logout`, {
             method: "POST",
             headers: { ...headers, "x-csrf-token": recoveredCsrf }

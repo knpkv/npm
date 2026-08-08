@@ -79,6 +79,7 @@ export const WorkspaceRichText = ({
         "h5",
         "h6",
         "hr",
+        "input",
         "li",
         "ol",
         "p",
@@ -100,7 +101,9 @@ export const WorkspaceRichText = ({
         h3: ({ children }) => <Heading level={4}>{children}</Heading>,
         h4: ({ children }) => <Heading level={5}>{children}</Heading>,
         h5: ({ children }) => <Heading level={6}>{children}</Heading>,
-        h6: ({ children }) => <Heading level={6}>{children}</Heading>
+        h6: ({ children }) => <Heading level={6}>{children}</Heading>,
+        input: ({ checked, type }) =>
+          type === "checkbox" ? <input checked={checked} disabled readOnly type="checkbox" /> : null
       }}
       skipHtml
       remarkPlugins={[remarkGfm, preserveLiteralUrls]}

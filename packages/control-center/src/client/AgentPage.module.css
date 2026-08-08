@@ -4,6 +4,7 @@
 .people,
 .starters,
 .composer,
+.templatePicker,
 .legacy,
 .legacyHeader,
 .legacyContext {
@@ -64,6 +65,26 @@
 .people,
 .starters {
   gap: var(--rly-space-24);
+}
+
+.publication {
+  scroll-margin-block-start: 6rem;
+}
+
+.publicationAction {
+  display: grid;
+}
+
+.templatePicker {
+  background: color-mix(in srgb, var(--rly-color-service-confluence) 6%, var(--rly-color-surface-2));
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence);
+  gap: var(--rly-space-16);
+  padding: var(--rly-space-20);
+}
+
+.templatePicker > div:first-child {
+  display: grid;
+  gap: var(--rly-space-8);
 }
 
 .presetList {

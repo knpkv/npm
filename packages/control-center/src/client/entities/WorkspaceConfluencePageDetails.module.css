@@ -12,6 +12,16 @@
 .attachments,
 .attachments > li,
 .contentState,
+.documentRead,
+.editorEntry,
+.visualEditor,
+.editorHeading,
+.editorActions,
+.editorToolbar,
+.releaseTasks,
+.releaseTaskHeading,
+.releaseTaskList,
+.releaseTaskList > li,
 .evidenceCount {
   display: grid;
 }
@@ -123,6 +133,135 @@
   padding: var(--rly-space-20);
 }
 
+.documentRead,
+.visualEditor {
+  gap: var(--rly-space-24);
+}
+
+.releaseTasks {
+  background: color-mix(in srgb, var(--rly-color-service-confluence) 5%, var(--rly-color-surface-2));
+  border: 1px solid color-mix(in srgb, var(--rly-color-service-confluence) 28%, var(--rly-color-border-1));
+  border-radius: var(--rly-radius-group);
+  gap: var(--rly-space-16);
+  max-inline-size: 62ch;
+  padding: var(--rly-space-20);
+}
+
+.releaseTaskHeading {
+  align-items: baseline;
+  gap: var(--rly-space-12);
+  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+}
+
+.releaseTaskList {
+  gap: var(--rly-space-8);
+  list-style: none;
+  margin: var(--rly-space-0);
+  padding: var(--rly-space-0);
+}
+
+.releaseTaskList > li {
+  align-items: center;
+  gap: var(--rly-space-12);
+  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+}
+
+.releaseTaskList label {
+  align-items: start;
+  cursor: pointer;
+  display: flex;
+  gap: var(--rly-space-12);
+}
+
+.releaseTaskList input {
+  accent-color: var(--rly-color-service-confluence);
+  block-size: var(--rly-space-20);
+  inline-size: var(--rly-space-20);
+  margin: var(--rly-space-0);
+}
+
+.releaseTaskList input:disabled + span {
+  color: var(--rly-color-text-2);
+  cursor: not-allowed;
+}
+
+.editorEntry {
+  align-items: center;
+  gap: var(--rly-space-12);
+  grid-template-columns: repeat(2, max-content) minmax(var(--rly-space-0), 1fr);
+}
+
+.visualEditor {
+  background: color-mix(in srgb, var(--rly-color-service-confluence) 4%, var(--rly-color-surface-1));
+  border: 1px solid color-mix(in srgb, var(--rly-color-service-confluence) 36%, var(--rly-color-border-1));
+  border-radius: var(--rly-radius-group);
+  padding: var(--rly-space-24);
+}
+
+.editorHeading {
+  align-items: start;
+  gap: var(--rly-space-16);
+  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+}
+
+.editorHeading > div:first-child {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.editorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.editorToolbar {
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  gap: 1px;
+  grid-auto-columns: max-content;
+  grid-auto-flow: column;
+  overflow-x: auto;
+  padding: var(--rly-space-4);
+}
+
+.editorToolbar button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--rly-radius-control);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  padding: var(--rly-space-8) var(--rly-space-12);
+  white-space: nowrap;
+}
+
+.editorToolbar button:hover {
+  background: var(--rly-color-surface-1);
+}
+
+.editorToolbar button:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 1px;
+}
+
+.editorCanvas {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  min-block-size: 24rem;
+  max-inline-size: none;
+  outline: none;
+  padding: clamp(var(--rly-space-24), 5vw, var(--rly-space-48));
+}
+
+.editorCanvas:focus {
+  border-color: var(--rly-color-service-confluence);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rly-color-service-confluence) 22%, transparent);
+}
+
 .collections {
   gap: var(--rly-space-40);
   grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
@@ -177,6 +316,11 @@
   }
 
   .folioMeta dl {
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
+  }
+
+  .editorHeading,
+  .editorEntry {
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
   }
 }

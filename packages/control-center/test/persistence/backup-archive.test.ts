@@ -11,6 +11,7 @@ import {
   verifyBackup
 } from "../../src/server/persistence/index.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
+import { descriptorIt } from "../fixtures/descriptorPublication.js"
 import {
   assertOwnerOnlyTree,
   makeContentVerifiedArchive,
@@ -412,28 +413,31 @@ describe("verified backup archive", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("reports a missing reproducible-cache blob as RecoverableCacheGaps", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, digests } = yield* makeContentVerifiedArchive("control-center-backup-cache-gap-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      yield* fileSystem.remove(
-        blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.cache).file
-      )
-      const result = yield* verifyBackup(archiveRoot)
-      assert.strictEqual(result._tag, "RecoverableCacheGaps")
-      if (result._tag === "RecoverableCacheGaps") {
-        assert.deepStrictEqual(result.reproducibleBlobGaps, [
-          {
-            digest: digests.cache,
-            reason: "missing",
-            workspaceId: fixtureWorkspaceIds.alpha
-          }
-        ])
-      }
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+  descriptorIt.effect(
+    "reports a missing reproducible-cache blob as RecoverableCacheGaps",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, digests } = yield* makeContentVerifiedArchive("control-center-backup-cache-gap-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        yield* fileSystem.remove(
+          blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.cache).file
+        )
+        const result = yield* verifyBackup(archiveRoot)
+        assert.strictEqual(result._tag, "RecoverableCacheGaps")
+        if (result._tag === "RecoverableCacheGaps") {
+          assert.deepStrictEqual(result.reproducibleBlobGaps, [
+            {
+              digest: digests.cache,
+              reason: "missing",
+              workspaceId: fixtureWorkspaceIds.alpha
+            }
+          ])
+        }
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
-  it.effect("rejects a missing durable blob", () =>
+  descriptorIt.effect("rejects a missing durable blob", () =>
     Effect.gen(function*() {
       const { archiveRoot, digests } = yield* makeContentVerifiedArchive("control-center-backup-durable-gap-")
       const fileSystem = yield* FileSystem.FileSystem

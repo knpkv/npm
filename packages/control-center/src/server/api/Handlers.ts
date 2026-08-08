@@ -20,7 +20,7 @@ import type {
   UnauthorizedApiError
 } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
-import { CsrfToken, CurrentSession } from "../../api/session.js"
+import { CsrfToken, CurrentSession, PairingCode } from "../../api/session.js"
 import { WorkspacePresentationReadModel } from "../../api/workspaceSettings.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
@@ -245,6 +245,30 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
               auth.listSessions(currentSessionToken(request))
             )
           }))
+        .handle("issueBrowserPairingCode", ({ payload, request }) =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              const issued = yield* mapAuthenticationFailures(
+                auth.issuePairingCode(currentSessionToken(request), {
+                  actor: session.actor,
+                  permission: payload.permission
+                })
+              )
+              yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+                Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "private, no-store"))
+              )
+              return {
+                pairingCode: PairingCode.make(Redacted.value(issued.pairingCode)),
+                expiresAt: issued.summary.expiresAt
+              }
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("revoke", ({ params, request }) =>
           Effect.gen(function*() {
             yield* mapAuthenticationFailures(
