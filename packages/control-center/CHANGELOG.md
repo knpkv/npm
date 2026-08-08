@@ -1,5 +1,16 @@
 # @knpkv/control-center
 
+## 0.5.0
+
+### Minor Changes
+
+- [#346](https://github.com/knpkv/npm/pull/346) [`da5585b`](https://github.com/knpkv/npm/commit/da5585b0b5fc710d2e7b32b3b687c954bbb9f509) Thanks [@konopkov](https://github.com/konopkov)! - Add reliable Confluence links, an in-page visual editor with read-mode task completion and release checklist gates, Relay-assisted exact-page drafting, governed release-page copies from synchronized Confluence templates, provider-observed pipeline approval stages in release worksets, and owner-managed pairing for multiple independent browser sessions.
+
+### Patch Changes
+
+- Updated dependencies [[`471974f`](https://github.com/knpkv/npm/commit/471974f89a86d01594cb9ac08d784ec1f4770541)]:
+  - @knpkv/ai-codex@0.2.0
+
 ## 0.4.0
 
 ### Minor Changes
