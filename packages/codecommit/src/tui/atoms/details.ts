@@ -2,8 +2,15 @@ import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { Effect, Stream } from "effect"
 import { type RelayReviewKind, runRelayReview } from "../../RelayReview.js"
 import { type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
-import { changedFilePath, type PullRequestWorkspaceIdentity, pullRequestWorkspaceIdentity } from "../details-model.js"
-import { type FileDiffRequest, loadFileDiff } from "../file-diff.js"
+import {
+  actionOutcome,
+  changedFilePath,
+  type FileDiffIdentity,
+  fileDiffIdentity,
+  type PullRequestWorkspaceIdentity,
+  pullRequestWorkspaceIdentity
+} from "../details-model.js"
+import { type FileDiffRequest, loadFileDiff, type RenderedFileDiff } from "../file-diff.js"
 import { runtimeAtom } from "./runtime.js"
 
 export interface PullRequestWorkspace {
@@ -24,20 +31,9 @@ export interface WorktreeActionInput {
   readonly requestId: string
 }
 
-export type ActionOutcome<A> =
-  | { readonly _tag: "failure"; readonly requestId: string }
-  | { readonly _tag: "success"; readonly requestId: string; readonly value: A }
-
-const actionFailure = (requestId: string): ActionOutcome<never> => ({ _tag: "failure", requestId })
-const actionSuccess = <A>(requestId: string, value: A): ActionOutcome<A> => ({ _tag: "success", requestId, value })
-
-const actionOutcome = <A, E, R>(requestId: string, effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(
-    Effect.match({
-      onFailure: () => actionFailure(requestId),
-      onSuccess: (value) => actionSuccess(requestId, value)
-    })
-  )
+export type FileDiffOutcome =
+  | { readonly _tag: "failure"; readonly identity: FileDiffIdentity }
+  | { readonly _tag: "success"; readonly identity: FileDiffIdentity; readonly value: RenderedFileDiff }
 
 export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
   Effect.gen(function*() {
@@ -61,7 +57,13 @@ export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullReque
 export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
   Effect.gen(function*() {
     const client = yield* ReadClient.CodeCommitReadClient
-    return yield* loadFileDiff(client, request)
+    const identity = fileDiffIdentity(request.identity, request.revision, request.file)
+    return yield* loadFileDiff(client, request).pipe(
+      Effect.match({
+        onFailure: (): FileDiffOutcome => ({ _tag: "failure", identity }),
+        onSuccess: (value): FileDiffOutcome => ({ _tag: "success", identity, value })
+      })
+    )
   }).pipe(Effect.withSpan("loadFileDiffAtom", { attributes: { path: changedFilePath(request.file) } }))
 )
 

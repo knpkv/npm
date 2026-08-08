@@ -1,11 +1,15 @@
 import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { structuredPatch } from "diff"
+import { Effect, Schema } from "effect"
+import * as AiError from "effect/unstable/ai/AiError"
+import { WorktreeError } from "../WorktreeService.js"
 
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
 const DIFF_CONTEXT_LINES = 3
 const BINARY_SAMPLE_BYTES = 8_000
 const MAX_PREVIEW_BLOB_BYTES = ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES
+const MAX_ACTION_DIAGNOSTIC_CHARACTERS = 2_048
 const FILETYPE_ALIASES: Record<string, string> = {
   cjs: "javascript",
   js: "javascript",
@@ -34,6 +38,50 @@ export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly destinationCommit: string
   readonly sourceCommit: string
 }
+
+export interface ActionDiagnostic {
+  readonly message: string
+  readonly operation: string
+}
+
+export type ActionOutcome<A> =
+  | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }
+  | { readonly _tag: "success"; readonly requestId: string; readonly value: A }
+
+const isWorktreeError = Schema.is(WorktreeError)
+
+/** Retains only bounded, already-sanitized fields from typed action failures. */
+export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
+  if (isWorktreeError(error)) {
+    return {
+      message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
+      operation: error.operation
+    }
+  }
+  if (AiError.isAiError(error)) {
+    return {
+      message: error.reason.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
+      operation: `codex-${error.method}`
+    }
+  }
+  return { message: "Unexpected action failure", operation: "action" }
+}
+
+const actionFailure = (requestId: string, error: unknown): ActionOutcome<never> => ({
+  _tag: "failure",
+  diagnostic: actionDiagnostic(error),
+  requestId
+})
+
+const actionSuccess = <A>(requestId: string, value: A): ActionOutcome<A> => ({ _tag: "success", requestId, value })
+
+export const actionOutcome = <A, E, R>(requestId: string, effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.match({
+      onFailure: (error) => actionFailure(requestId, error),
+      onSuccess: (value) => actionSuccess(requestId, value)
+    })
+  )
 
 export type DetailsKeyIntent =
   | "back"
@@ -140,6 +188,13 @@ export const fileDiffIdentityMatches = (actual: FileDiffIdentity, expected: File
   actual.destinationCommit === expected.destinationCommit &&
   actual.sourceCommit === expected.sourceCommit
 
+/** Keeps a retained async result only when it belongs to the file currently on screen. */
+export const currentFileDiffOutcome = <A extends { readonly identity: FileDiffIdentity }>(
+  outcome: A | null,
+  expected: FileDiffIdentity | null
+): A | null =>
+  outcome !== null && expected !== null && fileDiffIdentityMatches(outcome.identity, expected) ? outcome : null
+
 export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "isMergeable">) => ({
   approval: pr.isApproved ? "APPROVED" : "NEEDS REVIEW",
   mergeability: pr.isMergeable ? "MERGEABLE" : "CONFLICTS"
@@ -170,18 +225,23 @@ const escapedCodePoint = (character: string): string =>
 const isTerminalControl = (codePoint: number): boolean =>
   (codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f)
 
+const BIDI_CONTROL = /\p{Bidi_Control}/u
+
+const isTerminalUnsafe = (character: string, codePoint: number): boolean =>
+  isTerminalControl(codePoint) || BIDI_CONTROL.test(character)
+
 /** Makes an untrusted single-line value visibly safe for terminal rendering. */
 export const terminalSafeText = (value: string): string =>
   Array.from(value, (character) => {
     const codePoint = character.codePointAt(0)
-    return codePoint !== undefined && isTerminalControl(codePoint) ? escapedCodePoint(character) : character
+    return codePoint !== undefined && isTerminalUnsafe(character, codePoint) ? escapedCodePoint(character) : character
   }).join("")
 
 /** Preserves tabs and line feeds while escaping terminal controls. */
 export const terminalSafeMultilineText = (value: string): string =>
   Array.from(value, (character) => {
     const codePoint = character.codePointAt(0)
-    return codePoint !== undefined && codePoint !== 0x09 && codePoint !== 0x0a && isTerminalControl(codePoint)
+    return codePoint !== undefined && codePoint !== 0x09 && codePoint !== 0x0a && isTerminalUnsafe(character, codePoint)
       ? escapedCodePoint(character)
       : character
   }).join("")

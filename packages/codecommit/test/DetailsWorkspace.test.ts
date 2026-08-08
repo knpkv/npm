@@ -4,9 +4,12 @@ import { applyPatch, parsePatch } from "diff"
 import { Effect, Schema } from "effect"
 import { makeRelayReviewPrompt } from "../src/RelayReview.js"
 import {
+  actionDiagnostic,
+  actionOutcome,
   blobPreviewDisposition,
   buildUnifiedDiff,
   changedFileRowId,
+  currentFileDiffOutcome,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentityMatches,
@@ -16,7 +19,12 @@ import {
   workspaceIdentityMatches
 } from "../src/tui/details-model.js"
 import { loadFileDiff } from "../src/tui/file-diff.js"
-import { reviewRevisionSpecifiers, safePathSegment } from "../src/WorktreeService.js"
+import {
+  reviewRevisionSpecifiers,
+  safePathSegment,
+  WORKTREE_LOCK_REQUIREMENT,
+  WorktreeError
+} from "../src/WorktreeService.js"
 
 const decodeChangedFile = Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)
 const hasTerminalControl = (value: string): boolean =>
@@ -66,6 +74,51 @@ describe("PR detail workspace", () => {
     )
     expect(terminalSafeText("\tconst value = 1")).toBe("\\u{0009}const value = 1")
   })
+
+  it("renders bidi controls visibly without changing ordinary international text", () => {
+    expect(terminalSafeText("src/\u202ecod.exe")).toBe("src/\\u{202e}cod.exe")
+    expect(terminalSafeMultilineText("\u2067review\u2069\nשלום/café.ts")).toBe(
+      "\\u{2067}review\\u{2069}\nשלום/café.ts"
+    )
+    expect(terminalSafeText("café/שלום.ts")).toBe("café/שלום.ts")
+  })
+
+  it("keeps bounded typed action diagnostics without exposing raw causes", () => {
+    const cause = new Error("AWS_SECRET_ACCESS_KEY=do-not-render")
+    const failure = new WorktreeError({
+      cause,
+      message: WORKTREE_LOCK_REQUIREMENT,
+      operation: "unsupported-platform"
+    })
+
+    expect(actionDiagnostic(failure)).toEqual({
+      message: WORKTREE_LOCK_REQUIREMENT,
+      operation: "unsupported-platform"
+    })
+    expect(actionDiagnostic(cause)).toEqual({ message: "Unexpected action failure", operation: "action" })
+  })
+
+  it.effect("preserves action successes and attaches typed failure diagnostics", () =>
+    Effect.gen(function*() {
+      const failure = new WorktreeError({
+        message: WORKTREE_LOCK_REQUIREMENT,
+        operation: "unsupported-platform"
+      })
+
+      expect(yield* actionOutcome("request-success", Effect.succeed("ready"))).toEqual({
+        _tag: "success",
+        requestId: "request-success",
+        value: "ready"
+      })
+      expect(yield* actionOutcome("request-failure", Effect.fail(failure))).toEqual({
+        _tag: "failure",
+        diagnostic: {
+          message: WORKTREE_LOCK_REQUIREMENT,
+          operation: "unsupported-platform"
+        },
+        requestId: "request-failure"
+      })
+    }))
 
   it("computes changes before escaping terminal controls", () => {
     const file = decodeChangedFile({
@@ -338,6 +391,10 @@ describe("PR detail workspace", () => {
     expect(fileDiffIdentityMatches(fileB, { ...fileB, beforeBlobId: "rotated" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, destinationCommit: "rotated" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, sourceCommit: "rotated" })).toBe(false)
+    const failureA: { readonly _tag: "failure"; readonly identity: typeof fileA } = { _tag: "failure", identity: fileA }
+    const failureB: { readonly _tag: "failure"; readonly identity: typeof fileB } = { _tag: "failure", identity: fileB }
+    expect(currentFileDiffOutcome(failureA, fileB)).toBeNull()
+    expect(currentFileDiffOutcome(failureB, fileB)).toBe(failureB)
   })
 
   it("keeps approval and mergeability independent", () => {

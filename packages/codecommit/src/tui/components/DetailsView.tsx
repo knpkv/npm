@@ -17,12 +17,13 @@ import {
   runRelayReviewAtom
 } from "../atoms/details.js"
 import {
+  type ActionDiagnostic,
   changedFilePath,
   changedFileRowId,
+  currentFileDiffOutcome,
   detailsKeyIntent,
   exactRevisionReviewState,
   fileDiffIdentity,
-  fileDiffIdentityMatches,
   pullRequestWorkspaceIdentity,
   terminalSafeMultilineText,
   terminalSafeText,
@@ -153,7 +154,7 @@ type ActionStatus =
       readonly requestId: string
     }
   | { readonly _tag: "done"; readonly action: PendingAction; readonly detail: string }
-  | { readonly _tag: "failed"; readonly action: PendingAction }
+  | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
 const actionLabel = (action: PendingAction): string =>
   ({
@@ -230,13 +231,11 @@ export function DetailsView() {
     workspace === null || selectedFile === null
       ? null
       : fileDiffIdentity(workspace.identity, workspace.revision, selectedFile)
-  const renderedDiff =
-    AsyncResult.isSuccess(diffResult) &&
-    !AsyncResult.isWaiting(diffResult) &&
-    expectedFileIdentity !== null &&
-    fileDiffIdentityMatches(diffResult.value.identity, expectedFileIdentity)
-      ? diffResult.value
-      : null
+  const retainedDiffOutcome =
+    AsyncResult.isSuccess(diffResult) && !AsyncResult.isWaiting(diffResult) ? diffResult.value : null
+  const diffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
+  const renderedDiff = diffOutcome?._tag === "success" ? diffOutcome.value : null
+  const diffFailed = diffOutcome?._tag === "failure"
 
   useEffect(() => {
     if (pr === null) return
@@ -267,7 +266,7 @@ export function DetailsView() {
     const outcome = preflightResult.value
     if (outcome.requestId !== action.requestId) return
     if (outcome._tag === "failure") {
-      setAction({ _tag: "failed", action: action.action })
+      setAction({ _tag: "failed", action: action.action, diagnostic: outcome.diagnostic })
       return
     }
     const plan = outcome.value
@@ -289,7 +288,7 @@ export function DetailsView() {
     if (!AsyncResult.isSuccess(checkoutResult) || checkoutResult.value.requestId !== action.requestId) return
     const outcome = checkoutResult.value
     if (outcome._tag === "failure") {
-      setAction({ _tag: "failed", action: "worktree" })
+      setAction({ _tag: "failed", action: "worktree", diagnostic: outcome.diagnostic })
       return
     }
     if (outcome.value.path === action.plan.targetPath && outcome.value.sourceCommit === action.plan.sourceCommit) {
@@ -302,7 +301,7 @@ export function DetailsView() {
     if (!AsyncResult.isSuccess(reviewResult) || reviewResult.value.requestId !== action.requestId) return
     const outcome = reviewResult.value
     if (outcome._tag === "failure") {
-      setAction({ _tag: "failed", action: action.action })
+      setAction({ _tag: "failed", action: action.action, diagnostic: outcome.diagnostic })
       return
     }
     if (
@@ -470,10 +469,10 @@ export function DetailsView() {
 
           <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, flexGrow: 1 }}>
             <text fg={theme.textAccent}>{` ${terminalSafeText(selectedPath ?? "Select a changed file")}`}</text>
-            {selectedFile !== null && renderedDiff === null && (
+            {selectedFile !== null && diffOutcome === null && (
               <text fg={theme.textMuted}> Loading immutable blobs…</text>
             )}
-            {AsyncResult.isFailure(diffResult) && <text fg={theme.textError}> Unable to load this file preview.</text>}
+            {diffFailed && <text fg={theme.textError}> Unable to load this file preview.</text>}
             {renderedDiff?.binary && (
               <text fg={theme.textMuted}> Binary file changed. Checkout the worktree to inspect it locally.</text>
             )}
@@ -564,7 +563,14 @@ export function DetailsView() {
                 <text fg={theme.textMuted}>Esc/x cancel</text>
               </box>
             )}
-            {action._tag === "failed" && <text fg={theme.textError}>{`${actionLabel(action.action)} failed.`}</text>}
+            {action._tag === "failed" && (
+              <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+                <text
+                  fg={theme.textError}
+                >{`${actionLabel(action.action)} failed · ${terminalSafeText(action.diagnostic.operation)}`}</text>
+                <text fg={theme.textMuted}>{terminalSafeMultilineText(action.diagnostic.message)}</text>
+              </scrollbox>
+            )}
             {action._tag === "done" && (
               <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
                 <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
