@@ -699,6 +699,15 @@ describe("BlobStore", () => {
       const swapped = yield* Ref.make(false)
       const faultingFileSystem = FileSystem.FileSystem.of({
         ...fs,
+        stat: (requestedPath) =>
+          requestedPath.endsWith("/.") &&
+            (requestedPath.startsWith("/proc/self/fd/") || requestedPath.startsWith("/dev/fd/"))
+            ? Effect.fail(PlatformError.systemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "stat"
+            }))
+            : fs.stat(requestedPath),
         open: (requestedPath, options) =>
           Effect.gen(function*() {
             if (requestedPath.includes(".incoming-") && !(yield* Ref.getAndSet(swapped, true))) {
@@ -732,14 +741,14 @@ describe("BlobStore", () => {
       const derived = blobPath(path, root, WORKSPACE_A, CONCURRENT_DIGEST)
       const faultingFileSystem = FileSystem.FileSystem.of({
         ...fs,
-        realPath: (requestedPath) =>
+        stat: (requestedPath) =>
           requestedPath.startsWith("/proc/self/fd/") || requestedPath.startsWith("/dev/fd/")
             ? Effect.fail(PlatformError.systemError({
               _tag: "NotFound",
               module: "FileSystem",
-              method: "realPath"
+              method: "stat"
             }))
-            : fs.realPath(requestedPath)
+            : fs.stat(requestedPath)
       })
       const store = yield* makeBlobStore({ blobRoot: root }).pipe(
         Effect.provideService(FileSystem.FileSystem, faultingFileSystem)

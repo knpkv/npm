@@ -1,5 +1,5 @@
 import type { FileSystem, Path } from "effect"
-import { Effect, Result } from "effect"
+import { Effect, Option, Result } from "effect"
 
 import { BlobContainmentError, blobStoreIoError } from "./BlobStoreError.js"
 
@@ -15,17 +15,39 @@ const descriptorAliases = (path: Path.Path, descriptor: FileSystem.File.Descript
   path.join("/dev/fd", String(descriptor))
 ]
 
+const sameIdentity = (left: FileSystem.File.Info, right: FileSystem.File.Info): boolean =>
+  left.dev === right.dev &&
+  Option.isSome(left.ino) &&
+  Option.isSome(right.ino) &&
+  left.ino.value === right.ino.value
+
+const sameDescriptorAlias = (alias: FileSystem.File.Info, opened: FileSystem.File.Info): boolean =>
+  alias.type === opened.type &&
+  Option.isSome(alias.ino) &&
+  Option.isSome(opened.ino) &&
+  alias.ino.value === opened.ino.value
+
 /** Resolve a verified alias for the exact object already held by a descriptor. */
 export const resolveDescriptorAlias = Effect.fn("BlobStore.resolveDescriptorAlias")(function*(
   fs: FileSystem.FileSystem,
   path: Path.Path,
   descriptor: FileSystem.File.Descriptor,
+  openedInfo: FileSystem.File.Info,
   expectedPath: string,
   operation: string
 ) {
   for (const alias of descriptorAliases(path, descriptor)) {
-    const resolved = yield* fs.realPath(alias).pipe(Effect.result)
-    if (Result.isSuccess(resolved) && resolved.success === expectedPath) return alias
+    const aliasInfo = yield* fs.stat(alias).pipe(Effect.result)
+    const expectedInfo = yield* fs.stat(expectedPath).pipe(Effect.result)
+    const canonicalExpected = yield* fs.realPath(expectedPath).pipe(Effect.result)
+    if (
+      Result.isSuccess(aliasInfo) &&
+      Result.isSuccess(expectedInfo) &&
+      Result.isSuccess(canonicalExpected) &&
+      canonicalExpected.success === expectedPath &&
+      sameDescriptorAlias(aliasInfo.success, openedInfo) &&
+      sameIdentity(openedInfo, expectedInfo.success)
+    ) return alias
   }
 
   return yield* new BlobContainmentError({
@@ -47,20 +69,34 @@ export const pinDirectory = Effect.fn("BlobStore.pinDirectory")(function*(
     Effect.mapError((cause) => blobStoreIoError("pin object directory", cause))
   )
 
-  const alias = yield* resolveDescriptorAlias(fs, path, handle.fd, directory, "publish blob")
-  const assertIdentity = fs.realPath(alias).pipe(
-    Effect.result,
-    Effect.flatMap((current) =>
-      Result.isSuccess(current) && current.success === directory
-        ? Effect.void
-        : new BlobContainmentError({
-          operation: "publish blob",
-          message: "pinned object directory identity changed"
-        })
-    )
+  const openedInfo = yield* handle.stat.pipe(
+    Effect.mapError((cause) => blobStoreIoError("inspect pinned object directory", cause))
   )
+  const alias = yield* resolveDescriptorAlias(fs, path, handle.fd, openedInfo, directory, "publish blob")
+  const traversedAlias = yield* fs.stat(`${alias}${path.sep}.`).pipe(Effect.result)
+  // Linux permits descriptor-relative child paths. macOS exposes the same
+  // descriptor identity through /dev/fd but requires child operations to use
+  // the canonical pathname, guarded by the still-open directory handle.
+  const publicationPath = Result.isSuccess(traversedAlias) && sameIdentity(openedInfo, traversedAlias.success)
+    ? alias
+    : directory
+  const assertIdentity = Effect.gen(function*() {
+    const current = yield* handle.stat.pipe(Effect.result)
+    const pathInfo = yield* fs.stat(directory).pipe(Effect.result)
+    if (
+      Result.isFailure(current) ||
+      Result.isFailure(pathInfo) ||
+      !sameIdentity(openedInfo, current.success) ||
+      !sameIdentity(openedInfo, pathInfo.success)
+    ) {
+      return yield* new BlobContainmentError({
+        operation: "publish blob",
+        message: "pinned object directory identity changed"
+      })
+    }
+  })
   return {
-    path: alias,
+    path: publicationPath,
     sync: handle.sync.pipe(
       Effect.mapError((cause) => blobStoreIoError("sync pinned object directory", cause))
     ),
