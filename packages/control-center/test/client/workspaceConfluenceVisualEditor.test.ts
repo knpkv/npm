@@ -44,6 +44,28 @@ describe("Confluence visual editor", () => {
     )
   })
 
+  it("round-trips task markers while leaving ordinary bullets unchanged", () => {
+    const root = document.createElement("div")
+    const list = document.createElement("ul")
+    const pending = document.createElement("li")
+    const pendingControl = document.createElement("input")
+    pendingControl.type = "checkbox"
+    pending.append(pendingControl, " Run smoke tests")
+    const completed = document.createElement("li")
+    const completedControl = document.createElement("input")
+    completedControl.type = "checkbox"
+    completedControl.checked = true
+    completed.append(completedControl, " Attach report")
+    const ordinary = document.createElement("li")
+    ordinary.textContent = "Keep the rollback notes"
+    list.append(pending, completed, ordinary)
+    root.append(list)
+
+    expect(confluenceEditorMarkdown(root)).toBe(
+      "- [ ] Run smoke tests\n- [x] Attach report\n- Keep the rollback notes"
+    )
+  })
+
   it("drops unsupported embedded media while keeping its readable text", () => {
     const root = document.createElement("div")
     const paragraph = document.createElement("p")
@@ -96,7 +118,7 @@ describe("Confluence visual editor", () => {
     )
 
     expect(container.textContent).toContain("1 of 2 complete")
-    const checkbox = container.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    const checkbox = container.querySelector<HTMLInputElement>("input[type=\"checkbox\"]:not([disabled])")
     if (checkbox === null) throw new Error("Expected a release-task checkbox")
     await act(async () => {
       checkbox.click()

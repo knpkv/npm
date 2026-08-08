@@ -966,21 +966,15 @@ describe("Control Center closed runtime", () => {
         ["user-message", "job-queued"]
       )
       yield* TestClock.adjust("1 second")
-      const terminalThread = yield* Effect.gen(function*() {
-        yield* Effect.yieldNow
-        const page = yield* runtimePersistence.agentJobs.threadAfter({
-          workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
-          after: AgentEventCursor.make(0),
-          limit: AgentThreadEventPageSize.make(128)
-        })
-        const terminal = page.events.some(({ eventKind }) =>
-          eventKind === "job-completed" || eventKind === "job-failed"
-        )
-        return terminal ? page : yield* Effect.fail("release worker has not completed its claim")
-      }).pipe(
-        Effect.retry({ times: 1_000 })
-      )
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* lifecycle.beginDrain
+      yield* lifecycle.awaitWorkDrained
+      const terminalThread = yield* runtimePersistence.agentJobs.threadAfter({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: AgentEventCursor.make(0),
+        limit: AgentThreadEventPageSize.make(128)
+      })
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
         "job-started",
@@ -1081,20 +1075,15 @@ describe("Control Center closed runtime", () => {
       })
       assert.strictEqual(enqueued.state, "queued")
       yield* TestClock.adjust("1 second")
-      const terminalThread = yield* Effect.gen(function*() {
-        yield* Effect.yieldNow
-        const page = yield* persistence.agentJobs.threadAfter({
-          workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
-          after: AgentEventCursor.make(0),
-          limit: AgentThreadEventPageSize.make(128)
-        })
-        return page.events.some(({ eventKind }) => eventKind === "job-completed" || eventKind === "job-failed")
-          ? page
-          : yield* Effect.fail("release worker has not completed its claim")
-      }).pipe(
-        Effect.retry({ times: 1_000 })
-      )
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* lifecycle.beginDrain
+      yield* lifecycle.awaitWorkDrained
+      const terminalThread = yield* persistence.agentJobs.threadAfter({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: AgentEventCursor.make(0),
+        limit: AgentThreadEventPageSize.make(128)
+      })
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
         "job-completed",

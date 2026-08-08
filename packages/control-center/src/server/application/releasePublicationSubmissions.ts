@@ -33,6 +33,7 @@ import {
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
+import { releasePipelineApprovalReadiness } from "../../domain/releasePipelineApproval.js"
 import { canonicalReleasePublicationTitle } from "../../domain/releasePublication.js"
 import { Revision } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -381,9 +382,10 @@ const makeService = Effect.gen(function*() {
         environmentId: null,
         limit: 500
       }).pipe(mapFailure)
+      if (taskInspection._tag !== "releaseSlice") return yield* failure("conflict")
       if (
-        taskInspection._tag !== "releaseSlice" ||
-        !releaseConfluenceTaskReadiness(taskInspection.value).ready
+        !releaseConfluenceTaskReadiness(taskInspection.value).ready ||
+        !releasePipelineApprovalReadiness(taskInspection.value).ready
       ) return yield* failure("conflict")
     }
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)

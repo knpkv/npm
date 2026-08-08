@@ -23,6 +23,7 @@ import type {
   ReleaseId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import { releasePipelineApprovalReadiness } from "../../domain/releasePipelineApproval.js"
 import { presentPipelineExecutionStages } from "../entities/presentWorkspacePipelineExecution.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
@@ -576,6 +577,21 @@ export const presentReleaseWorkset = (
         }]
     )
   })
+  const pipelineApprovalGaps = releasePipelineApprovalReadiness(inspection).gates.flatMap(
+    (gate): ReadonlyArray<RlyWorksetGap> =>
+      gate.state === "waiting"
+        ? []
+        : [{
+          id: `${gate.entityId}:release-approval-gate`,
+          label: gate.state === "missing"
+            ? `${gate.pipelineName} has no release approval gate`
+            : `${gate.pipelineName} is not waiting for Stage approval`,
+          reason: gate.state === "missing"
+            ? "Every pipeline delivering this release must contain an observed manual approval stage."
+            : "The affected pipeline must wait at its manual approval stage before release publication.",
+          service: "codepipeline"
+        }]
+  )
 
   return {
     jiraItems: issues.map((issue) => ({
@@ -625,7 +641,8 @@ export const presentReleaseWorkset = (
           }]
           : []
       ),
-      ...confluenceTaskGaps
+      ...confluenceTaskGaps,
+      ...pipelineApprovalGaps
     ],
     pipelines: pipelineExecutions.map((pipeline) => {
       const state = pipelineStateLabel(pipeline.details.status)

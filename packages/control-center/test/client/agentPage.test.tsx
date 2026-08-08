@@ -625,7 +625,9 @@ describe("AgentPage context", () => {
     expect(loadPresets).toHaveBeenCalledOnce()
     expect(providerButtons).toHaveLength(2)
     expect(providerButtons.every(({ disabled }) => disabled)).toBe(true)
-    expect(host.textContent).toContain("Selected agent is not configured")
+    expect(host.textContent).toContain("No agent is configured")
+    expect(host.textContent).not.toContain("Selected agent is not configured")
+    expect(host.querySelector<HTMLAnchorElement>('a[href="/settings"]')?.textContent).toBe("Configure an agent")
     expect(host.textContent).not.toContain("Retry agent presets")
   })
 

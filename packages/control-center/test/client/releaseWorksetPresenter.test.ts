@@ -114,6 +114,31 @@ describe("release workset presenter", () => {
     ])
   })
 
+  it("exposes a release gap when an affected pipeline is not waiting at approval", () => {
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.details._tag === "pipeline-execution"
+          ? {
+            ...entry,
+            projection: {
+              ...entry.projection,
+              details: {
+                ...entry.projection.details,
+                stages: [{ name: "Approval", status: "succeeded", actionCount: 1, actionsTruncated: false }]
+              }
+            }
+          }
+          : entry
+      )
+    }
+
+    expect(presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID).gaps).toContainEqual(expect.objectContaining({
+      label: "payments-main is not waiting for Stage approval",
+      service: "codepipeline"
+    }))
+  })
+
   it("maps the OPS-428 review lifecycle and provider states without copying portfolio labels", () => {
     const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 

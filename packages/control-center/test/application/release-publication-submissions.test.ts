@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema"
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import { GovernedActionEnvelopeDigest } from "../../src/domain/governedAction/index.js"
 import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { releasePipelineApprovalReadiness } from "../../src/domain/releasePipelineApproval.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   confluenceEntityPublicationContext,
@@ -108,6 +109,63 @@ describe("release publication submissions", () => {
     assert.isFalse(lazyReadiness.ready)
     assert.strictEqual(lazyReadiness.unverifiablePages, 1)
     assert.isFalse(releaseConfluenceTaskReadiness({ ...releaseWorksetFixture, truncated: true }).ready)
+  })
+
+  it("requires every affected pipeline to wait at its release approval gate", () => {
+    assert.deepStrictEqual(releasePipelineApprovalReadiness(releaseWorksetFixture), {
+      affected: 1,
+      gates: [{
+        entityId: releaseWorksetFixture.entityProjections.find(
+          ({ projection }) => projection.details._tag === "pipeline-execution"
+        )?.projection.entityId,
+        pipelineName: "payments-main",
+        state: "waiting"
+      }],
+      missing: 0,
+      notWaiting: 0,
+      ready: true,
+      unverifiablePipelines: 0,
+      waiting: 1
+    })
+    const withoutGate: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.details._tag === "pipeline-execution"
+          ? {
+            ...entry,
+            projection: {
+              ...entry.projection,
+              details: {
+                ...entry.projection.details,
+                stages: [{ name: "Deploy", status: "running", actionCount: 1, actionsTruncated: false }]
+              }
+            }
+          }
+          : entry
+      )
+    }
+    const passedGate: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.details._tag === "pipeline-execution"
+          ? {
+            ...entry,
+            projection: {
+              ...entry.projection,
+              details: {
+                ...entry.projection.details,
+                stages: [{ name: "Approval", status: "succeeded", actionCount: 1, actionsTruncated: false }]
+              }
+            }
+          }
+          : entry
+      )
+    }
+
+    assert.deepStrictEqual(releasePipelineApprovalReadiness(withoutGate).gates[0]?.state, "missing")
+    assert.isFalse(releasePipelineApprovalReadiness(withoutGate).ready)
+    assert.deepStrictEqual(releasePipelineApprovalReadiness(passedGate).gates[0]?.state, "not-waiting")
+    assert.isFalse(releasePipelineApprovalReadiness(passedGate).ready)
   })
 
   it("rejects Jira publication payloads beyond provider character and UTF-8 byte limits", () => {

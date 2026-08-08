@@ -626,6 +626,7 @@ const ReleaseAgentRoom = ({
   const runtimeUnavailable = runTurn === undefined
   const selectedProviderUnavailable =
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
+  const providerCatalogEmpty = availableProviders?.length === 0
   const pageAwareness = release.releasePageAwareness
   const selectedTemplate =
     templateState._tag === "ready"
@@ -883,7 +884,14 @@ const ReleaseAgentRoom = ({
           description="Connect the server to a local Codex or Claude runner. Provider credentials and repository access stay server-side; this tab stores its bounded thread locally."
           title="Local agent not connected"
         />
-      ) : providerCatalogPending ? null : selectedProviderUnavailable ? (
+      ) : providerCatalogPending ? null : providerCatalogEmpty ? (
+        <StatePanel
+          action={<Link to="/settings">Configure an agent</Link>}
+          description="Enable a local Codex or Claude runner in Settings, then return here to draft or review this release."
+          title="No agent is configured"
+          tone="caution"
+        />
+      ) : selectedProviderUnavailable ? (
         <StatePanel
           description="Choose a configured Codex or Claude preset before starting this turn."
           title="Selected agent is not configured"

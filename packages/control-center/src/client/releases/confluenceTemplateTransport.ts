@@ -47,6 +47,11 @@ const orderTemplates = (
     return leftTemplate - rightTemplate || left.title.localeCompare(right.title)
   })
 
+const isTemplateSummary = (projection: DeliveryEntityProjection): boolean =>
+  projection.entityState === "present" &&
+  projection.details._tag === "page" &&
+  /\btemplate\b/iu.test(projection.title)
+
 /**
  * Hydrate exact page projections behind the summarized workspace index.
  *
@@ -57,7 +62,7 @@ export const makeConfluenceTemplateLoader = (
   source: ConfluenceTemplateSource
 ): ConfluenceTemplateLoader => {
   return async (signal) => {
-    const summaries = (await source.list(signal)).slice(0, MAXIMUM_CONFLUENCE_TEMPLATES)
+    const summaries = (await source.list(signal)).filter(isTemplateSummary).slice(0, MAXIMUM_CONFLUENCE_TEMPLATES)
     const templates: Array<ConfluenceReleaseTemplate> = []
     for (let offset = 0; offset < summaries.length; offset += CONFLUENCE_TEMPLATE_BATCH_SIZE) {
       const batch = summaries.slice(offset, offset + CONFLUENCE_TEMPLATE_BATCH_SIZE)

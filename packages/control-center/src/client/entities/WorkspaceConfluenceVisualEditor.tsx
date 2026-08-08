@@ -48,7 +48,11 @@ const inlineMarkdown = (node: Node): string => {
 const listMarkdown = (element: Element, ordered: boolean): string =>
   [...element.children]
     .filter((child) => child.tagName.toLocaleLowerCase("en-US") === "li")
-    .map((child, index) => `${ordered ? `${String(index + 1)}.` : "-"} ${inlineMarkdown(child).trim()}`)
+    .map((child, index) => {
+      const task = child.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      const marker = task === null ? "" : `[${task.checked ? "x" : " "}] `
+      return `${ordered ? `${String(index + 1)}.` : "-"} ${marker}${inlineMarkdown(child).trim()}`
+    })
     .join("\n")
 
 const blockMarkdown = (node: Node): string => {
