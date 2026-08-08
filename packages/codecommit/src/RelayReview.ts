@@ -65,6 +65,7 @@ export const collectRelayPatch = (request: RelayReviewRequest) =>
       "diff",
       "--no-ext-diff",
       "--no-textconv",
+      "--text",
       "--unified=3",
       request.baseCommit,
       request.headCommit,

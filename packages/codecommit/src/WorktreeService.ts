@@ -214,7 +214,8 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
 const isCleanWorktree = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   request: WorktreeRequest,
-  targetPath: string
+  targetPath: string,
+  home: string
 ) =>
   spawner.string(ChildProcess.make("git", [
     "status",
@@ -223,7 +224,7 @@ const isCleanWorktree = (
     "--ignored=matching"
   ], {
     cwd: targetPath,
-    env: gitEnvironment(request),
+    env: materializationGitEnvironment(request, home),
     extendEnv: true,
     stderr: "ignore",
     stdout: "pipe"
@@ -237,10 +238,11 @@ const isCleanWorktree = (
 const isReusableWorktree = Effect.fn("WorktreeService.isReusableWorktree")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   request: WorktreeRequest,
-  targetPath: string
+  targetPath: string,
+  home: string
 ) {
   const exact = yield* isExactHead(spawner, request, targetPath)
-  return exact && (yield* isCleanWorktree(spawner, request, targetPath))
+  return exact && (yield* isCleanWorktree(spawner, request, targetPath, home))
 })
 
 const LOCK_READY_LINE = "knpkv-codecommit-lock-ready"
@@ -651,7 +653,7 @@ export const makeWorktreeService = (
       )
       if (targetExists) {
         yield* assertCanonical("validate-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-        const reusable = yield* isReusableWorktree(spawner, plan, plan.targetPath)
+        const reusable = yield* isReusableWorktree(spawner, plan, plan.targetPath, home)
         if (!reusable) {
           return yield* commandFailure(
             "validate-existing-target",
@@ -677,7 +679,7 @@ export const makeWorktreeService = (
         )
         if (racedTargetExists) {
           yield* assertCanonical("validate-raced-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-          if (yield* isReusableWorktree(spawner, plan, plan.targetPath)) {
+          if (yield* isReusableWorktree(spawner, plan, plan.targetPath, home)) {
             return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
           }
           return yield* commandFailure(
@@ -711,7 +713,7 @@ export const makeWorktreeService = (
               canonicalWorktreesRoot,
               plan.targetPath
             )
-            if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath))) {
+            if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath, home))) {
               return yield* commandFailure(
                 "validate-retried-target",
                 "Retried worktree is not a clean exact-head checkout"
@@ -731,7 +733,7 @@ export const makeWorktreeService = (
               canonicalWorktreesRoot,
               plan.targetPath
             )
-            if (yield* isReusableWorktree(spawner, plan, plan.targetPath)) {
+            if (yield* isReusableWorktree(spawner, plan, plan.targetPath, home)) {
               return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
             }
           }
@@ -741,7 +743,7 @@ export const makeWorktreeService = (
       }
 
       yield* assertCanonical("validate-created-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-      if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath))) {
+      if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath, home))) {
         return yield* commandFailure("validate-created-target", "New worktree is not a clean exact-head checkout")
       }
       return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult

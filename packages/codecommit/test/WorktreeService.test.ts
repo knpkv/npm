@@ -340,6 +340,7 @@ describe("WorktreeService", () => {
         )
         yield* fs.chmod(filterScript, 0o700)
         yield* runGit(["config", "--file", path.join(home, ".gitconfig"), "filter.review.smudge", filterScript])
+        yield* runGit(["config", "--file", path.join(home, ".gitconfig"), "filter.review.clean", filterScript])
         yield* runGit(["config", "--file", path.join(home, ".gitconfig"), "filter.review.required", "true"])
         yield* runGit(["clone", "--bare", origin, plan.cachePath], root)
         const filterControl = path.join(root, "filter-control")
