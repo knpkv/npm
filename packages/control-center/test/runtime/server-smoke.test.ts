@@ -593,6 +593,21 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const secondBrowserCode = yield* mutationClient.session.issueBrowserPairingCode({
+        payload: { permission: "workspace-approver" }
+      })
+      const [secondBrowser, secondBrowserResponse] = yield* pairClient.session.pair({
+        payload: { pairingCode: secondBrowserCode.pairingCode },
+        responseMode: "decoded-and-response"
+      })
+      assert.strictEqual(secondBrowser.session.permission, "workspace-approver")
+      assert.isDefined(secondBrowserResponse.cookies.cookies.cc_session)
+      const sessions = yield* authenticatedClient.session.list()
+      assert.strictEqual(sessions.length, 2)
+      assert.deepStrictEqual(
+        sessions.map(({ sessionId }) => sessionId).sort(),
+        [paired.session.sessionId, secondBrowser.session.sessionId].sort()
+      )
       const rejectedAgentJob = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
         payload: {
@@ -964,12 +979,12 @@ describe("Control Center closed runtime", () => {
         )
         return terminal ? page : yield* Effect.fail("release worker has not completed its claim")
       }).pipe(
-        Effect.tapError(() => TestClock.adjust("1 second")),
-        Effect.retry({ times: 50 })
+        Effect.retry({ times: 1_000 })
       )
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
-        "job-started"
+        "job-started",
+        JSON.stringify(terminalThread.events)
       )
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
@@ -1078,12 +1093,12 @@ describe("Control Center closed runtime", () => {
           ? page
           : yield* Effect.fail("release worker has not completed its claim")
       }).pipe(
-        Effect.tapError(() => TestClock.adjust("1 second")),
-        Effect.retry({ times: 50 })
+        Effect.retry({ times: 1_000 })
       )
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
-        "job-completed"
+        "job-completed",
+        JSON.stringify(terminalThread.events)
       )
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
