@@ -374,6 +374,20 @@ describe("PR detail workspace", () => {
     expect(printable.diff.split("\n").every((line) => line.length <= 2_000)).toBe(true)
   })
 
+  it("bounds escaped file headers before rendering a diff", () => {
+    const hostilePath = `src/${"\u001b".repeat(300)}.ts`
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-blob", path: hostilePath, mode: "100644" },
+      after: { blobId: "after-blob", path: hostilePath, mode: "100644" }
+    })
+    const result = buildUnifiedDiff(file, "before\n", "after\n")
+
+    expect(result.truncated).toBe(true)
+    expect(result.diff).toBe("")
+    expect(result.metadata).toBeNull()
+  })
+
   it("surfaces rename and mode metadata when blob text is unchanged", () => {
     const file = decodeChangedFile({
       status: "renamed",

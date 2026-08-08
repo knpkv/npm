@@ -403,6 +403,9 @@ export const buildUnifiedDiff = (
   }
 
   const lines = [`--- ${oldFileName}`, `+++ ${newFileName}`]
+  if (lines.some((line) => line.length > MAX_RENDERED_LINE_LENGTH)) {
+    return { diff: "", metadata: null, truncated: true }
+  }
   let retainedHunks = 0
   for (const hunk of patch.hunks) {
     const formatted = formatHunk(hunk)
