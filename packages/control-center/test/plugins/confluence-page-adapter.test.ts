@@ -984,6 +984,20 @@ describe("Confluence page adapter", () => {
       assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
     }))
 
+  it.effect("keeps pages lazy when conversion produces only whitespace", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient(), "  \n")
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+
+      assert.strictEqual(attributes.content, null)
+      assert.strictEqual(attributes.contentState, "lazy")
+    }))
+
   it.effect("marks watcher metadata incomplete when the classic endpoint reports OAuth scope mismatch as 401", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(

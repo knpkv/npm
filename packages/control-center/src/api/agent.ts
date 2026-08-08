@@ -30,6 +30,7 @@ import {
   PrReviewSuggestionRevisionPageSize,
   PrReviewSuggestionRevisionSequence
 } from "../domain/prReviewRevision.js"
+import { Revision } from "../domain/sourceRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ConflictApiError,
@@ -209,6 +210,8 @@ export const SubmitReleasePublicationRequest = Schema.Struct({
   publicationActionId: Schema.optionalKey(GovernedActionId),
   /** Exact synchronized Confluence page selected before its first governed release update. */
   targetEntityId: Schema.optionalKey(EntityId),
+  /** Revision displayed to the owner before an exact-page update is submitted. */
+  targetRevision: Schema.optionalKey(Revision),
   /** Existing synchronized Confluence page copied into a new release-owned page. */
   templateEntityId: Schema.optionalKey(EntityId)
 })

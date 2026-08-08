@@ -139,6 +139,22 @@ describe("release workset presenter", () => {
     }))
   })
 
+  it("exposes a release gap when an affected pipeline projection is unverifiable", () => {
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.details._tag === "pipeline-execution"
+          ? { ...entry, projection: { ...entry.projection, entityState: "deleted" } }
+          : entry
+      )
+    }
+
+    expect(presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID).gaps).toContainEqual(expect.objectContaining({
+      label: "Affected pipeline approval state is unavailable",
+      service: "codepipeline"
+    }))
+  })
+
   it("maps the OPS-428 review lifecycle and provider states without copying portfolio labels", () => {
     const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID)
 

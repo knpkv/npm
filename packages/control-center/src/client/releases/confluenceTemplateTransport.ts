@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import type { DeliveryEntityProjection } from "../../domain/deliveryGraph.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import { browserWorkspaceEntityTransport } from "../entities/useWorkspaceEntity.js"
@@ -5,6 +6,7 @@ import { browserWorkspaceItemsTransport } from "../items/useWorkspaceItems.js"
 
 const MAXIMUM_CONFLUENCE_TEMPLATES = 50
 const CONFLUENCE_TEMPLATE_BATCH_SIZE = 8
+const TEMPLATE_TITLE_PATTERN = /\btemplate\b/iu
 
 export interface ConfluenceReleaseTemplate {
   readonly entityId: EntityId
@@ -42,15 +44,15 @@ const orderTemplates = (
   templates: ReadonlyArray<ConfluenceReleaseTemplate>
 ): ReadonlyArray<ConfluenceReleaseTemplate> =>
   [...templates].sort((left, right) => {
-    const leftTemplate = /\btemplate\b/iu.test(left.title) ? 0 : 1
-    const rightTemplate = /\btemplate\b/iu.test(right.title) ? 0 : 1
+    const leftTemplate = TEMPLATE_TITLE_PATTERN.test(left.title) ? 0 : 1
+    const rightTemplate = TEMPLATE_TITLE_PATTERN.test(right.title) ? 0 : 1
     return leftTemplate - rightTemplate || left.title.localeCompare(right.title)
   })
 
 const isTemplateSummary = (projection: DeliveryEntityProjection): boolean =>
   projection.entityState === "present" &&
   projection.details._tag === "page" &&
-  /\btemplate\b/iu.test(projection.title)
+  TEMPLATE_TITLE_PATTERN.test(projection.title)
 
 /**
  * Hydrate exact page projections behind the summarized workspace index.
@@ -66,11 +68,15 @@ export const makeConfluenceTemplateLoader = (
     const templates: Array<ConfluenceReleaseTemplate> = []
     for (let offset = 0; offset < summaries.length; offset += CONFLUENCE_TEMPLATE_BATCH_SIZE) {
       const batch = summaries.slice(offset, offset + CONFLUENCE_TEMPLATE_BATCH_SIZE)
-      const projections = await Promise.all(
+      const projections = await Promise.allSettled(
         batch.map(({ entityId }) => source.load(entityId, signal))
       )
-      for (const projection of projections) {
-        const template = templateFor(projection)
+      for (const result of projections) {
+        if (result.status === "rejected") {
+          if (Predicate.isTagged("NotFoundApiError")(result.reason)) continue
+          throw result.reason
+        }
+        const template = templateFor(result.value)
         if (template !== null) templates.push(template)
       }
     }

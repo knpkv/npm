@@ -40,6 +40,21 @@ describe("Confluence release tasks", () => {
     })])
   })
 
+  it("does not close a fenced example when text follows the marker", () => {
+    const markdown = [
+      "```md",
+      "````not-a-close",
+      "- [ ] Still example content",
+      "````   ",
+      "- [ ] Real release work"
+    ].join("\n")
+
+    expect(confluenceTasks(markdown)).toEqual([expect.objectContaining({
+      label: "Real release work",
+      lineNumber: 5
+    })])
+  })
+
   it("ticks only the selected line and preserves the document", () => {
     const markdown = "- [ ] Test report\n- [x] Release notes"
 

@@ -858,9 +858,10 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
       const { history, inventory, page, versions, watchers } = context
       const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
       const adf = page.body?.atlas_doc_format?.value
-      const markdown = adf === undefined
+      const converted = adf === undefined
         ? null
         : yield* toSafeConfluenceMarkdown(input.converter, adf)
+      const markdown = converted === null || converted.trim().length === 0 ? null : converted
       const attributesInput = fitSyncAttributes({
         schemaVersion: 1,
         status: page.status,

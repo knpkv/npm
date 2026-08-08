@@ -558,7 +558,7 @@ export const presentReleaseWorkset = (
       runbookEntityIds.has(projection.entityId)
     )
   const confluenceTaskGaps = pages.flatMap((page): ReadonlyArray<RlyWorksetGap> => {
-    if (page.details.contentState === "lazy") {
+    if (page.details.contentState !== "loaded") {
       return [{
         id: `${page.entityId}:confluence-tasks-unavailable`,
         label: `${page.title} tasks are not synchronized`,
@@ -577,7 +577,8 @@ export const presentReleaseWorkset = (
         }]
     )
   })
-  const pipelineApprovalGaps = releasePipelineApprovalReadiness(inspection).gates.flatMap(
+  const pipelineReadiness = releasePipelineApprovalReadiness(inspection)
+  const pipelineApprovalGaps = pipelineReadiness.gates.flatMap(
     (gate): ReadonlyArray<RlyWorksetGap> =>
       gate.state === "waiting"
         ? []
@@ -592,6 +593,14 @@ export const presentReleaseWorkset = (
           service: "codepipeline"
         }]
   )
+  const unverifiablePipelineGaps: ReadonlyArray<RlyWorksetGap> = pipelineReadiness.unverifiablePipelines === 0
+    ? []
+    : [{
+      id: "release-pipelines-unverifiable",
+      label: "Affected pipeline approval state is unavailable",
+      reason: "Release readiness cannot be verified until every affected pipeline is synchronized.",
+      service: "codepipeline"
+    }]
 
   return {
     jiraItems: issues.map((issue) => ({
@@ -642,7 +651,8 @@ export const presentReleaseWorkset = (
           : []
       ),
       ...confluenceTaskGaps,
-      ...pipelineApprovalGaps
+      ...pipelineApprovalGaps,
+      ...unverifiablePipelineGaps
     ],
     pipelines: pipelineExecutions.map((pipeline) => {
       const state = pipelineStateLabel(pipeline.details.status)

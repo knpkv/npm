@@ -220,7 +220,8 @@
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-field);
   gap: 1px;
-  grid-template-columns: repeat(8, max-content);
+  grid-auto-columns: max-content;
+  grid-auto-flow: column;
   overflow-x: auto;
   padding: var(--rly-space-4);
 }

@@ -28,10 +28,15 @@ const permissionLabel = (permission: SessionSummary["permission"]): string =>
       ? "Workspace approver"
       : permission
 
-const sessionStatus = (session: SessionSummary): string =>
-  session.revokedAt === null
-    ? `Active · last used ${DateTime.formatIso(session.lastSeenAt)}`
-    : `Revoked ${DateTime.formatIso(session.revokedAt)}`
+const sessionExpired = (session: SessionSummary, now = DateTime.nowUnsafe()): boolean =>
+  DateTime.Order(now, session.idleExpiresAt) >= 0 || DateTime.Order(now, session.absoluteExpiresAt) >= 0
+
+export const sessionStatus = (session: SessionSummary, now = DateTime.nowUnsafe()): string =>
+  session.revokedAt !== null
+    ? `Revoked ${DateTime.formatIso(session.revokedAt)}`
+    : sessionExpired(session, now)
+      ? `Expired · last used ${DateTime.formatIso(session.lastSeenAt)}`
+      : `Active · last used ${DateTime.formatIso(session.lastSeenAt)}`
 
 const copyPairingCode = async (pairingCode: string): Promise<boolean> => {
   try {
@@ -209,7 +214,7 @@ export const BrowserSessionsPanel = ({
                     {sessionStatus(session)}
                   </Text>
                 </div>
-                {canManage && !isCurrent && session.revokedAt === null ? (
+                {canManage && !isCurrent && session.revokedAt === null && !sessionExpired(session) ? (
                   <Button loading={revokingSessionId === session.sessionId} onClick={() => revoke(session.sessionId)}>
                     Revoke
                   </Button>

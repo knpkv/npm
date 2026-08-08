@@ -74,12 +74,12 @@ export const pinDirectory = Effect.fn("BlobStore.pinDirectory")(function*(
   )
   const alias = yield* resolveDescriptorAlias(fs, path, handle.fd, openedInfo, directory, "publish blob")
   const traversedAlias = yield* fs.stat(`${alias}${path.sep}.`).pipe(Effect.result)
-  // Linux permits descriptor-relative child paths. macOS exposes the same
-  // descriptor identity through /dev/fd but requires child operations to use
-  // the canonical pathname, guarded by the still-open directory handle.
-  const publicationPath = Result.isSuccess(traversedAlias) && sameIdentity(openedInfo, traversedAlias.success)
-    ? alias
-    : directory
+  if (Result.isFailure(traversedAlias) || !sameIdentity(openedInfo, traversedAlias.success)) {
+    return yield* new BlobContainmentError({
+      operation: "publish blob",
+      message: "platform cannot address children through the pinned directory descriptor"
+    })
+  }
   const assertIdentity = Effect.gen(function*() {
     const current = yield* handle.stat.pipe(Effect.result)
     const pathInfo = yield* fs.stat(directory).pipe(Effect.result)
@@ -96,7 +96,7 @@ export const pinDirectory = Effect.fn("BlobStore.pinDirectory")(function*(
     }
   })
   return {
-    path: publicationPath,
+    path: alias,
     sync: handle.sync.pipe(
       Effect.mapError((cause) => blobStoreIoError("sync pinned object directory", cause))
     ),

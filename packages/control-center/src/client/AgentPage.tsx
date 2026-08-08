@@ -8,6 +8,7 @@ import { Link, Navigate, useLocation, useOutletContext, useParams, useSearchPara
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EntityId, EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
 import { canonicalReleasePublicationTitle } from "../domain/releasePublication.js"
+import { Revision } from "../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "./BrowserSession.js"
 import { contextualReleaseAgentPath } from "./contextualAgentPath.js"
 import { presentWorkspaceConfluencePage } from "./entities/presentWorkspaceConfluencePage.js"
@@ -476,7 +477,7 @@ const ReleaseAgentComposer = ({
   </form>
 )
 
-interface ConfluencePageDraftTarget {
+export interface ConfluencePageDraftTarget {
   readonly contentState: "empty" | "lazy" | "loaded"
   readonly entityId: EntityId
   readonly markdown: string
@@ -495,22 +496,24 @@ type ConfluenceTemplateState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly templates: ReadonlyArray<ConfluenceReleaseTemplate> }
 
-const pageAwareAgentPrompt = (request: string, page: ConfluencePageDraftTarget): string => {
-  const prefix = [
+export const pageAwareAgentPrompt = (request: string, page: ConfluencePageDraftTarget): string => {
+  const header = [
     "Work on the exact synchronized Confluence page below.",
     `Page title: ${page.title}`,
     `Current revision: ${page.revision}`,
     page.contentState === "loaded"
       ? "Current safe-Markdown page body:"
-      : "The current page body was not synchronized. Draft a complete replacement body.",
-    page.contentState === "loaded" ? "" : "No current body is available.",
-    "",
-    "User request:"
+      : "The current page body was not synchronized. Draft a complete replacement body."
   ].join("\n")
-  const suffix = `\n\n${request}`
-  const availableBodyCharacters = Math.max(0, 8_000 - prefix.length - suffix.length)
+  const bodyPrefix = page.contentState === "loaded" ? "\n" : "\nNo current body is available."
+  const suffix = `\n\nUser request:\n${request}`
+  const fixedCharacters = header.length + bodyPrefix.length + suffix.length
+  // At the input limit, preserve the complete owner instruction instead of
+  // producing an invalid oversized prompt with partial page context.
+  if (fixedCharacters > 8_000) return request
+  const availableBodyCharacters = 8_000 - fixedCharacters
   const body = page.contentState === "loaded" ? page.markdown.slice(0, availableBodyCharacters) : ""
-  return `${prefix}\n${body}${suffix}`
+  return `${header}${bodyPrefix}${body}${suffix}`
 }
 
 /** Adopt only an exact synchronized Confluence page that belongs to this release. */
@@ -593,13 +596,7 @@ const ReleaseAgentRoom = ({
   useEffect(() => {
     setPublicationTitle(publicationDefaultTitle)
     setPublicationMarkdown(publicationDefaultMarkdown)
-  }, [
-    exactPage?.entityId,
-    exactPage?.revision,
-    publicationDefaultMarkdown,
-    publicationDefaultTitle,
-    release.releasePageAwareness?.state
-  ])
+  }, [exactPage?.entityId, exactPage?.revision, publicationDefaultMarkdown, publicationDefaultTitle])
 
   useEffect(() => {
     if (exactPage !== null) publicationRef.current?.scrollIntoView({ block: "start" })
@@ -744,7 +741,12 @@ const ReleaseAgentRoom = ({
       ...(updatingConfluence && exactPage === null && pageAwareness?.publicationActionId !== undefined
         ? { publicationActionId: pageAwareness.publicationActionId }
         : {}),
-      ...(publicationProvider === "confluence" && exactPage !== null ? { targetEntityId: exactPage.entityId } : {}),
+      ...(publicationProvider === "confluence" && exactPage !== null
+        ? {
+            targetEntityId: exactPage.entityId,
+            targetRevision: Revision.make(exactPage.revision)
+          }
+        : {}),
       ...(publicationProvider === "confluence" && exactPage === null && selectedTemplate !== null
         ? { templateEntityId: selectedTemplate.entityId }
         : {})

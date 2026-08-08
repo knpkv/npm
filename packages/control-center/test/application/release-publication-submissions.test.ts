@@ -6,11 +6,13 @@ import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph
 import { GovernedActionEnvelopeDigest } from "../../src/domain/governedAction/index.js"
 import { GovernedActionId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { releasePipelineApprovalReadiness } from "../../src/domain/releasePipelineApproval.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   confluenceEntityPublicationContext,
   confluencePublicationRequestContext,
   confluencePublicationRequestMatchesHistory,
+  confluenceTargetRevisionMatches,
   jiraPublicationPayloadWithinLimits,
   loadLatestConfluenceReleasePublication,
   releaseConfluenceTaskReadiness
@@ -85,7 +87,7 @@ describe("release publication submissions", () => {
     assert.isTrue(releaseConfluenceTaskReadiness(completed).ready)
   })
 
-  it("does not claim readiness from a truncated or lazy Confluence release slice", () => {
+  it("does not claim readiness from truncated, absent, or unreadable Confluence release pages", () => {
     const page = releaseWorksetFixture.entityProjections.find(
       ({ projection }) => projection.details._tag === "page"
     )
@@ -108,6 +110,16 @@ describe("release publication submissions", () => {
     const lazyReadiness = releaseConfluenceTaskReadiness(lazy)
     assert.isFalse(lazyReadiness.ready)
     assert.strictEqual(lazyReadiness.unverifiablePages, 1)
+    const deleted: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.entityId === page.projection.entityId
+          ? { ...entry, projection: { ...page.projection, entityState: "deleted" } }
+          : entry
+      )
+    }
+    assert.isFalse(releaseConfluenceTaskReadiness(deleted).ready)
+    assert.strictEqual(releaseConfluenceTaskReadiness(deleted).unverifiablePages, 1)
     assert.isFalse(releaseConfluenceTaskReadiness({ ...releaseWorksetFixture, truncated: true }).ready)
   })
 
@@ -223,6 +235,11 @@ describe("release publication submissions", () => {
     }, history))
   })
 
+  it("rejects an exact-page update when the reviewed provider revision is stale", () => {
+    assert.isTrue(confluenceTargetRevisionMatches(Revision.make("7"), Revision.make("7")))
+    assert.isFalse(confluenceTargetRevisionMatches(Revision.make("8"), Revision.make("7")))
+  })
+
   it("adopts any explicitly selected related page while preserving a matching page predecessor", () => {
     const target = {
       pageId: "42",
@@ -240,7 +257,7 @@ describe("release publication submissions", () => {
         publication: target
       }
     )
-    assert.isTrue(
+    assert.deepStrictEqual(
       confluenceEntityPublicationContext(
         {
           hasBlockingPublication: true,
@@ -253,7 +270,12 @@ describe("release publication submissions", () => {
           }
         },
         target
-      ).historyMatches
+      ),
+      {
+        historyMatches: true,
+        predecessorPublicationActionId: PUBLICATION_ACTION_ID,
+        publication: target
+      }
     )
     assert.deepStrictEqual(
       confluenceEntityPublicationContext(

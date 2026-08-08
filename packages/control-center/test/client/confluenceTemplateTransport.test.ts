@@ -85,4 +85,32 @@ describe("Confluence template transport", () => {
       title: "Components release template"
     })])
   })
+
+  it("keeps valid templates when a summarized page disappears during hydration", async () => {
+    const disappearedId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000098")
+    const load = makeConfluenceTemplateLoader({
+      list: async () => [
+        { ...summarizedPage, entityId: disappearedId, title: "Old release template" },
+        summarizedPage
+      ],
+      load: async (entityId) => {
+        if (entityId === disappearedId) throw { _tag: "NotFoundApiError" }
+        return exactPage
+      }
+    })
+
+    await expect(load(new AbortController().signal)).resolves.toEqual([
+      expect.objectContaining({ entityId: pageProjection.entityId })
+    ])
+  })
+
+  it("still rejects systemic template hydration failures", async () => {
+    const failure = new Error("connection unavailable")
+    const load = makeConfluenceTemplateLoader({
+      list: async () => [summarizedPage],
+      load: async () => Promise.reject(failure)
+    })
+
+    await expect(load(new AbortController().signal)).rejects.toBe(failure)
+  })
 })

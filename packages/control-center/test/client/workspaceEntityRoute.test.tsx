@@ -40,7 +40,7 @@ import { confluencePageDraftTarget } from "../../src/client/AgentPage.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
-import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
+import { confluenceEditHref, WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import {
   type ClockifyActionSubmissionTransport,
@@ -52,6 +52,15 @@ import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntity
 import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
+
+describe("Confluence edit links", () => {
+  it("derives an exact HTTPS editor and rejects executable source schemes", () => {
+    expect(confluenceEditHref("https://example.test/wiki/spaces/SD/pages/42/Report", "42")).toBe(
+      "https://example.test/wiki/spaces/SD/pages/edit-v2/42"
+    )
+    expect(confluenceEditHref("javascript://host/wiki/spaces/SD/pages/42", "42")).toBeNull()
+  })
+})
 
 const encodedWorkset = Schema.encodeSync(ReleaseDeliveryGraphInspection)(releaseWorksetFixture)
 const projectionEntry = encodedWorkset.entityProjections[0]

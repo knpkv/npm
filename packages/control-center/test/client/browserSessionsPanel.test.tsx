@@ -6,9 +6,10 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { IssueBrowserPairingCodeResponse, PairingCode, SessionSummary } from "../../src/api/session.js"
-import { BrowserSessionsPanel } from "../../src/client/settings/BrowserSessionsPanel.js"
+import { BrowserSessionsPanel, sessionStatus } from "../../src/client/settings/BrowserSessionsPanel.js"
 import type { BrowserSessionAdministrationTransport } from "../../src/client/settings/browserSessionTransport.js"
 import { PersonId, SessionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -19,7 +20,7 @@ const personId = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-0000000004
 const sessionTimestamps = {
   createdAt: "2026-08-07T10:00:00.000Z",
   lastSeenAt: "2026-08-07T10:05:00.000Z",
-  idleExpiresAt: "2026-08-07T22:05:00.000Z",
+  idleExpiresAt: "2026-08-09T22:05:00.000Z",
   absoluteExpiresAt: "2026-09-06T10:00:00.000Z",
   revokedAt: null
 }
@@ -57,6 +58,14 @@ const mount = async (element: ReactElement): Promise<HTMLElement> => {
 }
 
 describe("browser sessions panel", () => {
+  it("gives revocation precedence and distinguishes expired sessions from active ones", () => {
+    const activeNow = Schema.decodeSync(UtcTimestamp)("2026-08-07T11:00:00.000Z")
+    const expiredNow = Schema.decodeSync(UtcTimestamp)("2026-08-10T11:00:00.000Z")
+    expect(sessionStatus(secondSession, activeNow)).toContain("Active")
+    expect(sessionStatus(secondSession, expiredNow)).toContain("Expired")
+    expect(sessionStatus({ ...secondSession, revokedAt: secondSession.lastSeenAt }, expiredNow)).toContain("Revoked")
+  })
+
   it("adds another browser and revokes only the selected independent session", async () => {
     const issuePairingCode = vi.fn<BrowserSessionAdministrationTransport["issuePairingCode"]>(() =>
       Promise.resolve(issued)

@@ -4,6 +4,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import type { ReleasePublicationProvider } from "../../api/agent.js"
 import type { EntityId, GovernedActionId, ReleaseId } from "../../domain/identifiers.js"
+import type { Revision } from "../../domain/sourceRevision.js"
 import type { ReleaseAgentTurn } from "../AgentPage.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
@@ -15,6 +16,8 @@ export const submitBrowserReleasePublication = (input: {
   readonly publicationActionId?: GovernedActionId
   readonly templateEntityId?: EntityId
   readonly targetEntityId?: EntityId
+  readonly targetRevision?: Revision
+  readonly signal?: AbortSignal
 }): Promise<{ readonly actionId: string; readonly state: string }> =>
   Effect.runPromise(
     Effect.gen(function*() {
@@ -30,10 +33,12 @@ export const submitBrowserReleasePublication = (input: {
             publicationActionId: input.publicationActionId
           }),
           ...(input.templateEntityId === undefined ? {} : { templateEntityId: input.templateEntityId }),
-          ...(input.targetEntityId === undefined ? {} : { targetEntityId: input.targetEntityId })
+          ...(input.targetEntityId === undefined ? {} : { targetEntityId: input.targetEntityId }),
+          ...(input.targetRevision === undefined ? {} : { targetRevision: input.targetRevision })
         }
       })
-    }).pipe(Effect.provide(FetchHttpClient.layer))
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+    input.signal === undefined ? undefined : { signal: input.signal }
   )
 
 class ReleaseAgentProtocolError extends Data.TaggedError("ReleaseAgentProtocolError") {}

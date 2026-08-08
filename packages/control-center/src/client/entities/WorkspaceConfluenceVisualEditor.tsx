@@ -1,8 +1,9 @@
 import { Button, Field, StatePanel, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useEffect, useRef, useState } from "react"
+import { memo, type ReactElement, useEffect, useRef, useState } from "react"
 
 import type { EntityId, ReleaseId } from "../../domain/identifiers.js"
 import { confluenceTaskSummary, setConfluenceTaskChecked } from "../../domain/confluenceTasks.js"
+import { Revision } from "../../domain/sourceRevision.js"
 import { submitBrowserReleasePublication } from "../releases/releaseAgentTransport.js"
 import type { WorkspaceConfluencePagePresentation } from "./presentWorkspaceConfluencePage.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
@@ -17,6 +18,12 @@ type EditorState =
 
 const markdownEscape = (value: string): string => value.replace(/([\\`*_[\]<>])/gu, "\\$1")
 const isElementNode = (node: Node): node is Element => node.nodeType === Node.ELEMENT_NODE
+const isCheckboxInput = (node: Element): node is Element & { readonly checked: boolean } =>
+  node.tagName.toLocaleLowerCase("en-US") === "input" &&
+  "type" in node &&
+  node.type === "checkbox" &&
+  "checked" in node &&
+  typeof node.checked === "boolean"
 
 const inlineMarkdown = (node: Node): string => {
   if (node.nodeType === Node.TEXT_NODE) return markdownEscape(node.textContent ?? "")
@@ -45,13 +52,24 @@ const inlineMarkdown = (node: Node): string => {
   }
 }
 
-const listMarkdown = (element: Element, ordered: boolean): string =>
+const listMarkdown = (element: Element, ordered: boolean, depth = 0): string =>
   [...element.children]
     .filter((child) => child.tagName.toLocaleLowerCase("en-US") === "li")
     .map((child, index) => {
-      const task = child.querySelector<HTMLInputElement>('input[type="checkbox"]')
-      const marker = task === null ? "" : `[${task.checked ? "x" : " "}] `
-      return `${ordered ? `${String(index + 1)}.` : "-"} ${marker}${inlineMarkdown(child).trim()}`
+      const task = [...child.children].find(isCheckboxInput)
+      const marker = task === undefined ? "" : `[${task.checked ? "x" : " "}] `
+      const nestedLists = [...child.children].filter((node) => /^(?:ol|ul)$/u.test(node.tagName.toLowerCase()))
+      const label = [...child.childNodes]
+        .filter((node) => !isElementNode(node) || !/^(?:ol|ul)$/u.test(node.tagName.toLowerCase()))
+        .map(inlineMarkdown)
+        .join("")
+        .trim()
+      const indent = "  ".repeat(depth)
+      const nested = nestedLists.map((node) => listMarkdown(node, node.tagName.toLowerCase() === "ol", depth + 1))
+      return [
+        `${indent}${ordered ? `${String(index + 1)}.` : "-"} ${task === undefined ? "" : marker}${label}`,
+        ...nested
+      ].join("\n")
     })
     .join("\n")
 
@@ -77,8 +95,12 @@ const blockMarkdown = (node: Node): string => {
         .split("\n")
         .map((line) => `> ${line}`)
         .join("\n")
-    case "pre":
-      return `\`\`\`\n${node.textContent ?? ""}\n\`\`\``
+    case "pre": {
+      const content = node.textContent ?? ""
+      const longestFence = Math.max(0, ...[...content.matchAll(/`+/gu)].map(([marker]) => marker.length))
+      const fence = "`".repeat(Math.max(3, longestFence + 1))
+      return `${fence}\n${content}\n${fence}`
+    }
     case "hr":
       return "---"
     case "p":
@@ -112,6 +134,19 @@ export const confluenceEditorMarkdown = (root: HTMLElement): string =>
 const runEditorCommand = (command: string, value?: string): void => {
   document.execCommand(command, false, value)
 }
+
+/** Accept only ordinary web links from the visual-editor prompt. */
+export const safeConfluenceEditorLinkHref = (href: string): string | null => {
+  const parsed = URL.parse(href)
+  return parsed !== null && (parsed.protocol === "http:" || parsed.protocol === "https:") ? parsed.href : null
+}
+
+export const releasePublicationSucceeded = (state: string): boolean => state === "succeeded"
+
+const InitialEditorBody = memo(
+  ({ markdown }: { readonly markdown: string }): ReactElement => <WorkspaceRichText value={markdown} />,
+  () => true
+)
 
 export interface WorkspaceConfluenceVisualEditorProps {
   readonly canEdit: boolean
@@ -162,10 +197,15 @@ export const WorkspaceConfluenceVisualEditor = ({
       provider: "confluence",
       title,
       markdown,
-      targetEntityId: entityId
+      targetEntityId: entityId,
+      targetRevision: Revision.make(page.revision),
+      signal: AbortSignal.timeout(30_000)
     })
       .then(
-        () => onSaved(),
+        (result) => {
+          if (releasePublicationSucceeded(result.state)) onSaved()
+          else setTaskSaveFailed(true)
+        },
         () => setTaskSaveFailed(true)
       )
       .finally(() => setTaskLineSaving(null))
@@ -186,11 +226,17 @@ export const WorkspaceConfluenceVisualEditor = ({
       provider: "confluence",
       title: normalizedTitle,
       markdown,
-      targetEntityId: entityId
+      targetEntityId: entityId,
+      targetRevision: Revision.make(page.revision),
+      signal: AbortSignal.timeout(30_000)
     }).then(
-      () => {
-        setState({ _tag: "saved" })
-        onSaved()
+      (result) => {
+        if (releasePublicationSucceeded(result.state)) {
+          setState({ _tag: "saved" })
+          onSaved()
+        } else {
+          setState({ _tag: "failed" })
+        }
       },
       () => setState({ _tag: "failed" })
     )
@@ -267,6 +313,9 @@ export const WorkspaceConfluenceVisualEditor = ({
           {!canEdit ? (
             <Text tone="secondary">Current source data and workspace-owner access are required to edit.</Text>
           ) : null}
+          {canEdit && releaseId === null ? (
+            <Text tone="secondary">Link this page to a release before editing it in Relay.</Text>
+          ) : null}
         </div>
       </div>
     )
@@ -341,7 +390,8 @@ export const WorkspaceConfluenceVisualEditor = ({
         <button
           onClick={() => {
             const href = window.prompt("Link address")
-            if (href !== null && URL.canParse(href)) runEditorCommand("createLink", href)
+            const safeHref = href === null ? null : safeConfluenceEditorLinkHref(href)
+            if (safeHref !== null) runEditorCommand("createLink", safeHref)
           }}
           type="button"
         >
@@ -350,13 +400,14 @@ export const WorkspaceConfluenceVisualEditor = ({
       </div>
       <div
         aria-label="Confluence page body"
+        aria-multiline="true"
         className={`${styles.editorCanvas} ${styles.richText}`}
         contentEditable={!busy}
         ref={editorRef}
         role="textbox"
         suppressContentEditableWarning
       >
-        <WorkspaceRichText value={page.content ?? ""} />
+        <InitialEditorBody markdown={page.content ?? ""} />
       </div>
       {state._tag === "failed" ? (
         <StatePanel

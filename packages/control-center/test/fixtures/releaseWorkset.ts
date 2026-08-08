@@ -147,7 +147,14 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
       entityType: "page",
       displayKey: "PAY/RUNBOOK-12",
       title: "Payments release runbook",
-      details: { _tag: "page", spaceKey: "PAY", revision: "12", status: "current" }
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "12",
+        status: "current",
+        contentState: "loaded",
+        content: { representation: "safe-markdown", markdown: "Release runbook" }
+      }
     })
   ],
   nodes: [

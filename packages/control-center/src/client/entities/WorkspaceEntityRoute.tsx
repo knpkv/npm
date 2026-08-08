@@ -118,7 +118,7 @@ const PrincipalAction = ({
 export const confluenceEditHref = (sourceHref: string | null, pageId: string): string | null => {
   if (sourceHref === null) return null
   const source = URL.parse(sourceHref)
-  if (source === null) return null
+  if (source === null || source.protocol !== "https:") return null
   const match = /^\/wiki\/spaces\/([^/]+)\/pages\/([^/]+)(?:\/|$)/u.exec(source.pathname)
   if (match?.[1] === undefined || match[2] !== encodeURIComponent(pageId)) return null
   source.pathname = `/wiki/spaces/${match[1]}/pages/edit-v2/${encodeURIComponent(pageId)}`
