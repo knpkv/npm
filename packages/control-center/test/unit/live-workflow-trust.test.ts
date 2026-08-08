@@ -27,22 +27,48 @@ const fieldRecord = (source: Record<string, unknown>, key: string, label: string
   return value
 }
 
-const fieldArray = (source: Record<string, unknown>, key: string, label: string): ReadonlyArray<unknown> => {
+const fieldArray = (source: Record<string, unknown>, key: string, label: string): Array<unknown> => {
   const value = source[key]
 
   if (!Array.isArray(value)) throw new Error(`${label}.${key} should be an array`)
   return value
 }
 
-const oidcTrustStatement = (template: Record<string, unknown>) => {
+const liveIntegrationTrustStatementArray = (template: Record<string, unknown>) => {
   const resources = fieldRecord(template, "Resources", "live AWS template")
   const role = fieldRecord(resources, "LiveIntegrationRole", "live AWS template.Resources")
   const properties = fieldRecord(role, "Properties", "LiveIntegrationRole")
   const assumeRolePolicy = fieldRecord(properties, "AssumeRolePolicyDocument", "LiveIntegrationRole.Properties")
-  const statement = fieldArray(assumeRolePolicy, "Statement", "AssumeRolePolicyDocument")[0]
 
-  if (!isRecord(statement)) throw new Error("LiveIntegrationRole trust statement should be a mapping")
-  return statement
+  return fieldArray(assumeRolePolicy, "Statement", "AssumeRolePolicyDocument")
+}
+
+const liveIntegrationTrustStatements = (template: Record<string, unknown>) =>
+  liveIntegrationTrustStatementArray(template).map((statement, index) => {
+    if (!isRecord(statement)) throw new Error(`LiveIntegrationRole trust statement ${index} should be a mapping`)
+    return statement
+  })
+
+const hasWebIdentityAction = (statement: Record<string, unknown>) => {
+  if (statement.Action === "sts:AssumeRoleWithWebIdentity") return true
+  if (Array.isArray(statement.Action)) return statement.Action.includes("sts:AssumeRoleWithWebIdentity")
+  return false
+}
+
+const assertConstrainedOidcTrust = (template: Record<string, unknown>) => {
+  const statements = liveIntegrationTrustStatements(template).filter(hasWebIdentityAction)
+
+  expect(statements).toHaveLength(1)
+
+  for (const statement of statements) {
+    const condition = fieldRecord(statement, "Condition", "LiveIntegrationRole trust statement")
+    const stringEquals = fieldRecord(condition, "StringEquals", "LiveIntegrationRole trust statement.Condition")
+
+    expect(statement.Action).toBe("sts:AssumeRoleWithWebIdentity")
+    expect(stringEquals["token.actions.githubusercontent.com:aud"]).toBe("sts.amazonaws.com")
+    expect(stringEquals["token.actions.githubusercontent.com:sub"]).toBe(trustedOidcSubject)
+    expect(stringEquals["token.actions.githubusercontent.com:sub"]).not.toBe("repo:knpkv/npm:ref:refs/heads/main")
+  }
 }
 
 const workflowJob = (workflowSource: string, name: string) => {
@@ -114,14 +140,20 @@ describe("Control Center live workflow trust boundary", () => {
     Effect.gen(function*() {
       const { awsTemplate, packageReadme, workflowReadme } = yield* loadContracts
       const template = parseRecord(awsTemplate, "live AWS template")
-      const statement = oidcTrustStatement(template)
-      const condition = fieldRecord(statement, "Condition", "LiveIntegrationRole trust statement")
-      const stringEquals = fieldRecord(condition, "StringEquals", "LiveIntegrationRole trust statement.Condition")
+      const unsafeAdditionalTrustStatement = parseRecord(awsTemplate, "live AWS template fixture")
+      const unsafeStatements = liveIntegrationTrustStatementArray(unsafeAdditionalTrustStatement)
+      unsafeStatements.push({
+        Action: "sts:AssumeRoleWithWebIdentity",
+        Condition: {
+          StringEquals: {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub": "repo:knpkv/npm:*"
+          }
+        }
+      })
 
-      expect(statement.Action).toBe("sts:AssumeRoleWithWebIdentity")
-      expect(stringEquals["token.actions.githubusercontent.com:aud"]).toBe("sts.amazonaws.com")
-      expect(stringEquals["token.actions.githubusercontent.com:sub"]).toBe(trustedOidcSubject)
-      expect(stringEquals["token.actions.githubusercontent.com:sub"]).not.toBe("repo:knpkv/npm:ref:refs/heads/main")
+      expect(() => assertConstrainedOidcTrust(unsafeAdditionalTrustStatement)).toThrow()
+      assertConstrainedOidcTrust(template)
       expect(packageReadme).toContain("deployment branch policy limited to `main`")
       expect(packageReadme).toContain("pin the AWS role trust policy to the repository and environment OIDC subject")
       expect(packageReadme).not.toContain("repository, `main` ref, and environment OIDC subject")
