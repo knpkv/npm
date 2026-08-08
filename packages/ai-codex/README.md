@@ -78,4 +78,8 @@ pnpm --filter @knpkv/ai-codex test:smoke:real
 ```
 
 This is deliberately separate from `pnpm test`. Once invoked it does not skip
-when Codex or authentication is unavailable.
+when Codex or authentication is unavailable. The smoke suite pins the reviewed
+Codex CLI version and verifies that prompt-only turns cannot emit web-search or
+local-image tool events. Prompt-only invocations disable those non-feature tools
+with `web_search="disabled"` and `tools.view_image=false` in addition to the
+negotiated feature denylist.

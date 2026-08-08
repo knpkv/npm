@@ -29,25 +29,27 @@ const fakeProcessLayer = (
       calls.push(command)
       const isFeatureInventory = ChildProcess.isStandardCommand(command) && command.args.join(" ") === "features list"
       const stdout = Stream.make(
-        isFeatureInventory ? options.featureInventory ?? completeFeatureInventory : options.stdout
+        isFeatureInventory ? (options.featureInventory ?? completeFeatureInventory) : options.stdout
       ).pipe(Stream.encodeText)
       const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
-      return Effect.succeed(ChildProcessSpawner.makeHandle({
-        all: Stream.concat(stdout, stderr),
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(
-          isFeatureInventory ? options.featureExitCode ?? 0 : options.exitCode ?? 0
-        )),
-        getInputFd: () => Sink.drain,
-        getOutputFd: () => Stream.empty,
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
-        pid: ChildProcessSpawner.ProcessId(42),
-        reref: Effect.void,
-        stderr,
-        stdin: Sink.drain,
-        stdout,
-        unref: Effect.succeed(Effect.void)
-      }))
+      return Effect.succeed(
+        ChildProcessSpawner.makeHandle({
+          all: Stream.concat(stdout, stderr),
+          exitCode: Effect.succeed(
+            ChildProcessSpawner.ExitCode(isFeatureInventory ? (options.featureExitCode ?? 0) : (options.exitCode ?? 0))
+          ),
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          pid: ChildProcessSpawner.ProcessId(42),
+          reref: Effect.void,
+          stderr,
+          stdin: Sink.drain,
+          stdout,
+          unref: Effect.succeed(Effect.void)
+        })
+      )
     })
   )
 
@@ -76,11 +78,9 @@ describe("model", () => {
   it.effect("generates text with safe bounded defaults", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
-      const response = yield* provideTestRuntime(
-        LanguageModel.generateText({ prompt: "Say hello" }),
-        calls,
-        { stdout: successTranscript("hello") }
-      )
+      const response = yield* provideTestRuntime(LanguageModel.generateText({ prompt: "Say hello" }), calls, {
+        stdout: successTranscript("hello")
+      })
 
       expect(response.text).toBe("hello")
       expect(response.usage.inputTokens.total).toBe(7)
@@ -109,10 +109,12 @@ describe("model", () => {
         .join("\n")
       yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
         Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
-        Effect.provide(fakeProcessLayer(calls, {
-          featureInventory: olderInventory,
-          stdout: successTranscript("clean")
-        })),
+        Effect.provide(
+          fakeProcessLayer(calls, {
+            featureInventory: olderInventory,
+            stdout: successTranscript("clean")
+          })
+        ),
         Effect.provide(NodeFileSystem.layer)
       )
 
@@ -129,10 +131,12 @@ describe("model", () => {
       const calls: Array<ChildProcess.Command> = []
       const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
         Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
-        Effect.provide(fakeProcessLayer(calls, {
-          featureInventory: `${completeFeatureInventory}\nfuture_host_tool stable true`,
-          stdout: successTranscript("must not run")
-        })),
+        Effect.provide(
+          fakeProcessLayer(calls, {
+            featureInventory: `${completeFeatureInventory}\nfuture_host_tool stable true`,
+            stdout: successTranscript("must not run")
+          })
+        ),
         Effect.provide(NodeFileSystem.layer),
         Effect.exit
       )
@@ -146,11 +150,13 @@ describe("model", () => {
       const calls: Array<ChildProcess.Command> = []
       const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
         Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
-        Effect.provide(fakeProcessLayer(calls, {
-          featureExitCode: 1,
-          featureInventory: completeFeatureInventory.split("\n").slice(0, 4).join("\n"),
-          stdout: successTranscript("must not run")
-        })),
+        Effect.provide(
+          fakeProcessLayer(calls, {
+            featureExitCode: 1,
+            featureInventory: completeFeatureInventory.split("\n").slice(0, 4).join("\n"),
+            stdout: successTranscript("must not run")
+          })
+        ),
         Effect.provide(NodeFileSystem.layer),
         Effect.exit
       )
@@ -164,10 +170,12 @@ describe("model", () => {
       const calls: Array<ChildProcess.Command> = []
       const exit = yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
         Effect.provide(model({ cwd: "/workspace", maxOutputBytes: 32, promptOnly: true })),
-        Effect.provide(fakeProcessLayer(calls, {
-          featureInventory: completeFeatureInventory,
-          stdout: successTranscript("must not run")
-        })),
+        Effect.provide(
+          fakeProcessLayer(calls, {
+            featureInventory: completeFeatureInventory,
+            stdout: successTranscript("must not run")
+          })
+        ),
         Effect.provide(NodeFileSystem.layer),
         Effect.exit
       )
@@ -193,17 +201,34 @@ describe("model", () => {
         expect(command.args).toContain("--ignore-rules")
         expect(command.args).toContain("project_doc_max_bytes=0")
         expect(command.args).toContain("shell_environment_policy.inherit=none")
+        expect(command.args).toContain("web_search=\"disabled\"")
+        expect(command.args).toContain("tools.view_image=false")
         for (const feature of PROMPT_ONLY_DISABLED_FEATURES) {
           const index = command.args.indexOf(feature)
           expect(index).toBeGreaterThan(0)
           expect(command.args[index - 1]).toBe("--disable")
         }
-        expect(PROMPT_ONLY_DISABLED_FEATURES).toEqual(expect.arrayContaining([
-          "hooks",
-          "plugins",
-          "skill_mcp_dependency_install",
-          "skill_search"
-        ]))
+        expect(PROMPT_ONLY_DISABLED_FEATURES).toEqual(
+          expect.arrayContaining(["hooks", "plugins", "skill_mcp_dependency_install", "skill_search"])
+        )
+      }
+    }))
+
+  it.effect("keeps normal turns eligible for configured Codex tools", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Review the workspace" }).pipe(
+        Effect.provide(model({ cwd: "/workspace" })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("clean") })),
+        Effect.provide(NodeFileSystem.layer)
+      )
+
+      expect(calls).toHaveLength(1)
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args).not.toContain("web_search=\"disabled\"")
+        expect(command.args).not.toContain("tools.view_image=false")
       }
     }))
 
@@ -230,25 +255,31 @@ describe("model", () => {
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       yield* LanguageModel.generateText({ prompt: "Say hello" }).pipe(
-        Effect.provide(model({
-          cwd: "/workspace",
-          environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
-        })),
+        Effect.provide(
+          model({
+            cwd: "/workspace",
+            environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
+          })
+        ),
         Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("hello") })),
         Effect.provide(NodeFileSystem.layer),
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-          env: {
-            AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
-            CODEX_ACCESS_TOKEN: "codex-access-token",
-            CODEX_API_KEY: "codex-api-key",
-            CODEX_HOME: "/home/reviewer/.codex",
-            CODEX_THREAD_ID: "session-canary",
-            HOME: "/home/reviewer",
-            PATH: "/reviewed/bin",
-            SENTRY_AUTH_TOKEN: "vendor-canary",
-            XDG_CONFIG_HOME: "/home/reviewer/.config"
-          }
-        })))
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
+                CODEX_ACCESS_TOKEN: "codex-access-token",
+                CODEX_API_KEY: "codex-api-key",
+                CODEX_HOME: "/home/reviewer/.codex",
+                CODEX_THREAD_ID: "session-canary",
+                HOME: "/home/reviewer",
+                PATH: "/reviewed/bin",
+                SENTRY_AUTH_TOKEN: "vendor-canary",
+                XDG_CONFIG_HOME: "/home/reviewer/.config"
+              }
+            })
+          )
+        )
       )
 
       const command = calls[0]
@@ -294,20 +325,26 @@ describe("model", () => {
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       yield* LanguageModel.streamText({ prompt: "Say hello" }).pipe(
-        Stream.provide(model({
-          cwd: "/workspace",
-          environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
-        })),
+        Stream.provide(
+          model({
+            cwd: "/workspace",
+            environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
+          })
+        ),
         Stream.provide(fakeProcessLayer(calls, { stdout: successTranscript("hello") })),
         Stream.provide(NodeFileSystem.layer),
-        Stream.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-          env: {
-            AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
-            CODEX_API_KEY: "codex-api-key",
-            HOME: "/home/reviewer",
-            PATH: "/reviewed/bin"
-          }
-        }))),
+        Stream.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
+                CODEX_API_KEY: "codex-api-key",
+                HOME: "/home/reviewer",
+                PATH: "/reviewed/bin"
+              }
+            })
+          )
+        ),
         Stream.runDrain
       )
 
@@ -329,9 +366,7 @@ describe("model", () => {
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       const failingProvider = ConfigProvider.make(() =>
-        Effect.fail(
-          new ConfigProvider.SourceError({ message: "environment unavailable" })
-        )
+        Effect.fail(new ConfigProvider.SourceError({ message: "environment unavailable" }))
       )
       const error = yield* LanguageModel.generateText({ prompt: "Say hello" }).pipe(
         Effect.provide(model({ cwd: "/workspace" })),
@@ -353,10 +388,12 @@ describe("model", () => {
       const calls: Array<ChildProcess.Command> = []
       const exit = yield* provideTestRuntime(
         LanguageModel.generateText({
-          prompt: [{
-            content: [{ data: "aGVsbG8=", mediaType: "text/plain", type: "file" }],
-            role: "user"
-          }]
+          prompt: [
+            {
+              content: [{ data: "aGVsbG8=", mediaType: "text/plain", type: "file" }],
+              role: "user"
+            }
+          ]
         }),
         calls,
         { stdout: successTranscript("unused") }

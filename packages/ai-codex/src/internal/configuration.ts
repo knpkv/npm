@@ -150,9 +150,7 @@ const reviewedChildEnvironment = Config.all({
       ? { CODEX_CA_CERTIFICATE: configured.codexCaCertificate.value }
       : {}),
     ...(Option.isSome(configured.codexHome) ? { CODEX_HOME: configured.codexHome.value } : {}),
-    ...(Option.isSome(configured.codexSqliteHome)
-      ? { CODEX_SQLITE_HOME: configured.codexSqliteHome.value }
-      : {}),
+    ...(Option.isSome(configured.codexSqliteHome) ? { CODEX_SQLITE_HOME: configured.codexSqliteHome.value } : {}),
     ...(Option.isSome(configured.home) ? { HOME: configured.home.value } : {}),
     ...(Option.isSome(configured.path) ? { PATH: configured.path.value } : {}),
     ...(Option.isSome(configured.rustLog) ? { RUST_LOG: configured.rustLog.value } : {}),
@@ -202,9 +200,7 @@ export const normalizeOptions = (
       access: options.access ?? "read-only",
       cwd: options.cwd,
       environment: {
-        ...yield* reviewedChildEnvironment.pipe(
-          Effect.mapError((cause) => configurationFailure(method, cause))
-        ),
+        ...(yield* reviewedChildEnvironment.pipe(Effect.mapError((cause) => configurationFailure(method, cause)))),
         ...options.environment
       },
       executable: options.executable ?? DEFAULT_EXECUTABLE,
@@ -224,11 +220,7 @@ export const validatePrompt = Effect.fn("CodexConfiguration.validatePrompt")(fun
 ) {
   const bytes = textEncoder.encode(prompt).byteLength
   if (bytes > maximumBytes) {
-    return yield* invalidRequest(
-      method,
-      "prompt",
-      `must not exceed ${maximumBytes} UTF-8 bytes`
-    )
+    return yield* invalidRequest(method, "prompt", `must not exceed ${maximumBytes} UTF-8 bytes`)
   }
   return prompt
 })
@@ -238,14 +230,7 @@ export const makeArguments = (
   schemaFile: string | undefined,
   promptOnlyDisabledFeatures: ReadonlyArray<string> = []
 ): ReadonlyArray<string> => {
-  const args = [
-    "exec",
-    "--json",
-    "--ephemeral",
-    "--sandbox",
-    options.access,
-    "--skip-git-repo-check"
-  ]
+  const args = ["exec", "--json", "--ephemeral", "--sandbox", options.access, "--skip-git-repo-check"]
   if (options.promptOnly) {
     args.push(
       "--ignore-user-config",
@@ -253,7 +238,11 @@ export const makeArguments = (
       "-c",
       "project_doc_max_bytes=0",
       "-c",
-      "shell_environment_policy.inherit=none"
+      "shell_environment_policy.inherit=none",
+      "-c",
+      "web_search=\"disabled\"",
+      "-c",
+      "tools.view_image=false"
     )
     for (const feature of promptOnlyDisabledFeatures) {
       args.push("--disable", feature)
