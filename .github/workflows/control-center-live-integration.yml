@@ -14,6 +14,7 @@ permissions: {}
 jobs:
   prepare-live-runner:
     name: Build sealed live runner
+    if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -60,6 +61,7 @@ jobs:
 
   live-provider-journey:
     name: Four-provider real server journey
+    if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'
     needs: prepare-live-runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
