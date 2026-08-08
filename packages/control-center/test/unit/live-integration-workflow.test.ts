@@ -216,7 +216,7 @@ describe("Control Center live integration workflow", () => {
       )
       expect(workflow).toContain("persist-credentials: false")
       expect(workflow).toContain(
-        "aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885"
+        "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
       )
       expect(workflow).toContain(
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
