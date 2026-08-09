@@ -352,9 +352,13 @@ const activeCrossTabSynchronizationLease = async (
   return remainingMillis <= 0 ? null : { remainingMillis, synchronization }
 }
 
-const waitForCrossTabSynchronization = async (pluginConnectionId: PluginConnectionId): Promise<void> => {
+const waitForCrossTabSynchronization = async (
+  pluginConnectionId: PluginConnectionId,
+  registrationLifetime: AbortSignal
+): Promise<void> => {
   const storageKey = automaticSynchronizationStorageKey(pluginConnectionId)
   while (true) {
+    if (registrationLifetime.aborted) return
     const lease = await activeCrossTabSynchronizationLease(storageKey)
     if (lease === null) return
     const lifetime = new AbortController()
@@ -365,12 +369,15 @@ const waitForCrossTabSynchronization = async (pluginConnectionId: PluginConnecti
         finished = true
         lifetime.abort()
         window.removeEventListener("storage", storageChanged)
+        registrationLifetime.removeEventListener("abort", finish)
         resolve()
       }
       const storageChanged = (event: StorageEvent): void => {
         if (event.key === storageKey) finish()
       }
       window.addEventListener("storage", storageChanged)
+      registrationLifetime.addEventListener("abort", finish, { once: true })
+      if (registrationLifetime.aborted) finish()
       const current = readCrossTabSynchronization(storageKey)
       if (
         current?.state !== "syncing" ||
@@ -451,7 +458,7 @@ export const useOpenConfluenceSynchronization = ({
     const inFlight = pluginConnectionId === null
       ? undefined
       : automaticSynchronizationGroups.get(pluginConnectionId)?.active?.completion
-        ?? waitForCrossTabSynchronization(pluginConnectionId)
+        ?? waitForCrossTabSynchronization(pluginConnectionId, lifetime)
     if (inFlight === undefined) void synchronize()
     else {
       void inFlight.then(() => {

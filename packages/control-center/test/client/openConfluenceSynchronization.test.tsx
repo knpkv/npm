@@ -522,6 +522,45 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
   })
 
+  it("cancels a cross-tab wait when its controller unmounts", async () => {
+    vi.useFakeTimers()
+    setDocumentVisibility("hidden")
+    localStorage.setItem(
+      `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
+      JSON.stringify({
+        ownerKey: "other-tab",
+        recordedAt: await currentTimeMillis(),
+        sessionExpired: false,
+        state: "syncing"
+      })
+    )
+    const addedListeners = vi.spyOn(window, "addEventListener")
+    const removedListeners = vi.spyOn(window, "removeEventListener")
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness action="now" onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+    const storageListeners = addedListeners.mock.calls.filter(([event]) => event === "storage")
+    expect(storageListeners).toHaveLength(2)
+    const waitingListener = storageListeners[1]?.[1]
+    expect(waitingListener).toBeTypeOf("function")
+    expect(vi.getTimerCount()).toBe(2)
+
+    await act(async () => root?.unmount())
+    root = null
+
+    expect(removedListeners).toHaveBeenCalledWith("storage", waitingListener)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(transport.synchronize).not.toHaveBeenCalled()
+  })
+
   it("refreshes after an orphaned cross-tab lease expires", async () => {
     setDocumentVisibility("hidden")
     const recordedAt = (await currentTimeMillis()) - SYNCHRONIZATION_LEASE_MILLIS - 1
