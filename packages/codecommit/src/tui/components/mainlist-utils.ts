@@ -5,6 +5,7 @@
  *
  * @internal
  */
+import { pullRequestSelectionKey } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
 
 export interface ParsedSettingsFilter {
@@ -34,11 +35,11 @@ export const applySettingsFilter = (items: ReadonlyArray<ListItem>, filter: stri
 export const findStableIndex = (
   items: ReadonlyArray<ListItem>,
   view: string,
-  selectedPrId: string | null,
+  selectedPrKey: string | null,
   selectedIndex: number
 ): number => {
-  if ((view === "prs" || view === "details") && selectedPrId) {
-    const idx = items.findIndex((item) => item.type === "pr" && item.pr.id === selectedPrId)
+  if ((view === "prs" || view === "details") && selectedPrKey) {
+    const idx = items.findIndex((item) => item.type === "pr" && pullRequestSelectionKey(item.pr) === selectedPrKey)
     if (idx !== -1) return idx
   }
   if (selectedIndex >= items.length) return Math.max(0, items.length - 1)
@@ -73,8 +74,8 @@ export const computeItemPositions = (items: ReadonlyArray<ListItem>): ReadonlyAr
     if (item.type === "header") {
       height = i === 0 ? 2 : 3
     } else if (item.type === "pr") {
-      const descLines = item.pr.description ? Math.min(item.pr.description.split("\n").length, 5) : 0
-      height = 1 + 1 + descLines + 1 + 1
+      const hasDescription = item.pr.description?.split("\n").some((line) => line.trim().length > 0) ?? false
+      height = hasDescription ? 4 : 3
     }
     y += height
     positions.push({ start, end: y })

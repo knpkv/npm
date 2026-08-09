@@ -32,6 +32,14 @@ export interface PullRequestWorkspaceIdentity {
   readonly repositoryName: string
 }
 
+/** Collision-safe selection key for provider-local pull-request numbers. */
+export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
+  JSON.stringify([pr.account.profile, pr.account.region, pr.repositoryName, pr.id])
+
+/** Exact-head path accepted by local editors; deleted files have no head path. */
+export const changedFileHeadPath = (file: ReadClient.CodeCommitChangedFile | null): string | null =>
+  file?.after?.path ?? null
+
 export type WorkspaceActionPhase = "idle" | "preflight" | "ready" | "running-review" | "running-worktree" | "terminal"
 
 export type WorkspaceLifecycleTransition =
@@ -184,7 +192,9 @@ export const detailsKeyIntent = (input: {
     input.conversationRunning !== true &&
     input.keyName === "v" &&
     input.shifted !== true
-  ) return "open-vscode"
+  ) {
+    return "open-vscode"
+  }
   if (input.tab === "diff" && !input.actionCancelable && input.keyName === "g") return "choose-review-skills"
   if (input.tab === "diff" && input.keyName === "k") return "previous-file"
   if (input.tab === "diff" && input.keyName === "j") return "next-file"
@@ -522,7 +532,7 @@ export const adjacentChangedFileIndex = (
   currentFileIndex: number,
   direction: -1 | 1
 ): number => {
-  const fileIndexes = rows.flatMap((row) => row._tag === "file" ? [row.fileIndex] : [])
+  const fileIndexes = rows.flatMap((row) => (row._tag === "file" ? [row.fileIndex] : []))
   if (fileIndexes.length === 0) return 0
   const currentPosition = fileIndexes.indexOf(currentFileIndex)
   if (currentPosition < 0) return fileIndexes[0] ?? 0

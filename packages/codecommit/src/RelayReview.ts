@@ -20,12 +20,7 @@ export interface RelayReviewRequest {
   readonly worktreePath: string
 }
 
-const RelayFindingPublicationTarget = Schema.Literals([
-  "description",
-  "pr-comment",
-  "file-comment",
-  "line-comment"
-])
+const RelayFindingPublicationTarget = Schema.Literals(["description", "pr-comment", "line-comment"])
 
 /** Human-selected provider surface for a reviewed finding. */
 export type RelayFindingPublicationTarget = typeof RelayFindingPublicationTarget.Type
@@ -59,10 +54,9 @@ const RelayReviewFinding = Schema.Struct({
 const RelayReviewResult = Schema.Struct({
   findings: Schema.Array(RelayReviewFinding).check(
     Schema.isMaxLength(50),
-    Schema.makeFilter(
-      (findings) => new Set(findings.map((finding) => finding.id)).size === findings.length,
-      { expected: "unique Relay finding ids" }
-    )
+    Schema.makeFilter((findings) => new Set(findings.map((finding) => finding.id)).size === findings.length, {
+      expected: "unique Relay finding ids"
+    })
   ),
   verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
 })
@@ -121,12 +115,7 @@ const RelayReviewConversationResult = Schema.Struct({
   review: RelayReviewResult
 })
 
-const RelayReviewVerificationOutcome = Schema.Literals([
-  "resolved",
-  "still-actionable",
-  "superseded",
-  "inconclusive"
-])
+const RelayReviewVerificationOutcome = Schema.Literals(["resolved", "still-actionable", "superseded", "inconclusive"])
 
 const RelayReviewVerificationResult = Schema.Struct({
   outcome: RelayReviewVerificationOutcome,
@@ -162,7 +151,6 @@ export const relayFindingPublicationLabel = (target: RelayFindingPublicationTarg
   ({
     description: "PR description",
     "pr-comment": "PR comment",
-    "file-comment": "File comment",
     "line-comment": "Line comment"
   })[target]
 
@@ -179,7 +167,7 @@ export const parseRelayReviewResult = (message: string): Option.Option<RelayRevi
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
   return decodeRelayReviewResult(trimmed).pipe(
-    Option.orElse(() => fenced === undefined ? Option.none() : decodeRelayReviewResult(fenced))
+    Option.orElse(() => (fenced === undefined ? Option.none() : decodeRelayReviewResult(fenced)))
   )
 }
 
@@ -191,7 +179,7 @@ export const parseRelayReviewConversationResult = (
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
   const decoded = decodeRelayReviewConversationResult(trimmed).pipe(
-    Option.orElse(() => fenced === undefined ? Option.none() : decodeRelayReviewConversationResult(fenced))
+    Option.orElse(() => (fenced === undefined ? Option.none() : decodeRelayReviewConversationResult(fenced)))
   )
   return Option.getOrElse(decoded, () => ({
     reply: trimmed.slice(0, 8_000) || "Relay could not decode the follow-up response.",
@@ -207,7 +195,7 @@ export const parseRelayReviewVerificationResult = (
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
   const decoded = decodeRelayReviewVerificationResult(trimmed).pipe(
-    Option.orElse(() => fenced === undefined ? Option.none() : decodeRelayReviewVerificationResult(fenced))
+    Option.orElse(() => (fenced === undefined ? Option.none() : decodeRelayReviewVerificationResult(fenced)))
   )
   return Option.getOrElse(decoded, () => ({
     outcome: "inconclusive",
@@ -236,20 +224,22 @@ export const relayFindingPublicationOptions = (
     case "general":
       return ["description", "pr-comment"]
     case "file":
-      return ["description", "pr-comment", "file-comment"]
+      return ["description", "pr-comment"]
     case "line":
-      return ["description", "pr-comment", "file-comment", "line-comment"]
+      return ["description", "pr-comment", "line-comment"]
   }
 }
+
+/** Whether the selected target can be published atomically through CodeCommit. */
+export const relayFindingCanPublishAutomatically = (target: RelayFindingPublicationTarget): boolean =>
+  target !== "description"
 
 /** Applies a human target override without manufacturing a file or line coordinate. */
 export const withRelayFindingPublicationTarget = (
   finding: RelayReviewFinding,
   target: RelayFindingPublicationTarget
 ): RelayReviewFinding =>
-  relayFindingPublicationOptions(finding).includes(target)
-    ? { ...finding, publicationTarget: target }
-    : finding
+  relayFindingPublicationOptions(finding).includes(target) ? { ...finding, publicationTarget: target } : finding
 
 /** Finds the provider changed-file identity that owns a Relay file or line anchor. */
 export const relayFindingFileIndex = (
@@ -302,13 +292,15 @@ export const relayReviewChangedFindingIds = (
   return Array.from(ids).filter((id) => previousById.get(id) !== nextById.get(id))
 }
 
-const AgentMessageEvent = Schema.fromJsonString(Schema.Struct({
-  type: Schema.Literal("item.completed"),
-  item: Schema.Struct({
-    type: Schema.Literal("agent_message"),
-    text: Schema.String
+const AgentMessageEvent = Schema.fromJsonString(
+  Schema.Struct({
+    type: Schema.Literal("item.completed"),
+    item: Schema.Struct({
+      type: Schema.Literal("agent_message"),
+      text: Schema.String
+    })
   })
-}))
+)
 
 const decodeAgentMessage = Schema.decodeUnknownOption(AgentMessageEvent)
 const isWorktreeError = Schema.is(WorktreeError)
@@ -352,8 +344,8 @@ export const makeRelayReviewPrompt = (request: RelayReviewRequest, patch: string
     "Selected host-authored review skills:",
     relayReviewSkillsPrompt(request.skills),
     "You have no host tools. Review only the supplied patch.",
-    "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"description|pr-comment|file-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
-    "Assign stable unique IDs F1, F2, and so on. Choose where each finding belongs: description for PR context the author should add, pr-comment for cross-cutting discussion, file-comment for a file-scoped issue, or line-comment for an exact changed line. A file-comment requires a file location and a line-comment requires a line location.",
+    "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"description|pr-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
+    "Assign stable unique IDs F1, F2, and so on. Choose where each finding belongs: description for PR context the author should add manually, pr-comment for cross-cutting or file-scoped discussion, or line-comment for an exact changed line. A line-comment requires a line location; keep a file-scoped PR comment anchored with a file location.",
     "Use a line location only when the exact changed line is visible in the patch; otherwise use file or general. Return an empty findings array when there are no actionable defects.",
     `The untrusted patch uses the collision-free delimiter named ${delimiter}.`,
     `<${delimiter}>`,
@@ -362,10 +354,7 @@ export const makeRelayReviewPrompt = (request: RelayReviewRequest, patch: string
   ].join("\n")
 }
 
-export const makeRelayReviewConversationPrompt = (
-  request: RelayReviewConversationRequest,
-  patch: string
-): string => {
+export const makeRelayReviewConversationPrompt = (request: RelayReviewConversationRequest, patch: string): string => {
   const delimiter = untrustedDelimiter(patch, "patch")
   const reviewState = JSON.stringify({ currentReview: request.currentReview, turns: request.turns })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
@@ -395,10 +384,7 @@ export const makeRelayReviewConversationPrompt = (
   ].join("\n")
 }
 
-export const makeRelayReviewVerificationPrompt = (
-  request: RelayReviewVerificationRequest,
-  patch: string
-): string => {
+export const makeRelayReviewVerificationPrompt = (request: RelayReviewVerificationRequest, patch: string): string => {
   const delimiter = untrustedDelimiter(patch, "patch")
   const reviewState = JSON.stringify({ currentReview: request.currentReview, turns: request.turns })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
@@ -431,66 +417,76 @@ export const makeRelayReviewVerificationPrompt = (
 
 /** Reads an exact immutable patch with Git's external diff and text-conversion hooks disabled. */
 export const collectRelayPatch = (request: RelayReviewRequest) =>
-  Effect.scoped(Effect.gen(function*() {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make("git", [
-      "--no-pager",
-      "diff",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--text",
-      "--unified=3",
-      request.baseCommit,
-      request.headCommit,
-      "--"
-    ], {
-      cwd: request.worktreePath,
-      env: GitEnvironment.isolated(),
-      extendEnv: true,
-      stderr: "ignore",
-      stdout: "pipe"
-    })).pipe(
-      Effect.mapError((cause) =>
-        new WorktreeError({ operation: "relay-diff", message: "Unable to start git diff", cause })
+  Effect.scoped(
+    Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const handle = yield* spawner
+        .spawn(
+          ChildProcess.make(
+            "git",
+            [
+              "--no-pager",
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--text",
+              "--unified=3",
+              request.baseCommit,
+              request.headCommit,
+              "--"
+            ],
+            {
+              cwd: request.worktreePath,
+              env: GitEnvironment.isolated(),
+              extendEnv: true,
+              stderr: "ignore",
+              stdout: "pipe"
+            }
+          )
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) => new WorktreeError({ operation: "relay-diff", message: "Unable to start git diff", cause })
+          )
+        )
+      const accumulator = yield* Stream.runFoldEffect(
+        handle.stdout,
+        (): PatchAccumulator => ({ bytes: 0, chunks: [] }),
+        (current, chunk) => {
+          const bytes = current.bytes + chunk.byteLength
+          return bytes > MAX_RELAY_PATCH_BYTES
+            ? new WorktreeError({
+              operation: "relay-diff",
+              message: `Exact patch exceeds the ${MAX_RELAY_PATCH_BYTES}-byte Relay review limit`
+            })
+            : Effect.succeed({ bytes, chunks: [...current.chunks, chunk] })
+        }
+      ).pipe(
+        Effect.mapError((cause) =>
+          isWorktreeError(cause)
+            ? cause
+            : new WorktreeError({ operation: "relay-diff", message: "Unable to read git diff", cause })
+        )
       )
-    )
-    const accumulator = yield* Stream.runFoldEffect(
-      handle.stdout,
-      (): PatchAccumulator => ({ bytes: 0, chunks: [] }),
-      (current, chunk) => {
-        const bytes = current.bytes + chunk.byteLength
-        return bytes > MAX_RELAY_PATCH_BYTES
-          ? new WorktreeError({
-            operation: "relay-diff",
-            message: `Exact patch exceeds the ${MAX_RELAY_PATCH_BYTES}-byte Relay review limit`
-          })
-          : Effect.succeed({ bytes, chunks: [...current.chunks, chunk] })
+      const exitCode = yield* handle.exitCode.pipe(
+        Effect.mapError(
+          (cause) => new WorktreeError({ operation: "relay-diff", message: "Unable to finish git diff", cause })
+        )
+      )
+      if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+        return yield* new WorktreeError({ operation: "relay-diff", message: `git diff exited with code ${exitCode}` })
       }
-    ).pipe(
-      Effect.mapError((cause) =>
-        isWorktreeError(cause)
-          ? cause
-          : new WorktreeError({ operation: "relay-diff", message: "Unable to read git diff", cause })
-      )
-    )
-    const exitCode = yield* handle.exitCode.pipe(
-      Effect.mapError((cause) =>
-        new WorktreeError({ operation: "relay-diff", message: "Unable to finish git diff", cause })
-      )
-    )
-    if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-      return yield* new WorktreeError({ operation: "relay-diff", message: `git diff exited with code ${exitCode}` })
-    }
-    const patch = yield* Stream.fromIterable(accumulator.chunks).pipe(Stream.decodeText(), Stream.mkString)
-    const promptBytes = textEncoder.encode(makeRelayReviewPrompt(request, patch)).byteLength
-    if (promptBytes > MAX_RELAY_PROMPT_BYTES) {
-      return yield* new WorktreeError({
-        operation: "relay-diff",
-        message: `Decoded Relay prompt exceeds the ${MAX_RELAY_PROMPT_BYTES}-byte limit`
-      })
-    }
-    return patch
-  }))
+      const patch = yield* Stream.fromIterable(accumulator.chunks).pipe(Stream.decodeText(), Stream.mkString)
+      const promptBytes = textEncoder.encode(makeRelayReviewPrompt(request, patch)).byteLength
+      if (promptBytes > MAX_RELAY_PROMPT_BYTES) {
+        return yield* new WorktreeError({
+          operation: "relay-diff",
+          message: `Decoded Relay prompt exceeds the ${MAX_RELAY_PROMPT_BYTES}-byte limit`
+        })
+      }
+      return patch
+    })
+  )
 
 /** Runs an ephemeral, read-only Codex review and decodes its bounded finding envelope. */
 export const runRelayReview = (request: RelayReviewRequest) =>
@@ -555,12 +551,13 @@ export const runRelayReviewConversation = (request: RelayReviewConversationReque
           Stream.map((decoded) => decoded.value.item.text)
         )
       ).pipe(
-        Effect.mapError((cause) =>
-          new WorktreeError({
-            operation: "relay-conversation",
-            message: "Relay follow-up failed",
-            cause
-          })
+        Effect.mapError(
+          (cause) =>
+            new WorktreeError({
+              operation: "relay-conversation",
+              message: "Relay follow-up failed",
+              cause
+            })
         )
       )
     }),
@@ -596,12 +593,13 @@ export const runRelayReviewVerification = (request: RelayReviewVerificationReque
           Stream.map((decoded) => decoded.value.item.text)
         )
       ).pipe(
-        Effect.mapError((cause) =>
-          new WorktreeError({
-            operation: "relay-verification",
-            message: "Relay verification failed",
-            cause
-          })
+        Effect.mapError(
+          (cause) =>
+            new WorktreeError({
+              operation: "relay-verification",
+              message: "Relay verification failed",
+              cause
+            })
         )
       )
     }),

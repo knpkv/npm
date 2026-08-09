@@ -23,6 +23,7 @@ import {
   adjacentChangedFileIndex,
   blobPreviewDisposition,
   buildUnifiedDiff,
+  changedFileHeadPath,
   changedFileRowId,
   changedFileTreeContentWidth,
   type ChangedFileTreeRow,
@@ -77,6 +78,21 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("opens editors only for files that exist in the exact head checkout", () => {
+    const deleted = decodeChangedFile({
+      status: "deleted",
+      before: { blobId: "before", path: "src/removed.ts", mode: "100644" },
+      after: null
+    })
+    const modified = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before", path: "src/current.ts", mode: "100644" },
+      after: { blobId: "after", path: "src/current.ts", mode: "100644" }
+    })
+    expect(changedFileHeadPath(deleted)).toBeNull()
+    expect(changedFileHeadPath(modified)).toBe("src/current.ts")
+  })
+
   it("keeps global filter shortcuts out of the details workspace", () => {
     expect(shouldOpenPullRequestFilter("details")).toBe(false)
     expect(shouldOpenPullRequestFilter("settings")).toBe(false)
@@ -161,10 +177,12 @@ describe("PR detail workspace", () => {
       _tag: "file",
       filePath: "src/model.ts"
     })
-    expect(commentLocationAnchor({
-      comments: [{ replies: [], root: lineComment }],
-      filePath: "src/auth.ts"
-    })).toEqual({
+    expect(
+      commentLocationAnchor({
+        comments: [{ replies: [], root: lineComment }],
+        filePath: "src/auth.ts"
+      })
+    ).toEqual({
       _tag: "line",
       filePath: "src/auth.ts",
       lineNumber: 42
@@ -560,23 +578,27 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "u" })).toBe("next-pending-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "d" })).toBe("discuss-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "m" })).toBe("choose-finding-target")
-    expect(detailsKeyIntent({
-      ...base,
-      conversationRunning: true,
-      findingReviewActive: true,
-      keyName: "v",
-      shifted: true
-    })).toBe("yield")
+    expect(
+      detailsKeyIntent({
+        ...base,
+        conversationRunning: true,
+        findingReviewActive: true,
+        keyName: "v",
+        shifted: true
+      })
+    ).toBe("yield")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "p" })).toBe("post-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "a" })).toBe("ack-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "x" })).toBe("reject-finding")
-    expect(detailsKeyIntent({
-      ...base,
-      actionCancelable: true,
-      conversationRunning: true,
-      findingReviewActive: true,
-      keyName: "x"
-    })).toBe("cancel-action")
+    expect(
+      detailsKeyIntent({
+        ...base,
+        actionCancelable: true,
+        conversationRunning: true,
+        findingReviewActive: true,
+        keyName: "x"
+      })
+    ).toBe("cancel-action")
     expect(detailsKeyIntent({ ...base, keyName: "left" })).toBe("scroll-files-left")
     expect(detailsKeyIntent({ ...base, keyName: "right" })).toBe("scroll-files-right")
   })
@@ -663,7 +685,7 @@ describe("PR detail workspace", () => {
     expect(review).toContain("Apply the PR Review playbook")
     expect(review).toContain("Apply the PR Diff Review playbook")
     expect(review).toContain("P1|P2|P3|P4")
-    expect(review).toContain("description|pr-comment|file-comment|line-comment")
+    expect(review).toContain("description|pr-comment|line-comment")
     expect(security).toContain("Perform a security-focused review")
     expect(tests).toContain("Review the test strategy")
     expect(explain).toContain("Explain the change, its architecture")
@@ -699,44 +721,48 @@ describe("PR detail workspace", () => {
   })
 
   it("decodes line, file, and general Relay findings for explicit human disposition", () => {
-    const result = Option.getOrThrow(parseRelayReviewResult(JSON.stringify({
-      findings: [
-        {
-          id: "F1",
-          priority: "P2",
-          title: "Guard the branch",
-          summary: "The changed condition bypasses authorization.",
-          details: "The new early return skips the authorization branch.",
-          recommendation: "Move authorization before the early return.",
-          verification: "Static patch review only; traced the changed branch.",
-          publicationTarget: "line-comment",
-          location: { scope: "line", filePath: "src/auth.ts", line: 42, side: "after" }
-        },
-        {
-          id: "F2",
-          priority: "P3",
-          title: "Cover the module",
-          summary: "The changed behavior has no regression coverage.",
-          details: "No test in the patch exercises the new failure path.",
-          recommendation: "Add a focused regression test for the failure path.",
-          verification: "Static patch review only; inspected the supplied test changes.",
-          publicationTarget: "file-comment",
-          location: { scope: "file", filePath: "src/model.ts" }
-        },
-        {
-          id: "F3",
-          priority: "P4",
-          title: "Document the rollout",
-          summary: "The changed rollout behavior is undocumented.",
-          details: "The patch changes deployment behavior without an operator note.",
-          recommendation: "Document the rollout and rollback sequence.",
-          verification: "Static patch review only; checked the supplied documentation diff.",
-          publicationTarget: "description",
-          location: { scope: "general" }
-        }
-      ],
-      verdict: "Changes requested."
-    })))
+    const result = Option.getOrThrow(
+      parseRelayReviewResult(
+        JSON.stringify({
+          findings: [
+            {
+              id: "F1",
+              priority: "P2",
+              title: "Guard the branch",
+              summary: "The changed condition bypasses authorization.",
+              details: "The new early return skips the authorization branch.",
+              recommendation: "Move authorization before the early return.",
+              verification: "Static patch review only; traced the changed branch.",
+              publicationTarget: "line-comment",
+              location: { scope: "line", filePath: "src/auth.ts", line: 42, side: "after" }
+            },
+            {
+              id: "F2",
+              priority: "P3",
+              title: "Cover the module",
+              summary: "The changed behavior has no regression coverage.",
+              details: "No test in the patch exercises the new failure path.",
+              recommendation: "Add a focused regression test for the failure path.",
+              verification: "Static patch review only; inspected the supplied test changes.",
+              publicationTarget: "pr-comment",
+              location: { scope: "file", filePath: "src/model.ts" }
+            },
+            {
+              id: "F3",
+              priority: "P4",
+              title: "Document the rollout",
+              summary: "The changed rollout behavior is undocumented.",
+              details: "The patch changes deployment behavior without an operator note.",
+              recommendation: "Document the rollout and rollback sequence.",
+              verification: "Static patch review only; checked the supplied documentation diff.",
+              publicationTarget: "description",
+              location: { scope: "general" }
+            }
+          ],
+          verdict: "Changes requested."
+        })
+      )
+    )
     const files = [
       decodeChangedFile({
         status: "modified",
@@ -795,6 +821,17 @@ describe("PR detail workspace", () => {
       verdict: "Two concerns."
     }
     expect(Option.isNone(parseRelayReviewResult(JSON.stringify(duplicated)))).toBe(true)
+    const unsupportedFileComment = {
+      findings: [
+        {
+          ...duplicated.findings[0],
+          publicationTarget: "file-comment",
+          location: { scope: "file", filePath: "src/model.ts" }
+        }
+      ],
+      verdict: "One concern."
+    }
+    expect(Option.isNone(parseRelayReviewResult(JSON.stringify(unsupportedFileComment)))).toBe(true)
   })
 
   it("accepts only exact changed-side line coordinates", () => {
@@ -1062,21 +1099,25 @@ describe("PR detail workspace", () => {
 
       expect(previews.size).toBe(MAXIMUM_PRELOADED_FILE_DIFFS)
       for (const file of files.slice(0, MAXIMUM_PRELOADED_FILE_DIFFS)) {
-        const key = fileDiffIdentityKey(fileDiffIdentity(
-          { profile: account.profile, pullRequestId, region: account.region, repositoryName },
-          revision,
-          file
-        ))
+        const key = fileDiffIdentityKey(
+          fileDiffIdentity(
+            { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+            revision,
+            file
+          )
+        )
         expect(previews.get(key)?._tag).toBe("success")
       }
       const deferredFile = files[MAXIMUM_PRELOADED_FILE_DIFFS]
       expect(deferredFile).toBeDefined()
       if (deferredFile !== undefined) {
-        const deferredKey = fileDiffIdentityKey(fileDiffIdentity(
-          { profile: account.profile, pullRequestId, region: account.region, repositoryName },
-          revision,
-          deferredFile
-        ))
+        const deferredKey = fileDiffIdentityKey(
+          fileDiffIdentity(
+            { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+            revision,
+            deferredFile
+          )
+        )
         expect(previews.has(deferredKey)).toBe(false)
       }
       expect(providerReads).toBe(0)
@@ -1089,13 +1130,17 @@ describe("PR detail workspace", () => {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "codecommit-local-blob-" })
       const runGit = (args: ReadonlyArray<string>) =>
-        spawner.string(ChildProcess.make("git", args, {
-          cwd: root,
-          env: GitEnvironment.isolated(),
-          extendEnv: true,
-          stderr: "pipe",
-          stdout: "pipe"
-        })).pipe(Effect.map((output) => output.trim()))
+        spawner
+          .string(
+            ChildProcess.make("git", args, {
+              cwd: root,
+              env: GitEnvironment.isolated(),
+              extendEnv: true,
+              stderr: "pipe",
+              stdout: "pipe"
+            })
+          )
+          .pipe(Effect.map((output) => output.trim()))
 
       yield* runGit(["init", "-b", "main"])
       yield* fs.writeFileString(path.join(root, "tracked.txt"), "immutable\n")
@@ -1124,14 +1169,18 @@ describe("PR detail workspace", () => {
       sourceCommit: ReadClient.CodeCommitCommitId.make("d".repeat(40))
     }
 
-    expect(fileDiffIdentityKey(shared)).not.toBe(fileDiffIdentityKey({
-      ...shared,
-      afterBlobId: ReadClient.CodeCommitBlobId.make("e".repeat(40))
-    }))
-    expect(fileDiffIdentityKey(shared)).not.toBe(fileDiffIdentityKey({
-      ...shared,
-      sourceCommit: ReadClient.CodeCommitCommitId.make("f".repeat(40))
-    }))
+    expect(fileDiffIdentityKey(shared)).not.toBe(
+      fileDiffIdentityKey({
+        ...shared,
+        afterBlobId: ReadClient.CodeCommitBlobId.make("e".repeat(40))
+      })
+    )
+    expect(fileDiffIdentityKey(shared)).not.toBe(
+      fileDiffIdentityKey({
+        ...shared,
+        sourceCommit: ReadClient.CodeCommitCommitId.make("f".repeat(40))
+      })
+    )
   })
 
   it("uses advertised branch refs to acquire both divergent revisions", () => {

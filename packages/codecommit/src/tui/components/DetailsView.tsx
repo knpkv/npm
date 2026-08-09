@@ -36,7 +36,7 @@ import {
 import {
   type ActionDiagnostic,
   adjacentChangedFileIndex,
-  changedFilePath,
+  changedFileHeadPath,
   changedFileRowId,
   changedFileTreeContentWidth,
   changedFileTreeRows,
@@ -53,6 +53,7 @@ import {
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
+  pullRequestSelectionKey,
   revisionHeaderText,
   terminalSafeCompactText,
   terminalSafeMultilineText,
@@ -408,7 +409,9 @@ export function DetailsView() {
 
   const pr = useMemo(
     () =>
-      selectedPrId === null ? null : (appState.pullRequests.find((candidate) => candidate.id === selectedPrId) ?? null),
+      selectedPrId === null
+        ? null
+        : (appState.pullRequests.find((candidate) => pullRequestSelectionKey(candidate) === selectedPrId) ?? null),
     [appState.pullRequests, selectedPrId]
   )
   const loadedWorkspaceCandidate =
@@ -425,7 +428,7 @@ export function DetailsView() {
   const fileTreeRows = useMemo(() => changedFileTreeRows(workspace?.files ?? []), [workspace?.files])
   const fileTreeContentWidth = useMemo(() => changedFileTreeContentWidth(fileTreeRows), [fileTreeRows])
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
-  const selectedPath = selectedFile === null ? null : changedFilePath(selectedFile)
+  const headEditorPath = changedFileHeadPath(selectedFile)
   const beforePath = selectedFile?.before?.path ?? "/dev/null"
   const afterPath = selectedFile?.after?.path ?? "/dev/null"
   const expectedFileIdentity =
@@ -797,11 +800,11 @@ export function DetailsView() {
   const agentRunning = conversationRunning || verificationRunning
   const actionCancelable =
     action._tag === "preflight" || action._tag === "ready" || action._tag === "running" || agentRunning
-  const editorReady = workspace?.localDiff._tag === "ready" && selectedPath !== null && !actionCancelable
+  const editorReady = workspace?.localDiff._tag === "ready" && headEditorPath !== null && !actionCancelable
   const reviewCardExpanded = action._tag === "reviewed"
 
   const openSelectedInEditor = (editor: LocalEditor) => {
-    if (workspace === null || selectedPath === null || actionCancelable) return
+    if (workspace === null || headEditorPath === null || actionCancelable) return
     if (workspace.localDiff._tag !== "ready") {
       setEditorStatus({
         _tag: "failed",
@@ -814,11 +817,11 @@ export function DetailsView() {
     }
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:editor:${editor}:${nextActionRequestSequence}`
-    const lineNumber = relayFindingHeadEditorLine(selectedFinding, selectedPath)
+    const lineNumber = relayFindingHeadEditorLine(selectedFinding, headEditorPath)
     setEditorStatus({ _tag: "opening", editor, requestId })
     openEditor({
       editor,
-      filePath: selectedPath,
+      filePath: headEditorPath,
       ...(lineNumber === undefined ? {} : { lineNumber }),
       requestId,
       worktreePath: workspace.localDiff.worktree.path

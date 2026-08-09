@@ -11,7 +11,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - SSO login/logout management
 - Full-text search across cached PRs
 - Exact-revision PR workspace with hierarchical navigation and locally cached native diff previews
-- Prompt-only local Codex Relay passes with description, PR-comment, file-comment, or line-comment findings that a human can discuss, publish, acknowledge, or reject
+- Prompt-only local Codex Relay passes with description suggestions, file-anchored PR comments, or exact line comments that a human can discuss, publish, acknowledge, or reject
 - Automatic deterministic detached checkout of the selected PR head
 
 ## Prerequisites
@@ -120,7 +120,7 @@ scrolling.
 
 Relay returns decoded findings anchored to the whole PR, a changed file, or an
 exact before/after line and proposes one publication target: the PR description,
-a general PR comment, a file comment, or an exact line comment. Press `g` before starting a review to choose one or
+a PR comment (including file-anchored findings), or an exact line comment. Press `g` before starting a review to choose one or
 both trusted, prompt-only review playbooks: **PR Review** for broad defect
 coverage and **PR Diff Review** for high-confidence, evidence-led diff review.
 The selection is snapshotted when the action starts. Findings use the same
@@ -145,9 +145,11 @@ read-only and never publishes or updates the PR. Lowercase `v` continues to open
 the selected file in VS Code.
 
 The human must explicitly choose `p` to publish one finding to CodeCommit, `a`
-to acknowledge it locally, or `x` to reject it locally. Description targets are
-appended after rechecking the exact revision and persist the marker
-`<!-- relay-finding:<hex-sha256> -->`. Comment targets use that same hexadecimal
+to acknowledge it locally, or `x` to reject it locally. CodeCommit does not offer
+a conditional description update, so description suggestions fail closed and
+must be copied manually; this prevents overwriting concurrent author edits.
+File-scoped findings publish as PR comments with their file anchor in the body,
+while exact changed-side line findings use provider line coordinates. Comment targets use a hexadecimal
 SHA-256 digest as their deterministic idempotency token. The canonical identity
 is the NUL-delimited sequence of every production input below, in this order:
 

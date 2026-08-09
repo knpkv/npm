@@ -18,6 +18,7 @@ import {
 } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { useListNavigation } from "../hooks/useListNavigation.js"
+import { pullRequestSelectionKey } from "../details-model.js"
 import { buildListItems, type ListItem, type TuiView } from "../ListBuilder.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { applySettingsFilter, computeItemPositions, findGroupHeader, findStableIndex } from "./mainlist-utils.js"
@@ -87,7 +88,10 @@ const useSyncCurrentPR = (items: ReadonlyArray<ListItem>, stableIndex: number, v
   useEffect(() => {
     if (view === "details") return
     setCurrentPR(currentPR)
-    if (currentPR && currentPR.id !== selectedPrId) setSelectedPrId(currentPR.id)
+    if (currentPR) {
+      const selectionKey = pullRequestSelectionKey(currentPR)
+      if (selectionKey !== selectedPrId) setSelectedPrId(selectionKey)
+    }
   }, [currentPR, setCurrentPR, setSelectedPrId, selectedPrId, view])
 }
 
