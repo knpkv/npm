@@ -24,17 +24,27 @@ describe("getCommentsForPullRequest", () => {
       expect(after.comments[0]?.root.lineNumber).toBe(42)
     }))
 
-  it.effect("preserves the provider side through cached comment-location JSON", () =>
+  it.effect("validates and preserves both provider sides through cached comment-location JSON", () =>
     Effect.gen(function*() {
-      const encoded = encodeCommentLocations([{
-        afterCommitId: "b".repeat(40),
-        beforeCommitId: "a".repeat(40),
+      const relativeFileVersions: ReadonlyArray<"BEFORE" | "AFTER"> = ["BEFORE", "AFTER"]
+      for (const relativeFileVersion of relativeFileVersions) {
+        const encoded = encodeCommentLocations([{
+          afterCommitId: "b".repeat(40),
+          beforeCommitId: "a".repeat(40),
+          comments: [],
+          filePath: "src/auth.ts",
+          relativeFileVersion
+        }])
+        const decoded = yield* decodeCommentLocations(JSON.stringify(encoded))
+
+        expect(decoded[0]?.relativeFileVersion).toBe(relativeFileVersion)
+      }
+
+      const invalid = yield* decodeCommentLocations(JSON.stringify([{
         comments: [],
         filePath: "src/auth.ts",
-        relativeFileVersion: "BEFORE"
-      }])
-      const decoded = yield* decodeCommentLocations(JSON.stringify(encoded))
-
-      expect(decoded[0]?.relativeFileVersion).toBe("BEFORE")
+        relativeFileVersion: "MIDDLE"
+      }]))
+      expect(invalid).toEqual([])
     }))
 })

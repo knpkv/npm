@@ -1,5 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  cycleSettingsFilterMode,
+  parseSettingsFilter,
+  settingsFilterActionScope,
   textFilterActionScope,
   type TextFilterInputKey,
   type TextFilterInputState,
@@ -48,6 +51,34 @@ describe("text filter input", () => {
     expect(textFilterActionScope(submitted, profiles)).toEqual(["production-admin"])
     expect(textFilterActionScope({ active: false, text: "prod" }, profiles)).toEqual(["production-admin"])
     expect(textFilterActionScope({ active: false, text: "" }, profiles)).toBeNull()
+  })
+
+  it("scopes settings actions to the parsed status and profile name", () => {
+    const accounts = [
+      { enabled: true, profile: "production-admin" },
+      { enabled: false, profile: "production-readonly" },
+      { enabled: true, profile: "development-admin" }
+    ]
+
+    expect(settingsFilterActionScope({ active: false, text: "on:prod" }, accounts)).toEqual(["production-admin"])
+    expect(settingsFilterActionScope({ active: false, text: "off:prod" }, accounts)).toEqual(["production-readonly"])
+    expect(settingsFilterActionScope({ active: false, text: "on:" }, accounts)).toEqual([
+      "production-admin",
+      "development-admin"
+    ])
+    expect(settingsFilterActionScope({ active: false, text: "" }, accounts)).toBeNull()
+  })
+
+  it("treats only a leading settings mode as a prefix", () => {
+    expect(parseSettingsFilter("ON:Prod")).toEqual({ status: "on", name: "prod" })
+    expect(parseSettingsFilter("prod-on:secondary")).toEqual({ status: "all", name: "prod-on:secondary" })
+  })
+
+  it("cycles settings modes in either filter state without losing profile text", () => {
+    expect(cycleSettingsFilterMode("Prod", "right")).toBe("on:Prod")
+    expect(cycleSettingsFilterMode("on:Prod", "right")).toBe("off:Prod")
+    expect(cycleSettingsFilterMode("off:Prod", "right")).toBe("Prod")
+    expect(cycleSettingsFilterMode("Prod", "left")).toBe("off:Prod")
   })
 
   it("does not consume ordinary navigation when filtering cannot open", () => {

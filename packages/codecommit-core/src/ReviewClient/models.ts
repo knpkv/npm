@@ -6,7 +6,7 @@
  */
 import { Schema } from "effect"
 
-import { PullRequestId, RepositoryName } from "../Domain.js"
+import { PullRequestId, RelativeFileVersion, RepositoryName } from "../Domain.js"
 import { CodeCommitCommitId, CodeCommitReadAccount } from "../ReadClient/models.js"
 
 const NonEmptyString = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
@@ -41,7 +41,7 @@ export class CodeCommitReviewLocation extends Schema.Class<CodeCommitReviewLocat
 )({
   filePath: ReviewFilePath,
   filePosition: ReviewFilePosition,
-  relativeFileVersion: Schema.Literals(["BEFORE", "AFTER"])
+  relativeFileVersion: RelativeFileVersion
 }) {}
 
 const CommentActionFields = {

@@ -7,18 +7,9 @@
  */
 import { pullRequestSelectionKey } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
+import { parseSettingsFilter } from "../text-filter-input.js"
 
-export interface ParsedSettingsFilter {
-  readonly status: "all" | "on" | "off"
-  readonly name: string
-}
-
-export const parseSettingsFilter = (raw: string): ParsedSettingsFilter => {
-  const lower = raw.toLowerCase()
-  if (lower.startsWith("on:")) return { status: "on", name: lower.slice(3) }
-  if (lower.startsWith("off:")) return { status: "off", name: lower.slice(4) }
-  return { status: "all", name: lower }
-}
+export { parseSettingsFilter } from "../text-filter-input.js"
 
 export const applySettingsFilter = (items: ReadonlyArray<ListItem>, filter: string): ReadonlyArray<ListItem> => {
   if (!filter) return items

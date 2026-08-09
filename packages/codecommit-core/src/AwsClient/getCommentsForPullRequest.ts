@@ -6,7 +6,7 @@ import type { GetCommentsForPullRequestError } from "@distilled.cloud/aws/codeco
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
 import type { HttpClient } from "effect/unstable/http"
-import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"
+import { type CommentThread, PRComment, type PRCommentLocation, RelativeFileVersion } from "../Domain.js"
 import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ const RawCommentLocation = Schema.Struct({
   location: Schema.optional(Schema.Struct({
     filePath: Schema.optional(Schema.String),
     filePosition: Schema.optional(Schema.Number),
-    relativeFileVersion: Schema.optional(Schema.Literals(["BEFORE", "AFTER"]))
+    relativeFileVersion: Schema.optional(RelativeFileVersion)
   })),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
@@ -86,7 +86,7 @@ const PRCommentLocationSchema = Schema.Struct({
   filePath: Schema.optional(Schema.String),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
-  relativeFileVersion: Schema.optional(Schema.Literals(["BEFORE", "AFTER"])),
+  relativeFileVersion: Schema.optional(RelativeFileVersion),
   comments: Schema.Array(Schema.Any)
 })
 

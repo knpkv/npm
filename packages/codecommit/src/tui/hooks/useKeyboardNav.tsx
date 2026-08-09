@@ -31,10 +31,14 @@ import { shouldOpenPullRequestFilter } from "../navigation-model.js"
 import { isAwsAuthenticationNotification } from "../notification-auth.js"
 import { quickFilterTypeForShortcut } from "../quick-filter-config.js"
 import { themes } from "../theme/themes.js"
-import { textFilterActionScope, transitionTextFilterInput, type TextFilterInputState } from "../text-filter-input.js"
+import {
+  cycleSettingsFilterMode,
+  settingsFilterActionScope,
+  transitionTextFilterInput,
+  type TextFilterInputState
+} from "../text-filter-input.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
 
-const settingsFilterModes: ReadonlyArray<string> = ["", "on:", "off:"]
 const decodeAwsProfileName = Schema.decodeSync(Domain.AwsProfileName)
 
 const defaultState: Domain.AppState = {
@@ -211,16 +215,9 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     if (settingsFilterTransition.handled) {
       let nextSettingsFilterState = settingsFilterTransition.state
       if (wasSettingsFiltering && (key.name === "left" || key.name === "right")) {
-        const modes = settingsFilterModes
-        const currentText = settingsFilterInputRef.current.text
-        const currentPrefix = currentText.startsWith("on:") ? "on:" : currentText.startsWith("off:") ? "off:" : ""
-        const nameFilter = currentPrefix ? currentText.slice(currentPrefix.length) : currentText
-        const idx = modes.indexOf(currentPrefix)
-        const nextIdx = key.name === "right" ? (idx + 1) % modes.length : (idx - 1 + modes.length) % modes.length
-        const nextMode = modes[nextIdx] ?? ""
         nextSettingsFilterState = {
           active: true,
-          text: nextMode + nameFilter
+          text: cycleSettingsFilterMode(settingsFilterInputRef.current.text, key.name)
         }
       }
       settingsFilterInputRef.current = nextSettingsFilterState
@@ -277,36 +274,17 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       // Accounts tab specific
       if (settingsTab === "accounts") {
         if (key.name === "a") {
-          const profiles = textFilterActionScope(
-            settingsFilterInputRef.current,
-            appState.accounts.map((account) => account.profile)
-          )
+          const profiles = settingsFilterActionScope(settingsFilterInputRef.current, appState.accounts)
           setAllAccounts({ enabled: true, ...(profiles && { profiles }) })
           return
         }
         if (key.name === "d") {
-          const profiles = textFilterActionScope(
-            settingsFilterInputRef.current,
-            appState.accounts.map((account) => account.profile)
-          )
+          const profiles = settingsFilterActionScope(settingsFilterInputRef.current, appState.accounts)
           setAllAccounts({ enabled: false, ...(profiles && { profiles }) })
           return
         }
         if (key.name === "left" || key.name === "right") {
-          const modes = settingsFilterModes
-          const synchronousSettingsFilter = settingsFilterInputRef.current.text
-          const currentPrefix = synchronousSettingsFilter.startsWith("on:")
-            ? "on:"
-            : synchronousSettingsFilter.startsWith("off:")
-              ? "off:"
-              : ""
-          const nameFilter = currentPrefix
-            ? synchronousSettingsFilter.slice(currentPrefix.length)
-            : synchronousSettingsFilter
-          const idx = modes.indexOf(currentPrefix)
-          const nextIdx = key.name === "right" ? (idx + 1) % modes.length : (idx - 1 + modes.length) % modes.length
-          const nextMode = modes[nextIdx] ?? ""
-          const nextText = nextMode + nameFilter
+          const nextText = cycleSettingsFilterMode(settingsFilterInputRef.current.text, key.name)
           settingsFilterInputRef.current = { active: false, text: nextText }
           setSettingsFilter(nextText)
           return
