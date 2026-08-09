@@ -1,5 +1,5 @@
 import { type Domain, ReadClient } from "@knpkv/codecommit-core"
-import { structuredPatch } from "diff"
+import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
 import { WorktreeError } from "../WorktreeService.js"
@@ -735,4 +735,63 @@ export const isChangedDiffLine = (
     }
   }
   return false
+}
+
+/** Resolves an exact provider line coordinate to OpenTUI's zero-based split-diff row. */
+export const splitDiffLineRow = (diff: string, side: "before" | "after", line: number): number | null => {
+  if (!Number.isInteger(line) || line < 1) return null
+  let patches: ReturnType<typeof parsePatch>
+  try {
+    patches = parsePatch(diff)
+  } catch {
+    return null
+  }
+  const patch = patches[0]
+  if (patch === undefined) return null
+  let row = 0
+  for (const hunk of patch.hunks) {
+    let beforeLine = hunk.oldStart
+    let afterLine = hunk.newStart
+    let index = 0
+    while (index < hunk.lines.length) {
+      const content = hunk.lines[index]
+      const prefix = content?.[0]
+      if (prefix === " ") {
+        if (side === "before" ? beforeLine === line : afterLine === line) return row
+        beforeLine += 1
+        afterLine += 1
+        row += 1
+        index += 1
+        continue
+      }
+      if (prefix === "\\") {
+        index += 1
+        continue
+      }
+      const beforeStart = beforeLine
+      const afterStart = afterLine
+      let removed = 0
+      let added = 0
+      while (index < hunk.lines.length) {
+        const changePrefix = hunk.lines[index]?.[0]
+        if (changePrefix === " " || changePrefix === "\\") break
+        if (changePrefix === "-") {
+          removed += 1
+          beforeLine += 1
+        } else if (changePrefix === "+") {
+          added += 1
+          afterLine += 1
+        }
+        index += 1
+      }
+      if (side === "before" && line >= beforeStart && line < beforeStart + removed) {
+        return row + line - beforeStart
+      }
+      if (side === "after" && line >= afterStart && line < afterStart + added) {
+        return row + line - afterStart
+      }
+      row += Math.max(removed, added)
+    }
+  }
+  return null
 }

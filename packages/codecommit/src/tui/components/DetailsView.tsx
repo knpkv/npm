@@ -55,6 +55,7 @@ import {
   pullRequestWorkspaceIdentity,
   pullRequestSelectionKey,
   revisionHeaderText,
+  splitDiffLineRow,
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
@@ -100,6 +101,17 @@ const scrollDiffBy = (diff: DiffRenderable | null, lines: number): void => {
     const renderable = pending.pop()
     if (renderable === undefined) continue
     if (hasVerticalScroll(renderable)) renderable.scrollY += lines
+    for (const child of renderable.getChildren()) pending.push(child)
+  }
+}
+
+const scrollDiffToRow = (diff: DiffRenderable, row: number): void => {
+  const offset = Math.max(0, row - 2)
+  const pending = [...diff.getChildren()]
+  while (pending.length > 0) {
+    const renderable = pending.pop()
+    if (renderable === undefined) continue
+    if (hasVerticalScroll(renderable)) renderable.scrollY = offset
     for (const child of renderable.getChildren()) pending.push(child)
   }
 }
@@ -402,6 +414,7 @@ export function DetailsView() {
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
   const actionRef = useRef<ActionStatus>(action)
   const diffRef = useRef<DiffRenderable>(null)
+  const highlightedFindingRef = useRef<{ readonly diff: DiffRenderable; readonly row: number } | null>(null)
   const filesScrollRef = useRef<ScrollBoxRenderable>(null)
   const loadedWorkspaceKeyRef = useRef<string | null>(null)
   const pendingDiffKeyRef = useRef<string | null>(null)
@@ -747,6 +760,16 @@ export function DetailsView() {
     setEditorStatus({ _tag: "done", editor: outcome.value.editor })
   }, [editorStatus, openEditorResult])
 
+  const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
+  const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
+  const selectedFindingDiffRow = useMemo(() => {
+    if (selectedFinding?.location.scope !== "line" || renderedDiff === null || selectedFile === null) return null
+    const selectedPath =
+      selectedFinding.location.side === "after" ? selectedFile.after?.path : selectedFile.before?.path
+    if (selectedPath !== selectedFinding.location.filePath) return null
+    return splitDiffLineRow(renderedDiff.diff, selectedFinding.location.side, selectedFinding.location.line)
+  }, [renderedDiff, selectedFile, selectedFinding])
+
   useEffect(() => {
     if (action._tag !== "reviewed" || workspace === null) return
     const finding = action.result.findings[selectedFindingIndex]
@@ -754,6 +777,22 @@ export function DetailsView() {
     const fileIndex = relayFindingFileIndex(finding, workspace.files)
     if (fileIndex !== null) setSelectedFileIndex(fileIndex)
   }, [action, selectedFindingIndex, workspace])
+
+  useLayoutEffect(() => {
+    const previous = highlightedFindingRef.current
+    if (previous !== null) {
+      previous.diff.clearHighlightLines(previous.row, previous.row)
+      highlightedFindingRef.current = null
+    }
+    const diff = diffRef.current
+    if (selectedFindingDiffRow === null || diff === null) return
+    diff.highlightLines(selectedFindingDiffRow, selectedFindingDiffRow, {
+      content: theme.accentTint,
+      gutter: theme.accentTint
+    })
+    scrollDiffToRow(diff, selectedFindingDiffRow)
+    highlightedFindingRef.current = { diff, row: selectedFindingDiffRow }
+  }, [renderedDiff, selectedFile, selectedFinding, selectedFindingDiffRow, theme.accentTint])
 
   useLayoutEffect(() => {
     actionScrollRef.current?.scrollTo({ x: 0, y: 0 })
@@ -772,8 +811,6 @@ export function DetailsView() {
     return () => style.destroy()
   }, [theme])
 
-  const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
-  const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
   const selectedFindingDisposition =
     selectedFinding === null ? "pending" : (findingDispositions[selectedFinding.id] ?? "pending")
   const selectedFindingNeedsResolution = findingDispositionNeedsResolution(selectedFindingDisposition)
@@ -1437,9 +1474,31 @@ export function DetailsView() {
                       <text bg={theme.accentTint} fg={theme.textAccent}>
                         {` ${relayFindingPublicationLabel(selectedFinding.publicationTarget).toUpperCase()} `}
                       </text>
-                      <text fg={theme.textMuted}> {"→"} </text>
-                      <text fg={theme.text}>{terminalSafeText(relayFindingAnchor(selectedFinding))}</text>
+                      <text fg={theme.textMuted}> {"·"} </text>
+                      <text fg={theme.textMuted}>{terminalSafeText(relayFindingAnchor(selectedFinding))}</text>
                     </box>
+                    {selectedFinding.location.scope === "line" ? (
+                      <box
+                        border={["left"]}
+                        borderColor={theme.primary}
+                        flexDirection="column"
+                        style={{ backgroundColor: theme.accentTint, paddingLeft: 1 }}
+                      >
+                        <box flexDirection="row">
+                          <text fg={theme.textAccent}>{`LINE ${selectedFinding.location.line}`}</text>
+                          <text fg={theme.textMuted}> {" · "} </text>
+                          <text fg={selectedFinding.location.side === "after" ? theme.textSuccess : theme.textError}>
+                            {selectedFinding.location.side === "after" ? "HEAD / AFTER" : "BASE / BEFORE"}
+                          </text>
+                        </box>
+                        <text fg={theme.text}>{terminalSafeText(selectedFinding.location.filePath)}</text>
+                        <text fg={selectedFindingDiffRow === null ? theme.textWarning : theme.textAccent}>
+                          {selectedFindingDiffRow === null
+                            ? "↳ exact line is outside the bounded preview"
+                            : "↳ focused and highlighted in the split diff"}
+                        </text>
+                      </box>
+                    ) : null}
                     <text fg={theme.text}>{terminalSafeText(selectedFinding.title)}</text>
                     <text fg={theme.textMuted}>SUMMARY</text>
                     <text fg={theme.text}>{terminalSafeMultilineText(selectedFinding.summary)}</text>

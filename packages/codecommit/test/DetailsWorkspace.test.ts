@@ -44,6 +44,7 @@ import {
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
+  splitDiffLineRow,
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
@@ -860,6 +861,22 @@ describe("PR detail workspace", () => {
     expect(isChangedDiffLine(before, after, "before", 42)).toBe(false)
     expect(isChangedDiffLine("same\nold", "same\nnew\n", "after", 2)).toBe(true)
     expect(isChangedDiffLine("same\nold\n", "same\nnew", "before", 2)).toBe(true)
+  })
+
+  it("maps exact provider coordinates to aligned split-diff rows", () => {
+    const file = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before-row", path: "src/index.ts", mode: "100644" },
+      after: { blobId: "after-row", path: "src/index.ts", mode: "100644" }
+    })
+    const rendered = buildUnifiedDiff(file, "same\nold one\nold two\ntail\n", "same\nnew\ntail\n")
+
+    expect(splitDiffLineRow(rendered.diff, "before", 2)).toBe(1)
+    expect(splitDiffLineRow(rendered.diff, "before", 3)).toBe(2)
+    expect(splitDiffLineRow(rendered.diff, "after", 2)).toBe(1)
+    expect(splitDiffLineRow(rendered.diff, "after", 3)).toBe(3)
+    expect(splitDiffLineRow(rendered.diff, "after", 42)).toBeNull()
+    expect(splitDiffLineRow("not a patch", "after", 2)).toBeNull()
   })
 
   it.effect("validates line comments from immutable provider blobs", () =>
