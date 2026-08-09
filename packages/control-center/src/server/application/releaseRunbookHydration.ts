@@ -8,6 +8,10 @@ interface ReleaseRunbookPersistence {
   readonly deliveryGraph: Pick<PersistenceService["deliveryGraph"], "read">
 }
 
+/** Keep exact release inspection bodies within a small deterministic response budget. */
+export const MAXIMUM_HYDRATED_RELEASE_RUNBOOKS = 16
+export const MAXIMUM_HYDRATED_RELEASE_RUNBOOK_CHARACTERS = 1_048_576
+
 const relationshipIsCurrent = (
   relationship: ReleaseDeliveryGraphInspection["relationships"][number]
 ): boolean =>
@@ -52,30 +56,39 @@ export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.h
       projection.entityState === "present" ? [projection.entityId] : []
     )
   )
-  const exactPages = yield* Effect.forEach(
-    releaseRunbookEntityIds(inspection).filter((entityId) => presentEntityIds.has(entityId)),
-    (entityId) =>
-      persistence.deliveryGraph.read(workspaceId, {
-        _tag: "entityProjection",
-        entityId,
-        revision: null
-      }).pipe(
-        Effect.flatMap((result) =>
-          result._tag === "entityProjection"
-            ? Effect.succeed(result.value)
-            : Effect.die("Expected an exact entity projection for release runbook")
-        ),
-        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
+  const candidates = releaseRunbookEntityIds(inspection).filter((entityId) => presentEntityIds.has(entityId))
+  const exactPages = new Array<ReleaseDeliveryGraphInspection["entityProjections"][number]>()
+  let hydratedCharacters = 0
+  let hydrationTruncated = candidates.length > MAXIMUM_HYDRATED_RELEASE_RUNBOOKS
+  for (const entityId of candidates.slice(0, MAXIMUM_HYDRATED_RELEASE_RUNBOOKS)) {
+    const page = yield* persistence.deliveryGraph.read(workspaceId, {
+      _tag: "entityProjection",
+      entityId,
+      revision: null
+    }).pipe(
+      Effect.flatMap((result) =>
+        result._tag === "entityProjection"
+          ? Effect.succeed(result.value)
+          : Effect.die("Expected an exact entity projection for release runbook")
       ),
-    { concurrency: 4 }
-  )
-  if (exactPages.length === 0) return inspection
-  const exactByEntityId = new Map<EntityId, NonNullable<(typeof exactPages)[number]>>()
-  for (const page of exactPages) {
-    if (page !== null) exactByEntityId.set(page.projection.entityId, page)
+      Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
+    )
+    if (page === null) continue
+    const pageCharacters = page.projection.details._tag === "page"
+      ? page.projection.details.content?.markdown.length ?? 0
+      : 0
+    if (hydratedCharacters + pageCharacters > MAXIMUM_HYDRATED_RELEASE_RUNBOOK_CHARACTERS) {
+      hydrationTruncated = true
+      break
+    }
+    hydratedCharacters += pageCharacters
+    exactPages.push(page)
   }
+  if (exactPages.length === 0 && !hydrationTruncated) return inspection
+  const exactByEntityId = new Map(exactPages.map((page) => [page.projection.entityId, page]))
   return {
     ...inspection,
+    truncated: inspection.truncated || hydrationTruncated,
     entityProjections: inspection.entityProjections.map((summary) =>
       exactByEntityId.get(summary.projection.entityId) ?? summary
     )

@@ -40,25 +40,30 @@ afterEach(async () => {
 })
 
 const Harness = ({
+  enabled = true,
   onSessionExpired = ignoreSessionExpiration,
   onSynchronized,
   pluginConnectionId = PLUGIN_CONNECTION_ID,
   sessionKey = "session-a",
-  transport
+  transport,
+  verifySynchronized = () => Promise.resolve(true)
 }: {
+  readonly enabled?: boolean
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly onSynchronized: () => void
   readonly pluginConnectionId?: PluginConnectionId
   readonly sessionKey?: string
   readonly transport: OpenConfluenceSynchronizationTransport
+  readonly verifySynchronized?: (signal: AbortSignal) => Promise<boolean>
 }): ReactElement => {
   const synchronization = useOpenConfluenceSynchronization({
-    enabled: true,
+    enabled,
     onSessionExpired,
     onSynchronized,
     pluginConnectionId,
     sessionKey,
-    transport
+    transport,
+    verifySynchronized
   })
   return (
     <button onClick={synchronization.synchronizeAfterMutation} type="button">
@@ -88,6 +93,33 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledTimes(2))
   })
 
+  it("does not mark the open page current until its exact source synchronization advances", async () => {
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const verifySynchronized = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <Harness onSynchronized={onSynchronized} transport={transport} verifySynchronized={verifySynchronized} />
+      )
+    )
+    await vi.waitFor(() => expect(verifySynchronized).toHaveBeenCalledOnce())
+    expect(onSynchronized).not.toHaveBeenCalled()
+    expect(host.textContent).toBe("idle")
+
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+    await act(async () => button.click())
+    await vi.waitFor(() => expect(verifySynchronized).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledOnce())
+    expect(host.textContent).toBe("synchronized")
+  })
+
   it("queues a post-mutation refresh behind active automatic synchronization", async () => {
     let resolveInitial = (_state: PluginSynchronizationState): void => {
       throw new Error("Expected the initial synchronization resolver")
@@ -115,6 +147,34 @@ describe("open Confluence page synchronization", () => {
 
     await act(async () => resolveInitial(synchronizationState("synchronized")))
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+  })
+
+  it("cancels a queued post-mutation refresh when the hook unregisters", async () => {
+    let resolveInitial = (_state: PluginSynchronizationState): void => {
+      throw new Error("Expected the initial synchronization resolver")
+    }
+    const initial = new Promise<PluginSynchronizationState>((resolve) => {
+      resolveInitial = resolve
+    })
+    const transport = {
+      synchronize: vi.fn(() => initial)
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+    await act(async () => button.click())
+
+    await act(async () => root?.unmount())
+    root = null
+    await act(async () => resolveInitial(synchronizationState("synchronized")))
+    await act(async () => Promise.resolve())
+
+    expect(transport.synchronize).toHaveBeenCalledOnce()
   })
 
   it("queues a post-mutation refresh behind synchronization active in another tab", async () => {

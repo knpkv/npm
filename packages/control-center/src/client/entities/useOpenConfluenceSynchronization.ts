@@ -36,11 +36,13 @@ const browserOpenConfluenceSynchronizationTransport: OpenConfluenceSynchronizati
 }
 
 interface AutomaticSynchronizationParticipant {
+  readonly lifetime: AbortSignal
   readonly onSessionExpired: () => void
   readonly onSynchronized: () => void
   readonly sessionKey: string
   readonly setState: (state: OpenConfluenceSynchronizationState) => void
   readonly transport: OpenConfluenceSynchronizationTransport
+  readonly verifySynchronized: (signal: AbortSignal) => Promise<boolean>
 }
 
 interface AutomaticSynchronizationGroup {
@@ -89,20 +91,34 @@ const writeCrossTabSynchronization = (
   }
 }
 
-const applyAutomaticSynchronization = (
+const applyAutomaticSynchronization = async (
   group: AutomaticSynchronizationGroup,
   synchronization: CrossTabAutomaticSynchronization
-): boolean => {
+): Promise<boolean> => {
   let requiresSessionRetry = false
-  for (const participant of group.participants.values()) {
+  await Promise.all(Array.from(group.participants.values(), async (participant) => {
+    if (participant.lifetime.aborted) return
     if (synchronization.sessionExpired && synchronization.sessionKey !== participant.sessionKey) {
       requiresSessionRetry = true
-      continue
+      return
     }
-    participant.setState(synchronization.state)
-    if (synchronization.sessionExpired) participant.onSessionExpired()
-    if (synchronization.state === "synchronized") participant.onSynchronized()
-  }
+    if (synchronization.state !== "synchronized") {
+      participant.setState(synchronization.state)
+      if (synchronization.sessionExpired) participant.onSessionExpired()
+      return
+    }
+    participant.setState("syncing")
+    try {
+      const verified = await participant.verifySynchronized(participant.lifetime)
+      if (participant.lifetime.aborted) return
+      participant.setState(verified ? "synchronized" : "idle")
+      if (verified) participant.onSynchronized()
+    } catch (failure) {
+      if (participant.lifetime.aborted) return
+      if (Predicate.isTagged("UnauthorizedApiError")(failure)) participant.onSessionExpired()
+      participant.setState("failed")
+    }
+  }))
   return requiresSessionRetry
 }
 
@@ -128,7 +144,7 @@ const synchronizeAutomatically = (
       (recent.recordedAt >= requestStartedAt ||
         (!force && recordedAt - recent.recordedAt < OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS))
     ) {
-      if (recent.state !== "syncing") applyAutomaticSynchronization(group, recent)
+      if (recent.state !== "syncing") retryAfterCompletion = await applyAutomaticSynchronization(group, recent)
       return
     }
     const syncing = {
@@ -138,7 +154,7 @@ const synchronizeAutomatically = (
       state: "syncing"
     } satisfies CrossTabAutomaticSynchronization
     writeCrossTabSynchronization(storageKey, syncing)
-    applyAutomaticSynchronization(group, syncing)
+    retryAfterCompletion = await applyAutomaticSynchronization(group, syncing)
     try {
       const result = await source.transport.synchronize(pluginConnectionId, abort.signal)
       if (abort.signal.aborted) return
@@ -149,7 +165,7 @@ const synchronizeAutomatically = (
         state: result.result === "synchronized" ? "synchronized" : "failed"
       } satisfies CrossTabAutomaticSynchronization
       writeCrossTabSynchronization(storageKey, completed)
-      applyAutomaticSynchronization(group, completed)
+      retryAfterCompletion = await applyAutomaticSynchronization(group, completed)
     } catch (failure) {
       if (abort.signal.aborted) return
       const failed = {
@@ -159,7 +175,7 @@ const synchronizeAutomatically = (
         state: "failed"
       } satisfies CrossTabAutomaticSynchronization
       writeCrossTabSynchronization(storageKey, failed)
-      retryAfterCompletion = applyAutomaticSynchronization(group, failed)
+      retryAfterCompletion = await applyAutomaticSynchronization(group, failed)
     }
   }
   const lockManager = "locks" in navigator ? navigator.locks : null
@@ -171,7 +187,7 @@ const synchronizeAutomatically = (
         { ifAvailable: true },
         (lock) => lock === null ? Promise.resolve() : synchronizeWithLease()
       )
-  ).catch((failure: unknown) => {
+  ).catch(async (failure: unknown) => {
     if (!abort.signal.aborted) {
       const failed = {
         recordedAt: 0,
@@ -179,7 +195,7 @@ const synchronizeAutomatically = (
         sessionKey: null,
         state: "failed"
       } satisfies CrossTabAutomaticSynchronization
-      applyAutomaticSynchronization(group, failed)
+      retryAfterCompletion = await applyAutomaticSynchronization(group, failed)
     }
   }).finally(() => {
     if (group.active?.abort === abort) group.active = null
@@ -235,13 +251,12 @@ const startAutomaticSynchronization = (
     const synchronization = Result.getOrNull(
       Schema.decodeUnknownResult(Schema.fromJsonString(CrossTabAutomaticSynchronization))(event.newValue)
     )
-    if (
-      synchronization !== null &&
-      applyAutomaticSynchronization(group, synchronization) &&
-      document.visibilityState === "visible"
-    ) {
-      void synchronizeAutomatically(pluginConnectionId, group, true)
-    }
+    if (synchronization === null) return
+    void applyAutomaticSynchronization(group, synchronization).then((requiresSessionRetry) => {
+      if (requiresSessionRetry && document.visibilityState === "visible") {
+        void synchronizeAutomatically(pluginConnectionId, group, true)
+      }
+    })
   }
   document.addEventListener("visibilitychange", synchronizeWhenVisible)
   window.addEventListener("storage", synchronizeFromAnotherTab)
@@ -320,7 +335,8 @@ export const useOpenConfluenceSynchronization = ({
   onSynchronized,
   pluginConnectionId,
   sessionKey,
-  transport = browserOpenConfluenceSynchronizationTransport
+  transport = browserOpenConfluenceSynchronizationTransport,
+  verifySynchronized
 }: {
   readonly enabled: boolean
   readonly onSessionExpired: (sessionKey: string) => void
@@ -328,6 +344,7 @@ export const useOpenConfluenceSynchronization = ({
   readonly pluginConnectionId: PluginConnectionId | null
   readonly sessionKey: string | null
   readonly transport?: OpenConfluenceSynchronizationTransport
+  readonly verifySynchronized: (signal: AbortSignal) => Promise<boolean>
 }): {
   readonly state: OpenConfluenceSynchronizationState
   readonly synchronizeAfterMutation: () => void
@@ -335,10 +352,13 @@ export const useOpenConfluenceSynchronization = ({
 } => {
   const [state, setState] = useState<OpenConfluenceSynchronizationState>("idle")
   const manualActive = useRef<ActiveSynchronization | null>(null)
+  const registrationLifetime = useRef<AbortController | null>(null)
   const sessionExpired = useRef(onSessionExpired)
   const synchronized = useRef(onSynchronized)
+  const verification = useRef(verifySynchronized)
   sessionExpired.current = onSessionExpired
   synchronized.current = onSynchronized
+  verification.current = verifySynchronized
 
   const synchronize = useCallback((): Promise<void> => {
     if (!enabled || pluginConnectionId === null || sessionKey === null) return Promise.resolve()
@@ -346,29 +366,33 @@ export const useOpenConfluenceSynchronization = ({
     if (inFlight !== null) return inFlight.completion
     const abort = new AbortController()
     setState("syncing")
-    const completion = transport.synchronize(pluginConnectionId, abort.signal).then(
-      (result) => {
+    const completion = (async (): Promise<void> => {
+      try {
+        const result = await transport.synchronize(pluginConnectionId, abort.signal)
         if (abort.signal.aborted) return
         if (result.result !== "synchronized") {
           setState("failed")
           return
         }
-        setState("synchronized")
-        synchronized.current()
-      },
-      (failure) => {
+        const verified = await verification.current(abort.signal)
+        if (abort.signal.aborted) return
+        setState(verified ? "synchronized" : "idle")
+        if (verified) synchronized.current()
+      } catch (failure) {
         if (abort.signal.aborted) return
         if (Predicate.isTagged("UnauthorizedApiError")(failure)) sessionExpired.current(sessionKey)
         setState("failed")
+      } finally {
+        if (manualActive.current?.abort === abort) manualActive.current = null
       }
-    ).finally(() => {
-      if (manualActive.current?.abort === abort) manualActive.current = null
-    })
+    })()
     manualActive.current = { abort, completion }
     return completion
   }, [enabled, pluginConnectionId, sessionKey, transport])
 
   const synchronizeAfterMutation = useCallback((): void => {
+    const lifetime = registrationLifetime.current?.signal
+    if (lifetime === undefined || lifetime.aborted) return
     const automaticInFlight = pluginConnectionId === null
       ? undefined
       : automaticSynchronizationGroups.get(pluginConnectionId)?.active?.completion
@@ -377,20 +401,30 @@ export const useOpenConfluenceSynchronization = ({
       : waitForCrossTabSynchronization(pluginConnectionId)
     const inFlight = manualActive.current?.completion ?? automaticInFlight ?? crossTabInFlight
     if (inFlight === undefined) void synchronize()
-    else void inFlight.then(synchronize)
+    else {
+      void inFlight.then(() => {
+        if (!lifetime.aborted) void synchronize()
+      })
+    }
   }, [pluginConnectionId, synchronize])
 
   useEffect(() => {
     setState("idle")
     if (!enabled || pluginConnectionId === null || sessionKey === null) return
+    const lifetime = new AbortController()
+    registrationLifetime.current = lifetime
     const unregister = registerAutomaticSynchronization(pluginConnectionId, {
+      lifetime: lifetime.signal,
       onSessionExpired: () => sessionExpired.current(sessionKey),
       onSynchronized: () => synchronized.current(),
       sessionKey,
       setState,
-      transport
+      transport,
+      verifySynchronized: (signal) => verification.current(signal)
     })
     return () => {
+      lifetime.abort()
+      if (registrationLifetime.current === lifetime) registrationLifetime.current = null
       unregister()
       manualActive.current?.abort.abort()
       manualActive.current = null

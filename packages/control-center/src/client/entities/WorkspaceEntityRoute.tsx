@@ -11,7 +11,8 @@ import {
   type RlyCollaboratorCategory
 } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, lazy, Suspense, useEffect, useRef, useState } from "react"
+import * as DateTime from "effect/DateTime"
+import { type ReactElement, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
 
 import type { DurableAgentPrompt } from "../../api/agent.js"
@@ -48,7 +49,7 @@ import {
   type ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
-import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
+import { browserWorkspaceEntityTransport, useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
 const WorkspacePullRequestDetails = lazy(() =>
   import("./WorkspacePullRequestDetails.js").then((module) => ({
@@ -657,12 +658,29 @@ const ConnectedWorkspaceEntity = ({
     controller.state.inspection.sourceSynchronizationAvailable &&
     browserSession.state._tag === "authenticated" &&
     browserSession.state.session.permission === "workspace-owner"
+  const confluenceSynchronizedAt =
+    confluencePluginConnectionId !== null && (controller.state._tag === "ready" || controller.state._tag === "stale")
+      ? DateTime.toEpochMillis(controller.state.inspection.source.synchronizedAt)
+      : null
+  const verifyConfluenceSynchronization = useCallback(
+    async (signal: AbortSignal): Promise<boolean> => {
+      if (confluencePluginConnectionId === null || confluenceSynchronizedAt === null) return false
+      const current = await browserWorkspaceEntityTransport.load(entityId, signal)
+      return (
+        current.entity.projection.entityId === entityId &&
+        current.source.pluginConnectionId === confluencePluginConnectionId &&
+        DateTime.toEpochMillis(current.source.synchronizedAt) > confluenceSynchronizedAt
+      )
+    },
+    [confluencePluginConnectionId, confluenceSynchronizedAt, entityId]
+  )
   const confluenceSynchronization = useOpenConfluenceSynchronization({
     enabled: canSynchronizeConfluence,
     onSessionExpired: browserSession.invalidateSession,
     onSynchronized: controller.retry,
     pluginConnectionId: confluencePluginConnectionId,
-    sessionKey
+    sessionKey,
+    verifySynchronized: verifyConfluenceSynchronization
   })
   const clockifyActions = useClockifyActionSubmission(
     entityId,
