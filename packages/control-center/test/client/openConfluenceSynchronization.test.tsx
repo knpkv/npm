@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement } from "react"
+import { act, type ReactElement, useRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -44,26 +44,35 @@ const Harness = ({
   onSessionExpired = ignoreSessionExpiration,
   onSynchronized,
   pluginConnectionId = PLUGIN_CONNECTION_ID,
+  readSynchronizationRevision,
   sessionKey = "session-a",
-  transport,
-  verifySynchronized = () => Promise.resolve(true)
+  synchronizationRevision = 0,
+  transport
 }: {
   readonly enabled?: boolean
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly onSynchronized: () => void
   readonly pluginConnectionId?: PluginConnectionId
+  readonly readSynchronizationRevision?: (signal: AbortSignal) => Promise<number | null>
   readonly sessionKey?: string
+  readonly synchronizationRevision?: number
   readonly transport: OpenConfluenceSynchronizationTransport
-  readonly verifySynchronized?: (signal: AbortSignal) => Promise<boolean>
 }): ReactElement => {
+  const defaultRevision = useRef(synchronizationRevision)
   const synchronization = useOpenConfluenceSynchronization({
     enabled,
     onSessionExpired,
     onSynchronized,
     pluginConnectionId,
+    readSynchronizationRevision:
+      readSynchronizationRevision ??
+      (() => {
+        defaultRevision.current += 1
+        return Promise.resolve(defaultRevision.current)
+      }),
     sessionKey,
-    transport,
-    verifySynchronized
+    synchronizationRevision,
+    transport
   })
   return (
     <button onClick={synchronization.synchronizeAfterMutation} type="button">
@@ -97,7 +106,7 @@ describe("open Confluence page synchronization", () => {
     const transport = {
       synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
     } satisfies OpenConfluenceSynchronizationTransport
-    const verifySynchronized = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const readSynchronizationRevision = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(1)
     const onSynchronized = vi.fn()
     const host = document.createElement("div")
     document.body.append(host)
@@ -105,17 +114,21 @@ describe("open Confluence page synchronization", () => {
 
     await act(async () =>
       root?.render(
-        <Harness onSynchronized={onSynchronized} transport={transport} verifySynchronized={verifySynchronized} />
+        <Harness
+          onSynchronized={onSynchronized}
+          readSynchronizationRevision={readSynchronizationRevision}
+          transport={transport}
+        />
       )
     )
-    await vi.waitFor(() => expect(verifySynchronized).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(readSynchronizationRevision).toHaveBeenCalledOnce())
     expect(onSynchronized).not.toHaveBeenCalled()
     expect(host.textContent).toBe("idle")
 
     const button = host.querySelector<HTMLButtonElement>("button")
     if (button === null) throw new Error("Expected synchronization harness")
     await act(async () => button.click())
-    await vi.waitFor(() => expect(verifySynchronized).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(readSynchronizationRevision).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledOnce())
     expect(host.textContent).toBe("synchronized")
   })
@@ -134,11 +147,21 @@ describe("open Confluence page synchronization", () => {
         return calls === 1 ? initial : Promise.resolve(synchronizationState("synchronized"))
       })
     } satisfies OpenConfluenceSynchronizationTransport
+    const readSynchronizationRevision = vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(2)
+    const onSynchronized = vi.fn()
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
 
-    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    await act(async () =>
+      root?.render(
+        <Harness
+          onSynchronized={onSynchronized}
+          readSynchronizationRevision={readSynchronizationRevision}
+          transport={transport}
+        />
+      )
+    )
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
     const button = host.querySelector<HTMLButtonElement>("button")
     if (button === null) throw new Error("Expected synchronization harness")
@@ -147,6 +170,50 @@ describe("open Confluence page synchronization", () => {
 
     await act(async () => resolveInitial(synchronizationState("synchronized")))
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledTimes(2))
+    expect(host.textContent).toBe("synchronized")
+  })
+
+  it("rebases queued post-mutation verification after the preceding synchronization", async () => {
+    let resolveInitial = (_state: PluginSynchronizationState): void => {
+      throw new Error("Expected the initial synchronization resolver")
+    }
+    const initial = new Promise<PluginSynchronizationState>((resolve) => {
+      resolveInitial = resolve
+    })
+    let calls = 0
+    const transport = {
+      synchronize: vi.fn(() => {
+        calls += 1
+        return calls === 1 ? initial : Promise.resolve(synchronizationState("synchronized"))
+      })
+    } satisfies OpenConfluenceSynchronizationTransport
+    const readSynchronizationRevision = vi.fn().mockResolvedValue(1)
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <Harness
+          onSynchronized={onSynchronized}
+          readSynchronizationRevision={readSynchronizationRevision}
+          transport={transport}
+        />
+      )
+    )
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+    await act(async () => button.click())
+
+    await act(async () => resolveInitial(synchronizationState("synchronized")))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(readSynchronizationRevision).toHaveBeenCalledTimes(2))
+
+    expect(onSynchronized).toHaveBeenCalledOnce()
+    expect(host.textContent).toBe("idle")
   })
 
   it("cancels a queued post-mutation refresh when the hook unregisters", async () => {

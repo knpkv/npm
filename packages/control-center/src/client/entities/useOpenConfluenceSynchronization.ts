@@ -334,17 +334,19 @@ export const useOpenConfluenceSynchronization = ({
   onSessionExpired,
   onSynchronized,
   pluginConnectionId,
+  readSynchronizationRevision,
   sessionKey,
-  transport = browserOpenConfluenceSynchronizationTransport,
-  verifySynchronized
+  synchronizationRevision,
+  transport = browserOpenConfluenceSynchronizationTransport
 }: {
   readonly enabled: boolean
   readonly onSessionExpired: (sessionKey: string) => void
   readonly onSynchronized: () => void
   readonly pluginConnectionId: PluginConnectionId | null
+  readonly readSynchronizationRevision: (signal: AbortSignal) => Promise<number | null>
   readonly sessionKey: string | null
+  readonly synchronizationRevision: number | null
   readonly transport?: OpenConfluenceSynchronizationTransport
-  readonly verifySynchronized: (signal: AbortSignal) => Promise<boolean>
 }): {
   readonly state: OpenConfluenceSynchronizationState
   readonly synchronizeAfterMutation: () => void
@@ -355,10 +357,29 @@ export const useOpenConfluenceSynchronization = ({
   const registrationLifetime = useRef<AbortController | null>(null)
   const sessionExpired = useRef(onSessionExpired)
   const synchronized = useRef(onSynchronized)
-  const verification = useRef(verifySynchronized)
+  const revisionReader = useRef(readSynchronizationRevision)
+  const knownRevision = useRef({ pluginConnectionId, sessionKey, value: synchronizationRevision })
   sessionExpired.current = onSessionExpired
   synchronized.current = onSynchronized
-  verification.current = verifySynchronized
+  revisionReader.current = readSynchronizationRevision
+  if (
+    knownRevision.current.pluginConnectionId !== pluginConnectionId ||
+    knownRevision.current.sessionKey !== sessionKey
+  ) {
+    knownRevision.current = { pluginConnectionId, sessionKey, value: synchronizationRevision }
+  } else if (
+    synchronizationRevision !== null &&
+    (knownRevision.current.value === null || synchronizationRevision > knownRevision.current.value)
+  ) {
+    knownRevision.current.value = synchronizationRevision
+  }
+  const verifySynchronized = useCallback(async (signal: AbortSignal): Promise<boolean> => {
+    const currentRevision = await revisionReader.current(signal)
+    const previousRevision = knownRevision.current.value
+    if (currentRevision === null || previousRevision === null || currentRevision <= previousRevision) return false
+    knownRevision.current.value = currentRevision
+    return true
+  }, [])
 
   const synchronize = useCallback((): Promise<void> => {
     if (!enabled || pluginConnectionId === null || sessionKey === null) return Promise.resolve()
@@ -374,7 +395,7 @@ export const useOpenConfluenceSynchronization = ({
           setState("failed")
           return
         }
-        const verified = await verification.current(abort.signal)
+        const verified = await verifySynchronized(abort.signal)
         if (abort.signal.aborted) return
         setState(verified ? "synchronized" : "idle")
         if (verified) synchronized.current()
@@ -388,7 +409,7 @@ export const useOpenConfluenceSynchronization = ({
     })()
     manualActive.current = { abort, completion }
     return completion
-  }, [enabled, pluginConnectionId, sessionKey, transport])
+  }, [enabled, pluginConnectionId, sessionKey, transport, verifySynchronized])
 
   const synchronizeAfterMutation = useCallback((): void => {
     const lifetime = registrationLifetime.current?.signal
@@ -420,7 +441,7 @@ export const useOpenConfluenceSynchronization = ({
       sessionKey,
       setState,
       transport,
-      verifySynchronized: (signal) => verification.current(signal)
+      verifySynchronized
     })
     return () => {
       lifetime.abort()
@@ -429,7 +450,7 @@ export const useOpenConfluenceSynchronization = ({
       manualActive.current?.abort.abort()
       manualActive.current = null
     }
-  }, [enabled, pluginConnectionId, sessionKey, transport])
+  }, [enabled, pluginConnectionId, sessionKey, transport, verifySynchronized])
 
   return {
     state,

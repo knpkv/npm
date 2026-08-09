@@ -662,25 +662,25 @@ const ConnectedWorkspaceEntity = ({
     confluencePluginConnectionId !== null && (controller.state._tag === "ready" || controller.state._tag === "stale")
       ? DateTime.toEpochMillis(controller.state.inspection.source.synchronizedAt)
       : null
-  const verifyConfluenceSynchronization = useCallback(
-    async (signal: AbortSignal): Promise<boolean> => {
-      if (confluencePluginConnectionId === null || confluenceSynchronizedAt === null) return false
+  const readConfluenceSynchronizationRevision = useCallback(
+    async (signal: AbortSignal): Promise<number | null> => {
+      if (confluencePluginConnectionId === null) return null
       const current = await browserWorkspaceEntityTransport.load(entityId, signal)
-      return (
-        current.entity.projection.entityId === entityId &&
-        current.source.pluginConnectionId === confluencePluginConnectionId &&
-        DateTime.toEpochMillis(current.source.synchronizedAt) > confluenceSynchronizedAt
-      )
+      return current.entity.projection.entityId === entityId &&
+        current.source.pluginConnectionId === confluencePluginConnectionId
+        ? DateTime.toEpochMillis(current.source.synchronizedAt)
+        : null
     },
-    [confluencePluginConnectionId, confluenceSynchronizedAt, entityId]
+    [confluencePluginConnectionId, entityId]
   )
   const confluenceSynchronization = useOpenConfluenceSynchronization({
     enabled: canSynchronizeConfluence,
     onSessionExpired: browserSession.invalidateSession,
     onSynchronized: controller.retry,
     pluginConnectionId: confluencePluginConnectionId,
+    readSynchronizationRevision: readConfluenceSynchronizationRevision,
     sessionKey,
-    verifySynchronized: verifyConfluenceSynchronization
+    synchronizationRevision: confluenceSynchronizedAt
   })
   const clockifyActions = useClockifyActionSubmission(
     entityId,
