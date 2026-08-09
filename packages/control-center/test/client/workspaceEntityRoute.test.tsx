@@ -2093,6 +2093,81 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).not.toContain("Publish")
   })
 
+  it("offers page-local manual synchronization with the foreground cadence visible", async () => {
+    const synchronize = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <PortalProvider>
+          <MemoryRouter>
+            <WorkspaceEntityView
+              confluenceSynchronizationState="synchronized"
+              onAskAgent={() => undefined}
+              onConfluenceSynchronize={synchronize}
+              originHref={`/w/${WORKSET_WORKSPACE_ID}/items`}
+              originLabel="Back to items"
+              originState={null}
+              retry={() => undefined}
+              state={confluenceState}
+              workspaceId={WORKSET_WORKSPACE_ID}
+            />
+          </MemoryRouter>
+        </PortalProvider>
+      )
+    )
+
+    expect(host.textContent).toContain("Up to date · live sync every 15 seconds while visible")
+    const sync = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Sync now"
+    )
+    if (sync === undefined) throw new Error("Expected the page-local synchronization control")
+    await act(async () => sync.click())
+    expect(synchronize).toHaveBeenCalledOnce()
+  })
+
+  it("disables synchronization in flight and keeps failed synchronization retryable", async () => {
+    const synchronize = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    const renderSynchronization = async (state: "syncing" | "failed"): Promise<void> =>
+      act(async () =>
+        mountedRoot?.render(
+          <PortalProvider>
+            <MemoryRouter>
+              <WorkspaceEntityView
+                confluenceSynchronizationState={state}
+                onAskAgent={() => undefined}
+                onConfluenceSynchronize={synchronize}
+                originHref={`/w/${WORKSET_WORKSPACE_ID}/items`}
+                originLabel="Back to items"
+                originState={null}
+                retry={() => undefined}
+                state={confluenceState}
+                workspaceId={WORKSET_WORKSPACE_ID}
+              />
+            </MemoryRouter>
+          </PortalProvider>
+        )
+      )
+
+    await renderSynchronization("syncing")
+    const sync = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Sync now"
+    )
+    if (sync === undefined) throw new Error("Expected the page-local synchronization control")
+    expect(sync.disabled).toBe(true)
+    expect(host.textContent).toContain("Live sync every 15 seconds while visible")
+
+    await renderSynchronization("failed")
+    expect(sync.disabled).toBe(false)
+    expect(host.textContent).toContain("Sync failed. Try again.")
+    await act(async () => sync.click())
+    expect(synchronize).toHaveBeenCalledOnce()
+  })
+
   it("hands Relay the exact related Confluence page body and revision for owner editing", () => {
     const releaseId = confluenceInspection.entity.releaseIds[0]
     if (releaseId === undefined) throw new Error("Expected the page to belong to a release")

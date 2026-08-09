@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 
 import { confluenceTasks, confluenceTaskSummary, setConfluenceTaskChecked } from "../../src/domain/confluenceTasks.js"
 
@@ -62,5 +62,29 @@ describe("Confluence release tasks", () => {
       "- [x] Test report\n- [x] Release notes"
     )
     expect(setConfluenceTaskChecked(markdown, 8, true)).toBeNull()
+  })
+
+  it("counts and ticks task markers escaped by the safe Confluence projection", () => {
+    const markdown = "- \\[ \\] Stage approval\n- \\[x\\] Risk sign-off"
+
+    expect(confluenceTaskSummary(markdown)).toEqual(expect.objectContaining({
+      completed: 1,
+      outstanding: 1,
+      total: 2
+    }))
+    expect(setConfluenceTaskChecked(markdown, 0, true)).toBe(
+      "- \\[x\\] Stage approval\n- \\[x\\] Risk sign-off"
+    )
+    expect(setConfluenceTaskChecked(markdown, 1, false)).toBe(
+      "- \\[ \\] Stage approval\n- \\[ \\] Risk sign-off"
+    )
+  })
+
+  it("ignores task markers with only one escaped bracket", () => {
+    const markdown = "- \\[ ] Not a task\n- [x\\] Also not a task"
+
+    expect(confluenceTasks(markdown)).toEqual([])
+    expect(setConfluenceTaskChecked(markdown, 0, true)).toBeNull()
+    expect(setConfluenceTaskChecked(markdown, 1, false)).toBeNull()
   })
 })

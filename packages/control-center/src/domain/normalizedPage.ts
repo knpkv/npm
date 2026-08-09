@@ -56,6 +56,7 @@ export const NormalizedPageAttributes = Schema.Struct({
   updatedAt: Schema.optionalKey(UtcTimestamp),
   content: Schema.optionalKey(Schema.NullOr(NormalizedPageContent)),
   contentState: Schema.optionalKey(Schema.Literals(["loaded", "lazy"])),
+  taskUpdatesSafe: Schema.optionalKey(Schema.Boolean),
   versions: Schema.optionalKey(Schema.Array(NormalizedPageVersion).check(Schema.isMaxLength(500))),
   versionHistory: Schema.optionalKey(BoundedInventory),
   contributors: Schema.optionalKey(Schema.Array(NormalizedPageContributor).check(Schema.isMaxLength(502))),

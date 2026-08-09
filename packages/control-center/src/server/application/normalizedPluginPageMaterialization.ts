@@ -281,6 +281,7 @@ const decodedConfluencePageAttributes = Effect.fn(
     updatedAt: yield* decodedPageTimestamp(attributes.updatedAt, event.eventId),
     content: attributes.content,
     contentState,
+    taskUpdatesSafe: attributes.taskUpdatesSafe ?? false,
     versions,
     versionHistory: attributes.versionHistory,
     contributors: attributes.contributors.map((contributor) => ({

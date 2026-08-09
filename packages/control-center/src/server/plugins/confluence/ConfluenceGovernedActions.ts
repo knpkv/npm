@@ -397,6 +397,21 @@ const reconciliationKey = (payload: UpdatePageActionPayload): PluginActionReconc
     ])
   )
 
+const confirmedRejectedUpdate = (
+  payload: UpdatePageActionPayload,
+  observedAt: DateTime.Utc
+): PluginActionDispatchResultV1 => ({
+  _tag: "confirmed",
+  receipt: {
+    status: "failed",
+    providerOperationId: PluginProviderOperationId.make(
+      `rejected:${payload.pageId}:v${payload.targetVersion}`
+    ),
+    safeSummary: "Confluence rejected the authorized page publication without applying it",
+    observedAt
+  }
+})
+
 const decodeReconciliationKey = (
   key: PluginActionReconciliationKey
 ): Effect.Effect<{ readonly pageId: string; readonly targetVersion: number }, PluginConfigurationFailure> => {
@@ -433,12 +448,11 @@ const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")
   return { _tag: "found", version }
 })
 
-const hasVisibleDraft = Effect.fn("ConfluenceGovernedActions.hasVisibleDraft")(function*(
+const hasDivergentDraft = Effect.fn("ConfluenceGovernedActions.hasDivergentDraft")(function*(
   client: ConfluencePageClientShape,
-  pageId: string,
-  spaceId: string
+  page: RawConfluencePage
 ): Effect.fn.Return<boolean, PluginFailure> {
-  const result = yield* client.getPageDraft(pageId).pipe(Effect.result)
+  const result = yield* client.getPageDraft(page.id).pipe(Effect.result)
   if (Result.isFailure(result)) {
     if (result.failure.reason === "not-found") return false
     return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
@@ -446,10 +460,17 @@ const hasVisibleDraft = Effect.fn("ConfluenceGovernedActions.hasVisibleDraft")(f
   const draft = yield* Schema.decodeUnknownEffect(RawConfluenceDraftPage)(result.success).pipe(
     Effect.mapError(() => malformed("confluence-page-draft-read", "confluence-page-draft-invalid"))
   )
-  if (draft.id !== pageId || draft.spaceId !== spaceId) {
+  if (draft.id !== page.id || draft.spaceId !== page.spaceId) {
     return yield* malformed("confluence-page-draft-read", "confluence-page-draft-scope-mismatch")
   }
-  return true
+  return draft.parentId === undefined ||
+    page.parentId === undefined ||
+    draft.ownerId === undefined ||
+    page.ownerId === undefined ||
+    draft.parentId !== page.parentId ||
+    draft.ownerId !== page.ownerId ||
+    draft.title !== page.title ||
+    draft.body.atlas_doc_format.value !== page.body?.atlas_doc_format?.value
 })
 
 /** Build the governed Confluence proposal and executor surfaces. @internal */
@@ -731,7 +752,7 @@ export const makeConfluenceGovernedActions = (
         checkedAt
       })
     }
-    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+    if (yield* hasDivergentDraft(input.client, page)) {
       return yield* output("preflight", PluginActionPreflightV1, {
         _tag: "blocked",
         reasons: ["Confluence page has an unpublished draft that this publication could overwrite"],
@@ -754,7 +775,20 @@ export const makeConfluenceGovernedActions = (
     )
     const locator = reconciliationKey(payload)
     const marker = versionMarker(request.idempotencyKey, request.payloadDigest, payload.versionMessage)
-    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+    const currentResult = yield* input.client.getPage(payload.pageId).pipe(Effect.result)
+    if (Result.isFailure(currentResult)) {
+      if (currentResult.failure.reason === "not-found") {
+        return confirmedRejectedUpdate(payload, yield* DateTime.now)
+      }
+      return yield* clientFailure(currentResult.failure).pipe(Effect.flatMap(Effect.fail))
+    }
+    const currentPage = yield* decodePage(
+      "confluence-execute-page",
+      currentResult.success,
+      payload.pageId,
+      input.spaceId
+    )
+    if (yield* hasDivergentDraft(input.client, currentPage)) {
       return yield* new PluginConflictFailure({
         operation: "execute-authorized-action",
         diagnosticCode: "confluence-page-draft-present"
@@ -785,17 +819,7 @@ export const makeConfluenceGovernedActions = (
       ) {
         return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
       }
-      return {
-        _tag: "confirmed",
-        receipt: {
-          status: "failed",
-          providerOperationId: PluginProviderOperationId.make(
-            `rejected:${payload.pageId}:v${payload.targetVersion}`
-          ),
-          safeSummary: "Confluence rejected the authorized page publication without applying it",
-          observedAt
-        }
-      }
+      return confirmedRejectedUpdate(payload, observedAt)
     }
     const page = yield* decodePage(
       "confluence-page-update",

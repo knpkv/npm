@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
+import { afterEach, describe, expect, it, vi } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   confluenceEditorMarkdown,
@@ -132,7 +132,7 @@ describe("Confluence visual editor", () => {
           page: {
             attachmentInventoryLabel: "Complete",
             attachments: [],
-            content: "- [ ] Run smoke tests\n- [x] Attach report",
+            content: "- \\[ \\] Run smoke tests\n- \\[x\\] Attach report\n",
             contentState: "loaded",
             contributors: [],
             createdAt: null,
@@ -141,6 +141,7 @@ describe("Confluence visual editor", () => {
             runbookEvidenceCount: 0,
             sourceSpaceId: "SD",
             status: "Current",
+            taskUpdatesSafe: true,
             updatedAt: null,
             versions: [],
             watcherInventoryLabel: "Complete"
@@ -161,13 +162,108 @@ describe("Confluence visual editor", () => {
     })
 
     expect(submitPublication).toHaveBeenCalledWith(expect.objectContaining({
-      markdown: "- [x] Run smoke tests\n- [x] Attach report",
+      markdown: "- \\[x\\] Run smoke tests\n- \\[x\\] Attach report\n",
       provider: "confluence",
       targetEntityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
       targetRevision: "4"
     }))
     expect(onSaved).toHaveBeenCalledOnce()
     expect(container.querySelector("[data-confluence-visual-editor]")).toBeNull()
+  })
+
+  it("preserves surrounding Markdown when toggling a release task", async () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+    const root = createRoot(container)
+    mounted.push({ container, root })
+    const submitPublication = vi.fn(async () => ({ actionId: "action-1", state: "succeeded" }))
+
+    await act(async () =>
+      root.render(
+        createElement(WorkspaceConfluenceVisualEditor, {
+          canEdit: true,
+          entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+          onAskAgent: () => undefined,
+          onSaved: () => undefined,
+          page: {
+            attachmentInventoryLabel: "Complete",
+            attachments: [],
+            content: "\n\n- \\[ \\] Preserve surrounding whitespace\n\n",
+            contentState: "loaded",
+            contributors: [],
+            createdAt: null,
+            historyInventoryLabel: "Complete",
+            revision: "4",
+            runbookEvidenceCount: 0,
+            sourceSpaceId: "SD",
+            status: "Current",
+            taskUpdatesSafe: true,
+            updatedAt: null,
+            versions: [],
+            watcherInventoryLabel: "Complete"
+          },
+          releaseId: ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000092"),
+          submitPublication,
+          title: "Release test report"
+        })
+      )
+    )
+
+    const checkbox = container.querySelector<HTMLInputElement>("input[type=\"checkbox\"]:not([disabled])")
+    if (checkbox === null) throw new Error("Expected a release-task checkbox")
+    await act(async () => checkbox.click())
+
+    await vi.waitFor(() =>
+      expect(submitPublication).toHaveBeenCalledWith(expect.objectContaining({
+        markdown: "\n\n- \\[x\\] Preserve surrounding whitespace\n\n"
+      }))
+    )
+  })
+
+  it("does not submit task-only replacement from a lossy safe page projection", async () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+    const root = createRoot(container)
+    mounted.push({ container, root })
+    const submitPublication = vi.fn(async () => ({ actionId: "action-1", state: "succeeded" }))
+
+    await act(async () =>
+      root.render(
+        createElement(WorkspaceConfluenceVisualEditor, {
+          canEdit: true,
+          entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+          onAskAgent: () => undefined,
+          onSaved: () => undefined,
+          page: {
+            attachmentInventoryLabel: "Complete",
+            attachments: [],
+            content: "- \\[ \\] Run smoke tests\nEvidence image and link labels remain readable\n",
+            contentState: "loaded",
+            contributors: [],
+            createdAt: null,
+            historyInventoryLabel: "Complete",
+            revision: "4",
+            runbookEvidenceCount: 0,
+            sourceSpaceId: "SD",
+            status: "Current",
+            taskUpdatesSafe: false,
+            updatedAt: null,
+            versions: [],
+            watcherInventoryLabel: "Complete"
+          },
+          releaseId: ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000092"),
+          submitPublication,
+          title: "Rich release report"
+        })
+      )
+    )
+
+    const checkbox = container.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    if (checkbox === null) throw new Error("Expected the projected release task")
+    expect(checkbox.disabled).toBe(true)
+    expect(container.textContent).toContain("cannot prove a lossless ADF round trip")
+    await act(async () => checkbox.click())
+    expect(submitPublication).not.toHaveBeenCalled()
   })
 
   it("does not report a resolved failed publication as saved", async () => {

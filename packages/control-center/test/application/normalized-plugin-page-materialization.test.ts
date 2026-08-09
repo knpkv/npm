@@ -2440,6 +2440,7 @@ describe("normalized plugin page materialization", () => {
       const inspection = yield* makeDeliveryGraphInspection
       const historical = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isFalse(historical.sourceActionsAvailable)
+      assert.isTrue(historical.sourceSynchronizationAvailable)
 
       yield* persistence.pluginRuntime.acceptPluginDescriptor(
         WORKSPACE_ID,
@@ -2451,6 +2452,7 @@ describe("normalized plugin page materialization", () => {
       )
       const current = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isTrue(current.sourceActionsAvailable)
+      assert.isTrue(current.sourceSynchronizationAvailable)
 
       const connection = yield* persistence.pluginConnections.get(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID)
       yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID, {
@@ -2461,6 +2463,7 @@ describe("normalized plugin page materialization", () => {
       })
       const disabled = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isFalse(disabled.sourceActionsAvailable)
+      assert.isFalse(disabled.sourceSynchronizationAvailable)
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
@@ -3320,8 +3323,8 @@ describe("normalized plugin page materialization", () => {
       const indexedPage = boundedSlice.entityProjections.find(({ projection }) => projection.details._tag === "page")
         ?.projection
       if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
-      assert.strictEqual(indexedPage.details.contentState, "lazy")
-      assert.isNull(indexedPage.details.content)
+      assert.strictEqual(indexedPage.details.contentState, "loaded")
+      assert.isNotNull(indexedPage.details.content)
       const indexedTimeEntry = boundedSlice.entityProjections.find(
         ({ projection }) => projection.details._tag === "time-entry"
       )?.projection
@@ -6036,6 +6039,7 @@ describe("normalized plugin page materialization", () => {
       if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
       assert.strictEqual(lazy.projectionSchemaVersion, 2)
       assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.isFalse(lazy.details.taskUpdatesSafe)
       assert.deepStrictEqual(lazy.details.linkedIssueKeys, ["PAY-42"])
       assert.deepStrictEqual(lazy.details.linkedReleaseVersions, ["2026.29"])
       assert.deepStrictEqual(lazy.details.contributors?.[0], {
@@ -6071,6 +6075,7 @@ describe("normalized plugin page materialization", () => {
       if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
       assert.strictEqual(loaded.projectionRevision, 2)
       assert.strictEqual(loaded.details.contentState, "loaded")
+      assert.isFalse(loaded.details.taskUpdatesSafe)
       assert.isNull(loaded.details.content)
       assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
       assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })

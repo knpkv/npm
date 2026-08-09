@@ -143,12 +143,19 @@ describe("Confluence page client", () => {
     }).pipe(Effect.provide(pageClientLayer(version, requests)))
   })
 
-  it.effect("requests the visible draft without loading the published body", () => {
+  it.effect("requests the visible draft body for safe divergence detection", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const draft = {
       id: "42",
       status: "draft",
-      spaceId: "space-payments"
+      title: "Payments release runbook",
+      spaceId: "space-payments",
+      body: {
+        atlas_doc_format: {
+          representation: "atlas_doc_format",
+          value: "{\"content\":[],\"type\":\"doc\",\"version\":1}"
+        }
+      }
     }
     return Effect.gen(function*() {
       const client = yield* ConfluencePageClient
@@ -159,6 +166,7 @@ describe("Confluence page client", () => {
       assert.deepStrictEqual(
         new Map(requests[0]?.urlParams ?? []),
         new Map([
+          ["body-format", "atlas_doc_format"],
           ["get-draft", "true"],
           ["status", "draft"]
         ])

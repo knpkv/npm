@@ -52,7 +52,16 @@ export type RawConfluencePage = typeof RawConfluencePage.Type
 export const RawConfluenceDraftPage = Schema.Struct({
   id: boundedString(512),
   status: Schema.Literal("draft"),
-  spaceId: boundedString(512)
+  title: boundedString(500),
+  spaceId: boundedString(512),
+  parentId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
+  ownerId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
+  body: Schema.Struct({
+    atlas_doc_format: Schema.Struct({
+      representation: Schema.optionalKey(Schema.Literal("atlas_doc_format")),
+      value: Schema.String.check(Schema.isMaxLength(1_048_576))
+    })
+  })
 })
 
 /** Decoded Confluence page draft. @internal */
@@ -211,6 +220,7 @@ export const ConfluencePageAttributesV1 = Schema.Struct({
     complete: Schema.Boolean,
     pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))
   })),
+  taskUpdatesSafe: Schema.optionalKey(Schema.Boolean),
   contentState: Schema.optionalKey(Schema.Literals(["loaded", "lazy"]))
 }).check(hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes))
 

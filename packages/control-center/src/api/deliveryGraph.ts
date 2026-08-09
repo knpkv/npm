@@ -202,6 +202,9 @@ export const WorkspaceEntityInspection = Schema.Struct({
   sourceActionsAvailable: Schema.Boolean.pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
   ),
+  sourceSynchronizationAvailable: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
+  ),
   freshness: Schema.NullOr(Freshness),
   clockifyApproval: Schema.NullOr(ClockifyApproval).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(null))

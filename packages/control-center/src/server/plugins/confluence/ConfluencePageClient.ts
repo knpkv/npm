@@ -184,6 +184,7 @@ export const makeConfluencePageClient = (
       api.v2.httpClient.execute(
         HttpClientRequest.get(`/pages/${encodeURIComponent(pageId)}`).pipe(
           HttpClientRequest.setUrlParams({
+            "body-format": "atlas_doc_format",
             "get-draft": true,
             status: ["draft"]
           })

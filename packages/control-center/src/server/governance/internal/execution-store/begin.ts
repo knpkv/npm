@@ -256,7 +256,7 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
           // remains responsible for checking the live destination/version.
           const currentTarget = publication !== undefined &&
               record.envelope.targetEntityId === EntityId.make(publication.releaseId)
-            ? yield* Schema.decodeUnknownEffect(GovernedActionTargetSnapshotV1)({
+            ? yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionTargetSnapshotV1))({
               workspaceId: record.envelope.workspaceId,
               entityId: record.envelope.targetEntityId,
               entityType: record.envelope.proposal.request.target.entityType,

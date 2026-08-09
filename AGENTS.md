@@ -126,6 +126,7 @@ Security-sensitive canonical-payload documentation and code examples must name t
 
 Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
 Every provider fixture-locator list must classify each coordinate as server-private or name its safe normalized/authenticated boundary, persisted representation, and prohibited emission surfaces.
+For `packages/control-center/README.md`, `packages/control-center/src/api/**`, and `packages/control-center/src/client/**`, an identifier that crosses an authenticated HTTP route or browser storage boundary is client-visible and must not be described as server-private. In particular, document `pluginConnectionId` as a normalized authenticated client-visible identifier when it appears in typed routes or cross-tab storage, including that persisted representation and its unauthenticated/public emission prohibition; keep raw provider site locators and credentials server-private. Generated and vendor documentation are excluded, while identifiers that never cross a transport boundary still require judgment.
 
 ### Versioning and Publishing
 

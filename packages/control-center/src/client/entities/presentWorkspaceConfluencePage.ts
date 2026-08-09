@@ -30,6 +30,7 @@ export interface WorkspaceConfluencePagePresentation {
   readonly runbookEvidenceCount: number
   readonly sourceSpaceId: string
   readonly status: "Current" | "Draft" | "Superseded"
+  readonly taskUpdatesSafe?: boolean
   readonly updatedAt: WorkspacePageTimestamp | null
   readonly versions: ReadonlyArray<{
     readonly author: string
@@ -130,6 +131,7 @@ export const presentWorkspaceConfluencePage = (
     runbookEvidenceCount: inspection.graph.evidenceItems.length,
     sourceSpaceId: details.sourceSpaceId ?? details.spaceKey,
     status: details.status === "superseded" ? "Superseded" : details.status === "draft" ? "Draft" : "Current",
+    taskUpdatesSafe: details.taskUpdatesSafe === true,
     updatedAt: timestampFor(details.updatedAt),
     versions: (details.versions ?? []).map((version) => ({
       author: version.authorSourcePersonId === null
