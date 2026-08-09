@@ -1,6 +1,7 @@
 import { AwsClient, CacheService, ChildEnv, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Predicate, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { assumeConsoleArgs } from "../browser-command.js"
 import { runtimeAtom, TuiApplicationScope } from "./runtime.js"
 
 // ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
     })
 
     yield* Effect.forkIn(
-      exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
+      exitCode(ChildProcess.make("assume", assumeConsoleArgs(pr.link, profile), {
         stdout: "inherit",
         stderr: "inherit",
         // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the

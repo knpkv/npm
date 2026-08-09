@@ -20,6 +20,7 @@ const relayRequest: RelayReviewRequest = {
   kind: "review",
   pullRequestId: Domain.PullRequestId.make("42"),
   repositoryName: Domain.RepositoryName.make("payments"),
+  skills: ["pr-review", "pr-review-diff"],
   worktreePath: "/review/worktree"
 }
 
@@ -164,6 +165,7 @@ describe("RelayReview", () => {
         kind: "security",
         pullRequestId: Domain.PullRequestId.make("42"),
         repositoryName: Domain.RepositoryName.make("payments"),
+        skills: ["pr-review-diff"],
         worktreePath: root
       })
 

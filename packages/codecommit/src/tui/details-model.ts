@@ -102,30 +102,47 @@ export const actionOutcome = <A, E, R>(requestId: string, effect: Effect.Effect<
   )
 
 export type DetailsKeyIntent =
+  | "ack-finding"
   | "back"
   | "cancel-action"
+  | "choose-review-skills"
   | "checkout-worktree"
   | "confirm-action"
+  | "discuss-finding"
   | "explain-risk"
   | "next-file"
   | "open-browser"
+  | "open-neovim"
+  | "open-vscode"
+  | "next-finding"
+  | "next-pending-finding"
   | "previous-file"
+  | "post-finding"
+  | "previous-finding"
+  | "reject-finding"
   | "review-pr"
   | "review-security"
   | "review-tests"
   | "scroll-content-down"
   | "scroll-content-up"
+  | "scroll-files-left"
+  | "scroll-files-right"
   | "show-comments"
   | "show-diff"
+  | "choose-finding-target"
+  | "verify-finding"
   | "yield"
 
 /** Decides whether the exact-head workspace consumes a key or yields it to dialogs/focused controls. */
 export const detailsKeyIntent = (input: {
   readonly actionCancelable: boolean
   readonly actionReady: boolean
+  readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
+  readonly findingReviewActive?: boolean
   readonly keyName: string
   readonly modified: boolean
+  readonly shifted?: boolean
   readonly tab: "comments" | "diff"
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
@@ -133,10 +150,46 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
+  if (input.findingReviewActive === true && (input.keyName === "h" || input.keyName === "[")) return "previous-finding"
+  if (input.findingReviewActive === true && (input.keyName === "l" || input.keyName === "]")) return "next-finding"
+  if (input.findingReviewActive === true && input.keyName === "u") return "next-pending-finding"
+  if (input.findingReviewActive === true && input.keyName === "d" && input.conversationRunning !== true) {
+    return "discuss-finding"
+  }
+  if (input.findingReviewActive === true && input.keyName === "m" && input.conversationRunning !== true) {
+    return "choose-finding-target"
+  }
+  if (
+    input.findingReviewActive === true &&
+    (input.keyName === "V" || (input.keyName === "v" && input.shifted === true)) &&
+    input.conversationRunning !== true
+  ) {
+    return "verify-finding"
+  }
+  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "p") {
+    return "post-finding"
+  }
+  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "a") {
+    return "ack-finding"
+  }
+  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "x") {
+    return "reject-finding"
+  }
+  if (input.tab === "diff" && !input.actionCancelable && input.keyName === "n") return "open-neovim"
+  if (
+    input.tab === "diff" &&
+    !input.actionCancelable &&
+    input.conversationRunning !== true &&
+    input.keyName === "v" &&
+    input.shifted !== true
+  ) return "open-vscode"
+  if (input.tab === "diff" && !input.actionCancelable && input.keyName === "g") return "choose-review-skills"
   if (input.tab === "diff" && input.keyName === "k") return "previous-file"
   if (input.tab === "diff" && input.keyName === "j") return "next-file"
   if (input.tab === "diff" && input.keyName === "up") return "scroll-content-up"
   if (input.tab === "diff" && input.keyName === "down") return "scroll-content-down"
+  if (input.tab === "diff" && input.keyName === "left") return "scroll-files-left"
+  if (input.tab === "diff" && input.keyName === "right") return "scroll-files-right"
   if (input.tab === "diff" && input.keyName === "w") return "checkout-worktree"
   if (input.tab === "diff" && input.keyName === "r") return "review-pr"
   if (input.tab === "diff" && input.keyName === "s") return "review-security"
@@ -248,16 +301,55 @@ export const currentWorkspaceSelection = <
     : { _tag: "stale" }
 }
 
-/** Keeps exact-pair threads plus explicitly commitless general PR comments. */
-export const currentRevisionCommentLocations = (
+export type CommentRevisionContext =
+  | { readonly _tag: "current" }
+  | { readonly _tag: "historical"; readonly headCommit: string | undefined }
+  | { readonly _tag: "pull-request" }
+  | { readonly _tag: "unlocated" }
+
+/** Describes which immutable PR revision owns a fetched review coordinate. */
+export const commentRevisionContext = (
+  location: Pick<Domain.PRCommentLocation, "afterCommitId" | "beforeCommitId" | "filePath">,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
+): CommentRevisionContext => {
+  const commitless = location.beforeCommitId === undefined && location.afterCommitId === undefined
+  if (commitless) return { _tag: location.filePath === undefined ? "pull-request" : "unlocated" }
+  if (location.beforeCommitId === revision.destinationCommit && location.afterCommitId === revision.sourceCommit) {
+    return { _tag: "current" }
+  }
+  return { _tag: "historical", headCommit: location.afterCommitId }
+}
+
+/** Keeps every posted thread visible while placing exact-revision comments first. */
+export const displayedCommentLocations = (
   locations: ReadonlyArray<Domain.PRCommentLocation>,
   revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
-): ReadonlyArray<Domain.PRCommentLocation> =>
-  locations.filter((location) => {
-    const commitless = location.beforeCommitId === undefined && location.afterCommitId === undefined
-    if (commitless) return location.filePath === undefined
-    return location.beforeCommitId === revision.destinationCommit && location.afterCommitId === revision.sourceCommit
-  })
+): ReadonlyArray<Domain.PRCommentLocation> => {
+  const rank = (location: Domain.PRCommentLocation): number =>
+    ({ current: 0, "pull-request": 1, unlocated: 1, historical: 2 })[commentRevisionContext(location, revision)._tag]
+  return locations
+    .map((location, index) => ({ index, location }))
+    .sort((left, right) => rank(left.location) - rank(right.location) || left.index - right.index)
+    .map(({ location }) => location)
+}
+
+export type CommentLocationAnchor =
+  | { readonly _tag: "general"; readonly label: "Pull request" }
+  | { readonly _tag: "file"; readonly filePath: string }
+  | { readonly _tag: "line"; readonly filePath: string; readonly lineNumber: number }
+
+/** Turns CodeCommit's grouped comment shape into one scan-friendly review coordinate. */
+export const commentLocationAnchor = (
+  location: Pick<Domain.PRCommentLocation, "comments" | "filePath">
+): CommentLocationAnchor => {
+  if (location.filePath === undefined) return { _tag: "general", label: "Pull request" }
+  const lineNumber = location.comments
+    .map((thread) => thread.root.lineNumber)
+    .find((candidate): candidate is number => candidate !== undefined)
+  return lineNumber === undefined
+    ? { _tag: "file", filePath: location.filePath }
+    : { _tag: "line", filePath: location.filePath, lineNumber }
+}
 
 export const fileDiffIdentity = (
   identity: PullRequestWorkspaceIdentity,
@@ -281,6 +373,21 @@ export const fileDiffIdentityMatches = (actual: FileDiffIdentity, expected: File
   actual.beforePath === expected.beforePath &&
   actual.destinationCommit === expected.destinationCommit &&
   actual.sourceCommit === expected.sourceCommit
+
+/** Stable in-memory cache key for one exact file revision and both immutable blob identities. */
+export const fileDiffIdentityKey = (identity: FileDiffIdentity): string =>
+  [
+    identity.profile,
+    identity.region,
+    identity.repositoryName,
+    identity.pullRequestId,
+    identity.destinationCommit,
+    identity.sourceCommit,
+    identity.beforePath ?? "",
+    identity.beforeBlobId ?? "",
+    identity.afterPath ?? "",
+    identity.afterBlobId ?? ""
+  ].join("\u0000")
 
 /** Keeps a retained async result only when it belongs to the file currently on screen. */
 export const currentFileDiffOutcome = <A extends { readonly identity: FileDiffIdentity }>(
@@ -308,6 +415,110 @@ export const changedFilePath = (file: ReadClient.CodeCommitChangedFile): string 
 
 export const changedFileRowId = (index: number): string => `changed-file-${index}`
 
+export type ChangedFileTreeRow =
+  | {
+    readonly _tag: "directory"
+    readonly depth: number
+    readonly key: string
+    readonly name: string
+  }
+  | {
+    readonly _tag: "file"
+    readonly depth: number
+    readonly fileIndex: number
+    readonly key: string
+    readonly name: string
+  }
+
+const MAXIMUM_CHANGED_FILE_TREE_NAME_CHARACTERS = 120
+
+/** Preserves ordinary file names while bounding hostile provider text independently of tree depth. */
+export const changedFileTreeVisibleName = (row: ChangedFileTreeRow): string =>
+  terminalSafeCompactText(row.name, MAXIMUM_CHANGED_FILE_TREE_NAME_CHARACTERS)
+
+/** Natural horizontal width required to expose every bounded tree row without wrapping. */
+export const changedFileTreeContentWidth = (rows: ReadonlyArray<ChangedFileTreeRow>): number =>
+  rows.reduce(
+    (maximum, row) =>
+      Math.max(
+        maximum,
+        (row._tag === "directory" ? 3 : 5) + row.depth * 2 + Array.from(changedFileTreeVisibleName(row)).length
+      ),
+    1
+  )
+
+interface MutableChangedFileTreeDirectory {
+  readonly children: Map<string, MutableChangedFileTreeDirectory>
+  readonly entries: Array<
+    | { readonly _tag: "directory"; readonly name: string }
+    | { readonly _tag: "file"; readonly fileIndex: number; readonly name: string }
+  >
+}
+
+const mutableChangedFileTreeDirectory = (): MutableChangedFileTreeDirectory => ({
+  children: new Map(),
+  entries: []
+})
+
+/** Groups shared path prefixes once while retaining stable first-seen sibling order and original file identities. */
+export const changedFileTreeRows = (
+  files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
+): ReadonlyArray<ChangedFileTreeRow> => {
+  const root = mutableChangedFileTreeDirectory()
+  files.forEach((file, fileIndex) => {
+    const path = changedFilePath(file)
+    const segments = path.split("/").filter((segment) => segment.length > 0)
+    const fileName = segments.pop() ?? path
+    let directory = root
+    for (const segment of segments) {
+      let child = directory.children.get(segment)
+      if (child === undefined) {
+        child = mutableChangedFileTreeDirectory()
+        directory.children.set(segment, child)
+        directory.entries.push({ _tag: "directory", name: segment })
+      }
+      directory = child
+    }
+    directory.entries.push({ _tag: "file", fileIndex, name: fileName })
+  })
+
+  const rows: Array<ChangedFileTreeRow> = []
+  const append = (directory: MutableChangedFileTreeDirectory, depth: number, prefix: string): void => {
+    for (const entry of directory.entries) {
+      if (entry._tag === "file") {
+        rows.push({
+          _tag: "file",
+          depth,
+          fileIndex: entry.fileIndex,
+          key: `${prefix}${entry.name}\u0000${entry.fileIndex}`,
+          name: entry.name
+        })
+        continue
+      }
+      const path = `${prefix}${entry.name}/`
+      rows.push({ _tag: "directory", depth, key: path, name: entry.name })
+      const child = directory.children.get(entry.name)
+      if (child !== undefined) append(child, depth + 1, path)
+    }
+  }
+  append(root, 0, "")
+  return rows
+}
+
+/** Moves between selectable file leaves in visual tree order; directory rows never receive focus. */
+export const adjacentChangedFileIndex = (
+  rows: ReadonlyArray<ChangedFileTreeRow>,
+  currentFileIndex: number,
+  direction: -1 | 1
+): number => {
+  const fileIndexes = rows.flatMap((row) => row._tag === "file" ? [row.fileIndex] : [])
+  if (fileIndexes.length === 0) return 0
+  const currentPosition = fileIndexes.indexOf(currentFileIndex)
+  if (currentPosition < 0) return fileIndexes[0] ?? 0
+  const nextPosition = Math.max(0, Math.min(fileIndexes.length - 1, currentPosition + direction))
+  return fileIndexes[nextPosition] ?? currentFileIndex
+}
+
 export const filetypeForPath = (path: string): string | undefined => {
   const extension = path.includes(".") ? path.slice(path.lastIndexOf(".") + 1).toLowerCase() : ""
   return FILETYPE_ALIASES[extension] ?? (extension.length > 0 ? extension : undefined)
@@ -330,6 +541,15 @@ export const terminalSafeText = (value: string): string =>
     const codePoint = character.codePointAt(0)
     return codePoint !== undefined && isTerminalUnsafe(character, codePoint) ? escapedCodePoint(character) : character
   }).join("")
+
+/** Keeps untrusted single-line text within a fixed terminal column budget. */
+export const terminalSafeCompactText = (value: string, maxLength: number): string => {
+  if (maxLength <= 0) return ""
+  const safeCharacters = Array.from(terminalSafeText(value))
+  if (safeCharacters.length <= maxLength) return safeCharacters.join("")
+  if (maxLength === 1) return "…"
+  return `${safeCharacters.slice(0, maxLength - 1).join("")}…`
+}
 
 /** Formats untrusted provider revision metadata for a single terminal-safe header. */
 export const revisionHeaderText = (

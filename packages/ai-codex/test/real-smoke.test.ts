@@ -6,7 +6,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { model, streamEvents } from "../src/index.js"
 
-const expectedCodexVersion = "codex-cli 0.146.0"
+const expectedCodexVersion = "codex-cli 0.147.0"
 const smokeModel = "gpt-5.6-luna"
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 const EventWithOptionalItem = Schema.fromJsonString(

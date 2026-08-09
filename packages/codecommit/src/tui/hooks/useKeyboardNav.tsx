@@ -25,9 +25,13 @@ import {
   viewAtom
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
+import { pressExitConfirmation } from "../exit-confirmation.js"
 import { extractScope } from "../ListBuilder.js"
 import { shouldOpenPullRequestFilter } from "../navigation-model.js"
+import { isAwsAuthenticationNotification } from "../notification-auth.js"
+import { quickFilterTypeForShortcut } from "../quick-filter-config.js"
 import { themes } from "../theme/themes.js"
+import { transitionTextFilterInput, type TextFilterInputState } from "../text-filter-input.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
 
 const settingsFilterModes: ReadonlyArray<string> = ["", "on:", "off:"]
@@ -55,6 +59,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setFilterText = useAtomSet(filterTextAtom)
   const isFiltering = useAtomValue(isFilteringAtom)
   const setIsFiltering = useAtomSet(isFilteringAtom)
+  const filterInputRef = useRef<TextFilterInputState>({ active: isFiltering, text: filterText })
   const currentPR = useAtomValue(currentPRAtom)
   const selectedIndex = useAtomValue(selectedIndexAtom)
   const refresh = useAtomSet(refreshAtom)
@@ -62,13 +67,14 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const notificationsResult = useAtomValue(notificationsAtom)
   const notifications: PaginatedNotifications = AsyncResult.getOrElse(notificationsResult, () => ({ items: [] }))
   const loginToAws = useAtomSet(loginToAwsAtom)
-  const exitPending = useAtomValue(exitPendingAtom)
   const setExitPending = useAtomSet(exitPendingAtom)
   const exitTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const exitPendingRef = useRef(false)
 
   useEffect(
     () => () => {
       if (exitTimeoutRef.current) clearTimeout(exitTimeoutRef.current)
+      exitPendingRef.current = false
     },
     []
   )
@@ -88,6 +94,10 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setSettingsFilter = useAtomSet(settingsFilterAtom)
   const isSettingsFiltering = useAtomValue(isSettingsFilteringAtom)
   const setIsSettingsFiltering = useAtomSet(isSettingsFilteringAtom)
+  const settingsFilterInputRef = useRef<TextFilterInputState>({
+    active: isSettingsFiltering,
+    text: settingsFilter
+  })
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
   const settingsTab = useAtomValue(settingsTabAtom)
   const setSettingsTab = useAtomSet(settingsTabAtom)
@@ -95,6 +105,16 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setThemeSelectionIndex = useAtomSet(themeSelectionIndexAtom)
   const setThemeId = useAtomSet(themeAtom)
   const themeNames = useMemo(() => Object.keys(themes).sort(), [])
+
+  // Reconcile external atom changes after a committed render. Assigning these
+  // refs during render can overwrite a newer key-batch transition with the
+  // previous atom snapshot before all setters from that transition commit.
+  useEffect(() => {
+    filterInputRef.current = { active: isFiltering, text: filterText }
+  }, [filterText, isFiltering])
+  useEffect(() => {
+    settingsFilterInputRef.current = { active: isSettingsFiltering, text: settingsFilter }
+  }, [isSettingsFiltering, settingsFilter])
 
   // Extract unique authors, accounts, scopes, and repos
   const { accounts, authors, myScopes, repos, scopes } = useMemo(() => {
@@ -147,71 +167,61 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
 
     // Ctrl+C double-press to exit
     if (key.name === "c" && key.ctrl) {
-      if (exitPending) {
+      if (pressExitConfirmation(exitPendingRef) === "quit") {
+        if (exitTimeoutRef.current) clearTimeout(exitTimeoutRef.current)
+        exitTimeoutRef.current = null
+        setExitPending(false)
         onQuit()
       } else {
         setExitPending(true)
         if (exitTimeoutRef.current) clearTimeout(exitTimeoutRef.current)
         exitTimeoutRef.current = setTimeout(() => {
+          exitPendingRef.current = false
           setExitPending(false)
         }, 3000)
       }
       return
     }
 
-    // Filter mode input (PRs)
-    if (isFiltering) {
-      if (key.name === "escape") {
-        setIsFiltering(false)
-        setFilterText("")
-      } else if (key.name === "return") {
-        setIsFiltering(false)
-      } else if (key.name === "backspace") {
-        setFilterText(filterText.slice(0, -1))
-      } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
-        if (char && char.length === 1) {
-          setFilterText(filterText + char)
-        }
-      }
+    // Keep this transition synchronous: terminals may deliver a whole paste
+    // before React has rendered the state change caused by the opening slash.
+    const wasFiltering = filterInputRef.current.active
+    const filterTransition = transitionTextFilterInput(filterInputRef.current, key, shouldOpenPullRequestFilter(view))
+    if (filterTransition.handled) {
+      filterInputRef.current = filterTransition.state
+      setIsFiltering(filterTransition.state.active)
+      setFilterText(filterTransition.state.text)
+      if (!wasFiltering && filterTransition.state.active) setView("prs")
       return
     }
 
-    // Settings filter mode input
-    if (isSettingsFiltering) {
-      if (key.name === "escape") {
-        setIsSettingsFiltering(false)
-        setSettingsFilter("")
-      } else if (key.name === "return") {
-        setIsSettingsFiltering(false)
-      } else if (key.name === "backspace") {
-        setSettingsFilter(settingsFilter.slice(0, -1))
-      } else if (key.name === "left" || key.name === "right") {
+    // Settings filtering needs the same synchronous paste handling as the PR
+    // filter. Otherwise a pasted "d" can escape into the disable-all shortcut
+    // before React renders the opening slash.
+    const wasSettingsFiltering = settingsFilterInputRef.current.active
+    const settingsFilterTransition = transitionTextFilterInput(
+      settingsFilterInputRef.current,
+      key,
+      view === "settings" && settingsTab === "accounts"
+    )
+    if (settingsFilterTransition.handled) {
+      let nextSettingsFilterState = settingsFilterTransition.state
+      if (wasSettingsFiltering && (key.name === "left" || key.name === "right")) {
         const modes = settingsFilterModes
-        const currentPrefix = settingsFilter.startsWith("on:") ? "on:" : settingsFilter.startsWith("off:") ? "off:" : ""
-        const nameFilter = currentPrefix ? settingsFilter.slice(currentPrefix.length) : settingsFilter
+        const currentText = settingsFilterInputRef.current.text
+        const currentPrefix = currentText.startsWith("on:") ? "on:" : currentText.startsWith("off:") ? "off:" : ""
+        const nameFilter = currentPrefix ? currentText.slice(currentPrefix.length) : currentText
         const idx = modes.indexOf(currentPrefix)
         const nextIdx = key.name === "right" ? (idx + 1) % modes.length : (idx - 1 + modes.length) % modes.length
         const nextMode = modes[nextIdx] ?? ""
-        setSettingsFilter(nextMode + nameFilter)
-        return
-      } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
-        if (char && char.length === 1) {
-          setSettingsFilter(settingsFilter + char)
+        nextSettingsFilterState = {
+          active: true,
+          text: nextMode + nameFilter
         }
       }
-      return
-    }
-
-    // "/" or "f" filter shortcut
-    if (key.name === "/" || key.char === "/" || key.name === "f") {
-      if (view === "settings" && settingsTab === "accounts") {
-        setIsSettingsFiltering(true)
-      } else if (shouldOpenPullRequestFilter(view)) {
-        setIsFiltering(true)
-        setView("prs")
-      }
+      settingsFilterInputRef.current = nextSettingsFilterState
+      setIsSettingsFiltering(nextSettingsFilterState.active)
+      setSettingsFilter(nextSettingsFilterState.text)
       return
     }
 
@@ -307,6 +317,24 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       return
     }
 
+    // Quick filter shortcuts (1-9) share their registry with the command palette.
+    const selectedQuickFilter = view === "prs" ? quickFilterTypeForShortcut(key.name) : undefined
+    if (selectedQuickFilter) {
+      setQuickFilterType(selectedQuickFilter)
+      if (selectedQuickFilter === "mine" && !quickFilterValues.mine && myScopes.length > 0) {
+        setQuickFilterValues({ ...quickFilterValues, mine: myScopes[0]! })
+      } else if (selectedQuickFilter === "account" && !quickFilterValues.account && accounts.length > 0) {
+        setQuickFilterValues({ ...quickFilterValues, account: accounts[0]! })
+      } else if (selectedQuickFilter === "author" && !quickFilterValues.author && authors.length > 0) {
+        setQuickFilterValues({ ...quickFilterValues, author: authors[0]! })
+      } else if (selectedQuickFilter === "scope" && !quickFilterValues.scope && scopes.length > 0) {
+        setQuickFilterValues({ ...quickFilterValues, scope: scopes[0]! })
+      } else if (selectedQuickFilter === "repo" && !quickFilterValues.repo && repos.length > 0) {
+        setQuickFilterValues({ ...quickFilterValues, repo: repos[0]! })
+      }
+      return
+    }
+
     // Global keybindings (prs + notifications views)
     switch (key.name) {
       case "q":
@@ -332,7 +360,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           const selected = notifications.items[selectedIndex]
           if (selected) {
             const profile = selected.title.replace(/\s*\(.*$/, "")
-            if (/ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials/i.test(selected.message)) {
+            if (isAwsAuthenticationNotification(selected.message)) {
               loginToAws(decodeAwsProfileName(profile || selected.title))
             }
           }
@@ -352,64 +380,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       case "c":
         if (view === "notifications") {
           markAllRead()
-        }
-        break
-
-      // Quick filter shortcuts (1-9) — only in prs view
-      case "1":
-        if (view === "prs") setQuickFilterType("all")
-        break
-      case "2":
-        if (view === "prs") setQuickFilterType("hot")
-        break
-      case "3":
-        if (view === "prs") {
-          setQuickFilterType("mine")
-          if (!quickFilterValues.mine && myScopes.length > 0) {
-            setQuickFilterValues({ ...quickFilterValues, mine: myScopes[0]! })
-          }
-        }
-        break
-      case "4":
-        if (view === "prs") {
-          setQuickFilterType("account")
-          if (!quickFilterValues.account && accounts.length > 0) {
-            setQuickFilterValues({ ...quickFilterValues, account: accounts[0]! })
-          }
-        }
-        break
-      case "5":
-        if (view === "prs") {
-          setQuickFilterType("author")
-          if (!quickFilterValues.author && authors.length > 0) {
-            setQuickFilterValues({ ...quickFilterValues, author: authors[0]! })
-          }
-        }
-        break
-      case "6":
-        if (view === "prs") {
-          setQuickFilterType("scope")
-          if (!quickFilterValues.scope && scopes.length > 0) {
-            setQuickFilterValues({ ...quickFilterValues, scope: scopes[0]! })
-          }
-        }
-        break
-      case "7":
-        if (view === "prs") {
-          setQuickFilterType("date")
-        }
-        break
-      case "8":
-        if (view === "prs") {
-          setQuickFilterType("repo")
-          if (!quickFilterValues.repo && repos.length > 0) {
-            setQuickFilterValues({ ...quickFilterValues, repo: repos[0]! })
-          }
-        }
-        break
-      case "9":
-        if (view === "prs") {
-          setQuickFilterType("status")
         }
         break
 

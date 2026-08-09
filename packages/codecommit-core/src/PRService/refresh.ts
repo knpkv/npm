@@ -7,12 +7,12 @@ import type { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import type { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import type { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import type { ConfigService } from "../ConfigService/index.js"
 import type { AppStatus } from "../Domain.js"
-import type { PRState } from "./internal.js"
+import { decodeCachedPR, type PRState } from "./internal.js"
 import { enrichDiffs } from "./refreshDiffs.js"
 import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
@@ -33,6 +33,13 @@ const transitionToRefreshError = (state: PRState, error: unknown) =>
     status: errorStatus,
     error: refreshErrorMessage(error)
   }))
+
+const publishCachedPullRequests = (state: PRState) =>
+  Effect.gen(function*() {
+    const prRepo = yield* PullRequestRepo
+    const pullRequests = (yield* prRepo.findAll()).map((row) => decodeCachedPR(row))
+    yield* SubscriptionRef.update(state, (current) => ({ ...current, pullRequests }))
+  })
 
 export type RefreshDeps =
   | ConfigService
@@ -62,6 +69,9 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
         yield* enrichComments({ state, subscribedRef })
         yield* enrichDiffs(state)
         yield* calculateHealthScores(state)
+        // All enrichment writes land in the cache. Publish that final snapshot
+        // during this refresh so newly fetched PRs do not require a second run.
+        yield* publishCachedPullRequests(state)
       })
     )
 

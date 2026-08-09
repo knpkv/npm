@@ -10,6 +10,7 @@ import * as GitEnvironment from "../src/GitEnvironment.js"
 import {
   acquireReadyLockHolder,
   codeCommitRemoteUrl,
+  makeCodeCommitGitCommand,
   makeWorktreeService,
   repositoryLockPath,
   WORKTREE_LOCK_REQUIREMENT,
@@ -17,6 +18,50 @@ import {
 } from "../src/WorktreeService.js"
 
 describe("WorktreeService", () => {
+  it("owns CodeCommit HTTPS authentication instead of relying on ambient Git helpers", () => {
+    const request = {
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("review-profile"),
+        region: Domain.AwsRegion.make("eu-central-1"),
+        repoAccountId: "111122223333"
+      }),
+      destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+      destinationReference: "main",
+      pullRequestId: Domain.PullRequestId.make("77"),
+      repositoryName: Domain.RepositoryName.make("review-repository"),
+      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
+      sourceReference: "feature/review"
+    }
+    const command = makeCodeCommitGitCommand(request, ["clone", "--bare", "remote", "cache"])
+
+    expect(ChildProcess.isStandardCommand(command)).toBe(true)
+    if (!ChildProcess.isStandardCommand(command)) return
+    expect(command.args).toEqual([
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "credential.interactive=false",
+      "-c",
+      "credential.helper=",
+      "-c",
+      "credential.helper=!aws codecommit credential-helper $@",
+      "-c",
+      "credential.UseHttpPath=true",
+      "clone",
+      "--bare",
+      "remote",
+      "cache"
+    ])
+    expect(command.options.extendEnv).toBe(true)
+    expect(command.options.env).toMatchObject({
+      AWS_PROFILE: "review-profile",
+      AWS_REGION: "eu-central-1"
+    })
+    expect(command.options.env?.AWS_ACCESS_KEY_ID).toBeUndefined()
+    expect(command.options.env?.AWS_SECRET_ACCESS_KEY).toBeUndefined()
+    expect(command.options.env?.AWS_SESSION_TOKEN).toBeUndefined()
+  })
+
   it.effect("falls back when lockf starts but exits before readiness", () =>
     Effect.scoped(Effect.gen(function*() {
       const calls: Array<string> = []

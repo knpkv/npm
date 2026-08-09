@@ -1,4 +1,4 @@
-import { defaultTheme, type Theme } from "./default.js"
+import { controlCenterDarkTheme, controlCenterLightTheme, type Theme } from "./default.js"
 import { isThemeJson, jsonToTheme } from "./Resolver.js"
 import { themeRegistry } from "./ThemeRegistry.js"
 
@@ -11,5 +11,7 @@ for (const [name, json] of Object.entries(themeRegistry)) {
   }
 }
 
-themes.dark = themes["dracula-dark"] ?? Object.values(themes)[0] ?? defaultTheme
-themes.light = themes["aura-light"] ?? Object.values(themes)[1] ?? defaultTheme
+themes["control-center-dark"] = controlCenterDarkTheme
+themes["control-center-light"] = controlCenterLightTheme
+themes.dark = controlCenterDarkTheme
+themes.light = controlCenterLightTheme

@@ -16,24 +16,24 @@ export function Badge({ children, minWidth, variant = "neutral" }: BadgeProps) {
   const { theme } = useTheme()
 
   let bg = theme.backgroundElement
-  let fg = theme.text
+  let fg = theme.textMuted
 
   switch (variant) {
     case "success":
-      bg = theme.success
-      fg = theme.background
+      bg = theme.successTint
+      fg = theme.textSuccess
       break
     case "warning":
-      bg = theme.warning
-      fg = theme.background
+      bg = theme.warningTint
+      fg = theme.textWarning
       break
     case "error":
-      bg = theme.error
-      fg = theme.background
+      bg = theme.errorTint
+      fg = theme.textError
       break
     case "info":
-      bg = theme.primary
-      fg = theme.background
+      bg = theme.accentTint
+      fg = theme.textAccent
       break
     case "neutral":
       bg = theme.backgroundElement

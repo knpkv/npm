@@ -20,11 +20,11 @@ export function SettingsThemeTab() {
   return (
     <box style={{ flexDirection: "column", flexGrow: 1, width: "100%" }}>
       <box style={{ height: 1, paddingLeft: 1 }}>
-        <text fg={theme.textMuted}>{`Current: `}</text>
+        <text fg={theme.textMuted}>{`CURRENT THEME  `}</text>
         <text fg={theme.text}>{currentThemeId}</text>
       </box>
       <box style={{ height: 1, paddingLeft: 1 }}>
-        <text fg={theme.textMuted}>{"↑↓: Navigate  Enter: Apply"}</text>
+        <text fg={theme.textMuted}>{"↑↓ navigate  ·  enter apply"}</text>
       </box>
       <scrollbox style={{ flexGrow: 1, width: "100%" }}>
         {allThemes.map((t, i) => {
@@ -36,11 +36,11 @@ export function SettingsThemeTab() {
               style={{
                 height: 1,
                 paddingLeft: 1,
-                ...(isSelected && { backgroundColor: theme.primary })
+                ...(isSelected && { backgroundColor: theme.backgroundRaised })
               }}
             >
-              <text fg={isSelected ? theme.selectedText : isCurrent ? theme.textAccent : theme.text}>
-                {`${isSelected ? ">" : " "} ${t.label}${isCurrent ? " ●" : ""}`}
+              <text fg={isSelected ? theme.text : isCurrent ? theme.textAccent : theme.textMuted}>
+                {`${isSelected ? "│" : " "} ${t.label}${isCurrent ? "  current" : ""}`}
               </text>
             </box>
           )

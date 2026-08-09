@@ -1,0 +1,13 @@
+id: no-flatten-after-stream-paginate
+valid:
+  - |
+    const branches = Stream.paginate(undefined, (token) =>
+      Effect.succeed([["main", "feature"], Option.none()]))
+  - |
+    const lines = Stream.fromIterable(pages).pipe(
+      Stream.flatMap(Stream.fromIterable))
+invalid:
+  - |
+    const branches = Stream.paginate(undefined, (token) =>
+      Effect.succeed([["main", "feature"], Option.none()])).pipe(
+        Stream.flatMap(Stream.fromIterable))

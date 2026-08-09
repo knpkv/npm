@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-flatten-after-stream-paginate
+language: tsx
+severity: error
+message: "Stream.paginate already flattens each returned page; do not flatten its elements again"
+
+rule:
+  pattern: Stream.flatMap(Stream.fromIterable)
+  inside:
+    pattern: Stream.paginate($$$ARGS).pipe($$$OPERATORS)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "**/vendor/**"
+  - "repos/**"
+
+note: |
+  Effect v4 Stream.paginate expects each page callback to return an array of
+  elements and emits those elements directly. Applying
+  Stream.flatMap(Stream.fromIterable) afterwards iterates each element again;
+  string elements become individual characters. If the element type is itself
+  intentionally iterable, use an explicitly named flattening function and
+  document that second-level flattening.

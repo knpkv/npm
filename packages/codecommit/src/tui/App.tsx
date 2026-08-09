@@ -6,7 +6,7 @@ import { refreshAtom } from "./atoms/app.js"
 import { creatingPrAtom, viewAtom } from "./atoms/ui.js"
 import { DetailsView, Footer, Header, MainList, QuickFilters } from "./components/index.js"
 import { DialogProvider } from "./context/dialog.js"
-import { ThemeProvider } from "./context/theme.js"
+import { ThemeProvider, useTheme } from "./context/theme.js"
 import { useKeyboardNav } from "./hooks/useKeyboardNav.js"
 import { DialogRenderer } from "./ui/Dialog.js"
 
@@ -15,6 +15,7 @@ interface AppProps {
 }
 
 function AppContent({ onQuit }: AppProps) {
+  const { theme } = useTheme()
   const openPr = useAtomSet(openPrAtom)
   const refresh = useAtomSet(refreshAtom)
   const view = useAtomValue(viewAtom)
@@ -42,7 +43,7 @@ function AppContent({ onQuit }: AppProps) {
   })
 
   return (
-    <box style={{ flexDirection: "column", height: "100%", width: "100%" }}>
+    <box style={{ backgroundColor: theme.background, flexDirection: "column", height: "100%", width: "100%" }}>
       <Header />
 
       <box style={{ flexGrow: 1, width: "100%" }}>

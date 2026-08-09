@@ -5,41 +5,80 @@ import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { RelayReviewKind } from "../../RelayReview.js"
+import {
+  type RelayFindingPublicationTarget,
+  type RelayReviewConversationTurn,
+  type RelayReviewFinding,
+  type RelayReviewKind,
+  type RelayReviewResult,
+  type RelayReviewVerificationResult,
+  relayFindingAnchor,
+  relayFindingFileIndex,
+  relayFindingPublicationLabel,
+  relayReviewPriorityLabel
+} from "../../RelayReview.js"
+import { defaultRelayReviewSkills, relayReviewSkillsLabel, type RelayReviewSkillId } from "../../ReviewSkills.js"
 import type { WorktreePlan } from "../../WorktreeService.js"
 import { fetchPrCommentsAtom, openPrAtom } from "../atoms/actions.js"
 import { type AppState, appStateAtom } from "../atoms/app.js"
 import {
   checkoutWorktreeAtom,
+  continueRelayReviewAtom,
   loadFileDiffAtom,
   loadPullRequestWorkspaceAtom,
+  openEditorAtom,
+  postRelayFindingAtom,
   preflightWorktreeAtom,
-  runRelayReviewAtom
+  type PullRequestWorkspace,
+  runRelayReviewAtom,
+  verifyRelayFindingAtom
 } from "../atoms/details.js"
 import {
   type ActionDiagnostic,
+  adjacentChangedFileIndex,
   changedFilePath,
   changedFileRowId,
+  changedFileTreeContentWidth,
+  changedFileTreeRows,
+  changedFileTreeVisibleName,
+  commentLocationAnchor,
+  commentRevisionContext,
   currentFileDiffOutcome,
-  currentRevisionCommentLocations,
   currentWorkspaceSelection,
   detailsKeyIntent,
+  displayedCommentLocations,
   exactRevisionReviewState,
   fileDiffIdentity,
+  fileDiffIdentityKey,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   revisionHeaderText,
+  terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
   type WorkspaceActionPhase,
   workspaceLifecycleTransition,
   workspaceIdentityMatches
 } from "../details-model.js"
+import type { FileDiffOutcome } from "../file-diff.js"
+import type { LocalEditor } from "../editor-launch.js"
 import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
-import { Badge } from "./Badge.js"
+import {
+  adjacentFindingIndex,
+  consistentRelayVerificationOutcome,
+  findingDispositionMarker,
+  type FindingDisposition,
+  nextPendingFindingIndex,
+  type RelayReviewReconciliation,
+  relayReviewReconciliationLabel,
+  reconcileRelayReviewSession
+} from "../review-session.js"
+import { DialogFindingConversation } from "../ui/DialogFindingConversation.js"
+import { DialogFindingTarget } from "../ui/DialogFindingTarget.js"
+import { DialogReviewSkills } from "../ui/DialogReviewSkills.js"
 
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
@@ -104,6 +143,44 @@ function CommentThread({
   )
 }
 
+function CommentLocationHeader({
+  location,
+  revision
+}: {
+  readonly location: Domain.PRCommentLocation
+  readonly revision: ReadClient.CodeCommitPullRequestRevision
+}) {
+  const { theme } = useTheme()
+  const anchor = commentLocationAnchor(location)
+  const revisionContext = commentRevisionContext(location, revision)
+  const badge = anchor._tag === "line" ? ` LINE ${anchor.lineNumber} ` : ` ${anchor._tag.toUpperCase()} `
+  const target = anchor._tag === "general" ? anchor.label : anchor.filePath
+  const revisionLabel =
+    revisionContext._tag === "current"
+      ? "CURRENT REVISION"
+      : revisionContext._tag === "historical"
+        ? `OLDER REVISION · head ${revisionContext.headCommit?.slice(0, 12) ?? "unknown"} · current ${revision.sourceCommit.slice(0, 12)}`
+        : revisionContext._tag === "unlocated"
+          ? "REVISION NOT PROVIDED"
+          : null
+  return (
+    <box flexDirection="column" style={{ paddingBottom: 1 }}>
+      <box flexDirection="row">
+        <text bg={theme.accentTint} fg={theme.textAccent}>
+          {badge}
+        </text>
+        <text fg={theme.textMuted}> {"→"} </text>
+        <text fg={theme.text}>{terminalSafeText(target)}</text>
+      </box>
+      {revisionLabel === null ? null : (
+        <text fg={revisionContext._tag === "historical" ? theme.textWarning : theme.textMuted}>
+          {` ${revisionLabel}`}
+        </text>
+      )}
+    </box>
+  )
+}
+
 function CommentsPanel({
   pr,
   revision,
@@ -136,55 +213,121 @@ function CommentsPanel({
   const comments =
     commentsResult === null || revision === null
       ? emptyCommentLocations()
-      : currentRevisionCommentLocations(commentsResult, revision)
+      : displayedCommentLocations(commentsResult, revision)
   return (
-    <scrollbox focused style={{ flexGrow: 1, padding: 2, width: "100%" }}>
+    <scrollbox
+      focused
+      style={{ backgroundColor: theme.background, flexGrow: 1, padding: 1, paddingLeft: 2, width: "100%" }}
+    >
       {workspaceFailed ? (
         <text fg={theme.textError}>Exact-head read failed.</text>
       ) : commentsResult === null || revision === null ? (
         <text fg={theme.textMuted}>Loading review thread…</text>
       ) : null}
       {!workspaceFailed && commentsResult !== null && revision !== null && comments.length === 0 && (
-        <text fg={theme.textMuted}>No comments for this revision</text>
+        <text fg={theme.textMuted}>No posted comments</text>
       )}
-      {comments.map((location, locationIndex) => (
-        <box
-          flexDirection="column"
-          key={`${location.filePath ?? "general"}-${locationIndex}`}
-          style={{ paddingBottom: 1 }}
-        >
-          <text fg={theme.textAccent}>{terminalSafeText(location.filePath ?? "General review")}</text>
-          {location.comments.map((thread) => (
-            <CommentThread depth={0} key={thread.root.id} syntaxStyle={syntaxStyle} thread={thread} />
+      {revision === null
+        ? null
+        : comments.map((location, locationIndex) => (
+            <box
+              flexDirection="column"
+              key={`${location.filePath ?? "general"}-${locationIndex}`}
+              style={{ paddingBottom: 1 }}
+            >
+              <CommentLocationHeader location={location} revision={revision} />
+              {location.comments.map((thread) => (
+                <CommentThread depth={0} key={thread.root.id} syntaxStyle={syntaxStyle} thread={thread} />
+              ))}
+            </box>
           ))}
-        </box>
-      ))}
     </scrollbox>
   )
 }
 
 type PendingAction = "worktree" | RelayReviewKind
+type ReviewSkillSnapshot = { readonly reviewSkills: ReadonlyArray<RelayReviewSkillId> }
 type ActionStatus =
   | { readonly _tag: "idle" }
-  | { readonly _tag: "preflight"; readonly action: PendingAction; readonly requestId: string }
-  | { readonly _tag: "ready"; readonly action: PendingAction; readonly plan: WorktreePlan; readonly requestId: string }
-  | {
+  | ({ readonly _tag: "preflight"; readonly action: PendingAction; readonly requestId: string } & ReviewSkillSnapshot)
+  | ({
+      readonly _tag: "ready"
+      readonly action: PendingAction
+      readonly plan: WorktreePlan
+      readonly requestId: string
+    } & ReviewSkillSnapshot)
+  | ({
       readonly _tag: "running"
       readonly action: PendingAction
       readonly plan: WorktreePlan
       readonly requestId: string
-    }
+    } & ReviewSkillSnapshot)
   | { readonly _tag: "done"; readonly action: PendingAction; readonly detail: string }
+  | ({
+      readonly _tag: "reviewed"
+      readonly action: RelayReviewKind
+      readonly plan: WorktreePlan
+      readonly result: RelayReviewResult
+    } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
+
+type EditorStatus =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "opening"; readonly editor: LocalEditor; readonly requestId: string }
+  | { readonly _tag: "done"; readonly editor: LocalEditor }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+type ConversationStatus =
+  | { readonly _tag: "idle" }
+  | {
+      readonly _tag: "running"
+      readonly findingId: string
+      readonly previousReview: RelayReviewResult
+      readonly requestId: string
+    }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+  | {
+      readonly _tag: "complete"
+      readonly findingId: string
+      readonly reconciliation: RelayReviewReconciliation
+      readonly reply: string | null
+    }
+
+type VerificationStatus =
+  | { readonly _tag: "idle" }
+  | {
+      readonly _tag: "running"
+      readonly findingId: string
+      readonly previousReview: RelayReviewResult
+      readonly previousRevision: ReadClient.CodeCommitPullRequestRevision
+      readonly requestId: string
+    }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+  | {
+      readonly _tag: "complete"
+      readonly findingId: string
+      readonly headChanged: boolean
+      readonly outcome: RelayReviewVerificationResult["outcome"]
+      readonly reconciliation: RelayReviewReconciliation
+      readonly reply: string
+    }
 
 const actionLabel = (action: PendingAction): string =>
   ({
-    review: "Review PR",
-    security: "Security pass",
-    tests: "Review tests",
-    explain: "Explain risk",
-    worktree: "Checkout worktree"
+    review: "Review",
+    security: "Security",
+    tests: "Tests",
+    explain: "Risk",
+    worktree: "Worktree"
   })[action]
+
+const verificationOutcomeLabel = (outcome: RelayReviewVerificationResult["outcome"]): string =>
+  ({
+    resolved: "RESOLVED",
+    "still-actionable": "STILL OPEN",
+    superseded: "SUPERSEDED",
+    inconclusive: "INCONCLUSIVE"
+  })[outcome]
 
 function ActionKey({
   active,
@@ -197,9 +340,9 @@ function ActionKey({
 }) {
   const { theme } = useTheme()
   return (
-    <text fg={active ? theme.textWarning : theme.textMuted}>
-      <span fg={active ? theme.textWarning : theme.textAccent}>{keyName}</span>
-      {` ${label}`}
+    <text fg={active ? theme.text : theme.textMuted} {...(active ? { bg: theme.backgroundRaised } : {})}>
+      <span fg={theme.textAccent}>{` ${keyName} `}</span>
+      {`${label} `}
     </text>
   )
 }
@@ -222,15 +365,39 @@ export function DetailsView() {
   const checkoutResult = useAtomValue(checkoutWorktreeAtom)
   const runReview = useAtomSet(runRelayReviewAtom)
   const reviewResult = useAtomValue(runRelayReviewAtom)
+  const continueReview = useAtomSet(continueRelayReviewAtom)
+  const continueReviewResult = useAtomValue(continueRelayReviewAtom)
+  const verifyFindingAction = useAtomSet(verifyRelayFindingAtom)
+  const verifyFindingResult = useAtomValue(verifyRelayFindingAtom)
+  const postFinding = useAtomSet(postRelayFindingAtom)
+  const postFindingResult = useAtomValue(postRelayFindingAtom)
+  const openEditor = useAtomSet(openEditorAtom)
+  const openEditorResult = useAtomValue(openEditorAtom)
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
+  const [selectedFindingIndex, setSelectedFindingIndex] = useState(0)
+  const [findingDispositions, setFindingDispositions] = useState<Record<string, FindingDisposition>>({})
+  const [findingPostDiagnostic, setFindingPostDiagnostic] = useState<ActionDiagnostic | null>(null)
+  const [postingFinding, setPostingFinding] = useState<{
+    readonly findingId: string
+    readonly findingIndex: number
+    readonly requestId: string
+  } | null>(null)
+  const [conversationTurns, setConversationTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
+  const [conversationStatus, setConversationStatus] = useState<ConversationStatus>({ _tag: "idle" })
+  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>({ _tag: "idle" })
+  const [verifiedWorkspace, setVerifiedWorkspace] = useState<PullRequestWorkspace | null>(null)
   const [tab, setTab] = useState<"comments" | "diff">("diff")
+  const [reviewSkills, setReviewSkills] = useState<ReadonlyArray<RelayReviewSkillId>>(defaultRelayReviewSkills)
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
+  const [editorStatus, setEditorStatus] = useState<EditorStatus>({ _tag: "idle" })
+  const [diffCache, setDiffCache] = useState<ReadonlyMap<string, FileDiffOutcome>>(() => new Map())
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
   const actionRef = useRef<ActionStatus>(action)
   const diffRef = useRef<DiffRenderable>(null)
   const filesScrollRef = useRef<ScrollBoxRenderable>(null)
   const loadedWorkspaceKeyRef = useRef<string | null>(null)
+  const pendingDiffKeyRef = useRef<string | null>(null)
   actionRef.current = action
 
   const pr = useMemo(
@@ -238,20 +405,35 @@ export function DetailsView() {
       selectedPrId === null ? null : (appState.pullRequests.find((candidate) => candidate.id === selectedPrId) ?? null),
     [appState.pullRequests, selectedPrId]
   )
-  const workspaceCandidate =
+  const loadedWorkspaceCandidate =
     AsyncResult.isSuccess(workspaceResult) && !AsyncResult.isWaiting(workspaceResult) ? workspaceResult.value : null
   const expectedWorkspaceIdentity = pr === null ? null : pullRequestWorkspaceIdentity(pr)
+  const workspaceCandidate =
+    verifiedWorkspace !== null &&
+    expectedWorkspaceIdentity !== null &&
+    workspaceIdentityMatches(verifiedWorkspace.identity, expectedWorkspaceIdentity)
+      ? verifiedWorkspace
+      : loadedWorkspaceCandidate
   const workspaceSelection = currentWorkspaceSelection(workspaceCandidate, expectedWorkspaceIdentity)
   const workspace = workspaceSelection._tag === "ready" ? workspaceSelection.value : null
+  const fileTreeRows = useMemo(() => changedFileTreeRows(workspace?.files ?? []), [workspace?.files])
+  const fileTreeContentWidth = useMemo(() => changedFileTreeContentWidth(fileTreeRows), [fileTreeRows])
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
   const selectedPath = selectedFile === null ? null : changedFilePath(selectedFile)
+  const beforePath = selectedFile?.before?.path ?? "/dev/null"
+  const afterPath = selectedFile?.after?.path ?? "/dev/null"
   const expectedFileIdentity =
     workspace === null || selectedFile === null
       ? null
       : fileDiffIdentity(workspace.identity, workspace.revision, selectedFile)
+  const selectedDiffKey = expectedFileIdentity === null ? null : fileDiffIdentityKey(expectedFileIdentity)
   const retainedDiffOutcome =
     AsyncResult.isSuccess(diffResult) && !AsyncResult.isWaiting(diffResult) ? diffResult.value : null
-  const diffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
+  const liveDiffOutcome = currentFileDiffOutcome(retainedDiffOutcome, expectedFileIdentity)
+  const diffOutcome =
+    selectedDiffKey === null
+      ? null
+      : (diffCache.get(selectedDiffKey) ?? workspace?.fileDiffs.get(selectedDiffKey) ?? liveDiffOutcome)
   const renderedDiff = diffOutcome?._tag === "success" ? diffOutcome.value : null
   const diffFailed = diffOutcome?._tag === "failure"
   const workspaceFailed =
@@ -266,7 +448,7 @@ export function DetailsView() {
         ? currentAction.action === "worktree"
           ? "running-worktree"
           : "running-review"
-        : currentAction._tag === "done" || currentAction._tag === "failed"
+        : currentAction._tag === "done" || currentAction._tag === "reviewed" || currentAction._tag === "failed"
           ? "terminal"
           : currentAction._tag
     const transition = workspaceLifecycleTransition(loadedWorkspaceKeyRef.current, workspaceReloadKey, phase)
@@ -275,22 +457,52 @@ export function DetailsView() {
     if (transition.interrupt === "preflight") preflight(Atom.Interrupt)
     else if (transition.interrupt === "checkout") checkout(Atom.Interrupt)
     else if (transition.interrupt === "review") runReview(Atom.Interrupt)
+    verifyFindingAction(Atom.Interrupt)
     setSelectedFileIndex(0)
+    setSelectedFindingIndex(0)
+    setFindingDispositions({})
+    setFindingPostDiagnostic(null)
+    setPostingFinding(null)
+    setConversationTurns([])
+    setConversationStatus({ _tag: "idle" })
+    setVerificationStatus({ _tag: "idle" })
+    setVerifiedWorkspace(null)
+    setDiffCache(new Map())
+    setEditorStatus({ _tag: "idle" })
+    pendingDiffKeyRef.current = null
     setTab("diff")
     setAction({ _tag: "idle" })
     if (pr !== null) loadWorkspace(pr)
-  }, [checkout, loadWorkspace, preflight, pr, runReview, workspaceReloadKey])
+  }, [checkout, loadWorkspace, preflight, pr, runReview, verifyFindingAction, workspaceReloadKey])
 
   useEffect(() => {
-    if (pr === null || workspace === null || selectedFile === null) return
+    if (pr === null || workspace === null || selectedFile === null || selectedDiffKey === null) return
+    if (diffCache.has(selectedDiffKey)) return
+    if (workspace.fileDiffs.has(selectedDiffKey)) return
+    if (pendingDiffKeyRef.current === selectedDiffKey) return
+    pendingDiffKeyRef.current = selectedDiffKey
     loadDiff({
       account: pr.account,
       file: selectedFile,
       identity: workspace.identity,
+      ...(workspace.localDiff._tag === "ready" ? { localWorktreePath: workspace.localDiff.worktree.path } : {}),
       repositoryName: workspace.revision.repositoryName,
       revision: workspace.revision
     })
-  }, [loadDiff, pr, selectedFile, workspace])
+  }, [diffCache, loadDiff, pr, selectedDiffKey, selectedFile, workspace])
+
+  useEffect(() => {
+    if (retainedDiffOutcome === null) return
+    const completedKey = fileDiffIdentityKey(retainedDiffOutcome.identity)
+    if (pendingDiffKeyRef.current === completedKey) pendingDiffKeyRef.current = null
+    if (retainedDiffOutcome._tag !== "success") return
+    setDiffCache((current) => {
+      if (current.has(completedKey)) return current
+      const next = new Map(current)
+      next.set(completedKey, retainedDiffOutcome)
+      return next
+    })
+  }, [retainedDiffOutcome])
 
   useLayoutEffect(() => {
     filesScrollRef.current?.scrollChildIntoView(changedFileRowId(selectedFileIndex))
@@ -316,7 +528,13 @@ export function DetailsView() {
       plan.sourceCommit !== workspace.revision.sourceCommit
     )
       return
-    setAction({ _tag: "ready", action: action.action, plan, requestId: action.requestId })
+    setAction({
+      _tag: "ready",
+      action: action.action,
+      plan,
+      requestId: action.requestId,
+      reviewSkills: action.reviewSkills
+    })
   }, [action, pr, preflightResult, workspace])
 
   useEffect(() => {
@@ -345,9 +563,177 @@ export function DetailsView() {
       outcome.value.worktree.path === action.plan.targetPath &&
       outcome.value.worktree.sourceCommit === action.plan.sourceCommit
     ) {
-      setAction({ _tag: "done", action: action.action, detail: outcome.value.summary })
+      setSelectedFindingIndex(0)
+      setFindingDispositions({})
+      setFindingPostDiagnostic(null)
+      setConversationTurns([])
+      setConversationStatus({ _tag: "idle" })
+      setVerificationStatus({ _tag: "idle" })
+      setAction({
+        _tag: "reviewed",
+        action: action.action,
+        plan: action.plan,
+        result: outcome.value.summary,
+        reviewSkills: action.reviewSkills
+      })
     }
   }, [action, reviewResult])
+
+  useEffect(() => {
+    if (postingFinding === null || AsyncResult.isWaiting(postFindingResult)) return
+    if (!AsyncResult.isSuccess(postFindingResult) || postFindingResult.value.requestId !== postingFinding.requestId)
+      return
+    const outcome = postFindingResult.value
+    if (outcome._tag === "failure") {
+      setFindingDispositions((current) => ({ ...current, [postingFinding.findingId]: "failed" }))
+      setFindingPostDiagnostic(outcome.diagnostic)
+      setPostingFinding(null)
+      return
+    }
+    if (
+      outcome.value.findingIndex !== postingFinding.findingIndex ||
+      outcome.value.findingId !== postingFinding.findingId
+    )
+      return
+    const nextDispositions: Record<string, FindingDisposition> = {
+      ...findingDispositions,
+      [postingFinding.findingId]: "posted"
+    }
+    const findingIds = action._tag === "reviewed" ? action.result.findings.map((finding) => finding.id) : []
+    setFindingDispositions(nextDispositions)
+    setSelectedFindingIndex((index) => nextPendingFindingIndex(findingIds, nextDispositions, index))
+    setFindingPostDiagnostic(null)
+    setPostingFinding(null)
+  }, [action, findingDispositions, postFindingResult, postingFinding])
+
+  useEffect(() => {
+    if (conversationStatus._tag !== "running" || AsyncResult.isWaiting(continueReviewResult)) return
+    if (
+      !AsyncResult.isSuccess(continueReviewResult) ||
+      continueReviewResult.value.requestId !== conversationStatus.requestId
+    )
+      return
+    const outcome = continueReviewResult.value
+    if (outcome._tag === "failure") {
+      setConversationStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      return
+    }
+    const nextReview = outcome.value.response.review
+    const reconciled = reconcileRelayReviewSession(conversationStatus.previousReview, nextReview, findingDispositions)
+    const previousIndex = conversationStatus.previousReview.findings.findIndex(
+      (finding) => finding.id === conversationStatus.findingId
+    )
+    const retainedIndex = nextReview.findings.findIndex((finding) => finding.id === conversationStatus.findingId)
+    setSelectedFindingIndex(
+      retainedIndex >= 0
+        ? retainedIndex
+        : Math.min(Math.max(0, previousIndex), Math.max(0, nextReview.findings.length - 1))
+    )
+    setFindingDispositions(reconciled.dispositions)
+    setConversationTurns((current) => [
+      ...current,
+      { findingId: conversationStatus.findingId, role: "assistant", message: outcome.value.response.reply }
+    ])
+    setAction((current) => (current._tag === "reviewed" ? { ...current, result: nextReview } : current))
+    setConversationStatus({
+      _tag: "complete",
+      findingId: conversationStatus.findingId,
+      reconciliation: reconciled.reconciliation,
+      reply: outcome.value.response.reply
+    })
+  }, [continueReviewResult, conversationStatus, findingDispositions])
+
+  useEffect(() => {
+    if (verificationStatus._tag !== "running" || AsyncResult.isWaiting(verifyFindingResult)) return
+    if (
+      !AsyncResult.isSuccess(verifyFindingResult) ||
+      verifyFindingResult.value.requestId !== verificationStatus.requestId
+    )
+      return
+    const outcome = verifyFindingResult.value
+    if (outcome._tag === "failure") {
+      setVerificationStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      return
+    }
+    const nextReview = outcome.value.response.review
+    const reconciled = reconcileRelayReviewSession(verificationStatus.previousReview, nextReview, findingDispositions)
+    const previousIndex = verificationStatus.previousReview.findings.findIndex(
+      (finding) => finding.id === verificationStatus.findingId
+    )
+    const retainedIndex = nextReview.findings.findIndex((finding) => finding.id === verificationStatus.findingId)
+    const verificationOutcome = consistentRelayVerificationOutcome(
+      verificationStatus.findingId,
+      nextReview,
+      outcome.value.response.outcome
+    )
+    setSelectedFindingIndex(
+      retainedIndex >= 0
+        ? retainedIndex
+        : Math.min(Math.max(0, previousIndex), Math.max(0, nextReview.findings.length - 1))
+    )
+    setSelectedFileIndex(0)
+    setFindingDispositions(reconciled.dispositions)
+    setFindingPostDiagnostic(null)
+    setConversationTurns((current) => [
+      ...current,
+      {
+        findingId: verificationStatus.findingId,
+        role: "user",
+        message: `Verify against latest PR revision ${outcome.value.workspace.revision.sourceCommit}.`
+      },
+      {
+        findingId: verificationStatus.findingId,
+        role: "assistant",
+        message: outcome.value.response.reply
+      }
+    ])
+    setVerifiedWorkspace(outcome.value.workspace)
+    setDiffCache(outcome.value.workspace.fileDiffs)
+    pendingDiffKeyRef.current = null
+    setAction((current) =>
+      current._tag === "reviewed" ? { ...current, plan: outcome.value.plan, result: nextReview } : current
+    )
+    setVerificationStatus({
+      _tag: "complete",
+      findingId: verificationStatus.findingId,
+      headChanged:
+        verificationStatus.previousRevision.sourceCommit !== outcome.value.workspace.revision.sourceCommit ||
+        verificationStatus.previousRevision.destinationCommit !== outcome.value.workspace.revision.destinationCommit,
+      outcome: verificationOutcome,
+      reconciliation: reconciled.reconciliation,
+      reply: outcome.value.response.reply
+    })
+  }, [findingDispositions, verificationStatus, verifyFindingResult])
+
+  useEffect(() => {
+    if (editorStatus._tag !== "opening" || AsyncResult.isWaiting(openEditorResult)) return
+    if (AsyncResult.isFailure(openEditorResult)) {
+      setEditorStatus({
+        _tag: "failed",
+        diagnostic: { operation: "open-editor", message: "The editor action failed unexpectedly" }
+      })
+      return
+    }
+    if (!AsyncResult.isSuccess(openEditorResult) || openEditorResult.value.requestId !== editorStatus.requestId) return
+    const outcome = openEditorResult.value
+    if (outcome._tag === "failure") {
+      setEditorStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      return
+    }
+    setEditorStatus({ _tag: "done", editor: outcome.value.editor })
+  }, [editorStatus, openEditorResult])
+
+  useEffect(() => {
+    if (action._tag !== "reviewed" || workspace === null) return
+    const finding = action.result.findings[selectedFindingIndex]
+    if (finding === undefined) return
+    const fileIndex = relayFindingFileIndex(finding, workspace.files)
+    if (fileIndex !== null) setSelectedFileIndex(fileIndex)
+  }, [action, selectedFindingIndex, workspace])
+
+  useLayoutEffect(() => {
+    actionScrollRef.current?.scrollTo({ x: 0, y: 0 })
+  }, [selectedFindingIndex])
 
   useEffect(() => {
     const style = SyntaxStyle.fromStyles({
@@ -362,42 +748,268 @@ export function DetailsView() {
     return () => style.destroy()
   }, [theme])
 
+  const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
+  const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
+  const selectedFindingDisposition =
+    selectedFinding === null ? "pending" : (findingDispositions[selectedFinding.id] ?? "pending")
+  const selectedFindingTurns =
+    selectedFinding === null ? [] : conversationTurns.filter((turn) => turn.findingId === selectedFinding.id)
+  const latestSelectedFindingReply = [...selectedFindingTurns]
+    .reverse()
+    .find((turn) => turn.role === "assistant")?.message
+  const latestSessionReply =
+    verificationStatus._tag === "complete"
+      ? { findingId: verificationStatus.findingId, message: verificationStatus.reply }
+      : conversationStatus._tag === "complete" && conversationStatus.reply !== null
+        ? { findingId: conversationStatus.findingId, message: conversationStatus.reply }
+        : undefined
+  const displayedFindingReply = latestSessionReply?.message ?? latestSelectedFindingReply
+  const findingDeck = reviewedFindings
+    .map(
+      (finding, index) =>
+        `${index + 1}${findingDispositionMarker(findingDispositions[finding.id] ?? "pending", index === selectedFindingIndex)}`
+    )
+    .join(" ")
+  const conversationRunning = conversationStatus._tag === "running"
+  const verificationRunning = verificationStatus._tag === "running"
+  const agentRunning = conversationRunning || verificationRunning
+  const actionCancelable =
+    action._tag === "preflight" || action._tag === "ready" || action._tag === "running" || agentRunning
+  const editorReady = workspace?.localDiff._tag === "ready" && selectedPath !== null && !actionCancelable
+  const reviewCardExpanded = action._tag === "reviewed"
+
+  const openSelectedInEditor = (editor: LocalEditor) => {
+    if (workspace === null || selectedPath === null || actionCancelable) return
+    if (workspace.localDiff._tag !== "ready") {
+      setEditorStatus({
+        _tag: "failed",
+        diagnostic: {
+          operation: `open-${editor}`,
+          message: "A verified exact-head checkout is required before opening an editor"
+        }
+      })
+      return
+    }
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:editor:${editor}:${nextActionRequestSequence}`
+    const lineNumber =
+      selectedFinding?.location.scope === "line" && selectedFinding.location.filePath === selectedPath
+        ? selectedFinding.location.line
+        : undefined
+    setEditorStatus({ _tag: "opening", editor, requestId })
+    openEditor({
+      editor,
+      filePath: selectedPath,
+      ...(lineNumber === undefined ? {} : { lineNumber }),
+      requestId,
+      worktreePath: workspace.localDiff.worktree.path
+    })
+  }
+
+  const decideFinding = (disposition: "acknowledged" | "rejected") => {
+    if (
+      selectedFinding === null ||
+      (selectedFindingDisposition !== "pending" && selectedFindingDisposition !== "failed")
+    ) {
+      return
+    }
+    const nextDispositions = { ...findingDispositions, [selectedFinding.id]: disposition }
+    setFindingDispositions(nextDispositions)
+    setSelectedFindingIndex(
+      nextPendingFindingIndex(
+        reviewedFindings.map((finding) => finding.id),
+        nextDispositions,
+        selectedFindingIndex
+      )
+    )
+    setFindingPostDiagnostic(null)
+  }
+
+  const changeFindingTarget = (target: RelayFindingPublicationTarget) => {
+    if (action._tag !== "reviewed" || selectedFinding === null) return
+    const nextReview: RelayReviewResult = {
+      ...action.result,
+      findings: action.result.findings.map((finding) =>
+        finding.id === selectedFinding.id ? { ...finding, publicationTarget: target } : finding
+      )
+    }
+    const reconciled = reconcileRelayReviewSession(action.result, nextReview, findingDispositions)
+    setFindingDispositions(reconciled.dispositions)
+    setAction({ ...action, result: nextReview })
+    setConversationStatus({
+      _tag: "complete",
+      findingId: selectedFinding.id,
+      reconciliation: reconciled.reconciliation,
+      reply: null
+    })
+  }
+
+  const discussFinding = (message: string) => {
+    if (action._tag !== "reviewed" || workspace === null || selectedFinding === null || agentRunning) return
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:conversation:${selectedFinding.id}:${nextActionRequestSequence}`
+    const userTurn: RelayReviewConversationTurn = {
+      findingId: selectedFinding.id,
+      role: "user",
+      message
+    }
+    const turns = [...conversationTurns, userTurn]
+    setConversationTurns(turns)
+    setVerificationStatus({ _tag: "idle" })
+    setConversationStatus({
+      _tag: "running",
+      findingId: selectedFinding.id,
+      previousReview: action.result,
+      requestId
+    })
+    continueReview({
+      currentReview: action.result,
+      findingId: selectedFinding.id,
+      kind: action.action,
+      message,
+      plan: action.plan,
+      requestId,
+      revision: workspace.revision,
+      skills: action.reviewSkills,
+      turns
+    })
+  }
+
+  const verifyFinding = () => {
+    if (action._tag !== "reviewed" || pr === null || workspace === null || selectedFinding === null || agentRunning)
+      return
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:verify:${selectedFinding.id}:${nextActionRequestSequence}`
+    setConversationStatus({ _tag: "idle" })
+    setVerificationStatus({
+      _tag: "running",
+      findingId: selectedFinding.id,
+      previousReview: action.result,
+      previousRevision: workspace.revision,
+      requestId
+    })
+    verifyFindingAction({
+      currentReview: action.result,
+      findingId: selectedFinding.id,
+      kind: action.action,
+      previousRevision: workspace.revision,
+      pr,
+      requestId,
+      skills: action.reviewSkills,
+      turns: conversationTurns
+    })
+  }
+
+  const publishFinding = () => {
+    if (
+      pr === null ||
+      workspace === null ||
+      selectedFinding === null ||
+      postingFinding !== null ||
+      (selectedFindingDisposition !== "pending" && selectedFindingDisposition !== "failed")
+    )
+      return
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:finding:${selectedFindingIndex}:${nextActionRequestSequence}`
+    setFindingDispositions((current) => ({ ...current, [selectedFinding.id]: "posting" }))
+    setFindingPostDiagnostic(null)
+    setPostingFinding({ findingId: selectedFinding.id, findingIndex: selectedFindingIndex, requestId })
+    postFinding({
+      files: workspace.files,
+      finding: selectedFinding,
+      findingIndex: selectedFindingIndex,
+      pr,
+      requestId,
+      revision: workspace.revision
+    })
+  }
+
   const beginAction = (next: PendingAction) => {
-    if (pr === null || workspace === null || action._tag === "running") return
+    if (pr === null || workspace === null || action._tag === "running" || agentRunning) return
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:${nextActionRequestSequence}`
-    setAction({ _tag: "preflight", action: next, requestId })
-    preflight({ pr, requestId, revision: workspace.revision })
+    const reviewSkillSnapshot = next === "worktree" ? [] : reviewSkills
+    if (workspace.localDiff._tag === "ready") {
+      setAction({
+        _tag: "ready",
+        action: next,
+        plan: workspace.localDiff.plan,
+        requestId,
+        reviewSkills: reviewSkillSnapshot
+      })
+    } else {
+      setAction({ _tag: "preflight", action: next, requestId, reviewSkills: reviewSkillSnapshot })
+      preflight({ pr, requestId, revision: workspace.revision })
+    }
   }
 
   useKeyboard((key) => {
     const intent = detailsKeyIntent({
-      actionCancelable: action._tag !== "idle",
+      actionCancelable,
       actionReady: action._tag === "ready" && workspace !== null,
+      conversationRunning: agentRunning,
       dialogOpen: dialog.current !== null,
+      findingReviewActive: selectedFinding !== null,
       keyName: key.name,
       modified: key.ctrl === true || key.meta === true,
+      shifted: key.shift === true,
       tab
     })
     if (intent === "yield") return
     key.stopPropagation()
     if (intent === "back") setView("prs")
     else if (intent === "cancel-action") {
-      if (action._tag === "preflight") preflight(Atom.Interrupt)
-      else if (action._tag === "running" && action.action === "worktree") checkout(Atom.Interrupt)
-      else if (action._tag === "running") runReview(Atom.Interrupt)
-      setAction({ _tag: "idle" })
+      if (verificationRunning) {
+        verifyFindingAction(Atom.Interrupt)
+        setVerificationStatus({ _tag: "idle" })
+      } else if (conversationRunning) {
+        continueReview(Atom.Interrupt)
+        setConversationStatus({ _tag: "idle" })
+      } else {
+        if (action._tag === "preflight") preflight(Atom.Interrupt)
+        else if (action._tag === "running" && action.action === "worktree") checkout(Atom.Interrupt)
+        else if (action._tag === "running") runReview(Atom.Interrupt)
+        setAction({ _tag: "idle" })
+      }
     } else if (intent === "show-diff") setTab("diff")
     else if (intent === "show-comments") setTab("comments")
     else if (intent === "open-browser" && pr !== null) openPr(pr)
+    else if (intent === "choose-review-skills") {
+      dialog.show(() => <DialogReviewSkills onApply={setReviewSkills} selected={reviewSkills} />)
+    } else if (intent === "open-neovim") openSelectedInEditor("neovim")
+    else if (intent === "open-vscode") openSelectedInEditor("vscode")
+    else if (intent === "previous-finding") {
+      setSelectedFindingIndex((index) => adjacentFindingIndex(reviewedFindings.length, index, -1))
+    } else if (intent === "next-finding") {
+      setSelectedFindingIndex((index) => adjacentFindingIndex(reviewedFindings.length, index, 1))
+    } else if (intent === "next-pending-finding") {
+      setSelectedFindingIndex((index) =>
+        nextPendingFindingIndex(
+          reviewedFindings.map((finding) => finding.id),
+          findingDispositions,
+          index
+        )
+      )
+    } else if (intent === "discuss-finding" && selectedFinding !== null) {
+      dialog.show(() => (
+        <DialogFindingConversation finding={selectedFinding} onSubmit={discussFinding} turns={conversationTurns} />
+      ))
+    } else if (intent === "choose-finding-target" && selectedFinding !== null) {
+      dialog.show(() => <DialogFindingTarget finding={selectedFinding} onApply={changeFindingTarget} />)
+    } else if (intent === "verify-finding") verifyFinding()
+    else if (intent === "post-finding") publishFinding()
+    else if (intent === "ack-finding") decideFinding("acknowledged")
+    else if (intent === "reject-finding") decideFinding("rejected")
     else if (intent === "previous-file") {
-      setSelectedFileIndex((index) => Math.max(0, index - 1))
+      setSelectedFileIndex((index) => adjacentChangedFileIndex(fileTreeRows, index, -1))
     } else if (intent === "next-file") {
-      setSelectedFileIndex((index) => Math.min(Math.max(0, (workspace?.files.length ?? 1) - 1), index + 1))
+      setSelectedFileIndex((index) => adjacentChangedFileIndex(fileTreeRows, index, 1))
     } else if (intent === "scroll-content-up" || intent === "scroll-content-down") {
       const lines = intent === "scroll-content-up" ? -3 : 3
       scrollDiffBy(diffRef.current, lines)
       actionScrollRef.current?.scrollBy({ x: 0, y: lines })
+    } else if (intent === "scroll-files-left" || intent === "scroll-files-right") {
+      filesScrollRef.current?.scrollBy({ x: intent === "scroll-files-left" ? -8 : 8, y: 0 })
     } else if (intent === "checkout-worktree") beginAction("worktree")
     else if (intent === "review-pr") beginAction("review")
     else if (intent === "review-security") beginAction("security")
@@ -409,7 +1021,8 @@ export function DetailsView() {
         _tag: "running",
         action: ready.action,
         plan: ready.plan,
-        requestId: ready.requestId
+        requestId: ready.requestId,
+        reviewSkills: ready.reviewSkills
       })
       if (ready.action === "worktree") checkout({ plan: ready.plan, requestId: ready.requestId })
       else {
@@ -417,7 +1030,8 @@ export function DetailsView() {
           kind: ready.action,
           plan: ready.plan,
           requestId: ready.requestId,
-          revision: workspace.revision
+          revision: workspace.revision,
+          skills: ready.reviewSkills
         })
       }
     }
@@ -435,36 +1049,49 @@ export function DetailsView() {
   const humanState = exactRevisionReviewState()
 
   return (
-    <box flexDirection="column" style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1, width: "100%" }}>
+    <box flexDirection="column" style={{ backgroundColor: theme.background, flexGrow: 1, width: "100%" }}>
       <box
+        border={["left"]}
+        borderColor={theme.primary}
         flexDirection="column"
-        style={{ backgroundColor: theme.backgroundElement, height: 4, paddingLeft: 2, paddingRight: 2 }}
+        style={{ backgroundColor: theme.accentTint, height: 5, paddingLeft: 1, paddingRight: 1 }}
       >
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textAccent}>{terminalSafeText(`${pr.repositoryName}  PR #${pr.id}  ${pr.title}`)}</text>
-          <box flexDirection="row">
-            <text fg={theme.textMuted}>{`APPROVAL ${humanState.approval}`}</text>
-            <text fg={theme.textMuted}> · </text>
-            <text fg={theme.textMuted}>{`MERGEABILITY ${humanState.mergeability}`}</text>
-          </box>
+        <box flexDirection="row">
+          <text fg={theme.textAccent}>CODECOMMIT</text>
+          <text fg={theme.textMuted}>{`  /  PR #${pr.id}  /  `}</text>
+          <text fg={theme.text}>{terminalSafeCompactText(pr.repositoryName, 36)}</text>
         </box>
+        <text fg={theme.text}>{terminalSafeCompactText(pr.title, 72)}</text>
         <text fg={theme.textMuted}>
-          {terminalSafeText(`${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}`)}
+          {terminalSafeCompactText(`HEAD ${pr.sourceBranch} → BASE ${pr.destinationBranch}  ·  ${pr.author}`, 72)}
         </text>
         <text fg={theme.textMuted}>
           {revision === undefined ? "Loading exact revision…" : revisionHeaderText(revision)}
         </text>
+        <box flexDirection="row">
+          <text fg={theme.textMuted}>HUMAN </text>
+          <text fg={theme.textWarning}>{humanState.approval}</text>
+          <text fg={theme.textMuted}> · MERGEABILITY </text>
+          <text fg={theme.textWarning}>{humanState.mergeability}</text>
+        </box>
       </box>
 
-      <box flexDirection="row" style={{ height: 2, paddingLeft: 2, alignItems: "center" }}>
-        <Badge minWidth={10} variant={tab === "diff" ? "info" : "neutral"}>
-          1 Changes
-        </Badge>
-        <box style={{ width: 1 }} />
-        <Badge
-          minWidth={14}
-          variant={tab === "comments" ? "info" : "neutral"}
-        >{`2 Comments${pr.commentCount ? ` (${pr.commentCount})` : ""}`}</Badge>
+      <box
+        border={["bottom"]}
+        borderColor={theme.border}
+        flexDirection="row"
+        style={{ backgroundColor: theme.backgroundPanel, height: 2, paddingLeft: 2, alignItems: "center" }}
+      >
+        <text
+          fg={tab === "diff" ? theme.textAccent : theme.textMuted}
+          {...(tab === "diff" ? { bg: theme.accentTint } : {})}
+        >
+          {" 1  Changes "}
+        </text>
+        <text
+          fg={tab === "comments" ? theme.textAccent : theme.textMuted}
+          {...(tab === "comments" ? { bg: theme.accentTint } : {})}
+        >{` 2  Comments${pr.commentCount ? ` ${pr.commentCount}` : ""} `}</text>
       </box>
 
       {tab === "comments" ? (
@@ -475,13 +1102,37 @@ export function DetailsView() {
           workspaceFailed={workspaceFailed}
         />
       ) : (
-        <box flexDirection="row" style={{ flexGrow: 1, width: "100%" }}>
-          <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, width: "25%" }}>
-            <text fg={theme.textMuted}>{` FILES · ${workspace?.files.length ?? "…"}`}</text>
-            <scrollbox ref={filesScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+        <box flexDirection="row" style={{ backgroundColor: theme.background, flexGrow: 1, width: "100%" }}>
+          <box
+            flexDirection="column"
+            style={{
+              backgroundColor: theme.backgroundPanel,
+              border: true,
+              borderColor: theme.border,
+              flexShrink: 0,
+              width: reviewCardExpanded ? "20%" : "26%"
+            }}
+          >
+            <text fg={theme.textMuted}>{` FILES  ${workspace?.files.length ?? "…"}`}</text>
+            <scrollbox
+              contentOptions={{ minWidth: fileTreeContentWidth }}
+              ref={filesScrollRef}
+              scrollX
+              scrollY
+              style={{ flexGrow: 1, paddingTop: 1, width: "100%" }}
+            >
               {workspace === null && !workspaceFailed && <text fg={theme.textMuted}> Loading changed files…</text>}
               {workspaceFailed && <text fg={theme.textError}> Exact-head read failed.</text>}
-              {workspace?.files.map((file, index) => {
+              {fileTreeRows.map((row) => {
+                if (row._tag === "directory") {
+                  return (
+                    <text fg={theme.textMuted} key={row.key} truncate={false} wrapMode="none">
+                      {` ${"│ ".repeat(row.depth)}▾ ${changedFileTreeVisibleName(row)}`}
+                    </text>
+                  )
+                }
+                const file = workspace?.files[row.fileIndex]
+                if (file === undefined) return null
                 const status =
                   file.status === "added"
                     ? "+"
@@ -492,22 +1143,51 @@ export function DetailsView() {
                         : "M"
                 return (
                   <text
-                    {...(index === selectedFileIndex ? { bg: theme.selectedBackground } : {})}
-                    fg={index === selectedFileIndex ? theme.selectedText : theme.textMuted}
-                    key={`${changedFilePath(file)}-${index}`}
-                    id={changedFileRowId(index)}
+                    {...(row.fileIndex === selectedFileIndex ? { bg: theme.selectedBackground } : {})}
+                    fg={row.fileIndex === selectedFileIndex ? theme.text : theme.textMuted}
+                    key={row.key}
+                    id={changedFileRowId(row.fileIndex)}
+                    truncate={false}
+                    wrapMode="none"
                   >
-                    {` ${status} ${terminalSafeText(changedFilePath(file))}`}
+                    {` ${row.fileIndex === selectedFileIndex ? "›" : " "} ${"│ ".repeat(row.depth)}${status} ${changedFileTreeVisibleName(row)}`}
                   </text>
                 )
               })}
             </scrollbox>
           </box>
 
-          <box flexDirection="column" style={{ border: true, borderColor: theme.backgroundElement, flexGrow: 1 }}>
-            <text fg={theme.textAccent}>{` ${terminalSafeText(selectedPath ?? "Select a changed file")}`}</text>
+          <box
+            flexDirection="column"
+            style={{
+              backgroundColor: theme.backgroundPanel,
+              border: true,
+              borderColor: theme.border,
+              flexGrow: 1,
+              flexShrink: 1,
+              minWidth: 0
+            }}
+          >
+            {selectedFile === null ? (
+              <box style={{ backgroundColor: theme.backgroundElement, height: 1, paddingLeft: 1 }}>
+                <text fg={theme.textMuted}>Select a changed file</text>
+              </box>
+            ) : (
+              <box flexDirection="row" style={{ backgroundColor: theme.backgroundElement, height: 1 }}>
+                <box style={{ paddingLeft: 1, width: "50%" }}>
+                  <text fg={theme.textError}>{terminalSafeCompactText(`BASE · ${beforePath}`, 36)}</text>
+                </box>
+                <box border={["left"]} borderColor={theme.borderStrong} style={{ paddingLeft: 1, width: "50%" }}>
+                  <text fg={theme.textSuccess}>{terminalSafeCompactText(`HEAD · ${afterPath}`, 36)}</text>
+                </box>
+              </box>
+            )}
             {selectedFile !== null && diffOutcome === null && (
-              <text fg={theme.textMuted}> Loading immutable blobs…</text>
+              <text fg={theme.textMuted}>
+                {workspace?.localDiff._tag === "ready"
+                  ? " Loading local immutable diff…"
+                  : " Loading provider fallback diff…"}
+              </text>
             )}
             {diffFailed && <text fg={theme.textError}> Unable to load this file preview.</text>}
             {renderedDiff?.binary && (
@@ -530,16 +1210,24 @@ export function DetailsView() {
             )}
             {renderedDiff !== null && !renderedDiff.binary && renderedDiff.diff.length > 0 && (
               <diff
+                addedBg={theme.successTint}
+                addedLineNumberBg={theme.successTint}
                 addedSignColor={theme.textSuccess}
+                contextBg={theme.backgroundPanel}
                 diff={renderedDiff.diff}
                 ref={diffRef}
                 fg={theme.text}
                 {...(renderedDiff.filetype === undefined ? {} : { filetype: renderedDiff.filetype })}
+                lineNumberBg={theme.backgroundElement}
+                lineNumberFg={theme.textMuted}
+                removedBg={theme.errorTint}
+                removedLineNumberBg={theme.errorTint}
                 removedSignColor={theme.textError}
                 showLineNumbers
                 style={{ flexGrow: 1, width: "100%" }}
+                syncScroll
                 {...(syntaxStyle === null ? {} : { syntaxStyle })}
-                view="unified"
+                view="split"
                 wrapMode="none"
               />
             )}
@@ -549,35 +1237,65 @@ export function DetailsView() {
             flexDirection="column"
             style={{
               border: true,
-              borderColor: theme.backgroundElement,
+              backgroundColor: theme.backgroundPanel,
+              borderColor: theme.border,
+              flexShrink: 0,
               paddingLeft: 1,
               paddingRight: 1,
-              width: "28%"
+              width: reviewCardExpanded ? "36%" : "22%"
             }}
           >
-            <text fg={theme.text}>ACTIONS · EXACT HEAD</text>
-            <ActionKey active={action._tag !== "idle" && action.action === "review"} keyName="r" label="Review PR" />
-            <ActionKey
-              active={action._tag !== "idle" && action.action === "security"}
-              keyName="s"
-              label="Security pass"
-            />
-            <ActionKey active={action._tag !== "idle" && action.action === "tests"} keyName="t" label="Review tests" />
-            <ActionKey
-              active={action._tag !== "idle" && action.action === "explain"}
-              keyName="e"
-              label="Explain risk"
-            />
-            <ActionKey
-              active={action._tag !== "idle" && action.action === "worktree"}
-              keyName="w"
-              label="Checkout worktree"
-            />
-            <box style={{ height: 1 }} />
+            {!reviewCardExpanded && (
+              <>
+                <text fg={theme.textMuted}>OPEN SELECTED</text>
+                <ActionKey active={editorReady} keyName="n" label="Neovim" />
+                <ActionKey active={editorReady} keyName="v" label="VS Code" />
+                {editorStatus._tag === "opening" && (
+                  <text
+                    fg={theme.textWarning}
+                  >{`Opening ${editorStatus.editor === "neovim" ? "Neovim" : "VS Code"}…`}</text>
+                )}
+                {editorStatus._tag === "done" && (
+                  <text fg={theme.textSuccess}>
+                    {editorStatus.editor === "neovim" ? "Returned from Neovim" : "Opened in VS Code"}
+                  </text>
+                )}
+                {editorStatus._tag === "failed" && (
+                  <text fg={theme.textError}>
+                    {terminalSafeText(`${editorStatus.diagnostic.operation}: ${editorStatus.diagnostic.message}`)}
+                  </text>
+                )}
+                <box style={{ height: 1 }} />
+                <text fg={theme.textMuted}>RELAY</text>
+                <text fg={theme.text}>{"Exact head · local Codex"}</text>
+                <ActionKey active={!actionCancelable} keyName="g" label="Skills" />
+                <text fg={theme.textAccent}>{`${reviewSkills.length} SELECTED`}</text>
+                {workspace?.localDiff._tag === "ready" ? (
+                  <text fg={theme.textSuccess}>DIFF · LOCAL GIT</text>
+                ) : workspace?.localDiff._tag === "unavailable" ? (
+                  <text fg={theme.textWarning}>DIFF · PROVIDER FALLBACK</text>
+                ) : (
+                  <text fg={theme.textMuted}>DIFF · PREPARING LOCAL HEAD</text>
+                )}
+                <box style={{ height: 1 }} />
+                <ActionKey active={action._tag !== "idle" && action.action === "review"} keyName="r" label="Review" />
+                <ActionKey
+                  active={action._tag !== "idle" && action.action === "security"}
+                  keyName="s"
+                  label="Security"
+                />
+                <ActionKey active={action._tag !== "idle" && action.action === "tests"} keyName="t" label="Tests" />
+                <ActionKey active={action._tag !== "idle" && action.action === "explain"} keyName="e" label="Risk" />
+                <ActionKey
+                  active={action._tag !== "idle" && action.action === "worktree"}
+                  keyName="w"
+                  label="Worktree"
+                />
+                <box style={{ height: 1 }} />
+              </>
+            )}
             {action._tag === "idle" && (
-              <text fg={theme.textMuted}>
-                Relay uses local Codex in a read-only sandbox. Human approval stays separate.
-              </text>
+              <text fg={theme.textMuted}>Read-only sandbox. Human approval stays separate.</text>
             )}
             {action._tag === "preflight" && (
               <text fg={theme.textWarning}>{`Preparing ${actionLabel(action.action)} preflight…`}</text>
@@ -591,12 +1309,18 @@ export function DetailsView() {
                 </text>
                 <text fg={theme.textMuted}>{terminalSafeText(action.plan.targetPath)}</text>
                 {action.action !== "worktree" && <text fg={theme.textMuted}>sandbox read-only · local Codex</text>}
+                {action.action !== "worktree" && (
+                  <text fg={theme.textAccent}>{terminalSafeText(relayReviewSkillsLabel(action.reviewSkills))}</text>
+                )}
                 <text fg={theme.textSuccess}>Enter run · x cancel</text>
               </box>
             )}
             {action._tag === "running" && (
               <box flexDirection="column">
                 <text fg={theme.textWarning}>{`${actionLabel(action.action)} · RUNNING…`}</text>
+                {action.action !== "worktree" && (
+                  <text fg={theme.textAccent}>{terminalSafeText(relayReviewSkillsLabel(action.reviewSkills))}</text>
+                )}
                 <text fg={theme.textMuted}>Esc/x cancel</text>
               </box>
             )}
@@ -612,6 +1336,203 @@ export function DetailsView() {
               <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
                 <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
                 <text fg={theme.text}>{terminalSafeMultilineText(action.detail)}</text>
+              </scrollbox>
+            )}
+            {action._tag === "reviewed" && (
+              <scrollbox ref={actionScrollRef} style={{ flexGrow: 1, width: "100%" }}>
+                <box flexDirection="row">
+                  <text fg={theme.textSuccess}>{`${actionLabel(action.action)} · COMPLETE`}</text>
+                  <text fg={theme.textMuted}>{`  ${action.result.findings.length} findings`}</text>
+                </box>
+                <text fg={theme.textMuted}>{terminalSafeText(relayReviewSkillsLabel(action.reviewSkills))}</text>
+                <box flexDirection="row">
+                  <ActionKey active={!agentRunning} keyName="g" label="Skills" />
+                  <ActionKey active={!agentRunning} keyName="r" label="Rerun" />
+                  <ActionKey active={editorReady} keyName="n/v" label="Open" />
+                </box>
+                {selectedFinding === null ? (
+                  <box flexDirection="column" style={{ paddingTop: 1 }}>
+                    <text fg={theme.textSuccess}>No actionable findings</text>
+                    <text fg={theme.text}>{terminalSafeMultilineText(action.result.verdict)}</text>
+                    {conversationStatus._tag === "complete" && (
+                      <text fg={theme.textAccent}>
+                        {`RECONCILED  ${relayReviewReconciliationLabel(conversationStatus.reconciliation)}`}
+                      </text>
+                    )}
+                    {verificationStatus._tag === "complete" && (
+                      <box flexDirection="column">
+                        <text fg={verificationStatus.outcome === "resolved" ? theme.textSuccess : theme.textWarning}>
+                          {`VERIFIED · ${verificationOutcomeLabel(verificationStatus.outcome)} · ${verificationStatus.headChanged ? "NEW HEAD" : "SAME HEAD"}`}
+                        </text>
+                        <text fg={theme.textAccent}>
+                          {`RECONCILED  ${relayReviewReconciliationLabel(verificationStatus.reconciliation)}`}
+                        </text>
+                      </box>
+                    )}
+                    {latestSessionReply === undefined ? null : (
+                      <box
+                        border={["left"]}
+                        borderColor={theme.primary}
+                        flexDirection="column"
+                        style={{ paddingLeft: 1 }}
+                      >
+                        <text fg={theme.textSuccess}>
+                          {verificationStatus._tag === "complete"
+                            ? `LATEST VERIFICATION · ${latestSessionReply.findingId}`
+                            : `LATEST SESSION REPLY · ${latestSessionReply.findingId}`}
+                        </text>
+                        <text fg={theme.text}>{terminalSafeMultilineText(latestSessionReply.message)}</text>
+                      </box>
+                    )}
+                  </box>
+                ) : (
+                  <box flexDirection="column" style={{ paddingTop: 1 }}>
+                    <box flexDirection="row" style={{ backgroundColor: theme.backgroundRaised }}>
+                      <text
+                        fg={theme.textAccent}
+                      >{` ${selectedFindingIndex + 1}/${action.result.findings.length} `}</text>
+                      <text fg={theme.textMuted}>{terminalSafeCompactText(findingDeck, 32)}</text>
+                    </box>
+                    <box flexDirection="row">
+                      <ActionKey active keyName="[" label="Prev" />
+                      <ActionKey active keyName="]" label="Next" />
+                      <ActionKey active keyName="u" label="Unresolved" />
+                    </box>
+                    <text
+                      fg={
+                        selectedFinding.priority === "P1" || selectedFinding.priority === "P2"
+                          ? theme.textError
+                          : selectedFinding.priority === "P3"
+                            ? theme.textWarning
+                            : theme.textAccent
+                      }
+                    >
+                      {`${selectedFinding.id} · ${selectedFinding.priority} · ${relayReviewPriorityLabel(selectedFinding.priority)}`}
+                    </text>
+                    <box flexDirection="row">
+                      <text bg={theme.accentTint} fg={theme.textAccent}>
+                        {` ${relayFindingPublicationLabel(selectedFinding.publicationTarget).toUpperCase()} `}
+                      </text>
+                      <text fg={theme.textMuted}> {"→"} </text>
+                      <text fg={theme.text}>{terminalSafeText(relayFindingAnchor(selectedFinding))}</text>
+                    </box>
+                    <text fg={theme.text}>{terminalSafeText(selectedFinding.title)}</text>
+                    <text fg={theme.textMuted}>SUMMARY</text>
+                    <text fg={theme.text}>{terminalSafeMultilineText(selectedFinding.summary)}</text>
+                    <text fg={theme.textMuted}>DETAILS</text>
+                    <text fg={theme.textMuted}>{terminalSafeMultilineText(selectedFinding.details)}</text>
+                    <text fg={theme.textMuted}>RECOMMENDATION</text>
+                    <text fg={theme.text}>{terminalSafeMultilineText(selectedFinding.recommendation)}</text>
+                    <text fg={theme.textMuted}>VERIFICATION</text>
+                    <text fg={theme.textAccent}>{terminalSafeMultilineText(selectedFinding.verification)}</text>
+                    <box style={{ height: 1 }} />
+                    <box flexDirection="row">
+                      <ActionKey active={!agentRunning} keyName="m" label="Target" />
+                      <ActionKey active={!agentRunning} keyName="d" label="Discuss" />
+                      <ActionKey active={!agentRunning} keyName="V" label="Verify" />
+                      <text fg={theme.textMuted}>{` ${selectedFindingTurns.length} turns`}</text>
+                    </box>
+                    {conversationStatus._tag === "running" && (
+                      <text
+                        fg={theme.textWarning}
+                      >{`Relay is reconsidering the full deck from ${conversationStatus.findingId}…`}</text>
+                    )}
+                    {conversationStatus._tag === "failed" && (
+                      <text fg={theme.textError}>
+                        {terminalSafeText(
+                          `${conversationStatus.diagnostic.operation}: ${conversationStatus.diagnostic.message}`
+                        )}
+                      </text>
+                    )}
+                    {conversationStatus._tag === "complete" && (
+                      <text fg={theme.textAccent}>
+                        {`RECONCILED  ${relayReviewReconciliationLabel(conversationStatus.reconciliation)}`}
+                      </text>
+                    )}
+                    {verificationStatus._tag === "running" && (
+                      <text fg={theme.textWarning}>
+                        {`Refreshing the provider head and verifying ${verificationStatus.findingId}…`}
+                      </text>
+                    )}
+                    {verificationStatus._tag === "failed" && (
+                      <text fg={theme.textError}>
+                        {terminalSafeText(
+                          `${verificationStatus.diagnostic.operation}: ${verificationStatus.diagnostic.message}`
+                        )}
+                      </text>
+                    )}
+                    {verificationStatus._tag === "complete" && (
+                      <box flexDirection="column">
+                        <text fg={verificationStatus.outcome === "resolved" ? theme.textSuccess : theme.textWarning}>
+                          {`VERIFIED · ${verificationOutcomeLabel(verificationStatus.outcome)} · ${verificationStatus.headChanged ? "NEW HEAD" : "SAME HEAD"}`}
+                        </text>
+                        <text fg={theme.textAccent}>
+                          {`RECONCILED  ${relayReviewReconciliationLabel(verificationStatus.reconciliation)}`}
+                        </text>
+                      </box>
+                    )}
+                    {displayedFindingReply === undefined ? null : (
+                      <box
+                        border={["left"]}
+                        borderColor={theme.primary}
+                        flexDirection="column"
+                        style={{ paddingLeft: 1 }}
+                      >
+                        <text fg={theme.textSuccess}>
+                          {latestSessionReply === undefined
+                            ? "LATEST RELAY REPLY"
+                            : verificationStatus._tag === "complete"
+                              ? `LATEST VERIFICATION · ${latestSessionReply.findingId}`
+                              : `LATEST SESSION REPLY · ${latestSessionReply.findingId}`}
+                        </text>
+                        <text fg={theme.text}>{terminalSafeMultilineText(displayedFindingReply)}</text>
+                      </box>
+                    )}
+                    <box style={{ height: 1 }} />
+                    <text
+                      fg={
+                        selectedFindingDisposition === "failed"
+                          ? theme.textError
+                          : selectedFindingDisposition === "rejected"
+                            ? theme.textMuted
+                            : selectedFindingDisposition === "pending" || selectedFindingDisposition === "posted-stale"
+                              ? theme.textWarning
+                              : theme.textSuccess
+                      }
+                    >{`STATE  ${selectedFindingDisposition.toUpperCase()}`}</text>
+                    {findingPostDiagnostic !== null && selectedFindingDisposition === "failed" && (
+                      <text fg={theme.textError}>
+                        {terminalSafeText(`${findingPostDiagnostic.operation}: ${findingPostDiagnostic.message}`)}
+                      </text>
+                    )}
+                    <box flexDirection="row">
+                      <ActionKey
+                        active={
+                          !agentRunning &&
+                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
+                        }
+                        keyName="p"
+                        label={selectedFinding.publicationTarget === "description" ? "Add" : "Post"}
+                      />
+                      <ActionKey
+                        active={
+                          !agentRunning &&
+                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
+                        }
+                        keyName="a"
+                        label="Ack"
+                      />
+                      <ActionKey
+                        active={
+                          !agentRunning &&
+                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
+                        }
+                        keyName="x"
+                        label="Reject"
+                      />
+                    </box>
+                  </box>
+                )}
               </scrollbox>
             )}
           </box>

@@ -39,6 +39,8 @@ const resolveStaleStatus = (
       detail.approvedBy
     )
 
+const accountRegionKey = (profile: string, region: string): string => `${profile}\0${region}`
+
 export const fetchAndUpsertPRs = (params: {
   readonly state: PRState
   readonly enabledAccounts: ReadonlyArray<AccountConfig>
@@ -54,6 +56,17 @@ export const fetchAndUpsertPRs = (params: {
     const subscriptionRepo = yield* SubscriptionRepo
 
     const { accountIdMap, currentUser, enabledAccounts, staleThreshold, state, subscribedRef } = params
+
+    // Stale rows are safe to reconcile only when their owning list operation
+    // completed successfully. A failed account stream says nothing about which
+    // cached PRs remain open and must never turn into cache deletion.
+    const successfullyFetchedScopes = yield* Ref.make(
+      new Set(
+        enabledAccounts.flatMap((account) =>
+          (account.regions ?? []).map((region) => accountRegionKey(account.profile, region))
+        )
+      )
+    )
 
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({
@@ -80,6 +93,11 @@ export const fetchAndUpsertPRs = (params: {
             const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
             return Stream.fromEffectDrain(
               Effect.gen(function*() {
+                yield* Ref.update(successfullyFetchedScopes, (scopes) => {
+                  const next = new Set(scopes)
+                  next.delete(accountRegionKey(account.profile, region))
+                  return next
+                })
                 yield* notificationRepo.addSystem({
                   type: "error",
                   title: label,
@@ -149,10 +167,11 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
+    const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
-          stalePRs,
+          stalePRs.filter((pr) => successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))),
           (pr) =>
             awsClient
               .getPullRequest({
