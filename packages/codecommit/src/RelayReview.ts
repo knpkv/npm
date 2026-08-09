@@ -306,6 +306,7 @@ const decodeAgentMessage = Schema.decodeUnknownOption(AgentMessageEvent)
 const isWorktreeError = Schema.is(WorktreeError)
 const MAX_RELAY_PATCH_BYTES = 786_432
 export const MAX_RELAY_PROMPT_BYTES = 1_048_576
+export const MAX_RELAY_TURN_STATE_BYTES = 98_304
 const textEncoder = new TextEncoder()
 
 interface PatchAccumulator {
@@ -332,6 +333,22 @@ const untrustedDelimiter = (content: string, name: "patch" | "review_state"): st
   return `untrusted_${name}_${suffix}`
 }
 
+const boundedRelayReviewTurns = (
+  turns: ReadonlyArray<RelayReviewConversationTurn>
+): ReadonlyArray<RelayReviewConversationTurn> => {
+  const retained: Array<RelayReviewConversationTurn> = []
+  let bytes = 2
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    if (turn === undefined) continue
+    const turnBytes = textEncoder.encode(JSON.stringify(turn)).byteLength + (retained.length === 0 ? 0 : 1)
+    if (bytes + turnBytes > MAX_RELAY_TURN_STATE_BYTES) break
+    retained.push(turn)
+    bytes += turnBytes
+  }
+  return retained.reverse()
+}
+
 export const makeRelayReviewPrompt = (request: RelayReviewRequest, patch: string): string => {
   const delimiter = untrustedDelimiter(patch, "patch")
   return [
@@ -356,7 +373,10 @@ export const makeRelayReviewPrompt = (request: RelayReviewRequest, patch: string
 
 export const makeRelayReviewConversationPrompt = (request: RelayReviewConversationRequest, patch: string): string => {
   const delimiter = untrustedDelimiter(patch, "patch")
-  const reviewState = JSON.stringify({ currentReview: request.currentReview, turns: request.turns })
+  const reviewState = JSON.stringify({
+    currentReview: request.currentReview,
+    turns: boundedRelayReviewTurns(request.turns)
+  })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
   return [
     `Continue the review of CodeCommit PR #${request.pullRequestId}.`,
@@ -386,7 +406,10 @@ export const makeRelayReviewConversationPrompt = (request: RelayReviewConversati
 
 export const makeRelayReviewVerificationPrompt = (request: RelayReviewVerificationRequest, patch: string): string => {
   const delimiter = untrustedDelimiter(patch, "patch")
-  const reviewState = JSON.stringify({ currentReview: request.currentReview, turns: request.turns })
+  const reviewState = JSON.stringify({
+    currentReview: request.currentReview,
+    turns: boundedRelayReviewTurns(request.turns)
+  })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
   return [
     `Verify finding ${request.selectedFindingId} from CodeCommit PR #${request.pullRequestId} against the provider's latest exact revision.`,
@@ -413,6 +436,32 @@ export const makeRelayReviewVerificationPrompt = (request: RelayReviewVerificati
     patch,
     `</${delimiter}>`
   ].join("\n")
+}
+
+/** Whether an initial result leaves enough prompt capacity for bounded follow-up state. */
+export const relayReviewSupportsFollowUps = (
+  request: RelayReviewRequest,
+  patch: string,
+  currentReview: RelayReviewResult
+): boolean => {
+  const selectedFindingId = currentReview.findings[0]?.id
+  if (selectedFindingId === undefined) return true
+  const conversationBytes = textEncoder.encode(makeRelayReviewConversationPrompt({
+    ...request,
+    currentReview,
+    message: "x".repeat(4_000),
+    selectedFindingId,
+    turns: []
+  }, patch)).byteLength
+  const verificationBytes = textEncoder.encode(makeRelayReviewVerificationPrompt({
+    ...request,
+    currentReview,
+    previousBaseCommit: request.baseCommit,
+    previousHeadCommit: request.headCommit,
+    selectedFindingId,
+    turns: []
+  }, patch)).byteLength
+  return Math.max(conversationBytes, verificationBytes) + MAX_RELAY_TURN_STATE_BYTES <= MAX_RELAY_PROMPT_BYTES
 }
 
 /** Reads an exact immutable patch with Git's external diff and text-conversion hooks disabled. */
@@ -514,10 +563,11 @@ export const runRelayReview = (request: RelayReviewRequest) =>
               message: "Relay review execution failed",
               cause
             })
-        )
+        ),
+        Effect.map((message) => ({ message, patch }))
       )
     ),
-    Effect.flatMap((message) =>
+    Effect.flatMap(({ message, patch }) =>
       parseRelayReviewResult(Option.getOrElse(message, () => "")).pipe(
         Option.match({
           onNone: () =>
@@ -527,7 +577,15 @@ export const runRelayReview = (request: RelayReviewRequest) =>
                 message: "Relay returned malformed review JSON; no clean verdict was recorded"
               })
             ),
-          onSome: Effect.succeed
+          onSome: (result) =>
+            relayReviewSupportsFollowUps(request, patch, result)
+              ? Effect.succeed(result)
+              : Effect.fail(
+                new WorktreeError({
+                  operation: "relay-review-budget",
+                  message: "Relay review state leaves insufficient capacity for discussion and verification"
+                })
+              )
         })
       )
     )

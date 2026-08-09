@@ -16,3 +16,8 @@ invalid:
     const branches = Stream.paginate(undefined, (token) =>
       Effect.succeed([["main", "feature"], Option.none()])).pipe(
         Stream.flatMap(Stream.fromIterable))
+  - |
+    const branches = Stream.paginate(undefined, (token) =>
+      Effect.succeed([["main", "feature"], Option.none()])).pipe(
+        Stream.flatMap(Stream.fromIterable),
+        Stream.take(10))

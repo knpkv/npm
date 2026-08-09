@@ -592,6 +592,21 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "p" })).toBe("post-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "a" })).toBe("ack-finding")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "x" })).toBe("reject-finding")
+    for (
+      const input of [
+        { keyName: "h" },
+        { keyName: "l" },
+        { keyName: "u" },
+        { keyName: "d" },
+        { keyName: "m" },
+        { keyName: "p" },
+        { keyName: "a" },
+        { keyName: "x" },
+        { keyName: "v", shifted: true }
+      ]
+    ) {
+      expect(detailsKeyIntent({ ...base, ...input, findingReviewActive: true, tab: "comments" })).toBe("yield")
+    }
     expect(
       detailsKeyIntent({
         ...base,

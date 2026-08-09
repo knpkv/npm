@@ -247,6 +247,13 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep CodeCommit editor documentation synchronized with exact-head behavior in
+  `packages/codecommit/README.md` and `packages/codecommit/src/tui/review-session.ts`:
+  after-side findings may open at their line, before-side findings must not apply
+  a base line to the head file, and deleted files are not launchable unless a
+  separate verified base artifact is explicitly materialized. Also document
+  `codecommit:GetBlob` as mandatory whenever exact-line publication validation
+  reads provider blobs, even when local checkout powers the displayed diff.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

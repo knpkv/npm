@@ -11,7 +11,10 @@ import {
   collectRelayPatch,
   makeRelayReviewPrompt,
   MAX_RELAY_PROMPT_BYTES,
-  type RelayReviewRequest
+  type RelayReviewFinding,
+  type RelayReviewRequest,
+  type RelayReviewResult,
+  relayReviewSupportsFollowUps
 } from "../src/RelayReview.js"
 
 const relayRequest: RelayReviewRequest = {
@@ -75,6 +78,27 @@ describe("RelayReview", () => {
     expect(prompt).toContain(`<untrusted_patch_${occupiedCount}>`)
     expect(prompt).toContain(`</untrusted_patch_${occupiedCount}>`)
   }, 1_000)
+
+  it("rejects an initial review that cannot retain bounded discussion and verification capacity", () => {
+    const maximumFinding = (index: number): RelayReviewFinding => ({
+      details: "d".repeat(4_000),
+      id: `F${index + 1}`,
+      location: { scope: "general" },
+      priority: "P2",
+      publicationTarget: "pr-comment",
+      recommendation: "r".repeat(2_000),
+      summary: "s".repeat(500),
+      title: "t".repeat(200),
+      verification: "v".repeat(1_000)
+    })
+    const currentReview: RelayReviewResult = {
+      findings: Array.from({ length: 50 }, (_, index) => maximumFinding(index)),
+      verdict: "v".repeat(8_000)
+    }
+
+    expect(relayReviewSupportsFollowUps(relayRequest, "+small patch", currentReview)).toBe(true)
+    expect(relayReviewSupportsFollowUps(relayRequest, "x".repeat(700_000), currentReview)).toBe(false)
+  })
 
   it.effect("treats a repository AGENTS file as inert patch text and never reads its outside sentinel", () =>
     Effect.gen(function*() {

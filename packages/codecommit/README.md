@@ -32,7 +32,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
   - `codecommit:GetDifferences` — exact-revision changed files
-  - `codecommit:GetBlob` — diff-preview fallback when automatic local checkout is unavailable
+  - `codecommit:GetBlob` — mandatory exact-line publication validation and diff-preview fallback when automatic local checkout is unavailable
   - `codecommit:GitPull` — automatic exact-head local diffs, detached worktrees, and Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
@@ -111,7 +111,10 @@ In the Changes tab, `n` opens the selected exact-head file in Neovim using the
 same terminal. The TUI suspends while Neovim owns the terminal and restores the
 same PR workspace when Neovim exits. `v` opens the file in an existing VS Code
 window through `code --goto`. When a selected Relay finding supplies a line
-anchor for that file, both shortcuts open at that line. Editor targets are
+anchor for that file on the after/head side, both shortcuts open at that line.
+Before/base-side anchors open a surviving head file without applying the base
+line number, and deleted files cannot be opened from the exact-head checkout.
+Editor targets are
 canonicalized and must remain regular files inside the verified detached
 worktree; deleted files and paths or symlinks that escape it are rejected. Text
 changes render side by side by default, with the base revision on the left and

@@ -160,29 +160,65 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
-  if (input.findingReviewActive === true && (input.keyName === "h" || input.keyName === "[")) return "previous-finding"
-  if (input.findingReviewActive === true && (input.keyName === "l" || input.keyName === "]")) return "next-finding"
-  if (input.findingReviewActive === true && input.keyName === "u") return "next-pending-finding"
-  if (input.findingReviewActive === true && input.keyName === "d" && input.conversationRunning !== true) {
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    (input.keyName === "h" || input.keyName === "[")
+  ) return "previous-finding"
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    (input.keyName === "l" || input.keyName === "]")
+  ) return "next-finding"
+  if (input.tab === "diff" && input.findingReviewActive === true && input.keyName === "u") {
+    return "next-pending-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.keyName === "d" &&
+    input.conversationRunning !== true
+  ) {
     return "discuss-finding"
   }
-  if (input.findingReviewActive === true && input.keyName === "m" && input.conversationRunning !== true) {
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.keyName === "m" &&
+    input.conversationRunning !== true
+  ) {
     return "choose-finding-target"
   }
   if (
+    input.tab === "diff" &&
     input.findingReviewActive === true &&
     (input.keyName === "V" || (input.keyName === "v" && input.shifted === true)) &&
     input.conversationRunning !== true
   ) {
     return "verify-finding"
   }
-  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "p") {
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "p"
+  ) {
     return "post-finding"
   }
-  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "a") {
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "a"
+  ) {
     return "ack-finding"
   }
-  if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "x") {
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "x"
+  ) {
     return "reject-finding"
   }
   if (

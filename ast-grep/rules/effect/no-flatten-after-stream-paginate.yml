@@ -6,7 +6,9 @@ severity: error
 message: "Stream.paginate already flattens each returned page; do not flatten its elements again"
 
 rule:
-  pattern: Stream.paginate($$$ARGS).pipe(Stream.flatMap(Stream.fromIterable))
+  any:
+    - pattern: Stream.paginate($$$ARGS).pipe(Stream.flatMap(Stream.fromIterable))
+    - pattern: Stream.paginate($$$ARGS).pipe(Stream.flatMap(Stream.fromIterable), $$$REST)
 
 files:
   - "packages/**/*.ts"
