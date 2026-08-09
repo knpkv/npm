@@ -228,8 +228,8 @@ const synchronizeAutomatically = (
       ? synchronizeWithLease()
       : lockManager.request(
         `control-center:confluence-sync:${pluginConnectionId}`,
-        { ifAvailable: true },
-        (lock) => lock === null ? Promise.resolve() : synchronizeWithLease()
+        { signal: abort.signal },
+        () => synchronizeWithLease()
       )
   ).catch(async (failure: unknown) => {
     const source = group.participants.values().next().value

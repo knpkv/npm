@@ -380,6 +380,80 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
   })
 
+  it("queues a post-mutation refresh until a contended Web Lock becomes available", async () => {
+    setDocumentVisibility("hidden")
+    let acquire = (): void => {
+      throw new Error("Expected a queued Web Lock callback")
+    }
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: vi.fn(
+          (_name: string, _options: LockOptions, callback: LockGrantedCallback<unknown>) =>
+            new Promise<unknown>((resolve, reject) => {
+              acquire = () =>
+                Promise.resolve(callback({ name: "control-center:confluence-sync", mode: "exclusive" })).then(
+                  resolve,
+                  reject
+                )
+            })
+        )
+      }
+    })
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+    expect(localStorage.getItem(`control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`)).toBeNull()
+    expect(transport.synchronize).not.toHaveBeenCalled()
+
+    const storageKey = `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ownerKey: "other-tab",
+        recordedAt: await currentTimeMillis(),
+        sessionExpired: false,
+        state: "synchronized"
+      })
+    )
+    await act(async () => acquire())
+
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+  })
+
+  it("starts a manual refresh immediately when the Web Lock is available", async () => {
+    setDocumentVisibility("hidden")
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: vi.fn((_name: string, _options: LockOptions, callback: LockGrantedCallback<unknown>) =>
+          Promise.resolve(callback({ name: "control-center:confluence-sync", mode: "exclusive" }))
+        )
+      }
+    })
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness action="now" onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+  })
+
   it("keeps the cadence serialized behind an active manual refresh", async () => {
     vi.useFakeTimers()
     let resolveManual = (_state: PluginSynchronizationState): void => {
