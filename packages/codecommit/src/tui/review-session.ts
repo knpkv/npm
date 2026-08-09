@@ -87,14 +87,21 @@ export const relayFindingPostReceiptDisposition = (
 /** Successful stale posts whose findings left the current deck still require a visible session warning. */
 export const detachedStalePublicationIds = (
   currentFindingIds: ReadonlyArray<string>,
-  dispositions: Readonly<Record<string, FindingDisposition>>,
-  diagnosticFindingIds: ReadonlyArray<string>
+  dispositions: Readonly<Record<string, FindingDisposition>>
 ): ReadonlyArray<string> => {
   const currentIds = new Set(currentFindingIds)
-  return diagnosticFindingIds.filter(
-    (findingId) => !currentIds.has(findingId) && dispositions[findingId] === "posted-stale"
-  )
+  return Object.entries(dispositions)
+    .filter(([findingId, disposition]) => !currentIds.has(findingId) && disposition === "posted-stale")
+    .map(([findingId]) => findingId)
 }
+
+/** Keeps detached stale publications actionable after their transient diagnostic has been cleared. */
+export const detachedStalePublicationDiagnostic = (
+  diagnostic: { readonly message: string; readonly operation: string } | undefined
+): string =>
+  diagnostic === undefined
+    ? "The obsolete provider comment remains published; inspect or supersede it"
+    : `${diagnostic.operation}: ${diagnostic.message}`
 
 /** Head worktrees can represent only after-side line coordinates truthfully. */
 export const relayFindingHeadEditorLine = (

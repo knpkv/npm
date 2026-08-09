@@ -71,6 +71,7 @@ import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import {
   adjacentFindingIndex,
+  detachedStalePublicationDiagnostic,
   detachedStalePublicationIds,
   findingDispositionNeedsResolution,
   findingDispositionMarker,
@@ -867,8 +868,7 @@ export function DetailsView() {
     selectedFinding === null ? null : (findingPostDiagnostics[selectedFinding.id] ?? null)
   const detachedStaleFindingIds = detachedStalePublicationIds(
     reviewedFindings.map((finding) => finding.id),
-    findingDispositions,
-    Object.keys(findingPostDiagnostics)
+    findingDispositions
   )
   const selectedFindingNeedsResolution = findingDispositionNeedsResolution(selectedFindingDisposition)
   const selectedFindingTurns =
@@ -1080,6 +1080,7 @@ export function DetailsView() {
       actionReady: action._tag === "ready" && workspace !== null,
       conversationRunning: agentRunning,
       dialogOpen: dialog.current !== null,
+      findingPostRunning: postingFinding !== null,
       findingReviewActive: selectedFinding !== null,
       keyName: key.name,
       modified: key.ctrl === true || key.meta === true,
@@ -1483,7 +1484,7 @@ export function DetailsView() {
                 </box>
                 {detachedStaleFindingIds.map((findingId) => {
                   const diagnostic = findingPostDiagnostics[findingId]
-                  return diagnostic === undefined ? null : (
+                  return (
                     <box
                       border={["left"]}
                       borderColor={theme.warning}
@@ -1493,7 +1494,7 @@ export function DetailsView() {
                     >
                       <text fg={theme.textWarning}>{`STALE PROVIDER POST · ${findingId} · FINDING REMOVED`}</text>
                       <text fg={theme.textWarning}>
-                        {terminalSafeText(`${diagnostic.operation}: ${diagnostic.message}`)}
+                        {terminalSafeText(detachedStalePublicationDiagnostic(diagnostic))}
                       </text>
                     </box>
                   )

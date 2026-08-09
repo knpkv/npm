@@ -115,6 +115,7 @@ export type DetailsKeyIntent =
   | "ack-finding"
   | "back"
   | "cancel-action"
+  | "consume"
   | "choose-review-skills"
   | "checkout-worktree"
   | "confirm-action"
@@ -149,6 +150,7 @@ export const detailsKeyIntent = (input: {
   readonly actionReady: boolean
   readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
+  readonly findingPostRunning?: boolean
   readonly findingReviewActive?: boolean
   readonly keyName: string
   readonly modified: boolean
@@ -156,6 +158,7 @@ export const detailsKeyIntent = (input: {
   readonly tab: "comments" | "diff"
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
+  if (input.keyName === "escape" && input.findingPostRunning === true) return "consume"
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"

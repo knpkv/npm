@@ -1,7 +1,7 @@
 ---
 "@knpkv/ai-codex": patch
 "@knpkv/codecommit": minor
-"@knpkv/codecommit-core": patch
+"@knpkv/codecommit-core": minor
 ---
 
 Fix real-account CodeCommit TUI authentication actions, terminal text input,

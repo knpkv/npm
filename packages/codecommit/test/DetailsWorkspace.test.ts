@@ -62,6 +62,7 @@ import {
 } from "../src/tui/file-diff.js"
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
 import {
+  detachedStalePublicationDiagnostic,
   detachedStalePublicationIds,
   reconcileRelayReviewSession,
   relayFindingFingerprint,
@@ -112,7 +113,7 @@ describe("PR detail workspace", () => {
     const removedDisposition = relayFindingPostReceiptDisposition(posting, removed.findings[0], receipt)
     const removedState = reconcileRelayReviewSession(previous, removed, { F1: removedDisposition }).dispositions
     expect(removedState).toEqual({ F1: "posted-stale" })
-    expect(detachedStalePublicationIds([], removedState, ["F1"])).toEqual(["F1"])
+    expect(detachedStalePublicationIds([], removedState)).toEqual(["F1"])
 
     const changedDisposition = relayFindingPostReceiptDisposition(posting, changed.findings[0], receipt)
     expect(reconcileRelayReviewSession(previous, changed, { F1: changedDisposition }).dispositions).toEqual({
@@ -126,9 +127,12 @@ describe("PR detail workspace", () => {
   })
 
   it("keeps a session warning for successful stale posts whose finding left the deck", () => {
-    expect(detachedStalePublicationIds(["F2"], { F1: "posted-stale", F2: "pending" }, ["F1"])).toEqual(["F1"])
-    expect(detachedStalePublicationIds(["F1", "F2"], { F1: "posted-stale" }, ["F1"])).toEqual([])
-    expect(detachedStalePublicationIds(["F2"], { F1: "failed" }, ["F1"])).toEqual([])
+    expect(detachedStalePublicationIds(["F2"], { F1: "posted-stale", F2: "pending" })).toEqual(["F1"])
+    expect(detachedStalePublicationIds(["F1", "F2"], { F1: "posted-stale" })).toEqual([])
+    expect(detachedStalePublicationIds(["F2"], { F1: "failed" })).toEqual([])
+    expect(detachedStalePublicationIds([], { F1: "pending", F2: "acknowledged" })).toEqual([])
+    expect(detachedStalePublicationDiagnostic(undefined)).toContain("provider comment remains published")
+    expect(detachedStalePublicationDiagnostic({ message: "stale", operation: "post" })).toBe("post: stale")
   })
 
   it("shows completed session replies only on the finding that produced them", () => {
@@ -633,6 +637,8 @@ describe("PR detail workspace", () => {
     }
 
     expect(detailsKeyIntent({ ...base, dialogOpen: true, keyName: "escape" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "escape" })).toBe("back")
+    expect(detailsKeyIntent({ ...base, findingPostRunning: true, keyName: "escape" })).toBe("consume")
     expect(detailsKeyIntent({ ...base, keyName: "j" })).toBe("next-file")
     expect(detailsKeyIntent({ ...base, keyName: "down" })).toBe("scroll-content-down")
     expect(detailsKeyIntent({ ...base, keyName: "up" })).toBe("scroll-content-up")
