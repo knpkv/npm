@@ -185,7 +185,14 @@ export const detailsKeyIntent = (input: {
   if (input.findingReviewActive === true && input.conversationRunning !== true && input.keyName === "x") {
     return "reject-finding"
   }
-  if (input.tab === "diff" && !input.actionCancelable && input.keyName === "n") return "open-neovim"
+  if (
+    input.tab === "diff" &&
+    !input.actionCancelable &&
+    input.conversationRunning !== true &&
+    input.keyName === "n"
+  ) {
+    return "open-neovim"
+  }
   if (
     input.tab === "diff" &&
     !input.actionCancelable &&
@@ -684,6 +691,7 @@ export const isChangedDiffLine = (
     let afterLine = hunk.newStart
     for (const content of hunk.lines) {
       const prefix = content[0]
+      if (prefix === "\\") continue
       if (prefix === "-" && side === "before" && beforeLine === line) return true
       if (prefix === "+" && side === "after" && afterLine === line) return true
       if (prefix !== "+") beforeLine += 1

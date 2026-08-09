@@ -7,9 +7,9 @@
  *
  * Uses `@effect/vitest` for consistency with the rest of the codebase.
  */
+import { describe, expect, it } from "@effect/vitest"
 import { Domain } from "@knpkv/codecommit-core"
 import { Schema } from "effect"
-import { describe, expect, it } from "vitest"
 import {
   applySettingsFilter,
   computeItemPositions,

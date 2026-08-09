@@ -561,6 +561,8 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "c", modified: true })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "n" })).toBe("open-neovim")
     expect(detailsKeyIntent({ ...base, keyName: "v" })).toBe("open-vscode")
+    expect(detailsKeyIntent({ ...base, conversationRunning: true, keyName: "n" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, conversationRunning: true, keyName: "v" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "v", shifted: true })).toBe("verify-finding")
     expect(detailsKeyIntent({ ...base, keyName: "g" })).toBe("choose-review-skills")
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "g" })).toBe("yield")
@@ -841,6 +843,8 @@ describe("PR detail workspace", () => {
     expect(isChangedDiffLine(before, after, "after", 2)).toBe(true)
     expect(isChangedDiffLine(before, after, "after", 1)).toBe(false)
     expect(isChangedDiffLine(before, after, "before", 42)).toBe(false)
+    expect(isChangedDiffLine("same\nold", "same\nnew\n", "after", 2)).toBe(true)
+    expect(isChangedDiffLine("same\nold\n", "same\nnew", "before", 2)).toBe(true)
   })
 
   it.effect("validates line comments from immutable provider blobs", () =>
@@ -892,6 +896,26 @@ describe("PR detail workspace", () => {
 
       expect(yield* validateChangedFileLine(client, request, "after", 2)).toBe(true)
       expect(yield* validateChangedFileLine(client, request, "after", 42)).toBe(false)
+
+      const tooLarge = new ReadClient.CodeCommitBlobTooLargeError({
+        actualBytes: null,
+        maximumBytes: ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES,
+        operation: "get-blob",
+        source: "provider"
+      })
+      expect(yield* validateChangedFileLine({ getBlob: () => Effect.fail(tooLarge) }, request, "after", 2)).toBe(
+        false
+      )
+      const binaryClient = {
+        getBlob: ({ blobId }: { readonly blobId: string }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
+              bytes: new Uint8Array([65, 0, 66])
+            })
+          )
+      }
+      expect(yield* validateChangedFileLine(binaryClient, request, "after", 2)).toBe(false)
     }))
 
   it("bounds text decoding and samples binary content", () => {

@@ -505,6 +505,16 @@ export const runRelayReview = (request: RelayReviewRequest) =>
           Stream.filter(Option.isSome),
           Stream.map((decoded) => decoded.value.item.text)
         )
+      ).pipe(
+        Effect.mapError((cause) =>
+          isWorktreeError(cause)
+            ? cause
+            : new WorktreeError({
+              operation: "relay-review",
+              message: "Relay review execution failed",
+              cause
+            })
+        )
       )
     ),
     Effect.flatMap((message) =>
