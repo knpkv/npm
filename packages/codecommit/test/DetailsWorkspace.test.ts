@@ -1080,6 +1080,65 @@ describe("PR detail workspace", () => {
       expect(providerReads).toBe(0)
     }))
 
+  it.effect("falls back to provider blobs when checked-out object reads fail", () =>
+    Effect.gen(function*() {
+      const account = new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      })
+      const repositoryName = Domain.RepositoryName.make("payments")
+      const pullRequestId = Domain.PullRequestId.make("42")
+      const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+      const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      const file = decodeChangedFile({
+        status: "modified",
+        before: { blobId: "before-provider", path: "src/index.ts", mode: "100644" },
+        after: { blobId: "after-provider", path: "src/index.ts", mode: "100644" }
+      })
+      let providerReads = 0
+      const rendered = yield* loadFileDiff(
+        {
+          getBlob: ({ blobId }) => {
+            providerReads += 1
+            return Effect.succeed(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new TextEncoder().encode(blobId === file.before?.blobId ? "before\n" : "after\n")
+              })
+            )
+          },
+          getLocalBlob: () =>
+            Effect.fail(new WorktreeError({ operation: "read-local-blob", message: "missing object" }))
+        },
+        {
+          account,
+          file,
+          identity: { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+          localWorktreePath: "/private/exact-head",
+          repositoryName,
+          revision: new ReadClient.CodeCommitPullRequestRevision({
+            authorArn: null,
+            creationDate: new Date(0),
+            destinationCommit,
+            destinationReference: "refs/heads/main",
+            lastActivityDate: new Date(0),
+            mergeBase: destinationCommit,
+            pullRequestId,
+            repositoryName,
+            revisionId: "revision-1",
+            sourceCommit,
+            sourceReference: "refs/heads/feature",
+            status: "OPEN",
+            title: "Review"
+          })
+        }
+      )
+
+      expect(rendered.diff).toContain("-before")
+      expect(rendered.diff).toContain("+after")
+      expect(providerReads).toBe(2)
+    }))
+
   it.effect("preloads a bounded exact-head prefix before publishing a navigable workspace", () =>
     Effect.gen(function*() {
       const account = new Domain.Account({

@@ -149,24 +149,28 @@ const loadPreviewBlobs = Effect.fn("loadPreviewBlobs")(function*(
   client: FileDiffReadClient,
   request: FileDiffRequest
 ) {
+  const loadProviderBlob = (blob: ReadClient.CodeCommitBlobMetadata) =>
+    client.getBlob({
+      account: request.account,
+      repositoryName: request.repositoryName,
+      blobId: blob.blobId
+    }).pipe(
+      Effect.map(({ bytes }): PreviewBlob => ({ _tag: "bytes", bytes })),
+      Effect.catchTag("CodeCommitBlobTooLargeError", (): Effect.Effect<PreviewBlob> =>
+        Effect.succeed({ _tag: "too-large" }))
+    )
   const loadBlob = (blob: ReadClient.CodeCommitBlobMetadata | null) =>
     blob === null
       ? Effect.succeed<PreviewBlob>({ _tag: "bytes", bytes: new Uint8Array() })
       : request.localWorktreePath !== undefined && client.getLocalBlob !== undefined
       ? client.getLocalBlob({ blobId: blob.blobId, worktreePath: request.localWorktreePath }).pipe(
         Effect.map(({ bytes }): PreviewBlob => ({ _tag: "bytes", bytes })),
-        Effect.catchTag("CodeCommitBlobTooLargeError", (): Effect.Effect<PreviewBlob> =>
-          Effect.succeed({ _tag: "too-large" }))
+        Effect.catchTags({
+          CodeCommitBlobTooLargeError: (): Effect.Effect<PreviewBlob> => Effect.succeed({ _tag: "too-large" }),
+          WorktreeError: () => loadProviderBlob(blob)
+        })
       )
-      : client.getBlob({
-        account: request.account,
-        repositoryName: request.repositoryName,
-        blobId: blob.blobId
-      }).pipe(
-        Effect.map(({ bytes }): PreviewBlob => ({ _tag: "bytes", bytes })),
-        Effect.catchTag("CodeCommitBlobTooLargeError", (): Effect.Effect<PreviewBlob> =>
-          Effect.succeed({ _tag: "too-large" }))
-      )
+      : loadProviderBlob(blob)
   return yield* Effect.all([loadBlob(request.file.before), loadBlob(request.file.after)], { concurrency: 2 })
 })
 
