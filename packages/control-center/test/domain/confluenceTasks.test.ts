@@ -79,4 +79,12 @@ describe("Confluence release tasks", () => {
       "- \\[ \\] Stage approval\n- \\[ \\] Risk sign-off"
     )
   })
+
+  it("ignores task markers with only one escaped bracket", () => {
+    const markdown = "- \\[ ] Not a task\n- [x\\] Also not a task"
+
+    expect(confluenceTasks(markdown)).toEqual([])
+    expect(setConfluenceTaskChecked(markdown, 0, true)).toBeNull()
+    expect(setConfluenceTaskChecked(markdown, 1, false)).toBeNull()
+  })
 })

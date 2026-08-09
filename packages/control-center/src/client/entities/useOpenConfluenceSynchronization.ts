@@ -31,6 +31,106 @@ const browserOpenConfluenceSynchronizationTransport: OpenConfluenceSynchronizati
   }
 }
 
+interface AutomaticSynchronizationParticipant {
+  readonly onSessionExpired: () => void
+  readonly onSynchronized: () => void
+  readonly setState: (state: OpenConfluenceSynchronizationState) => void
+  readonly transport: OpenConfluenceSynchronizationTransport
+}
+
+interface AutomaticSynchronizationGroup {
+  active: ActiveSynchronization | null
+  readonly participants: Map<symbol, AutomaticSynchronizationParticipant>
+}
+
+const automaticSynchronizationGroups = new Map<PluginConnectionId, AutomaticSynchronizationGroup>()
+const automaticSynchronizationCleanup = new WeakMap<AutomaticSynchronizationGroup, () => void>()
+
+const synchronizeAutomatically = (
+  pluginConnectionId: PluginConnectionId,
+  group: AutomaticSynchronizationGroup
+): Promise<void> => {
+  if (group.active !== null) return group.active.completion
+  const source = group.participants.values().next().value
+  if (source === undefined) return Promise.resolve()
+  const abort = new AbortController()
+  for (const participant of group.participants.values()) participant.setState("syncing")
+  const completion = source.transport.synchronize(pluginConnectionId, abort.signal).then(
+    (result) => {
+      if (abort.signal.aborted) return
+      for (const participant of group.participants.values()) {
+        if (result.result === "synchronized") {
+          participant.setState("synchronized")
+          participant.onSynchronized()
+        } else participant.setState("failed")
+      }
+    },
+    (failure) => {
+      if (abort.signal.aborted) return
+      for (const participant of group.participants.values()) {
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) participant.onSessionExpired()
+        participant.setState("failed")
+      }
+    }
+  ).finally(() => {
+    if (group.active?.abort === abort) group.active = null
+  })
+  group.active = { abort, completion }
+  return completion
+}
+
+const startAutomaticSynchronization = (
+  pluginConnectionId: PluginConnectionId,
+  group: AutomaticSynchronizationGroup
+): () => void => {
+  const lifetime = new AbortController()
+  const run = async (): Promise<void> => {
+    if (document.visibilityState === "visible") await synchronizeAutomatically(pluginConnectionId, group)
+    while (!lifetime.signal.aborted) {
+      try {
+        await Effect.runPromise(Effect.sleep(OPEN_CONFLUENCE_SYNC_INTERVAL), { signal: lifetime.signal })
+      } catch {
+        return
+      }
+      if (document.visibilityState === "visible") await synchronizeAutomatically(pluginConnectionId, group)
+    }
+  }
+  const synchronizeWhenVisible = (): void => {
+    if (document.visibilityState === "visible") void synchronizeAutomatically(pluginConnectionId, group)
+  }
+  document.addEventListener("visibilitychange", synchronizeWhenVisible)
+  void run()
+  return () => {
+    lifetime.abort()
+    group.active?.abort.abort()
+    group.active = null
+    document.removeEventListener("visibilitychange", synchronizeWhenVisible)
+  }
+}
+
+const registerAutomaticSynchronization = (
+  pluginConnectionId: PluginConnectionId,
+  participant: AutomaticSynchronizationParticipant
+): () => void => {
+  const participantId = Symbol()
+  const existing = automaticSynchronizationGroups.get(pluginConnectionId)
+  const group = existing ?? { active: null, participants: new Map() }
+  group.participants.set(participantId, participant)
+  if (existing === undefined) {
+    automaticSynchronizationGroups.set(pluginConnectionId, group)
+    automaticSynchronizationCleanup.set(group, startAutomaticSynchronization(pluginConnectionId, group))
+  }
+  return () => {
+    group.participants.delete(participantId)
+    if (group.participants.size !== 0) return
+    automaticSynchronizationCleanup.get(group)?.()
+    automaticSynchronizationCleanup.delete(group)
+    if (automaticSynchronizationGroups.get(pluginConnectionId) === group) {
+      automaticSynchronizationGroups.delete(pluginConnectionId)
+    }
+  }
+}
+
 /** Keep an open Confluence page fresh without polling while its browser tab is hidden. */
 export const useOpenConfluenceSynchronization = ({
   enabled,
@@ -52,7 +152,7 @@ export const useOpenConfluenceSynchronization = ({
   readonly synchronizeNow: () => void
 } => {
   const [state, setState] = useState<OpenConfluenceSynchronizationState>("idle")
-  const active = useRef<ActiveSynchronization | null>(null)
+  const manualActive = useRef<ActiveSynchronization | null>(null)
   const sessionExpired = useRef(onSessionExpired)
   const synchronized = useRef(onSynchronized)
   sessionExpired.current = onSessionExpired
@@ -60,7 +160,7 @@ export const useOpenConfluenceSynchronization = ({
 
   const synchronize = useCallback((): Promise<void> => {
     if (!enabled || pluginConnectionId === null || sessionKey === null) return Promise.resolve()
-    const inFlight = active.current
+    const inFlight = manualActive.current
     if (inFlight !== null) return inFlight.completion
     const abort = new AbortController()
     setState("syncing")
@@ -80,14 +180,14 @@ export const useOpenConfluenceSynchronization = ({
         setState("failed")
       }
     ).finally(() => {
-      if (active.current?.abort === abort) active.current = null
+      if (manualActive.current?.abort === abort) manualActive.current = null
     })
-    active.current = { abort, completion }
+    manualActive.current = { abort, completion }
     return completion
   }, [enabled, pluginConnectionId, sessionKey, transport])
 
   const synchronizeAfterMutation = useCallback((): void => {
-    const inFlight = active.current?.completion
+    const inFlight = manualActive.current?.completion
     if (inFlight === undefined) void synchronize()
     else void inFlight.then(synchronize)
   }, [synchronize])
@@ -95,30 +195,18 @@ export const useOpenConfluenceSynchronization = ({
   useEffect(() => {
     setState("idle")
     if (!enabled || pluginConnectionId === null || sessionKey === null) return
-    const lifetime = new AbortController()
-    const run = async (): Promise<void> => {
-      if (document.visibilityState === "visible") await synchronize()
-      while (!lifetime.signal.aborted) {
-        try {
-          await Effect.runPromise(Effect.sleep(OPEN_CONFLUENCE_SYNC_INTERVAL), { signal: lifetime.signal })
-        } catch {
-          return
-        }
-        if (document.visibilityState === "visible") await synchronize()
-      }
-    }
-    const synchronizeWhenVisible = (): void => {
-      if (document.visibilityState === "visible") void synchronize()
-    }
-    document.addEventListener("visibilitychange", synchronizeWhenVisible)
-    void run()
+    const unregister = registerAutomaticSynchronization(pluginConnectionId, {
+      onSessionExpired: () => sessionExpired.current(sessionKey),
+      onSynchronized: () => synchronized.current(),
+      setState,
+      transport
+    })
     return () => {
-      lifetime.abort()
-      active.current?.abort.abort()
-      active.current = null
-      document.removeEventListener("visibilitychange", synchronizeWhenVisible)
+      unregister()
+      manualActive.current?.abort.abort()
+      manualActive.current = null
     }
-  }, [enabled, pluginConnectionId, sessionKey, synchronize])
+  }, [enabled, pluginConnectionId, sessionKey, transport])
 
   return {
     state,

@@ -11,7 +11,7 @@ export const ConfluenceTask = Schema.Struct({
 /** Decoded Markdown checkbox participating in release readiness. */
 export type ConfluenceTask = typeof ConfluenceTask.Type
 
-const taskLine = /^(?:\s*(?:(?:[-*+]|\d+\.)\s+)?)\\?\[( |x|X)?\\?\]\s+(.+?)\s*$/u
+const taskLine = /^(?:\s*(?:(?:[-*+]|\d+\.)\s+)?)(?:\[( |x|X)?\]|\\\[( |x|X)?\\\])\s+(.+?)\s*$/u
 const openingFenceLine = /^\s*(`{3,}|~{3,})/u
 const closingFenceLine = /^\s*(`{3,}|~{3,})\s*$/u
 
@@ -33,10 +33,11 @@ export const confluenceTasks = (markdown: string): ReadonlyArray<ConfluenceTask>
     }
     if (fence !== null) continue
     const match = taskLine.exec(line)
-    if (match?.[2] === undefined) continue
+    if (match?.[3] === undefined) continue
+    const marker = match[1] ?? match[2]
     tasks.push({
-      checked: match[1]?.toLocaleLowerCase("en-US") === "x",
-      label: match[2],
+      checked: marker?.toLocaleLowerCase("en-US") === "x",
+      label: match[3],
       lineIndex,
       lineNumber: lineIndex + 1
     })

@@ -15,6 +15,7 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 let root: Root | null = null
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+const OTHER_PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000100")
 const ignoreSessionExpiration = (): void => undefined
 const synchronizationState = (result: PluginSynchronizationResult): PluginSynchronizationState => ({
   pluginConnectionId: PLUGIN_CONNECTION_ID,
@@ -40,17 +41,19 @@ afterEach(async () => {
 const Harness = ({
   onSessionExpired = ignoreSessionExpiration,
   onSynchronized,
+  pluginConnectionId = PLUGIN_CONNECTION_ID,
   transport
 }: {
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly onSynchronized: () => void
+  readonly pluginConnectionId?: PluginConnectionId
   readonly transport: OpenConfluenceSynchronizationTransport
 }): ReactElement => {
   const synchronization = useOpenConfluenceSynchronization({
     enabled: true,
     onSessionExpired,
     onSynchronized,
-    pluginConnectionId: PLUGIN_CONNECTION_ID,
+    pluginConnectionId,
     sessionKey: "session-a",
     transport
   })
@@ -107,6 +110,60 @@ describe("open Confluence page synchronization", () => {
     setDocumentVisibility("visible")
     await act(async () => document.dispatchEvent(new Event("visibilitychange")))
     expect(transport.synchronize).toHaveBeenCalledTimes(3)
+  })
+
+  it("shares automatic polling across controllers for the same connection", async () => {
+    vi.useFakeTimers()
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <>
+          <Harness onSynchronized={onSynchronized} transport={transport} />
+          <Harness onSynchronized={onSynchronized} transport={transport} />
+          <Harness onSynchronized={onSynchronized} transport={transport} />
+        </>
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(transport.synchronize).toHaveBeenCalledOnce()
+    expect(onSynchronized).toHaveBeenCalledTimes(3)
+    await act(async () => vi.advanceTimersByTimeAsync(15_000))
+    expect(transport.synchronize).toHaveBeenCalledTimes(2)
+    expect(onSynchronized).toHaveBeenCalledTimes(6)
+  })
+
+  it("polls distinct connections independently", async () => {
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <>
+          <Harness onSynchronized={() => undefined} transport={transport} />
+          <Harness
+            onSynchronized={() => undefined}
+            pluginConnectionId={OTHER_PLUGIN_CONNECTION_ID}
+            transport={transport}
+          />
+        </>
+      )
+    )
+
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+    expect(transport.synchronize).toHaveBeenCalledWith(PLUGIN_CONNECTION_ID, expect.any(AbortSignal))
+    expect(transport.synchronize).toHaveBeenCalledWith(OTHER_PLUGIN_CONNECTION_ID, expect.any(AbortSignal))
   })
 
   it("invalidates the exact browser session after an unauthorized synchronization", async () => {
