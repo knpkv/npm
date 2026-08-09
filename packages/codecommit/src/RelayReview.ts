@@ -49,7 +49,12 @@ const RelayReviewFinding = Schema.Struct({
   verification: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
   publicationTarget: RelayFindingPublicationTarget,
   location: RelayReviewLocation
-})
+}).check(
+  Schema.makeFilter(
+    (finding) => finding.publicationTarget !== "line-comment" || finding.location.scope === "line",
+    { expected: "line-comment publication target paired with a line location" }
+  )
+)
 
 const RelayReviewResult = Schema.Struct({
   findings: Schema.Array(RelayReviewFinding).check(
