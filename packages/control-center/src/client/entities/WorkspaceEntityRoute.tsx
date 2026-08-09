@@ -166,8 +166,8 @@ const EntityActions = ({
             {synchronizationState === "failed"
               ? "Sync failed. Try again."
               : synchronizationState === "synchronized"
-                ? "Up to date · live sync every 15 seconds while open"
-                : "Live sync every 15 seconds while open"}
+                ? "Up to date · live sync every 15 seconds while visible"
+                : "Live sync every 15 seconds while visible"}
           </Text>
         </div>
       )}

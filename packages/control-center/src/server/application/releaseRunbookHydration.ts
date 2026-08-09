@@ -4,6 +4,10 @@ import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
 import type { EntityId, WorkspaceId } from "../../domain/identifiers.js"
 import type { PersistenceService } from "../persistence/Persistence.js"
 
+interface ReleaseRunbookPersistence {
+  readonly deliveryGraph: Pick<PersistenceService["deliveryGraph"], "read">
+}
+
 const relationshipIsCurrent = (
   relationship: ReleaseDeliveryGraphInspection["relationships"][number]
 ): boolean =>
@@ -39,7 +43,7 @@ export const releaseRunbookEntityIds = (
 
 /** Hydrate exact safe page content only for release runbooks whose tasks govern readiness. */
 export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.hydrate")(function*(
-  persistence: PersistenceService,
+  persistence: ReleaseRunbookPersistence,
   workspaceId: WorkspaceId,
   inspection: ReleaseDeliveryGraphInspection
 ) {
@@ -53,7 +57,10 @@ export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.h
       }).pipe(
         Effect.flatMap((result) =>
           result._tag === "entitySlice"
-            ? Effect.succeed(result.value.entity)
+            ? Effect.succeed({
+              projection: result.value.entity.projection,
+              recordedAt: result.value.entity.recordedAt
+            })
             : Effect.die("Expected an entity slice for release runbook")
         )
       ),

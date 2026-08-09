@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 
 import { confluenceTasks, confluenceTaskSummary, setConfluenceTaskChecked } from "../../src/domain/confluenceTasks.js"
 
@@ -74,6 +74,9 @@ describe("Confluence release tasks", () => {
     }))
     expect(setConfluenceTaskChecked(markdown, 0, true)).toBe(
       "- \\[x\\] Stage approval\n- \\[x\\] Risk sign-off"
+    )
+    expect(setConfluenceTaskChecked(markdown, 1, false)).toBe(
+      "- \\[ \\] Stage approval\n- \\[ \\] Risk sign-off"
     )
   })
 })

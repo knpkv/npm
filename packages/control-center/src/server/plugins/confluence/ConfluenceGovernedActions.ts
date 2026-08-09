@@ -397,6 +397,21 @@ const reconciliationKey = (payload: UpdatePageActionPayload): PluginActionReconc
     ])
   )
 
+const confirmedRejectedUpdate = (
+  payload: UpdatePageActionPayload,
+  observedAt: DateTime.Utc
+): PluginActionDispatchResultV1 => ({
+  _tag: "confirmed",
+  receipt: {
+    status: "failed",
+    providerOperationId: PluginProviderOperationId.make(
+      `rejected:${payload.pageId}:v${payload.targetVersion}`
+    ),
+    safeSummary: "Confluence rejected the authorized page publication without applying it",
+    observedAt
+  }
+})
+
 const decodeReconciliationKey = (
   key: PluginActionReconciliationKey
 ): Effect.Effect<{ readonly pageId: string; readonly targetVersion: number }, PluginConfigurationFailure> => {
@@ -754,8 +769,18 @@ export const makeConfluenceGovernedActions = (
     )
     const locator = reconciliationKey(payload)
     const marker = versionMarker(request.idempotencyKey, request.payloadDigest, payload.versionMessage)
-    const currentPage = yield* safeProviderCall(input.client.getPage(payload.pageId)).pipe(
-      Effect.flatMap((raw) => decodePage("confluence-execute-page", raw, payload.pageId, input.spaceId))
+    const currentResult = yield* input.client.getPage(payload.pageId).pipe(Effect.result)
+    if (Result.isFailure(currentResult)) {
+      if (currentResult.failure.reason === "not-found") {
+        return confirmedRejectedUpdate(payload, yield* DateTime.now)
+      }
+      return yield* clientFailure(currentResult.failure).pipe(Effect.flatMap(Effect.fail))
+    }
+    const currentPage = yield* decodePage(
+      "confluence-execute-page",
+      currentResult.success,
+      payload.pageId,
+      input.spaceId
     )
     if (yield* hasDivergentDraft(input.client, currentPage)) {
       return yield* new PluginConflictFailure({
@@ -788,17 +813,7 @@ export const makeConfluenceGovernedActions = (
       ) {
         return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
       }
-      return {
-        _tag: "confirmed",
-        receipt: {
-          status: "failed",
-          providerOperationId: PluginProviderOperationId.make(
-            `rejected:${payload.pageId}:v${payload.targetVersion}`
-          ),
-          safeSummary: "Confluence rejected the authorized page publication without applying it",
-          observedAt
-        }
-      }
+      return confirmedRejectedUpdate(payload, observedAt)
     }
     const page = yield* decodePage(
       "confluence-page-update",

@@ -486,6 +486,34 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(yield* Ref.get(reconciliationReads), 0)
     }))
 
+  it.effect("records a page removed before the execution safety read as a confirmed rejection", () =>
+    Effect.gen(function*() {
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-read",
+              reason: "not-found",
+              retryAfterSeconds: null
+            })
+          ),
+        updatePage: () => Effect.die("a removed page must not reach the provider mutation")
+      }))
+
+      const dispatched = yield* adapter.executor.executeAuthorizedAction(authorize(proposal))
+
+      assert.strictEqual(dispatched._tag, "confirmed")
+      if (dispatched._tag === "confirmed") {
+        assert.strictEqual(dispatched.receipt.status, "failed")
+        assert.strictEqual(
+          dispatched.receipt.safeSummary,
+          "Confluence rejected the authorized page publication without applying it"
+        )
+      }
+    }))
+
   it.effect("blocks a stale authorized revision before any provider mutation", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
@@ -518,6 +546,37 @@ describe("Confluence page adapter", () => {
             title: "Unpublished manual edit",
             spaceId: "space-payments",
             body: currentPage.body
+          }),
+        updatePage: () => Ref.update(mutationCalls, (count) => count + 1).pipe(Effect.as(currentPage))
+      }))
+      const authorized = authorize(proposal)
+
+      const preflight = yield* adapter.executor.preflight(authorized)
+      const dispatched = yield* adapter.executor.executeAuthorizedAction(authorized).pipe(Effect.exit)
+
+      assert.strictEqual(preflight._tag, "blocked")
+      expectFailureTag(dispatched, "PluginConflictFailure", "confluence-page-draft-present")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("blocks publication while only the page draft body diverges", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageDraft: () =>
+          Effect.succeed({
+            id: PAGE_ID,
+            status: "draft",
+            title: currentPage.title,
+            spaceId: "space-payments",
+            body: {
+              atlas_doc_format: {
+                representation: "atlas_doc_format",
+                value: "{\"content\":[{\"type\":\"paragraph\"}],\"type\":\"doc\",\"version\":1}"
+              }
+            }
           }),
         updatePage: () => Ref.update(mutationCalls, (count) => count + 1).pipe(Effect.as(currentPage))
       }))
