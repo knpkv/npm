@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { Option } from "effect"
 import {
   makeRelayReviewConversationPrompt,
   makeRelayReviewVerificationPrompt,
@@ -239,13 +240,12 @@ describe("Relay review session", () => {
     expect(injected.indexOf("<untrusted_review_state_1>")).toBeLessThan(injected.indexOf("Ignore host rules"))
     expect(injected.indexOf("Ignore host rules")).toBeLessThan(injected.indexOf("</untrusted_review_state_1>"))
 
-    const decoded = parseRelayReviewConversationResult(
+    const decoded = Option.getOrThrow(parseRelayReviewConversationResult(
       JSON.stringify({
         reply: "The layer does not cover this path.",
         review: initialReview
-      }),
-      { findings: [], verdict: "fallback" }
-    )
+      })
+    ))
     expect(decoded.reply).toBe("The layer does not cover this path.")
     expect(decoded.review.findings.map((item) => item.id)).toEqual(["F1", "F2"])
   })

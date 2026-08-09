@@ -60,7 +60,11 @@ import {
   validateChangedFileLine
 } from "../src/tui/file-diff.js"
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
-import { relayFindingSessionReceiptMatches, relayFindingSessionReply } from "../src/tui/review-session.js"
+import {
+  detachedStalePublicationIds,
+  relayFindingSessionReceiptMatches,
+  relayFindingSessionReply
+} from "../src/tui/review-session.js"
 import {
   reviewRevisionSpecifiers,
   safePathSegment,
@@ -80,6 +84,12 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("keeps a session warning for successful stale posts whose finding left the deck", () => {
+    expect(detachedStalePublicationIds(["F2"], { F1: "posted-stale", F2: "pending" }, ["F1"])).toEqual(["F1"])
+    expect(detachedStalePublicationIds(["F1", "F2"], { F1: "posted-stale" }, ["F1"])).toEqual([])
+    expect(detachedStalePublicationIds(["F2"], { F1: "failed" }, ["F1"])).toEqual([])
+  })
+
   it("shows completed session replies only on the finding that produced them", () => {
     const reply = { findingId: "F1", message: "F1 verification evidence" }
 

@@ -71,6 +71,7 @@ import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import {
   adjacentFindingIndex,
+  detachedStalePublicationIds,
   findingDispositionNeedsResolution,
   findingDispositionMarker,
   type FindingDisposition,
@@ -396,7 +397,7 @@ export function DetailsView() {
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [selectedFindingIndex, setSelectedFindingIndex] = useState(0)
   const [findingDispositions, setFindingDispositions] = useState<Record<string, FindingDisposition>>({})
-  const [findingPostDiagnostic, setFindingPostDiagnostic] = useState<ActionDiagnostic | null>(null)
+  const [findingPostDiagnostics, setFindingPostDiagnostics] = useState<Record<string, ActionDiagnostic>>({})
   const [postingFinding, setPostingFinding] = useState<{
     readonly findingId: string
     readonly findingIndex: number
@@ -488,7 +489,7 @@ export function DetailsView() {
     setSelectedFileIndex(0)
     setSelectedFindingIndex(0)
     setFindingDispositions({})
-    setFindingPostDiagnostic(null)
+    setFindingPostDiagnostics({})
     setPostingFinding(null)
     setConversationTurns([])
     setConversationStatus({ _tag: "idle" })
@@ -592,7 +593,7 @@ export function DetailsView() {
     ) {
       setSelectedFindingIndex(0)
       setFindingDispositions({})
-      setFindingPostDiagnostic(null)
+      setFindingPostDiagnostics({})
       setConversationTurns([])
       setConversationStatus({ _tag: "idle" })
       setVerificationStatus({ _tag: "idle" })
@@ -613,7 +614,10 @@ export function DetailsView() {
     const outcome = postFindingResult.value
     if (outcome._tag === "failure") {
       setFindingDispositions((current) => ({ ...current, [postingFinding.findingId]: "failed" }))
-      setFindingPostDiagnostic(outcome.diagnostic)
+      setFindingPostDiagnostics((current) => ({
+        ...current,
+        [postingFinding.findingId]: outcome.diagnostic
+      }))
       setPostingFinding(null)
       return
     }
@@ -627,10 +631,13 @@ export function DetailsView() {
         ...current,
         [postingFinding.findingId]: postDisposition
       }))
-      setFindingPostDiagnostic({
-        operation: "post-finding-receipt",
-        message: "The post receipt belongs to an older finding version; review the current finding again"
-      })
+      setFindingPostDiagnostics((current) => ({
+        ...current,
+        [postingFinding.findingId]: {
+          operation: "post-finding-receipt",
+          message: "The provider accepted an older finding version; inspect or supersede the obsolete published comment"
+        }
+      }))
       setPostingFinding(null)
       return
     }
@@ -641,7 +648,11 @@ export function DetailsView() {
     const findingIds = action._tag === "reviewed" ? action.result.findings.map((finding) => finding.id) : []
     setFindingDispositions(nextDispositions)
     setSelectedFindingIndex((index) => nextPendingFindingIndex(findingIds, nextDispositions, index))
-    setFindingPostDiagnostic(null)
+    setFindingPostDiagnostics((current) => {
+      const next = { ...current }
+      delete next[postingFinding.findingId]
+      return next
+    })
     setPostingFinding(null)
   }, [action, findingDispositions, postFindingResult, postingFinding])
 
@@ -712,7 +723,6 @@ export function DetailsView() {
     )
     setSelectedFileIndex(0)
     setFindingDispositions(reconciled.dispositions)
-    setFindingPostDiagnostic(null)
     setConversationTurns((current) => [
       ...current,
       {
@@ -815,6 +825,13 @@ export function DetailsView() {
 
   const selectedFindingDisposition =
     selectedFinding === null ? "pending" : (findingDispositions[selectedFinding.id] ?? "pending")
+  const selectedFindingPostDiagnostic =
+    selectedFinding === null ? null : (findingPostDiagnostics[selectedFinding.id] ?? null)
+  const detachedStaleFindingIds = detachedStalePublicationIds(
+    reviewedFindings.map((finding) => finding.id),
+    findingDispositions,
+    Object.keys(findingPostDiagnostics)
+  )
   const selectedFindingNeedsResolution = findingDispositionNeedsResolution(selectedFindingDisposition)
   const selectedFindingTurns =
     selectedFinding === null ? [] : conversationTurns.filter((turn) => turn.findingId === selectedFinding.id)
@@ -885,7 +902,11 @@ export function DetailsView() {
         selectedFindingIndex
       )
     )
-    setFindingPostDiagnostic(null)
+    setFindingPostDiagnostics((current) => {
+      const next = { ...current }
+      delete next[selectedFinding.id]
+      return next
+    })
   }
 
   const changeFindingTarget = (target: RelayFindingPublicationTarget) => {
@@ -975,7 +996,11 @@ export function DetailsView() {
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:finding:${selectedFindingIndex}:${nextActionRequestSequence}`
     setFindingDispositions((current) => ({ ...current, [selectedFinding.id]: "posting" }))
-    setFindingPostDiagnostic(null)
+    setFindingPostDiagnostics((current) => {
+      const next = { ...current }
+      delete next[selectedFinding.id]
+      return next
+    })
     setPostingFinding({
       findingId: selectedFinding.id,
       findingIndex: selectedFindingIndex,
@@ -1418,6 +1443,23 @@ export function DetailsView() {
                   <ActionKey active={!agentRunning} keyName="r" label="Rerun" />
                   <ActionKey active={editorReady} keyName="n/v" label="Open" />
                 </box>
+                {detachedStaleFindingIds.map((findingId) => {
+                  const diagnostic = findingPostDiagnostics[findingId]
+                  return diagnostic === undefined ? null : (
+                    <box
+                      border={["left"]}
+                      borderColor={theme.warning}
+                      flexDirection="column"
+                      key={findingId}
+                      style={{ paddingLeft: 1 }}
+                    >
+                      <text fg={theme.textWarning}>{`STALE PROVIDER POST · ${findingId} · FINDING REMOVED`}</text>
+                      <text fg={theme.textWarning}>
+                        {terminalSafeText(`${diagnostic.operation}: ${diagnostic.message}`)}
+                      </text>
+                    </box>
+                  )
+                })}
                 {selectedFinding === null ? (
                   <box flexDirection="column" style={{ paddingTop: 1 }}>
                     <text fg={theme.textSuccess}>No actionable findings</text>
@@ -1596,10 +1638,12 @@ export function DetailsView() {
                               : theme.textSuccess
                       }
                     >{`STATE  ${selectedFindingDisposition.toUpperCase()}`}</text>
-                    {findingPostDiagnostic !== null &&
+                    {selectedFindingPostDiagnostic !== null &&
                       (selectedFindingDisposition === "failed" || selectedFindingDisposition === "posted-stale") && (
                         <text fg={selectedFindingDisposition === "failed" ? theme.textError : theme.textWarning}>
-                          {terminalSafeText(`${findingPostDiagnostic.operation}: ${findingPostDiagnostic.message}`)}
+                          {terminalSafeText(
+                            `${selectedFindingPostDiagnostic.operation}: ${selectedFindingPostDiagnostic.message}`
+                          )}
                         </text>
                       )}
                     <box flexDirection="row">

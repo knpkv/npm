@@ -188,20 +188,15 @@ export const parseRelayReviewResult = (message: string): Option.Option<RelayRevi
   )
 }
 
-/** Decodes a strict follow-up envelope; malformed output leaves the current review unchanged. */
+/** Decodes a strict follow-up envelope, tolerating only one surrounding JSON fence. */
 export const parseRelayReviewConversationResult = (
-  message: string,
-  currentReview: RelayReviewResult
-): RelayReviewConversationResult => {
+  message: string
+): Option.Option<RelayReviewConversationResult> => {
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
-  const decoded = decodeRelayReviewConversationResult(trimmed).pipe(
+  return decodeRelayReviewConversationResult(trimmed).pipe(
     Option.orElse(() => (fenced === undefined ? Option.none() : decodeRelayReviewConversationResult(fenced)))
   )
-  return Option.getOrElse(decoded, () => ({
-    reply: trimmed.slice(0, 8_000) || "Relay could not decode the follow-up response.",
-    review: currentReview
-  }))
 }
 
 /** Decodes a strict verification envelope without ever treating malformed output as resolution. */
@@ -650,18 +645,28 @@ export const runRelayReviewConversation = (request: RelayReviewConversationReque
       )
     }),
     Effect.flatMap(({ message, patch }) => {
-      const result = parseRelayReviewConversationResult(
-        Option.getOrElse(message, () => "Relay completed without a follow-up response."),
-        request.currentReview
+      return parseRelayReviewConversationResult(
+        Option.getOrElse(message, () => "Relay completed without a follow-up response.")
+      ).pipe(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new WorktreeError({
+                operation: "relay-conversation-decode",
+                message: "Relay returned malformed follow-up JSON; the review deck was not reconciled"
+              })
+            ),
+          onSome: (result) =>
+            relayReviewSupportsFollowUps(request, patch, result.review)
+              ? Effect.succeed(result)
+              : Effect.fail(
+                new WorktreeError({
+                  operation: "relay-review-budget",
+                  message: "Reconciled Relay review state leaves insufficient capacity for discussion and verification"
+                })
+              )
+        })
       )
-      return relayReviewSupportsFollowUps(request, patch, result.review)
-        ? Effect.succeed(result)
-        : Effect.fail(
-          new WorktreeError({
-            operation: "relay-review-budget",
-            message: "Reconciled Relay review state leaves insufficient capacity for discussion and verification"
-          })
-        )
     })
   )
 

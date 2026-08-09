@@ -84,6 +84,18 @@ export const relayFindingPostReceiptDisposition = (
   receipt: { readonly findingId: string; readonly findingIndex: number }
 ): FindingDisposition => relayFindingPostReceiptMatches(posting, currentFinding, receipt) ? "posted" : "posted-stale"
 
+/** Successful stale posts whose findings left the current deck still require a visible session warning. */
+export const detachedStalePublicationIds = (
+  currentFindingIds: ReadonlyArray<string>,
+  dispositions: Readonly<Record<string, FindingDisposition>>,
+  diagnosticFindingIds: ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  const currentIds = new Set(currentFindingIds)
+  return diagnosticFindingIds.filter(
+    (findingId) => !currentIds.has(findingId) && dispositions[findingId] === "posted-stale"
+  )
+}
+
 /** Head worktrees can represent only after-side line coordinates truthfully. */
 export const relayFindingHeadEditorLine = (
   finding: RelayReviewResult["findings"][number] | null,
