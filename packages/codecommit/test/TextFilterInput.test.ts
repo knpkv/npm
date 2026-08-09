@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  textFilterActionScope,
   type TextFilterInputKey,
   type TextFilterInputState,
   transitionTextFilterInput
@@ -34,6 +35,19 @@ describe("text filter input", () => {
     ])
 
     expect(state).toEqual({ active: false, text: "dev administrator" })
+  })
+
+  it("scopes an immediate bulk action to just-submitted settings filter text", () => {
+    const submitted = applyBatch([
+      { name: "/", char: "/" },
+      ...Array.from("prod", (char) => ({ name: char, char })),
+      { name: "return" }
+    ])
+    const profiles = ["production-admin", "development-admin"]
+
+    expect(textFilterActionScope(submitted, profiles)).toEqual(["production-admin"])
+    expect(textFilterActionScope({ active: false, text: "prod" }, profiles)).toEqual(["production-admin"])
+    expect(textFilterActionScope({ active: false, text: "" }, profiles)).toBeNull()
   })
 
   it("does not consume ordinary navigation when filtering cannot open", () => {

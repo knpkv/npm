@@ -146,9 +146,16 @@ describe("Relay review session", () => {
     }
     const original = relayFindingCanonicalIdentity(identity, initialReview.findings[0]!)
     expect(relayFindingCanonicalIdentity(identity, initialReview.findings[0]!)).toBe(original)
+    expect(relayFindingCanonicalIdentity(identity, { ...initialReview.findings[0]!, id: "F2" })).toBe(original)
     expect(relayFindingCanonicalIdentity(identity, { ...initialReview.findings[0]!, title: "Changed" })).not.toBe(
       original
     )
+    expect(
+      relayFindingCanonicalIdentity(identity, {
+        ...initialReview.findings[0]!,
+        location: { scope: "line", filePath: "src/auth.ts", line: 43, side: "after" }
+      })
+    ).not.toBe(original)
     expect(
       relayFindingCanonicalIdentity({ ...identity, revisionId: "revision-2" }, initialReview.findings[0]!)
     ).not.toBe(original)

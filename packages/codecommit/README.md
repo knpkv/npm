@@ -168,7 +168,6 @@ order:
   "revision-id",
   "<40-hex-base-commit>",
   "<40-hex-head-commit>",
-  "F1",
   "P1",
   "Finding title",
   "Finding summary",
@@ -182,8 +181,9 @@ order:
 
 The array elements are, after the version: AWS profile, AWS region, repository
 name, pull request ID, revision ID, destination commit, source commit, finding
-ID, priority, title, summary, details, recommendation, verification,
-publication target, and location. JSON escaping makes embedded NULs and field
+priority, title, summary, details, recommendation, verification, publication
+target, and location. Session-local finding IDs are excluded because the same
+provider-visible finding may be renumbered by a later review. JSON escaping makes embedded NULs and field
 boundaries unambiguous. The location is `["general"]`,
 `["file", filePath]`, or `["line", filePath, line, side]`. Presentation order is deliberately excluded, so
 reordering the finding deck cannot create a duplicate provider comment. File findings post as general

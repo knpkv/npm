@@ -15,6 +15,15 @@ export interface TextFilterInputTransition {
   readonly state: TextFilterInputState
 }
 
+/** Resolves a batch action's scope from the synchronous filter state, including just-submitted text. */
+export const textFilterActionScope = <Value extends string>(
+  state: TextFilterInputState,
+  values: ReadonlyArray<Value>
+): Array<Value> | null => {
+  const needle = state.text.toLowerCase()
+  return needle.length === 0 ? null : values.filter((value) => value.toLowerCase().includes(needle))
+}
+
 /**
  * Advances filter input synchronously so pasted terminal key batches do not
  * depend on a React render occurring between individual key events.

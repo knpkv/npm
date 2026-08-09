@@ -108,7 +108,6 @@ export const relayFindingCanonicalIdentity = (
     identity.revisionId,
     identity.destinationCommit,
     identity.sourceCommit,
-    finding.id,
     finding.priority,
     finding.title,
     finding.summary,
