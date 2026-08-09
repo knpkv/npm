@@ -463,7 +463,13 @@ const hasDivergentDraft = Effect.fn("ConfluenceGovernedActions.hasDivergentDraft
   if (draft.id !== page.id || draft.spaceId !== page.spaceId) {
     return yield* malformed("confluence-page-draft-read", "confluence-page-draft-scope-mismatch")
   }
-  return draft.title !== page.title ||
+  return draft.parentId === undefined ||
+    page.parentId === undefined ||
+    draft.ownerId === undefined ||
+    page.ownerId === undefined ||
+    draft.parentId !== page.parentId ||
+    draft.ownerId !== page.ownerId ||
+    draft.title !== page.title ||
     draft.body.atlas_doc_format.value !== page.body?.atlas_doc_format?.value
 })
 

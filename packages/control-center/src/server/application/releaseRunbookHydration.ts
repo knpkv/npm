@@ -47,8 +47,13 @@ export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.h
   workspaceId: WorkspaceId,
   inspection: ReleaseDeliveryGraphInspection
 ) {
+  const presentEntityIds = new Set(
+    inspection.entityProjections.flatMap(({ projection }): ReadonlyArray<EntityId> =>
+      projection.entityState === "present" ? [projection.entityId] : []
+    )
+  )
   const exactPages = yield* Effect.forEach(
-    releaseRunbookEntityIds(inspection),
+    releaseRunbookEntityIds(inspection).filter((entityId) => presentEntityIds.has(entityId)),
     (entityId) =>
       persistence.deliveryGraph.read(workspaceId, {
         _tag: "entitySlice",
@@ -62,12 +67,16 @@ export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.h
               recordedAt: result.value.entity.recordedAt
             })
             : Effect.die("Expected an entity slice for release runbook")
-        )
+        ),
+        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
       ),
     { concurrency: 4 }
   )
   if (exactPages.length === 0) return inspection
-  const exactByEntityId = new Map(exactPages.map((page) => [page.projection.entityId, page]))
+  const exactByEntityId = new Map<EntityId, NonNullable<(typeof exactPages)[number]>>()
+  for (const page of exactPages) {
+    if (page !== null) exactByEntityId.set(page.projection.entityId, page)
+  }
   return {
     ...inspection,
     entityProjections: inspection.entityProjections.map((summary) =>

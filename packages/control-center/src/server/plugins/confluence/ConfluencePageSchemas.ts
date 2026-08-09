@@ -54,6 +54,8 @@ export const RawConfluenceDraftPage = Schema.Struct({
   status: Schema.Literal("draft"),
   title: boundedString(500),
   spaceId: boundedString(512),
+  parentId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
+  ownerId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
   body: Schema.Struct({
     atlas_doc_format: Schema.Struct({
       representation: Schema.optionalKey(Schema.Literal("atlas_doc_format")),

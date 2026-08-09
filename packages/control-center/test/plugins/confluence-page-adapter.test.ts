@@ -300,6 +300,8 @@ describe("Confluence page adapter", () => {
             status: "draft",
             title: currentPage.title,
             spaceId: currentPage.spaceId,
+            parentId: currentPage.parentId,
+            ownerId: currentPage.ownerId,
             body: currentPage.body
           }),
         updatePage: (_pageId, update) =>
@@ -588,6 +590,41 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(preflight._tag, "blocked")
       expectFailureTag(dispatched, "PluginConflictFailure", "confluence-page-draft-present")
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("blocks publication when only the draft parent or owner diverges", () =>
+    Effect.gen(function*() {
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const authorized = authorize(proposal)
+
+      yield* Effect.forEach([
+        { parentId: "different-parent", ownerId: currentPage.ownerId },
+        { parentId: currentPage.parentId, ownerId: "different-owner" }
+      ], ({ ownerId, parentId }) =>
+        Effect.gen(function*() {
+          const mutationCalls = yield* Ref.make(0)
+          const adapter = yield* makeAdapter(defaultClient({
+            getPageDraft: () =>
+              Effect.succeed({
+                id: PAGE_ID,
+                status: "draft",
+                title: currentPage.title,
+                spaceId: currentPage.spaceId,
+                parentId,
+                ownerId,
+                body: currentPage.body
+              }),
+            updatePage: () => Ref.update(mutationCalls, (count) => count + 1).pipe(Effect.as(currentPage))
+          }))
+
+          const preflight = yield* adapter.executor.preflight(authorized)
+          const dispatched = yield* adapter.executor.executeAuthorizedAction(authorized).pipe(Effect.exit)
+
+          assert.strictEqual(preflight._tag, "blocked")
+          expectFailureTag(dispatched, "PluginConflictFailure", "confluence-page-draft-present")
+          assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+        }))
     }))
 
   it.effect("rejects non-canonical revisions and reconciliation locators before provider reads", () =>

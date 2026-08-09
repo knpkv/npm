@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import type { WorkspaceId } from "../../src/domain/identifiers.js"
+import { releaseConfluenceTaskReadiness } from "../../src/server/application/releasePublicationSubmissions.js"
 import {
   hydrateReleaseRunbookContent,
   releaseRunbookEntityIds
@@ -138,5 +139,44 @@ describe("release runbook hydration", () => {
         ),
         exact
       )
+    }))
+
+  it.effect("preserves a deleted runbook as unverifiable without reading its exact slice", () =>
+    Effect.gen(function*() {
+      const page = releaseWorksetFixture.entityProjections.find(
+        ({ projection }) => projection.details._tag === "page"
+      )
+      if (page === undefined) return yield* Effect.die("Expected a release runbook fixture")
+      const deleted: typeof page = {
+        ...page,
+        projection: { ...page.projection, entityState: "deleted" }
+      }
+      const inspection: ReleaseDeliveryGraphInspection = {
+        ...releaseWorksetFixture,
+        entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+          entry.projection.entityId === deleted.projection.entityId ? deleted : entry
+        )
+      }
+      const persistence = {
+        deliveryGraph: {
+          read: (_workspaceId: WorkspaceId, _input: unknown) =>
+            Effect.die("Deleted release runbooks must not request an exact entity slice")
+        }
+      }
+
+      const hydrated = yield* hydrateReleaseRunbookContent(
+        persistence,
+        WORKSET_WORKSPACE_ID,
+        inspection
+      )
+
+      assert.deepStrictEqual(hydrated, inspection)
+      assert.deepStrictEqual(releaseConfluenceTaskReadiness(hydrated), {
+        completed: 0,
+        outstanding: 0,
+        ready: false,
+        total: 0,
+        unverifiablePages: 1
+      })
     }))
 })

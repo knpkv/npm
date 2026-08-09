@@ -8,12 +8,23 @@ import {
   type OpenConfluenceSynchronizationTransport,
   useOpenConfluenceSynchronization
 } from "../../src/client/entities/useOpenConfluenceSynchronization.js"
+import type { PluginSynchronizationResult, PluginSynchronizationState } from "../../src/api/plugins.js"
 import { PluginConnectionId } from "../../src/domain/identifiers.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 let root: Root | null = null
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
 const ignoreSessionExpiration = (): void => undefined
+const synchronizationState = (result: PluginSynchronizationResult): PluginSynchronizationState => ({
+  pluginConnectionId: PLUGIN_CONNECTION_ID,
+  providerId: "confluence",
+  streamKey: "pages",
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  result,
+  pagesCommitted: 0
+})
 const setDocumentVisibility = (visibilityState: DocumentVisibilityState): void => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState })
 }
@@ -39,7 +50,7 @@ const Harness = ({
     enabled: true,
     onSessionExpired,
     onSynchronized,
-    pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000099"),
+    pluginConnectionId: PLUGIN_CONNECTION_ID,
     sessionKey: "session-a",
     transport
   })
@@ -53,7 +64,7 @@ const Harness = ({
 describe("open Confluence page synchronization", () => {
   it("synchronizes on open and exposes an immediate post-mutation refresh", async () => {
     const transport = {
-      synchronize: vi.fn(() => Promise.resolve())
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
     } satisfies OpenConfluenceSynchronizationTransport
     const onSynchronized = vi.fn()
     const host = document.createElement("div")
@@ -74,7 +85,7 @@ describe("open Confluence page synchronization", () => {
   it("polls every 15 seconds only while visible and refreshes immediately when shown again", async () => {
     vi.useFakeTimers()
     const transport = {
-      synchronize: vi.fn(() => Promise.resolve())
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
     } satisfies OpenConfluenceSynchronizationTransport
     const host = document.createElement("div")
     document.body.append(host)
@@ -115,5 +126,20 @@ describe("open Confluence page synchronization", () => {
 
     await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledWith("session-a"))
     expect(host.textContent).toBe("failed")
+  })
+
+  it("fails without refreshing when synchronization returns a non-success result", async () => {
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("source-unavailable")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={onSynchronized} transport={transport} />))
+
+    await vi.waitFor(() => expect(host.textContent).toBe("failed"))
+    expect(onSynchronized).not.toHaveBeenCalled()
   })
 })

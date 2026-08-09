@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import type { PluginSynchronizationState } from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
 import { browserConnectionTestTransport } from "../services/connectionTestTransport.js"
 
@@ -10,7 +11,10 @@ export const OPEN_CONFLUENCE_SYNC_INTERVAL = "15 seconds"
 export type OpenConfluenceSynchronizationState = "idle" | "syncing" | "synchronized" | "failed"
 
 export interface OpenConfluenceSynchronizationTransport {
-  readonly synchronize: (pluginConnectionId: PluginConnectionId, signal: AbortSignal) => Promise<unknown>
+  readonly synchronize: (
+    pluginConnectionId: PluginConnectionId,
+    signal: AbortSignal
+  ) => Promise<PluginSynchronizationState>
 }
 
 interface ActiveSynchronization {
@@ -61,8 +65,12 @@ export const useOpenConfluenceSynchronization = ({
     const abort = new AbortController()
     setState("syncing")
     const completion = transport.synchronize(pluginConnectionId, abort.signal).then(
-      () => {
+      (result) => {
         if (abort.signal.aborted) return
+        if (result.result !== "synchronized") {
+          setState("failed")
+          return
+        }
         setState("synchronized")
         synchronized.current()
       },
