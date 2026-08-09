@@ -90,28 +90,13 @@ describe("release runbook hydration", () => {
               const query = yield* Schema.decodeUnknownEffect(DeliveryGraphQuery)(input).pipe(
                 Effect.orDie
               )
-              if (workspaceId !== WORKSET_WORKSPACE_ID || query._tag !== "entitySlice") {
-                return yield* Effect.die("Expected one exact runbook entity read")
+              if (workspaceId !== WORKSET_WORKSPACE_ID || query._tag !== "entityProjection") {
+                return yield* Effect.die("Expected one exact runbook projection read")
               }
               reads.push({ entityId: query.entityId, workspaceId })
               return DeliveryGraphReadResult.make({
-                _tag: "entitySlice",
-                value: {
-                  entity: {
-                    canonicalReleaseId: releaseWorksetFixture.releaseId,
-                    owners: [],
-                    ownersTruncated: false,
-                    releaseIds: [releaseWorksetFixture.releaseId],
-                    releaseMembershipsTruncated: false,
-                    ...exact
-                  },
-                  truncated: false,
-                  nodes: [],
-                  relatedEntityProjections: [],
-                  relationships: [],
-                  evidenceClaims: [],
-                  evidenceItems: []
-                }
+                _tag: "entityProjection",
+                value: exact
               })
             })
         }

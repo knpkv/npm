@@ -205,12 +205,18 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       Result.isSuccess(negotiated) &&
       hasPluginCapability(negotiated.success, "action.propose", 1) &&
       hasPluginCapability(negotiated.success, "action.execute", 1)
+    const sourceSynchronizationAvailable = Result.isSuccess(connection) &&
+      connection.success.isEnabled &&
+      negotiated !== null &&
+      Result.isSuccess(negotiated) &&
+      hasPluginCapability(negotiated.success, "sync.incremental", 1)
 
     return {
       entity: result.value.entity,
       source: entityRecord.sourceRevision,
       isSourceCurrent: Number(entityRecord.revision) === Number(result.value.entity.projection.sourceEntityRevision),
       sourceActionsAvailable,
+      sourceSynchronizationAvailable,
       freshness,
       clockifyApproval: projectClockifyApproval(
         input.entityId,

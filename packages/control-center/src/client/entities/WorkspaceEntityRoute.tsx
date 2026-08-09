@@ -653,6 +653,8 @@ const ConnectedWorkspaceEntity = ({
       : null
   const canSynchronizeConfluence =
     confluencePluginConnectionId !== null &&
+    (controller.state._tag === "ready" || controller.state._tag === "stale") &&
+    controller.state.inspection.sourceSynchronizationAvailable &&
     browserSession.state._tag === "authenticated" &&
     browserSession.state.session.permission === "workspace-owner"
   const confluenceSynchronization = useOpenConfluenceSynchronization({

@@ -56,17 +56,14 @@ export const hydrateReleaseRunbookContent = Effect.fn("ReleaseRunbookHydration.h
     releaseRunbookEntityIds(inspection).filter((entityId) => presentEntityIds.has(entityId)),
     (entityId) =>
       persistence.deliveryGraph.read(workspaceId, {
-        _tag: "entitySlice",
+        _tag: "entityProjection",
         entityId,
-        limit: 100
+        revision: null
       }).pipe(
         Effect.flatMap((result) =>
-          result._tag === "entitySlice"
-            ? Effect.succeed({
-              projection: result.value.entity.projection,
-              recordedAt: result.value.entity.recordedAt
-            })
-            : Effect.die("Expected an entity slice for release runbook")
+          result._tag === "entityProjection"
+            ? Effect.succeed(result.value)
+            : Effect.die("Expected an exact entity projection for release runbook")
         ),
         Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null))
       ),

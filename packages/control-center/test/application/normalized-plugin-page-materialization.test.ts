@@ -2440,6 +2440,7 @@ describe("normalized plugin page materialization", () => {
       const inspection = yield* makeDeliveryGraphInspection
       const historical = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isFalse(historical.sourceActionsAvailable)
+      assert.isTrue(historical.sourceSynchronizationAvailable)
 
       yield* persistence.pluginRuntime.acceptPluginDescriptor(
         WORKSPACE_ID,
@@ -2451,6 +2452,7 @@ describe("normalized plugin page materialization", () => {
       )
       const current = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isTrue(current.sourceActionsAvailable)
+      assert.isTrue(current.sourceSynchronizationAvailable)
 
       const connection = yield* persistence.pluginConnections.get(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID)
       yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID, {
@@ -2461,6 +2463,7 @@ describe("normalized plugin page materialization", () => {
       })
       const disabled = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
       assert.isFalse(disabled.sourceActionsAvailable)
+      assert.isFalse(disabled.sourceSynchronizationAvailable)
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>

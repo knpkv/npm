@@ -34,6 +34,7 @@ afterEach(async () => {
   if (root !== null) await act(async () => root?.unmount())
   root = null
   document.body.replaceChildren()
+  localStorage.clear()
   setDocumentVisibility("visible")
   vi.useRealTimers()
 })
@@ -85,6 +86,35 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledTimes(2))
   })
 
+  it("queues a post-mutation refresh behind active automatic synchronization", async () => {
+    let resolveInitial = (_state: PluginSynchronizationState): void => {
+      throw new Error("Expected the initial synchronization resolver")
+    }
+    const initial = new Promise<PluginSynchronizationState>((resolve) => {
+      resolveInitial = resolve
+    })
+    let calls = 0
+    const transport = {
+      synchronize: vi.fn(() => {
+        calls += 1
+        return calls === 1 ? initial : Promise.resolve(synchronizationState("synchronized"))
+      })
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+    await act(async () => button.click())
+    expect(transport.synchronize).toHaveBeenCalledOnce()
+
+    await act(async () => resolveInitial(synchronizationState("synchronized")))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+  })
+
   it("polls every 15 seconds only while visible and refreshes immediately when shown again", async () => {
     vi.useFakeTimers()
     const transport = {
@@ -109,6 +139,30 @@ describe("open Confluence page synchronization", () => {
 
     setDocumentVisibility("visible")
     await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+    expect(transport.synchronize).toHaveBeenCalledTimes(3)
+  })
+
+  it("restarts the cadence after synchronizing on visibility", async () => {
+    vi.useFakeTimers()
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    await act(async () => Promise.resolve())
+    expect(transport.synchronize).toHaveBeenCalledOnce()
+    setDocumentVisibility("hidden")
+    await act(async () => vi.advanceTimersByTimeAsync(14_999))
+    setDocumentVisibility("visible")
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+    expect(transport.synchronize).toHaveBeenCalledTimes(2)
+
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(transport.synchronize).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTimeAsync(14_999))
     expect(transport.synchronize).toHaveBeenCalledTimes(3)
   })
 
@@ -164,6 +218,51 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
     expect(transport.synchronize).toHaveBeenCalledWith(PLUGIN_CONNECTION_ID, expect.any(AbortSignal))
     expect(transport.synchronize).toHaveBeenCalledWith(OTHER_PLUGIN_CONNECTION_ID, expect.any(AbortSignal))
+  })
+
+  it("reuses a recent same-origin tab synchronization without another provider request", async () => {
+    localStorage.setItem(
+      `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
+      JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, state: "synchronized" })
+    )
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={onSynchronized} transport={transport} />))
+
+    await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledOnce())
+    expect(transport.synchronize).not.toHaveBeenCalled()
+    expect(host.textContent).toBe("synchronized")
+  })
+
+  it("applies synchronization results broadcast by another same-origin tab", async () => {
+    setDocumentVisibility("hidden")
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const onSynchronized = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness onSynchronized={onSynchronized} transport={transport} />))
+
+    await act(async () =>
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
+          newValue: JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, state: "synchronized" })
+        })
+      )
+    )
+
+    expect(transport.synchronize).not.toHaveBeenCalled()
+    expect(onSynchronized).toHaveBeenCalledOnce()
+    expect(host.textContent).toBe("synchronized")
   })
 
   it("invalidates the exact browser session after an unauthorized synchronization", async () => {

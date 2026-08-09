@@ -1,5 +1,8 @@
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { PluginSynchronizationState } from "../../api/plugins.js"
@@ -7,6 +10,7 @@ import type { PluginConnectionId } from "../../domain/identifiers.js"
 import { browserConnectionTestTransport } from "../services/connectionTestTransport.js"
 
 export const OPEN_CONFLUENCE_SYNC_INTERVAL = "15 seconds"
+const OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS = 15_000
 
 export type OpenConfluenceSynchronizationState = "idle" | "syncing" | "synchronized" | "failed"
 
@@ -43,36 +47,123 @@ interface AutomaticSynchronizationGroup {
   readonly participants: Map<symbol, AutomaticSynchronizationParticipant>
 }
 
+const CrossTabAutomaticSynchronization = Schema.Struct({
+  recordedAt: Schema.Number,
+  sessionExpired: Schema.Boolean,
+  state: Schema.Literals(["syncing", "synchronized", "failed"])
+})
+
+type CrossTabAutomaticSynchronization = typeof CrossTabAutomaticSynchronization.Type
+
 const automaticSynchronizationGroups = new Map<PluginConnectionId, AutomaticSynchronizationGroup>()
 const automaticSynchronizationCleanup = new WeakMap<AutomaticSynchronizationGroup, () => void>()
 
+const automaticSynchronizationStorageKey = (pluginConnectionId: PluginConnectionId): string =>
+  `control-center:confluence-sync:${pluginConnectionId}`
+
+const readCrossTabSynchronization = (key: string): CrossTabAutomaticSynchronization | null => {
+  try {
+    const value = localStorage.getItem(key)
+    if (value === null) return null
+    return Result.getOrNull(
+      Schema.decodeUnknownResult(Schema.fromJsonString(CrossTabAutomaticSynchronization))(value)
+    )
+  } catch {
+    return null
+  }
+}
+
+const writeCrossTabSynchronization = (
+  key: string,
+  synchronization: CrossTabAutomaticSynchronization
+): void => {
+  try {
+    localStorage.setItem(
+      key,
+      Schema.encodeSync(Schema.fromJsonString(CrossTabAutomaticSynchronization))(synchronization)
+    )
+  } catch {
+    // Storage can be unavailable in a restricted browser context; the in-document coordinator remains active.
+  }
+}
+
+const applyAutomaticSynchronization = (
+  group: AutomaticSynchronizationGroup,
+  synchronization: CrossTabAutomaticSynchronization
+): void => {
+  for (const participant of group.participants.values()) {
+    participant.setState(synchronization.state)
+    if (synchronization.sessionExpired) participant.onSessionExpired()
+    if (synchronization.state === "synchronized") participant.onSynchronized()
+  }
+}
+
 const synchronizeAutomatically = (
   pluginConnectionId: PluginConnectionId,
-  group: AutomaticSynchronizationGroup
+  group: AutomaticSynchronizationGroup,
+  force = false
 ): Promise<void> => {
   if (group.active !== null) return group.active.completion
-  const source = group.participants.values().next().value
-  if (source === undefined) return Promise.resolve()
   const abort = new AbortController()
-  for (const participant of group.participants.values()) participant.setState("syncing")
-  const completion = source.transport.synchronize(pluginConnectionId, abort.signal).then(
-    (result) => {
-      if (abort.signal.aborted) return
-      for (const participant of group.participants.values()) {
-        if (result.result === "synchronized") {
-          participant.setState("synchronized")
-          participant.onSynchronized()
-        } else participant.setState("failed")
-      }
-    },
-    (failure) => {
-      if (abort.signal.aborted) return
-      for (const participant of group.participants.values()) {
-        if (Predicate.isTagged("UnauthorizedApiError")(failure)) participant.onSessionExpired()
-        participant.setState("failed")
-      }
+  const requestedAt = Effect.runPromise(Clock.currentTimeMillis)
+  const storageKey = automaticSynchronizationStorageKey(pluginConnectionId)
+  const synchronizeWithLease = async (): Promise<void> => {
+    const requestStartedAt = await requestedAt
+    const recordedAt = await Effect.runPromise(Clock.currentTimeMillis)
+    const recent = readCrossTabSynchronization(storageKey)
+    if (
+      recent !== null &&
+      (recent.recordedAt >= requestStartedAt ||
+        (!force && recordedAt - recent.recordedAt < OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS))
+    ) {
+      if (recent.state !== "syncing") applyAutomaticSynchronization(group, recent)
+      return
     }
-  ).finally(() => {
+    const source = group.participants.values().next().value
+    if (source === undefined || abort.signal.aborted) return
+    const syncing = { recordedAt, sessionExpired: false, state: "syncing" } satisfies CrossTabAutomaticSynchronization
+    writeCrossTabSynchronization(storageKey, syncing)
+    applyAutomaticSynchronization(group, syncing)
+    try {
+      const result = await source.transport.synchronize(pluginConnectionId, abort.signal)
+      if (abort.signal.aborted) return
+      const completed = {
+        recordedAt: await Effect.runPromise(Clock.currentTimeMillis),
+        sessionExpired: false,
+        state: result.result === "synchronized" ? "synchronized" : "failed"
+      } satisfies CrossTabAutomaticSynchronization
+      writeCrossTabSynchronization(storageKey, completed)
+      applyAutomaticSynchronization(group, completed)
+    } catch (failure) {
+      if (abort.signal.aborted) return
+      const failed = {
+        recordedAt: await Effect.runPromise(Clock.currentTimeMillis),
+        sessionExpired: Predicate.isTagged("UnauthorizedApiError")(failure),
+        state: "failed"
+      } satisfies CrossTabAutomaticSynchronization
+      writeCrossTabSynchronization(storageKey, failed)
+      applyAutomaticSynchronization(group, failed)
+    }
+  }
+  const lockManager = "locks" in navigator ? navigator.locks : null
+  const completion = (
+    lockManager === null
+      ? synchronizeWithLease()
+      : lockManager.request(
+        `control-center:confluence-sync:${pluginConnectionId}`,
+        { ifAvailable: true },
+        (lock) => lock === null ? Promise.resolve() : synchronizeWithLease()
+      )
+  ).catch((failure: unknown) => {
+    if (!abort.signal.aborted) {
+      const failed = {
+        recordedAt: 0,
+        sessionExpired: Predicate.isTagged("UnauthorizedApiError")(failure),
+        state: "failed"
+      } satisfies CrossTabAutomaticSynchronization
+      applyAutomaticSynchronization(group, failed)
+    }
+  }).finally(() => {
     if (group.active?.abort === abort) group.active = null
   })
   group.active = { abort, completion }
@@ -83,28 +174,60 @@ const startAutomaticSynchronization = (
   pluginConnectionId: PluginConnectionId,
   group: AutomaticSynchronizationGroup
 ): () => void => {
-  const lifetime = new AbortController()
-  const run = async (): Promise<void> => {
-    if (document.visibilityState === "visible") await synchronizeAutomatically(pluginConnectionId, group)
-    while (!lifetime.signal.aborted) {
-      try {
-        await Effect.runPromise(Effect.sleep(OPEN_CONFLUENCE_SYNC_INTERVAL), { signal: lifetime.signal })
-      } catch {
-        return
+  let cadence: AbortController | null = null
+  let generation = 0
+  let stopped = false
+  const schedule = (currentGeneration: number): void => {
+    if (stopped || currentGeneration !== generation) return
+    const nextCadence = new AbortController()
+    cadence = nextCadence
+    void Effect.runPromise(Effect.sleep(OPEN_CONFLUENCE_SYNC_INTERVAL), { signal: nextCadence.signal }).then(
+      () => synchronizeAndSchedule(),
+      (_failure: unknown) => {
+        if (!nextCadence.signal.aborted) {
+          for (const participant of group.participants.values()) participant.setState("failed")
+        }
       }
-      if (document.visibilityState === "visible") await synchronizeAutomatically(pluginConnectionId, group)
-    }
+    )
+  }
+  const synchronizeAndSchedule = (): void => {
+    generation += 1
+    const currentGeneration = generation
+    cadence?.abort()
+    cadence = null
+    const completion = document.visibilityState === "visible"
+      ? synchronizeAutomatically(pluginConnectionId, group)
+      : Promise.resolve()
+    void completion.finally(() => schedule(currentGeneration))
   }
   const synchronizeWhenVisible = (): void => {
-    if (document.visibilityState === "visible") void synchronizeAutomatically(pluginConnectionId, group)
+    if (document.visibilityState === "visible") {
+      generation += 1
+      const currentGeneration = generation
+      cadence?.abort()
+      cadence = null
+      void synchronizeAutomatically(pluginConnectionId, group, true).finally(() => schedule(currentGeneration))
+    }
+  }
+  const synchronizeFromAnotherTab = (event: StorageEvent): void => {
+    if (event.key !== automaticSynchronizationStorageKey(pluginConnectionId) || event.newValue === null) return
+    const synchronization = Result.getOrNull(
+      Schema.decodeUnknownResult(Schema.fromJsonString(CrossTabAutomaticSynchronization))(event.newValue)
+    )
+    if (synchronization !== null) applyAutomaticSynchronization(group, synchronization)
   }
   document.addEventListener("visibilitychange", synchronizeWhenVisible)
-  void run()
+  window.addEventListener("storage", synchronizeFromAnotherTab)
+  synchronizeAndSchedule()
   return () => {
-    lifetime.abort()
+    stopped = true
+    generation += 1
+    cadence?.abort()
+    cadence = null
     group.active?.abort.abort()
     group.active = null
     document.removeEventListener("visibilitychange", synchronizeWhenVisible)
+    window.removeEventListener("storage", synchronizeFromAnotherTab)
   }
 }
 
@@ -187,10 +310,13 @@ export const useOpenConfluenceSynchronization = ({
   }, [enabled, pluginConnectionId, sessionKey, transport])
 
   const synchronizeAfterMutation = useCallback((): void => {
-    const inFlight = manualActive.current?.completion
+    const automaticInFlight = pluginConnectionId === null
+      ? undefined
+      : automaticSynchronizationGroups.get(pluginConnectionId)?.active?.completion
+    const inFlight = manualActive.current?.completion ?? automaticInFlight
     if (inFlight === undefined) void synchronize()
     else void inFlight.then(synchronize)
-  }, [synchronize])
+  }, [pluginConnectionId, synchronize])
 
   useEffect(() => {
     setState("idle")
