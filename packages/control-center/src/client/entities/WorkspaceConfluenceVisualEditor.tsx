@@ -188,8 +188,9 @@ export const WorkspaceConfluenceVisualEditor = ({
 
   const setTaskChecked = (lineIndex: number, checked: boolean): void => {
     if (!canEdit || releaseId === null || page.content === null || taskLineSaving !== null) return
-    const markdown = setConfluenceTaskChecked(page.content, lineIndex, checked)
-    if (markdown === null) return
+    const updatedMarkdown = setConfluenceTaskChecked(page.content, lineIndex, checked)
+    if (updatedMarkdown === null) return
+    const markdown = updatedMarkdown.trim()
     setTaskLineSaving(lineIndex)
     setTaskSaveFailed(false)
     submitPublication({

@@ -52,7 +52,14 @@ export type RawConfluencePage = typeof RawConfluencePage.Type
 export const RawConfluenceDraftPage = Schema.Struct({
   id: boundedString(512),
   status: Schema.Literal("draft"),
-  spaceId: boundedString(512)
+  title: boundedString(500),
+  spaceId: boundedString(512),
+  body: Schema.Struct({
+    atlas_doc_format: Schema.Struct({
+      representation: Schema.optionalKey(Schema.Literal("atlas_doc_format")),
+      value: Schema.String.check(Schema.isMaxLength(1_048_576))
+    })
+  })
 })
 
 /** Decoded Confluence page draft. @internal */

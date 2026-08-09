@@ -11,7 +11,7 @@ export const ConfluenceTask = Schema.Struct({
 /** Decoded Markdown checkbox participating in release readiness. */
 export type ConfluenceTask = typeof ConfluenceTask.Type
 
-const taskLine = /^(?:\s*(?:(?:[-*+]|\d+\.)\s+)?)\[( |x|X)?\]\s+(.+?)\s*$/u
+const taskLine = /^(?:\s*(?:(?:[-*+]|\d+\.)\s+)?)\\?\[( |x|X)?\\?\]\s+(.+?)\s*$/u
 const openingFenceLine = /^\s*(`{3,}|~{3,})/u
 const closingFenceLine = /^\s*(`{3,}|~{3,})\s*$/u
 
@@ -53,7 +53,11 @@ export const setConfluenceTaskChecked = (
   const lines = markdown.split("\n")
   const line = lines[lineIndex]
   if (line === undefined || !confluenceTasks(line).some((task) => task.lineIndex === 0)) return null
-  lines[lineIndex] = line.replace(/\[(?: |x|X)?\]/u, checked ? "[x]" : "[ ]")
+  lines[lineIndex] = line.replace(
+    /(\\?)\[(?: |x|X)?(\\?)\]/u,
+    (_marker, openingEscape, closingEscape) =>
+      `${String(openingEscape)}[${checked ? "x" : " "}${String(closingEscape)}]`
+  )
   return lines.join("\n")
 }
 

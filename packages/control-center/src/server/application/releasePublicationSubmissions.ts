@@ -63,6 +63,7 @@ import {
   releasePublicationTargetEntityId,
   selectReleasePublicationConnection
 } from "./releasePublicationMetadata.js"
+import { hydrateReleaseRunbookContent } from "./releaseRunbookHydration.js"
 
 export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<ReleasePublicationSubmissionError>()(
   "ReleasePublicationSubmissionError",
@@ -398,9 +399,14 @@ const makeService = Effect.gen(function*() {
         limit: 500
       }).pipe(mapFailure)
       if (taskInspection._tag !== "releaseSlice") return yield* failure("conflict")
+      const hydratedTaskInspection = yield* hydrateReleaseRunbookContent(
+        persistence,
+        input.workspaceId,
+        taskInspection.value
+      ).pipe(mapFailure)
       if (
-        !releaseConfluenceTaskReadiness(taskInspection.value).ready ||
-        !releasePipelineApprovalReadiness(taskInspection.value).ready
+        !releaseConfluenceTaskReadiness(hydratedTaskInspection).ready ||
+        !releasePipelineApprovalReadiness(hydratedTaskInspection).ready
       ) return yield* failure("conflict")
     }
     const sources = release.release.sourceRevisions.filter(({ providerId }) => providerId === input.request.provider)

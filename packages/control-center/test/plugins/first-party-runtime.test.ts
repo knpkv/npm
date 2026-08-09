@@ -809,7 +809,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("executes an authorized Confluence publication through the production registry exactly once", () =>
+  it.effect("executes an authorized Confluence publication once after two safety reads", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(
         Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
@@ -988,7 +988,7 @@ describe("first-party plugin runtime", () => {
         if (record.head.lineage._tag === "terminal") {
           assert.strictEqual(record.head.lineage.receipt.status, "succeeded")
         }
-        assert.strictEqual(yield* Ref.get(readCalls), 1)
+        assert.strictEqual(yield* Ref.get(readCalls), 2)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),

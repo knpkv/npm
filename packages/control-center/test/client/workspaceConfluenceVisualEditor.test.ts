@@ -132,7 +132,7 @@ describe("Confluence visual editor", () => {
           page: {
             attachmentInventoryLabel: "Complete",
             attachments: [],
-            content: "- [ ] Run smoke tests\n- [x] Attach report",
+            content: "- \\[ \\] Run smoke tests\n- \\[x\\] Attach report\n",
             contentState: "loaded",
             contributors: [],
             createdAt: null,
@@ -161,7 +161,7 @@ describe("Confluence visual editor", () => {
     })
 
     expect(submitPublication).toHaveBeenCalledWith(expect.objectContaining({
-      markdown: "- [x] Run smoke tests\n- [x] Attach report",
+      markdown: "- \\[x\\] Run smoke tests\n- \\[x\\] Attach report",
       provider: "confluence",
       targetEntityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
       targetRevision: "4"

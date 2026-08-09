@@ -433,12 +433,11 @@ const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")
   return { _tag: "found", version }
 })
 
-const hasVisibleDraft = Effect.fn("ConfluenceGovernedActions.hasVisibleDraft")(function*(
+const hasDivergentDraft = Effect.fn("ConfluenceGovernedActions.hasDivergentDraft")(function*(
   client: ConfluencePageClientShape,
-  pageId: string,
-  spaceId: string
+  page: RawConfluencePage
 ): Effect.fn.Return<boolean, PluginFailure> {
-  const result = yield* client.getPageDraft(pageId).pipe(Effect.result)
+  const result = yield* client.getPageDraft(page.id).pipe(Effect.result)
   if (Result.isFailure(result)) {
     if (result.failure.reason === "not-found") return false
     return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
@@ -446,10 +445,11 @@ const hasVisibleDraft = Effect.fn("ConfluenceGovernedActions.hasVisibleDraft")(f
   const draft = yield* Schema.decodeUnknownEffect(RawConfluenceDraftPage)(result.success).pipe(
     Effect.mapError(() => malformed("confluence-page-draft-read", "confluence-page-draft-invalid"))
   )
-  if (draft.id !== pageId || draft.spaceId !== spaceId) {
+  if (draft.id !== page.id || draft.spaceId !== page.spaceId) {
     return yield* malformed("confluence-page-draft-read", "confluence-page-draft-scope-mismatch")
   }
-  return true
+  return draft.title !== page.title ||
+    draft.body.atlas_doc_format.value !== page.body?.atlas_doc_format?.value
 })
 
 /** Build the governed Confluence proposal and executor surfaces. @internal */
@@ -731,7 +731,7 @@ export const makeConfluenceGovernedActions = (
         checkedAt
       })
     }
-    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+    if (yield* hasDivergentDraft(input.client, page)) {
       return yield* output("preflight", PluginActionPreflightV1, {
         _tag: "blocked",
         reasons: ["Confluence page has an unpublished draft that this publication could overwrite"],
@@ -754,7 +754,10 @@ export const makeConfluenceGovernedActions = (
     )
     const locator = reconciliationKey(payload)
     const marker = versionMarker(request.idempotencyKey, request.payloadDigest, payload.versionMessage)
-    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+    const currentPage = yield* safeProviderCall(input.client.getPage(payload.pageId)).pipe(
+      Effect.flatMap((raw) => decodePage("confluence-execute-page", raw, payload.pageId, input.spaceId))
+    )
+    if (yield* hasDivergentDraft(input.client, currentPage)) {
       return yield* new PluginConflictFailure({
         operation: "execute-authorized-action",
         diagnosticCode: "confluence-page-draft-present"

@@ -3320,8 +3320,8 @@ describe("normalized plugin page materialization", () => {
       const indexedPage = boundedSlice.entityProjections.find(({ projection }) => projection.details._tag === "page")
         ?.projection
       if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
-      assert.strictEqual(indexedPage.details.contentState, "lazy")
-      assert.isNull(indexedPage.details.content)
+      assert.strictEqual(indexedPage.details.contentState, "loaded")
+      assert.isNotNull(indexedPage.details.content)
       const indexedTimeEntry = boundedSlice.entityProjections.find(
         ({ projection }) => projection.details._tag === "time-entry"
       )?.projection

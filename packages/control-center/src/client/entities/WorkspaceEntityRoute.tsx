@@ -32,6 +32,10 @@ import { WorkspaceEntityLink } from "./WorkspaceEntityLink.js"
 import styles from "./WorkspaceEntityRoute.module.css"
 import { WorkspaceClockifyTimeEntryDetails } from "./WorkspaceClockifyTimeEntryDetails.js"
 import { type ClockifyActionSubmissionState, useClockifyActionSubmission } from "./useClockifyActionSubmission.js"
+import {
+  type OpenConfluenceSynchronizationState,
+  useOpenConfluenceSynchronization
+} from "./useOpenConfluenceSynchronization.js"
 import { WorkspaceConfluencePageDetails } from "./WorkspaceConfluencePageDetails.js"
 import type { WorkspaceConfluenceVisualEditorProps } from "./WorkspaceConfluenceVisualEditor.js"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
@@ -127,7 +131,15 @@ export const confluenceEditHref = (sourceHref: string | null, pageId: string): s
   return source.href
 }
 
-const EntityActions = ({ presentation }: { readonly presentation: WorkspaceEntityPresentation }): ReactElement => {
+const EntityActions = ({
+  onConfluenceSynchronize,
+  presentation,
+  synchronizationState
+}: {
+  readonly onConfluenceSynchronize: () => void
+  readonly presentation: WorkspaceEntityPresentation
+  readonly synchronizationState: OpenConfluenceSynchronizationState | null
+}): ReactElement => {
   const editHref =
     presentation.confluencePage === null
       ? null
@@ -139,6 +151,25 @@ const EntityActions = ({ presentation }: { readonly presentation: WorkspaceEntit
         <a className={styles.secondaryAction} href={editHref} rel="noreferrer" target="_blank">
           Edit in Confluence
         </a>
+      )}
+      {presentation.confluencePage === null || synchronizationState === null ? null : (
+        <div className={styles.pageSynchronization}>
+          <Button
+            disabled={synchronizationState === "syncing"}
+            loading={synchronizationState === "syncing"}
+            onClick={onConfluenceSynchronize}
+            variant="secondary"
+          >
+            Sync now
+          </Button>
+          <Text tone="secondary" variant="meta">
+            {synchronizationState === "failed"
+              ? "Sync failed. Try again."
+              : synchronizationState === "synchronized"
+                ? "Up to date · live sync every 15 seconds while open"
+                : "Live sync every 15 seconds while open"}
+          </Text>
+        </div>
       )}
     </div>
   )
@@ -404,6 +435,9 @@ interface WorkspaceEntityViewProps {
   readonly clockifyActionState?: ClockifyActionSubmissionState
   readonly clockifyActionSubmit?: (request: SubmitClockifyActionRequest) => void
   readonly confluenceCanEdit?: boolean
+  readonly confluenceSynchronizationState?: OpenConfluenceSynchronizationState | null
+  readonly onConfluenceSaved?: () => void
+  readonly onConfluenceSynchronize?: () => void
   readonly onAskAgent: () => void
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly originHref: string
@@ -438,7 +472,10 @@ export const WorkspaceEntityView = ({
   clockifyActionState = { _tag: "idle" },
   clockifyActionSubmit = ignoreAction,
   confluenceCanEdit = false,
+  confluenceSynchronizationState = null,
   onAskAgent,
+  onConfluenceSaved,
+  onConfluenceSynchronize = ignoreAction,
   onSessionExpired = ignoreSessionExpiration,
   originHref,
   originLabel: backLabel,
@@ -507,10 +544,17 @@ export const WorkspaceEntityView = ({
   const presentation = presentWorkspaceEntity(workspaceId, state.inspection)
   const clockifyActionsCurrent =
     state._tag === "ready" && state.inspection.isSourceCurrent && state.inspection.sourceActionsAvailable
+  const afterConfluenceSave = onConfluenceSaved ?? retry
   return (
     <LinkProvider component={WorkspaceEntityLink}>
       <EntityShell
-        actions={<EntityActions presentation={presentation} />}
+        actions={
+          <EntityActions
+            onConfluenceSynchronize={onConfluenceSynchronize}
+            presentation={presentation}
+            synchronizationState={confluenceSynchronizationState}
+          />
+        }
         activity={<EntityActivity presentation={presentation} />}
         agentEntry={
           <AgentContextButton
@@ -538,7 +582,7 @@ export const WorkspaceEntityView = ({
                 state.inspection.sourceActionsAvailable,
               entityId: state.inspection.entity.projection.entityId,
               onAskAgent,
-              onSaved: retry,
+              onSaved: afterConfluenceSave,
               releaseId: state.inspection.entity.canonicalReleaseId,
               title: presentation.title
             }}
@@ -602,6 +646,22 @@ const ConnectedWorkspaceEntity = ({
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
   const sessionKey = browserReadableSessionKey(browserSession.state)
   const controller = useWorkspaceEntity(workspaceId, entityId, refreshKey, sessionKey, browserSession.invalidateSession)
+  const confluencePluginConnectionId =
+    (controller.state._tag === "ready" || controller.state._tag === "stale") &&
+    controller.state.inspection.entity.projection.details._tag === "page"
+      ? controller.state.inspection.source.pluginConnectionId
+      : null
+  const canSynchronizeConfluence =
+    confluencePluginConnectionId !== null &&
+    browserSession.state._tag === "authenticated" &&
+    browserSession.state.session.permission === "workspace-owner"
+  const confluenceSynchronization = useOpenConfluenceSynchronization({
+    enabled: canSynchronizeConfluence,
+    onSessionExpired: browserSession.invalidateSession,
+    onSynchronized: controller.retry,
+    pluginConnectionId: confluencePluginConnectionId,
+    sessionKey
+  })
   const clockifyActions = useClockifyActionSubmission(
     entityId,
     sessionKey,
@@ -657,7 +717,10 @@ const ConnectedWorkspaceEntity = ({
       confluenceCanEdit={
         browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
       }
+      confluenceSynchronizationState={canSynchronizeConfluence ? confluenceSynchronization.state : null}
       onAskAgent={() => navigate(agentPath, { state: location.state })}
+      onConfluenceSaved={confluenceSynchronization.synchronizeAfterMutation}
+      onConfluenceSynchronize={confluenceSynchronization.synchronizeNow}
       onSessionExpired={browserSession.invalidateSession}
       originHref={resolvedOriginHref}
       originLabel={originLabel(resolvedOriginHref, workspaceId)}

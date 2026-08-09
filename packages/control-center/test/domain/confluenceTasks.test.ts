@@ -63,4 +63,17 @@ describe("Confluence release tasks", () => {
     )
     expect(setConfluenceTaskChecked(markdown, 8, true)).toBeNull()
   })
+
+  it("counts and ticks task markers escaped by the safe Confluence projection", () => {
+    const markdown = "- \\[ \\] Stage approval\n- \\[x\\] Risk sign-off"
+
+    expect(confluenceTaskSummary(markdown)).toEqual(expect.objectContaining({
+      completed: 1,
+      outstanding: 1,
+      total: 2
+    }))
+    expect(setConfluenceTaskChecked(markdown, 0, true)).toBe(
+      "- \\[x\\] Stage approval\n- \\[x\\] Risk sign-off"
+    )
+  })
 })

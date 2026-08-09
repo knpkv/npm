@@ -294,6 +294,14 @@ describe("Confluence page adapter", () => {
       const mutationCalls = yield* Ref.make(0)
       const updates: Array<Parameters<ConfluencePageClientShape["updatePage"]>[1]> = []
       const client = defaultClient({
+        getPageDraft: () =>
+          Effect.succeed({
+            id: PAGE_ID,
+            status: "draft",
+            title: currentPage.title,
+            spaceId: currentPage.spaceId,
+            body: currentPage.body
+          }),
         updatePage: (_pageId, update) =>
           Ref.update(mutationCalls, (count) => count + 1).pipe(
             Effect.tap(() => Effect.sync(() => updates.push(update))),
@@ -497,7 +505,7 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
-  it.effect("blocks publication while a page draft is visible", () =>
+  it.effect("blocks publication while a page draft diverges from the published page", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
       const proposalAdapter = yield* makeAdapter(defaultClient())
@@ -507,7 +515,9 @@ describe("Confluence page adapter", () => {
           Effect.succeed({
             id: PAGE_ID,
             status: "draft",
-            spaceId: "space-payments"
+            title: "Unpublished manual edit",
+            spaceId: "space-payments",
+            body: currentPage.body
           }),
         updatePage: () => Ref.update(mutationCalls, (count) => count + 1).pipe(Effect.as(currentPage))
       }))

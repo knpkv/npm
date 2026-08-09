@@ -64,6 +64,15 @@
   gap: var(--rly-space-8);
 }
 
+.pageSynchronization {
+  display: grid;
+  gap: var(--rly-space-6);
+}
+
+.pageSynchronization > button {
+  inline-size: 100%;
+}
+
 .secondaryAction {
   align-items: center;
   border: 1px solid var(--rly-color-border-2);

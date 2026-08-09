@@ -27,6 +27,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { hasPluginCapability } from "../plugins/negotiation.js"
 import { projectClockifyApproval } from "./clockifyApprovalProjection.js"
 import { mapPersistenceRead } from "./errors.js"
+import { hydrateReleaseRunbookContent } from "./releaseRunbookHydration.js"
 import { presentTimelineEvent } from "./timelineReads.js"
 
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
@@ -115,7 +116,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       limit: 500
     }))
     if (result._tag !== "releaseSlice") return yield* unexpectedResult("release slice")
-    return result.value satisfies ReleaseDeliveryGraphInspection
+    return yield* hydrateReleaseRunbookContent(persistence, input.workspaceId, result.value).pipe(mapPersistenceRead)
   })
 
   const readRelationship = Effect.fn("DeliveryGraphInspection.relationship")(function*(input: {
