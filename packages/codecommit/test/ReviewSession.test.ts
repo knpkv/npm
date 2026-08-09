@@ -19,8 +19,10 @@ import {
   findingDispositionNeedsResolution,
   nextPendingFindingIndex,
   reconcileRelayReviewSession,
+  reconcileRelayVerificationResult,
   relayFindingFingerprint,
   relayFindingHeadEditorLine,
+  relayFindingPostReceiptDisposition,
   relayFindingPostReceiptMatches,
   relayReviewReconciliationLabel
 } from "../src/tui/review-session.js"
@@ -100,6 +102,15 @@ describe("Relay review session", () => {
         { findingId: "F1", findingIndex: 0 }
       )
     ).toBe(false)
+    expect(relayFindingPostReceiptDisposition(posting, original, { findingId: "F1", findingIndex: 0 })).toBe(
+      "posted"
+    )
+    expect(
+      relayFindingPostReceiptDisposition(posting, { ...original, title: "Edited while posting" }, {
+        findingId: "F1",
+        findingIndex: 0
+      })
+    ).toBe("posted-stale")
     expect(findingDispositionNeedsResolution("posted-stale")).toBe(true)
     expect(findingDispositionNeedsResolution("posted")).toBe(false)
   })
@@ -141,6 +152,12 @@ describe("Relay review session", () => {
     expect(
       relayFindingCanonicalIdentity({ ...identity, revisionId: "revision-2" }, initialReview.findings[0]!)
     ).not.toBe(original)
+
+    const firstBoundary = { ...initialReview.findings[0]!, title: "a\u0000b", summary: "c" }
+    const secondBoundary = { ...initialReview.findings[0]!, title: "a", summary: "b\u0000c" }
+    expect(relayFindingCanonicalIdentity(identity, firstBoundary)).not.toBe(
+      relayFindingCanonicalIdentity(identity, secondBoundary)
+    )
   })
 
   it("reopens changed decisions and never pretends an already-posted copy was updated", () => {
@@ -266,6 +283,28 @@ describe("Relay review session", () => {
     expect(decoded.outcome).toBe("resolved")
     expect(consistentRelayVerificationOutcome("F1", decoded.review, decoded.outcome)).toBe("resolved")
     expect(consistentRelayVerificationOutcome("F2", decoded.review, "resolved")).toBe("inconclusive")
+
+    const nonResolvingOutcomes: ReadonlyArray<"inconclusive" | "still-actionable"> = [
+      "inconclusive",
+      "still-actionable"
+    ]
+    for (const outcome of nonResolvingOutcomes) {
+      const reconciled = reconcileRelayVerificationResult("F1", initialReview, {
+        outcome,
+        reply: "Could not prove resolution.",
+        review: resolvedReview
+      })
+      expect(reconciled.review.findings.map((item) => item.id)).toEqual(["F1", "F2"])
+    }
+    const resolvingOutcomes: ReadonlyArray<"resolved" | "superseded"> = ["resolved", "superseded"]
+    for (const outcome of resolvingOutcomes) {
+      const reconciled = reconcileRelayVerificationResult("F1", initialReview, {
+        outcome,
+        reply: "The original concern no longer applies.",
+        review: resolvedReview
+      })
+      expect(reconciled.review.findings.map((item) => item.id)).toEqual(["F2"])
+    }
 
     const malformed = parseRelayReviewVerificationResult("not-json", initialReview)
     expect(malformed.outcome).toBe("inconclusive")

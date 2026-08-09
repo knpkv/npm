@@ -155,31 +155,37 @@ must be copied manually; this prevents overwriting concurrent author edits.
 File-scoped findings publish as PR comments with their file anchor in the body,
 while exact changed-side line findings use provider line coordinates. Comment targets use a hexadecimal
 SHA-256 digest as their deterministic idempotency token. The canonical identity
-is the NUL-delimited sequence of every production input below, in this order:
+is the UTF-8 JSON serialization of this versioned array, preserving this exact
+order:
 
 ```json
-{
-  "awsProfile": "dev-administratoraccess",
-  "awsRegion": "eu-west-1",
-  "repositoryName": "npm-control-center-review",
-  "pullRequestId": "35",
-  "revisionId": "revision-id",
-  "destinationCommit": "<40-hex-base-commit>",
-  "sourceCommit": "<40-hex-head-commit>",
-  "findingId": "F1",
-  "priority": "P1",
-  "title": "Finding title",
-  "summary": "Finding summary",
-  "details": "Finding evidence and impact",
-  "recommendation": "Recommended remediation",
-  "verification": "Verification procedure",
-  "publicationTarget": "line-comment",
-  "locationJson": "{\"scope\":\"line\",\"filePath\":\"src/example.ts\",\"line\":42,\"side\":\"after\"}"
-}
+[
+  "relay-finding-v1",
+  "dev-administratoraccess",
+  "eu-west-1",
+  "npm-control-center-review",
+  "35",
+  "revision-id",
+  "<40-hex-base-commit>",
+  "<40-hex-head-commit>",
+  "F1",
+  "P1",
+  "Finding title",
+  "Finding summary",
+  "Finding evidence and impact",
+  "Recommended remediation",
+  "Verification procedure",
+  "line-comment",
+  ["line", "src/example.ts", 42, "after"]
+]
 ```
 
-The JSON location string is the exact canonical serialization used by the
-production token input. Presentation order is deliberately excluded, so
+The array elements are, after the version: AWS profile, AWS region, repository
+name, pull request ID, revision ID, destination commit, source commit, finding
+ID, priority, title, summary, details, recommendation, verification,
+publication target, and location. JSON escaping makes embedded NULs and field
+boundaries unambiguous. The location is `["general"]`,
+`["file", filePath]`, or `["line", filePath, line, side]`. Presentation order is deliberately excluded, so
 reordering the finding deck cannot create a duplicate provider comment. File findings post as general
 comments with their file anchor in the body because CodeCommit exposes only
 general and line comment locations.

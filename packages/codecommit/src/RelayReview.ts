@@ -83,12 +83,24 @@ export interface RelayFindingPostIdentity {
   readonly sourceCommit: string
 }
 
+const relayFindingCanonicalLocation = (location: RelayReviewFinding["location"]): ReadonlyArray<string | number> => {
+  switch (location.scope) {
+    case "general":
+      return ["general"]
+    case "file":
+      return ["file", location.filePath]
+    case "line":
+      return ["line", location.filePath, location.line, location.side]
+  }
+}
+
 /** Canonical semantic identity shared by provider comment tokens and description markers. */
 export const relayFindingCanonicalIdentity = (
   identity: RelayFindingPostIdentity,
   finding: RelayReviewFinding
 ): string =>
-  [
+  JSON.stringify([
+    "relay-finding-v1",
     identity.profile,
     identity.region,
     identity.repositoryName,
@@ -104,8 +116,8 @@ export const relayFindingCanonicalIdentity = (
     finding.recommendation,
     finding.verification,
     finding.publicationTarget,
-    JSON.stringify(finding.location)
-  ].join("\u0000")
+    relayFindingCanonicalLocation(finding.location)
+  ])
 
 const RelayReviewConversationTurn = Schema.Struct({
   findingId: RelayFindingId,

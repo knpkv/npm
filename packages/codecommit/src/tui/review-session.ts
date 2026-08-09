@@ -28,6 +28,28 @@ export const consistentRelayVerificationOutcome = (
   return claimed
 }
 
+/** Prevents a non-resolving verification envelope from silently removing its selected finding. */
+export const reconcileRelayVerificationResult = (
+  findingId: string,
+  previousReview: RelayReviewResult,
+  result: RelayReviewVerificationResult
+): RelayReviewVerificationResult => {
+  const outcome = consistentRelayVerificationOutcome(findingId, result.review, result.outcome)
+  const retained = result.review.findings.some((finding) => finding.id === findingId)
+  const previousFinding = previousReview.findings.find((finding) => finding.id === findingId)
+  if ((outcome === "inconclusive" || outcome === "still-actionable") && !retained && previousFinding !== undefined) {
+    const findings = [...result.review.findings]
+    const previousIndex = previousReview.findings.findIndex((finding) => finding.id === findingId)
+    findings.splice(Math.min(Math.max(0, previousIndex), findings.length), 0, previousFinding)
+    return {
+      ...result,
+      outcome,
+      review: { ...result.review, findings }
+    }
+  }
+  return { ...result, outcome }
+}
+
 export const relayReviewReconciliationLabel = (value: RelayReviewReconciliation): string =>
   [
     value.added.length > 0 ? `+${value.added.length}` : null,
@@ -54,6 +76,13 @@ export const relayFindingPostReceiptMatches = (
   receipt.findingIndex === posting.findingIndex &&
   currentFinding !== undefined &&
   relayFindingFingerprint(currentFinding) === posting.fingerprint
+
+/** A successful provider post is stale, rather than pending, when its initiating snapshot changed. */
+export const relayFindingPostReceiptDisposition = (
+  posting: { readonly findingId: string; readonly findingIndex: number; readonly fingerprint: string },
+  currentFinding: RelayReviewResult["findings"][number] | undefined,
+  receipt: { readonly findingId: string; readonly findingIndex: number }
+): FindingDisposition => relayFindingPostReceiptMatches(posting, currentFinding, receipt) ? "posted" : "posted-stale"
 
 /** Head worktrees can represent only after-side line coordinates truthfully. */
 export const relayFindingHeadEditorLine = (

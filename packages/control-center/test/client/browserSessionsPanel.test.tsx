@@ -3,7 +3,7 @@
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IssueBrowserPairingCodeResponse, PairingCode, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionsPanel, sessionStatus } from "../../src/client/settings/BrowserSessionsPanel.js"
@@ -14,6 +14,11 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 let mountedRoot: Root | undefined
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date("2026-08-07T11:00:00.000Z"))
+})
 
 const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000401")
 const personId = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000402")
@@ -47,6 +52,7 @@ afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
   mountedRoot = undefined
   document.body.replaceChildren()
+  vi.useRealTimers()
 })
 
 const mount = async (element: ReactElement): Promise<HTMLElement> => {

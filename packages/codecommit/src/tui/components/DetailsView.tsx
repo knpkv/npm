@@ -71,7 +71,6 @@ import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import {
   adjacentFindingIndex,
-  consistentRelayVerificationOutcome,
   findingDispositionNeedsResolution,
   findingDispositionMarker,
   type FindingDisposition,
@@ -79,10 +78,11 @@ import {
   type RelayReviewReconciliation,
   relayFindingFingerprint,
   relayFindingHeadEditorLine,
-  relayFindingPostReceiptMatches,
+  relayFindingPostReceiptDisposition,
   relayFindingSessionReceiptMatches,
   relayFindingSessionReply,
   relayReviewReconciliationLabel,
+  reconcileRelayVerificationResult,
   reconcileRelayReviewSession
 } from "../review-session.js"
 import { DialogFindingConversation } from "../ui/DialogFindingConversation.js"
@@ -621,11 +621,11 @@ export function DetailsView() {
       action._tag === "reviewed"
         ? action.result.findings.find((finding) => finding.id === postingFinding.findingId)
         : undefined
-    if (!relayFindingPostReceiptMatches(postingFinding, currentFinding, outcome.value)) {
+    const postDisposition = relayFindingPostReceiptDisposition(postingFinding, currentFinding, outcome.value)
+    if (postDisposition === "posted-stale") {
       setFindingDispositions((current) => ({
         ...current,
-        [postingFinding.findingId]:
-          current[postingFinding.findingId] === "posting" ? "pending" : (current[postingFinding.findingId] ?? "pending")
+        [postingFinding.findingId]: postDisposition
       }))
       setFindingPostDiagnostic({
         operation: "post-finding-receipt",
@@ -694,17 +694,17 @@ export function DetailsView() {
       setVerificationStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
       return
     }
-    const nextReview = outcome.value.response.review
+    const verificationResult = reconcileRelayVerificationResult(
+      verificationStatus.findingId,
+      verificationStatus.previousReview,
+      outcome.value.response
+    )
+    const nextReview = verificationResult.review
     const reconciled = reconcileRelayReviewSession(verificationStatus.previousReview, nextReview, findingDispositions)
     const previousIndex = verificationStatus.previousReview.findings.findIndex(
       (finding) => finding.id === verificationStatus.findingId
     )
     const retainedIndex = nextReview.findings.findIndex((finding) => finding.id === verificationStatus.findingId)
-    const verificationOutcome = consistentRelayVerificationOutcome(
-      verificationStatus.findingId,
-      nextReview,
-      outcome.value.response.outcome
-    )
     setSelectedFindingIndex(
       retainedIndex >= 0
         ? retainedIndex
@@ -723,7 +723,7 @@ export function DetailsView() {
       {
         findingId: verificationStatus.findingId,
         role: "assistant",
-        message: outcome.value.response.reply
+        message: verificationResult.reply
       }
     ])
     setVerifiedWorkspace(outcome.value.workspace)
@@ -738,9 +738,9 @@ export function DetailsView() {
       headChanged:
         verificationStatus.previousRevision.sourceCommit !== outcome.value.workspace.revision.sourceCommit ||
         verificationStatus.previousRevision.destinationCommit !== outcome.value.workspace.revision.destinationCommit,
-      outcome: verificationOutcome,
+      outcome: verificationResult.outcome,
       reconciliation: reconciled.reconciliation,
-      reply: outcome.value.response.reply
+      reply: verificationResult.reply
     })
   }, [findingDispositions, verificationStatus, verifyFindingResult])
 
@@ -1596,11 +1596,12 @@ export function DetailsView() {
                               : theme.textSuccess
                       }
                     >{`STATE  ${selectedFindingDisposition.toUpperCase()}`}</text>
-                    {findingPostDiagnostic !== null && selectedFindingDisposition === "failed" && (
-                      <text fg={theme.textError}>
-                        {terminalSafeText(`${findingPostDiagnostic.operation}: ${findingPostDiagnostic.message}`)}
-                      </text>
-                    )}
+                    {findingPostDiagnostic !== null &&
+                      (selectedFindingDisposition === "failed" || selectedFindingDisposition === "posted-stale") && (
+                        <text fg={selectedFindingDisposition === "failed" ? theme.textError : theme.textWarning}>
+                          {terminalSafeText(`${findingPostDiagnostic.operation}: ${findingPostDiagnostic.message}`)}
+                        </text>
+                      )}
                     <box flexDirection="row">
                       <ActionKey
                         active={!agentRunning && selectedFindingNeedsResolution}
