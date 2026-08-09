@@ -80,6 +80,7 @@ import {
   relayFindingFingerprint,
   relayFindingHeadEditorLine,
   relayFindingPostReceiptMatches,
+  relayFindingSessionReceiptMatches,
   relayFindingSessionReply,
   relayReviewReconciliationLabel,
   reconcileRelayReviewSession
@@ -827,6 +828,10 @@ export function DetailsView() {
         ? { findingId: conversationStatus.findingId, message: conversationStatus.reply }
         : undefined
   const selectedFindingSessionReply = relayFindingSessionReply(selectedFinding, latestSessionReply)
+  const selectedFindingVerificationStatus =
+    verificationStatus._tag === "complete" && relayFindingSessionReceiptMatches(selectedFinding, verificationStatus)
+      ? verificationStatus
+      : undefined
   const displayedFindingReply = selectedFindingSessionReply?.message ?? latestSelectedFindingReply
   const findingDeck = reviewedFindings
     .map(
@@ -1546,13 +1551,19 @@ export function DetailsView() {
                         )}
                       </text>
                     )}
-                    {verificationStatus._tag === "complete" && (
+                    {selectedFindingVerificationStatus !== undefined && (
                       <box flexDirection="column">
-                        <text fg={verificationStatus.outcome === "resolved" ? theme.textSuccess : theme.textWarning}>
-                          {`VERIFIED · ${verificationOutcomeLabel(verificationStatus.outcome)} · ${verificationStatus.headChanged ? "NEW HEAD" : "SAME HEAD"}`}
+                        <text
+                          fg={
+                            selectedFindingVerificationStatus.outcome === "resolved"
+                              ? theme.textSuccess
+                              : theme.textWarning
+                          }
+                        >
+                          {`VERIFIED · ${verificationOutcomeLabel(selectedFindingVerificationStatus.outcome)} · ${selectedFindingVerificationStatus.headChanged ? "NEW HEAD" : "SAME HEAD"}`}
                         </text>
                         <text fg={theme.textAccent}>
-                          {`RECONCILED  ${relayReviewReconciliationLabel(verificationStatus.reconciliation)}`}
+                          {`RECONCILED  ${relayReviewReconciliationLabel(selectedFindingVerificationStatus.reconciliation)}`}
                         </text>
                       </box>
                     )}

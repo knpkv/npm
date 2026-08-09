@@ -71,12 +71,20 @@ export interface RelayFindingSessionReply {
   readonly message: string
 }
 
+/** Binds an asynchronous review-session receipt to the finding that initiated it. */
+export const relayFindingSessionReceiptMatches = (
+  finding: Pick<RelayReviewResult["findings"][number], "id"> | null,
+  receipt: { readonly findingId: string } | undefined
+): boolean => finding !== null && receipt?.findingId === finding.id
+
 /** Keeps a completed conversation or verification receipt on the finding that produced it. */
 export const relayFindingSessionReply = (
   finding: Pick<RelayReviewResult["findings"][number], "id"> | null,
   reply: RelayFindingSessionReply | undefined
 ): RelayFindingSessionReply | undefined =>
-  finding !== null && reply?.findingId === finding.id && reply.message.length > 0 ? reply : undefined
+  relayFindingSessionReceiptMatches(finding, reply) && reply !== undefined && reply.message.length > 0
+    ? reply
+    : undefined
 
 /** Wraps finding navigation so the deck never dead-ends at its first or last card. */
 export const adjacentFindingIndex = (count: number, index: number, direction: -1 | 1): number => {

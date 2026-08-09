@@ -60,7 +60,7 @@ import {
   validateChangedFileLine
 } from "../src/tui/file-diff.js"
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
-import { relayFindingSessionReply } from "../src/tui/review-session.js"
+import { relayFindingSessionReceiptMatches, relayFindingSessionReply } from "../src/tui/review-session.js"
 import {
   reviewRevisionSpecifiers,
   safePathSegment,
@@ -83,6 +83,9 @@ describe("PR detail workspace", () => {
   it("shows completed session replies only on the finding that produced them", () => {
     const reply = { findingId: "F1", message: "F1 verification evidence" }
 
+    expect(relayFindingSessionReceiptMatches({ id: "F2" }, reply)).toBe(false)
+    expect(relayFindingSessionReceiptMatches({ id: "F1" }, reply)).toBe(true)
+    expect(relayFindingSessionReceiptMatches({ id: "F1" }, undefined)).toBe(false)
     expect(relayFindingSessionReply({ id: "F2" }, reply)).toBeUndefined()
     expect(relayFindingSessionReply({ id: "F1" }, reply)).toEqual(reply)
     expect(relayFindingSessionReply({ id: "F1" }, undefined)).toBeUndefined()

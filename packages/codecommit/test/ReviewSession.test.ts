@@ -192,7 +192,8 @@ describe("Relay review session", () => {
     }
     const prompt = makeRelayReviewConversationPrompt(request, "+const guarded = true")
 
-    expect(prompt).toContain("discussing finding F1")
+    expect(prompt).toContain("selected finding declared inside the untrusted review state")
+    expect(prompt).toContain("\"selectedFindingId\":\"F1\"")
     expect(prompt).toContain("review-session-wide in effect")
     expect(prompt).toContain("may revise, add, merge, or withdraw other findings")
     expect(prompt).toContain("Guard authorization")
@@ -242,7 +243,8 @@ describe("Relay review session", () => {
     }
     const prompt = makeRelayReviewVerificationPrompt(request, "+const guarded = true")
 
-    expect(prompt).toContain("Verify finding F1")
+    expect(prompt).toContain("Verify the selected finding")
+    expect(prompt).toContain("\"selectedFindingId\":\"F1\"")
     expect(prompt).toContain(`Previously reviewed head: ${"b".repeat(40)}`)
     expect(prompt).toContain(`Latest immutable head: ${"d".repeat(40)}`)
     expect(prompt).toContain("review-session-wide in effect")

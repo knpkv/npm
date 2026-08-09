@@ -21,6 +21,7 @@ export interface RelayReviewRequest {
 }
 
 const RelayFindingPublicationTarget = Schema.Literals(["description", "pr-comment", "line-comment"])
+const RelayFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]*$/u))
 
 /** Human-selected provider surface for a reviewed finding. */
 export type RelayFindingPublicationTarget = typeof RelayFindingPublicationTarget.Type
@@ -40,7 +41,7 @@ const RelayReviewLocation = Schema.Union([
 ])
 
 const RelayReviewFinding = Schema.Struct({
-  id: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(80)),
+  id: RelayFindingId,
   priority: Schema.Literals(["P1", "P2", "P3", "P4"]),
   title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
@@ -107,7 +108,7 @@ export const relayFindingCanonicalIdentity = (
   ].join("\u0000")
 
 const RelayReviewConversationTurn = Schema.Struct({
-  findingId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(80)),
+  findingId: RelayFindingId,
   role: Schema.Literals(["user", "assistant"]),
   message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_000))
 })
@@ -380,6 +381,7 @@ export const makeRelayReviewConversationPrompt = (request: RelayReviewConversati
   const delimiter = untrustedDelimiter(patch, "patch")
   const reviewState = JSON.stringify({
     currentReview: request.currentReview,
+    selectedFindingId: request.selectedFindingId,
     turns: boundedRelayReviewTurns(request.turns)
   })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
@@ -388,7 +390,7 @@ export const makeRelayReviewConversationPrompt = (request: RelayReviewConversati
     `Repository: ${request.repositoryName}`,
     `Immutable base: ${request.baseCommit}`,
     `Immutable head: ${request.headCommit}`,
-    `The user is discussing finding ${request.selectedFindingId}. Their latest message is:`,
+    "The user is discussing the selected finding declared inside the untrusted review state. Their latest message is:",
     request.message,
     "The conversation is finding-specific in the UI but review-session-wide in effect. Reconsider every finding. A reply may revise, add, merge, or withdraw other findings and may change their publication targets.",
     "Preserve an existing finding ID while it remains the same concern. Use a new unique ID only for a genuinely new concern. Omit a resolved or withdrawn finding.",
@@ -413,11 +415,12 @@ export const makeRelayReviewVerificationPrompt = (request: RelayReviewVerificati
   const delimiter = untrustedDelimiter(patch, "patch")
   const reviewState = JSON.stringify({
     currentReview: request.currentReview,
+    selectedFindingId: request.selectedFindingId,
     turns: boundedRelayReviewTurns(request.turns)
   })
   const reviewStateDelimiter = untrustedDelimiter(reviewState, "review_state")
   return [
-    `Verify finding ${request.selectedFindingId} from CodeCommit PR #${request.pullRequestId} against the provider's latest exact revision.`,
+    `Verify the selected finding from CodeCommit PR #${request.pullRequestId} against the provider's latest exact revision.`,
     `Repository: ${request.repositoryName}`,
     `Previously reviewed base: ${request.previousBaseCommit}`,
     `Previously reviewed head: ${request.previousHeadCommit}`,
@@ -631,11 +634,24 @@ export const runRelayReviewConversation = (request: RelayReviewConversationReque
               message: "Relay follow-up failed",
               cause
             })
-        )
+        ),
+        Effect.map((message) => ({ message, patch }))
       )
     }),
-    Effect.map(Option.getOrElse(() => "Relay completed without a follow-up response.")),
-    Effect.map((message) => parseRelayReviewConversationResult(message, request.currentReview))
+    Effect.flatMap(({ message, patch }) => {
+      const result = parseRelayReviewConversationResult(
+        Option.getOrElse(message, () => "Relay completed without a follow-up response."),
+        request.currentReview
+      )
+      return relayReviewSupportsFollowUps(request, patch, result.review)
+        ? Effect.succeed(result)
+        : Effect.fail(
+          new WorktreeError({
+            operation: "relay-review-budget",
+            message: "Reconciled Relay review state leaves insufficient capacity for discussion and verification"
+          })
+        )
+    })
   )
 
 /** Rechecks one finding on the latest immutable PR revision and reconciles the complete review set. */
@@ -673,9 +689,22 @@ export const runRelayReviewVerification = (request: RelayReviewVerificationReque
               message: "Relay verification failed",
               cause
             })
-        )
+        ),
+        Effect.map((message) => ({ message, patch }))
       )
     }),
-    Effect.map(Option.getOrElse(() => "Relay completed without a verification response.")),
-    Effect.map((message) => parseRelayReviewVerificationResult(message, request.currentReview))
+    Effect.flatMap(({ message, patch }) => {
+      const result = parseRelayReviewVerificationResult(
+        Option.getOrElse(message, () => "Relay completed without a verification response."),
+        request.currentReview
+      )
+      return relayReviewSupportsFollowUps(request, patch, result.review)
+        ? Effect.succeed(result)
+        : Effect.fail(
+          new WorktreeError({
+            operation: "relay-review-budget",
+            message: "Reconciled Relay review state leaves insufficient capacity for discussion and verification"
+          })
+        )
+    })
   )
