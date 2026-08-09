@@ -174,7 +174,13 @@ function CommentLocationHeader({
   const { theme } = useTheme()
   const anchor = commentLocationAnchor(location)
   const revisionContext = commentRevisionContext(location, revision)
-  const badge = anchor._tag === "line" ? ` LINE ${anchor.lineNumber} ` : ` ${anchor._tag.toUpperCase()} `
+  const lineSide =
+    anchor._tag !== "line" || anchor.side === undefined
+      ? ""
+      : anchor.side === "before"
+        ? " · BASE / BEFORE"
+        : " · HEAD / AFTER"
+  const badge = anchor._tag === "line" ? ` LINE ${anchor.lineNumber}${lineSide} ` : ` ${anchor._tag.toUpperCase()} `
   const target = anchor._tag === "general" ? anchor.label : anchor.filePath
   const revisionLabel =
     revisionContext._tag === "current"
@@ -621,10 +627,29 @@ export function DetailsView() {
       setPostingFinding(null)
       return
     }
-    const currentFinding =
-      action._tag === "reviewed"
-        ? action.result.findings.find((finding) => finding.id === postingFinding.findingId)
-        : undefined
+    let receiptReview = action._tag === "reviewed" ? action.result : null
+    if (
+      conversationStatus._tag === "running" &&
+      !AsyncResult.isWaiting(continueReviewResult) &&
+      AsyncResult.isSuccess(continueReviewResult) &&
+      continueReviewResult.value.requestId === conversationStatus.requestId &&
+      continueReviewResult.value._tag === "success"
+    ) {
+      receiptReview = continueReviewResult.value.value.response.review
+    } else if (
+      verificationStatus._tag === "running" &&
+      !AsyncResult.isWaiting(verifyFindingResult) &&
+      AsyncResult.isSuccess(verifyFindingResult) &&
+      verifyFindingResult.value.requestId === verificationStatus.requestId &&
+      verifyFindingResult.value._tag === "success"
+    ) {
+      receiptReview = reconcileRelayVerificationResult(
+        verificationStatus.findingId,
+        verificationStatus.previousReview,
+        verifyFindingResult.value.value.response
+      ).review
+    }
+    const currentFinding = receiptReview?.findings.find((finding) => finding.id === postingFinding.findingId)
     const postDisposition = relayFindingPostReceiptDisposition(postingFinding, currentFinding, outcome.value)
     if (postDisposition === "posted-stale") {
       setFindingDispositions((current) => ({
@@ -654,7 +679,16 @@ export function DetailsView() {
       return next
     })
     setPostingFinding(null)
-  }, [action, findingDispositions, postFindingResult, postingFinding])
+  }, [
+    action,
+    continueReviewResult,
+    conversationStatus,
+    findingDispositions,
+    postFindingResult,
+    postingFinding,
+    verificationStatus,
+    verifyFindingResult
+  ])
 
   useEffect(() => {
     if (conversationStatus._tag !== "running" || AsyncResult.isWaiting(continueReviewResult)) return
@@ -679,7 +713,9 @@ export function DetailsView() {
         ? retainedIndex
         : Math.min(Math.max(0, previousIndex), Math.max(0, nextReview.findings.length - 1))
     )
-    setFindingDispositions(reconciled.dispositions)
+    setFindingDispositions(
+      (current) => reconcileRelayReviewSession(conversationStatus.previousReview, nextReview, current).dispositions
+    )
     setConversationTurns((current) => [
       ...current,
       { findingId: conversationStatus.findingId, role: "assistant", message: outcome.value.response.reply }
@@ -722,7 +758,9 @@ export function DetailsView() {
         : Math.min(Math.max(0, previousIndex), Math.max(0, nextReview.findings.length - 1))
     )
     setSelectedFileIndex(0)
-    setFindingDispositions(reconciled.dispositions)
+    setFindingDispositions(
+      (current) => reconcileRelayReviewSession(verificationStatus.previousReview, nextReview, current).dispositions
+    )
     setConversationTurns((current) => [
       ...current,
       {

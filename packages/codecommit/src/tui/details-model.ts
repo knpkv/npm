@@ -400,11 +400,16 @@ export const displayedCommentLocations = (
 export type CommentLocationAnchor =
   | { readonly _tag: "general"; readonly label: "Pull request" }
   | { readonly _tag: "file"; readonly filePath: string }
-  | { readonly _tag: "line"; readonly filePath: string; readonly lineNumber: number }
+  | {
+    readonly _tag: "line"
+    readonly filePath: string
+    readonly lineNumber: number
+    readonly side: "before" | "after" | undefined
+  }
 
 /** Turns CodeCommit's grouped comment shape into one scan-friendly review coordinate. */
 export const commentLocationAnchor = (
-  location: Pick<Domain.PRCommentLocation, "comments" | "filePath">
+  location: Pick<Domain.PRCommentLocation, "comments" | "filePath" | "relativeFileVersion">
 ): CommentLocationAnchor => {
   if (location.filePath === undefined) return { _tag: "general", label: "Pull request" }
   const lineNumber = location.comments
@@ -412,7 +417,16 @@ export const commentLocationAnchor = (
     .find((candidate): candidate is number => candidate !== undefined)
   return lineNumber === undefined
     ? { _tag: "file", filePath: location.filePath }
-    : { _tag: "line", filePath: location.filePath, lineNumber }
+    : {
+      _tag: "line",
+      filePath: location.filePath,
+      lineNumber,
+      side: location.relativeFileVersion === "BEFORE"
+        ? "before"
+        : location.relativeFileVersion === "AFTER"
+        ? "after"
+        : undefined
+    }
 }
 
 export const fileDiffIdentity = (

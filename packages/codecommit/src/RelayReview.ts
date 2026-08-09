@@ -21,7 +21,10 @@ export interface RelayReviewRequest {
 }
 
 const RelayFindingPublicationTarget = Schema.Literals(["description", "pr-comment", "line-comment"])
-const RelayFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]*$/u))
+export const MAX_RELAY_FINDING_ID_DIGITS = 6
+const RelayFindingId = Schema.String.check(
+  Schema.isPattern(new RegExp(`^F[1-9][0-9]{0,${MAX_RELAY_FINDING_ID_DIGITS - 1}}$`, "u"))
+)
 
 /** Human-selected provider surface for a reviewed finding. */
 export type RelayFindingPublicationTarget = typeof RelayFindingPublicationTarget.Type

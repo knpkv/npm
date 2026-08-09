@@ -12,6 +12,7 @@ import {
   makeRelayReviewConversationPrompt,
   makeRelayReviewPrompt,
   makeRelayReviewVerificationPrompt,
+  MAX_RELAY_FINDING_ID_DIGITS,
   MAX_RELAY_PROMPT_BYTES,
   parseRelayReviewConversationResult,
   parseRelayReviewResult,
@@ -49,6 +50,28 @@ const patchSpawner = (chunks: ReadonlyArray<Uint8Array>) =>
   )
 
 describe("RelayReview", () => {
+  it("bounds finding ids while keeping the documented maximum follow-up capable", () => {
+    const finding = (id: string) => ({
+      details: "Evidence",
+      id,
+      location: { scope: "general" },
+      priority: "P2",
+      publicationTarget: "pr-comment",
+      recommendation: "Fix it",
+      summary: "Impact",
+      title: "Issue",
+      verification: "Static patch review only."
+    })
+    const decode = (id: string) =>
+      parseRelayReviewResult(JSON.stringify({ findings: [finding(id)], verdict: "One finding" }))
+    const largestDocumentedId = `F${"9".repeat(MAX_RELAY_FINDING_ID_DIGITS)}`
+
+    expect(Option.isSome(decode("F1"))).toBe(true)
+    const largestReview = Option.getOrThrow(decode(largestDocumentedId))
+    expect(relayReviewSupportsFollowUps(relayRequest, "+small patch", largestReview)).toBe(true)
+    expect(Option.isNone(decode(`F1${"0".repeat(MAX_RELAY_FINDING_ID_DIGITS)}`))).toBe(true)
+  })
+
   it("rejects malformed conversation envelopes while accepting strict JSON and one JSON fence", () => {
     const review: RelayReviewResult = {
       findings: [],

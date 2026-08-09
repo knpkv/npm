@@ -310,6 +310,7 @@ export interface PRCommentLocation {
   readonly filePath?: string
   readonly beforeCommitId?: string
   readonly afterCommitId?: string
+  readonly relativeFileVersion?: "BEFORE" | "AFTER"
   readonly comments: ReadonlyArray<CommentThread>
 }
 
@@ -348,6 +349,7 @@ export const PRCommentLocationJson = Schema.Struct({
   filePath: Schema.optional(Schema.String),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
+  relativeFileVersion: Schema.optional(Schema.Literals(["BEFORE", "AFTER"])),
   comments: Schema.Array(CommentThreadJson)
 })
 
@@ -379,6 +381,7 @@ export const encodeCommentLocations = (
     ...(loc.filePath != null ? { filePath: loc.filePath } : {}),
     ...(loc.beforeCommitId != null ? { beforeCommitId: loc.beforeCommitId } : {}),
     ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
+    ...(loc.relativeFileVersion != null ? { relativeFileVersion: loc.relativeFileVersion } : {}),
     comments: loc.comments.map(serializeThread)
   }))
 

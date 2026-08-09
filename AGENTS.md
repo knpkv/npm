@@ -247,6 +247,12 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep CodeCommit review-publication terminology synchronized across
+  `.changeset/*.md`, `packages/codecommit/README.md`, and the publication schema.
+  CodeCommit has no native file-comment target: describe file-scoped findings as
+  file-anchored PR comments unless the schema and provider operation actually add
+  a distinct capability. Generated and vendor changelogs are excluded; provider
+  terminology still requires judgment.
 - Keep CodeCommit editor documentation synchronized with exact-head behavior in
   `packages/codecommit/README.md` and `packages/codecommit/src/tui/review-session.ts`:
   after-side findings may open at their line, before-side findings must not apply

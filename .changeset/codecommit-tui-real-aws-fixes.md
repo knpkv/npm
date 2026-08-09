@@ -23,8 +23,8 @@ base/head split diff by default. Add a multi-select review-skill picker and
 snapshot the selected PR Review / PR Diff Review playbooks into each prompt-only
 Relay run. Present and post findings as evidence-led P1–P4 issue cards with
 separate Summary, Details, Recommendation, Verification, and Location fields.
-Route each finding to the PR description, PR comments, file comments, or exact
-line comments; add a wraparound finding deck, unresolved jump, publication
+Route each finding to the PR description, PR comments, file-anchored PR comments,
+or exact line comments; add a wraparound finding deck, unresolved jump, publication
 target picker, and finding-specific follow-up conversations that reconcile the
 complete finding set and reopen affected local decisions. Verify an individual
 finding against CodeCommit's latest exact revision, report whether it was

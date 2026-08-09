@@ -14,7 +14,8 @@ import {
   relayFindingAnchor,
   relayFindingCommentContent,
   relayFindingFileIndex,
-  type RelayReviewRequest
+  type RelayReviewRequest,
+  type RelayReviewResult
 } from "../src/RelayReview.js"
 import { defaultRelayReviewSkills, normalizeRelayReviewSkills, relayReviewSkillsLabel } from "../src/ReviewSkills.js"
 import {
@@ -62,6 +63,9 @@ import {
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
 import {
   detachedStalePublicationIds,
+  reconcileRelayReviewSession,
+  relayFindingFingerprint,
+  relayFindingPostReceiptDisposition,
   relayFindingSessionReceiptMatches,
   relayFindingSessionReply
 } from "../src/tui/review-session.js"
@@ -84,6 +88,43 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("merges simultaneous successful post and reconciliation receipts without losing stale state", () => {
+    const original: RelayReviewResult["findings"][number] = {
+      details: "Evidence",
+      id: "F1",
+      location: { scope: "line", filePath: "src/auth.ts", line: 42, side: "after" },
+      priority: "P2",
+      publicationTarget: "line-comment",
+      recommendation: "Fix it",
+      summary: "Impact",
+      title: "Guard authorization",
+      verification: "Static patch review only."
+    }
+    const previous: RelayReviewResult = { findings: [original], verdict: "Before" }
+    const posting = { findingId: "F1", findingIndex: 0, fingerprint: relayFindingFingerprint(original) }
+    const receipt = { findingId: "F1", findingIndex: 0 }
+    const removed: RelayReviewResult = { findings: [], verdict: "Removed" }
+    const changed: RelayReviewResult = {
+      findings: [{ ...original, title: "Guard authorization differently" }],
+      verdict: "Changed"
+    }
+
+    const removedDisposition = relayFindingPostReceiptDisposition(posting, removed.findings[0], receipt)
+    const removedState = reconcileRelayReviewSession(previous, removed, { F1: removedDisposition }).dispositions
+    expect(removedState).toEqual({ F1: "posted-stale" })
+    expect(detachedStalePublicationIds([], removedState, ["F1"])).toEqual(["F1"])
+
+    const changedDisposition = relayFindingPostReceiptDisposition(posting, changed.findings[0], receipt)
+    expect(reconcileRelayReviewSession(previous, changed, { F1: changedDisposition }).dispositions).toEqual({
+      F1: "posted-stale"
+    })
+
+    const unchangedDisposition = relayFindingPostReceiptDisposition(posting, original, receipt)
+    expect(reconcileRelayReviewSession(previous, previous, { F1: unchangedDisposition }).dispositions).toEqual({
+      F1: "posted"
+    })
+  })
+
   it("keeps a session warning for successful stale posts whose finding left the deck", () => {
     expect(detachedStalePublicationIds(["F2"], { F1: "posted-stale", F2: "pending" }, ["F1"])).toEqual(["F1"])
     expect(detachedStalePublicationIds(["F1", "F2"], { F1: "posted-stale" }, ["F1"])).toEqual([])
@@ -208,8 +249,23 @@ describe("PR detail workspace", () => {
     ).toEqual({
       _tag: "line",
       filePath: "src/auth.ts",
-      lineNumber: 42
+      lineNumber: 42,
+      side: undefined
     })
+    expect(
+      commentLocationAnchor({
+        comments: [{ replies: [], root: lineComment }],
+        filePath: "src/auth.ts",
+        relativeFileVersion: "BEFORE"
+      })
+    ).toEqual({ _tag: "line", filePath: "src/auth.ts", lineNumber: 42, side: "before" })
+    expect(
+      commentLocationAnchor({
+        comments: [{ replies: [], root: lineComment }],
+        filePath: "src/auth.ts",
+        relativeFileVersion: "AFTER"
+      })
+    ).toEqual({ _tag: "line", filePath: "src/auth.ts", lineNumber: 42, side: "after" })
   })
 
   it.effect("keeps local path segments bounded, traversal-safe, and identity-sensitive", () =>

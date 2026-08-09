@@ -16,6 +16,9 @@ const optionalString = (value: unknown): string | undefined => typeof value === 
 
 const optionalNumber = (value: unknown): number | undefined => typeof value === "number" ? value : undefined
 
+const optionalRelativeFileVersion = (value: unknown): "BEFORE" | "AFTER" | undefined =>
+  value === "BEFORE" || value === "AFTER" ? value : undefined
+
 const requiredString = (value: unknown): string | null => typeof value === "string" ? value : null
 
 const requiredBoolean = (value: unknown): boolean | null => typeof value === "boolean" ? value : null
@@ -79,6 +82,9 @@ const jsonLocationFromUnknown = (value: unknown): CommentLocationJson | null => 
     ...(optionalString(value["afterCommitId"]) !== undefined
       ? { afterCommitId: optionalString(value["afterCommitId"]) }
       : {}),
+    ...(optionalRelativeFileVersion(value["relativeFileVersion"]) !== undefined
+      ? { relativeFileVersion: optionalRelativeFileVersion(value["relativeFileVersion"]) }
+      : {}),
     comments
   }
 }
@@ -112,6 +118,7 @@ const locationFromJson = (location: CommentLocationJson): PRCommentLocation => (
   ...(location.filePath !== undefined ? { filePath: location.filePath } : {}),
   ...(location.beforeCommitId !== undefined ? { beforeCommitId: location.beforeCommitId } : {}),
   ...(location.afterCommitId !== undefined ? { afterCommitId: location.afterCommitId } : {}),
+  ...(location.relativeFileVersion !== undefined ? { relativeFileVersion: location.relativeFileVersion } : {}),
   comments: location.comments.map(threadFromJson)
 })
 

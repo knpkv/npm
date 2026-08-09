@@ -182,6 +182,10 @@ export const reconcileRelayReviewSession = (
     nextDispositions[finding.id] = "pending"
     if (current !== "pending") reopened.push(finding.id)
   }
+  for (const findingId of removed) {
+    const current = dispositions[findingId]
+    if (current === "posted" || current === "posted-stale") nextDispositions[findingId] = "posted-stale"
+  }
   return {
     dispositions: nextDispositions,
     reconciliation: { added, changed, removed, reopened }
