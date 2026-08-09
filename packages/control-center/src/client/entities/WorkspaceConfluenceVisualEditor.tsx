@@ -187,7 +187,9 @@ export const WorkspaceConfluenceVisualEditor = ({
   }, [page.revision, title])
 
   const setTaskChecked = (lineIndex: number, checked: boolean): void => {
-    if (!canEdit || releaseId === null || page.content === null || taskLineSaving !== null) return
+    if (!canEdit || !page.taskUpdatesSafe || releaseId === null || page.content === null || taskLineSaving !== null) {
+      return
+    }
     const updatedMarkdown = setConfluenceTaskChecked(page.content, lineIndex, checked)
     if (updatedMarkdown === null) return
     const markdown = updatedMarkdown.trim()
@@ -275,7 +277,7 @@ export const WorkspaceConfluenceVisualEditor = ({
                   <label>
                     <input
                       checked={task.checked}
-                      disabled={!canEdit || releaseId === null || taskLineSaving !== null}
+                      disabled={!canEdit || !page.taskUpdatesSafe || releaseId === null || taskLineSaving !== null}
                       onChange={(event) => setTaskChecked(task.lineIndex, event.target.checked)}
                       type="checkbox"
                     />
@@ -292,6 +294,12 @@ export const WorkspaceConfluenceVisualEditor = ({
                 {taskSummary.outstanding} task{taskSummary.outstanding === 1 ? "" : "s"} block release publication.
               </Text>
             )}
+            {!page.taskUpdatesSafe ? (
+              <Text tone="secondary">
+                Task-only updates are unavailable because this safe page projection cannot prove a lossless ADF round
+                trip. Review a complete replacement before changing these tasks.
+              </Text>
+            ) : null}
             {taskSaveFailed ? (
               <StatePanel
                 description="Refresh the latest Confluence revision, then tick the task again."

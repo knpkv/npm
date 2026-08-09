@@ -43,11 +43,13 @@ const Harness = ({
   onSessionExpired = ignoreSessionExpiration,
   onSynchronized,
   pluginConnectionId = PLUGIN_CONNECTION_ID,
+  sessionKey = "session-a",
   transport
 }: {
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly onSynchronized: () => void
   readonly pluginConnectionId?: PluginConnectionId
+  readonly sessionKey?: string
   readonly transport: OpenConfluenceSynchronizationTransport
 }): ReactElement => {
   const synchronization = useOpenConfluenceSynchronization({
@@ -55,7 +57,7 @@ const Harness = ({
     onSessionExpired,
     onSynchronized,
     pluginConnectionId,
-    sessionKey: "session-a",
+    sessionKey,
     transport
   })
   return (
@@ -113,6 +115,37 @@ describe("open Confluence page synchronization", () => {
 
     await act(async () => resolveInitial(synchronizationState("synchronized")))
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledTimes(2))
+  })
+
+  it("queues a post-mutation refresh behind synchronization active in another tab", async () => {
+    setDocumentVisibility("hidden")
+    const storageKey = `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, sessionKey: "session-a", state: "syncing" })
+    )
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+    expect(transport.synchronize).not.toHaveBeenCalled()
+
+    const completed = JSON.stringify({
+      recordedAt: Date.now(),
+      sessionExpired: false,
+      sessionKey: "session-a",
+      state: "synchronized"
+    })
+    localStorage.setItem(storageKey, completed)
+    await act(async () => window.dispatchEvent(new StorageEvent("storage", { key: storageKey, newValue: completed })))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
   })
 
   it("polls every 15 seconds only while visible and refreshes immediately when shown again", async () => {
@@ -223,7 +256,7 @@ describe("open Confluence page synchronization", () => {
   it("reuses a recent same-origin tab synchronization without another provider request", async () => {
     localStorage.setItem(
       `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
-      JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, state: "synchronized" })
+      JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, sessionKey: "session-a", state: "synchronized" })
     )
     const transport = {
       synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
@@ -255,7 +288,12 @@ describe("open Confluence page synchronization", () => {
       window.dispatchEvent(
         new StorageEvent("storage", {
           key: `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
-          newValue: JSON.stringify({ recordedAt: Date.now(), sessionExpired: false, state: "synchronized" })
+          newValue: JSON.stringify({
+            recordedAt: Date.now(),
+            sessionExpired: false,
+            sessionKey: "session-a",
+            state: "synchronized"
+          })
         })
       )
     )
@@ -282,6 +320,42 @@ describe("open Confluence page synchronization", () => {
 
     await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledWith("session-a"))
     expect(host.textContent).toBe("failed")
+  })
+
+  it("does not replay another tab's expired session into a replacement session", async () => {
+    setDocumentVisibility("hidden")
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const onSessionExpired = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <Harness
+          onSessionExpired={onSessionExpired}
+          onSynchronized={() => undefined}
+          sessionKey="session-b"
+          transport={transport}
+        />
+      )
+    )
+
+    const storageKey = `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`
+    const expired = JSON.stringify({
+      recordedAt: Date.now(),
+      sessionExpired: true,
+      sessionKey: "session-a",
+      state: "failed"
+    })
+    setDocumentVisibility("visible")
+    localStorage.setItem(storageKey, expired)
+    await act(async () => window.dispatchEvent(new StorageEvent("storage", { key: storageKey, newValue: expired })))
+
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+    expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(host.textContent).toBe("synchronized")
   })
 
   it("fails without refreshing when synchronization returns a non-success result", async () => {

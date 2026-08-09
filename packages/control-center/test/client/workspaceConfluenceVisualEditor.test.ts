@@ -141,6 +141,7 @@ describe("Confluence visual editor", () => {
             runbookEvidenceCount: 0,
             sourceSpaceId: "SD",
             status: "Current",
+            taskUpdatesSafe: true,
             updatedAt: null,
             versions: [],
             watcherInventoryLabel: "Complete"
@@ -168,6 +169,52 @@ describe("Confluence visual editor", () => {
     }))
     expect(onSaved).toHaveBeenCalledOnce()
     expect(container.querySelector("[data-confluence-visual-editor]")).toBeNull()
+  })
+
+  it("does not submit task-only replacement from a lossy safe page projection", async () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+    const root = createRoot(container)
+    mounted.push({ container, root })
+    const submitPublication = vi.fn(async () => ({ actionId: "action-1", state: "succeeded" }))
+
+    await act(async () =>
+      root.render(
+        createElement(WorkspaceConfluenceVisualEditor, {
+          canEdit: true,
+          entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000091"),
+          onAskAgent: () => undefined,
+          onSaved: () => undefined,
+          page: {
+            attachmentInventoryLabel: "Complete",
+            attachments: [],
+            content: "- \\[ \\] Run smoke tests\nEvidence image and link labels remain readable\n",
+            contentState: "loaded",
+            contributors: [],
+            createdAt: null,
+            historyInventoryLabel: "Complete",
+            revision: "4",
+            runbookEvidenceCount: 0,
+            sourceSpaceId: "SD",
+            status: "Current",
+            taskUpdatesSafe: false,
+            updatedAt: null,
+            versions: [],
+            watcherInventoryLabel: "Complete"
+          },
+          releaseId: ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000092"),
+          submitPublication,
+          title: "Rich release report"
+        })
+      )
+    )
+
+    const checkbox = container.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    if (checkbox === null) throw new Error("Expected the projected release task")
+    expect(checkbox.disabled).toBe(true)
+    expect(container.textContent).toContain("cannot prove a lossless ADF round trip")
+    await act(async () => checkbox.click())
+    expect(submitPublication).not.toHaveBeenCalled()
   })
 
   it("does not report a resolved failed publication as saved", async () => {

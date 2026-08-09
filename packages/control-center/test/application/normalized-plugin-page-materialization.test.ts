@@ -6039,6 +6039,7 @@ describe("normalized plugin page materialization", () => {
       if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
       assert.strictEqual(lazy.projectionSchemaVersion, 2)
       assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.isFalse(lazy.details.taskUpdatesSafe)
       assert.deepStrictEqual(lazy.details.linkedIssueKeys, ["PAY-42"])
       assert.deepStrictEqual(lazy.details.linkedReleaseVersions, ["2026.29"])
       assert.deepStrictEqual(lazy.details.contributors?.[0], {
@@ -6074,6 +6075,7 @@ describe("normalized plugin page materialization", () => {
       if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
       assert.strictEqual(loaded.projectionRevision, 2)
       assert.strictEqual(loaded.details.contentState, "loaded")
+      assert.isFalse(loaded.details.taskUpdatesSafe)
       assert.isNull(loaded.details.content)
       assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
       assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })

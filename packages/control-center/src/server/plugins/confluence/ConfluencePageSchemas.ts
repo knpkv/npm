@@ -220,6 +220,7 @@ export const ConfluencePageAttributesV1 = Schema.Struct({
     complete: Schema.Boolean,
     pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))
   })),
+  taskUpdatesSafe: Schema.optionalKey(Schema.Boolean),
   contentState: Schema.optionalKey(Schema.Literals(["loaded", "lazy"]))
 }).check(hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes))
 
