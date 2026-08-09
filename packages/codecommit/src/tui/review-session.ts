@@ -66,6 +66,18 @@ export const relayFindingHeadEditorLine = (
     ? finding.location.line
     : undefined
 
+export interface RelayFindingSessionReply {
+  readonly findingId: string
+  readonly message: string
+}
+
+/** Keeps a completed conversation or verification receipt on the finding that produced it. */
+export const relayFindingSessionReply = (
+  finding: Pick<RelayReviewResult["findings"][number], "id"> | null,
+  reply: RelayFindingSessionReply | undefined
+): RelayFindingSessionReply | undefined =>
+  finding !== null && reply?.findingId === finding.id && reply.message.length > 0 ? reply : undefined
+
 /** Wraps finding navigation so the deck never dead-ends at its first or last card. */
 export const adjacentFindingIndex = (count: number, index: number, direction: -1 | 1): number => {
   if (count <= 0) return 0

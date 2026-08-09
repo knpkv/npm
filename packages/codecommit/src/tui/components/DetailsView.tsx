@@ -80,6 +80,7 @@ import {
   relayFindingFingerprint,
   relayFindingHeadEditorLine,
   relayFindingPostReceiptMatches,
+  relayFindingSessionReply,
   relayReviewReconciliationLabel,
   reconcileRelayReviewSession
 } from "../review-session.js"
@@ -825,7 +826,8 @@ export function DetailsView() {
       : conversationStatus._tag === "complete" && conversationStatus.reply !== null
         ? { findingId: conversationStatus.findingId, message: conversationStatus.reply }
         : undefined
-  const displayedFindingReply = latestSessionReply?.message ?? latestSelectedFindingReply
+  const selectedFindingSessionReply = relayFindingSessionReply(selectedFinding, latestSessionReply)
+  const displayedFindingReply = selectedFindingSessionReply?.message ?? latestSelectedFindingReply
   const findingDeck = reviewedFindings
     .map(
       (finding, index) =>
@@ -1562,11 +1564,11 @@ export function DetailsView() {
                         style={{ paddingLeft: 1 }}
                       >
                         <text fg={theme.textSuccess}>
-                          {latestSessionReply === undefined
+                          {selectedFindingSessionReply === undefined
                             ? "LATEST RELAY REPLY"
                             : verificationStatus._tag === "complete"
-                              ? `LATEST VERIFICATION · ${latestSessionReply.findingId}`
-                              : `LATEST SESSION REPLY · ${latestSessionReply.findingId}`}
+                              ? `LATEST VERIFICATION · ${selectedFindingSessionReply.findingId}`
+                              : `LATEST SESSION REPLY · ${selectedFindingSessionReply.findingId}`}
                         </text>
                         <text fg={theme.text}>{terminalSafeMultilineText(displayedFindingReply)}</text>
                       </box>

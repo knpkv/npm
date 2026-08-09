@@ -113,7 +113,8 @@ same PR workspace when Neovim exits. `v` opens the file in an existing VS Code
 window through `code --goto`. When a selected Relay finding supplies a line
 anchor for that file on the after/head side, both shortcuts open at that line.
 Before/base-side anchors open a surviving head file without applying the base
-line number, and deleted files cannot be opened from the exact-head checkout.
+line number. Deleted files cannot be opened from the exact-head checkout unless
+a separate verified base artifact is explicitly materialized.
 Editor targets are
 canonicalized and must remain regular files inside the verified detached
 worktree; deleted files and paths or symlinks that escape it are rejected. Text

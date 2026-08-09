@@ -60,6 +60,7 @@ import {
   validateChangedFileLine
 } from "../src/tui/file-diff.js"
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
+import { relayFindingSessionReply } from "../src/tui/review-session.js"
 import {
   reviewRevisionSpecifiers,
   safePathSegment,
@@ -79,6 +80,14 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("shows completed session replies only on the finding that produced them", () => {
+    const reply = { findingId: "F1", message: "F1 verification evidence" }
+
+    expect(relayFindingSessionReply({ id: "F2" }, reply)).toBeUndefined()
+    expect(relayFindingSessionReply({ id: "F1" }, reply)).toEqual(reply)
+    expect(relayFindingSessionReply({ id: "F1" }, undefined)).toBeUndefined()
+  })
+
   it("opens editors only for files that exist in the exact head checkout", () => {
     const deleted = decodeChangedFile({
       status: "deleted",
