@@ -32,7 +32,11 @@ resolved, remains actionable, was superseded, or could not be established, and
 reconcile every dependent finding and human decision from the refreshed patch.
 Keep cached open pull requests when an account refresh fails, and publish newly
 fetched and enriched pull requests to the live TUI state before that same
-refresh completes. Preload every immutable local file preview before exposing an
-exact-head workspace so navigation and verification never flash a second loading
-state, and make the second Ctrl+C consume the armed exit confirmation
+refresh completes. Preload a bounded prefix of immutable local file previews
+before exposing an exact-head workspace, then load larger-review overflow from
+the same local checkout, and make the second Ctrl+C consume the armed exit confirmation
 synchronously.
+Reject malformed or duplicate-id Relay output, isolate prior agent review text as
+untrusted prompt evidence, validate exact changed-side line anchors before
+posting, and keep edited or stale-posted findings attached to explicit human
+resolution and content-bound provider receipts.

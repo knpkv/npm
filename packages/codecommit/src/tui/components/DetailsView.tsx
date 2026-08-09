@@ -59,6 +59,7 @@ import {
   terminalSafeText,
   type WorkspaceActionPhase,
   workspaceLifecycleTransition,
+  workspaceResetInterruptions,
   workspaceIdentityMatches
 } from "../details-model.js"
 import type { FileDiffOutcome } from "../file-diff.js"
@@ -69,10 +70,14 @@ import { useTheme } from "../context/theme.js"
 import {
   adjacentFindingIndex,
   consistentRelayVerificationOutcome,
+  findingDispositionNeedsResolution,
   findingDispositionMarker,
   type FindingDisposition,
   nextPendingFindingIndex,
   type RelayReviewReconciliation,
+  relayFindingFingerprint,
+  relayFindingHeadEditorLine,
+  relayFindingPostReceiptMatches,
   relayReviewReconciliationLabel,
   reconcileRelayReviewSession
 } from "../review-session.js"
@@ -380,6 +385,7 @@ export function DetailsView() {
   const [postingFinding, setPostingFinding] = useState<{
     readonly findingId: string
     readonly findingIndex: number
+    readonly fingerprint: string
     readonly requestId: string
   } | null>(null)
   const [conversationTurns, setConversationTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
@@ -454,10 +460,13 @@ export function DetailsView() {
     const transition = workspaceLifecycleTransition(loadedWorkspaceKeyRef.current, workspaceReloadKey, phase)
     if (transition._tag === "preserve") return
     loadedWorkspaceKeyRef.current = workspaceReloadKey
-    if (transition.interrupt === "preflight") preflight(Atom.Interrupt)
-    else if (transition.interrupt === "checkout") checkout(Atom.Interrupt)
-    else if (transition.interrupt === "review") runReview(Atom.Interrupt)
-    verifyFindingAction(Atom.Interrupt)
+    for (const interrupt of workspaceResetInterruptions(transition.interrupt)) {
+      if (interrupt === "preflight") preflight(Atom.Interrupt)
+      else if (interrupt === "checkout") checkout(Atom.Interrupt)
+      else if (interrupt === "review") runReview(Atom.Interrupt)
+      else if (interrupt === "conversation") continueReview(Atom.Interrupt)
+      else verifyFindingAction(Atom.Interrupt)
+    }
     setSelectedFileIndex(0)
     setSelectedFindingIndex(0)
     setFindingDispositions({})
@@ -473,7 +482,7 @@ export function DetailsView() {
     setTab("diff")
     setAction({ _tag: "idle" })
     if (pr !== null) loadWorkspace(pr)
-  }, [checkout, loadWorkspace, preflight, pr, runReview, verifyFindingAction, workspaceReloadKey])
+  }, [checkout, continueReview, loadWorkspace, preflight, pr, runReview, verifyFindingAction, workspaceReloadKey])
 
   useEffect(() => {
     if (pr === null || workspace === null || selectedFile === null || selectedDiffKey === null) return
@@ -590,11 +599,23 @@ export function DetailsView() {
       setPostingFinding(null)
       return
     }
-    if (
-      outcome.value.findingIndex !== postingFinding.findingIndex ||
-      outcome.value.findingId !== postingFinding.findingId
-    )
+    const currentFinding =
+      action._tag === "reviewed"
+        ? action.result.findings.find((finding) => finding.id === postingFinding.findingId)
+        : undefined
+    if (!relayFindingPostReceiptMatches(postingFinding, currentFinding, outcome.value)) {
+      setFindingDispositions((current) => ({
+        ...current,
+        [postingFinding.findingId]:
+          current[postingFinding.findingId] === "posting" ? "pending" : (current[postingFinding.findingId] ?? "pending")
+      }))
+      setFindingPostDiagnostic({
+        operation: "post-finding-receipt",
+        message: "The post receipt belongs to an older finding version; review the current finding again"
+      })
+      setPostingFinding(null)
       return
+    }
     const nextDispositions: Record<string, FindingDisposition> = {
       ...findingDispositions,
       [postingFinding.findingId]: "posted"
@@ -752,6 +773,7 @@ export function DetailsView() {
   const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
   const selectedFindingDisposition =
     selectedFinding === null ? "pending" : (findingDispositions[selectedFinding.id] ?? "pending")
+  const selectedFindingNeedsResolution = findingDispositionNeedsResolution(selectedFindingDisposition)
   const selectedFindingTurns =
     selectedFinding === null ? [] : conversationTurns.filter((turn) => turn.findingId === selectedFinding.id)
   const latestSelectedFindingReply = [...selectedFindingTurns]
@@ -792,10 +814,7 @@ export function DetailsView() {
     }
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:editor:${editor}:${nextActionRequestSequence}`
-    const lineNumber =
-      selectedFinding?.location.scope === "line" && selectedFinding.location.filePath === selectedPath
-        ? selectedFinding.location.line
-        : undefined
+    const lineNumber = relayFindingHeadEditorLine(selectedFinding, selectedPath)
     setEditorStatus({ _tag: "opening", editor, requestId })
     openEditor({
       editor,
@@ -807,10 +826,7 @@ export function DetailsView() {
   }
 
   const decideFinding = (disposition: "acknowledged" | "rejected") => {
-    if (
-      selectedFinding === null ||
-      (selectedFindingDisposition !== "pending" && selectedFindingDisposition !== "failed")
-    ) {
+    if (selectedFinding === null || !selectedFindingNeedsResolution) {
       return
     }
     const nextDispositions = { ...findingDispositions, [selectedFinding.id]: disposition }
@@ -906,14 +922,19 @@ export function DetailsView() {
       workspace === null ||
       selectedFinding === null ||
       postingFinding !== null ||
-      (selectedFindingDisposition !== "pending" && selectedFindingDisposition !== "failed")
+      !selectedFindingNeedsResolution
     )
       return
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:finding:${selectedFindingIndex}:${nextActionRequestSequence}`
     setFindingDispositions((current) => ({ ...current, [selectedFinding.id]: "posting" }))
     setFindingPostDiagnostic(null)
-    setPostingFinding({ findingId: selectedFinding.id, findingIndex: selectedFindingIndex, requestId })
+    setPostingFinding({
+      findingId: selectedFinding.id,
+      findingIndex: selectedFindingIndex,
+      fingerprint: relayFindingFingerprint(selectedFinding),
+      requestId
+    })
     postFinding({
       files: workspace.files,
       finding: selectedFinding,
@@ -1507,29 +1528,12 @@ export function DetailsView() {
                     )}
                     <box flexDirection="row">
                       <ActionKey
-                        active={
-                          !agentRunning &&
-                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
-                        }
+                        active={!agentRunning && selectedFindingNeedsResolution}
                         keyName="p"
                         label={selectedFinding.publicationTarget === "description" ? "Add" : "Post"}
                       />
-                      <ActionKey
-                        active={
-                          !agentRunning &&
-                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
-                        }
-                        keyName="a"
-                        label="Ack"
-                      />
-                      <ActionKey
-                        active={
-                          !agentRunning &&
-                          (selectedFindingDisposition === "pending" || selectedFindingDisposition === "failed")
-                        }
-                        keyName="x"
-                        label="Reject"
-                      />
+                      <ActionKey active={!agentRunning && selectedFindingNeedsResolution} keyName="a" label="Ack" />
+                      <ActionKey active={!agentRunning && selectedFindingNeedsResolution} keyName="x" label="Reject" />
                     </box>
                   </box>
                 )}

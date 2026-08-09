@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import {
   type TextFilterInputKey,
   type TextFilterInputState,
@@ -39,5 +39,21 @@ describe("text filter input", () => {
   it("does not consume ordinary navigation when filtering cannot open", () => {
     const state: TextFilterInputState = { active: false, text: "" }
     expect(transitionTextFilterInput(state, { name: "return" }, false)).toEqual({ handled: false, state })
+  })
+
+  it("owns deletion and cancellation while active", () => {
+    const active: TextFilterInputState = { active: true, text: "review" }
+    expect(transitionTextFilterInput(active, { name: "backspace" }, true)).toEqual({
+      handled: true,
+      state: { active: true, text: "revie" }
+    })
+    expect(transitionTextFilterInput(active, { name: "escape" }, true)).toEqual({
+      handled: true,
+      state: { active: false, text: "" }
+    })
+    expect(transitionTextFilterInput(active, { name: ":", char: ":" }, true)).toEqual({
+      handled: true,
+      state: { active: true, text: "review:" }
+    })
   })
 })

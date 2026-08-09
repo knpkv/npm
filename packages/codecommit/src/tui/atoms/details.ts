@@ -2,6 +2,7 @@ import { AwsClient, type Domain, ReadClient, ReviewClient } from "@knpkv/codecom
 import { Crypto, Effect, Stream } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import {
+  relayFindingCanonicalIdentity,
   relayFindingCommentContent,
   relayFindingDescriptionContent,
   relayFindingFileIndex,
@@ -31,7 +32,8 @@ import {
   type FileDiffRequest,
   loadFileDiff,
   loadLocalGitBlob,
-  preloadLocalFileDiffs
+  preloadLocalFileDiffs,
+  validateChangedFileLine
 } from "../file-diff.js"
 import { runtimeAtom } from "./runtime.js"
 
@@ -384,25 +386,47 @@ export const postRelayFindingAtom = runtimeAtom.fn((input: PostRelayFindingInput
           message: "The finding anchor does not belong to this exact pull-request revision"
         })
       }
-      const canonicalIdentity = [
-        input.pr.account.profile,
-        input.pr.account.region,
-        input.revision.repositoryName,
-        input.revision.pullRequestId,
-        input.revision.revisionId,
-        input.revision.destinationCommit,
-        input.revision.sourceCommit,
-        String(input.findingIndex),
-        input.finding.id,
-        input.finding.priority,
-        input.finding.title,
-        input.finding.summary,
-        input.finding.details,
-        input.finding.recommendation,
-        input.finding.verification,
-        input.finding.publicationTarget,
-        JSON.stringify(input.finding.location)
-      ].join("\u0000")
+      if (input.finding.publicationTarget === "line-comment" && input.finding.location.scope === "line") {
+        const file = fileIndex === null ? undefined : input.files[fileIndex]
+        if (file === undefined) {
+          return yield* new WorktreeError({
+            operation: "post-finding-line",
+            message: "The line anchor does not belong to this exact pull-request revision"
+          })
+        }
+        const changed = yield* validateChangedFileLine(
+          readClient,
+          {
+            account: input.pr.account,
+            file,
+            identity: {
+              profile: input.pr.account.profile,
+              pullRequestId: input.revision.pullRequestId,
+              region: input.pr.account.region,
+              repositoryName: input.revision.repositoryName
+            },
+            repositoryName: input.revision.repositoryName,
+            revision: input.revision
+          },
+          input.finding.location.side,
+          input.finding.location.line
+        )
+        if (!changed) {
+          return yield* new WorktreeError({
+            operation: "post-finding-line",
+            message: "The selected line is not changed on the requested side of this exact pull-request revision"
+          })
+        }
+      }
+      const canonicalIdentity = relayFindingCanonicalIdentity({
+        destinationCommit: input.revision.destinationCommit,
+        profile: input.pr.account.profile,
+        pullRequestId: input.revision.pullRequestId,
+        region: input.pr.account.region,
+        repositoryName: input.revision.repositoryName,
+        revisionId: input.revision.revisionId,
+        sourceCommit: input.revision.sourceCommit
+      }, input.finding)
       const digest = yield* cryptoService.digest("SHA-256", textEncoder.encode(canonicalIdentity)).pipe(
         Effect.mapError((cause) =>
           new WorktreeError({

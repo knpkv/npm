@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { applyPatch, parsePatch } from "diff"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -39,6 +39,7 @@ import {
   fileDiffIdentityKey,
   fileDiffIdentityMatches,
   humanReviewState,
+  isChangedDiffLine,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
@@ -46,9 +47,16 @@ import {
   terminalSafeMultilineText,
   terminalSafeText,
   workspaceIdentityMatches,
-  workspaceLifecycleTransition
+  workspaceLifecycleTransition,
+  workspaceResetInterruptions
 } from "../src/tui/details-model.js"
-import { loadFileDiff, loadLocalGitBlob, preloadLocalFileDiffs } from "../src/tui/file-diff.js"
+import {
+  loadFileDiff,
+  loadLocalGitBlob,
+  MAXIMUM_PRELOADED_FILE_DIFFS,
+  preloadLocalFileDiffs,
+  validateChangedFileLine
+} from "../src/tui/file-diff.js"
 import { shouldHandleListSelection, shouldOpenPullRequestFilter } from "../src/tui/navigation-model.js"
 import {
   reviewRevisionSpecifiers,
@@ -261,6 +269,8 @@ describe("PR detail workspace", () => {
       interrupt: "review"
     })
     expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
+    expect(workspaceResetInterruptions("none")).toEqual(["conversation", "verification"])
+    expect(workspaceResetInterruptions("review")).toEqual(["review", "conversation", "verification"])
   })
 
   it("keys comments by the exact revision pair", () => {
@@ -689,7 +699,7 @@ describe("PR detail workspace", () => {
   })
 
   it("decodes line, file, and general Relay findings for explicit human disposition", () => {
-    const result = parseRelayReviewResult(JSON.stringify({
+    const result = Option.getOrThrow(parseRelayReviewResult(JSON.stringify({
       findings: [
         {
           id: "F1",
@@ -726,7 +736,7 @@ describe("PR detail workspace", () => {
         }
       ],
       verdict: "Changes requested."
-    }))
+    })))
     const files = [
       decodeChangedFile({
         status: "modified",
@@ -752,15 +762,100 @@ describe("PR detail workspace", () => {
     expect(relayFindingCommentContent(result.findings[0]!)).toContain("**Location:** src/auth.ts:42 · after")
   })
 
-  it("keeps malformed Relay output as a bounded verdict without fabricating findings", () => {
-    expect(parseRelayReviewResult("ordinary summary")).toEqual({ findings: [], verdict: "ordinary summary" })
+  it("rejects malformed and duplicate-id Relay output instead of recording a clean review", () => {
+    expect(Option.isNone(parseRelayReviewResult("ordinary summary"))).toBe(true)
     expect(parseRelayReviewResult(`\`\`\`json\n${JSON.stringify({ findings: [], verdict: "clean" })}\n\`\`\``)).toEqual(
-      {
-        findings: [],
-        verdict: "clean"
-      }
+      Option.some({ findings: [], verdict: "clean" })
     )
+    const duplicated = {
+      findings: [
+        {
+          id: "F1",
+          priority: "P2",
+          title: "First",
+          summary: "First summary",
+          details: "First details",
+          recommendation: "First recommendation",
+          verification: "Static patch review only.",
+          publicationTarget: "pr-comment",
+          location: { scope: "general" }
+        },
+        {
+          id: "F1",
+          priority: "P3",
+          title: "Second",
+          summary: "Second summary",
+          details: "Second details",
+          recommendation: "Second recommendation",
+          verification: "Static patch review only.",
+          publicationTarget: "pr-comment",
+          location: { scope: "general" }
+        }
+      ],
+      verdict: "Two concerns."
+    }
+    expect(Option.isNone(parseRelayReviewResult(JSON.stringify(duplicated)))).toBe(true)
   })
+
+  it("accepts only exact changed-side line coordinates", () => {
+    const before = "same\nold\ntail\n"
+    const after = "same\nnew\ntail\n"
+    expect(isChangedDiffLine(before, after, "before", 2)).toBe(true)
+    expect(isChangedDiffLine(before, after, "after", 2)).toBe(true)
+    expect(isChangedDiffLine(before, after, "after", 1)).toBe(false)
+    expect(isChangedDiffLine(before, after, "before", 42)).toBe(false)
+  })
+
+  it.effect("validates line comments from immutable provider blobs", () =>
+    Effect.gen(function*() {
+      const account = new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      })
+      const repositoryName = Domain.RepositoryName.make("payments")
+      const pullRequestId = Domain.PullRequestId.make("42")
+      const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+      const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      const file = decodeChangedFile({
+        status: "modified",
+        before: { blobId: "before-line", path: "src/index.ts", mode: "100644" },
+        after: { blobId: "after-line", path: "src/index.ts", mode: "100644" }
+      })
+      const revision = new ReadClient.CodeCommitPullRequestRevision({
+        authorArn: null,
+        creationDate: new Date(0),
+        destinationCommit,
+        destinationReference: "refs/heads/main",
+        lastActivityDate: new Date(0),
+        mergeBase: destinationCommit,
+        pullRequestId,
+        repositoryName,
+        revisionId: "revision-1",
+        sourceCommit,
+        sourceReference: "refs/heads/feature",
+        status: "OPEN",
+        title: "Review"
+      })
+      const client = {
+        getBlob: ({ blobId }: { readonly blobId: string }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
+              bytes: new TextEncoder().encode(blobId === "before-line" ? "same\nold\n" : "same\nnew\n")
+            })
+          )
+      }
+      const request = {
+        account,
+        file,
+        identity: { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+        repositoryName,
+        revision
+      }
+
+      expect(yield* validateChangedFileLine(client, request, "after", 2)).toBe(true)
+      expect(yield* validateChangedFileLine(client, request, "after", 42)).toBe(false)
+    }))
 
   it("bounds text decoding and samples binary content", () => {
     expect(blobPreviewDisposition(new Uint8Array([65, 0, 66]), new Uint8Array())).toBe("binary")
@@ -909,7 +1004,7 @@ describe("PR detail workspace", () => {
       expect(providerReads).toBe(0)
     }))
 
-  it.effect("preloads every exact-head file before publishing a navigable workspace", () =>
+  it.effect("preloads a bounded exact-head prefix before publishing a navigable workspace", () =>
     Effect.gen(function*() {
       const account = new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
@@ -919,13 +1014,12 @@ describe("PR detail workspace", () => {
       const pullRequestId = Domain.PullRequestId.make("42")
       const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
       const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
-      const files = ["src/first.ts", "src/second.ts"].map((path, index) =>
+      const files = Array.from({ length: MAXIMUM_PRELOADED_FILE_DIFFS + 1 }, (_, index) =>
         decodeChangedFile({
           status: "modified",
-          before: { blobId: `before-${index}`, path, mode: "100644" },
-          after: { blobId: `after-${index}`, path, mode: "100644" }
-        })
-      )
+          before: { blobId: `before-${index}`, path: `src/file-${index}.ts`, mode: "100644" },
+          after: { blobId: `after-${index}`, path: `src/file-${index}.ts`, mode: "100644" }
+        }))
       const revision = new ReadClient.CodeCommitPullRequestRevision({
         authorArn: null,
         creationDate: new Date(0),
@@ -966,14 +1060,24 @@ describe("PR detail workspace", () => {
         }
       )
 
-      expect(previews.size).toBe(files.length)
-      for (const file of files) {
+      expect(previews.size).toBe(MAXIMUM_PRELOADED_FILE_DIFFS)
+      for (const file of files.slice(0, MAXIMUM_PRELOADED_FILE_DIFFS)) {
         const key = fileDiffIdentityKey(fileDiffIdentity(
           { profile: account.profile, pullRequestId, region: account.region, repositoryName },
           revision,
           file
         ))
         expect(previews.get(key)?._tag).toBe("success")
+      }
+      const deferredFile = files[MAXIMUM_PRELOADED_FILE_DIFFS]
+      expect(deferredFile).toBeDefined()
+      if (deferredFile !== undefined) {
+        const deferredKey = fileDiffIdentityKey(fileDiffIdentity(
+          { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+          revision,
+          deferredFile
+        ))
+        expect(previews.has(deferredKey)).toBe(false)
       }
       expect(providerReads).toBe(0)
     }))

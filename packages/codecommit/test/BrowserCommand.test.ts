@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { assumeConsoleArgs } from "../src/tui/browser-command.js"
 
 describe("Granted browser command", () => {

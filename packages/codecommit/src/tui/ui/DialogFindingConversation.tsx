@@ -45,7 +45,7 @@ export function DialogFindingConversation({
   })
 
   return (
-    <Dialog title={`DISCUSS ${finding.id}`}>
+    <Dialog title={`DISCUSS ${terminalSafeCompactText(finding.id, 32)}`}>
       <text fg={theme.textAccent}>{terminalSafeCompactText(finding.title, 70)}</text>
       <text fg={theme.textMuted}>
         This thread is attached here, but the agent will reconcile the whole finding deck.

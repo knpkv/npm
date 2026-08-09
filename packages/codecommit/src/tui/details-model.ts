@@ -41,6 +41,8 @@ export type WorkspaceLifecycleTransition =
     readonly interrupt: "checkout" | "none" | "preflight" | "review"
   }
 
+export type WorkspaceResetInterruption = "checkout" | "conversation" | "preflight" | "review" | "verification"
+
 export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly afterBlobId: string | null
   readonly afterPath: string | null
@@ -270,6 +272,15 @@ export const workspaceLifecycleTransition = (
     : "none"
   return { _tag: "reset", interrupt }
 }
+
+/** Includes review children that must never outlive the exact workspace they inspect. */
+export const workspaceResetInterruptions = (
+  interrupt: Extract<WorkspaceLifecycleTransition, { readonly _tag: "reset" }>["interrupt"]
+): ReadonlyArray<WorkspaceResetInterruption> => [
+  ...(interrupt === "none" ? [] : [interrupt]),
+  "conversation",
+  "verification"
+]
 
 export const workspaceIdentityMatches = (
   actual: PullRequestWorkspaceIdentity,
@@ -643,4 +654,31 @@ export const buildUnifiedDiff = (
     metadata: metadata.length === 0 ? null : metadata.join("\n"),
     truncated
   }
+}
+
+/** Validates that one exact-side line is an addition or deletion in the complete immutable blob diff. */
+export const isChangedDiffLine = (
+  beforeText: string,
+  afterText: string,
+  side: "before" | "after",
+  line: number
+): boolean => {
+  const patch = structuredPatch("before", "after", beforeText, afterText, "", "", {
+    context: 0,
+    maxEditLength: 20_000,
+    timeout: 1_000
+  })
+  if (patch === undefined) return false
+  for (const hunk of patch.hunks) {
+    let beforeLine = hunk.oldStart
+    let afterLine = hunk.newStart
+    for (const content of hunk.lines) {
+      const prefix = content[0]
+      if (prefix === "-" && side === "before" && beforeLine === line) return true
+      if (prefix === "+" && side === "after" && afterLine === line) return true
+      if (prefix !== "+") beforeLine += 1
+      if (prefix !== "-") afterLine += 1
+    }
+  }
+  return false
 }

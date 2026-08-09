@@ -83,9 +83,10 @@ commit ID before checkout; raw commit IDs are never used as fetch refspecs.
 Invocation from a Git hook therefore cannot redirect commands
 into the caller's repository, and authentication failures return to the TUI
 instead of waiting on an invisible prompt. After a successful checkout, the TUI
-preloads every bounded file preview from immutable local objects before exposing
-the workspace. File navigation therefore never returns to a loading state, and
-previews remain keyed in memory by exact base, head, path, and blob pair. If
+preloads the first 25 bounded file previews from immutable local objects before
+exposing the workspace. Larger reviews load remaining previews on demand from
+that same exact local checkout, never from mutable provider state. Warm previews
+remain keyed in memory by exact base, head, path, and blob pair. If
 automatic checkout is unavailable, the pane
 labels the fallback and uses bounded `GetBlob` reads instead. Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
@@ -145,8 +146,35 @@ the selected file in VS Code.
 
 The human must explicitly choose `p` to publish one finding to CodeCommit, `a`
 to acknowledge it locally, or `x` to reject it locally. Description targets are
-appended under an idempotency marker after rechecking the exact revision. Comment
-targets use a deterministic idempotency token. File findings post as general
+appended after rechecking the exact revision and persist the marker
+`<!-- relay-finding:<hex-sha256> -->`. Comment targets use that same hexadecimal
+SHA-256 digest as their deterministic idempotency token. The canonical identity
+is the NUL-delimited sequence of every production input below, in this order:
+
+```json
+{
+  "awsProfile": "dev-administratoraccess",
+  "awsRegion": "eu-west-1",
+  "repositoryName": "npm-control-center-review",
+  "pullRequestId": "35",
+  "revisionId": "revision-id",
+  "destinationCommit": "<40-hex-base-commit>",
+  "sourceCommit": "<40-hex-head-commit>",
+  "findingId": "F1",
+  "priority": "P1",
+  "title": "Finding title",
+  "summary": "Finding summary",
+  "details": "Finding evidence and impact",
+  "recommendation": "Recommended remediation",
+  "verification": "Verification procedure",
+  "publicationTarget": "line-comment",
+  "locationJson": "{\"scope\":\"line\",\"filePath\":\"src/example.ts\",\"line\":42,\"side\":\"after\"}"
+}
+```
+
+The JSON location string is the exact canonical serialization used by the
+production token input. Presentation order is deliberately excluded, so
+reordering the finding deck cannot create a duplicate provider comment. File findings post as general
 comments with their file anchor in the body because CodeCommit exposes only
 general and line comment locations.
 Long tree rows retain their complete bounded name instead of losing characters

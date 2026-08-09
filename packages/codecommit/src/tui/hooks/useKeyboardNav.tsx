@@ -160,7 +160,11 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     }
 
     // Command palette: Ctrl+P, Cmd+P, ":"
-    if ((key.name === "p" && (key.meta || key.ctrl)) || key.char === ":" || key.name === ":") {
+    if (
+      !filterInputRef.current.active &&
+      !settingsFilterInputRef.current.active &&
+      ((key.name === "p" && (key.meta || key.ctrl)) || key.char === ":" || key.name === ":")
+    ) {
       dialog.show(() => <DialogCommand />)
       return
     }

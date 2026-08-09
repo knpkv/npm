@@ -13,6 +13,7 @@ import {
   fileDiffIdentity,
   fileDiffIdentityKey,
   filetypeForPath,
+  isChangedDiffLine,
   type PullRequestWorkspaceIdentity
 } from "./details-model.js"
 
@@ -45,6 +46,9 @@ export interface LocalFileDiffWorkspaceRequest extends Omit<FileDiffRequest, "fi
 }
 
 type FileDiffCacheEntry = readonly [key: string, outcome: FileDiffOutcome]
+
+/** Maximum warm previews retained before the workspace becomes interactive. */
+export const MAXIMUM_PRELOADED_FILE_DIFFS = 25
 
 type PreviewBlob =
   | { readonly _tag: "bytes"; readonly bytes: Uint8Array }
@@ -141,8 +145,7 @@ export const loadLocalGitBlob = Effect.fn("loadLocalGitBlob")(function*(
   }))
 })
 
-/** Loads both immutable blobs while preserving binary, oversize, and provider failures distinctly. */
-export const loadFileDiff = Effect.fn("loadFileDiff")(function*(
+const loadPreviewBlobs = Effect.fn("loadPreviewBlobs")(function*(
   client: FileDiffReadClient,
   request: FileDiffRequest
 ) {
@@ -164,10 +167,32 @@ export const loadFileDiff = Effect.fn("loadFileDiff")(function*(
         Effect.catchTag("CodeCommitBlobTooLargeError", (): Effect.Effect<PreviewBlob> =>
           Effect.succeed({ _tag: "too-large" }))
       )
-  const [beforeBlob, afterBlob] = yield* Effect.all(
-    [loadBlob(request.file.before), loadBlob(request.file.after)],
+  return yield* Effect.all([loadBlob(request.file.before), loadBlob(request.file.after)], { concurrency: 2 })
+})
+
+/** Checks a provider line coordinate against both complete immutable blobs before any comment mutation. */
+export const validateChangedFileLine = Effect.fn("validateChangedFileLine")(function*(
+  client: FileDiffReadClient,
+  request: FileDiffRequest,
+  side: "before" | "after",
+  line: number
+) {
+  const [beforeBlob, afterBlob] = yield* loadPreviewBlobs(client, request)
+  if (beforeBlob._tag === "too-large" || afterBlob._tag === "too-large") return false
+  if (blobPreviewDisposition(beforeBlob.bytes, afterBlob.bytes) !== "text") return false
+  const [beforeText, afterText] = yield* Effect.all(
+    [decodeBlob(beforeBlob.bytes), decodeBlob(afterBlob.bytes)],
     { concurrency: 2 }
   )
+  return isChangedDiffLine(beforeText, afterText, side, line)
+})
+
+/** Loads both immutable blobs while preserving binary, oversize, and provider failures distinctly. */
+export const loadFileDiff = Effect.fn("loadFileDiff")(function*(
+  client: FileDiffReadClient,
+  request: FileDiffRequest
+) {
+  const [beforeBlob, afterBlob] = yield* loadPreviewBlobs(client, request)
   const path = changedFilePath(request.file)
   const identity = fileDiffIdentity(request.identity, request.revision, request.file)
   if (beforeBlob._tag === "too-large" || afterBlob._tag === "too-large") {
@@ -222,12 +247,12 @@ export const loadFileDiff = Effect.fn("loadFileDiff")(function*(
   } satisfies RenderedFileDiff
 })
 
-/** Completes every bounded local preview before exposing an exact-head workspace for file navigation. */
+/** Warms a bounded local prefix before exposing an exact-head workspace for file navigation. */
 export const preloadLocalFileDiffs = Effect.fn("preloadLocalFileDiffs")(function*(
   client: FileDiffReadClient,
   request: LocalFileDiffWorkspaceRequest
 ) {
-  const entries = yield* Effect.forEach(request.files, (file) => {
+  const entries = yield* Effect.forEach(request.files.slice(0, MAXIMUM_PRELOADED_FILE_DIFFS), (file) => {
     const fileRequest: FileDiffRequest = {
       account: request.account,
       file,

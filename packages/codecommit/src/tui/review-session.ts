@@ -36,7 +36,35 @@ export const relayReviewReconciliationLabel = (value: RelayReviewReconciliation)
     value.reopened.length > 0 ? `${value.reopened.length} reopened` : null
   ].filter((part): part is string => part !== null).join(" · ") || "No finding changes"
 
-const findingFingerprint = (finding: RelayReviewResult["findings"][number]): string => JSON.stringify(finding)
+/** Stable snapshot used to bind asynchronous post receipts to the exact reviewed finding content. */
+export const relayFindingFingerprint = (finding: RelayReviewResult["findings"][number]): string =>
+  JSON.stringify(finding)
+
+/** States that still require an explicit human resolution. */
+export const findingDispositionNeedsResolution = (disposition: FindingDisposition): boolean =>
+  disposition === "pending" || disposition === "failed" || disposition === "posted-stale"
+
+/** Accepts a provider post receipt only for the unchanged finding snapshot that initiated it. */
+export const relayFindingPostReceiptMatches = (
+  posting: { readonly findingId: string; readonly findingIndex: number; readonly fingerprint: string },
+  currentFinding: RelayReviewResult["findings"][number] | undefined,
+  receipt: { readonly findingId: string; readonly findingIndex: number }
+): boolean =>
+  receipt.findingId === posting.findingId &&
+  receipt.findingIndex === posting.findingIndex &&
+  currentFinding !== undefined &&
+  relayFindingFingerprint(currentFinding) === posting.fingerprint
+
+/** Head worktrees can represent only after-side line coordinates truthfully. */
+export const relayFindingHeadEditorLine = (
+  finding: RelayReviewResult["findings"][number] | null,
+  selectedPath: string
+): number | undefined =>
+  finding?.location.scope === "line" &&
+    finding.location.side === "after" &&
+    finding.location.filePath === selectedPath
+    ? finding.location.line
+    : undefined
 
 /** Wraps finding navigation so the deck never dead-ends at its first or last card. */
 export const adjacentFindingIndex = (count: number, index: number, direction: -1 | 1): number => {
@@ -53,7 +81,7 @@ export const nextPendingFindingIndex = (
   for (let offset = 1; offset <= findingIds.length; offset += 1) {
     const candidate = (index + offset) % findingIds.length
     const id = findingIds[candidate]
-    if (id !== undefined && (dispositions[id] ?? "pending") === "pending") return candidate
+    if (id !== undefined && findingDispositionNeedsResolution(dispositions[id] ?? "pending")) return candidate
   }
   return index
 }
@@ -74,7 +102,7 @@ export const reconcileRelayReviewSession = (
   const changed = next.findings
     .filter((finding) => {
       const prior = previousById.get(finding.id)
-      return prior !== undefined && findingFingerprint(prior) !== findingFingerprint(finding)
+      return prior !== undefined && relayFindingFingerprint(prior) !== relayFindingFingerprint(finding)
     })
     .map((finding) => finding.id)
   const changedIds = new Set(changed)

@@ -5,14 +5,10 @@ snapshots:
       Effect.succeed([["main", "feature"], Option.none()])).pipe(
         Stream.flatMap(Stream.fromIterable))
   : labels:
-      - source: Stream.flatMap(Stream.fromIterable)
-        style: primary
-        start: 121
-        end: 156
       - source: |-
           Stream.paginate(undefined, (token) =>
             Effect.succeed([["main", "feature"], Option.none()])).pipe(
               Stream.flatMap(Stream.fromIterable))
-        style: secondary
+        style: primary
         start: 17
         end: 157

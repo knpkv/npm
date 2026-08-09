@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { quickFilterCommands, quickFilterTypeForShortcut } from "../src/tui/quick-filter-config.js"
 
 describe("quick filter configuration", () => {
@@ -14,6 +14,9 @@ describe("quick filter configuration", () => {
       ["8", "repo"],
       ["9", "status"]
     ])
+    for (const command of quickFilterCommands) {
+      expect(quickFilterTypeForShortcut(command.shortcut)).toBe(command.type)
+    }
   })
 
   it("does not classify a nearby non-filter shortcut", () => {

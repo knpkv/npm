@@ -8,6 +8,7 @@ import {
 } from "../../RelayReview.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
+import { terminalSafeCompactText } from "../details-model.js"
 import { Dialog } from "./Dialog.js"
 
 export function DialogFindingTarget({
@@ -36,7 +37,7 @@ export function DialogFindingTarget({
   })
 
   return (
-    <Dialog title={`PUBLISH ${finding.id}`}>
+    <Dialog title={`PUBLISH ${terminalSafeCompactText(finding.id, 32)}`}>
       <text fg={theme.textMuted}>Choose where this finding belongs. No AWS write happens here.</text>
       <box flexDirection="column" style={{ paddingBottom: 1, paddingTop: 1 }}>
         {options.map((target, index) => (

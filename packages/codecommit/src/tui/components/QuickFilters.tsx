@@ -72,7 +72,7 @@ export function QuickFilters() {
       <box style={{ flexDirection: "row", paddingRight: 1 }}>
         {errorCount > 0 && (
           <box style={{ backgroundColor: theme.errorTint, paddingLeft: 1, paddingRight: 1, marginRight: 1 }}>
-            <text fg={theme.textError}>n Errors {errorCount}</text>
+            <text fg={theme.textError}>{`${errorCount} Error${errorCount === 1 ? "" : "s"}`}</text>
           </box>
         )}
         {totalCount > errorCount && (

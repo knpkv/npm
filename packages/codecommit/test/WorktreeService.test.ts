@@ -57,9 +57,22 @@ describe("WorktreeService", () => {
       AWS_PROFILE: "review-profile",
       AWS_REGION: "eu-central-1"
     })
-    expect(command.options.env?.AWS_ACCESS_KEY_ID).toBeUndefined()
-    expect(command.options.env?.AWS_SECRET_ACCESS_KEY).toBeUndefined()
-    expect(command.options.env?.AWS_SESSION_TOKEN).toBeUndefined()
+    for (
+      const key of [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+        "AWS_CREDENTIAL_EXPIRATION",
+        "AWS_ROLE_ARN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_ROLE_SESSION_NAME",
+        "AWS_DEFAULT_REGION"
+      ]
+    ) {
+      expect(Object.hasOwn(command.options.env ?? {}, key)).toBe(true)
+      expect(command.options.env?.[key]).toBeUndefined()
+    }
   })
 
   it.effect("falls back when lockf starts but exits before readiness", () =>

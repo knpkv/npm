@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { pressExitConfirmation } from "../src/tui/exit-confirmation.js"
 import { textFromKeyboardKey } from "../src/tui/keyboard-text.js"
 
@@ -9,6 +9,7 @@ describe("keyboard text normalization", () => {
 
   it("preserves ordinary characters without classifying navigation keys", () => {
     expect(textFromKeyboardKey({ name: "x", char: "x" })).toBe("x")
+    expect(textFromKeyboardKey({ name: "x" })).toBe("x")
     expect(textFromKeyboardKey({ name: "return" })).toBeUndefined()
   })
 
