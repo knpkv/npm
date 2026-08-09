@@ -573,6 +573,8 @@ describe("Confluence page adapter", () => {
             status: "draft",
             title: currentPage.title,
             spaceId: "space-payments",
+            parentId: currentPage.parentId,
+            ownerId: currentPage.ownerId,
             body: {
               atlas_doc_format: {
                 representation: "atlas_doc_format",
