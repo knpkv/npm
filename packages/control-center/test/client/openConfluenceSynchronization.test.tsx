@@ -47,6 +47,7 @@ afterEach(async () => {
 })
 
 const Harness = ({
+  action = "afterMutation",
   enabled = true,
   onSessionExpired = ignoreSessionExpiration,
   onSynchronized,
@@ -56,6 +57,7 @@ const Harness = ({
   synchronizationRevision = 0,
   transport
 }: {
+  readonly action?: "afterMutation" | "now"
   readonly enabled?: boolean
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly onSynchronized: () => void
@@ -82,7 +84,10 @@ const Harness = ({
     transport
   })
   return (
-    <button onClick={synchronization.synchronizeAfterMutation} type="button">
+    <button
+      onClick={action === "afterMutation" ? synchronization.synchronizeAfterMutation : synchronization.synchronizeNow}
+      type="button"
+    >
       {synchronization.state}
     </button>
   )
@@ -324,6 +329,54 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
   })
 
+  it("queues a manual refresh behind synchronization active in another tab", async () => {
+    setDocumentVisibility("hidden")
+    const storageKey = `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`
+    const recordedAt = await currentTimeMillis()
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ ownerKey: "other-tab", recordedAt, sessionExpired: false, state: "syncing" })
+    )
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness action="now" onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+    expect(transport.synchronize).not.toHaveBeenCalled()
+
+    const completed = JSON.stringify({
+      ownerKey: "other-tab",
+      recordedAt: await currentTimeMillis(),
+      sessionExpired: false,
+      state: "synchronized"
+    })
+    localStorage.setItem(storageKey, completed)
+    await act(async () => window.dispatchEvent(new StorageEvent("storage", { key: storageKey, newValue: completed })))
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+  })
+
+  it("starts a manual refresh immediately when no synchronization is active", async () => {
+    setDocumentVisibility("hidden")
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => root?.render(<Harness action="now" onSynchronized={() => undefined} transport={transport} />))
+    const button = host.querySelector<HTMLButtonElement>("button")
+    if (button === null) throw new Error("Expected synchronization harness")
+
+    await act(async () => button.click())
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
+  })
+
   it("polls every 15 seconds only while visible and refreshes immediately when shown again", async () => {
     vi.useFakeTimers()
     const transport = {
@@ -448,6 +501,24 @@ describe("open Confluence page synchronization", () => {
     await vi.waitFor(() => expect(onSynchronized).toHaveBeenCalledOnce())
     expect(transport.synchronize).not.toHaveBeenCalled()
     expect(host.textContent).toBe("synchronized")
+  })
+
+  it("ignores a synchronization record beyond the forward clock-skew tolerance", async () => {
+    const recordedAt = (await currentTimeMillis()) + 60_000
+    localStorage.setItem(
+      `control-center:confluence-sync:${PLUGIN_CONNECTION_ID}`,
+      JSON.stringify({ ownerKey: "other-tab", recordedAt, sessionExpired: false, state: "synchronized" })
+    )
+    const transport = {
+      synchronize: vi.fn(() => Promise.resolve(synchronizationState("synchronized")))
+    } satisfies OpenConfluenceSynchronizationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => root?.render(<Harness onSynchronized={() => undefined} transport={transport} />))
+
+    await vi.waitFor(() => expect(transport.synchronize).toHaveBeenCalledOnce())
   })
 
   it("applies synchronization results broadcast by another same-origin tab", async () => {

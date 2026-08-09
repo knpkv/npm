@@ -192,14 +192,13 @@ export const WorkspaceConfluenceVisualEditor = ({
     }
     const updatedMarkdown = setConfluenceTaskChecked(page.content, lineIndex, checked)
     if (updatedMarkdown === null) return
-    const markdown = updatedMarkdown.trim()
     setTaskLineSaving(lineIndex)
     setTaskSaveFailed(false)
     submitPublication({
       releaseId,
       provider: "confluence",
       title,
-      markdown,
+      markdown: updatedMarkdown,
       targetEntityId: entityId,
       targetRevision: Revision.make(page.revision),
       signal: AbortSignal.timeout(30_000)

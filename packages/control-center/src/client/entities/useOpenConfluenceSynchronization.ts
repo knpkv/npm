@@ -13,6 +13,7 @@ import { browserConnectionTestTransport } from "../services/connectionTestTransp
 
 export const OPEN_CONFLUENCE_SYNC_INTERVAL = "15 seconds"
 const OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS = 15_000
+const OPEN_CONFLUENCE_SYNC_MAX_FORWARD_SKEW_MILLIS = 1_000
 
 export type OpenConfluenceSynchronizationState = "idle" | "syncing" | "synchronized" | "failed"
 
@@ -156,6 +157,7 @@ const synchronizeAutomatically = (
     const recent = readCrossTabSynchronization(storageKey)
     if (
       recent !== null &&
+      recent.recordedAt <= recordedAt + OPEN_CONFLUENCE_SYNC_MAX_FORWARD_SKEW_MILLIS &&
       (!recent.sessionExpired || recent.ownerKey === source.ownerKey) &&
       (recent.recordedAt >= requestStartedAt ||
         (!force && recordedAt - recent.recordedAt < OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS))
@@ -442,7 +444,7 @@ export const useOpenConfluenceSynchronization = ({
     return completion
   }, [enabled, pluginConnectionId, sessionKey, transport, verifySynchronized])
 
-  const synchronizeAfterMutation = useCallback((): void => {
+  const synchronizeWhenReady = useCallback((): void => {
     const lifetime = registrationLifetime.current?.signal
     if (lifetime === undefined || lifetime.aborted) return
     const automaticInFlight = pluginConnectionId === null
@@ -484,7 +486,7 @@ export const useOpenConfluenceSynchronization = ({
 
   return {
     state,
-    synchronizeAfterMutation,
-    synchronizeNow: () => void synchronize()
+    synchronizeAfterMutation: synchronizeWhenReady,
+    synchronizeNow: synchronizeWhenReady
   }
 }
