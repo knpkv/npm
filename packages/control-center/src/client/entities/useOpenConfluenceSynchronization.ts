@@ -1,4 +1,6 @@
+import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto"
 import * as Clock from "effect/Clock"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
@@ -39,6 +41,7 @@ interface AutomaticSynchronizationParticipant {
   readonly lifetime: AbortSignal
   readonly onSessionExpired: () => void
   readonly onSynchronized: () => void
+  readonly ownerKey: string
   readonly sessionKey: string
   readonly setState: (state: OpenConfluenceSynchronizationState) => void
   readonly transport: OpenConfluenceSynchronizationTransport
@@ -51,8 +54,8 @@ interface AutomaticSynchronizationGroup {
 }
 
 const CrossTabAutomaticSynchronization = Schema.Struct({
+  ownerKey: Schema.String,
   recordedAt: Schema.Number,
-  sessionKey: Schema.NullOr(Schema.String),
   sessionExpired: Schema.Boolean,
   state: Schema.Literals(["syncing", "synchronized", "failed"])
 })
@@ -61,6 +64,19 @@ type CrossTabAutomaticSynchronization = typeof CrossTabAutomaticSynchronization.
 
 const automaticSynchronizationGroups = new Map<PluginConnectionId, AutomaticSynchronizationGroup>()
 const automaticSynchronizationCleanup = new WeakMap<AutomaticSynchronizationGroup, () => void>()
+const automaticSynchronizationOwnerKeys = new Map<string, string>()
+const makeAutomaticSynchronizationOwnerKey = Effect.gen(function*() {
+  const cryptoService = yield* Crypto.Crypto
+  return yield* cryptoService.randomUUIDv4
+}).pipe(Effect.provide(BrowserCrypto.layer))
+
+const automaticSynchronizationOwnerKey = (sessionKey: string): string => {
+  const existing = automaticSynchronizationOwnerKeys.get(sessionKey)
+  if (existing !== undefined) return existing
+  const ownerKey = Effect.runSync(makeAutomaticSynchronizationOwnerKey)
+  automaticSynchronizationOwnerKeys.set(sessionKey, ownerKey)
+  return ownerKey
+}
 
 const automaticSynchronizationStorageKey = (pluginConnectionId: PluginConnectionId): string =>
   `control-center:confluence-sync:${pluginConnectionId}`
@@ -98,7 +114,7 @@ const applyAutomaticSynchronization = async (
   let requiresSessionRetry = false
   await Promise.all(Array.from(group.participants.values(), async (participant) => {
     if (participant.lifetime.aborted) return
-    if (synchronization.sessionExpired && synchronization.sessionKey !== participant.sessionKey) {
+    if (synchronization.sessionExpired && synchronization.ownerKey !== participant.ownerKey) {
       requiresSessionRetry = true
       return
     }
@@ -140,7 +156,7 @@ const synchronizeAutomatically = (
     const recent = readCrossTabSynchronization(storageKey)
     if (
       recent !== null &&
-      (!recent.sessionExpired || recent.sessionKey === source.sessionKey) &&
+      (!recent.sessionExpired || recent.ownerKey === source.ownerKey) &&
       (recent.recordedAt >= requestStartedAt ||
         (!force && recordedAt - recent.recordedAt < OPEN_CONFLUENCE_SYNC_INTERVAL_MILLIS))
     ) {
@@ -148,30 +164,44 @@ const synchronizeAutomatically = (
       return
     }
     const syncing = {
+      ownerKey: source.ownerKey,
       recordedAt,
       sessionExpired: false,
-      sessionKey: source.sessionKey,
       state: "syncing"
     } satisfies CrossTabAutomaticSynchronization
     writeCrossTabSynchronization(storageKey, syncing)
     retryAfterCompletion = await applyAutomaticSynchronization(group, syncing)
-    try {
-      const result = await source.transport.synchronize(pluginConnectionId, abort.signal)
-      if (abort.signal.aborted) return
-      const completed = {
+    const releaseSyncingRecord = async (): Promise<void> => {
+      const current = readCrossTabSynchronization(storageKey)
+      if (
+        current?.state !== "syncing" ||
+        current.ownerKey !== syncing.ownerKey ||
+        current.recordedAt !== syncing.recordedAt
+      ) return
+      writeCrossTabSynchronization(storageKey, {
+        ownerKey: source.ownerKey,
         recordedAt: await Effect.runPromise(Clock.currentTimeMillis),
         sessionExpired: false,
-        sessionKey: source.sessionKey,
+        state: "failed"
+      })
+    }
+    try {
+      const result = await source.transport.synchronize(pluginConnectionId, abort.signal)
+      if (abort.signal.aborted) return await releaseSyncingRecord()
+      const completed = {
+        ownerKey: source.ownerKey,
+        recordedAt: await Effect.runPromise(Clock.currentTimeMillis),
+        sessionExpired: false,
         state: result.result === "synchronized" ? "synchronized" : "failed"
       } satisfies CrossTabAutomaticSynchronization
       writeCrossTabSynchronization(storageKey, completed)
       retryAfterCompletion = await applyAutomaticSynchronization(group, completed)
     } catch (failure) {
-      if (abort.signal.aborted) return
+      if (abort.signal.aborted) return await releaseSyncingRecord()
       const failed = {
+        ownerKey: source.ownerKey,
         recordedAt: await Effect.runPromise(Clock.currentTimeMillis),
         sessionExpired: Predicate.isTagged("UnauthorizedApiError")(failure),
-        sessionKey: source.sessionKey,
         state: "failed"
       } satisfies CrossTabAutomaticSynchronization
       writeCrossTabSynchronization(storageKey, failed)
@@ -188,11 +218,12 @@ const synchronizeAutomatically = (
         (lock) => lock === null ? Promise.resolve() : synchronizeWithLease()
       )
   ).catch(async (failure: unknown) => {
-    if (!abort.signal.aborted) {
+    const source = group.participants.values().next().value
+    if (!abort.signal.aborted && source !== undefined) {
       const failed = {
+        ownerKey: source.ownerKey,
         recordedAt: 0,
         sessionExpired: Predicate.isTagged("UnauthorizedApiError")(failure),
-        sessionKey: null,
         state: "failed"
       } satisfies CrossTabAutomaticSynchronization
       retryAfterCompletion = await applyAutomaticSynchronization(group, failed)
@@ -417,10 +448,8 @@ export const useOpenConfluenceSynchronization = ({
     const automaticInFlight = pluginConnectionId === null
       ? undefined
       : automaticSynchronizationGroups.get(pluginConnectionId)?.active?.completion
-    const crossTabInFlight = pluginConnectionId === null
-      ? undefined
-      : waitForCrossTabSynchronization(pluginConnectionId)
-    const inFlight = manualActive.current?.completion ?? automaticInFlight ?? crossTabInFlight
+    const inFlight = manualActive.current?.completion ?? automaticInFlight ??
+      (pluginConnectionId === null ? undefined : waitForCrossTabSynchronization(pluginConnectionId))
     if (inFlight === undefined) void synchronize()
     else {
       void inFlight.then(() => {
@@ -438,6 +467,7 @@ export const useOpenConfluenceSynchronization = ({
       lifetime: lifetime.signal,
       onSessionExpired: () => sessionExpired.current(sessionKey),
       onSynchronized: () => synchronized.current(),
+      ownerKey: automaticSynchronizationOwnerKey(sessionKey),
       sessionKey,
       setState,
       transport,

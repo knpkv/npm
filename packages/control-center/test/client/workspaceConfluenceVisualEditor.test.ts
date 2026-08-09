@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
+import { afterEach, describe, expect, it, vi } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   confluenceEditorMarkdown,
