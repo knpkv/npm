@@ -1,5 +1,6 @@
+import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, ConfigProvider, Deferred, Effect, Exit, Layer, Option, Ref } from "effect"
+import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
@@ -81,7 +82,15 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     Layer.mock(PluginService, {}),
     Layer.mock(ConfigService, { load: Effect.succeed(config) }),
     Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of({ makeDirectory })),
+    NodePath.layer,
     Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
+    Layer.succeed(
+      Crypto.Crypto,
+      Crypto.make({
+        randomBytes: (size) => new Uint8Array(size),
+        digest: (_algorithm, data) => Effect.succeed(data)
+      })
+    ),
     Layer.effect(
       SandboxWorkerScope,
       Effect.map(Effect.scope, (scope) =>

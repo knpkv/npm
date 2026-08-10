@@ -106,6 +106,23 @@ It reads the standard AWS config and credentials files, deduplicates profile
 names, and returns safe profile/region metadata only; credential values are
 never returned.
 
+Sandbox settings are validated before persistence. Images must use an immutable
+`sha256` digest, reserved code-server credential variables cannot be overridden,
+and existing host mounts must canonically resolve to children of
+`~/.codecommit/sandbox-volumes` while targeting children of `/home/coder`.
+
+### SandboxService
+
+Sandbox creation revalidates the persisted policy immediately before Docker
+execution. Each sandbox receives a cryptographically random persisted access
+password, runs code-server as UID/GID `1000:1000` with all Linux capabilities
+dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
+exclude both the access password and workspace path; the authenticated web
+owner retrieves the password through the single-sandbox credential route.
+Legacy containers without a password are stopped during reconciliation and must
+be recreated. Custom runtime composition must provide Effect `Crypto`, `Path`,
+filesystem, process, and configuration services required by the sandbox layer.
+
 ## Deep Imports
 
 Client-side code must use deep imports to avoid pulling in server-only deps:

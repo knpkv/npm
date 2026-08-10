@@ -244,6 +244,11 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
+
+The callback listener binds explicitly to `127.0.0.1`. Requests with a missing
+or mismatched OAuth state are rejected without consuming the pending login, so
+only the provider callback carrying the expected state can complete or fail it.
+
 6. In **Settings** tab, copy **Client ID** and **Secret**
 
 #### 2. Configure and Login

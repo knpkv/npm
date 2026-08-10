@@ -1,9 +1,16 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
+import { AsyncResult } from "effect/unstable/reactivity"
 import { ArrowLeftIcon, CodeIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
-import { appStateAtom, deleteSandboxAtom, restartSandboxAtom, stopSandboxAtom } from "../atoms/app.js"
+import {
+  appStateAtom,
+  deleteSandboxAtom,
+  restartSandboxAtom,
+  sandboxCredentialsAtom,
+  stopSandboxAtom
+} from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 
@@ -70,6 +77,8 @@ export function SandboxView() {
   const restartSandbox = useAtomSet(restartSandboxAtom)
   const deleteSandbox = useAtomSet(deleteSandboxAtom)
   const navigate = useNavigate()
+  const credentialsAtom = useMemo(() => sandboxCredentialsAtom(SandboxId.make(sandboxId ?? "missing")), [sandboxId])
+  const credentials = useAtomValue(credentialsAtom)
 
   const viewFromUrl = searchParams.get("view")
   const [showLogs, setShowLogs] = useState(viewFromUrl === "logs")
@@ -102,6 +111,7 @@ export function SandboxView() {
 
   const isRunning = sandbox.status === "running"
   const isActive = ["creating", "cloning", "starting"].includes(sandbox.status)
+  const accessPassword = AsyncResult.isSuccess(credentials) ? credentials.value.password : null
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -175,6 +185,12 @@ export function SandboxView() {
       </div>
 
       {/* Content */}
+      {isRunning && !showLogs && (
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs">
+          <span className="text-muted-foreground">code-server password</span>
+          <code className="select-all rounded bg-background px-2 py-1 font-mono">{accessPassword ?? "Loading…"}</code>
+        </div>
+      )}
       {showLogs || !isRunning ? (
         <div className="flex-1 min-h-0 flex flex-col gap-3 p-4">
           {sandbox.statusDetail && <p className="text-sm text-muted-foreground shrink-0">{sandbox.statusDetail}</p>}
@@ -192,7 +208,7 @@ export function SandboxView() {
           )}
         </div>
       ) : (
-        <iframe src={`http://localhost:${sandbox.port}/`} className="flex-1 w-full border-0" title="Code Sandbox" />
+        <iframe src={`http://127.0.0.1:${sandbox.port}/`} className="flex-1 w-full border-0" title="Code Sandbox" />
       )}
     </div>
   )

@@ -149,6 +149,18 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
 ) {}
 
 /**
+ * Sandbox configuration rejected before persistence or container creation.
+ *
+ * @category Errors
+ */
+export class SandboxConfigurationError extends Schema.TaggedErrorClass<SandboxConfigurationError>()(
+  "SandboxConfigurationError",
+  {
+    message: Schema.String
+  }
+) {}
+
+/**
  * API call blocked by permission gate.
  *
  * @category Errors
@@ -183,4 +195,5 @@ export type CodeCommitError =
   | RefreshError
   | DockerError
   | SandboxError
+  | SandboxConfigurationError
   | PermissionDeniedError

@@ -13,11 +13,13 @@ import { DockerError } from "../Errors.js"
 export interface ContainerConfig {
   readonly Image: string
   readonly Cmd: ReadonlyArray<string>
+  readonly User?: string
   readonly ExposedPorts: Record<string, Record<string, never>>
   readonly HostConfig: {
     readonly Binds: ReadonlyArray<string>
-    readonly PortBindings: Record<string, ReadonlyArray<{ HostPort: string }>>
+    readonly PortBindings: Record<string, ReadonlyArray<{ HostIp: string; HostPort: string }>>
     readonly NetworkMode?: string
+    readonly CapDrop?: ReadonlyArray<string>
   }
   readonly Env?: ReadonlyArray<string>
   readonly Labels?: Record<string, string>
@@ -72,6 +74,11 @@ const dockerError = (operation: string) => <A, E, R>(effect: Effect.Effect<A, E,
 
 const shellEscape = (s: string) => `'${s.replace(/'/g, "'\\''")}'`
 
+export const renderDockerPortBinding = (
+  containerPort: string,
+  binding: { readonly HostIp: string; readonly HostPort: string }
+): string => `${binding.HostIp}:${binding.HostPort}:${containerPort.replace("/tcp", "")}`
+
 const makeDockerService = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const docker = (...args: Array<string>) =>
@@ -92,7 +99,7 @@ const makeDockerService = Effect.gen(function*() {
       // Port bindings
       for (const [containerPort, bindings] of Object.entries(config.HostConfig.PortBindings)) {
         for (const b of bindings) {
-          args.push("-p", `${b.HostPort}:${containerPort.replace("/tcp", "")}`)
+          args.push("-p", renderDockerPortBinding(containerPort, b))
         }
       }
 
@@ -104,6 +111,14 @@ const makeDockerService = Effect.gen(function*() {
       // Network mode
       if (config.HostConfig.NetworkMode) {
         args.push("--network", config.HostConfig.NetworkMode)
+      }
+
+      for (const capability of config.HostConfig.CapDrop ?? []) {
+        args.push("--cap-drop", capability)
+      }
+
+      if (config.User) {
+        args.push("--user", config.User)
       }
 
       // Env vars

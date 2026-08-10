@@ -23,7 +23,7 @@ interface SandboxSettings {
 }
 
 const DEFAULTS: SandboxSettings = {
-  image: "codercom/code-server:latest",
+  image: "codercom/code-server@sha256:b88ed46a6ace76a0294a17a24f39aa88032ed0a3692c3d8ab5433b47ab57ccbf",
   extensions: [],
   setupCommands: [],
   env: {},
@@ -132,12 +132,12 @@ function SandboxForm({
         <label className="text-sm font-medium">Docker Image</label>
         <Input
           value={settings.image}
-          placeholder="codercom/code-server:latest"
+          placeholder="codercom/code-server@sha256:…"
           onChange={(e) => onChange({ image: e.target.value })}
           className="h-8 text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          Base image for sandboxes. Must have code-server or install via setup commands.
+          Digest-pinned base image for sandboxes. Must have code-server or install via setup commands.
         </p>
       </div>
 
@@ -468,7 +468,7 @@ const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
   {
     label: "VS Code Extensions",
     mount: {
-      hostPath: "~/.vscode/extensions",
+      hostPath: "~/.codecommit/sandbox-volumes/extensions",
       containerPath: "/home/coder/.local/share/code-server/extensions",
       readonly: false
     }
@@ -476,7 +476,7 @@ const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
   {
     label: "VS Code Settings",
     mount: {
-      hostPath: "~/Library/Application Support/Code/User/settings.json",
+      hostPath: "~/.codecommit/sandbox-volumes/settings.json",
       containerPath: "/home/coder/.local/share/code-server/User/settings.json",
       readonly: true
     }
@@ -484,22 +484,10 @@ const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
   {
     label: "VS Code Keybindings",
     mount: {
-      hostPath: "~/Library/Application Support/Code/User/keybindings.json",
+      hostPath: "~/.codecommit/sandbox-volumes/keybindings.json",
       containerPath: "/home/coder/.local/share/code-server/User/keybindings.json",
       readonly: true
     }
-  },
-  {
-    label: "SSH Keys",
-    mount: { hostPath: "~/.ssh", containerPath: "/home/coder/.ssh", readonly: true }
-  },
-  {
-    label: "Git Config",
-    mount: { hostPath: "~/.gitconfig", containerPath: "/home/coder/.gitconfig", readonly: true }
-  },
-  {
-    label: "AWS Credentials",
-    mount: { hostPath: "~/.aws", containerPath: "/home/coder/.aws", readonly: true }
   }
 ]
 

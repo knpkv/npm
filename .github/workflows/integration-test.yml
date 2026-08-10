@@ -8,28 +8,22 @@ on:
   # Allow manual trigger
   workflow_dispatch:
 
-  # Run on PRs that modify integration tests or integration-tested packages
-  pull_request:
-    paths:
-      - "packages/*/test/integration.test.ts"
-      - "packages/agent-skills/**"
-      - "packages/atlassian-common/src/**"
-      - "packages/confluence-to-markdown/src/**"
-      - "packages/confluence-to-markdown/package.json"
-      - "packages/jira-api-client/src/**"
-      - "packages/jira-cli/src/**"
-      - "packages/jira-cli/package.json"
-      - ".github/workflows/integration-test.yml"
+permissions:
+  contents: read
 
 jobs:
   test-confluence:
     name: Confluence CLI Integration Tests
+    if: github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
+    environment: control-center-live
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         uses: ./.github/actions/setup
@@ -49,12 +43,16 @@ jobs:
 
   test-jira:
     name: Jira CLI Integration Tests
+    if: github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
+    environment: control-center-live
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         uses: ./.github/actions/setup

@@ -28,13 +28,15 @@ jobs:
       id-token: write # For npm provenance
       pull-requests: write # For creating release PRs
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
           node-version: 24.10.0
       - name: Create Release Pull Request or Publish
-        uses: changesets/action@v1
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           # Version packages based on changeset files
           version: pnpm changeset:version

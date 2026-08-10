@@ -30,12 +30,22 @@ type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
  * @category Services
  */
 export interface HttpServerFactory {
-  readonly createServerLayer: (port: number) => Layer.Layer<
+  readonly createServerLayer: (options: CallbackServerListenOptions) => Layer.Layer<
     HttpServer.HttpServer,
     HttpServerError.ServeError,
     never
   >
 }
+
+export interface CallbackServerListenOptions {
+  readonly hostname: "127.0.0.1"
+  readonly port: number
+}
+
+export const callbackServerListenOptions = (port: number): CallbackServerListenOptions => ({
+  hostname: "127.0.0.1",
+  port
+})
 
 /**
  * Tag for the HttpServerFactory service.
@@ -57,7 +67,9 @@ export class HttpServerFactoryTag extends Context.Service<
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
+  createLayerFn: (
+    options: CallbackServerListenOptions
+  ) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
@@ -98,7 +110,7 @@ export const startCallbackServer = (
       { readonly context: Context.Context<HttpServer.HttpServer>; readonly port: number },
       OAuthError
     > =>
-      Layer.buildWithScope(factory.createServerLayer(port), serverScope).pipe(
+      Layer.buildWithScope(factory.createServerLayer(callbackServerListenOptions(port)), serverScope).pipe(
         Effect.map((context) => ({ context, port })),
         Effect.catchIf(
           (error) => isAddressInUse(error) && port < MAX_PORT,
@@ -124,6 +136,14 @@ export const startCallbackServer = (
           const error = url.searchParams.get("error")
           const errorDescription = url.searchParams.get("error_description")
 
+          if (state !== expectedState) {
+            return HttpServerResponse.html(
+              "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
+            ).pipe(
+              HttpServerResponse.setStatus(403)
+            )
+          }
+
           if (error) {
             yield* Deferred.fail(
               deferred,
@@ -131,16 +151,6 @@ export const startCallbackServer = (
             )
             return HttpServerResponse.html(
               "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
-            )
-          }
-
-          if (state !== expectedState) {
-            yield* Deferred.fail(
-              deferred,
-              new OAuthError({ step: "authorize", cause: "State mismatch - possible CSRF attack" })
-            )
-            return HttpServerResponse.html(
-              "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
             )
           }
 

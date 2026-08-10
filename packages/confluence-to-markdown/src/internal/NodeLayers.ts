@@ -16,5 +16,5 @@ import { makeHttpServerFactory } from "./oauthServer.js"
  * @category Layers
  */
 export const HttpServerFactoryLive = makeHttpServerFactory(
-  (port) => NodeHttpServer.layerServer(createServer, { port })
+  (options) => NodeHttpServer.layerServer(createServer, options)
 )

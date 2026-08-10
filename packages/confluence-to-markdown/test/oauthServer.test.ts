@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/unstable/http"
 import { createServer } from "node:http"
-import { makeHttpServerFactory, startCallbackServer } from "../src/internal/oauthServer.js"
+import { callbackServerListenOptions, makeHttpServerFactory, startCallbackServer } from "../src/internal/oauthServer.js"
 
 const HttpClientLive = NodeHttpClient.layerUndici
 const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
@@ -21,6 +21,10 @@ const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
 
 describe("oauthServer", () => {
   describe("startCallbackServer", () => {
+    it("binds the production callback listener to IPv4 loopback", () => {
+      expect(callbackServerListenOptions(8585)).toEqual({ hostname: "127.0.0.1", port: 8585 })
+    })
+
     it.effect("starts server and returns port", () =>
       Effect.scoped(
         Effect.gen(function*() {
@@ -88,7 +92,7 @@ describe("oauthServer", () => {
 
     it.effect("retries occupied fixed-range ports with the injected factory", () => {
       const attempts = Ref.makeUnsafe<ReadonlyArray<number>>([])
-      const occupiedFactory = makeHttpServerFactory((port) =>
+      const occupiedFactory = makeHttpServerFactory(({ port }) =>
         Layer.effect(
           HttpServer.HttpServer,
           Ref.update(attempts, (ports) => [...ports, port]).pipe(
@@ -113,7 +117,7 @@ describe("oauthServer", () => {
     it.effect("maps a multiply retried server failure to one OAuth error", () => {
       const attempts = Ref.makeUnsafe<ReadonlyArray<number>>([])
       const terminalFailure = new HttpServerError.ServeError({ cause: { code: "EACCES" } })
-      const failingFactory = makeHttpServerFactory((port) =>
+      const failingFactory = makeHttpServerFactory(({ port }) =>
         Layer.effect(
           HttpServer.HttpServer,
           Ref.update(attempts, (ports) => [...ports, port]).pipe(
@@ -159,5 +163,49 @@ describe("oauthServer", () => {
         )
       )
     })
+
+    it.effect("ignores a forged error callback before accepting the legitimate state", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "expected-state"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+          const client = yield* HttpClient.HttpClient
+
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("error", "access_denied")
+            )
+          )
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("code", "legitimate-code"),
+              HttpClientRequest.setUrlParam("state", expectedState)
+            )
+          )
+
+          expect(yield* Fiber.join(codeReceiver)).toBe("legitimate-code")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
+
+    it.effect("accepts a provider error only after validating state", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "expected-state"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+          const client = yield* HttpClient.HttpClient
+
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("error", "access_denied"),
+              HttpClientRequest.setUrlParam("state", expectedState)
+            )
+          )
+
+          const error = yield* Fiber.join(codeReceiver).pipe(Effect.flip)
+          expect(String(error.cause)).toContain("access_denied")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
   })
 })

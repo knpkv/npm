@@ -1,7 +1,7 @@
 import { SandboxService } from "@knpkv/codecommit-core"
 import type { SandboxRow } from "@knpkv/codecommit-core/CacheService.js"
 import { SandboxStatus } from "@knpkv/codecommit-core/Domain.js"
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi, type SandboxResponse } from "../Api.js"
 
@@ -42,6 +42,15 @@ export const SandboxLive = HttpApiBuilder.group(CodeCommitApi, "sandbox", (handl
         sandboxService.get(params.sandboxId).pipe(
           Effect.map(encodeSandbox),
           Effect.mapError((e) => new ApiError({ message: e.message }))
+        ))
+      .handle("credentials", ({ params }) =>
+        sandboxService.get(params.sandboxId).pipe(
+          Effect.flatMap((row) =>
+            row.accessPassword === null
+              ? Effect.fail(new ApiError({ message: "Sandbox has no authenticated access credential" }))
+              : Effect.succeed({ password: row.accessPassword })
+          ),
+          Effect.mapError((e) => Predicate.isTagged(e, "ApiError") ? e : new ApiError({ message: e.message }))
         ))
       .handle("stop", ({ params }) =>
         sandboxService.stop(params.sandboxId).pipe(

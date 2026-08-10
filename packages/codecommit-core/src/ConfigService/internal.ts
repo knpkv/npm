@@ -22,6 +22,8 @@ const emptyStrings: Array<string> = []
 const emptyEnv: Record<string, string> = {}
 const emptyVolumeMounts: Array<SandboxVolumeMountDefault> = []
 const defaultAccountRegions: Array<AwsRegion> = [decodeAwsRegion("us-east-1")]
+export const defaultSandboxImage =
+  "codercom/code-server@sha256:b88ed46a6ace76a0294a17a24f39aa88032ed0a3692c3d8ab5433b47ab57ccbf"
 
 export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProfile")({
   name: Schema.NonEmptyString.pipe(Schema.brand("AwsProfileName")),
@@ -29,7 +31,7 @@ export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProf
 }) {}
 
 export const SandboxConfig = Schema.Struct({
-  image: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault("codercom/code-server:latest"))),
+  image: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(defaultSandboxImage))),
   extensions: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(emptyStrings))),
   setupCommands: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefaultTypeKey(decodingDefault(emptyStrings))
@@ -41,7 +43,7 @@ export const SandboxConfig = Schema.Struct({
     Schema.Struct({
       hostPath: Schema.String,
       containerPath: Schema.String,
-      readonly: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(false)))
+      readonly: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(true)))
     })
   ).pipe(
     Schema.withDecodingDefaultTypeKey(

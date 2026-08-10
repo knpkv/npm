@@ -23,6 +23,8 @@ CLI and TUI for AWS CodeCommit pull requests.
 - [Granted](https://granted.dev) with the `assume` executable configured for
   opening a selected pull request in the matching AWS account console
 - A locally authenticated `codex` executable for optional Relay actions
+- Docker for optional web-mode review sandboxes. Sandbox IDE ports are
+  loopback-only and require the per-sandbox password shown by the web UI.
 - `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
   for the external editor shortcut
 - On macOS or Linux, `/bin/sh`, `/bin/cat`, and either `lockf` or `flock` for
@@ -208,6 +210,21 @@ narrower than the hierarchy.
 ```bash
 codecommit web [--port 3000] [--hostname 127.0.0.1]
 ```
+
+Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
+fragment contains process-scoped bootstrap and CSRF secrets; the bootstrap
+secret is exchanged for an HttpOnly SameSite cookie, removed from the address
+bar, and required by every `/api/**` route. Mutations additionally require the
+independent same-origin CSRF proof. Do not publish or proxy this local HTTP
+listener onto another network.
+
+Review sandboxes use a digest-pinned code-server image, a random password, a
+non-root user, dropped Linux capabilities, and a Docker port explicitly bound
+to `127.0.0.1`. User-configured host mounts must exist and canonically resolve to children of
+`~/.codecommit/sandbox-volumes`, and container targets must be children of
+`/home/coder`; AWS credentials, SSH keys, the Docker socket, and broad home or
+root mounts are rejected before configuration persistence and again before
+Docker execution.
 
 ### Pull Request Commands
 

@@ -10,6 +10,7 @@ import {
   Clock,
   Config,
   Context,
+  Crypto,
   Duration,
   Effect,
   Layer,
@@ -25,7 +26,12 @@ import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../ChildEnv.js"
-import { ConfigService, defaultSandboxConfig, type SandboxConfig } from "../ConfigService/index.js"
+import {
+  ConfigService,
+  defaultSandboxConfig,
+  type SandboxConfig,
+  validateSandboxConfig
+} from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
 import { type ContainerConfig, DockerService } from "./DockerService.js"
@@ -53,16 +59,18 @@ const sandboxesDir = homeDir.pipe(
 
 const expandHome = (p: string, home: string) => p.startsWith("~/") ? `${home}${p.slice(1)}` : p
 
-const makeContainerConfig = (
+export const makeContainerConfig = (
   workspacePath: string,
   port: number,
   sandboxId: string,
   pullRequestId: string,
   sandboxConfig: SandboxConfig,
-  homePath: string
+  homePath: string,
+  accessPassword: string
 ): ContainerConfig => ({
   Image: sandboxConfig.image,
-  Cmd: ["--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"],
+  User: "1000:1000",
+  Cmd: ["--bind-addr", "0.0.0.0:8080", "--auth", "password", "/workspace"],
   ExposedPorts: { "8080/tcp": {} },
   HostConfig: {
     Binds: [
@@ -71,10 +79,12 @@ const makeContainerConfig = (
         `${expandHome(m.hostPath, homePath)}:${m.containerPath}${m.readonly ? ":ro" : ""}`
       )
     ],
-    PortBindings: { "8080/tcp": [{ HostPort: String(port) }] }
+    PortBindings: { "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: String(port) }] },
+    CapDrop: ["ALL"]
   },
   Env: [
-    ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`)
+    ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`),
+    `PASSWORD=${accessPassword}`
   ],
   Labels: {
     "codecommit.sandbox.id": sandboxId,
@@ -88,6 +98,7 @@ const makeSandboxService = Effect.gen(function*() {
   const docker = yield* DockerService
   const plugins = yield* PluginService
   const configService = yield* ConfigService
+  const cryptoService = yield* Crypto.Crypto
   const homePath = yield* homeDir.pipe(Effect.orDie)
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
 
@@ -154,6 +165,7 @@ const makeSandboxService = Effect.gen(function*() {
         const rand = yield* Random.nextIntBetween(0, 2176782336)
         const id = SandboxId.make(`sbx-${nowMs}-${rand.toString(36).padStart(6, "0")}`)
         const port = yield* allocatePort()
+        const accessPassword = yield* cryptoService.randomUUIDv4
         const workspacePath = `${basePath}/${id}`
         const now = new Date(nowMs).toISOString()
 
@@ -163,6 +175,7 @@ const makeSandboxService = Effect.gen(function*() {
           awsAccountId: params.awsAccountId,
           repositoryName: params.repositoryName,
           sourceBranch: params.sourceBranch,
+          accessPassword,
           workspacePath,
           status: "creating",
           createdAt: now,
@@ -178,6 +191,7 @@ const makeSandboxService = Effect.gen(function*() {
             // Load config at creation time
             yield* log("Loading sandbox config")
             const sandboxCfg = yield* loadSandboxConfig
+            yield* validateSandboxConfig(sandboxCfg, homePath)
 
             // Clone via HTTPS + AWS credential helper
             yield* updateStatus(id, "cloning")
@@ -242,13 +256,15 @@ const makeSandboxService = Effect.gen(function*() {
 
             // Create + start container
             yield* log("Creating container")
+            yield* validateSandboxConfig(sandboxCfg, homePath)
             const containerConfig = makeContainerConfig(
               workspacePath,
               port,
               id,
               params.pullRequestId,
               sandboxCfg,
-              homePath
+              homePath,
+              accessPassword
             )
             const containerId = yield* docker.createContainer(containerConfig)
             const cid = containerId.trim()
@@ -354,6 +370,14 @@ const makeSandboxService = Effect.gen(function*() {
     restart: (id: SandboxId) =>
       Effect.gen(function*() {
         const row = yield* repo.findById(id)
+        if (row.accessPassword === null) {
+          return yield* Effect.fail(
+            new SandboxError({
+              sandboxId: id,
+              message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+            })
+          )
+        }
         if (!row.containerId) {
           return yield* Effect.fail(
             new SandboxError({ sandboxId: id, message: "No container to restart" })
@@ -403,6 +427,15 @@ const makeSandboxService = Effect.gen(function*() {
         const active = yield* repo.findActive()
         yield* Effect.forEach(active, (row) =>
           Effect.gen(function*() {
+            if (row.accessPassword === null) {
+              if (row.containerId) {
+                yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
+              }
+              yield* updateStatus(SandboxId.make(row.id), "error", {
+                error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+              })
+              return
+            }
             if (!row.containerId) {
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
               return

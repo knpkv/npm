@@ -13,6 +13,7 @@ export const SandboxRow = Schema.Struct({
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
+  accessPassword: Schema.NullOr(Schema.String),
   containerId: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
   workspacePath: Schema.String,
@@ -32,6 +33,7 @@ export interface InsertSandbox {
   readonly awsAccountId: string
   readonly repositoryName: string
   readonly sourceBranch: string
+  readonly accessPassword: string
   readonly workspacePath: string
   readonly status: string
   readonly createdAt: string
@@ -86,8 +88,8 @@ const makeSandboxRepo = Effect.gen(function*() {
 
   const service = {
     insert: (sandbox: InsertSandbox) =>
-      sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, workspace_path, status, created_at, last_activity_at)
-            VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.sourceBranch}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
+      sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, access_password, workspace_path, status, created_at, last_activity_at)
+            VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.sourceBranch}, ${sandbox.accessPassword}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
         .pipe(
           Effect.tap(() => publish),
           cacheError("insert")

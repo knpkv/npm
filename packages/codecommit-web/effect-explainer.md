@@ -390,7 +390,8 @@ Every handler maps domain errors to `ApiError` for consistent HTTP error respons
 
 ## Gotchas
 
-1. **CORS** — Configurable via `ALLOWED_ORIGINS` env var (comma-separated). Defaults to `localhost:3000`.
+1. **Owner session** — Startup creates a one-time bootstrap URL. Every API route requires the resulting
+   `HttpOnly` owner cookie, and mutations additionally require the same-origin CSRF header.
 2. **Static files vs API** — Static middleware runs first; API router handles `/api/*`. Order matters.
 3. **Bun vs Node** — Server uses `@effect/platform-bun`. For Node deployment, swap to `@effect/platform-node`.
 4. **SSE cleanup** — When client disconnects, the SubscriptionRef stream is interrupted automatically.
@@ -406,12 +407,16 @@ Bun throws a defect (not typed error) when a port is in use. Convert and retry:
 import * as Predicate from "effect/Predicate"
 
 const startServer = (port: number): Effect.Effect<never> =>
-  Effect.logInfo(`Starting on http://localhost:${port}`).pipe(
-    Effect.andThen(Effect.suspend(() => Layer.launch(makeServer({ port })))),
-    Effect.catchAllDefect((defect) =>
-      Predicate.isError(defect) && defect.message.includes("port") && port < 3010
-        ? Effect.logWarning(`Port ${port} in use`).pipe(Effect.andThen(startServer(port + 1)))
-        : Effect.die(defect)
+  makeOwnerSessionSecrets().pipe(
+    Effect.flatMap((security) =>
+      Effect.logInfo(`Starting on http://127.0.0.1:${port}`).pipe(
+        Effect.andThen(Effect.suspend(() => Layer.launch(makeServer({ port, security })))),
+        Effect.catchAllDefect((defect) =>
+          Predicate.isError(defect) && defect.message.includes("port") && port < 3010
+            ? Effect.logWarning(`Port ${port} in use`).pipe(Effect.andThen(startServer(port + 1)))
+            : Effect.die(defect)
+        )
+      )
     )
   )
 ```
