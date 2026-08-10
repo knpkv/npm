@@ -448,6 +448,18 @@ describe("PR detail workspace", () => {
         workspaceRefreshReason: "repository-changed"
       })
     ).toBe("refresh-list")
+    expect(
+      mergeFailureWorkspaceRefreshReason(
+        new ReadClient.CodeCommitReadNotFoundError({ operation: "get-pull-request" })
+      )
+    ).toBe("merge-target-not-found")
+    expect(
+      mergeFailureWorkspaceReloadPolicy({
+        message: "The pull request could not be found",
+        operation: "merge-squash",
+        workspaceRefreshReason: "merge-target-not-found"
+      })
+    ).toBe("refresh-list")
     const currentRevision = { current: "revision-a" }
     const submitOpenDialog = () =>
       mergeDialogWorkspaceSelection({
