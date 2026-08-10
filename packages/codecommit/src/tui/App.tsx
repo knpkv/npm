@@ -2,13 +2,14 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect } from "react"
 import { createPrAtom, openPrAtom } from "./atoms/actions.js"
-import { refreshAtom } from "./atoms/app.js"
-import { creatingPrAtom, viewAtom } from "./atoms/ui.js"
+import { appStateAtom, refreshAtom } from "./atoms/app.js"
+import { ambiguousMergeGuardAtom, creatingPrAtom, viewAtom } from "./atoms/ui.js"
 import { DetailsView, Footer, Header, MainList, QuickFilters } from "./components/index.js"
 import { DialogProvider } from "./context/dialog.js"
 import { ThemeProvider, useTheme } from "./context/theme.js"
 import { useKeyboardNav } from "./hooks/useKeyboardNav.js"
 import { DialogRenderer } from "./ui/Dialog.js"
+import { ambiguousMergeGuardAfterAppStatus } from "./details-model.js"
 
 interface AppProps {
   readonly onQuit: () => void
@@ -18,6 +19,9 @@ function AppContent({ onQuit }: AppProps) {
   const { theme } = useTheme()
   const openPr = useAtomSet(openPrAtom)
   const refresh = useAtomSet(refreshAtom)
+  const appStateResult = useAtomValue(appStateAtom)
+  const ambiguousMergeGuard = useAtomValue(ambiguousMergeGuardAtom)
+  const setAmbiguousMergeGuard = useAtomSet(ambiguousMergeGuardAtom)
   const view = useAtomValue(viewAtom)
   const createPrResult = useAtomValue(createPrAtom)
   const setCreatingPr = useAtomSet(creatingPrAtom)
@@ -26,6 +30,18 @@ function AppContent({ onQuit }: AppProps) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // A merge with an unknown provider outcome stays locked across DetailsView
+  // unmounts. Only a later completed authoritative refresh clears it.
+  useEffect(() => {
+    if (ambiguousMergeGuard === null || !AsyncResult.isSuccess(appStateResult)) return
+    const next = ambiguousMergeGuardAfterAppStatus(
+      ambiguousMergeGuard,
+      appStateResult.value.status,
+      appStateResult.value.lastUpdated
+    )
+    if (next !== ambiguousMergeGuard) setAmbiguousMergeGuard(next)
+  }, [ambiguousMergeGuard, appStateResult, setAmbiguousMergeGuard])
 
   // Clear creating PR state when result comes in
   useEffect(() => {

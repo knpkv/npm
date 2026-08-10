@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { loginToAwsAtom } from "../atoms/actions.js"
 import { appStateAtom, markAllReadAtom, notificationsAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
 import {
+  ambiguousMergeGuardAtom,
   currentPRAtom,
   currentUserAtom,
   exitPendingAtom,
@@ -25,6 +26,7 @@ import {
   viewAtom
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
+import { pullRequestOpeningBlocked } from "../details-model.js"
 import { pressExitConfirmation } from "../exit-confirmation.js"
 import { extractScope } from "../ListBuilder.js"
 import { shouldOpenPullRequestFilter } from "../navigation-model.js"
@@ -65,6 +67,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setIsFiltering = useAtomSet(isFilteringAtom)
   const filterInputRef = useRef<TextFilterInputState>({ active: isFiltering, text: filterText })
   const currentPR = useAtomValue(currentPRAtom)
+  const ambiguousMergeGuard = useAtomValue(ambiguousMergeGuardAtom)
   const selectedIndex = useAtomValue(selectedIndexAtom)
   const refresh = useAtomSet(refreshAtom)
   const markAllRead = useAtomSet(markAllReadAtom)
@@ -339,7 +342,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         break
 
       case "return":
-        if (view === "prs" && currentPR) {
+        if (view === "prs" && currentPR && !pullRequestOpeningBlocked(ambiguousMergeGuard, currentPR)) {
           setView("details")
         } else if (view === "notifications") {
           const selected = notifications.items[selectedIndex]

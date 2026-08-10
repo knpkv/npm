@@ -39,6 +39,7 @@ import {
 import {
   type ActionDiagnostic,
   adjacentChangedFileIndex,
+  beginAmbiguousMergeGuard,
   beginFindingPostSession,
   changedFileHeadPath,
   changedFileRowId,
@@ -47,6 +48,7 @@ import {
   changedFileTreeVisibleName,
   commentLocationAnchor,
   commentRevisionContext,
+  claimMergeConfirmation,
   currentFileDiffOutcome,
   currentWorkspaceSelection,
   detailsKeyIntent,
@@ -61,12 +63,14 @@ import {
   mergeFailureWorkspaceReloadPolicy,
   mergeResultSettlement,
   type MergeResultObservation,
+  type MergeStatus,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
   pullRequestRevisionPollTickEnabled,
+  pullRequestSelectionKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   revisionHeaderText,
@@ -89,7 +93,7 @@ import {
 } from "../details-model.js"
 import type { FileDiffOutcome } from "../file-diff.js"
 import type { LocalEditor } from "../editor-launch.js"
-import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { ambiguousMergeGuardAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
@@ -345,22 +349,6 @@ type ActionStatus =
     } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
-type MergeStatus =
-  | { readonly _tag: "idle" }
-  | {
-      readonly _tag: "ready"
-      readonly requestId: string
-      readonly revision: ReadClient.CodeCommitPullRequestRevision
-      readonly strategy: ReviewClient.CodeCommitMergeStrategy
-    }
-  | {
-      readonly _tag: "running"
-      readonly requestId: string
-      readonly revision: ReadClient.CodeCommitPullRequestRevision
-      readonly strategy: ReviewClient.CodeCommitMergeStrategy
-    }
-  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
-
 type EditorStatus =
   | { readonly _tag: "idle" }
   | { readonly _tag: "opening"; readonly editor: LocalEditor; readonly requestId: string }
@@ -458,6 +446,7 @@ export function DetailsView() {
   const setSelectedPrId = useAtomSet(selectedPrIdAtom)
   const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
   const refresh = useAtomSet(refreshAtom)
+  const setAmbiguousMergeGuard = useAtomSet(ambiguousMergeGuardAtom)
   const setView = useAtomSet(viewAtom)
   const openPr = useAtomSet(openPrAtom)
   const loadWorkspace = useAtomSet(loadPullRequestWorkspaceAtom)
@@ -522,7 +511,6 @@ export function DetailsView() {
     readonly providerDriftPending: boolean
   }>({ actionCancelable: true, currentWorkspace: null, providerDriftPending: false })
   actionRef.current = action
-  mergeStatusRef.current = mergeStatus
   selectedFindingIndexRef.current = selectedFindingIndex
 
   const updatePostingFinding = (next: FindingPostSession | null) => {
@@ -1057,6 +1045,9 @@ export function DetailsView() {
         }
       })
       setVerifiedWorkspace(null)
+      if (pr !== null) {
+        setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pullRequestSelectionKey(pr), appState.lastUpdated))
+      }
       refresh()
       setView("prs")
       return
@@ -1068,6 +1059,9 @@ export function DetailsView() {
       const reloadPolicy = mergeFailureWorkspaceReloadPolicy(outcome.diagnostic)
       setVerifiedWorkspace((current) => verifiedWorkspaceAfterMergeFailure(current, outcome.diagnostic))
       if (reloadPolicy === "refresh-list") {
+        if (outcome.diagnostic.workspaceRefreshReason === "merge-outcome-unknown" && pr !== null) {
+          setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pullRequestSelectionKey(pr), appState.lastUpdated))
+        }
         refresh()
         setView("prs")
       } else if (reloadPolicy === "reload" && pr !== null) {
@@ -1078,7 +1072,16 @@ export function DetailsView() {
     updateMergeStatus({ _tag: "idle" })
     refresh()
     setView("prs")
-  }, [loadWorkspace, mergePullRequestResult, mergeStatus, pr, refresh, setView])
+  }, [
+    appState.lastUpdated,
+    loadWorkspace,
+    mergePullRequestResult,
+    mergeStatus,
+    pr,
+    refresh,
+    setAmbiguousMergeGuard,
+    setView
+  ])
 
   const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
   const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
@@ -1516,11 +1519,12 @@ export function DetailsView() {
       actionReady: action._tag === "ready" && workspace !== null,
       conversationRunning: agentRunning,
       dialogOpen: dialog.current !== null,
+      exitShortcut: key.name === "c" && key.ctrl === true,
       findingPostRunning: postingFindingRef.current !== null,
       findingReviewActive: selectedFinding !== null,
       keyName: key.name,
-      mergeReady: mergeStatus._tag === "ready" && workspace !== null,
-      mergeRunning: mergeStatus._tag === "running",
+      mergeReady: mergeStatusRef.current._tag === "ready" && workspace !== null,
+      mergeRunning: mergeStatusRef.current._tag === "running",
       modified: key.ctrl === true || key.meta === true,
       shifted: key.shift === true,
       tab,
@@ -1590,14 +1594,15 @@ export function DetailsView() {
     else if (intent === "review-security") beginAction("security")
     else if (intent === "review-tests") beginAction("tests")
     else if (intent === "explain-risk") beginAction("explain")
-    else if (intent === "confirm-merge" && mergeStatus._tag === "ready" && pr !== null) {
-      const ready = mergeStatus
-      updateMergeStatus({ ...ready, _tag: "running" })
+    else if (intent === "confirm-merge" && pr !== null) {
+      const running = claimMergeConfirmation(mergeStatusRef.current)
+      if (running === null) return
+      updateMergeStatus(running)
       mergePullRequest({
         pr,
-        requestId: ready.requestId,
-        revision: ready.revision,
-        strategy: ready.strategy
+        requestId: running.requestId,
+        revision: running.revision,
+        strategy: running.strategy
       })
     } else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
       const ready = action

@@ -22,6 +22,9 @@ import {
   actionDiagnostic,
   actionOutcome,
   adjacentChangedFileIndex,
+  type AmbiguousMergeGuard,
+  ambiguousMergeGuardAfterAppStatus,
+  beginAmbiguousMergeGuard,
   beginFindingPostSession,
   blobPreviewDisposition,
   buildUnifiedDiff,
@@ -31,6 +34,7 @@ import {
   type ChangedFileTreeRow,
   changedFileTreeRows,
   changedFileTreeVisibleName,
+  claimMergeConfirmation,
   commentLocationAnchor,
   commentRevisionContext,
   currentFileDiffOutcome,
@@ -50,10 +54,12 @@ import {
   mergeFailureWorkspaceRefreshReason,
   mergeFailureWorkspaceReloadPolicy,
   mergeResultSettlement,
+  type MergeStatus,
   mergeStrategySelectionEnabled,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
+  pullRequestOpeningBlocked,
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
   pullRequestRevisionPollTickEnabled,
@@ -935,6 +941,11 @@ describe("PR detail workspace", () => {
     )
     expect(detailsKeyIntent({ ...base, keyName: "escape", mergeRunning: true })).toBe("consume")
     expect(detailsKeyIntent({ ...base, keyName: "return", mergeRunning: true })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, keyName: "p", mergeRunning: true, modified: true })).toBe("consume")
+    expect(
+      detailsKeyIntent({ ...base, exitShortcut: true, keyName: "c", mergeRunning: true, modified: true })
+    ).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "p", modified: true })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "r", workspaceRefreshing: true })).toBe("consume")
     expect(
       detailsKeyIntent({
@@ -1059,6 +1070,101 @@ describe("PR detail workspace", () => {
     ).toBe("cancel-action")
     expect(detailsKeyIntent({ ...base, keyName: "left" })).toBe("scroll-files-left")
     expect(detailsKeyIntent({ ...base, keyName: "right" })).toBe("scroll-files-right")
+  })
+
+  it("claims a merge confirmation synchronously before a second Return can dispatch", () => {
+    const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+    const revision = new ReadClient.CodeCommitPullRequestRevision({
+      authorArn: null,
+      creationDate: new Date(0),
+      destinationCommit,
+      destinationReference: "refs/heads/main",
+      lastActivityDate: new Date(0),
+      mergeBase: destinationCommit,
+      pullRequestId: Domain.PullRequestId.make("42"),
+      repositoryName: Domain.RepositoryName.make("payments"),
+      revisionId: "revision-a",
+      sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
+      sourceReference: "refs/heads/feature",
+      status: "OPEN",
+      title: "Review"
+    })
+    let status: MergeStatus = {
+      _tag: "ready",
+      requestId: "merge-1",
+      revision,
+      strategy: "squash"
+    }
+    let providerCalls = 0
+    const confirm = () => {
+      const running = claimMergeConfirmation(status)
+      if (running === null) return
+      status = running
+      providerCalls += 1
+    }
+
+    confirm()
+    confirm()
+    expect(providerCalls).toBe(1)
+    expect(status._tag).toBe("running")
+
+    status = { _tag: "failed", diagnostic: { message: "Approval rules are not satisfied", operation: "merge" } }
+    expect(claimMergeConfirmation(status)).toBeNull()
+    status = {
+      _tag: "ready",
+      requestId: "merge-2",
+      revision,
+      strategy: "squash"
+    }
+    confirm()
+    expect(providerCalls).toBe(2)
+  })
+
+  it("blocks an ambiguous merge target until a later authoritative refresh completes", () => {
+    const target = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: true,
+      isMergeable: true,
+      lastModifiedDate: new Date(1_000),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature",
+      status: "OPEN",
+      title: "Review"
+    })
+    const otherTarget = new Domain.PullRequest({ ...target, id: Domain.PullRequestId.make("43") })
+    let guard: AmbiguousMergeGuard | null = beginAmbiguousMergeGuard(
+      pullRequestSelectionKey(target),
+      new Date(1_000)
+    )
+
+    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+    expect(pullRequestOpeningBlocked(guard, otherTarget)).toBe(false)
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle")
+    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "error")
+    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle")
+    expect(guard).toBeNull()
+    expect(pullRequestOpeningBlocked(guard, target)).toBe(false)
+
+    guard = beginAmbiguousMergeGuard(pullRequestSelectionKey(target), new Date(1_000))
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000))
+    expect(guard).toBeNull()
   })
 
   it("retries A-to-B drift after a correlated return to A", () => {

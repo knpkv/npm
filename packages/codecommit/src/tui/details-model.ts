@@ -135,6 +135,67 @@ export interface ActionDiagnostic {
   readonly workspaceRefreshReason?: WorkspaceRefreshReason
 }
 
+export type MergeStatus =
+  | { readonly _tag: "idle" }
+  | {
+    readonly _tag: "ready"
+    readonly requestId: string
+    readonly revision: ReadClient.CodeCommitPullRequestRevision
+    readonly strategy: ReviewClient.CodeCommitMergeStrategy
+  }
+  | {
+    readonly _tag: "running"
+    readonly requestId: string
+    readonly revision: ReadClient.CodeCommitPullRequestRevision
+    readonly strategy: ReviewClient.CodeCommitMergeStrategy
+  }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+/** Atomically claims a ready merge so a terminal key batch can dispatch it only once. */
+export const claimMergeConfirmation = (
+  status: MergeStatus
+): Extract<MergeStatus, { readonly _tag: "running" }> | null =>
+  status._tag === "ready" ? { ...status, _tag: "running" } : null
+
+export interface AmbiguousMergeGuard {
+  readonly baselineLastUpdated: number | null
+  readonly phase: "awaiting-refresh" | "refreshing" | "refresh-failed"
+  readonly selectionKey: string
+}
+
+/** Blocks a non-idempotent merge target before starting its authoritative list refresh. */
+export const beginAmbiguousMergeGuard = (
+  selectionKey: string,
+  lastUpdated: Date | undefined = undefined
+): AmbiguousMergeGuard => ({
+  baselineLastUpdated: lastUpdated?.getTime() ?? null,
+  phase: "awaiting-refresh",
+  selectionKey
+})
+
+/** Keeps an ambiguous target blocked through refresh failure and clears it only after a completed refresh. */
+export const ambiguousMergeGuardAfterAppStatus = (
+  guard: AmbiguousMergeGuard | null,
+  status: Domain.AppStatus,
+  lastUpdated: Date | undefined = undefined
+): AmbiguousMergeGuard | null => {
+  if (guard === null) return null
+  if (status === "loading") return guard.phase === "refreshing" ? guard : { ...guard, phase: "refreshing" }
+  if (status === "error" && guard.phase === "refreshing") return { ...guard, phase: "refresh-failed" }
+  if (
+    status === "idle" &&
+    (guard.phase === "refreshing" ||
+      (lastUpdated !== undefined && lastUpdated.getTime() !== guard.baselineLastUpdated))
+  ) return null
+  return guard
+}
+
+/** Prevents cached list navigation back into the target whose merge outcome is unknown. */
+export const pullRequestOpeningBlocked = (
+  guard: AmbiguousMergeGuard | null,
+  pr: Domain.PullRequest
+): boolean => guard?.selectionKey === pullRequestSelectionKey(pr)
+
 export type WorkspaceRefreshReason =
   | "revision-changed"
   | "source-commit-changed"
@@ -428,6 +489,7 @@ export const detailsKeyIntent = (input: {
   readonly actionReady: boolean
   readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
+  readonly exitShortcut?: boolean
   readonly findingPostRunning?: boolean
   readonly findingReviewActive?: boolean
   readonly keyName: string
@@ -438,8 +500,9 @@ export const detailsKeyIntent = (input: {
   readonly tab: "comments" | "diff"
   readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
-  if (input.dialogOpen || input.modified) return "yield"
+  if (input.dialogOpen || input.exitShortcut === true) return "yield"
   if (input.mergeRunning === true) return "consume"
+  if (input.modified) return "yield"
   if (
     input.findingPostRunning === true &&
     ["escape", "r", "s", "t", "e", "w"].includes(input.keyName)
