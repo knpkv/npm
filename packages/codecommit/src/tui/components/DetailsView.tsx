@@ -59,6 +59,8 @@ import {
   localRevisionDriftMessage,
   mergeDialogWorkspaceSelection,
   mergeFailureWorkspaceReloadPolicy,
+  mergeResultSettlement,
+  type MergeResultObservation,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -73,6 +75,7 @@ import {
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
+  verifiedWorkspaceAfterMergeFailure,
   type FindingPostSession,
   type WorkspaceActionPhase,
   workspaceFindingPostSettlement,
@@ -1036,16 +1039,34 @@ export function DetailsView() {
   }, [editorStatus, openEditorResult])
 
   useEffect(() => {
-    if (mergeStatus._tag !== "running" || AsyncResult.isWaiting(mergePullRequestResult)) return
-    if (
-      !AsyncResult.isSuccess(mergePullRequestResult) ||
-      mergePullRequestResult.value.requestId !== mergeStatus.requestId
-    )
+    const observation: MergeResultObservation = AsyncResult.isWaiting(mergePullRequestResult)
+      ? { _tag: "pending" }
+      : AsyncResult.isFailure(mergePullRequestResult)
+      ? { _tag: "failure" }
+      : AsyncResult.isSuccess(mergePullRequestResult)
+      ? { _tag: "success", requestId: mergePullRequestResult.value.requestId }
+      : { _tag: "pending" }
+    const settlement = mergeResultSettlement(mergeStatus._tag === "running" ? mergeStatus.requestId : null, observation)
+    if (settlement === "ignore") return
+    if (settlement === "ambiguous") {
+      updateMergeStatus({
+        _tag: "failed",
+        diagnostic: {
+          operation: "merge",
+          message: "The merge outcome is unknown; CodeCommit was refreshed before another attempt"
+        }
+      })
+      setVerifiedWorkspace(null)
+      refresh()
+      setView("prs")
       return
+    }
+    if (!AsyncResult.isSuccess(mergePullRequestResult)) return
     const outcome = mergePullRequestResult.value
     if (outcome._tag === "failure") {
       updateMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
       const reloadPolicy = mergeFailureWorkspaceReloadPolicy(outcome.diagnostic)
+      setVerifiedWorkspace((current) => verifiedWorkspaceAfterMergeFailure(current, outcome.diagnostic))
       if (reloadPolicy === "refresh-list") {
         refresh()
         setView("prs")

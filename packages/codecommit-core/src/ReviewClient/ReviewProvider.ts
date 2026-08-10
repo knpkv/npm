@@ -50,6 +50,18 @@ export class CodeCommitReviewProvider extends Context.Service<
   CodeCommitReviewProviderService
 >()("@knpkv/codecommit-core/CodeCommitReviewProvider") {}
 
+/** Non-idempotent merge submissions stay supervised until the provider settles. */
+export const reviewProviderTimeoutPolicy = (operation: string): "none" | "operation" => {
+  switch (operation) {
+    case "mergePullRequestByFastForward":
+    case "mergePullRequestBySquash":
+    case "mergePullRequestByThreeWay":
+      return "none"
+    default:
+      return "operation"
+  }
+}
+
 const callProvider = <A, E>(
   operation: string,
   target: CodeCommitReviewTarget,
@@ -65,7 +77,7 @@ const callProvider = <A, E>(
     effect.pipe(
       Effect.mapError((cause) => makeApiError(operation, target.account.profile, target.account.region, cause))
     ),
-    { retry: false }
+    reviewProviderTimeoutPolicy(operation) === "none" ? { retry: false, timeout: "none" } : { retry: false }
   )
 
 /** Map one decoded comment action to the exact Distilled CodeCommit request. */

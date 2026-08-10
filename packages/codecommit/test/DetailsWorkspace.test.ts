@@ -48,6 +48,7 @@ import {
   localRevisionDriftMessage,
   mergeDialogWorkspaceSelection,
   mergeFailureWorkspaceReloadPolicy,
+  mergeResultSettlement,
   mergeStrategySelectionEnabled,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
@@ -63,6 +64,7 @@ import {
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
+  verifiedWorkspaceAfterMergeFailure,
   workspaceFindingPostSettlement,
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
@@ -456,6 +458,22 @@ describe("PR detail workspace", () => {
       })
     currentRevision.current = "revision-b"
     expect(submitOpenDialog()).toBe("revision-b")
+    expect(
+      verifiedWorkspaceAfterMergeFailure("verified-revision-a", {
+        message: "The source changed",
+        operation: "merge-squash",
+        workspaceRefreshReason: "source-commit-changed"
+      })
+    ).toBeNull()
+    expect(
+      verifiedWorkspaceAfterMergeFailure("verified-revision-a", {
+        message: "Approval rules are not satisfied",
+        operation: "merge-squash"
+      })
+    ).toBe("verified-revision-a")
+    expect(mergeResultSettlement("merge-1", { _tag: "failure" })).toBe("ambiguous")
+    expect(mergeResultSettlement("merge-1", { _tag: "success", requestId: "merge-2" })).toBe("ignore")
+    expect(mergeResultSettlement("merge-1", { _tag: "success", requestId: "merge-1" })).toBe("settle")
     expect(
       actionDiagnostic(
         new WorkspaceRefreshActionError({

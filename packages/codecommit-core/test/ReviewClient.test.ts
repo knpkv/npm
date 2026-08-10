@@ -1,11 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { TestClock } from "effect/testing"
 
+import { applyAwsOperationTimeout } from "../src/AwsClient/internal.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import {
@@ -27,7 +30,8 @@ import {
   makeMergePullRequestRequest,
   makePostCommentForPullRequestRequest,
   makePostCommentReplyRequest,
-  makeUpdateCommentRequest
+  makeUpdateCommentRequest,
+  reviewProviderTimeoutPolicy
 } from "../src/ReviewClient/ReviewProvider.js"
 
 const account = {
@@ -335,6 +339,33 @@ describe("CodeCommitReviewClient", () => {
           assert.strictEqual(result.failure.reason, expectedReason)
         }
       }
+    }))
+
+  it.effect("keeps accepted merge receipts supervised past the ordinary operation timeout", () =>
+    Effect.gen(function*() {
+      const mergeTimeout = reviewProviderTimeoutPolicy("mergePullRequestBySquash") === "none"
+        ? null
+        : "30 seconds"
+      const readTimeout = reviewProviderTimeoutPolicy("getPullRequest") === "none" ? null : "30 seconds"
+      const supervisedMerge = yield* Effect.forkChild(applyAwsOperationTimeout(
+        "mergePullRequestBySquash",
+        account,
+        Effect.sleep("31 seconds").pipe(Effect.as("merge-receipt")),
+        mergeTimeout
+      ))
+      const ordinaryRead = yield* Effect.forkChild(applyAwsOperationTimeout(
+        "getPullRequest",
+        account,
+        Effect.never,
+        readTimeout
+      ))
+
+      yield* TestClock.adjust("31 seconds")
+
+      assert.strictEqual(yield* Fiber.join(supervisedMerge), "merge-receipt")
+      const readResult = yield* Fiber.join(ordinaryRead).pipe(Effect.result)
+      assert.strictEqual(Result.isFailure(readResult), true)
+      if (Result.isFailure(readResult)) assert.instanceOf(readResult.failure, AwsApiError)
     }))
 
   it.effect("executes and reconciles update and reply actions without replay", () =>

@@ -185,6 +185,25 @@ export const mergeFailureWorkspaceReloadPolicy = (
   return diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
 }
 
+/** Clears an exact verification overlay whenever fresh provider workspace state is required. */
+export const verifiedWorkspaceAfterMergeFailure = <A>(current: A | null, diagnostic: ActionDiagnostic): A | null =>
+  mergeFailureWorkspaceReloadPolicy(diagnostic) === "retain" ? current : null
+
+export type MergeResultObservation =
+  | { readonly _tag: "failure" }
+  | { readonly _tag: "pending" }
+  | { readonly _tag: "success"; readonly requestId: string }
+
+/** Correlates merge settlement and treats untyped runtime failure as an ambiguous provider outcome. */
+export const mergeResultSettlement = (
+  runningRequestId: string | null,
+  observation: MergeResultObservation
+): "ambiguous" | "ignore" | "settle" => {
+  if (runningRequestId === null || observation._tag === "pending") return "ignore"
+  if (observation._tag === "failure") return "ambiguous"
+  return observation.requestId === runningRequestId ? "settle" : "ignore"
+}
+
 /**
  * Allows merge selection for a loaded exact revision when no workspace mutation is active.
  * Cached list-level mergeability is advisory; the conditional provider merge is authoritative.
