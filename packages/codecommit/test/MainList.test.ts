@@ -171,6 +171,35 @@ describe("findStableIndex", () => {
     expect(findStableIndex(duplicates, "prs", prSelectionKey(duplicates[3]!), 0)).toBe(3)
   })
 
+  it("follows unambiguous repository account enrichment across list reordering", () => {
+    const unknown = mkPR("1", undefined, { profile: "prod", repositoryName: "identity" })
+    const known = mkPR("1", undefined, {
+      profile: "prod",
+      repoAccountId: "111122223333",
+      repositoryName: "identity"
+    })
+    const other = mkPR("2", undefined, { profile: "prod", repositoryName: "identity" })
+    const reordered: ReadonlyArray<ListItem> = [mkHeader("group", 2), other, mkHeader("moved", 1), known]
+
+    expect(findStableIndex(reordered, "prs", prSelectionKey(unknown), 1)).toBe(3)
+  })
+
+  it("keeps identical PR coordinates in two known repository accounts distinct", () => {
+    const accountA = mkPR("1", undefined, {
+      profile: "prod",
+      repoAccountId: "111122223333",
+      repositoryName: "identity"
+    })
+    const accountB = mkPR("1", undefined, {
+      profile: "prod",
+      repoAccountId: "999900001111",
+      repositoryName: "identity"
+    })
+    const duplicates: ReadonlyArray<ListItem> = [mkHeader("group", 2), accountA, accountB]
+
+    expect(findStableIndex(duplicates, "prs", prSelectionKey(accountB), 0)).toBe(2)
+  })
+
   // Falls back to numeric index when PR ID is not found.
   it("falls back to selectedIndex when PR not found", () => {
     expect(findStableIndex(items, "prs", "nonexistent", 1)).toBe(1)
