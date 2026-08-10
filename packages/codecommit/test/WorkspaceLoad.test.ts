@@ -9,7 +9,8 @@ import {
   providerRevisionChanged,
   pullRequestProviderDrift,
   type PullRequestWorkspace,
-  refreshedWorkspaceForDrift
+  refreshedWorkspaceForDrift,
+  retainedProviderDriftAfterObservation
 } from "../src/tui/workspace.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -115,6 +116,7 @@ describe("pull request workspace loading", () => {
       identity: {
         profile: pullRequest.account.profile,
         pullRequestId: pullRequest.id,
+        repoAccountId: pullRequest.account.repoAccountId,
         region: pullRequest.account.region,
         repositoryName: pullRequest.repositoryName
       },
@@ -129,6 +131,9 @@ describe("pull request workspace loading", () => {
         revision,
         checkout
       )
+    ).toEqual({ _tag: "provider" })
+    expect(
+      localDiffForWorkspace({ ...checkout.identity, repoAccountId: "999900001111" }, revision, checkout)
     ).toEqual({ _tag: "provider" })
     const ready = localDiffForWorkspace(checkout.identity, revision, checkout)
     expect(ready).toEqual({
@@ -164,6 +169,22 @@ describe("pull request workspace loading", () => {
       expect(localDiffForWorkspace(checkout.identity, drift.revision, checkout)._tag).toBe("outdated")
     }
     expect(pullRequestProviderDrift(checkout.identity, revision, { ...changedObservation, revision })).toBeNull()
+    expect(
+      retainedProviderDriftAfterObservation(
+        checkout.identity,
+        revision,
+        changedObservation,
+        { ...changedObservation, revision }
+      )
+    ).toBeNull()
+    expect(
+      retainedProviderDriftAfterObservation(
+        checkout.identity,
+        revision,
+        changedObservation,
+        { ...changedObservation, baseline: newerBaseRevision, revision }
+      )
+    ).toBe(changedObservation)
     expect(
       pullRequestProviderDrift(
         checkout.identity,

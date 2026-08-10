@@ -359,6 +359,7 @@ export const postRelayFindingAtom = runtimeAtom.fn((input: PostRelayFindingInput
             identity: {
               profile: input.pr.account.profile,
               pullRequestId: input.revision.pullRequestId,
+              repoAccountId: input.pr.account.repoAccountId,
               region: input.pr.account.region,
               repositoryName: input.revision.repositoryName
             },

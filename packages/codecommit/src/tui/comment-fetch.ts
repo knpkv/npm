@@ -26,6 +26,7 @@ export const fetchPrComments = Effect.fn("fetchPrComments")(function*(pr: Domain
     identity: {
       profile: pr.account.profile,
       pullRequestId: pr.id,
+      repoAccountId: pr.account.repoAccountId,
       region: pr.account.region,
       repositoryName: pr.repositoryName
     }

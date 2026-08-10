@@ -28,13 +28,14 @@ const FILETYPE_ALIASES: Record<string, string> = {
 export interface PullRequestWorkspaceIdentity {
   readonly profile: string
   readonly pullRequestId: string
+  readonly repoAccountId: string | undefined
   readonly region: string
   readonly repositoryName: string
 }
 
 /** Collision-safe selection key for provider-local pull-request numbers. */
 export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
-  JSON.stringify([pr.account.profile, pr.account.region, pr.repositoryName, pr.id])
+  JSON.stringify([pr.account.profile, pr.account.region, pr.account.repoAccountId ?? null, pr.repositoryName, pr.id])
 
 /** Exact-head path accepted by local editors; deleted files have no head path. */
 export const changedFileHeadPath = (file: ReadClient.CodeCommitChangedFile | null): string | null =>
@@ -365,9 +366,31 @@ export const blobPreviewDisposition = (beforeBytes: Uint8Array, afterBytes: Uint
 export const pullRequestWorkspaceIdentity = (pr: Domain.PullRequest): PullRequestWorkspaceIdentity => ({
   profile: pr.account.profile,
   pullRequestId: pr.id,
+  repoAccountId: pr.account.repoAccountId,
   region: pr.account.region,
   repositoryName: pr.repositoryName
 })
+
+/** Names the exact base/head movement that made a retained checkout stale. */
+export const localRevisionDriftMessage = (
+  local: Pick<WorktreePlan, "destinationCommit" | "sourceCommit">,
+  provider: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
+  action: string
+): string => {
+  const baseChanged = local.destinationCommit !== provider.destinationCommit
+  const headChanged = local.sourceCommit !== provider.sourceCommit
+  const compact = (commit: string): string => commit.slice(0, 12)
+  const movement = baseChanged && headChanged
+    ? `Base ${compact(local.destinationCommit)} → ${compact(provider.destinationCommit)} · head ${
+      compact(local.sourceCommit)
+    } → ${compact(provider.sourceCommit)}`
+    : baseChanged
+    ? `Base local ${compact(local.destinationCommit)} → provider ${compact(provider.destinationCommit)}`
+    : headChanged
+    ? `Head local ${compact(local.sourceCommit)} → provider ${compact(provider.sourceCommit)}`
+    : "Local checkout matches provider"
+  return `${movement} · ${action}`
+}
 
 /** Stable refresh key for every PR field that can change exact-head loading or local actions. */
 export const pullRequestWorkspaceReloadKey = (pr: Domain.PullRequest): string =>
@@ -456,6 +479,7 @@ export const workspaceIdentityMatches = (
 ): boolean =>
   actual.profile === expected.profile &&
   actual.pullRequestId === expected.pullRequestId &&
+  actual.repoAccountId === expected.repoAccountId &&
   actual.region === expected.region &&
   actual.repositoryName === expected.repositoryName
 
@@ -588,6 +612,7 @@ export const fileDiffIdentityKey = (identity: FileDiffIdentity): string =>
   [
     identity.profile,
     identity.region,
+    identity.repoAccountId ?? "",
     identity.repositoryName,
     identity.pullRequestId,
     identity.destinationCommit,

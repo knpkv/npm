@@ -55,6 +55,7 @@ import {
   fileDiffIdentityKey,
   findingConversationSubmissionEnabled,
   localEditorReady,
+  localRevisionDriftMessage,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -86,6 +87,7 @@ import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
   refreshedWorkspaceForDrift,
+  retainedProviderDriftAfterObservation,
   type PullRequestLocalCheckout,
   type PullRequestRevisionCheck,
   pullRequestProviderDrift
@@ -1126,7 +1128,17 @@ export function DetailsView() {
       providerWorkspace.revision,
       revisionPollResult.value
     )
-    if (drift === null) return
+    if (drift === null) {
+      setProviderDrift((current) =>
+        retainedProviderDriftAfterObservation(
+          providerWorkspace.identity,
+          providerWorkspace.revision,
+          current,
+          revisionPollResult.value
+        )
+      )
+      return
+    }
     setProviderDrift(drift)
     loadDiff(Atom.Interrupt)
     setDiffCache(new Map())
@@ -1621,12 +1633,12 @@ export function DetailsView() {
             )}
             {workspace?.localDiff._tag === "outdated" && activeProviderDrift !== null && (
               <text fg={theme.textWarning}>
-                {` Local ${workspace.localDiff.plan.sourceCommit.slice(0, 12)} is behind provider ${activeProviderDrift.revision.sourceCommit.slice(0, 12)} · W update after refresh`}
+                {` ${localRevisionDriftMessage(workspace.localDiff.plan, activeProviderDrift.revision, "W update after refresh")}`}
               </text>
             )}
             {workspace?.localDiff._tag === "outdated" && activeProviderDrift === null && (
               <text fg={theme.textWarning}>
-                {` Local ${workspace.localDiff.plan.sourceCommit.slice(0, 12)} is behind provider ${workspace.revision.sourceCommit.slice(0, 12)} · W update worktree`}
+                {` ${localRevisionDriftMessage(workspace.localDiff.plan, workspace.revision, "W update worktree")}`}
               </text>
             )}
             {diffFailed && <text fg={theme.textError}> Unable to load this file preview.</text>}

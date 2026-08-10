@@ -39,7 +39,12 @@ const mkHeader = (label: string, count: number): ListItem => ({
 const mkPR = (
   id: string,
   description?: string,
-  identity: { readonly profile?: string; readonly region?: string; readonly repositoryName?: string } = {}
+  identity: {
+    readonly profile?: string
+    readonly region?: string
+    readonly repoAccountId?: string
+    readonly repositoryName?: string
+  } = {}
 ): ListItem => ({
   type: "pr",
   pr: decodePullRequest({
@@ -51,7 +56,11 @@ const mkPR = (
     creationDate: new Date(),
     lastModifiedDate: new Date(),
     link: "https://example.com",
-    account: { profile: identity.profile ?? "dev", region: identity.region ?? "us-east-1" },
+    account: {
+      profile: identity.profile ?? "dev",
+      region: identity.region ?? "us-east-1",
+      ...(identity.repoAccountId === undefined ? {} : { repoAccountId: identity.repoAccountId })
+    },
     status: "OPEN",
     sourceBranch: "feat",
     destinationBranch: "main",
@@ -156,9 +165,10 @@ describe("findStableIndex", () => {
     const duplicates: ReadonlyArray<ListItem> = [
       mkPR("1", undefined, { profile: "dev", repositoryName: "payments" }),
       mkPR("1", undefined, { profile: "prod", repositoryName: "payments" }),
-      mkPR("1", undefined, { profile: "prod", repositoryName: "identity" })
+      mkPR("1", undefined, { profile: "prod", repositoryName: "identity" }),
+      mkPR("1", undefined, { profile: "prod", repoAccountId: "999900001111", repositoryName: "identity" })
     ]
-    expect(findStableIndex(duplicates, "prs", prSelectionKey(duplicates[2]!), 0)).toBe(2)
+    expect(findStableIndex(duplicates, "prs", prSelectionKey(duplicates[3]!), 0)).toBe(3)
   })
 
   // Falls back to numeric index when PR ID is not found.

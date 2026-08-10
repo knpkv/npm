@@ -45,6 +45,7 @@ import {
   humanReviewState,
   isChangedDiffLine,
   localEditorReady,
+  localRevisionDriftMessage,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -962,6 +963,24 @@ describe("PR detail workspace", () => {
     ).toBe(provider)
   })
 
+  it("names the exact base or head movement that invalidates a local checkout", () => {
+    const baseA = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+    const baseC = ReadClient.CodeCommitCommitId.make("c".repeat(40))
+    const headB = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    const headD = ReadClient.CodeCommitCommitId.make("d".repeat(40))
+    const local = { destinationCommit: baseA, sourceCommit: headB }
+
+    expect(
+      localRevisionDriftMessage(local, { destinationCommit: baseC, sourceCommit: headB }, "W update worktree")
+    ).toBe("Base local aaaaaaaaaaaa → provider cccccccccccc · W update worktree")
+    expect(
+      localRevisionDriftMessage(local, { destinationCommit: baseA, sourceCommit: headD }, "W update worktree")
+    ).toBe("Head local bbbbbbbbbbbb → provider dddddddddddd · W update worktree")
+    expect(
+      localRevisionDriftMessage(local, { destinationCommit: baseC, sourceCommit: headD }, "W update worktree")
+    ).toBe("Base aaaaaaaaaaaa → cccccccccccc · head bbbbbbbbbbbb → dddddddddddd · W update worktree")
+  })
+
   it("gives every selected file a stable scroll target", () => {
     expect(Array.from({ length: 6 }, (_, index) => changedFileRowId(index))).toEqual([
       "changed-file-0",
@@ -1262,7 +1281,13 @@ describe("PR detail workspace", () => {
       const request = {
         account,
         file,
-        identity: { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+        identity: {
+          profile: account.profile,
+          pullRequestId,
+          repoAccountId: account.repoAccountId,
+          region: account.region,
+          repositoryName
+        },
         repositoryName,
         revision
       }
@@ -1320,6 +1345,7 @@ describe("PR detail workspace", () => {
         identity: {
           profile: account.profile,
           pullRequestId,
+          repoAccountId: account.repoAccountId,
           region: account.region,
           repositoryName
         },
@@ -1392,6 +1418,7 @@ describe("PR detail workspace", () => {
         identity: {
           profile: account.profile,
           pullRequestId,
+          repoAccountId: account.repoAccountId,
           region: account.region,
           repositoryName
         },
@@ -1471,7 +1498,13 @@ describe("PR detail workspace", () => {
         {
           account,
           file,
-          identity: { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+          identity: {
+            profile: account.profile,
+            pullRequestId,
+            repoAccountId: account.repoAccountId,
+            region: account.region,
+            repositoryName
+          },
           localWorktreePath: "/private/exact-head",
           repositoryName,
           revision: new ReadClient.CodeCommitPullRequestRevision({
@@ -1546,7 +1579,13 @@ describe("PR detail workspace", () => {
         {
           account,
           files,
-          identity: { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+          identity: {
+            profile: account.profile,
+            pullRequestId,
+            repoAccountId: account.repoAccountId,
+            region: account.region,
+            repositoryName
+          },
           localWorktreePath: "/private/exact-head",
           repositoryName,
           revision
@@ -1557,7 +1596,13 @@ describe("PR detail workspace", () => {
       for (const file of files.slice(0, MAXIMUM_PRELOADED_FILE_DIFFS)) {
         const key = fileDiffIdentityKey(
           fileDiffIdentity(
-            { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+            {
+              profile: account.profile,
+              pullRequestId,
+              repoAccountId: account.repoAccountId,
+              region: account.region,
+              repositoryName
+            },
             revision,
             file
           )
@@ -1569,7 +1614,13 @@ describe("PR detail workspace", () => {
       if (deferredFile !== undefined) {
         const deferredKey = fileDiffIdentityKey(
           fileDiffIdentity(
-            { profile: account.profile, pullRequestId, region: account.region, repositoryName },
+            {
+              profile: account.profile,
+              pullRequestId,
+              repoAccountId: account.repoAccountId,
+              region: account.region,
+              repositoryName
+            },
             revision,
             deferredFile
           )
@@ -1609,7 +1660,13 @@ describe("PR detail workspace", () => {
         status: "OPEN",
         title: "Review"
       })
-      const identity = { profile: account.profile, pullRequestId, region: account.region, repositoryName }
+      const identity = {
+        profile: account.profile,
+        pullRequestId,
+        repoAccountId: account.repoAccountId,
+        region: account.region,
+        repositoryName
+      }
       const request: FileDiffRequest = {
         account,
         file,
@@ -1697,6 +1754,7 @@ describe("PR detail workspace", () => {
       destinationCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
       profile: Domain.AwsProfileName.make("production"),
       pullRequestId: Domain.PullRequestId.make("42"),
+      repoAccountId: "111122223333",
       region: Domain.AwsRegion.make("eu-west-1"),
       repositoryName: Domain.RepositoryName.make("payments"),
       sourceCommit: ReadClient.CodeCommitCommitId.make("d".repeat(40))
@@ -1713,6 +1771,9 @@ describe("PR detail workspace", () => {
         ...shared,
         sourceCommit: ReadClient.CodeCommitCommitId.make("f".repeat(40))
       })
+    )
+    expect(fileDiffIdentityKey(shared)).not.toBe(
+      fileDiffIdentityKey({ ...shared, repoAccountId: "999900001111" })
     )
   })
 
@@ -1737,6 +1798,7 @@ describe("PR detail workspace", () => {
     const workspaceA = {
       profile: "production",
       pullRequestId: "41",
+      repoAccountId: "111122223333",
       region: "eu-west-1",
       repositoryName: "payments"
     }
@@ -1762,6 +1824,7 @@ describe("PR detail workspace", () => {
 
     expect(workspaceIdentityMatches(workspaceA, workspaceB)).toBe(false)
     expect(workspaceIdentityMatches(workspaceB, workspaceB)).toBe(true)
+    expect(workspaceIdentityMatches(workspaceB, { ...workspaceB, repoAccountId: "999900001111" })).toBe(false)
     expect(currentWorkspaceSelection(null, workspaceB)).toEqual({ _tag: "loading" })
     expect(currentWorkspaceSelection({ identity: workspaceA, revision: workspaceA }, workspaceB)).toEqual({
       _tag: "stale"
