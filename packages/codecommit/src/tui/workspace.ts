@@ -65,6 +65,18 @@ export const providerRevisionChanged = (
   observed: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
 ): boolean => current.destinationCommit !== observed.destinationCommit || current.sourceCommit !== observed.sourceCommit
 
+/** Retains a matching provider observation only when it invalidates the displayed exact revision. */
+export const pullRequestProviderDrift = (
+  identity: PullRequestWorkspaceIdentity,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
+  observation: PullRequestRevisionObservation | null
+): PullRequestRevisionObservation | null =>
+  observation !== null &&
+    workspaceIdentityMatches(observation.identity, identity) &&
+    providerRevisionChanged(revision, observation.revision)
+    ? observation
+    : null
+
 /** Refreshes only provider revision metadata so local drift checks never invoke Git. */
 export const loadPullRequestRevision = Effect.fn("loadPullRequestRevision")(function*(pr: Domain.PullRequest) {
   const client = yield* ReadClient.CodeCommitReadClient

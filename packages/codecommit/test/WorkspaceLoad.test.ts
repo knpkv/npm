@@ -6,7 +6,8 @@ import {
   loadPullRequestWorkspace,
   localDiffForWorkspace,
   localWorktreePathForDiff,
-  providerRevisionChanged
+  providerRevisionChanged,
+  pullRequestProviderDrift
 } from "../src/tui/workspace.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -154,5 +155,19 @@ describe("pull request workspace loading", () => {
     expect(providerRevisionChanged(revision, revision)).toBe(false)
     expect(providerRevisionChanged(revision, newerRevision)).toBe(true)
     expect(providerRevisionChanged(revision, newerBaseRevision)).toBe(true)
+    const changedObservation = { identity: checkout.identity, revision: newerRevision }
+    const drift = pullRequestProviderDrift(checkout.identity, revision, changedObservation)
+    expect(drift).toBe(changedObservation)
+    if (drift !== null) {
+      expect(localDiffForWorkspace(checkout.identity, drift.revision, checkout)._tag).toBe("outdated")
+    }
+    expect(pullRequestProviderDrift(checkout.identity, revision, { ...changedObservation, revision })).toBeNull()
+    expect(
+      pullRequestProviderDrift(
+        checkout.identity,
+        revision,
+        { ...changedObservation, identity: { ...checkout.identity, pullRequestId: Domain.PullRequestId.make("43") } }
+      )
+    ).toBeNull()
   })
 })

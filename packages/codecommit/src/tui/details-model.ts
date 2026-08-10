@@ -196,6 +196,7 @@ export const detailsKeyIntent = (input: {
   readonly modified: boolean
   readonly shifted?: boolean
   readonly tab: "comments" | "diff"
+  readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
   if (
@@ -205,6 +206,12 @@ export const detailsKeyIntent = (input: {
     return "consume"
   }
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
+  if (
+    input.workspaceRefreshing === true &&
+    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "w", "x", "return"].includes(input.keyName)
+  ) {
+    return "consume"
+  }
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"

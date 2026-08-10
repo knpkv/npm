@@ -717,6 +717,11 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "n" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "n", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "r" })).toBe("review-pr")
+    expect(detailsKeyIntent({ ...base, keyName: "r", workspaceRefreshing: true })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", workspaceRefreshing: true })).toBe(
+      "consume"
+    )
+    expect(detailsKeyIntent({ ...base, keyName: "escape", workspaceRefreshing: true })).toBe("back")
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")
