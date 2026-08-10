@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Terminal from "effect/Terminal"
 import { Command } from "effect/unstable/cli"
+import { fileURLToPath } from "node:url"
 import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../src/AtlaskitTransformers.js"
 import { makePageCreateCommand, makePagePatchCommand, makePagePutCommand } from "../src/commands/adfPage.js"
@@ -172,8 +173,14 @@ const runCommand = (
   })
 
 const pageUrl = `https://example.atlassian.net/wiki/spaces/PROJ/pages/${PAGE_ID}`
-/** A body authored offline, the shape `page put` exists for. */
-const adfFixture = "test/fixtures/page-put.adf.json"
+/**
+ * A body authored offline, the shape `page put` exists for.
+ *
+ * Resolved against this file, not the process cwd: the workspace-root `vitest`
+ * run has a different cwd from `vitest` inside the package, and a relative path
+ * silently passes in one and fails in the other.
+ */
+const adfFixture = fileURLToPath(new URL("./fixtures/page-put.adf.json", import.meta.url))
 
 describe("page patch", () => {
   // Re-reading the page at write time would number the update one ahead of the

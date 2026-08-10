@@ -6,7 +6,7 @@ Fix round-trip duplication of nested blocks, and add ADF-level page commands.
 
 `sync push` duplicated any block nested inside another encoded block — most
 visibly a Jira datasource card inside an expand. The reverter's scan for a
-closing marker stopped at the first *nested* open marker, so the parent never
+closing marker stopped at the first _nested_ open marker, so the parent never
 paired: it was restored from its payload and the inner marker was reverted
 again as a sibling. One extra copy per push, compounding silently.
 
@@ -23,14 +23,14 @@ again as a sibling. One extra copy per push, compounding silently.
   `origin/confluence`, so the retry — with or without `--force` — still has
   something to push, and a deletion already applied in Confluence is replayed
   harmlessly rather than counted as a failure that would park the branch for
-  good. Note that *any* push error holds the branch, not only a refusal, so
+  good. Note that _any_ push error holds the branch, not only a refusal, so
   unsent work is never recorded as pushed — the failure then repeats on every
   push until it is resolved, and the command now says so. `--force` covers the
   round-trip refusal only, and applies to the whole run rather than one page.
 - `page put --if-version <n>` opts into the optimistic-version check `page
-  patch` always makes, so the read-modify-write the refusal message recommends
+patch` always makes, so the read-modify-write the refusal message recommends
   cannot silently overwrite an edit made in Confluence in between. `page get
-  --format adf` reports that version on stderr, leaving stdout the
+--format adf` reports that version on stderr, leaving stdout the
   machine-readable document.
 - `sync push --dry-run` now runs the round-trip guard, so a preview reports the
   refusal that the real push would raise instead of a clean plan. It also counts

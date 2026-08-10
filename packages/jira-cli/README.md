@@ -194,7 +194,7 @@ jira version related-work sync 10042 \
 `related-work sync` is what a release scaffold should use: repeated `add` calls pile up duplicate links, while
 `sync` matches on URL (the only stable identity a link has, since Jira assigns the id and the title is editable)
 and adds only what is missing. `--prune` additionally removes links in the category that are not in the desired
-set, including surplus copies of a URL that *is* desired. Other categories are never touched.
+set, including surplus copies of a URL that _is_ desired. Other categories are never touched.
 
 ## Auth Commands
 
