@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, Errors, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, Errors, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { applyPatch, parsePatch } from "diff"
 import { Effect, Option, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
@@ -482,6 +482,21 @@ describe("PR detail workspace", () => {
         })
       )
     ).toBe("merge-outcome-unknown")
+    expect(
+      mergeFailureWorkspaceRefreshReason(
+        new ReviewClient.CodeCommitReviewConflictError({
+          operation: "merge-pull-request",
+          reason: "pull-request-closed"
+        })
+      )
+    ).toBe("pull-request-closed")
+    expect(
+      mergeFailureWorkspaceReloadPolicy({
+        message: "The pull request is already closed",
+        operation: "merge-squash",
+        workspaceRefreshReason: "pull-request-closed"
+      })
+    ).toBe("refresh-list")
     expect(
       mergeFailureWorkspaceRefreshReason(
         new Errors.AwsApiError({

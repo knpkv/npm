@@ -141,6 +141,7 @@ export type WorkspaceRefreshReason =
   | "destination-commit-changed"
   | "destination-reference-changed"
   | "repository-changed"
+  | "pull-request-closed"
   | "merge-outcome-unknown"
 
 /** Typed action failure whose immutable workspace must be reloaded before another attempt. */
@@ -155,6 +156,7 @@ export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<Workspa
       "destination-commit-changed",
       "destination-reference-changed",
       "repository-changed",
+      "pull-request-closed",
       "merge-outcome-unknown"
     ])
   }
@@ -170,8 +172,8 @@ export const mergeWorkspaceRefreshReason = (
     case "destination-commit-changed":
     case "destination-reference-changed":
     case "repository-changed":
-      return reason
     case "pull-request-closed":
+      return reason
     case "approval-by-author":
     case "approval-rules-unsatisfied":
     case "merge-conflict":
@@ -204,6 +206,7 @@ export const mergeFailureWorkspaceReloadPolicy = (
 ): "refresh-list" | "reload" | "retain" => {
   if (
     diagnostic.workspaceRefreshReason === "repository-changed" ||
+    diagnostic.workspaceRefreshReason === "pull-request-closed" ||
     diagnostic.workspaceRefreshReason === "merge-outcome-unknown"
   ) return "refresh-list"
   return diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
