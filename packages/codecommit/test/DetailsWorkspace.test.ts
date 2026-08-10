@@ -63,6 +63,7 @@ import {
   workspaceFindingPostSettlement,
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
+  workspaceMergeResetPolicy,
   workspaceResetInterruptions,
   workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
@@ -397,6 +398,8 @@ describe("PR detail workspace", () => {
     expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
     expect(workspaceResetInterruptions("none")).toEqual(["conversation", "verification"])
     expect(workspaceResetInterruptions("review")).toEqual(["review", "conversation", "verification"])
+    expect(workspaceMergeResetPolicy("running")).toBe("preserve")
+    expect(workspaceMergeResetPolicy("ready")).toBe("interrupt")
   })
 
   it("reconciles only unambiguous unknown-to-known repository account selection", () => {

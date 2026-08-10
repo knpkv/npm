@@ -549,6 +549,11 @@ export const workspaceResetInterruptions = (
   "verification"
 ]
 
+/** Keeps an external merge mutation alive while retiring merge state that has not started. */
+export const workspaceMergeResetPolicy = (
+  phase: "failed" | "idle" | "ready" | "running"
+): "interrupt" | "preserve" => phase === "running" ? "preserve" : "interrupt"
+
 export const workspaceIdentityMatches = (
   actual: PullRequestWorkspaceIdentity,
   expected: PullRequestWorkspaceIdentity

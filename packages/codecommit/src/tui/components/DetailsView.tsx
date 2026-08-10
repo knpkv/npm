@@ -75,6 +75,7 @@ import {
   type WorkspaceActionPhase,
   workspaceFindingPostSettlement,
   workspaceLifecycleTransition,
+  workspaceMergeResetPolicy,
   workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
   workspaceResetInterruptions,
@@ -499,6 +500,7 @@ export function DetailsView() {
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
   const actionRef = useRef<ActionStatus>(action)
+  const mergeStatusRef = useRef<MergeStatus>(mergeStatus)
   const selectedFindingIndexRef = useRef(selectedFindingIndex)
   const diffRef = useRef<DiffRenderable>(null)
   const highlightedFindingRef = useRef<{ readonly diff: DiffRenderable; readonly row: number } | null>(null)
@@ -510,11 +512,17 @@ export function DetailsView() {
   const providerDriftPendingRef = useRef(false)
   const revisionPollWaitingRef = useRef(false)
   actionRef.current = action
+  mergeStatusRef.current = mergeStatus
   selectedFindingIndexRef.current = selectedFindingIndex
 
   const updatePostingFinding = (next: FindingPostSession | null) => {
     postingFindingRef.current = next
     setPostingFinding(next)
+  }
+
+  const updateMergeStatus = (next: MergeStatus) => {
+    mergeStatusRef.current = next
+    setMergeStatus(next)
   }
 
   const prSelection = useMemo(
@@ -611,8 +619,9 @@ export function DetailsView() {
       postingFindingRef.current !== null
     )
     if (transition._tag === "preserve") return
+    const mergeResetPolicy = workspaceMergeResetPolicy(mergeStatusRef.current._tag)
     loadedWorkspaceKeyRef.current = workspaceReloadKey
-    mergePullRequest(Atom.Interrupt)
+    if (mergeResetPolicy === "interrupt") mergePullRequest(Atom.Interrupt)
     for (const interrupt of workspaceResetInterruptions(transition.interrupt)) {
       if (interrupt === "preflight") preflight(Atom.Interrupt)
       else if (interrupt === "checkout") checkout(Atom.Interrupt)
@@ -647,7 +656,7 @@ export function DetailsView() {
     )
     setDiffCache(new Map())
     setEditorStatus({ _tag: "idle" })
-    setMergeStatus({ _tag: "idle" })
+    if (mergeResetPolicy === "interrupt") updateMergeStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
     setTab("diff")
     setAction(reviewDeck.action)
@@ -1028,10 +1037,10 @@ export function DetailsView() {
       return
     const outcome = mergePullRequestResult.value
     if (outcome._tag === "failure") {
-      setMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      updateMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
       return
     }
-    setMergeStatus({ _tag: "idle" })
+    updateMergeStatus({ _tag: "idle" })
     refresh()
     setView("prs")
   }, [mergePullRequestResult, mergeStatus, refresh, setView])
@@ -1455,7 +1464,7 @@ export function DetailsView() {
     )
       return
     if (!pr.isMergeable) {
-      setMergeStatus({
+      updateMergeStatus({
         _tag: "failed",
         diagnostic: {
           operation: `merge-${strategy}`,
@@ -1466,7 +1475,7 @@ export function DetailsView() {
     }
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:merge:${strategy}:${nextActionRequestSequence}`
-    setMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy })
+    updateMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy })
   }
 
   useKeyboard((key) => {
@@ -1490,7 +1499,7 @@ export function DetailsView() {
     if (intent === "back") setView("prs")
     else if (intent === "cancel-action") {
       if (mergeStatus._tag === "ready") {
-        setMergeStatus({ _tag: "idle" })
+        updateMergeStatus({ _tag: "idle" })
       } else if (verificationRunning) {
         verifyFindingAction(Atom.Interrupt)
         setVerificationStatus({ _tag: "idle" })
@@ -1551,7 +1560,7 @@ export function DetailsView() {
     else if (intent === "explain-risk") beginAction("explain")
     else if (intent === "confirm-merge" && mergeStatus._tag === "ready" && pr !== null) {
       const ready = mergeStatus
-      setMergeStatus({ ...ready, _tag: "running" })
+      updateMergeStatus({ ...ready, _tag: "running" })
       mergePullRequest({
         pr,
         requestId: ready.requestId,
