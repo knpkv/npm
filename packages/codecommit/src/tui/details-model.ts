@@ -2,7 +2,7 @@ import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
-import { WorktreeError } from "../WorktreeService.js"
+import { WorktreeError, type WorktreePlan, type WorktreeResult } from "../WorktreeService.js"
 
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
@@ -75,6 +75,43 @@ export interface ActionDiagnostic {
 export type ActionOutcome<A> =
   | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }
   | { readonly _tag: "success"; readonly requestId: string; readonly value: A }
+
+export interface FindingPostSession {
+  readonly findingId: string
+  readonly findingIndex: number
+  readonly fingerprint: string
+  readonly requestId: string
+}
+
+/** Starts posting synchronously so a second key in the same terminal batch observes the in-flight write. */
+export const beginFindingPostSession = (
+  current: FindingPostSession | null,
+  next: FindingPostSession
+): FindingPostSession => current ?? next
+
+type WorktreeLocalDiff =
+  | { readonly _tag: "ready"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
+  | { readonly _tag: "unavailable"; readonly diagnostic: ActionDiagnostic }
+
+/** Promotes only the receipt for the expected exact-head checkout into local workspace readiness. */
+export const worktreeCheckoutLocalDiff = (
+  current: WorktreeLocalDiff,
+  pending: { readonly plan: WorktreePlan; readonly requestId: string },
+  outcome: ActionOutcome<WorktreeResult>
+): WorktreeLocalDiff =>
+  outcome._tag === "success" &&
+    outcome.requestId === pending.requestId &&
+    outcome.value.path === pending.plan.targetPath &&
+    outcome.value.sourceCommit === pending.plan.sourceCommit
+    ? { _tag: "ready", plan: pending.plan, worktree: outcome.value }
+    : current
+
+/** Enables editors only for a surviving head file in an exact-head local worktree. */
+export const localEditorReady = (
+  localDiff: { readonly _tag: "ready" | "unavailable" },
+  headPath: string | null,
+  actionCancelable: boolean
+): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
 
 const isWorktreeError = Schema.is(WorktreeError)
 

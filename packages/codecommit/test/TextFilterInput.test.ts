@@ -6,6 +6,7 @@ import {
   textFilterActionScope,
   type TextFilterInputKey,
   type TextFilterInputState,
+  transitionSingleLineDraft,
   transitionTextFilterInput
 } from "../src/tui/text-filter-input.js"
 
@@ -28,6 +29,26 @@ describe("text filter input", () => {
     ])
 
     expect(state).toEqual({ active: false, text: "fixture" })
+  })
+
+  it("submits the full synchronous conversation draft when paste and Return share a batch", () => {
+    let draft = "keep"
+    let submission: string | null = null
+    for (
+      const key of [
+        ...Array.from(" this finding", (char) => ({ name: char === " " ? "space" : char, char })),
+        { name: "return" }
+      ]
+    ) {
+      const transition = transitionSingleLineDraft(draft, key, 2_000)
+      draft = transition.draft
+      submission = transition.submission ?? submission
+    }
+
+    expect(submission).toBe("keep this finding")
+    expect(transitionSingleLineDraft("already rendered", { name: "return" }, 2_000).submission).toBe(
+      "already rendered"
+    )
   })
 
   it("keeps settings-filter shortcut letters inside a pasted account search", () => {

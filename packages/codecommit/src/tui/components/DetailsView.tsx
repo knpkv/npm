@@ -36,6 +36,7 @@ import {
 import {
   type ActionDiagnostic,
   adjacentChangedFileIndex,
+  beginFindingPostSession,
   changedFileHeadPath,
   changedFileRowId,
   changedFileTreeContentWidth,
@@ -50,6 +51,7 @@ import {
   exactRevisionReviewState,
   fileDiffIdentity,
   fileDiffIdentityKey,
+  localEditorReady,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
@@ -59,9 +61,11 @@ import {
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
+  type FindingPostSession,
   type WorkspaceActionPhase,
   workspaceLifecycleTransition,
   workspaceResetInterruptions,
+  worktreeCheckoutLocalDiff,
   workspaceIdentityMatches
 } from "../details-model.js"
 import type { FileDiffOutcome } from "../file-diff.js"
@@ -405,12 +409,7 @@ export function DetailsView() {
   const [selectedFindingIndex, setSelectedFindingIndex] = useState(0)
   const [findingDispositions, setFindingDispositions] = useState<Record<string, FindingDisposition>>({})
   const [findingPostDiagnostics, setFindingPostDiagnostics] = useState<Record<string, ActionDiagnostic>>({})
-  const [postingFinding, setPostingFinding] = useState<{
-    readonly findingId: string
-    readonly findingIndex: number
-    readonly fingerprint: string
-    readonly requestId: string
-  } | null>(null)
+  const [postingFinding, setPostingFinding] = useState<FindingPostSession | null>(null)
   const [conversationTurns, setConversationTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
   const [conversationStatus, setConversationStatus] = useState<ConversationStatus>({ _tag: "idle" })
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>({ _tag: "idle" })
@@ -428,7 +427,13 @@ export function DetailsView() {
   const filesScrollRef = useRef<ScrollBoxRenderable>(null)
   const loadedWorkspaceKeyRef = useRef<string | null>(null)
   const pendingDiffKeyRef = useRef<string | null>(null)
+  const postingFindingRef = useRef<FindingPostSession | null>(null)
   actionRef.current = action
+
+  const updatePostingFinding = (next: FindingPostSession | null) => {
+    postingFindingRef.current = next
+    setPostingFinding(next)
+  }
 
   const pr = useMemo(
     () =>
@@ -497,7 +502,7 @@ export function DetailsView() {
     setSelectedFindingIndex(0)
     setFindingDispositions({})
     setFindingPostDiagnostics({})
-    setPostingFinding(null)
+    updatePostingFinding(null)
     setConversationTurns([])
     setConversationStatus({ _tag: "idle" })
     setVerificationStatus({ _tag: "idle" })
@@ -573,17 +578,25 @@ export function DetailsView() {
   }, [action, pr, preflightResult, workspace])
 
   useEffect(() => {
-    if (action._tag !== "running" || action.action !== "worktree" || AsyncResult.isWaiting(checkoutResult)) return
+    if (
+      workspace === null ||
+      action._tag !== "running" ||
+      action.action !== "worktree" ||
+      AsyncResult.isWaiting(checkoutResult)
+    )
+      return
     if (!AsyncResult.isSuccess(checkoutResult) || checkoutResult.value.requestId !== action.requestId) return
     const outcome = checkoutResult.value
     if (outcome._tag === "failure") {
       setAction({ _tag: "failed", action: "worktree", diagnostic: outcome.diagnostic })
       return
     }
-    if (outcome.value.path === action.plan.targetPath && outcome.value.sourceCommit === action.plan.sourceCommit) {
+    const localDiff = worktreeCheckoutLocalDiff(workspace.localDiff, action, outcome)
+    if (localDiff !== workspace.localDiff) {
+      setVerifiedWorkspace({ ...workspace, localDiff })
       setAction({ _tag: "done", action: "worktree", detail: outcome.value.path })
     }
-  }, [action, checkoutResult])
+  }, [action, checkoutResult, workspace])
 
   useEffect(() => {
     if (action._tag !== "running" || action.action === "worktree" || AsyncResult.isWaiting(reviewResult)) return
@@ -625,7 +638,7 @@ export function DetailsView() {
         ...current,
         [postingFinding.findingId]: outcome.diagnostic
       }))
-      setPostingFinding(null)
+      updatePostingFinding(null)
       return
     }
     let receiptReview = action._tag === "reviewed" ? action.result : null
@@ -664,7 +677,7 @@ export function DetailsView() {
           message: "The provider accepted an older finding version; inspect or supersede the obsolete published comment"
         }
       }))
-      setPostingFinding(null)
+      updatePostingFinding(null)
       return
     }
     const nextDispositions: Record<string, FindingDisposition> = {
@@ -679,7 +692,7 @@ export function DetailsView() {
       delete next[postingFinding.findingId]
       return next
     })
-    setPostingFinding(null)
+    updatePostingFinding(null)
   }, [
     action,
     continueReviewResult,
@@ -899,7 +912,7 @@ export function DetailsView() {
   const agentRunning = conversationRunning || verificationRunning
   const actionCancelable =
     action._tag === "preflight" || action._tag === "ready" || action._tag === "running" || agentRunning
-  const editorReady = workspace?.localDiff._tag === "ready" && headEditorPath !== null && !actionCancelable
+  const editorReady = workspace !== null && localEditorReady(workspace.localDiff, headEditorPath, actionCancelable)
   const reviewCardExpanded = action._tag === "reviewed"
 
   const openSelectedInEditor = (editor: LocalEditor) => {
@@ -1027,7 +1040,7 @@ export function DetailsView() {
       pr === null ||
       workspace === null ||
       selectedFinding === null ||
-      postingFinding !== null ||
+      postingFindingRef.current !== null ||
       !selectedFindingNeedsResolution
     )
       return
@@ -1039,12 +1052,13 @@ export function DetailsView() {
       delete next[selectedFinding.id]
       return next
     })
-    setPostingFinding({
+    const nextPostingFinding = beginFindingPostSession(postingFindingRef.current, {
       findingId: selectedFinding.id,
       findingIndex: selectedFindingIndex,
       fingerprint: relayFindingFingerprint(selectedFinding),
       requestId
     })
+    updatePostingFinding(nextPostingFinding)
     postFinding({
       files: workspace.files,
       finding: selectedFinding,
@@ -1080,7 +1094,7 @@ export function DetailsView() {
       actionReady: action._tag === "ready" && workspace !== null,
       conversationRunning: agentRunning,
       dialogOpen: dialog.current !== null,
-      findingPostRunning: postingFinding !== null,
+      findingPostRunning: postingFindingRef.current !== null,
       findingReviewActive: selectedFinding !== null,
       keyName: key.name,
       modified: key.ctrl === true || key.meta === true,

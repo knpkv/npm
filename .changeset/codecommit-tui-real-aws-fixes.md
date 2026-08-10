@@ -39,4 +39,6 @@ synchronously.
 Reject malformed or duplicate-id Relay output, isolate prior agent review text as
 untrusted prompt evidence, validate exact changed-side line anchors before
 posting, and keep edited or stale-posted findings attached to explicit human
-resolution and content-bound provider receipts.
+resolution and content-bound provider receipts. Preserve finding-post and
+conversation state across same-batch terminal input, and promote a successful
+manual exact-head checkout into local preview and editor readiness.

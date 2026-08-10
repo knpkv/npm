@@ -22,6 +22,7 @@ import {
   actionDiagnostic,
   actionOutcome,
   adjacentChangedFileIndex,
+  beginFindingPostSession,
   blobPreviewDisposition,
   buildUnifiedDiff,
   changedFileHeadPath,
@@ -42,6 +43,7 @@ import {
   fileDiffIdentityMatches,
   humanReviewState,
   isChangedDiffLine,
+  localEditorReady,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
@@ -51,7 +53,8 @@ import {
   terminalSafeText,
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
-  workspaceResetInterruptions
+  workspaceResetInterruptions,
+  worktreeCheckoutLocalDiff
 } from "../src/tui/details-model.js"
 import {
   loadFileDiff,
@@ -703,6 +706,75 @@ describe("PR detail workspace", () => {
     ).toBe("cancel-action")
     expect(detailsKeyIntent({ ...base, keyName: "left" })).toBe("scroll-files-left")
     expect(detailsKeyIntent({ ...base, keyName: "right" })).toBe("scroll-files-right")
+  })
+
+  it("blocks same-batch Escape as soon as a finding post starts", () => {
+    const posting = beginFindingPostSession(null, {
+      findingId: "F1",
+      findingIndex: 0,
+      fingerprint: "fingerprint",
+      requestId: "post-1"
+    })
+
+    expect(
+      detailsKeyIntent({
+        actionCancelable: false,
+        actionReady: false,
+        dialogOpen: false,
+        findingPostRunning: posting !== null,
+        keyName: "escape",
+        modified: false,
+        tab: "diff"
+      })
+    ).toBe("consume")
+    expect(beginFindingPostSession(posting, { ...posting, requestId: "post-2" })).toBe(posting)
+  })
+
+  it("adopts only the matching successful manual checkout as the local diff", () => {
+    const unavailable: Parameters<typeof worktreeCheckoutLocalDiff>[0] = {
+      _tag: "unavailable",
+      diagnostic: { operation: "checkout", message: "automatic checkout failed" }
+    }
+    const plan = {
+      account: Domain.Account.make({
+        awsAccountId: "123456789012",
+        profile: Domain.AwsProfileName.make("dev"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      }),
+      cachePath: "/cache",
+      destinationCommit: ReadClient.CodeCommitCommitId.make("1".repeat(40)),
+      destinationReference: "main",
+      pullRequestId: Domain.PullRequestId.make("35"),
+      repositoryName: Domain.RepositoryName.make("repo"),
+      sourceCommit: ReadClient.CodeCommitCommitId.make("2".repeat(40)),
+      sourceReference: "feature",
+      targetExists: false,
+      targetPath: "/worktree"
+    }
+    const worktree = { path: "/worktree", reused: false, sourceCommit: plan.sourceCommit }
+    const success: Parameters<typeof worktreeCheckoutLocalDiff>[2] = {
+      _tag: "success",
+      requestId: "checkout-1",
+      value: worktree
+    }
+
+    const ready = worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, success)
+    expect(ready).toEqual({
+      _tag: "ready",
+      plan,
+      worktree
+    })
+    expect(localEditorReady(ready, "src/surviving.ts", false)).toBe(true)
+    expect(localEditorReady(ready, null, false)).toBe(false)
+    expect(localEditorReady(unavailable, "src/surviving.ts", false)).toBe(false)
+    expect(worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-2" }, success)).toBe(unavailable)
+    expect(
+      worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, {
+        _tag: "failure",
+        diagnostic: { operation: "checkout", message: "still failed" },
+        requestId: "checkout-1"
+      })
+    ).toBe(unavailable)
   })
 
   it("gives every selected file a stable scroll target", () => {

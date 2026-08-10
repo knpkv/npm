@@ -1,10 +1,10 @@
 import { useKeyboard } from "@opentui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type { RelayReviewConversationTurn, RelayReviewFinding } from "../../RelayReview.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { terminalSafeCompactText, terminalSafeMultilineText } from "../details-model.js"
-import { textFromKeyboardKey } from "../keyboard-text.js"
+import { transitionSingleLineDraft } from "../text-filter-input.js"
 import { Dialog } from "./Dialog.js"
 
 const MAX_FOLLOW_UP_CHARACTERS = 2_000
@@ -21,6 +21,7 @@ export function DialogFindingConversation({
   const { theme } = useTheme()
   const dialog = useDialog()
   const [draft, setDraft] = useState("")
+  const draftRef = useRef("")
   const relevantTurns = turns.filter((turn) => turn.findingId === finding.id).slice(-6)
 
   useKeyboard((key) => {
@@ -28,20 +29,15 @@ export function DialogFindingConversation({
       dialog.hide()
       return
     }
+    const transition = transitionSingleLineDraft(draftRef.current, key, MAX_FOLLOW_UP_CHARACTERS)
+    draftRef.current = transition.draft
     if (key.name === "return") {
-      const message = draft.trim()
-      if (message.length === 0) return
-      onSubmit(message)
+      if (transition.submission === null) return
+      onSubmit(transition.submission)
       dialog.hide()
       return
     }
-    if (key.name === "backspace") {
-      setDraft((current) => current.slice(0, -1))
-      return
-    }
-    const text = textFromKeyboardKey(key)
-    if (text === undefined) return
-    setDraft((current) => `${current}${text}`.slice(0, MAX_FOLLOW_UP_CHARACTERS))
+    setDraft(transition.draft)
   })
 
   return (

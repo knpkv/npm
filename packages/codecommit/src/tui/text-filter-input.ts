@@ -15,6 +15,29 @@ export interface TextFilterInputTransition {
   readonly state: TextFilterInputState
 }
 
+export interface SingleLineDraftTransition {
+  readonly draft: string
+  readonly submission: string | null
+}
+
+/** Advances a bounded dialog draft synchronously and snapshots the submitted text. */
+export const transitionSingleLineDraft = (
+  draft: string,
+  key: TextFilterInputKey,
+  maximumCharacters: number
+): SingleLineDraftTransition => {
+  if (key.name === "return") {
+    const submission = draft.trim()
+    return { draft, submission: submission.length === 0 ? null : submission }
+  }
+  if (key.name === "backspace") return { draft: draft.slice(0, -1), submission: null }
+  const text = textFromKeyboardKey(key)
+  return {
+    draft: text === undefined ? draft : `${draft}${text}`.slice(0, maximumCharacters),
+    submission: null
+  }
+}
+
 export interface ParsedSettingsFilter {
   readonly status: "all" | "on" | "off"
   readonly name: string
