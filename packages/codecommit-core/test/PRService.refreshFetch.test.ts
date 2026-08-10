@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
+import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
@@ -58,6 +59,19 @@ describe("fetchAndUpsertPRs", () => {
     isApproved: false,
     approvedBy: [],
     commentedBy: [],
+    approvalRules: []
+  })
+  const providerOpenDetail = Schema.decodeSync(PullRequestDetail)({
+    title: "Still open at provider",
+    author: "author",
+    status: "OPEN",
+    repositoryName: "example-repository",
+    sourceBranch: "feature",
+    destinationBranch: "main",
+    creationDate: new Date("2026-08-01T00:00:00.000Z"),
+    lastActivityDate: new Date("2026-08-02T00:00:00.000Z"),
+    approvedBy: [],
+    approvedByArns: [],
     approvalRules: []
   })
 
@@ -284,6 +298,43 @@ describe("fetchAndUpsertPRs", () => {
 
       expect(yield* Ref.get(deleteCalls)).toBe(1)
       expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("publishes scope success when a stale OPEN row is authoritatively read and removed", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const deleteCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(providerOpenDetail)
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(deleteCalls)).toBe(1)
+      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1" }])
     }))
 
   it.effect("withholds scope success when a listed PR cannot be upserted", () =>
