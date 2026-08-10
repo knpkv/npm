@@ -41,11 +41,16 @@ import {
   fileDiffIdentity,
   fileDiffIdentityKey,
   fileDiffIdentityMatches,
+  findingConversationSubmissionEnabled,
   humanReviewState,
   isChangedDiffLine,
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
+  pullRequestDriftRefreshStartEnabled,
+  pullRequestRevisionObservationEnabled,
+  pullRequestRevisionPollingEnabled,
+  pullRequestRevisionPollTickEnabled,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
   splitDiffLineRow,
@@ -717,6 +722,80 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "n" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "n", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "r" })).toBe("review-pr")
+    expect(detailsKeyIntent({ ...base, keyName: "r", workspaceRefreshing: true })).toBe("consume")
+    expect(
+      detailsKeyIntent({
+        ...base,
+        findingReviewActive: true,
+        keyName: "V",
+        shifted: true,
+        workspaceRefreshing: true
+      })
+    ).toBe("consume")
+    expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "V", shifted: true })).toBe(
+      "verify-finding"
+    )
+    expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", workspaceRefreshing: true })).toBe(
+      "consume"
+    )
+    expect(detailsKeyIntent({ ...base, keyName: "escape", workspaceRefreshing: true })).toBe("back")
+    expect(
+      pullRequestRevisionPollingEnabled({
+        actionCancelable: false,
+        checkoutIdentityMatches: true,
+        findingPostRunning: false,
+        hasLocalCheckout: true
+      })
+    ).toBe(true)
+    expect(
+      pullRequestRevisionPollingEnabled({
+        actionCancelable: false,
+        checkoutIdentityMatches: true,
+        findingPostRunning: true,
+        hasLocalCheckout: true
+      })
+    ).toBe(false)
+    expect(findingConversationSubmissionEnabled(true)).toBe(false)
+    expect(findingConversationSubmissionEnabled(false)).toBe(true)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: true, findingPostRunning: false })
+    ).toBe(false)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: false, findingPostRunning: true })
+    ).toBe(false)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: false, findingPostRunning: false })
+    ).toBe(true)
+    expect(pullRequestRevisionPollTickEnabled(true)).toBe(false)
+    expect(pullRequestRevisionPollTickEnabled(false)).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-C",
+        refreshWaiting: true
+      })
+    ).toBe(false)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-C",
+        refreshWaiting: false
+      })
+    ).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: null,
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(false)
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")
@@ -839,10 +918,7 @@ describe("PR detail workspace", () => {
   })
 
   it("adopts only the matching successful manual checkout as the local diff", () => {
-    const unavailable: Parameters<typeof worktreeCheckoutLocalDiff>[0] = {
-      _tag: "unavailable",
-      diagnostic: { operation: "checkout", message: "automatic checkout failed" }
-    }
+    const provider: Parameters<typeof worktreeCheckoutLocalDiff>[0] = { _tag: "provider" }
     const plan = {
       account: Domain.Account.make({
         awsAccountId: "123456789012",
@@ -866,7 +942,7 @@ describe("PR detail workspace", () => {
       value: worktree
     }
 
-    const ready = worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, success)
+    const ready = worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, success)
     expect(ready).toEqual({
       _tag: "ready",
       plan,
@@ -874,15 +950,16 @@ describe("PR detail workspace", () => {
     })
     expect(localEditorReady(ready, "src/surviving.ts", false)).toBe(true)
     expect(localEditorReady(ready, null, false)).toBe(false)
-    expect(localEditorReady(unavailable, "src/surviving.ts", false)).toBe(false)
-    expect(worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-2" }, success)).toBe(unavailable)
+    expect(localEditorReady(provider, "src/surviving.ts", false)).toBe(false)
+    expect(localEditorReady({ ...ready, _tag: "outdated" }, "src/surviving.ts", false)).toBe(false)
+    expect(worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-2" }, success)).toBe(provider)
     expect(
-      worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, {
+      worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, {
         _tag: "failure",
         diagnostic: { operation: "checkout", message: "still failed" },
         requestId: "checkout-1"
       })
-    ).toBe(unavailable)
+    ).toBe(provider)
   })
 
   it("gives every selected file a stable scroll target", () => {

@@ -16,16 +16,8 @@ import {
   runRelayReviewVerification
 } from "../../RelayReview.js"
 import type { RelayReviewSkillId } from "../../ReviewSkills.js"
-import { WorktreeError, type WorktreePlan, type WorktreeResult, WorktreeService } from "../../WorktreeService.js"
-import {
-  type ActionDiagnostic,
-  actionDiagnostic,
-  actionOutcome,
-  changedFilePath,
-  fileDiffIdentity,
-  type PullRequestWorkspaceIdentity,
-  pullRequestWorkspaceIdentity
-} from "../details-model.js"
+import { WorktreeError, type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
+import { actionOutcome, changedFilePath, fileDiffIdentity, pullRequestWorkspaceIdentity } from "../details-model.js"
 import { type OpenEditorInput, openLocalEditor } from "../editor-launch.js"
 import {
   type FileDiffOutcome,
@@ -35,23 +27,15 @@ import {
   preloadLocalFileDiffs,
   validateChangedFileLine
 } from "../file-diff.js"
+import {
+  loadPullRequestRevision,
+  loadPullRequestWorkspace,
+  type PullRequestRevisionCheck,
+  type PullRequestWorkspace
+} from "../workspace.js"
 import { runtimeAtom } from "./runtime.js"
 
-export interface PullRequestWorkspace {
-  readonly fileDiffs: ReadonlyMap<string, FileDiffOutcome>
-  readonly identity: PullRequestWorkspaceIdentity
-  readonly revision: ReadClient.CodeCommitPullRequestRevision
-  readonly files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
-  readonly localDiff:
-    | {
-      readonly _tag: "ready"
-      readonly plan: WorktreePlan
-      readonly worktree: WorktreeResult
-    }
-    | { readonly _tag: "unavailable"; readonly diagnostic: ActionDiagnostic }
-}
-
-type LocalDiffReady = Extract<PullRequestWorkspace["localDiff"], { readonly _tag: "ready" }>
+export type { PullRequestWorkspace } from "../workspace.js"
 
 export interface RelayReviewActionInput {
   readonly kind: RelayReviewKind
@@ -94,69 +78,23 @@ export interface PostRelayFindingInput {
 }
 
 export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
-  Effect.gen(function*() {
-    const client = yield* ReadClient.CodeCommitReadClient
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const worktreeService = yield* WorktreeService
-    const account = { profile: pr.account.profile, region: pr.account.region }
-    const revision = yield* client.getPullRequest({ account, pullRequestId: pr.id })
-    const localDiff = yield* worktreeService
-      .preflight({
-        account: pr.account,
-        destinationCommit: revision.destinationCommit,
-        destinationReference: pr.destinationBranch,
-        pullRequestId: pr.id,
-        repositoryName: pr.repositoryName,
-        sourceCommit: revision.sourceCommit,
-        sourceReference: pr.sourceBranch
-      })
-      .pipe(
-        Effect.flatMap((plan) =>
-          worktreeService
-            .checkout(plan)
-            .pipe(Effect.map((worktree): LocalDiffReady => ({ _tag: "ready", plan, worktree })))
-        ),
-        Effect.match({
-          onFailure: (error): PullRequestWorkspace["localDiff"] => ({
-            _tag: "unavailable",
-            diagnostic: actionDiagnostic(error)
-          }),
-          onSuccess: (ready) => ready
-        })
-      )
-    const files = yield* client
-      .streamChangedFiles({
-        account,
-        repositoryName: revision.repositoryName,
-        beforeCommitSpecifier: revision.destinationCommit,
-        afterCommitSpecifier: revision.sourceCommit
-      })
-      .pipe(Stream.runCollect)
-    const fileArray = Array.from(files)
-    const fileDiffs = localDiff._tag === "ready"
-      ? yield* preloadLocalFileDiffs(
-        {
-          getBlob: client.getBlob,
-          getLocalBlob: (request) => loadLocalGitBlob(spawner, request)
-        },
-        {
-          account: pr.account,
-          files: fileArray,
-          identity: pullRequestWorkspaceIdentity(pr),
-          localWorktreePath: localDiff.worktree.path,
-          repositoryName: revision.repositoryName,
-          revision
-        }
-      )
-      : new Map<string, FileDiffOutcome>()
-    return {
-      fileDiffs,
-      identity: pullRequestWorkspaceIdentity(pr),
-      revision,
-      files: fileArray,
-      localDiff
-    } satisfies PullRequestWorkspace
-  }).pipe(Effect.withSpan("loadPullRequestWorkspace", { attributes: { prId: pr.id } }))
+  loadPullRequestWorkspace(pr).pipe(Effect.withSpan("loadPullRequestWorkspaceAtom", { attributes: { prId: pr.id } }))
+)
+
+export const refreshPullRequestWorkspaceAtom = runtimeAtom.fn(
+  (input: { readonly check: PullRequestRevisionCheck; readonly pr: Domain.PullRequest }) =>
+    loadPullRequestWorkspace(input.pr).pipe(
+      Effect.map((workspace) => ({ check: input.check, workspace })),
+      Effect.withSpan("refreshPullRequestWorkspaceAtom", { attributes: { prId: input.pr.id } })
+    )
+)
+
+export const loadPullRequestRevisionAtom = runtimeAtom.fn(
+  (input: { readonly baseline: ReadClient.CodeCommitPullRequestRevision; readonly pr: Domain.PullRequest }) =>
+    loadPullRequestRevision(input.pr).pipe(
+      Effect.map((observation): PullRequestRevisionCheck => ({ ...observation, baseline: input.baseline })),
+      Effect.withSpan("loadPullRequestRevisionAtom", { attributes: { prId: input.pr.id } })
+    )
 )
 
 export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>

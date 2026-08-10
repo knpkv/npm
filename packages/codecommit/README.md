@@ -10,9 +10,9 @@ CLI and TUI for AWS CodeCommit pull requests.
 - Health score ranking (staleness, review urgency)
 - SSO login/logout management
 - Full-text search across cached PRs
-- Exact-revision PR workspace with hierarchical navigation and locally cached native diff previews
+- Exact-revision PR workspace with hierarchical navigation, API-first diff previews, and optional local worktrees
 - Prompt-only local Codex Relay passes with description suggestions, file-anchored PR comments, or exact line comments that a human can discuss, publish, acknowledge, or reject
-- Automatic deterministic detached checkout of the selected PR head
+- Explicit deterministic detached checkout of the selected PR head with provider-drift detection
 
 ## Prerequisites
 
@@ -32,8 +32,8 @@ CLI and TUI for AWS CodeCommit pull requests.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
   - `codecommit:GetDifferences` — exact-revision changed files
-  - `codecommit:GetBlob` — mandatory exact-line publication validation and diff-preview fallback when automatic local checkout is unavailable
-  - `codecommit:GitPull` — automatic exact-head local diffs, detached worktrees, and Relay review
+  - `codecommit:GetBlob` — default API diff previews and mandatory exact-line publication validation
+  - `codecommit:GitPull` — explicit exact-head local diffs, detached worktrees, and Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export and idempotent review-comment reconciliation
@@ -62,12 +62,19 @@ codecommit
 codecommit tui
 ```
 
-Open a pull request to enter the exact-revision review workspace. The TUI first
-prepares a detached checkout of the advertised immutable head. The left pane
-navigates changed files as a shared-directory tree, the center renders diffs
-from raw objects in that local Git database, and the right pane keeps local
-Relay actions separate from CodeCommit approval and mergeability. After explicit
-action confirmation, Relay has the host produce a bounded
+Open a pull request to enter the exact-revision review workspace. Opening is
+API-first: the TUI reads the advertised base/head and changed-file metadata,
+then renders selected files with bounded CodeCommit `GetBlob` reads without
+running Git or downloading source. The left pane navigates changed files as a
+shared-directory tree, the center renders a two-sided provider diff, and the
+right pane keeps local Relay actions separate from CodeCommit approval and
+mergeability. Press `w`, then confirm, to create or reuse the deterministic
+detached worktree and switch subsequent previews to immutable local Git blobs.
+While a local worktree is active, the TUI checks provider revision metadata
+every 30 seconds. A changed base or head immediately returns the preview to API
+mode, labels the retained checkout as outdated, and offers `w` to update it.
+
+After explicit action confirmation, Relay has the host produce a bounded
 exact-commit patch with Git hooks disabled, then runs the local Codex CLI in
 prompt-only mode. Prompt-only mode disables user and repository instructions,
 host tools, and inherited shell variables, so repository-authored text cannot
@@ -82,13 +89,11 @@ request's advertised source and destination branch refs, then verified by exact
 commit ID before checkout; raw commit IDs are never used as fetch refspecs.
 Invocation from a Git hook therefore cannot redirect commands
 into the caller's repository, and authentication failures return to the TUI
-instead of waiting on an invisible prompt. After a successful checkout, the TUI
-preloads the first 25 bounded file previews from immutable local objects before
-exposing the workspace. Larger reviews load remaining previews on demand from
-that same exact local checkout, never from mutable provider state. Warm previews
-remain keyed in memory by exact base, head, path, and blob pair. If
-automatic checkout is unavailable, the pane
-labels the fallback and uses bounded `GetBlob` reads instead. Worktrees are detached at the displayed head under
+instead of waiting on an invisible prompt. After a successful explicit
+checkout, selected previews load on demand from that exact local checkout.
+Provider and local previews remain keyed in memory by exact base, head, path,
+and blob pair, and switching sources clears the in-memory preview cache first.
+Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
 `~/.codecommit/repositories`. Both storage roots are enforced as user-only
 directories (`0700`) before checkout. Cache and worktree coordinates include the

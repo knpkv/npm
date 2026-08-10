@@ -93,7 +93,8 @@ export const beginFindingPostSession = (
 
 type WorktreeLocalDiff =
   | { readonly _tag: "ready"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
-  | { readonly _tag: "unavailable"; readonly diagnostic: ActionDiagnostic }
+  | { readonly _tag: "provider" }
+  | { readonly _tag: "outdated"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
 
 /** Promotes only the receipt for the expected exact-head checkout into local workspace readiness. */
 export const worktreeCheckoutLocalDiff = (
@@ -110,10 +111,41 @@ export const worktreeCheckoutLocalDiff = (
 
 /** Enables editors only for a surviving head file in an exact-head local worktree. */
 export const localEditorReady = (
-  localDiff: { readonly _tag: "ready" | "unavailable" },
+  localDiff: { readonly _tag: "ready" | "provider" | "outdated" },
   headPath: string | null,
   actionCancelable: boolean
 ): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
+
+/** Polls only while an exact local checkout is idle and no provider finding mutation owns the workspace. */
+export const pullRequestRevisionPollingEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly checkoutIdentityMatches: boolean
+  readonly findingPostRunning: boolean
+  readonly hasLocalCheckout: boolean
+}): boolean =>
+  input.hasLocalCheckout &&
+  input.checkoutIdentityMatches &&
+  !input.actionCancelable &&
+  !input.findingPostRunning
+
+/** Keeps an interval tick from replacing a revision request that has not settled. */
+export const pullRequestRevisionPollTickEnabled = (revisionPollWaiting: boolean): boolean => !revisionPollWaiting
+
+/** Starts each provider drift refresh once, after the previous refresh has settled. */
+export const pullRequestDriftRefreshStartEnabled = (input: {
+  readonly handledObservationKey: string | null
+  readonly observationKey: string
+  readonly refreshWaiting: boolean
+}): boolean => !input.refreshWaiting && input.handledObservationKey !== input.observationKey
+
+/** Rejects a poll result whenever another operation owns the workspace. */
+export const pullRequestRevisionObservationEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly findingPostRunning: boolean
+}): boolean => !input.actionCancelable && !input.findingPostRunning
+
+/** Keeps an already-open finding dialog from mutating a workspace during provider drift. */
+export const findingConversationSubmissionEnabled = (providerDriftPending: boolean): boolean => !providerDriftPending
 
 const isWorktreeError = Schema.is(WorktreeError)
 
@@ -195,6 +227,7 @@ export const detailsKeyIntent = (input: {
   readonly modified: boolean
   readonly shifted?: boolean
   readonly tab: "comments" | "diff"
+  readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
   if (
@@ -204,6 +237,12 @@ export const detailsKeyIntent = (input: {
     return "consume"
   }
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
+  if (
+    input.workspaceRefreshing === true &&
+    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
+  ) {
+    return "consume"
+  }
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
