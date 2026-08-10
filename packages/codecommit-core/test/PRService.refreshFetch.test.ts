@@ -51,7 +51,7 @@ describe("fetchAndUpsertPRs", () => {
     creationDate: new Date("2026-08-01T00:00:00.000Z"),
     lastModifiedDate: new Date("2026-08-02T00:00:00.000Z"),
     link: "https://example.invalid/pr/35",
-    account: { profile: "test-profile", region: "us-east-1" },
+    account: { profile: "test-profile", region: "us-east-1", repoAccountId: "" },
     status: "OPEN",
     sourceBranch: "feature",
     destinationBranch: "main",
@@ -74,6 +74,7 @@ describe("fetchAndUpsertPRs", () => {
     approvedByArns: [],
     approvalRules: []
   })
+  const providerClosedDetail = new PullRequestDetail({ ...providerOpenDetail, status: "CLOSED" })
 
   it.effect("preserves the original interruption from an account stream", () =>
     Effect.gen(function*() {
@@ -170,7 +171,45 @@ describe("fetchAndUpsertPRs", () => {
 
       expect(yield* Ref.get(detailCalls)).toBe(0)
       expect(yield* Ref.get(deleteCalls)).toBe(0)
-      expect(successfulScopes).toEqual([{ profile: "other-profile", region: "eu-west-1" }])
+      expect(successfulScopes).toEqual([
+        { profile: "other-profile", region: "eu-west-1", awsAccountId: "210987654321" }
+      ])
+    }))
+
+  it.effect("does not reconcile a stale row through a profile now resolved to another AWS account", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.die("foreign-account stale row must not be reconciled")
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "210987654321"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([
+        { profile: "test-profile", region: "us-east-1", awsAccountId: "210987654321" }
+      ])
     }))
 
   it.effect("withholds scope success when stale-row discovery fails", () =>
@@ -300,7 +339,7 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("publishes scope success when a stale OPEN row is authoritatively read and removed", () =>
+  it.effect("publishes scope success while retaining a stale row authoritatively observed OPEN", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
@@ -333,8 +372,49 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      expect(yield* Ref.get(deleteCalls)).toBe(1)
-      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1" }])
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([
+        { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
+      ])
+    }))
+
+  it.effect("publishes scope success after a stale row is authoritatively observed CLOSED", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const statusUpdates = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(providerClosedDetail)
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(statusUpdates)).toBe(1)
+      expect(successfulScopes).toEqual([
+        { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
+      ])
     }))
 
   it.effect("withholds scope success when a listed PR cannot be upserted", () =>
@@ -413,6 +493,7 @@ describe("fetchAndUpsertPRs", () => {
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
+      const upsertedRepoAccountId = yield* Ref.make<string | null | undefined>(undefined)
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -423,7 +504,7 @@ describe("fetchAndUpsertPRs", () => {
           getPullRequests: () => Stream.make(providerOpenPR)
         }),
         Layer.mock(PullRequestRepo, {
-          upsert: () => Effect.void,
+          upsert: (input) => Ref.set(upsertedRepoAccountId, input.repoAccountId),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -440,6 +521,9 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1" }])
+      expect(yield* Ref.get(upsertedRepoAccountId)).toBeNull()
+      expect(successfulScopes).toEqual([
+        { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
+      ])
     }))
 })

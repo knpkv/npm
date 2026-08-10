@@ -133,7 +133,7 @@ describe("PRService.refresh", () => {
       expect(finalState.pullRequests[0]?.id).toBe("35")
       expect(finalState.pullRequests[0]?.title).toBe("Visible after one refresh")
       expect(finalState.successfulRefreshScopes).toEqual([
-        { profile: "test-profile", region: "us-east-1" }
+        { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
       ])
     }))
 

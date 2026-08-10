@@ -1,4 +1,4 @@
-import { type Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
@@ -35,18 +35,27 @@ export interface PullRequestWorkspaceIdentity {
 
 /** Collision-safe selection key for provider-local pull-request numbers. */
 export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
-  JSON.stringify([pr.account.profile, pr.account.region, pr.account.repoAccountId ?? null, pr.repositoryName, pr.id])
+  JSON.stringify([
+    pr.account.profile,
+    pr.account.region,
+    Domain.normalizeAccountId(pr.account.awsAccountId) ?? null,
+    Domain.normalizeAccountId(pr.account.repoAccountId) ?? null,
+    pr.repositoryName,
+    pr.id
+  ])
 
 interface PullRequestSelectionResolution {
   readonly key: string
   readonly pullRequest: Domain.PullRequest
 }
 
-const unknownAccountPullRequestSelection = (
+const unresolvedAccountPullRequestSelection = (
   selectionKey: string
 ): {
+  readonly awsAccountId: string | null
   readonly profile: string
   readonly pullRequestId: string
+  readonly repoAccountId: string | null
   readonly region: string
   readonly repositoryName: string
 } | null => {
@@ -60,15 +69,47 @@ const unknownAccountPullRequestSelection = (
       typeof value[2] === "string" &&
       typeof value[3] === "string"
     ) {
-      return { profile: value[0], region: value[1], repositoryName: value[2], pullRequestId: value[3] }
+      return {
+        awsAccountId: null,
+        profile: value[0],
+        pullRequestId: value[3],
+        repoAccountId: null,
+        region: value[1],
+        repositoryName: value[2]
+      }
     }
-    return value.length === 5 &&
+    if (
+      value.length === 5 &&
+      typeof value[0] === "string" &&
+      typeof value[1] === "string" &&
+      (typeof value[2] === "string" || value[2] === null) &&
+      typeof value[3] === "string" &&
+      typeof value[4] === "string"
+    ) {
+      return {
+        awsAccountId: null,
+        profile: value[0],
+        pullRequestId: value[4],
+        repoAccountId: Domain.normalizeAccountId(value[2]) ?? null,
+        region: value[1],
+        repositoryName: value[3]
+      }
+    }
+    return value.length === 6 &&
         typeof value[0] === "string" &&
         typeof value[1] === "string" &&
-        value[2] === null &&
-        typeof value[3] === "string" &&
-        typeof value[4] === "string"
-      ? { profile: value[0], region: value[1], repositoryName: value[3], pullRequestId: value[4] }
+        (typeof value[2] === "string" || value[2] === null) &&
+        (typeof value[3] === "string" || value[3] === null) &&
+        typeof value[4] === "string" &&
+        typeof value[5] === "string"
+      ? {
+        awsAccountId: Domain.normalizeAccountId(value[2]) ?? null,
+        profile: value[0],
+        pullRequestId: value[5],
+        repoAccountId: Domain.normalizeAccountId(value[3]) ?? null,
+        region: value[1],
+        repositoryName: value[4]
+      }
       : null
   } catch {
     return null
@@ -83,14 +124,18 @@ export const resolvePullRequestSelection = (
   if (selectionKey === null) return null
   const exact = pullRequests.find((candidate) => pullRequestSelectionKey(candidate) === selectionKey)
   if (exact !== undefined) return { key: selectionKey, pullRequest: exact }
-  const unknownAccount = unknownAccountPullRequestSelection(selectionKey)
-  if (unknownAccount === null) return null
+  const unresolvedAccount = unresolvedAccountPullRequestSelection(selectionKey)
+  if (unresolvedAccount === null) return null
   const candidates = pullRequests.filter(
     (candidate) =>
-      candidate.account.profile === unknownAccount.profile &&
-      candidate.account.region === unknownAccount.region &&
-      candidate.repositoryName === unknownAccount.repositoryName &&
-      candidate.id === unknownAccount.pullRequestId
+      candidate.account.profile === unresolvedAccount.profile &&
+      candidate.account.region === unresolvedAccount.region &&
+      candidate.repositoryName === unresolvedAccount.repositoryName &&
+      candidate.id === unresolvedAccount.pullRequestId &&
+      (unresolvedAccount.awsAccountId === null ||
+        Domain.normalizeAccountId(candidate.account.awsAccountId) === unresolvedAccount.awsAccountId) &&
+      (unresolvedAccount.repoAccountId === null ||
+        Domain.normalizeAccountId(candidate.account.repoAccountId) === unresolvedAccount.repoAccountId)
   )
   return candidates.length === 1
     ? { key: pullRequestSelectionKey(candidates[0]!), pullRequest: candidates[0]! }
@@ -158,6 +203,7 @@ export const claimMergeConfirmation = (
   status._tag === "ready" ? { ...status, _tag: "running" } : null
 
 export interface AmbiguousMergeGuard {
+  readonly awsAccountId: string | null
   readonly baselineRefreshGeneration: number
   readonly phase: "awaiting-refresh" | "refreshing" | "refresh-failed"
   readonly profile: Domain.AwsProfileName
@@ -173,6 +219,7 @@ export const beginAmbiguousMergeGuard = (
   pr: Domain.PullRequest,
   refreshGeneration = 0
 ): AmbiguousMergeGuard => ({
+  awsAccountId: Domain.normalizeAccountId(pr.account.awsAccountId) ?? null,
   baselineRefreshGeneration: refreshGeneration,
   phase: "awaiting-refresh",
   profile: pr.account.profile,
@@ -203,8 +250,12 @@ const ambiguousMergeGuardAfterAppStatus = (
   if (status === "error" && guard.phase === "refreshing") return { ...guard, phase: "refresh-failed" }
   if (
     status === "idle" &&
+    guard.awsAccountId !== null &&
     successfulRefreshScopes.some(
-      (scope) => scope.profile === guard.profile && scope.region === guard.region
+      (scope) =>
+        scope.profile === guard.profile &&
+        scope.region === guard.region &&
+        scope.awsAccountId === guard.awsAccountId
     ) &&
     refreshGeneration > guard.baselineRefreshGeneration
   ) {

@@ -573,7 +573,9 @@ describe("PR detail workspace", () => {
     const unknown = new Domain.PullRequest({
       account: new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
-        region: Domain.AwsRegion.make("eu-west-1")
+        region: Domain.AwsRegion.make("eu-west-1"),
+        awsAccountId: "123456789012",
+        repoAccountId: ""
       }),
       approvalRules: [],
       approvedBy: [],
@@ -600,6 +602,10 @@ describe("PR detail workspace", () => {
       ...unknown,
       account: new Domain.Account({ ...unknown.account, repoAccountId: "999900001111" })
     })
+    const otherAwsAccount = new Domain.PullRequest({
+      ...known,
+      account: new Domain.Account({ ...known.account, awsAccountId: "210987654321" })
+    })
 
     expect(resolvePullRequestSelection([known], pullRequestSelectionKey(unknown))).toEqual({
       key: pullRequestSelectionKey(known),
@@ -618,6 +624,7 @@ describe("PR detail workspace", () => {
     expect(resolvePullRequestSelection([known], JSON.stringify(["production", "eu-west-1", null, "payments"])))
       .toBeNull()
     expect(resolvePullRequestSelection([otherKnown], pullRequestSelectionKey(known))).toBeNull()
+    expect(resolvePullRequestSelection([otherAwsAccount], pullRequestSelectionKey(known))).toBeNull()
     expect(resolvePullRequestSelection([known, otherKnown], pullRequestSelectionKey(otherKnown))).toEqual({
       key: pullRequestSelectionKey(otherKnown),
       pullRequest: otherKnown
@@ -1142,7 +1149,8 @@ describe("PR detail workspace", () => {
     const target = new Domain.PullRequest({
       account: new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
-        region: Domain.AwsRegion.make("eu-west-1")
+        region: Domain.AwsRegion.make("eu-west-1"),
+        awsAccountId: "123456789012"
       }),
       approvalRules: [],
       approvedBy: [],
@@ -1179,28 +1187,49 @@ describe("PR detail workspace", () => {
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 1, [
-      { profile: target.account.profile, region: target.account.region }
+      { profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }
     ])
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 2, [
-      { profile: Domain.AwsProfileName.make("staging"), region: Domain.AwsRegion.make("eu-west-1") }
+      {
+        profile: Domain.AwsProfileName.make("staging"),
+        region: Domain.AwsRegion.make("eu-west-1"),
+        awsAccountId: "123456789012"
+      }
     ])
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
     expect(Object.keys(guards)).toEqual([pullRequestSelectionKey(target)])
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target], 3, [
-      { profile: target.account.profile, region: target.account.region }
+      { profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }
     ])
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
     expect(Object.keys(guards)).toEqual([pullRequestSelectionKey(target)])
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 4, [
-      { profile: target.account.profile, region: target.account.region }
+      { profile: target.account.profile, region: target.account.region, awsAccountId: "210987654321" }
     ])
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 5, [
+      { profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }
+    ])
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(false)
+
+    guards = addAmbiguousMergeGuard({}, target, 5)
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(
+      guards,
+      "idle",
+      [new Domain.PullRequest({ ...target, status: "CLOSED" })],
+      6,
+      [{ profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }]
+    )
     expect(pullRequestOpeningBlocked(guards, target)).toBe(false)
   })
 
@@ -1208,7 +1237,8 @@ describe("PR detail workspace", () => {
     const targetA = new Domain.PullRequest({
       account: new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
-        region: Domain.AwsRegion.make("eu-west-1")
+        region: Domain.AwsRegion.make("eu-west-1"),
+        awsAccountId: "123456789012"
       }),
       approvalRules: [],
       approvedBy: [],
@@ -1242,7 +1272,7 @@ describe("PR detail workspace", () => {
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [targetA, targetB])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [targetB], 2, [
-      { profile: targetA.account.profile, region: targetA.account.region }
+      { profile: targetA.account.profile, region: targetA.account.region, awsAccountId: "123456789012" }
     ])
 
     expect(pullRequestOpeningBlocked(guards, targetA)).toBe(false)

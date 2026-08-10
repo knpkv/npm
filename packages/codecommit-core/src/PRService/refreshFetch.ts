@@ -22,7 +22,7 @@ import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 
-/** Resolve a stale OPEN PR: delete if still open, update status if merged/closed. */
+/** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
   prRepo: PullRequestRepoShape,
   detail: PullRequestDetail,
@@ -30,7 +30,7 @@ const resolveStaleStatus = (
   id: string
 ) =>
   detail.status === "OPEN"
-    ? prRepo.deleteOne(awsAccountId, id)
+    ? Effect.void
     : prRepo.updateStatusAndClosedAt(
       awsAccountId,
       id,
@@ -68,7 +68,9 @@ export const fetchAndUpsertPRs = (params: {
     const successfullyFetchedScopes = yield* Ref.make(
       new Set(
         enabledAccounts.flatMap((account) =>
-          (account.regions ?? []).map((region) => accountRegionKey(account.profile, region))
+          accountIdMap.get(account.profile)
+            ? (account.regions ?? []).map((region) => accountRegionKey(account.profile, region))
+            : []
         )
       )
     )
@@ -184,7 +186,11 @@ export const fetchAndUpsertPRs = (params: {
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
-          stalePRs.filter((pr) => successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))),
+          stalePRs.filter(
+            (pr) =>
+              accountIdMap.get(pr.accountProfile) === pr.awsAccountId &&
+              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))
+          ),
           (pr) =>
             awsClient
               .getPullRequest({
@@ -212,11 +218,12 @@ export const fetchAndUpsertPRs = (params: {
 
     const reconciledScopes = yield* Ref.get(successfullyFetchedScopes)
     return enabledAccounts.flatMap((account) =>
-      (account.regions ?? []).flatMap((region) =>
-        reconciledScopes.has(accountRegionKey(account.profile, region))
-          ? [{ profile: account.profile, region }]
+      (account.regions ?? []).flatMap((region) => {
+        const awsAccountId = accountIdMap.get(account.profile)
+        return awsAccountId && reconciledScopes.has(accountRegionKey(account.profile, region))
+          ? [{ profile: account.profile, region, awsAccountId }]
           : []
-      )
+      })
     )
   }).pipe(
     Effect.tapCauseIf(Cause.hasDies, (cause) => Effect.logWarning("fetchAndUpsertPRs failed", cause))

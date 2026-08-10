@@ -106,6 +106,12 @@ export type SandboxId = typeof SandboxId.Type
 export const PullRequestStatus = Schema.Literals(["OPEN", "CLOSED", "MERGED"])
 export type PullRequestStatus = typeof PullRequestStatus.Type
 
+/** Normalizes provider/cache account identifiers; blank values are unresolved, not identities. */
+export const normalizeAccountId = (value: string | null | undefined): string | undefined => {
+  const normalized = value?.trim()
+  return normalized === undefined || normalized.length === 0 ? undefined : normalized
+}
+
 /**
  * Notification severity type.
  *
@@ -468,6 +474,7 @@ export interface AccountState {
 export interface PullRequestRefreshScope {
   readonly profile: AwsProfileName
   readonly region: AwsRegion
+  readonly awsAccountId: string
 }
 
 /**
