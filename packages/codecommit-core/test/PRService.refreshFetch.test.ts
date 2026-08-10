@@ -6,7 +6,7 @@ import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
-import type { AppState } from "../src/Domain.js"
+import { type AppState, PullRequest } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 
@@ -41,6 +41,24 @@ describe("fetchAndUpsertPRs", () => {
     approvedByArns: null,
     commentedBy: null,
     approvalRules: null
+  })
+  const providerOpenPR = Schema.decodeSync(PullRequest)({
+    id: "35",
+    title: "Still open at provider",
+    author: "author",
+    repositoryName: "example-repository",
+    creationDate: new Date("2026-08-01T00:00:00.000Z"),
+    lastModifiedDate: new Date("2026-08-02T00:00:00.000Z"),
+    link: "https://example.invalid/pr/35",
+    account: { profile: "test-profile", region: "us-east-1" },
+    status: "OPEN",
+    sourceBranch: "feature",
+    destinationBranch: "main",
+    isMergeable: true,
+    isApproved: false,
+    approvedBy: [],
+    commentedBy: [],
+    approvalRules: []
   })
 
   it.effect("preserves the original interruption from an account stream", () =>
@@ -221,5 +239,111 @@ describe("fetchAndUpsertPRs", () => {
       }).pipe(Effect.provide(dependencies))
 
       expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("withholds scope success when a listed PR cannot be upserted", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const deleteCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.make(providerOpenPR),
+          getPullRequest: () => Effect.die("stale reconciliation must not run for an uncertified scope")
+        }),
+        Layer.mock(PullRequestRepo, {
+          upsert: () =>
+            Effect.fail(new CacheError({ operation: "upsert-pull-request", cause: new Error("database unavailable") })),
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([])
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+    }))
+
+  it.effect("withholds scope success when a listed PR has no resolved account identity", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.make(providerOpenPR)
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map(),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("publishes scope success after listed PR upsert and stale reconciliation succeed", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.make(providerOpenPR)
+        }),
+        Layer.mock(PullRequestRepo, {
+          upsert: () => Effect.void,
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1" }])
     }))
 })

@@ -1,4 +1,4 @@
-import { type Domain, ReadClient, type ReviewClient } from "@knpkv/codecommit-core"
+import { type Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
@@ -306,14 +306,7 @@ export const mergeFailureWorkspaceRefreshReason = (
     return error.operation === "merge-pull-request" ? "merge-outcome-unknown" : null
   }
   if (error._tag !== "AwsApiError") return null
-  switch (error.operation) {
-    case "mergePullRequestByFastForward":
-    case "mergePullRequestBySquash":
-    case "mergePullRequestByThreeWay":
-      return "merge-outcome-unknown"
-    default:
-      return null
-  }
+  return ReviewClient.isAmbiguousMergeProviderError(error) ? "merge-outcome-unknown" : null
 }
 
 /** Reloads stale revisions narrowly, but refreshes the PR list when selection identity changed. */

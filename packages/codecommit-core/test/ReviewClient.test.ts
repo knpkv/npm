@@ -21,7 +21,7 @@ import {
   CodeCommitRepositoryPage
 } from "../src/ReadClient/models.js"
 import { CodeCommitReadClient, type CodeCommitReadClientService } from "../src/ReadClient/ReadClient.js"
-import { CodeCommitReviewConflictError } from "../src/ReviewClient/errors.js"
+import { CodeCommitReviewConflictError, isAmbiguousMergeProviderError } from "../src/ReviewClient/errors.js"
 import { CodeCommitReviewAction } from "../src/ReviewClient/models.js"
 import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
 import {
@@ -329,6 +329,36 @@ describe("CodeCommitReviewClient", () => {
       if (Result.isFailure(result)) {
         assert.instanceOf(result.failure, AwsApiError)
         assert.strictEqual(result.failure.operation, "mergePullRequestBySquash")
+        assert.strictEqual(isAmbiguousMergeProviderError(result.failure), true)
+      }
+    }))
+
+  it.effect("preserves a definitive provider merge rejection without making it transport-shaped", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "mergePullRequestBySquash",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "AccessDeniedException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, AwsApiError)
+        assert.deepStrictEqual(result.failure.cause, { _tag: "AccessDeniedException" })
+        assert.strictEqual(isAmbiguousMergeProviderError(result.failure), false)
       }
     }))
 

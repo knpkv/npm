@@ -490,16 +490,34 @@ describe("PR detail workspace", () => {
         operation: "merge-squash"
       })
     ).toBe("verified-revision-a")
-    expect(
-      mergeFailureWorkspaceRefreshReason(
-        new Errors.AwsApiError({
-          cause: { _tag: "HttpClientError" },
-          operation: "mergePullRequestBySquash",
-          profile: Domain.AwsProfileName.make("production"),
-          region: Domain.AwsRegion.make("eu-west-1")
-        })
-      )
-    ).toBe("merge-outcome-unknown")
+    for (
+      const operation of [
+        "mergePullRequestByFastForward",
+        "mergePullRequestBySquash",
+        "mergePullRequestByThreeWay"
+      ]
+    ) {
+      expect(
+        mergeFailureWorkspaceRefreshReason(
+          new Errors.AwsApiError({
+            cause: { _tag: "HttpClientError" },
+            operation,
+            profile: Domain.AwsProfileName.make("production"),
+            region: Domain.AwsRegion.make("eu-west-1")
+          })
+        )
+      ).toBe("merge-outcome-unknown")
+      expect(
+        mergeFailureWorkspaceRefreshReason(
+          new Errors.AwsApiError({
+            cause: { _tag: "AccessDeniedException" },
+            operation,
+            profile: Domain.AwsProfileName.make("production"),
+            region: Domain.AwsRegion.make("eu-west-1")
+          })
+        )
+      ).toBeNull()
+    }
     expect(
       mergeFailureWorkspaceRefreshReason(
         new ReviewClient.CodeCommitReviewConflictError({

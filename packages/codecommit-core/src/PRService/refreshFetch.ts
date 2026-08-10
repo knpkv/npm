@@ -72,6 +72,12 @@ export const fetchAndUpsertPRs = (params: {
         )
       )
     )
+    const withholdScopeSuccess = (profile: string, region: string) =>
+      Ref.update(successfullyFetchedScopes, (scopes) => {
+        const next = new Set(scopes)
+        next.delete(accountRegionKey(profile, region))
+        return next
+      })
 
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({
@@ -153,7 +159,7 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId) {
             yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
-              Effect.catch(() => Effect.void)
+              Effect.catch(() => withholdScopeSuccess(pr.account.profile, pr.account.region))
             )
             const isAuthor = currentUser && pr.author === currentUser
             const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
@@ -161,6 +167,8 @@ export const fetchAndUpsertPRs = (params: {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
             }
+          } else {
+            yield* withholdScopeSuccess(pr.account.profile, pr.account.region)
           }
 
           yield* SubscriptionRef.update(state, (s) => ({
@@ -173,12 +181,6 @@ export const fetchAndUpsertPRs = (params: {
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
     const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
-    const withholdScopeSuccess = (profile: string, region: string) =>
-      Ref.update(successfullyFetchedScopes, (scopes) => {
-        const next = new Set(scopes)
-        next.delete(accountRegionKey(profile, region))
-        return next
-      })
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
