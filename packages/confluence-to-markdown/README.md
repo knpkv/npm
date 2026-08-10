@@ -150,14 +150,18 @@ would surface as an opaque conversion error instead.
 
 Pulling a page that holds one of the unsafe nodes marks it `roundTrip: unsafe` in its front matter, and
 `confluence sync push` refuses it rather than corrupting the node. Edit such a page with `page put --adf` or
-`page patch`, which never go through markdown. `--force` overrides the refusal; because a refused push leaves the
-commit unpushed, the retry still has something to push. Deletions already applied in Confluence are replayed
-harmlessly on that retry, so a partially completed push is never stuck.
+`page patch`, which never go through markdown. `--force` overrides the refusal, and a refused page stays a push
+candidate until it succeeds, so the retry always has something to push.
 
-Any push error — not just a refusal — holds `origin/confluence` back, so work Confluence did not receive is never
-recorded as pushed. The consequence is that a page which cannot succeed (one deleted in the Confluence UI, say)
-makes every later `sync push` repeat the same failure until you resolve it or remove the file. `--force` covers
-only the round-trip refusal, and applies to the whole run rather than a single page.
+A failed page push does not hold `origin/confluence` back. It does not need to: `sync push` rewrites a file's
+front-matter `contentHash` only after Confluence accepts the write, so a file that was refused or errored still
+disagrees with its recorded hash and is picked up again on the next push regardless of where the branch is. One
+page that can never succeed therefore blocks only itself, and everything Confluence did accept is recorded — so
+`sync pull` is never merging a branch that has fallen behind.
+
+A failed _deletion_ is the exception and does hold the branch: the local file is already gone, so nothing but the
+`origin/confluence`↔`HEAD` diff remembers the page is still owed a delete. Those retry on every push until they
+succeed, and a deletion Confluence has already applied is replayed harmlessly.
 
 `page put` writes onto whatever version the page is currently at. When you use it as the remedy above —
 `page get --format adf`, edit, `page put` — pass `--if-version <n>` so an edit made in Confluence in between

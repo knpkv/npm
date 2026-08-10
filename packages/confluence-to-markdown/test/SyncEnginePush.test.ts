@@ -1,16 +1,22 @@
 /**
  * Git-mode `push` bookkeeping.
  *
- * `origin/confluence` is the record of what Confluence already has: advancing
- * it is what makes `findUnpushedCommits` stop reporting a file. If it moves
- * after a refused push, the refusal becomes permanent — the retry sees nothing
- * to push and even `--force` prints "Nothing to push" — so the guard that was
- * meant to protect a page ends up stranding it.
+ * `origin/confluence` is the record of what Confluence already has. Two failure
+ * modes pull in opposite directions, and these cases pin down the line between
+ * them.
  *
- * Holding the branch back has a mirror-image failure, which is why the
- * two-run cases below exist: deletions are derived from the same unmoved diff,
- * so they replay on every retry. If a replayed deletion counts as an error the
- * workspace wedges in the other direction and no flag can free it.
+ * Advance it too eagerly and a refused page is stranded: `findUnpushedCommits`
+ * stops reporting it and even `--force` prints "Nothing to push". Hold it back
+ * on every error and one page that can never succeed parks the whole workspace,
+ * replaying the same failure forever while `sync pull` merges an ever-staler
+ * branch.
+ *
+ * The resolution is that the two kinds of failure are not equally recoverable.
+ * A push failure leaves the file's own front-matter `contentHash` untouched, so
+ * the file remembers it — the branch may advance. A deletion leaves no such
+ * record, because the file is gone, so only there is the branch held. The
+ * multi-run cases below exercise both, including the replayed deletion a held
+ * branch necessarily produces.
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
@@ -35,6 +41,11 @@ const DOCS_PATH = ".confluence/docs"
 const PAGE_ID = PageId("123456")
 const DELETED_PAGE_ID = "999888"
 const DELETED_PATH = "docs/retired.md"
+const BLOCKED_PAGE_ID = "999889"
+const BLOCKED_PATH = "docs/blocked.md"
+
+/** The pageId origin/confluence recorded for a deleted file. */
+const pageIdForDeletedPath = (path: string): string => path === BLOCKED_PATH ? BLOCKED_PAGE_ID : DELETED_PAGE_ID
 const CONTENT = "# Release notes\n\nBody text.\n"
 
 /** A macro `AdfWalker` has no case for at all — its bodies would be dropped. */
@@ -93,8 +104,10 @@ const TestLayer = (params: {
   readonly remoteState: RemoteState
   readonly deleteCalls: Ref.Ref<DeleteCalls>
   readonly deleteStatus: number
+  readonly forbidden: ReadonlySet<string>
   readonly remoteAdfAfterWrite: string | undefined
   readonly writtenFrontMatter: Ref.Ref<ReadonlyArray<PageFrontMatter>>
+  readonly unpushedCommits: number
 }) => {
   const filePath = params.filePath
   // Reads before the write see the stored body; reads after it see what
@@ -105,6 +118,13 @@ const TestLayer = (params: {
     Effect.gen(function*() {
       yield* Ref.update(params.deleteCalls, (c) => ({ ...c, attempted: [...c.attempted, id] }))
       const live = yield* Ref.get(params.remoteState)
+      // A page the caller is not allowed to delete: live, but every attempt
+      // fails, which is the shape that used to park the branch for good.
+      if (params.forbidden.has(id)) {
+        return yield* Effect.fail(
+          new ApiError({ status: 403, message: "Forbidden", endpoint: `/pages/${id}`, pageId: id })
+        )
+      }
       if (!live.has(id)) {
         return yield* Effect.fail(
           new ApiError({
@@ -179,10 +199,14 @@ const TestLayer = (params: {
     GitService.of({
       isInitialized: () => Effect.succeed(true),
       branchExists: () => Effect.succeed(true),
+      // `unpushedCommits: 0` is the state after the branch has advanced — the
+      // case where only file-level front matter still remembers unsent work.
       logRange: () =>
-        Effect.succeed([
-          { hash: "abc123", author: "A", email: "a@example.com", date: new Date(0), message: "Edit page" }
-        ]),
+        Effect.succeed(
+          params.unpushedCommits === 0
+            ? []
+            : [{ hash: "abc123", author: "A", email: "a@example.com", date: new Date(0), message: "Edit page" }]
+        ),
       getDeletedFiles: () => Effect.succeed(params.deletedFiles),
       addAll: () => Ref.update(params.gitCalls, (c) => ({ ...c, addAll: c.addAll + 1 })),
       amend: () => Effect.void,
@@ -210,7 +234,8 @@ const TestLayer = (params: {
       merge: () => Effect.die("not used"),
       // The blob origin/confluence still holds for the deleted file; push reads
       // the pageId back out of its front matter.
-      getFileContentAt: () => Effect.succeed(`---\npageId: ${DELETED_PAGE_ID}\ntitle: Retired\n---\n`)
+      getFileContentAt: (_ref, filePath) =>
+        Effect.succeed(`---\npageId: ${pageIdForDeletedPath(filePath)}\ntitle: Retired\n---\n`)
     })
   )
 
@@ -259,6 +284,8 @@ const runPush = (params: {
   readonly force?: boolean
   readonly remoteAdfAfterWrite?: string
   readonly dryRun?: boolean
+  readonly unpushedCommits?: number
+  readonly forbidden?: ReadonlySet<string>
 }) =>
   Effect.gen(function*() {
     const gitCalls = yield* Ref.make<GitCalls>({ updateBranch: 0, addAll: 0 })
@@ -288,8 +315,10 @@ const runPush = (params: {
         remoteState,
         deleteCalls,
         deleteStatus: params.deleteStatus ?? 404,
+        forbidden: params.forbidden ?? new Set(),
         remoteAdfAfterWrite: params.remoteAdfAfterWrite,
-        writtenFrontMatter
+        writtenFrontMatter,
+        unpushedCommits: params.unpushedCommits ?? 1
       }))
     )
 
@@ -308,7 +337,7 @@ describe("SyncEngine.push (git mode)", () => {
     Effect.gen(function*() {
       // Local content differs from the recorded hash, so the file is a push
       // candidate; the live page holds a node markdown cannot represent.
-      const { git, result, updates } = yield* runPush({
+      const { result, updates } = yield* runPush({
         remoteAdf: UNSAFE_REMOTE_ADF,
         localContentHash: ContentHash("0".repeat(64))
       })
@@ -316,8 +345,41 @@ describe("SyncEngine.push (git mode)", () => {
       expect(result.errors).toHaveLength(1)
       expect(result.pushed).toBe(0)
       expect(updates).toBe(0)
-      // The commit stays unpushed, so a retry (or --force) still has something
-      // to push instead of reporting "Nothing to push".
+    }))
+
+  // The invariant the parked branch used to protect, now carried by the file
+  // itself: `pushFile` never rewrote the refused file's contentHash, so the
+  // retry finds it again even though the branch has moved on and there are no
+  // unpushed commits left to report.
+  it.effect("still retries a refused page after the branch has advanced", () =>
+    Effect.gen(function*() {
+      const { result, updates } = yield* runPush({
+        remoteAdf: UNSAFE_REMOTE_ADF,
+        localContentHash: ContentHash("0".repeat(64)),
+        unpushedCommits: 0,
+        force: true
+      })
+
+      // Reached the page at all — the empty commit list did not short-circuit
+      // into "Nothing to push".
+      expect(updates).toBe(1)
+      expect(result.pushed).toBe(1)
+      expect(result.errors).toEqual([])
+    }))
+
+  // The nearby valid fixture: with the file genuinely in sync and no commits,
+  // there really is nothing to do and no remote call is made.
+  it.effect("does nothing when no commits and no file drift remain", () =>
+    Effect.gen(function*() {
+      const hash = yield* computeHash(CONTENT).pipe(Effect.provide(HashServiceLive))
+      const { git, result, updates } = yield* runPush({
+        remoteAdf: SAFE_REMOTE_ADF,
+        localContentHash: hash,
+        unpushedCommits: 0
+      })
+
+      expect(result).toMatchObject({ pushed: 0, created: 0, deleted: 0, errors: [] })
+      expect(updates).toBe(0)
       expect(git.updateBranch).toBe(0)
     }))
 
@@ -448,35 +510,61 @@ describe("SyncEngine.push (git mode)", () => {
   // The second replays it against a Confluence that no longer has the page.
   it.effect("a replayed deletion does not wedge the retry", () =>
     Effect.gen(function*() {
-      const remoteState = yield* Ref.make<ReadonlySet<string>>(new Set([DELETED_PAGE_ID]))
-
-      const first = yield* runPush({
-        remoteAdf: UNSAFE_REMOTE_ADF,
-        localContentHash: ContentHash("0".repeat(64)),
-        deletedFiles: [DELETED_PATH],
+      const remoteState = yield* Ref.make<ReadonlySet<string>>(
+        new Set([DELETED_PAGE_ID, BLOCKED_PAGE_ID])
+      )
+      const forbidden = new Set([BLOCKED_PAGE_ID])
+      const pending = {
+        remoteAdf: SAFE_REMOTE_ADF,
+        deletedFiles: [DELETED_PATH, BLOCKED_PATH],
         remoteState
-      })
+      }
+      const hash = yield* computeHash(CONTENT).pipe(Effect.provide(HashServiceLive))
+
+      // One deletion lands, the other is forbidden — so the branch is held and
+      // the completed deletion is still in the origin/confluence diff.
+      const first = yield* runPush({ ...pending, localContentHash: hash, forbidden })
 
       expect(first.deletes.succeeded).toEqual([DELETED_PAGE_ID])
-      expect(first.result.deleted).toBe(1)
       expect(first.result.errors).toHaveLength(1)
       expect(first.git.updateBranch).toBe(0)
 
-      const second = yield* runPush({
+      // The retry replays the deletion that already happened. Its 404 must be
+      // benign, or the workspace can never move again.
+      const second = yield* runPush({ ...pending, localContentHash: hash, forbidden })
+
+      expect(second.deletes.attempted).toEqual([DELETED_PAGE_ID, BLOCKED_PAGE_ID])
+      expect(second.result.deleted).toBe(0)
+      // Only the forbidden page is still an error; the replay is not.
+      expect(second.result.errors).toHaveLength(1)
+      expect(second.result.errors[0]).toContain(BLOCKED_PAGE_ID)
+      expect(second.git.updateBranch).toBe(0)
+
+      // Once the permission problem clears, the run completes and the branch
+      // finally advances — the wedge is escapable.
+      const third = yield* runPush({ ...pending, localContentHash: hash })
+
+      expect(third.result.errors).toEqual([])
+      expect(third.deletes.succeeded).toEqual([BLOCKED_PAGE_ID])
+      expect(third.git.updateBranch).toBe(1)
+    }))
+
+  // The wedge this model exists to prevent. A page that can never succeed used
+  // to park `origin/confluence` for good: every later push replayed the whole
+  // set, reported the same failure, and `sync pull` went on merging an
+  // ever-staler branch. A push failure is recoverable from the file's own front
+  // matter, so it must not hold the branch.
+  it.effect("a permanently failing page does not park the branch", () =>
+    Effect.gen(function*() {
+      const { git, result } = yield* runPush({
         remoteAdf: UNSAFE_REMOTE_ADF,
-        localContentHash: ContentHash("0".repeat(64)),
-        deletedFiles: [DELETED_PATH],
-        remoteState,
-        force: true
+        localContentHash: ContentHash("0".repeat(64))
       })
 
-      // The page is already gone, so the replay 404s — and that must not count
-      // as a failure, or the branch could never advance again.
-      expect(second.deletes.attempted).toEqual([DELETED_PAGE_ID])
-      expect(second.deletes.succeeded).toEqual([])
-      expect(second.result.deleted).toBe(0)
-      expect(second.result.errors).toEqual([])
-      expect(second.git.updateBranch).toBe(1)
+      expect(result.errors).toHaveLength(1)
+      // Everything Confluence did accept is recorded, so the next pull is not
+      // merging a stale branch.
+      expect(git.updateBranch).toBe(1)
     }))
 
   // The nearby valid fixture: a deletion that fails for any other reason is

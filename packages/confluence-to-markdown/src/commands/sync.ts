@@ -96,15 +96,15 @@ export const pushCommand = Command.make(
             })
           )
         }
-        // Say that the branch was held, not just that something failed. Any
-        // error keeps `origin/confluence` where it is so the unsent work stays
-        // retryable — which also means every later push repeats this failure
-        // until it is resolved. Silently, that reads as a broken workspace.
+        // Say what happens next, not just that something failed. Whatever
+        // Confluence accepted is recorded; each page listed above stays a push
+        // candidate until it succeeds, so the retry is scoped to the failures
+        // rather than replaying everything.
         return yield* Effect.fail(
           new ConfigError({
             message: `Push failed:\n${result.errors.join("\n")}\n` +
-              `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
-              `push retries all of it. Resolve the errors above (or remove the file) to move on.`
+              `Everything Confluence accepted is recorded. The pages above are still unsynced and will be ` +
+              `retried on the next push — resolve the errors (or remove the file) to move on.`
           })
         )
       }

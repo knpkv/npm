@@ -1080,6 +1080,27 @@ export const layer: Layer.Layer<
      * Uses two-branch model: finds commits in current branch not in origin/confluence.
      * Returns commits from oldest to newest.
      */
+    /**
+     * Whether any file still has content Confluence has not accepted.
+     *
+     * `pushFile` rewrites a file's front-matter `contentHash` only after the
+     * write succeeds, so a file that was refused or errored still disagrees
+     * with its recorded hash — and a brand-new file has no front matter at all.
+     * That makes file-level state, not commit reachability, the durable record
+     * of unsent work, which is what lets `origin/confluence` advance past a
+     * failure without stranding it.
+     */
+    const hasPendingFileWork = (files: ReadonlyArray<string>): Effect.Effect<boolean, SyncError> =>
+      Effect.gen(function*() {
+        for (const filePath of files) {
+          const localFile = yield* localFs.readMarkdownFile(filePath)
+          if (localFile.isNew || !localFile.frontMatter) return true
+          const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+          if (currentHash !== localFile.frontMatter.contentHash) return true
+        }
+        return false
+      })
+
     const findUnpushedCommits = (): Effect.Effect<
       ReadonlyArray<{ hash: string; message: string }>,
       SyncError
@@ -1242,13 +1263,20 @@ export const layer: Layer.Layer<
         // For simplicity, we push the final state as a single Confluence version
         // with the most recent commit message
         const errors: Array<string> = []
+        const deletionErrors: Array<string> = []
         let pushed = 0
         let created = 0
         let deleted = 0
 
         // Get the most recent unpushed commit message for the revision
         const unpushedCommits = yield* findUnpushedCommits()
-        if (unpushedCommits.length === 0) {
+        // Commit reachability alone is not enough to decide there is nothing to
+        // do. A file that was refused or errored on an earlier run is recorded
+        // in its own front matter, not in the branch, so "no unpushed commits"
+        // must not short-circuit past it — that is what once made a refusal
+        // permanent and forced the branch to be parked instead.
+        const pendingFiles = yield* hasPendingFileWork(sortedFiles)
+        if (unpushedCommits.length === 0 && !pendingFiles) {
           return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] }
         }
 
@@ -1264,9 +1292,11 @@ export const layer: Layer.Layer<
           }
         }
 
-        // Use the last commit's message as the revision message
-        const lastCommit = unpushedCommits[unpushedCommits.length - 1]!
-        const revisionMessage = options.message ?? lastCommit.message
+        // Use the last commit's message as the revision message. A retry of a
+        // file that failed on an earlier run can get here with no unpushed
+        // commits at all, so the list may be empty.
+        const lastCommit = unpushedCommits[unpushedCommits.length - 1]
+        const revisionMessage = options.message ?? lastCommit?.message ?? "Retry unsynced local changes"
 
         // Find deleted files by comparing origin/confluence with current HEAD
         const hasRemoteBranch = yield* git.branchExists("origin/confluence")
@@ -1293,7 +1323,13 @@ export const layer: Layer.Layer<
                   `Page ${pending.pageId} (${pending.path}) was already gone; treating the deletion as applied.`
                 )),
               Effect.catchIf(() => true, (error) => {
-                errors.push(`Failed to delete page ${pending.pageId}: ${error.message}`)
+                const message = `Failed to delete page ${pending.pageId}: ${error.message}`
+                errors.push(message)
+                // Tracked apart from push failures because only this kind is
+                // unrecoverable once the branch moves: the local file is gone,
+                // so nothing but the origin/confluence↔HEAD diff remembers the
+                // deletion is still owed.
+                deletionErrors.push(message)
                 return Effect.void
               })
             )
@@ -1321,10 +1357,20 @@ export const layer: Layer.Layer<
         )
 
         // Two-branch model: update origin/confluence to match HEAD.
-        // Only when every intended remote operation succeeded — advancing the
-        // branch after a failure would make findUnpushedCommits report nothing,
-        // so the refused file could never be retried (not even with --force).
-        if (hasRemoteBranch && errors.length === 0) {
+        //
+        // Held back only for a failed *deletion*. A file whose push failed is
+        // remembered by its own front matter — the recorded contentHash is
+        // still the pre-edit one — so it is picked up again by
+        // `hasPendingFileWork` however far the branch has moved. A deletion has
+        // no such record: the file is gone, and only the
+        // origin/confluence↔HEAD diff still knows the page is owed a delete.
+        //
+        // Gating on *every* error instead was what wedged a workspace: one page
+        // that could never succeed — deleted in the Confluence UI, say — parked
+        // the branch for good, so every later push replayed the whole set,
+        // reported the same failure, and `sync pull` went on merging an
+        // ever-staler origin/confluence.
+        if (hasRemoteBranch && deletionErrors.length === 0) {
           yield* git.updateBranch("origin/confluence", "HEAD")
         }
 
