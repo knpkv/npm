@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { pullRequestSelectionKey } from "../details-model.js"
+import { pullRequestSelectionKey, resolvePullRequestSelection } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
 import { parseSettingsFilter } from "../text-filter-input.js"
 
@@ -30,7 +30,15 @@ export const findStableIndex = (
   selectedIndex: number
 ): number => {
   if ((view === "prs" || view === "details") && selectedPrKey) {
-    const idx = items.findIndex((item) => item.type === "pr" && pullRequestSelectionKey(item.pr) === selectedPrKey)
+    const resolution = resolvePullRequestSelection(
+      items.flatMap((item) => item.type === "pr" ? [item.pr] : []),
+      selectedPrKey
+    )
+    const idx = resolution === null
+      ? -1
+      : items.findIndex(
+        (item) => item.type === "pr" && pullRequestSelectionKey(item.pr) === resolution.key
+      )
     if (idx !== -1) return idx
   }
   if (selectedIndex >= items.length) return Math.max(0, items.length - 1)

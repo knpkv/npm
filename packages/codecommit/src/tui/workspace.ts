@@ -92,6 +92,42 @@ export const pullRequestProviderDrift = (
     ? observation
     : null
 
+/** Replaces or clears retained drift only for an observation correlated with the displayed baseline. */
+export const retainedProviderDriftAfterObservation = (
+  identity: PullRequestWorkspaceIdentity,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
+  retained: PullRequestRevisionCheck | null,
+  observation: PullRequestRevisionCheck
+): PullRequestRevisionCheck | null =>
+  workspaceIdentityMatches(observation.identity, identity) && providerRevisionMatches(observation.baseline, revision)
+    ? providerRevisionChanged(revision, observation.revision)
+      ? observation
+      : null
+    : retained
+
+/** Clears both stale drift and its handled key when a correlated observation returns to the baseline. */
+export const providerDriftObservationTransition = (
+  identity: PullRequestWorkspaceIdentity,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
+  current: {
+    readonly drift: PullRequestRevisionCheck | null
+    readonly handledObservationKey: string | null
+  },
+  observation: PullRequestRevisionCheck
+): {
+  readonly drift: PullRequestRevisionCheck | null
+  readonly handledObservationKey: string | null
+} => {
+  const drift = retainedProviderDriftAfterObservation(identity, revision, current.drift, observation)
+  const returnedToBaseline = workspaceIdentityMatches(observation.identity, identity) &&
+    providerRevisionMatches(observation.baseline, revision) &&
+    providerRevisionMatches(observation.revision, revision)
+  return {
+    drift,
+    handledObservationKey: returnedToBaseline ? null : current.handledObservationKey
+  }
+}
+
 /** Accepts only the refresh correlated with the latest drift check from the still-displayed revision. */
 export const refreshedWorkspaceForDrift = (
   current: PullRequestWorkspace,
