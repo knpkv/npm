@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { parseConfluencePageUrl, resolvePageInput } from "../src/commands/pageInput.js"
+import { parseConfluencePageUrl, resolvePageInput, validateBaseUrl } from "../src/commands/pageInput.js"
 
 describe("page input", () => {
   it.effect("parses shorthand Atlassian URLs", () =>
@@ -77,6 +77,28 @@ describe("page input", () => {
         url: "https://example.atlassian.net/wiki/pages/2333334354",
         pageId: "2333334354"
       }))
+
+      expect(result._tag).toBe("Failure")
+    }))
+
+  // The browser address bar always shows /wiki, so that is the form users paste.
+  it.effect("normalizes a /wiki base URL to the site root", () =>
+    Effect.gen(function*() {
+      for (
+        const input of [
+          "https://example.atlassian.net",
+          "https://example.atlassian.net/",
+          "https://example.atlassian.net/wiki",
+          "https://example.atlassian.net/wiki/"
+        ]
+      ) {
+        expect(yield* validateBaseUrl(input)).toBe("https://example.atlassian.net")
+      }
+    }))
+
+  it.effect("still rejects a base URL carrying a real path", () =>
+    Effect.gen(function*() {
+      const result = yield* Effect.result(validateBaseUrl("https://example.atlassian.net/wiki/spaces/DEV"))
 
       expect(result._tag).toBe("Failure")
     }))

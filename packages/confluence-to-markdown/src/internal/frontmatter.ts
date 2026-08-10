@@ -117,7 +117,8 @@ export const serializeMarkdown = (
     updated: frontMatter.updated.toISOString(),
     ...(frontMatter.parentId !== undefined ? { parentId: frontMatter.parentId } : {}),
     ...(frontMatter.position !== undefined ? { position: frontMatter.position } : {}),
-    contentHash: frontMatter.contentHash
+    contentHash: frontMatter.contentHash,
+    ...(frontMatter.roundTrip !== undefined ? { roundTrip: frontMatter.roundTrip } : {})
   }
 
   return stringifyFrontmatter(content, fm)
