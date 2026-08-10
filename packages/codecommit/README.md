@@ -39,7 +39,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export and idempotent review-comment reconciliation
   - `codecommit:PostCommentForPullRequest` — explicitly post a reviewed Relay finding
-  - `codecommit:GetMergeConflicts` — mergeability gate for the exact pull-request revision
+  - `codecommit:GetMergeConflicts` — advisory mergeability status for the exact pull-request revision
   - `codecommit:MergePullRequestByFastForward`, `codecommit:MergePullRequestBySquash`, `codecommit:MergePullRequestByThreeWay` — explicitly confirmed TUI merge using the selected native strategy
   - `codecommit:ListBranches` — branch listing
 

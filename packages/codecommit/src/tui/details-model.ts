@@ -1,4 +1,4 @@
-import { type Domain, ReadClient } from "@knpkv/codecommit-core"
+import { type Domain, ReadClient, type ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
@@ -132,7 +132,70 @@ export type WorkspaceSelection<A> =
 export interface ActionDiagnostic {
   readonly message: string
   readonly operation: string
+  readonly workspaceRefreshReason?: WorkspaceRefreshReason
 }
+
+export type WorkspaceRefreshReason =
+  | "revision-changed"
+  | "source-commit-changed"
+  | "destination-commit-changed"
+  | "destination-reference-changed"
+  | "repository-changed"
+
+/** Typed action failure whose immutable workspace must be reloaded before another attempt. */
+export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<WorkspaceRefreshActionError>()(
+  "WorkspaceRefreshActionError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    workspaceRefreshReason: Schema.Literals([
+      "revision-changed",
+      "source-commit-changed",
+      "destination-commit-changed",
+      "destination-reference-changed",
+      "repository-changed"
+    ])
+  }
+) {}
+
+/** Classifies only stale immutable-target conflicts as reasons to reload before an explicit retry. */
+export const mergeWorkspaceRefreshReason = (
+  reason: ReviewClient.CodeCommitReviewConflictError["reason"]
+): WorkspaceRefreshReason | null => {
+  switch (reason) {
+    case "revision-changed":
+    case "source-commit-changed":
+    case "destination-commit-changed":
+    case "destination-reference-changed":
+    case "repository-changed":
+      return reason
+    case "pull-request-closed":
+    case "approval-by-author":
+    case "approval-rules-unsatisfied":
+    case "merge-conflict":
+      return null
+  }
+}
+
+/** Reloads only typed stale-target failures; policy failures remain visible against the current workspace. */
+export const mergeFailureWorkspaceReloadPolicy = (diagnostic: ActionDiagnostic): "reload" | "retain" =>
+  diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
+
+/**
+ * Allows merge selection for a loaded exact revision when no workspace mutation is active.
+ * Cached list-level mergeability is advisory; the conditional provider merge is authoritative.
+ */
+export const mergeStrategySelectionEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly cachedMergeable: boolean
+  readonly exactRevisionLoaded: boolean
+  readonly findingPostRunning: boolean
+  readonly providerDriftPending: boolean
+}): boolean =>
+  input.exactRevisionLoaded &&
+  !input.actionCancelable &&
+  !input.findingPostRunning &&
+  !input.providerDriftPending
 
 export type ActionOutcome<A> =
   | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }
@@ -209,9 +272,17 @@ export const pullRequestRevisionObservationEnabled = (input: {
 export const findingConversationSubmissionEnabled = (providerDriftPending: boolean): boolean => !providerDriftPending
 
 const isWorktreeError = Schema.is(WorktreeError)
+const isWorkspaceRefreshActionError = Schema.is(WorkspaceRefreshActionError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */
 export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
+  if (isWorkspaceRefreshActionError(error)) {
+    return {
+      message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
+      operation: error.operation,
+      workspaceRefreshReason: error.workspaceRefreshReason
+    }
+  }
   if (isWorktreeError(error)) {
     return {
       message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),

@@ -17,7 +17,14 @@ import {
 } from "../../RelayReview.js"
 import type { RelayReviewSkillId } from "../../ReviewSkills.js"
 import { WorktreeError, type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
-import { actionOutcome, changedFilePath, fileDiffIdentity, pullRequestWorkspaceIdentity } from "../details-model.js"
+import {
+  actionOutcome,
+  changedFilePath,
+  fileDiffIdentity,
+  mergeWorkspaceRefreshReason,
+  pullRequestWorkspaceIdentity,
+  WorkspaceRefreshActionError
+} from "../details-model.js"
 import { type OpenEditorInput, openLocalEditor } from "../editor-launch.js"
 import {
   type FileDiffOutcome,
@@ -372,12 +379,21 @@ export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput
         }
       }
       const receipt = yield* client.execute(action).pipe(
-        Effect.mapError((error) =>
-          new WorktreeError({
-            operation: `merge-${input.strategy}`,
-            message: mergePullRequestMessage(error)
-          })
-        )
+        Effect.mapError((error) => {
+          const workspaceRefreshReason = error._tag === "CodeCommitReviewConflictError"
+            ? mergeWorkspaceRefreshReason(error.reason)
+            : null
+          return workspaceRefreshReason === null
+            ? new WorktreeError({
+              operation: `merge-${input.strategy}`,
+              message: mergePullRequestMessage(error)
+            })
+            : new WorkspaceRefreshActionError({
+              operation: `merge-${input.strategy}`,
+              message: mergePullRequestMessage(error),
+              workspaceRefreshReason
+            })
+        })
       )
       const notificationRepo = yield* CacheService.NotificationRepo
       yield* notificationRepo.add({

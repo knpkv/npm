@@ -57,6 +57,8 @@ import {
   findingConversationSubmissionEnabled,
   localEditorReady,
   localRevisionDriftMessage,
+  mergeFailureWorkspaceReloadPolicy,
+  mergeStrategySelectionEnabled,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -1038,12 +1040,13 @@ export function DetailsView() {
     const outcome = mergePullRequestResult.value
     if (outcome._tag === "failure") {
       updateMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      if (mergeFailureWorkspaceReloadPolicy(outcome.diagnostic) === "reload" && pr !== null) loadWorkspace(pr)
       return
     }
     updateMergeStatus({ _tag: "idle" })
     refresh()
     setView("prs")
-  }, [mergePullRequestResult, mergeStatus, refresh, setView])
+  }, [loadWorkspace, mergePullRequestResult, mergeStatus, pr, refresh, setView])
 
   const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
   const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
@@ -1455,22 +1458,16 @@ export function DetailsView() {
   }
 
   const beginMerge = (strategy: ReviewClient.CodeCommitMergeStrategy) => {
+    if (pr === null || workspace === null) return
     if (
-      pr === null ||
-      workspace === null ||
-      actionCancelable ||
-      providerDriftPending ||
-      postingFindingRef.current !== null
-    )
-      return
-    if (!pr.isMergeable) {
-      updateMergeStatus({
-        _tag: "failed",
-        diagnostic: {
-          operation: `merge-${strategy}`,
-          message: "CodeCommit reports that this pull-request revision is not mergeable"
-        }
+      !mergeStrategySelectionEnabled({
+        actionCancelable,
+        cachedMergeable: pr.isMergeable,
+        exactRevisionLoaded: true,
+        findingPostRunning: postingFindingRef.current !== null,
+        providerDriftPending
       })
+    ) {
       return
     }
     nextActionRequestSequence += 1

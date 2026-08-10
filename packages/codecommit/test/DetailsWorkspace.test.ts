@@ -46,6 +46,8 @@ import {
   isChangedDiffLine,
   localEditorReady,
   localRevisionDriftMessage,
+  mergeFailureWorkspaceReloadPolicy,
+  mergeStrategySelectionEnabled,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -64,6 +66,7 @@ import {
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
   workspaceMergeResetPolicy,
+  WorkspaceRefreshActionError,
   workspaceResetInterruptions,
   workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
@@ -400,6 +403,53 @@ describe("PR detail workspace", () => {
     expect(workspaceResetInterruptions("review")).toEqual(["review", "conversation", "verification"])
     expect(workspaceMergeResetPolicy("running")).toBe("preserve")
     expect(workspaceMergeResetPolicy("ready")).toBe("interrupt")
+  })
+
+  it("uses exact-workspace merge authority and reloads typed stale outcomes", () => {
+    expect(
+      mergeStrategySelectionEnabled({
+        actionCancelable: false,
+        cachedMergeable: false,
+        exactRevisionLoaded: true,
+        findingPostRunning: false,
+        providerDriftPending: false
+      })
+    ).toBe(true)
+    expect(
+      mergeStrategySelectionEnabled({
+        actionCancelable: false,
+        cachedMergeable: true,
+        exactRevisionLoaded: true,
+        findingPostRunning: false,
+        providerDriftPending: true
+      })
+    ).toBe(false)
+    expect(
+      mergeFailureWorkspaceReloadPolicy({
+        message: "The source changed",
+        operation: "merge-squash",
+        workspaceRefreshReason: "source-commit-changed"
+      })
+    ).toBe("reload")
+    expect(
+      mergeFailureWorkspaceReloadPolicy({
+        message: "Approval rules are not satisfied",
+        operation: "merge-squash"
+      })
+    ).toBe("retain")
+    expect(
+      actionDiagnostic(
+        new WorkspaceRefreshActionError({
+          message: "The source changed",
+          operation: "merge-squash",
+          workspaceRefreshReason: "source-commit-changed"
+        })
+      )
+    ).toEqual({
+      message: "The source changed",
+      operation: "merge-squash",
+      workspaceRefreshReason: "source-commit-changed"
+    })
   })
 
   it("reconciles only unambiguous unknown-to-known repository account selection", () => {
