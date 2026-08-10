@@ -116,6 +116,18 @@ export const localEditorReady = (
   actionCancelable: boolean
 ): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
 
+/** Polls only while an exact local checkout is idle and no provider finding mutation owns the workspace. */
+export const pullRequestRevisionPollingEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly checkoutIdentityMatches: boolean
+  readonly findingPostRunning: boolean
+  readonly hasLocalCheckout: boolean
+}): boolean =>
+  input.hasLocalCheckout &&
+  input.checkoutIdentityMatches &&
+  !input.actionCancelable &&
+  !input.findingPostRunning
+
 const isWorktreeError = Schema.is(WorktreeError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */

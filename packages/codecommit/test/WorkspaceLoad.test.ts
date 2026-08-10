@@ -7,7 +7,9 @@ import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
   providerRevisionChanged,
-  pullRequestProviderDrift
+  pullRequestProviderDrift,
+  type PullRequestWorkspace,
+  refreshedWorkspaceForDrift
 } from "../src/tui/workspace.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -155,7 +157,7 @@ describe("pull request workspace loading", () => {
     expect(providerRevisionChanged(revision, revision)).toBe(false)
     expect(providerRevisionChanged(revision, newerRevision)).toBe(true)
     expect(providerRevisionChanged(revision, newerBaseRevision)).toBe(true)
-    const changedObservation = { identity: checkout.identity, revision: newerRevision }
+    const changedObservation = { baseline: revision, identity: checkout.identity, revision: newerRevision }
     const drift = pullRequestProviderDrift(checkout.identity, revision, changedObservation)
     expect(drift).toBe(changedObservation)
     if (drift !== null) {
@@ -168,6 +170,36 @@ describe("pull request workspace loading", () => {
         revision,
         { ...changedObservation, identity: { ...checkout.identity, pullRequestId: Domain.PullRequestId.make("43") } }
       )
+    ).toBeNull()
+
+    const workspace: PullRequestWorkspace = {
+      fileDiffs: new Map(),
+      files: [changedFile],
+      identity: checkout.identity,
+      localDiff: ready,
+      revision
+    }
+    const refreshedWorkspace: PullRequestWorkspace = {
+      ...workspace,
+      localDiff: { _tag: "provider" },
+      revision: newerRevision
+    }
+    const refresh = { check: changedObservation, workspace: refreshedWorkspace }
+    expect(refreshedWorkspaceForDrift(workspace, changedObservation, refresh)).toBe(refreshedWorkspace)
+    expect(refreshedWorkspaceForDrift({ ...workspace, revision: newerBaseRevision }, changedObservation, refresh))
+      .toBeNull()
+    expect(
+      refreshedWorkspaceForDrift(
+        workspace,
+        { ...changedObservation, revision: newerBaseRevision },
+        refresh
+      )
+    ).toBeNull()
+    expect(
+      refreshedWorkspaceForDrift(workspace, changedObservation, {
+        ...refresh,
+        check: { ...changedObservation, revision: newerBaseRevision }
+      })
     ).toBeNull()
   })
 })

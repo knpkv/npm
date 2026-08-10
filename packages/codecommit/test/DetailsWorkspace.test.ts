@@ -46,6 +46,7 @@ import {
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
+  pullRequestRevisionPollingEnabled,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
   splitDiffLineRow,
@@ -722,6 +723,22 @@ describe("PR detail workspace", () => {
       "consume"
     )
     expect(detailsKeyIntent({ ...base, keyName: "escape", workspaceRefreshing: true })).toBe("back")
+    expect(
+      pullRequestRevisionPollingEnabled({
+        actionCancelable: false,
+        checkoutIdentityMatches: true,
+        findingPostRunning: false,
+        hasLocalCheckout: true
+      })
+    ).toBe(true)
+    expect(
+      pullRequestRevisionPollingEnabled({
+        actionCancelable: false,
+        checkoutIdentityMatches: true,
+        findingPostRunning: true,
+        hasLocalCheckout: true
+      })
+    ).toBe(false)
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")

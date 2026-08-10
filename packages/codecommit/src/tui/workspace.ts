@@ -40,6 +40,15 @@ export interface PullRequestRevisionObservation {
   readonly revision: ReadClient.CodeCommitPullRequestRevision
 }
 
+export interface PullRequestRevisionCheck extends PullRequestRevisionObservation {
+  readonly baseline: ReadClient.CodeCommitPullRequestRevision
+}
+
+export interface PullRequestWorkspaceRefresh {
+  readonly check: PullRequestRevisionCheck
+  readonly workspace: PullRequestWorkspace
+}
+
 /** Selects local blobs only while the retained checkout matches the provider's exact revision. */
 export const localDiffForWorkspace = (
   identity: PullRequestWorkspaceIdentity,
@@ -65,16 +74,38 @@ export const providerRevisionChanged = (
   observed: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
 ): boolean => current.destinationCommit !== observed.destinationCommit || current.sourceCommit !== observed.sourceCommit
 
+export const providerRevisionMatches = (
+  left: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
+  right: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
+): boolean => !providerRevisionChanged(left, right)
+
 /** Retains a matching provider observation only when it invalidates the displayed exact revision. */
 export const pullRequestProviderDrift = (
   identity: PullRequestWorkspaceIdentity,
   revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">,
-  observation: PullRequestRevisionObservation | null
-): PullRequestRevisionObservation | null =>
+  observation: PullRequestRevisionCheck | null
+): PullRequestRevisionCheck | null =>
   observation !== null &&
     workspaceIdentityMatches(observation.identity, identity) &&
+    providerRevisionMatches(observation.baseline, revision) &&
     providerRevisionChanged(revision, observation.revision)
     ? observation
+    : null
+
+/** Accepts only the refresh correlated with the latest drift check from the still-displayed revision. */
+export const refreshedWorkspaceForDrift = (
+  current: PullRequestWorkspace,
+  drift: PullRequestRevisionCheck | null,
+  refresh: PullRequestWorkspaceRefresh
+): PullRequestWorkspace | null =>
+  drift !== null &&
+    workspaceIdentityMatches(drift.identity, current.identity) &&
+    workspaceIdentityMatches(refresh.workspace.identity, current.identity) &&
+    providerRevisionMatches(current.revision, drift.baseline) &&
+    providerRevisionMatches(refresh.check.baseline, drift.baseline) &&
+    providerRevisionMatches(refresh.check.revision, drift.revision) &&
+    providerRevisionChanged(current.revision, refresh.workspace.revision)
+    ? refresh.workspace
     : null
 
 /** Refreshes only provider revision metadata so local drift checks never invoke Git. */

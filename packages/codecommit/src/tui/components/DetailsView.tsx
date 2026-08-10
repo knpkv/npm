@@ -57,6 +57,7 @@ import {
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
+  pullRequestRevisionPollingEnabled,
   pullRequestWorkspaceIdentity,
   pullRequestSelectionKey,
   revisionHeaderText,
@@ -80,9 +81,9 @@ import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
-  providerRevisionChanged,
+  refreshedWorkspaceForDrift,
   type PullRequestLocalCheckout,
-  type PullRequestRevisionObservation,
+  type PullRequestRevisionCheck,
   pullRequestProviderDrift
 } from "../workspace.js"
 import { useDialog } from "../context/dialog.js"
@@ -453,7 +454,7 @@ export function DetailsView() {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>({ _tag: "idle" })
   const [verifiedWorkspace, setVerifiedWorkspace] = useState<PullRequestWorkspace | null>(null)
   const [localCheckout, setLocalCheckout] = useState<PullRequestLocalCheckout | null>(null)
-  const [providerDrift, setProviderDrift] = useState<PullRequestRevisionObservation | null>(null)
+  const [providerDrift, setProviderDrift] = useState<PullRequestRevisionCheck | null>(null)
   const [tab, setTab] = useState<"comments" | "diff">("diff")
   const [reviewSkills, setReviewSkills] = useState<ReadonlyArray<RelayReviewSkillId>>(defaultRelayReviewSkills)
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
@@ -506,7 +507,7 @@ export function DetailsView() {
       : pullRequestProviderDrift(
           providerWorkspace.identity,
           providerWorkspace.revision,
-          providerDrift ?? latestRevisionObservation
+          latestRevisionObservation ?? providerDrift
         )
   const providerDriftPending = activeProviderDrift !== null
   const providerDriftRefreshFailed =
@@ -1059,19 +1060,23 @@ export function DetailsView() {
   const reviewCardExpanded = action._tag === "reviewed"
 
   useEffect(() => {
+    if (pr === null || providerWorkspace === null) return
+    const checkoutIdentityMatches =
+      localCheckout !== null && workspaceIdentityMatches(localCheckout.identity, pullRequestWorkspaceIdentity(pr))
     if (
-      pr === null ||
-      localCheckout === null ||
-      actionCancelable ||
-      postingFindingRef.current !== null ||
-      !workspaceIdentityMatches(localCheckout.identity, pullRequestWorkspaceIdentity(pr))
+      !pullRequestRevisionPollingEnabled({
+        actionCancelable,
+        checkoutIdentityMatches,
+        findingPostRunning: postingFinding !== null,
+        hasLocalCheckout: localCheckout !== null
+      })
     )
       return
-    const refreshRevision = () => pollRevision(pr)
+    const refreshRevision = () => pollRevision({ baseline: providerWorkspace.revision, pr })
     refreshRevision()
     const interval = setInterval(refreshRevision, 30_000)
     return () => clearInterval(interval)
-  }, [actionCancelable, localCheckout, pollRevision, pr])
+  }, [actionCancelable, localCheckout, pollRevision, postingFinding, pr, providerWorkspace])
 
   useEffect(() => {
     if (AsyncResult.isWaiting(revisionPollResult)) {
@@ -1107,21 +1112,16 @@ export function DetailsView() {
     setDiffCache(new Map())
     setEditorStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
-    if (!AsyncResult.isWaiting(refreshWorkspaceResult)) refreshWorkspace(pr)
+    if (!AsyncResult.isWaiting(refreshWorkspaceResult)) refreshWorkspace({ check: drift, pr })
   }, [loadDiff, pr, providerWorkspace, refreshWorkspace, refreshWorkspaceResult, revisionPollResult])
 
   useEffect(() => {
-    if (
-      pr === null ||
-      workspace === null ||
-      AsyncResult.isWaiting(refreshWorkspaceResult) ||
-      !AsyncResult.isSuccess(refreshWorkspaceResult) ||
-      !workspaceIdentityMatches(refreshWorkspaceResult.value.identity, workspace.identity) ||
-      !providerRevisionChanged(workspace.revision, refreshWorkspaceResult.value.revision)
-    )
-      return
+    if (pr === null || workspace === null || AsyncResult.isWaiting(refreshWorkspaceResult)) return
+    if (!AsyncResult.isSuccess(refreshWorkspaceResult)) return
+    const refreshedWorkspace = refreshedWorkspaceForDrift(workspace, activeProviderDrift, refreshWorkspaceResult.value)
+    if (refreshedWorkspace === null) return
     loadDiff(Atom.Interrupt)
-    setVerifiedWorkspace(refreshWorkspaceResult.value)
+    setVerifiedWorkspace(refreshedWorkspace)
     setProviderDrift(null)
     setSelectedFileIndex(0)
     setSelectedFindingIndex(0)
@@ -1136,7 +1136,7 @@ export function DetailsView() {
     pendingDiffKeyRef.current = null
     setTab("diff")
     setAction({ _tag: "idle" })
-  }, [loadDiff, pr, refreshWorkspaceResult, workspace])
+  }, [activeProviderDrift, loadDiff, pr, refreshWorkspaceResult, workspace])
 
   const openSelectedInEditor = (editor: LocalEditor) => {
     if (workspace === null || headEditorPath === null || actionCancelable || providerDriftPending) return

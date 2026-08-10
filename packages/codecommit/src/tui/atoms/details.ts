@@ -27,7 +27,12 @@ import {
   preloadLocalFileDiffs,
   validateChangedFileLine
 } from "../file-diff.js"
-import { loadPullRequestRevision, loadPullRequestWorkspace, type PullRequestWorkspace } from "../workspace.js"
+import {
+  loadPullRequestRevision,
+  loadPullRequestWorkspace,
+  type PullRequestRevisionCheck,
+  type PullRequestWorkspace
+} from "../workspace.js"
 import { runtimeAtom } from "./runtime.js"
 
 export type { PullRequestWorkspace } from "../workspace.js"
@@ -76,14 +81,20 @@ export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullReque
   loadPullRequestWorkspace(pr).pipe(Effect.withSpan("loadPullRequestWorkspaceAtom", { attributes: { prId: pr.id } }))
 )
 
-export const refreshPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
-  loadPullRequestWorkspace(pr).pipe(
-    Effect.withSpan("refreshPullRequestWorkspaceAtom", { attributes: { prId: pr.id } })
-  )
+export const refreshPullRequestWorkspaceAtom = runtimeAtom.fn(
+  (input: { readonly check: PullRequestRevisionCheck; readonly pr: Domain.PullRequest }) =>
+    loadPullRequestWorkspace(input.pr).pipe(
+      Effect.map((workspace) => ({ check: input.check, workspace })),
+      Effect.withSpan("refreshPullRequestWorkspaceAtom", { attributes: { prId: input.pr.id } })
+    )
 )
 
-export const loadPullRequestRevisionAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
-  loadPullRequestRevision(pr).pipe(Effect.withSpan("loadPullRequestRevisionAtom", { attributes: { prId: pr.id } }))
+export const loadPullRequestRevisionAtom = runtimeAtom.fn(
+  (input: { readonly baseline: ReadClient.CodeCommitPullRequestRevision; readonly pr: Domain.PullRequest }) =>
+    loadPullRequestRevision(input.pr).pipe(
+      Effect.map((observation): PullRequestRevisionCheck => ({ ...observation, baseline: input.baseline })),
+      Effect.withSpan("loadPullRequestRevisionAtom", { attributes: { prId: input.pr.id } })
+    )
 )
 
 export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
