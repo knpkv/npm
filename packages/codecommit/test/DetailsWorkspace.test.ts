@@ -839,10 +839,7 @@ describe("PR detail workspace", () => {
   })
 
   it("adopts only the matching successful manual checkout as the local diff", () => {
-    const unavailable: Parameters<typeof worktreeCheckoutLocalDiff>[0] = {
-      _tag: "unavailable",
-      diagnostic: { operation: "checkout", message: "automatic checkout failed" }
-    }
+    const provider: Parameters<typeof worktreeCheckoutLocalDiff>[0] = { _tag: "provider" }
     const plan = {
       account: Domain.Account.make({
         awsAccountId: "123456789012",
@@ -866,7 +863,7 @@ describe("PR detail workspace", () => {
       value: worktree
     }
 
-    const ready = worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, success)
+    const ready = worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, success)
     expect(ready).toEqual({
       _tag: "ready",
       plan,
@@ -874,15 +871,15 @@ describe("PR detail workspace", () => {
     })
     expect(localEditorReady(ready, "src/surviving.ts", false)).toBe(true)
     expect(localEditorReady(ready, null, false)).toBe(false)
-    expect(localEditorReady(unavailable, "src/surviving.ts", false)).toBe(false)
-    expect(worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-2" }, success)).toBe(unavailable)
+    expect(localEditorReady(provider, "src/surviving.ts", false)).toBe(false)
+    expect(worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-2" }, success)).toBe(provider)
     expect(
-      worktreeCheckoutLocalDiff(unavailable, { plan, requestId: "checkout-1" }, {
+      worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, {
         _tag: "failure",
         diagnostic: { operation: "checkout", message: "still failed" },
         requestId: "checkout-1"
       })
-    ).toBe(unavailable)
+    ).toBe(provider)
   })
 
   it("gives every selected file a stable scroll target", () => {

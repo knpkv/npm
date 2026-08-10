@@ -93,7 +93,8 @@ export const beginFindingPostSession = (
 
 type WorktreeLocalDiff =
   | { readonly _tag: "ready"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
-  | { readonly _tag: "unavailable"; readonly diagnostic: ActionDiagnostic }
+  | { readonly _tag: "provider" }
+  | { readonly _tag: "outdated"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
 
 /** Promotes only the receipt for the expected exact-head checkout into local workspace readiness. */
 export const worktreeCheckoutLocalDiff = (
@@ -110,7 +111,7 @@ export const worktreeCheckoutLocalDiff = (
 
 /** Enables editors only for a surviving head file in an exact-head local worktree. */
 export const localEditorReady = (
-  localDiff: { readonly _tag: "ready" | "unavailable" },
+  localDiff: { readonly _tag: "ready" | "provider" | "outdated" },
   headPath: string | null,
   actionCancelable: boolean
 ): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
