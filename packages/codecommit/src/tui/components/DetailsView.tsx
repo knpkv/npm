@@ -86,8 +86,8 @@ import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
+  providerDriftObservationTransition,
   refreshedWorkspaceForDrift,
-  retainedProviderDriftAfterObservation,
   type PullRequestLocalCheckout,
   type PullRequestRevisionCheck,
   pullRequestProviderDrift
@@ -1125,20 +1125,20 @@ export function DetailsView() {
       observed.sourceCommit
     ].join("\u0000")
     if (handledRevisionObservationRef.current === observationKey) return
+    const transition = providerDriftObservationTransition(
+      providerWorkspace.identity,
+      providerWorkspace.revision,
+      { drift: providerDrift, handledObservationKey: handledRevisionObservationRef.current },
+      revisionPollResult.value
+    )
     const drift = pullRequestProviderDrift(
       providerWorkspace.identity,
       providerWorkspace.revision,
       revisionPollResult.value
     )
     if (drift === null) {
-      setProviderDrift((current) =>
-        retainedProviderDriftAfterObservation(
-          providerWorkspace.identity,
-          providerWorkspace.revision,
-          current,
-          revisionPollResult.value
-        )
-      )
+      handledRevisionObservationRef.current = transition.handledObservationKey
+      setProviderDrift(transition.drift)
       return
     }
     setProviderDrift(drift)
@@ -1161,6 +1161,7 @@ export function DetailsView() {
     loadDiff,
     postingFinding,
     pr,
+    providerDrift,
     providerWorkspace,
     refreshWorkspace,
     refreshWorkspaceResult,

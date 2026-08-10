@@ -86,6 +86,7 @@ import {
   relayFindingSessionReceiptMatches,
   relayFindingSessionReply
 } from "../src/tui/review-session.js"
+import { providerDriftObservationTransition } from "../src/tui/workspace.js"
 import {
   reviewRevisionSpecifiers,
   safePathSegment,
@@ -892,6 +893,66 @@ describe("PR detail workspace", () => {
     ).toBe("cancel-action")
     expect(detailsKeyIntent({ ...base, keyName: "left" })).toBe("scroll-files-left")
     expect(detailsKeyIntent({ ...base, keyName: "right" })).toBe("scroll-files-right")
+  })
+
+  it("retries A-to-B drift after a correlated return to A", () => {
+    const pullRequestId = Domain.PullRequestId.make("42")
+    const repositoryName = Domain.RepositoryName.make("payments")
+    const commitA = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+    const commitB = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+    const makeRevision = (sourceCommit: ReadClient.CodeCommitCommitId) =>
+      new ReadClient.CodeCommitPullRequestRevision({
+        authorArn: null,
+        creationDate: new Date(0),
+        destinationCommit: commitA,
+        destinationReference: "refs/heads/main",
+        lastActivityDate: new Date(0),
+        mergeBase: commitA,
+        pullRequestId,
+        repositoryName,
+        revisionId: `revision-${sourceCommit}`,
+        sourceCommit,
+        sourceReference: "refs/heads/feature",
+        status: "OPEN",
+        title: "Review"
+      })
+    const revisionA = makeRevision(commitA)
+    const revisionB = makeRevision(commitB)
+    const identity = {
+      profile: Domain.AwsProfileName.make("production"),
+      pullRequestId,
+      repoAccountId: "111122223333",
+      region: Domain.AwsRegion.make("eu-west-1"),
+      repositoryName
+    }
+    const observationB = { baseline: revisionA, identity, revision: revisionB }
+    const observationA = { baseline: revisionA, identity, revision: revisionA }
+    const firstB = providerDriftObservationTransition(
+      identity,
+      revisionA,
+      { drift: null, handledObservationKey: null },
+      observationB
+    )
+    const firstBStarted = { ...firstB, handledObservationKey: "A-to-B" }
+
+    expect(firstB.drift).toBe(observationB)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: firstBStarted.handledObservationKey,
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(false)
+
+    const returnedA = providerDriftObservationTransition(identity, revisionA, firstBStarted, observationA)
+    expect(returnedA).toEqual({ drift: null, handledObservationKey: null })
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: returnedA.handledObservationKey,
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(true)
   })
 
   it("blocks review reruns and Escape as soon as a finding post starts", () => {
