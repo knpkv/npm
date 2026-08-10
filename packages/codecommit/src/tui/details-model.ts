@@ -128,6 +128,16 @@ export const pullRequestRevisionPollingEnabled = (input: {
   !input.actionCancelable &&
   !input.findingPostRunning
 
+/** Keeps an interval tick from replacing a revision request that has not settled. */
+export const pullRequestRevisionPollTickEnabled = (revisionPollWaiting: boolean): boolean => !revisionPollWaiting
+
+/** Starts each provider drift refresh once, after the previous refresh has settled. */
+export const pullRequestDriftRefreshStartEnabled = (input: {
+  readonly handledObservationKey: string | null
+  readonly observationKey: string
+  readonly refreshWaiting: boolean
+}): boolean => !input.refreshWaiting && input.handledObservationKey !== input.observationKey
+
 /** Rejects a poll result whenever another operation owns the workspace. */
 export const pullRequestRevisionObservationEnabled = (input: {
   readonly actionCancelable: boolean

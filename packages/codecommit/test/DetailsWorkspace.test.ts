@@ -47,8 +47,10 @@ import {
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
+  pullRequestDriftRefreshStartEnabled,
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
+  pullRequestRevisionPollTickEnabled,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
   splitDiffLineRow,
@@ -764,6 +766,36 @@ describe("PR detail workspace", () => {
     expect(
       pullRequestRevisionObservationEnabled({ actionCancelable: false, findingPostRunning: false })
     ).toBe(true)
+    expect(pullRequestRevisionPollTickEnabled(true)).toBe(false)
+    expect(pullRequestRevisionPollTickEnabled(false)).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-C",
+        refreshWaiting: true
+      })
+    ).toBe(false)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-C",
+        refreshWaiting: false
+      })
+    ).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: null,
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(true)
+    expect(
+      pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: "A-to-B",
+        observationKey: "A-to-B",
+        refreshWaiting: false
+      })
+    ).toBe(false)
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")

@@ -57,8 +57,10 @@ import {
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
+  pullRequestDriftRefreshStartEnabled,
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
+  pullRequestRevisionPollTickEnabled,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   pullRequestSelectionKey,
@@ -474,6 +476,7 @@ export function DetailsView() {
   const pendingDiffKeyRef = useRef<string | null>(null)
   const postingFindingRef = useRef<FindingPostSession | null>(null)
   const providerDriftPendingRef = useRef(false)
+  const revisionPollWaitingRef = useRef(false)
   actionRef.current = action
   selectedFindingIndexRef.current = selectedFindingIndex
 
@@ -504,6 +507,7 @@ export function DetailsView() {
     AsyncResult.isSuccess(revisionPollResult) && !AsyncResult.isWaiting(revisionPollResult)
       ? revisionPollResult.value
       : null
+  revisionPollWaitingRef.current = AsyncResult.isWaiting(revisionPollResult)
   const activeProviderDrift =
     providerWorkspace === null
       ? null
@@ -1076,7 +1080,10 @@ export function DetailsView() {
       })
     )
       return
-    const refreshRevision = () => pollRevision({ baseline: providerWorkspace.revision, pr })
+    const refreshRevision = () => {
+      if (!pullRequestRevisionPollTickEnabled(revisionPollWaitingRef.current)) return
+      pollRevision({ baseline: providerWorkspace.revision, pr })
+    }
     refreshRevision()
     const interval = setInterval(refreshRevision, 30_000)
     return () => {
@@ -1114,7 +1121,6 @@ export function DetailsView() {
       observed.sourceCommit
     ].join("\u0000")
     if (handledRevisionObservationRef.current === observationKey) return
-    handledRevisionObservationRef.current = observationKey
     const drift = pullRequestProviderDrift(
       providerWorkspace.identity,
       providerWorkspace.revision,
@@ -1126,7 +1132,16 @@ export function DetailsView() {
     setDiffCache(new Map())
     setEditorStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
-    if (!AsyncResult.isWaiting(refreshWorkspaceResult)) refreshWorkspace({ check: drift, pr })
+    if (
+      !pullRequestDriftRefreshStartEnabled({
+        handledObservationKey: handledRevisionObservationRef.current,
+        observationKey,
+        refreshWaiting: AsyncResult.isWaiting(refreshWorkspaceResult)
+      })
+    )
+      return
+    handledRevisionObservationRef.current = observationKey
+    refreshWorkspace({ check: drift, pr })
   }, [
     actionCancelable,
     loadDiff,
