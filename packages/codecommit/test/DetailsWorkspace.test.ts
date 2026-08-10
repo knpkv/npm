@@ -719,6 +719,18 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "n", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "r" })).toBe("review-pr")
     expect(detailsKeyIntent({ ...base, keyName: "r", workspaceRefreshing: true })).toBe("consume")
+    expect(
+      detailsKeyIntent({
+        ...base,
+        findingReviewActive: true,
+        keyName: "V",
+        shifted: true,
+        workspaceRefreshing: true
+      })
+    ).toBe("consume")
+    expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "V", shifted: true })).toBe(
+      "verify-finding"
+    )
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", workspaceRefreshing: true })).toBe(
       "consume"
     )

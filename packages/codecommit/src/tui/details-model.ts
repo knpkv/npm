@@ -220,7 +220,7 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (
     input.workspaceRefreshing === true &&
-    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "w", "x", "return"].includes(input.keyName)
+    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
   ) {
     return "consume"
   }
