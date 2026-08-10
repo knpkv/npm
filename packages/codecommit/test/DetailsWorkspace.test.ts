@@ -359,18 +359,26 @@ describe("PR detail workspace", () => {
         pullRequestWorkspaceReloadKey(new Domain.PullRequest({ ...base, lastModifiedDate: new Date(2_000) })),
         "running-worktree"
       )
-    ).toEqual({ _tag: "reset", interrupt: "checkout" })
+    ).toEqual({ _tag: "reset", interrupt: "checkout", preserveFindingPost: false })
     expect(workspaceLifecycleTransition(key, `${key}-different-pr`, "preflight")).toEqual({
       _tag: "reset",
-      interrupt: "preflight"
+      interrupt: "preflight",
+      preserveFindingPost: false
     })
-    expect(workspaceLifecycleTransition(key, `${key}-idle-refresh`, "idle")).toEqual({
+    expect(workspaceLifecycleTransition(key, `${key}-idle-refresh`, "idle", false)).toEqual({
       _tag: "reset",
-      interrupt: "none"
+      interrupt: "none",
+      preserveFindingPost: false
+    })
+    expect(workspaceLifecycleTransition(key, `${key}-active-post-refresh`, "idle", true)).toEqual({
+      _tag: "reset",
+      interrupt: "none",
+      preserveFindingPost: true
     })
     expect(workspaceLifecycleTransition(key, null, "running-review")).toEqual({
       _tag: "reset",
-      interrupt: "review"
+      interrupt: "review",
+      preserveFindingPost: false
     })
     expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
     expect(workspaceResetInterruptions("none")).toEqual(["conversation", "verification"])

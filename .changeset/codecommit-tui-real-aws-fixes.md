@@ -42,3 +42,6 @@ posting, and keep edited or stale-posted findings attached to explicit human
 resolution and content-bound provider receipts. Preserve finding-post and
 conversation state across same-batch terminal input, and promote a successful
 manual exact-head checkout into local preview and editor readiness.
+Keep active provider-post receipts owned across workspace refreshes, base
+comment idempotency on the resolved repository account rather than a local AWS
+profile alias, and apply publication-target navigation synchronously.

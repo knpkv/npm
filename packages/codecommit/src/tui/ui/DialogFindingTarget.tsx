@@ -1,5 +1,5 @@
 import { useKeyboard } from "@opentui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   relayFindingPublicationLabel,
   relayFindingPublicationOptions,
@@ -9,6 +9,7 @@ import {
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { terminalSafeCompactText } from "../details-model.js"
+import { transitionBoundedSelection } from "../text-filter-input.js"
 import { Dialog } from "./Dialog.js"
 
 export function DialogFindingTarget({
@@ -23,13 +24,19 @@ export function DialogFindingTarget({
   const options = relayFindingPublicationOptions(finding)
   const initialIndex = Math.max(0, options.indexOf(finding.publicationTarget))
   const [cursor, setCursor] = useState(initialIndex)
+  const cursorRef = useRef(initialIndex)
 
   useKeyboard((key) => {
     if (key.name === "escape") dialog.hide()
-    else if (key.name === "up") setCursor((index) => Math.max(0, index - 1))
-    else if (key.name === "down") setCursor((index) => Math.min(options.length - 1, index + 1))
-    else if (key.name === "return") {
-      const target = options[cursor]
+    else {
+      const transition = transitionBoundedSelection(cursorRef.current, key, options.length)
+      cursorRef.current = transition.cursor
+      if (key.name !== "return") {
+        setCursor(transition.cursor)
+        return
+      }
+      if (transition.submittedIndex === null) return
+      const target = options[transition.submittedIndex]
       if (target === undefined) return
       onApply(target)
       dialog.hide()

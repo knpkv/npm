@@ -488,7 +488,12 @@ export function DetailsView() {
         : currentAction._tag === "done" || currentAction._tag === "reviewed" || currentAction._tag === "failed"
           ? "terminal"
           : currentAction._tag
-    const transition = workspaceLifecycleTransition(loadedWorkspaceKeyRef.current, workspaceReloadKey, phase)
+    const transition = workspaceLifecycleTransition(
+      loadedWorkspaceKeyRef.current,
+      workspaceReloadKey,
+      phase,
+      postingFindingRef.current !== null
+    )
     if (transition._tag === "preserve") return
     loadedWorkspaceKeyRef.current = workspaceReloadKey
     for (const interrupt of workspaceResetInterruptions(transition.interrupt)) {
@@ -500,9 +505,11 @@ export function DetailsView() {
     }
     setSelectedFileIndex(0)
     setSelectedFindingIndex(0)
-    setFindingDispositions({})
-    setFindingPostDiagnostics({})
-    updatePostingFinding(null)
+    if (!transition.preserveFindingPost) {
+      setFindingDispositions({})
+      setFindingPostDiagnostics({})
+      updatePostingFinding(null)
+    }
     setConversationTurns([])
     setConversationStatus({ _tag: "idle" })
     setVerificationStatus({ _tag: "idle" })

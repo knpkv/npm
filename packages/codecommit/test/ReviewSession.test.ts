@@ -138,14 +138,28 @@ describe("Relay review session", () => {
   it("keeps presentation order out of the provider idempotency identity", () => {
     const identity = {
       destinationCommit: "a".repeat(40),
-      profile: "production",
       pullRequestId: "35",
       region: "eu-west-1",
+      repositoryAccountId: "111122223333",
       repositoryName: "control-center",
       revisionId: "revision-1",
       sourceCommit: "b".repeat(40)
     }
     const original = relayFindingCanonicalIdentity(identity, initialReview.findings[0]!)
+    const firstAlias = { ...identity, profile: "production" }
+    const secondAlias = { ...identity, profile: "production-admin" }
+    expect(relayFindingCanonicalIdentity(firstAlias, initialReview.findings[0]!)).toBe(
+      relayFindingCanonicalIdentity(secondAlias, initialReview.findings[0]!)
+    )
+    expect(
+      relayFindingCanonicalIdentity(
+        { ...identity, repositoryAccountId: "999900001111" },
+        initialReview.findings[0]!
+      )
+    ).not.toBe(original)
+    expect(relayFindingCanonicalIdentity({ ...identity, region: "us-east-1" }, initialReview.findings[0]!)).not.toBe(
+      original
+    )
     expect(relayFindingCanonicalIdentity(identity, initialReview.findings[0]!)).toBe(original)
     expect(relayFindingCanonicalIdentity(identity, { ...initialReview.findings[0]!, id: "F2" })).toBe(original)
     expect(relayFindingCanonicalIdentity(identity, { ...initialReview.findings[0]!, title: "Changed" })).not.toBe(

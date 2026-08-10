@@ -437,12 +437,19 @@ export const postRelayFindingAtom = runtimeAtom.fn((input: PostRelayFindingInput
           })
         }
       }
+      const repositoryAccountId = input.pr.account.repoAccountId
+      if (repositoryAccountId === undefined || repositoryAccountId.length === 0) {
+        return yield* new WorktreeError({
+          operation: "post-finding-token",
+          message: "The resolved CodeCommit repository account ID is required to publish this finding safely"
+        })
+      }
       const canonicalIdentity = relayFindingCanonicalIdentity(
         {
           destinationCommit: input.revision.destinationCommit,
-          profile: input.pr.account.profile,
           pullRequestId: input.revision.pullRequestId,
           region: input.pr.account.region,
+          repositoryAccountId,
           repositoryName: input.revision.repositoryName,
           revisionId: input.revision.revisionId,
           sourceCommit: input.revision.sourceCommit

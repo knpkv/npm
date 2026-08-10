@@ -6,6 +6,7 @@ import {
   textFilterActionScope,
   type TextFilterInputKey,
   type TextFilterInputState,
+  transitionBoundedSelection,
   transitionSingleLineDraft,
   transitionTextFilterInput
 } from "../src/tui/text-filter-input.js"
@@ -49,6 +50,21 @@ describe("text filter input", () => {
     expect(transitionSingleLineDraft("already rendered", { name: "return" }, 2_000).submission).toBe(
       "already rendered"
     )
+  })
+
+  it("submits the synchronously selected target when navigation and Return share a batch", () => {
+    let cursor = 1
+    let submittedIndex: number | null = null
+    for (const key of [{ name: "down" }, { name: "return" }]) {
+      const transition = transitionBoundedSelection(cursor, key, 3)
+      cursor = transition.cursor
+      submittedIndex = transition.submittedIndex ?? submittedIndex
+    }
+
+    expect(submittedIndex).toBe(2)
+    expect(transitionBoundedSelection(1, { name: "return" }, 3).submittedIndex).toBe(1)
+    expect(transitionBoundedSelection(2, { name: "down" }, 3).cursor).toBe(2)
+    expect(transitionBoundedSelection(0, { name: "up" }, 3).cursor).toBe(0)
   })
 
   it("keeps settings-filter shortcut letters inside a pasted account search", () => {

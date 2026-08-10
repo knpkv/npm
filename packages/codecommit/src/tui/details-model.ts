@@ -47,6 +47,7 @@ export type WorkspaceLifecycleTransition =
   | {
     readonly _tag: "reset"
     readonly interrupt: "checkout" | "none" | "preflight" | "review"
+    readonly preserveFindingPost: boolean
   }
 
 export type WorkspaceResetInterruption = "checkout" | "conversation" | "preflight" | "review" | "verification"
@@ -353,7 +354,8 @@ export const pullRequestCommentsRequestKey = (
 export const workspaceLifecycleTransition = (
   previousKey: string | null,
   nextKey: string | null,
-  phase: WorkspaceActionPhase
+  phase: WorkspaceActionPhase,
+  findingPostRunning = false
 ): WorkspaceLifecycleTransition => {
   if (previousKey === nextKey) return { _tag: "preserve" }
   const interrupt = phase === "preflight"
@@ -363,7 +365,7 @@ export const workspaceLifecycleTransition = (
     : phase === "running-review"
     ? "review"
     : "none"
-  return { _tag: "reset", interrupt }
+  return { _tag: "reset", interrupt, preserveFindingPost: findingPostRunning }
 }
 
 /** Includes review children that must never outlive the exact workspace they inspect. */

@@ -78,9 +78,9 @@ export type RelayReviewResult = typeof RelayReviewResult.Type
 
 export interface RelayFindingPostIdentity {
   readonly destinationCommit: string
-  readonly profile: string
   readonly pullRequestId: string
   readonly region: string
+  readonly repositoryAccountId: string
   readonly repositoryName: string
   readonly revisionId: string
   readonly sourceCommit: string
@@ -103,8 +103,8 @@ export const relayFindingCanonicalIdentity = (
   finding: RelayReviewFinding
 ): string =>
   JSON.stringify([
-    "relay-finding-v1",
-    identity.profile,
+    "relay-finding-v2",
+    identity.repositoryAccountId,
     identity.region,
     identity.repositoryName,
     identity.pullRequestId,

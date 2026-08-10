@@ -160,8 +160,8 @@ order:
 
 ```json
 [
-  "relay-finding-v1",
-  "dev-administratoraccess",
+  "relay-finding-v2",
+  "111122223333",
   "eu-west-1",
   "npm-control-center-review",
   "35",
@@ -179,14 +179,19 @@ order:
 ]
 ```
 
-The array elements are, after the version: AWS profile, AWS region, repository
+The array elements are, after the version: resolved CodeCommit repository account ID, AWS region, repository
 name, pull request ID, revision ID, destination commit, source commit, finding
 priority, title, summary, details, recommendation, verification, publication
 target, and location. Session-local finding IDs are excluded because the same
 provider-visible finding may be renumbered by a later review. JSON escaping makes embedded NULs and field
 boundaries unambiguous. The location is `["general"]`,
 `["file", filePath]`, or `["line", filePath, line, side]`. Presentation order is deliberately excluded, so
-reordering the finding deck cannot create a duplicate provider comment. File findings post as general
+reordering the finding deck cannot create a duplicate provider comment. The
+resolved repository account ID is a server-private provider coordinate used
+only in this in-process canonical preimage; raw credentials and local profile
+aliases are excluded. Only the 64-character SHA-256 `clientRequestToken` is
+sent to and persisted by CodeCommit, and the raw account ID must not appear in
+comment content or other public output. File findings post as general
 comments with their file anchor in the body because CodeCommit exposes only
 general and line comment locations.
 Long tree rows retain their complete bounded name instead of losing characters

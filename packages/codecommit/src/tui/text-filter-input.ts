@@ -20,6 +20,27 @@ export interface SingleLineDraftTransition {
   readonly submission: string | null
 }
 
+export interface BoundedSelectionTransition {
+  readonly cursor: number
+  readonly submittedIndex: number | null
+}
+
+/** Advances a bounded selection synchronously and snapshots Return against that cursor. */
+export const transitionBoundedSelection = (
+  cursor: number,
+  key: TextFilterInputKey,
+  optionCount: number
+): BoundedSelectionTransition => {
+  if (optionCount <= 0) return { cursor: 0, submittedIndex: null }
+  const boundedCursor = Math.max(0, Math.min(optionCount - 1, cursor))
+  if (key.name === "up") return { cursor: Math.max(0, boundedCursor - 1), submittedIndex: null }
+  if (key.name === "down") return { cursor: Math.min(optionCount - 1, boundedCursor + 1), submittedIndex: null }
+  return {
+    cursor: boundedCursor,
+    submittedIndex: key.name === "return" ? boundedCursor : null
+  }
+}
+
 /** Advances a bounded dialog draft synchronously and snapshots the submitted text. */
 export const transitionSingleLineDraft = (
   draft: string,
