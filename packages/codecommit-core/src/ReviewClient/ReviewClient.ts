@@ -38,6 +38,13 @@ const RawApprovalStates = Schema.Struct({
   })))
 })
 
+const RawMergeResponse = Schema.Struct({
+  pullRequest: Schema.Struct({
+    pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    pullRequestStatus: Schema.Literal("CLOSED")
+  })
+})
+
 const RawCommentsPage = Schema.Struct({
   commentsForPullRequestData: Schema.optional(Schema.Array(Schema.Struct({
     comments: Schema.optional(Schema.Array(Schema.Struct({
@@ -167,6 +174,8 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
       return "Pull request revision approved"
     case "revoke-approval":
       return "Pull request approval revoked"
+    case "merge":
+      return "Pull request merged"
   }
 }
 
@@ -255,6 +264,20 @@ export class CodeCommitReviewClient extends Context.Service<
               summary: commentSummary(action._tag)
             })
           }
+          case "merge": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.mergePullRequest(action).pipe(
+              Effect.mapError(mapProviderError("merge-pull-request"))
+            )
+            const response = yield* decodeProvider("merge-pull-request", RawMergeResponse, raw)
+            if (response.pullRequest.pullRequestId !== action.target.pullRequestId) {
+              return yield* malformed("merge-pull-request")
+            }
+            return new CodeCommitReviewReceipt({
+              operationId: `merge:${action.strategy}:${action.target.pullRequestId}:${action.target.sourceCommit}`,
+              summary: `${commentSummary(action._tag)} using ${action.strategy}`
+            })
+          }
         }
       })
 
@@ -333,6 +356,8 @@ export class CodeCommitReviewClient extends Context.Service<
               } satisfies CodeCommitReviewReconciliation
               : { _tag: "pending" } satisfies CodeCommitReviewReconciliation
           }
+          case "merge":
+            return { _tag: "pending" } satisfies CodeCommitReviewReconciliation
         }
       })
 

@@ -249,8 +249,10 @@ export type DetailsKeyIntent =
   | "cancel-action"
   | "consume"
   | "choose-review-skills"
+  | "choose-merge-strategy"
   | "checkout-worktree"
   | "confirm-action"
+  | "confirm-merge"
   | "discuss-finding"
   | "explain-risk"
   | "next-file"
@@ -285,12 +287,15 @@ export const detailsKeyIntent = (input: {
   readonly findingPostRunning?: boolean
   readonly findingReviewActive?: boolean
   readonly keyName: string
+  readonly mergeReady?: boolean
+  readonly mergeRunning?: boolean
   readonly modified: boolean
   readonly shifted?: boolean
   readonly tab: "comments" | "diff"
   readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
+  if (input.mergeRunning === true) return "consume"
   if (
     input.findingPostRunning === true &&
     ["escape", "r", "s", "t", "e", "w"].includes(input.keyName)
@@ -300,13 +305,26 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (
     input.workspaceRefreshing === true &&
-    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
+    ["a", "d", "e", "g", "m", "M", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
   ) {
     return "consume"
   }
+  if (input.tab === "diff" && input.keyName === "return" && input.mergeReady === true) return "confirm-merge"
+  if (input.tab === "diff" && input.keyName === "return" && input.actionReady) return "confirm-action"
+  if (
+    input.actionCancelable &&
+    (
+      ["a", "d", "e", "m", "M", "p", "r", "s", "t", "V", "w", "x"].includes(input.keyName) ||
+      (input.keyName === "v" && input.shifted === true)
+    )
+  ) return input.keyName === "x" ? "cancel-action" : "consume"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
+  if (
+    input.tab === "diff" &&
+    (input.keyName === "M" || (input.keyName === "m" && input.shifted === true))
+  ) return input.actionCancelable ? "consume" : "choose-merge-strategy"
   if (
     input.tab === "diff" &&
     input.findingReviewActive === true &&
@@ -397,8 +415,6 @@ export const detailsKeyIntent = (input: {
   if (input.tab === "diff" && input.keyName === "s") return "review-security"
   if (input.tab === "diff" && input.keyName === "t") return "review-tests"
   if (input.tab === "diff" && input.keyName === "e") return "explain-risk"
-  if (input.keyName === "x" && input.actionCancelable) return "cancel-action"
-  if (input.tab === "diff" && input.keyName === "return" && input.actionReady) return "confirm-action"
   return "yield"
 }
 

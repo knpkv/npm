@@ -24,6 +24,7 @@ import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
 import {
   CodeCommitReviewProvider,
   type CodeCommitReviewProviderService,
+  makeMergePullRequestRequest,
   makePostCommentForPullRequestRequest,
   makePostCommentReplyRequest,
   makeUpdateCommentRequest
@@ -101,6 +102,12 @@ const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "5".repeat(64)
 })
 
+const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "merge",
+  target: commentAction.target,
+  strategy: "squash"
+})
+
 const baseReadClient = (
   overrides: Partial<CodeCommitReadClientService> = {}
 ): CodeCommitReadClientService => ({
@@ -146,6 +153,10 @@ const baseProvider = (
       comment: { commentId: "reply-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
+  mergePullRequest: () =>
+    Effect.succeed({
+      pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" }
+    }),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
   getCommentsPage: () => Effect.succeed({ commentsForPullRequestData: [], nextToken: undefined }),
   ...overrides
@@ -200,6 +211,90 @@ describe("CodeCommitReviewClient", () => {
       clientRequestToken: "5".repeat(64)
     })
   })
+
+  it("pins merge requests to the decoded pull-request head", () => {
+    assert.deepStrictEqual(makeMergePullRequestRequest(mergeAction), {
+      pullRequestId: "17",
+      repositoryName: "payments-api",
+      sourceCommitId: "head-commit-17"
+    })
+  })
+
+  it.effect("preflights and executes the selected native merge strategy exactly once", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make<Array<string>>([])
+      const receipt = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: (action) =>
+            Ref.update(providerCalls, (calls) => [...calls, action.strategy]).pipe(
+              Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(mergeAction)
+        })
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(providerCalls), ["squash"])
+      assert.strictEqual(receipt.operationId, "merge:squash:17:head-commit-17")
+      assert.strictEqual(receipt.summary, "Pull request merged using squash")
+    }))
+
+  it.effect("does not call the merge provider when the reviewed head is stale", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const stalePullRequest = new CodeCommitPullRequestRevision({
+        ...pullRequest,
+        sourceCommit: "new-head-commit-17"
+      })
+      const result = yield* runWithClients(
+        baseReadClient({ getPullRequest: () => Effect.succeed(stalePullRequest) }),
+        baseProvider({
+          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "source-commit-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("maps provider approval-rule rejection to a merge conflict", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "MergePullRequestBySquash",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "PullRequestApprovalRulesNotSatisfiedException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "approval-rules-unsatisfied")
+      }
+    }))
 
   it.effect("executes and reconciles update and reply actions without replay", () =>
     Effect.gen(function*() {

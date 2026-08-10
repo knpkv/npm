@@ -327,6 +327,7 @@ const unusedCodeCommitClients = (() => {
     updateComment: () => Effect.die("unused updateComment"),
     postReply: () => Effect.die("unused postReply"),
     updateApprovalState: () => Effect.die("unused updateApprovalState"),
+    mergePullRequest: () => Effect.die("unused mergePullRequest"),
     getApprovalStates: () => Effect.die("unused getApprovalStates"),
     getCommentsPage: () => Effect.die("unused getCommentsPage")
   })
@@ -413,6 +414,7 @@ describe("first-party plugin runtime", () => {
         updateComment: () => Effect.die("unused updateComment"),
         postReply: () => Effect.die("unused postReply"),
         updateApprovalState: () => Effect.die("unused updateApprovalState"),
+        mergePullRequest: () => Effect.die("unused mergePullRequest"),
         getApprovalStates: () => Effect.die("unused getApprovalStates"),
         getCommentsPage: () => Effect.die("unused getCommentsPage")
       })

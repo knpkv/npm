@@ -1,5 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { Domain, ReadClient } from "@knpkv/codecommit-core"
+import type { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { type DiffRenderable, parseColor, type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
@@ -20,13 +20,14 @@ import {
 import { defaultRelayReviewSkills, relayReviewSkillsLabel, type RelayReviewSkillId } from "../../ReviewSkills.js"
 import type { WorktreePlan } from "../../WorktreeService.js"
 import { fetchPrCommentsAtom, openPrAtom } from "../atoms/actions.js"
-import { type AppState, appStateAtom } from "../atoms/app.js"
+import { type AppState, appStateAtom, refreshAtom } from "../atoms/app.js"
 import {
   checkoutWorktreeAtom,
   continueRelayReviewAtom,
   loadFileDiffAtom,
   loadPullRequestRevisionAtom,
   loadPullRequestWorkspaceAtom,
+  mergePullRequestAtom,
   openEditorAtom,
   postRelayFindingAtom,
   preflightWorktreeAtom,
@@ -114,6 +115,7 @@ import {
 } from "../review-session.js"
 import { DialogFindingConversation } from "../ui/DialogFindingConversation.js"
 import { DialogFindingTarget } from "../ui/DialogFindingTarget.js"
+import { DialogMergeStrategy } from "../ui/DialogMergeStrategy.js"
 import { DialogReviewSkills } from "../ui/DialogReviewSkills.js"
 
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
@@ -337,6 +339,22 @@ type ActionStatus =
     } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
+type MergeStatus =
+  | { readonly _tag: "idle" }
+  | {
+      readonly _tag: "ready"
+      readonly requestId: string
+      readonly revision: ReadClient.CodeCommitPullRequestRevision
+      readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    }
+  | {
+      readonly _tag: "running"
+      readonly requestId: string
+      readonly revision: ReadClient.CodeCommitPullRequestRevision
+      readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
 type EditorStatus =
   | { readonly _tag: "idle" }
   | { readonly _tag: "opening"; readonly editor: LocalEditor; readonly requestId: string }
@@ -393,6 +411,13 @@ const actionLabel = (action: PendingAction): string =>
     worktree: "Worktree"
   })[action]
 
+const mergeStrategyLabel = (strategy: ReviewClient.CodeCommitMergeStrategy): string =>
+  ({
+    "fast-forward": "FAST-FORWARD",
+    squash: "SQUASH",
+    "three-way": "THREE-WAY"
+  })[strategy]
+
 const verificationOutcomeLabel = (outcome: RelayReviewVerificationResult["outcome"]): string =>
   ({
     resolved: "RESOLVED",
@@ -426,6 +451,7 @@ export function DetailsView() {
   const selectedPrId = useAtomValue(selectedPrIdAtom)
   const setSelectedPrId = useAtomSet(selectedPrIdAtom)
   const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
+  const refresh = useAtomSet(refreshAtom)
   const setView = useAtomSet(viewAtom)
   const openPr = useAtomSet(openPrAtom)
   const loadWorkspace = useAtomSet(loadPullRequestWorkspaceAtom)
@@ -448,6 +474,8 @@ export function DetailsView() {
   const verifyFindingResult = useAtomValue(verifyRelayFindingAtom)
   const postFinding = useAtomSet(postRelayFindingAtom)
   const postFindingResult = useAtomValue(postRelayFindingAtom)
+  const mergePullRequest = useAtomSet(mergePullRequestAtom)
+  const mergePullRequestResult = useAtomValue(mergePullRequestAtom)
   const openEditor = useAtomSet(openEditorAtom)
   const openEditorResult = useAtomValue(openEditorAtom)
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
@@ -465,6 +493,7 @@ export function DetailsView() {
   const [tab, setTab] = useState<"comments" | "diff">("diff")
   const [reviewSkills, setReviewSkills] = useState<ReadonlyArray<RelayReviewSkillId>>(defaultRelayReviewSkills)
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
+  const [mergeStatus, setMergeStatus] = useState<MergeStatus>({ _tag: "idle" })
   const [editorStatus, setEditorStatus] = useState<EditorStatus>({ _tag: "idle" })
   const [diffCache, setDiffCache] = useState<ReadonlyMap<string, FileDiffOutcome>>(() => new Map())
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
@@ -583,6 +612,7 @@ export function DetailsView() {
     )
     if (transition._tag === "preserve") return
     loadedWorkspaceKeyRef.current = workspaceReloadKey
+    mergePullRequest(Atom.Interrupt)
     for (const interrupt of workspaceResetInterruptions(transition.interrupt)) {
       if (interrupt === "preflight") preflight(Atom.Interrupt)
       else if (interrupt === "checkout") checkout(Atom.Interrupt)
@@ -617,11 +647,22 @@ export function DetailsView() {
     )
     setDiffCache(new Map())
     setEditorStatus({ _tag: "idle" })
+    setMergeStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
     setTab("diff")
     setAction(reviewDeck.action)
     if (pr !== null) loadWorkspace(pr)
-  }, [checkout, continueReview, loadWorkspace, preflight, pr, runReview, verifyFindingAction, workspaceReloadKey])
+  }, [
+    checkout,
+    continueReview,
+    loadWorkspace,
+    mergePullRequest,
+    preflight,
+    pr,
+    runReview,
+    verifyFindingAction,
+    workspaceReloadKey
+  ])
 
   useEffect(() => {
     if (providerDriftPending || pr === null || workspace === null || selectedFile === null || selectedDiffKey === null)
@@ -978,6 +1019,23 @@ export function DetailsView() {
     setEditorStatus({ _tag: "done", editor: outcome.value.editor })
   }, [editorStatus, openEditorResult])
 
+  useEffect(() => {
+    if (mergeStatus._tag !== "running" || AsyncResult.isWaiting(mergePullRequestResult)) return
+    if (
+      !AsyncResult.isSuccess(mergePullRequestResult) ||
+      mergePullRequestResult.value.requestId !== mergeStatus.requestId
+    )
+      return
+    const outcome = mergePullRequestResult.value
+    if (outcome._tag === "failure") {
+      setMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      return
+    }
+    setMergeStatus({ _tag: "idle" })
+    refresh()
+    setView("prs")
+  }, [mergePullRequestResult, mergeStatus, refresh, setView])
+
   const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
   const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
   const selectedFindingDiffRow = useMemo(() => {
@@ -1065,7 +1123,12 @@ export function DetailsView() {
   const verificationRunning = verificationStatus._tag === "running"
   const agentRunning = conversationRunning || verificationRunning
   const actionCancelable =
-    action._tag === "preflight" || action._tag === "ready" || action._tag === "running" || agentRunning
+    action._tag === "preflight" ||
+    action._tag === "ready" ||
+    action._tag === "running" ||
+    mergeStatus._tag === "ready" ||
+    mergeStatus._tag === "running" ||
+    agentRunning
   const editorReady =
     workspace !== null &&
     localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending)
@@ -1382,6 +1445,30 @@ export function DetailsView() {
     }
   }
 
+  const beginMerge = (strategy: ReviewClient.CodeCommitMergeStrategy) => {
+    if (
+      pr === null ||
+      workspace === null ||
+      actionCancelable ||
+      providerDriftPending ||
+      postingFindingRef.current !== null
+    )
+      return
+    if (!pr.isMergeable) {
+      setMergeStatus({
+        _tag: "failed",
+        diagnostic: {
+          operation: `merge-${strategy}`,
+          message: "CodeCommit reports that this pull-request revision is not mergeable"
+        }
+      })
+      return
+    }
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:merge:${strategy}:${nextActionRequestSequence}`
+    setMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy })
+  }
+
   useKeyboard((key) => {
     const intent = detailsKeyIntent({
       actionCancelable,
@@ -1391,6 +1478,8 @@ export function DetailsView() {
       findingPostRunning: postingFindingRef.current !== null,
       findingReviewActive: selectedFinding !== null,
       keyName: key.name,
+      mergeReady: mergeStatus._tag === "ready" && workspace !== null,
+      mergeRunning: mergeStatus._tag === "running",
       modified: key.ctrl === true || key.meta === true,
       shifted: key.shift === true,
       tab,
@@ -1400,7 +1489,9 @@ export function DetailsView() {
     key.stopPropagation()
     if (intent === "back") setView("prs")
     else if (intent === "cancel-action") {
-      if (verificationRunning) {
+      if (mergeStatus._tag === "ready") {
+        setMergeStatus({ _tag: "idle" })
+      } else if (verificationRunning) {
         verifyFindingAction(Atom.Interrupt)
         setVerificationStatus({ _tag: "idle" })
       } else if (conversationRunning) {
@@ -1417,6 +1508,8 @@ export function DetailsView() {
     else if (intent === "open-browser" && pr !== null) openPr(pr)
     else if (intent === "choose-review-skills") {
       dialog.show(() => <DialogReviewSkills onApply={setReviewSkills} selected={reviewSkills} />)
+    } else if (intent === "choose-merge-strategy") {
+      dialog.show(() => <DialogMergeStrategy onApply={beginMerge} />)
     } else if (intent === "open-neovim") openSelectedInEditor("neovim")
     else if (intent === "open-vscode") openSelectedInEditor("vscode")
     else if (intent === "previous-finding") {
@@ -1456,7 +1549,16 @@ export function DetailsView() {
     else if (intent === "review-security") beginAction("security")
     else if (intent === "review-tests") beginAction("tests")
     else if (intent === "explain-risk") beginAction("explain")
-    else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
+    else if (intent === "confirm-merge" && mergeStatus._tag === "ready" && pr !== null) {
+      const ready = mergeStatus
+      setMergeStatus({ ...ready, _tag: "running" })
+      mergePullRequest({
+        pr,
+        requestId: ready.requestId,
+        revision: ready.revision,
+        strategy: ready.strategy
+      })
+    } else if (intent === "confirm-action" && action._tag === "ready" && workspace !== null) {
       const ready = action
       setAction({
         _tag: "running",
@@ -1751,11 +1853,38 @@ export function DetailsView() {
                   keyName="w"
                   label={workspace?.localDiff._tag === "outdated" ? "Update Worktree" : "Worktree"}
                 />
+                <ActionKey active={mergeStatus._tag !== "idle"} keyName="M" label="Merge PR" />
                 <box style={{ height: 1 }} />
               </>
             )}
-            {action._tag === "idle" && (
-              <text fg={theme.textMuted}>Read-only sandbox. Human approval stays separate.</text>
+            {action._tag === "idle" && mergeStatus._tag === "idle" && (
+              <text fg={theme.textMuted}>Relay is read-only. Merge requires exact-head confirmation.</text>
+            )}
+            {mergeStatus._tag === "ready" && (
+              <box border={["left"]} borderColor={theme.warning} flexDirection="column" style={{ paddingLeft: 1 }}>
+                <text fg={theme.textWarning}>MERGE · READY</text>
+                <text fg={theme.textAccent}>{mergeStrategyLabel(mergeStatus.strategy)}</text>
+                <text fg={theme.textMuted}>{`base ${mergeStatus.revision.destinationCommit.slice(0, 12)}`}</text>
+                <text fg={theme.textMuted}>{`head ${mergeStatus.revision.sourceCommit.slice(0, 12)}`}</text>
+                <text fg={theme.text}>{terminalSafeText(mergeStatus.revision.destinationReference)}</text>
+                <text fg={theme.textSuccess}>Enter merge · x cancel</text>
+              </box>
+            )}
+            {mergeStatus._tag === "running" && (
+              <box border={["left"]} borderColor={theme.warning} flexDirection="column" style={{ paddingLeft: 1 }}>
+                <text fg={theme.textWarning}>MERGE · RUNNING…</text>
+                <text fg={theme.textAccent}>{mergeStrategyLabel(mergeStatus.strategy)}</text>
+                <text fg={theme.textMuted}>{`exact head ${mergeStatus.revision.sourceCommit.slice(0, 12)}`}</text>
+                <text fg={theme.textMuted}>Waiting for the CodeCommit receipt…</text>
+              </box>
+            )}
+            {mergeStatus._tag === "failed" && (
+              <box border={["left"]} borderColor={theme.error} flexDirection="column" style={{ paddingLeft: 1 }}>
+                <text
+                  fg={theme.textError}
+                >{`MERGE FAILED · ${terminalSafeText(mergeStatus.diagnostic.operation)}`}</text>
+                <text fg={theme.textMuted}>{terminalSafeMultilineText(mergeStatus.diagnostic.message)}</text>
+              </box>
             )}
             {findingPostReceipt === null ? null : (
               <box

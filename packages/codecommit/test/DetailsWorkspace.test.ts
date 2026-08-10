@@ -781,6 +781,14 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "n" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "n", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "r" })).toBe("review-pr")
+    expect(detailsKeyIntent({ ...base, keyName: "M", shifted: true })).toBe("choose-merge-strategy")
+    expect(detailsKeyIntent({ ...base, keyName: "m", shifted: true })).toBe("choose-merge-strategy")
+    expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "M", shifted: true })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", mergeReady: true })).toBe(
+      "confirm-merge"
+    )
+    expect(detailsKeyIntent({ ...base, keyName: "escape", mergeRunning: true })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, keyName: "return", mergeRunning: true })).toBe("consume")
     expect(detailsKeyIntent({ ...base, keyName: "r", workspaceRefreshing: true })).toBe("consume")
     expect(
       detailsKeyIntent({
@@ -857,6 +865,7 @@ describe("PR detail workspace", () => {
     ).toBe(false)
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, keyName: "M", shifted: true, tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "2" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "h" })).toBe("previous-finding")

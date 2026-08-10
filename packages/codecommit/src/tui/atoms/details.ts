@@ -1,4 +1,4 @@
-import { type Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { CacheService, type Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Crypto, Effect, Stream } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import {
@@ -75,6 +75,13 @@ export interface PostRelayFindingInput {
   readonly pr: Domain.PullRequest
   readonly requestId: string
   readonly revision: ReadClient.CodeCommitPullRequestRevision
+}
+
+export interface MergePullRequestInput {
+  readonly pr: Domain.PullRequest
+  readonly requestId: string
+  readonly revision: ReadClient.CodeCommitPullRequestRevision
+  readonly strategy: ReviewClient.CodeCommitMergeStrategy
 }
 
 export const loadPullRequestWorkspaceAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
@@ -315,6 +322,76 @@ const reviewPostingMessage = (error: ReviewClient.CodeCommitReviewError): string
       return "The exact pull-request target could not be verified for the finding post"
   }
 }
+
+const mergePullRequestMessage = (error: ReviewClient.CodeCommitReviewError): string => {
+  switch (error._tag) {
+    case "CodeCommitReviewConflictError":
+      switch (error.reason) {
+        case "approval-rules-unsatisfied":
+          return "CodeCommit approval rules are not satisfied for this exact revision"
+        case "merge-conflict":
+          return "CodeCommit cannot merge this revision with the selected strategy"
+        case "pull-request-closed":
+          return "The pull request is already closed"
+        default:
+          return `The pull-request target changed before merge (${error.reason})`
+      }
+    case "AwsCredentialError":
+      return "AWS credentials could not be acquired for the merge"
+    case "AwsThrottleError":
+      return "CodeCommit throttled the merge request"
+    case "AwsApiError":
+      return "CodeCommit rejected the merge request"
+    case "CodeCommitBlobTooLargeError":
+    case "CodeCommitMalformedResponseError":
+    case "CodeCommitReadNotFoundError":
+      return "The exact pull-request target or merge receipt could not be verified"
+  }
+}
+
+/** Merges one explicitly confirmed, immutable pull-request revision without checking out source. */
+export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput) =>
+  actionOutcome(
+    input.requestId,
+    Effect.gen(function*() {
+      const client = yield* ReviewClient.CodeCommitReviewClient
+      const action: Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "merge" }> = {
+        _tag: "merge",
+        strategy: input.strategy,
+        target: {
+          account: {
+            profile: input.pr.account.profile,
+            region: input.pr.account.region
+          },
+          destinationCommit: input.revision.destinationCommit,
+          destinationReference: input.revision.destinationReference,
+          pullRequestId: input.revision.pullRequestId,
+          repositoryName: input.revision.repositoryName,
+          revisionId: input.revision.revisionId,
+          sourceCommit: input.revision.sourceCommit
+        }
+      }
+      const receipt = yield* client.execute(action).pipe(
+        Effect.mapError((error) =>
+          new WorktreeError({
+            operation: `merge-${input.strategy}`,
+            message: mergePullRequestMessage(error)
+          })
+        )
+      )
+      const notificationRepo = yield* CacheService.NotificationRepo
+      yield* notificationRepo.add({
+        awsAccountId: input.pr.account.repoAccountId ?? "",
+        message: `${receipt.summary} at head ${input.revision.sourceCommit.slice(0, 12)}`,
+        profile: input.pr.account.profile,
+        pullRequestId: input.pr.id,
+        title: `Merged PR #${input.pr.id}`,
+        type: "success"
+      }).pipe(Effect.ignore)
+      return receipt
+    }).pipe(Effect.withSpan("mergePullRequest", { attributes: { strategy: input.strategy } }))
+  )
+)
 
 /** Posts one explicitly accepted Relay finding after an immutable-revision preflight. */
 export const postRelayFindingAtom = runtimeAtom.fn((input: PostRelayFindingInput) =>

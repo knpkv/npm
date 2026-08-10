@@ -35,6 +35,9 @@ export interface CodeCommitReviewProviderService {
   readonly updateApprovalState: (
     action: Extract<CodeCommitReviewAction, { readonly _tag: "approve" | "revoke-approval" }>
   ) => Effect.Effect<unknown, AwsClientError>
+  readonly mergePullRequest: (
+    action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>
+  ) => Effect.Effect<unknown, AwsClientError>
   readonly getApprovalStates: (target: CodeCommitReviewTarget) => Effect.Effect<unknown, AwsClientError>
   readonly getCommentsPage: (
     request: GetReviewCommentsProviderPageRequest
@@ -100,6 +103,15 @@ export const makePostCommentReplyRequest = (
   clientRequestToken: action.clientRequestToken
 })
 
+/** Map a merge action to a provider request pinned to the reviewed source commit. */
+export const makeMergePullRequestRequest = (
+  action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>
+) => ({
+  pullRequestId: action.target.pullRequestId,
+  repositoryName: action.target.repositoryName,
+  sourceCommitId: action.target.sourceCommit
+})
+
 /** Live raw provider layer backed by @distilled.cloud/aws CodeCommit operations. */
 export const CodeCommitReviewProviderLive = Layer.effect(
   CodeCommitReviewProvider,
@@ -145,6 +157,29 @@ export const CodeCommitReviewProviderLive = Layer.effect(
             approvalState: action._tag === "approve" ? "APPROVE" : "REVOKE"
           })
         )),
+      mergePullRequest: (action) => {
+        const request = makeMergePullRequestRequest(action)
+        switch (action.strategy) {
+          case "fast-forward":
+            return provideRuntime(callProvider(
+              "mergePullRequestByFastForward",
+              action.target,
+              codecommit.mergePullRequestByFastForward(request)
+            ))
+          case "squash":
+            return provideRuntime(callProvider(
+              "mergePullRequestBySquash",
+              action.target,
+              codecommit.mergePullRequestBySquash(request)
+            ))
+          case "three-way":
+            return provideRuntime(callProvider(
+              "mergePullRequestByThreeWay",
+              action.target,
+              codecommit.mergePullRequestByThreeWay(request)
+            ))
+        }
+      },
       getApprovalStates: (target) =>
         provideRuntime(callProvider(
           "getPullRequestApprovalStates",
