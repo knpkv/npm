@@ -128,6 +128,15 @@ export const pullRequestRevisionPollingEnabled = (input: {
   !input.actionCancelable &&
   !input.findingPostRunning
 
+/** Rejects a poll result whenever another operation owns the workspace. */
+export const pullRequestRevisionObservationEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly findingPostRunning: boolean
+}): boolean => !input.actionCancelable && !input.findingPostRunning
+
+/** Keeps an already-open finding dialog from mutating a workspace during provider drift. */
+export const findingConversationSubmissionEnabled = (providerDriftPending: boolean): boolean => !providerDriftPending
+
 const isWorktreeError = Schema.is(WorktreeError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */

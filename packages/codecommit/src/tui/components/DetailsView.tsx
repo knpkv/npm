@@ -53,11 +53,13 @@ import {
   exactRevisionReviewState,
   fileDiffIdentity,
   fileDiffIdentityKey,
+  findingConversationSubmissionEnabled,
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
-  pullRequestWorkspaceReloadKey,
+  pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
+  pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   pullRequestSelectionKey,
   revisionHeaderText,
@@ -471,6 +473,7 @@ export function DetailsView() {
   const handledRevisionObservationRef = useRef<string | null>(null)
   const pendingDiffKeyRef = useRef<string | null>(null)
   const postingFindingRef = useRef<FindingPostSession | null>(null)
+  const providerDriftPendingRef = useRef(false)
   actionRef.current = action
   selectedFindingIndexRef.current = selectedFindingIndex
 
@@ -510,6 +513,7 @@ export function DetailsView() {
           latestRevisionObservation ?? providerDrift
         )
   const providerDriftPending = activeProviderDrift !== null
+  providerDriftPendingRef.current = providerDriftPending
   const providerDriftRefreshFailed =
     providerDriftPending &&
     AsyncResult.isFailure(refreshWorkspaceResult) &&
@@ -1075,7 +1079,10 @@ export function DetailsView() {
     const refreshRevision = () => pollRevision({ baseline: providerWorkspace.revision, pr })
     refreshRevision()
     const interval = setInterval(refreshRevision, 30_000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      pollRevision(Atom.Interrupt)
+    }
   }, [actionCancelable, localCheckout, pollRevision, postingFinding, pr, providerWorkspace])
 
   useEffect(() => {
@@ -1083,6 +1090,13 @@ export function DetailsView() {
       handledRevisionObservationRef.current = null
       return
     }
+    if (
+      !pullRequestRevisionObservationEnabled({
+        actionCancelable,
+        findingPostRunning: postingFinding !== null
+      })
+    )
+      return
     if (
       pr === null ||
       providerWorkspace === null ||
@@ -1113,7 +1127,16 @@ export function DetailsView() {
     setEditorStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
     if (!AsyncResult.isWaiting(refreshWorkspaceResult)) refreshWorkspace({ check: drift, pr })
-  }, [loadDiff, pr, providerWorkspace, refreshWorkspace, refreshWorkspaceResult, revisionPollResult])
+  }, [
+    actionCancelable,
+    loadDiff,
+    postingFinding,
+    pr,
+    providerWorkspace,
+    refreshWorkspace,
+    refreshWorkspaceResult,
+    revisionPollResult
+  ])
 
   useEffect(() => {
     if (pr === null || workspace === null || AsyncResult.isWaiting(refreshWorkspaceResult)) return
@@ -1203,7 +1226,14 @@ export function DetailsView() {
   }
 
   const discussFinding = (message: string) => {
-    if (action._tag !== "reviewed" || workspace === null || selectedFinding === null || agentRunning) return
+    if (
+      action._tag !== "reviewed" ||
+      workspace === null ||
+      selectedFinding === null ||
+      agentRunning ||
+      !findingConversationSubmissionEnabled(providerDriftPendingRef.current)
+    )
+      return
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:conversation:${selectedFinding.id}:${nextActionRequestSequence}`
     const userTurn: RelayReviewConversationTurn = {

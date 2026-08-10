@@ -41,11 +41,13 @@ import {
   fileDiffIdentity,
   fileDiffIdentityKey,
   fileDiffIdentityMatches,
+  findingConversationSubmissionEnabled,
   humanReviewState,
   isChangedDiffLine,
   localEditorReady,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
+  pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
@@ -751,6 +753,17 @@ describe("PR detail workspace", () => {
         hasLocalCheckout: true
       })
     ).toBe(false)
+    expect(findingConversationSubmissionEnabled(true)).toBe(false)
+    expect(findingConversationSubmissionEnabled(false)).toBe(true)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: true, findingPostRunning: false })
+    ).toBe(false)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: false, findingPostRunning: true })
+    ).toBe(false)
+    expect(
+      pullRequestRevisionObservationEnabled({ actionCancelable: false, findingPostRunning: false })
+    ).toBe(true)
     expect(detailsKeyIntent({ ...base, keyName: "r", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "w", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionReady: true, keyName: "return", tab: "comments" })).toBe("yield")
