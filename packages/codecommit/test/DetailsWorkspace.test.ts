@@ -46,6 +46,7 @@ import {
   isChangedDiffLine,
   localEditorReady,
   localRevisionDriftMessage,
+  mergeDialogWorkspaceSelection,
   mergeFailureWorkspaceReloadPolicy,
   mergeStrategySelectionEnabled,
   postedCommentsPresentation,
@@ -437,6 +438,24 @@ describe("PR detail workspace", () => {
         operation: "merge-squash"
       })
     ).toBe("retain")
+    expect(
+      mergeFailureWorkspaceReloadPolicy({
+        message: "The repository changed",
+        operation: "merge-squash",
+        workspaceRefreshReason: "repository-changed"
+      })
+    ).toBe("refresh-list")
+    const currentRevision = { current: "revision-a" }
+    const submitOpenDialog = () =>
+      mergeDialogWorkspaceSelection({
+        actionCancelable: false,
+        cachedMergeable: false,
+        currentWorkspace: currentRevision.current,
+        findingPostRunning: false,
+        providerDriftPending: false
+      })
+    currentRevision.current = "revision-b"
+    expect(submitOpenDialog()).toBe("revision-b")
     expect(
       actionDiagnostic(
         new WorkspaceRefreshActionError({

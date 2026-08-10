@@ -296,6 +296,42 @@ describe("CodeCommitReviewClient", () => {
       }
     }))
 
+  it.effect("reloads merge reference races while retaining manual strategy conflicts", () =>
+    Effect.gen(function*() {
+      const cases = [
+        ["ConcurrentReferenceUpdateException", "destination-reference-changed"],
+        ["ReferenceDoesNotExistException", "destination-reference-changed"],
+        ["ManualMergeRequiredException", "merge-conflict"]
+      ] as const
+
+      for (const [tag, expectedReason] of cases) {
+        const result = yield* runWithClients(
+          baseReadClient(),
+          baseProvider({
+            mergePullRequest: () =>
+              Effect.fail(
+                new AwsApiError({
+                  operation: "MergePullRequestBySquash",
+                  profile: account.profile,
+                  region: account.region,
+                  cause: { _tag: tag }
+                })
+              )
+          }),
+          Effect.gen(function*() {
+            const client = yield* CodeCommitReviewClient
+            return yield* Effect.result(client.execute(mergeAction))
+          })
+        )
+
+        assert.strictEqual(Result.isFailure(result), true)
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+          assert.strictEqual(result.failure.reason, expectedReason)
+        }
+      }
+    }))
+
   it.effect("executes and reconciles update and reply actions without replay", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make<Array<string>>([])

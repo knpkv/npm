@@ -96,16 +96,27 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
     Predicate.isTagged(cause, "CommentDoesNotExistException") ||
     Predicate.isTagged(cause, "InvalidCommentIdException")
   ) return "revision-changed"
-  if (
-    Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
-    Predicate.isTagged(cause, "ManualMergeRequiredException")
-  ) return "merge-conflict"
+  if (Predicate.isTagged(cause, "ManualMergeRequiredException")) return "merge-conflict"
   return null
+}
+
+const providerConflictReason = (
+  operation: string,
+  cause: unknown
+): CodeCommitReviewConflictError["reason"] | null => {
+  if (
+    operation === "merge-pull-request" &&
+    (Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
+      Predicate.isTagged(cause, "ReferenceDoesNotExistException"))
+  ) {
+    return "destination-reference-changed"
+  }
+  return conflictReason(cause)
 }
 
 const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReviewError => {
   if (error._tag !== "AwsApiError") return error
-  const reason = conflictReason(error.cause)
+  const reason = providerConflictReason(operation, error.cause)
   if (reason !== null) return new CodeCommitReviewConflictError({ operation, reason })
   if (
     Predicate.isTagged(error.cause, "PullRequestDoesNotExistException") ||

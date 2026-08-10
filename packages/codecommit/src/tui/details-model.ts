@@ -177,9 +177,13 @@ export const mergeWorkspaceRefreshReason = (
   }
 }
 
-/** Reloads only typed stale-target failures; policy failures remain visible against the current workspace. */
-export const mergeFailureWorkspaceReloadPolicy = (diagnostic: ActionDiagnostic): "reload" | "retain" =>
-  diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
+/** Reloads stale revisions narrowly, but refreshes the PR list when selection identity changed. */
+export const mergeFailureWorkspaceReloadPolicy = (
+  diagnostic: ActionDiagnostic
+): "refresh-list" | "reload" | "retain" => {
+  if (diagnostic.workspaceRefreshReason === "repository-changed") return "refresh-list"
+  return diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
+}
 
 /**
  * Allows merge selection for a loaded exact revision when no workspace mutation is active.
@@ -196,6 +200,25 @@ export const mergeStrategySelectionEnabled = (input: {
   !input.actionCancelable &&
   !input.findingPostRunning &&
   !input.providerDriftPending
+
+/** Resolves an open merge dialog against the current render, never its captured opening revision. */
+export const mergeDialogWorkspaceSelection = <A>(input: {
+  readonly actionCancelable: boolean
+  readonly cachedMergeable: boolean
+  readonly currentWorkspace: A | null
+  readonly findingPostRunning: boolean
+  readonly providerDriftPending: boolean
+}): A | null =>
+  input.currentWorkspace !== null &&
+    mergeStrategySelectionEnabled({
+      actionCancelable: input.actionCancelable,
+      cachedMergeable: input.cachedMergeable,
+      exactRevisionLoaded: true,
+      findingPostRunning: input.findingPostRunning,
+      providerDriftPending: input.providerDriftPending
+    })
+    ? input.currentWorkspace
+    : null
 
 export type ActionOutcome<A> =
   | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }

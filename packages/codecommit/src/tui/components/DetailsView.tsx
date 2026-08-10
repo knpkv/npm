@@ -57,8 +57,8 @@ import {
   findingConversationSubmissionEnabled,
   localEditorReady,
   localRevisionDriftMessage,
+  mergeDialogWorkspaceSelection,
   mergeFailureWorkspaceReloadPolicy,
-  mergeStrategySelectionEnabled,
   postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestDriftRefreshStartEnabled,
@@ -513,6 +513,11 @@ export function DetailsView() {
   const postingFindingRef = useRef<FindingPostSession | null>(null)
   const providerDriftPendingRef = useRef(false)
   const revisionPollWaitingRef = useRef(false)
+  const mergeDialogWorkspaceRef = useRef<{
+    readonly actionCancelable: boolean
+    readonly currentWorkspace: { readonly pr: Domain.PullRequest; readonly workspace: PullRequestWorkspace } | null
+    readonly providerDriftPending: boolean
+  }>({ actionCancelable: true, currentWorkspace: null, providerDriftPending: false })
   actionRef.current = action
   mergeStatusRef.current = mergeStatus
   selectedFindingIndexRef.current = selectedFindingIndex
@@ -1040,7 +1045,13 @@ export function DetailsView() {
     const outcome = mergePullRequestResult.value
     if (outcome._tag === "failure") {
       updateMergeStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
-      if (mergeFailureWorkspaceReloadPolicy(outcome.diagnostic) === "reload" && pr !== null) loadWorkspace(pr)
+      const reloadPolicy = mergeFailureWorkspaceReloadPolicy(outcome.diagnostic)
+      if (reloadPolicy === "refresh-list") {
+        refresh()
+        setView("prs")
+      } else if (reloadPolicy === "reload" && pr !== null) {
+        loadWorkspace(pr)
+      }
       return
     }
     updateMergeStatus({ _tag: "idle" })
@@ -1141,6 +1152,11 @@ export function DetailsView() {
     mergeStatus._tag === "ready" ||
     mergeStatus._tag === "running" ||
     agentRunning
+  mergeDialogWorkspaceRef.current = {
+    actionCancelable,
+    currentWorkspace: pr === null || workspace === null ? null : { pr, workspace },
+    providerDriftPending
+  }
   const editorReady =
     workspace !== null &&
     localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending)
@@ -1458,18 +1474,16 @@ export function DetailsView() {
   }
 
   const beginMerge = (strategy: ReviewClient.CodeCommitMergeStrategy) => {
-    if (pr === null || workspace === null) return
-    if (
-      !mergeStrategySelectionEnabled({
-        actionCancelable,
-        cachedMergeable: pr.isMergeable,
-        exactRevisionLoaded: true,
-        findingPostRunning: postingFindingRef.current !== null,
-        providerDriftPending
-      })
-    ) {
-      return
-    }
+    const current = mergeDialogWorkspaceRef.current
+    const selection = mergeDialogWorkspaceSelection({
+      actionCancelable: current.actionCancelable,
+      cachedMergeable: current.currentWorkspace?.pr.isMergeable ?? false,
+      currentWorkspace: current.currentWorkspace,
+      findingPostRunning: postingFindingRef.current !== null,
+      providerDriftPending: current.providerDriftPending
+    })
+    if (selection === null) return
+    const { workspace } = selection
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:merge:${strategy}:${nextActionRequestSequence}`
     updateMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy })
