@@ -27,6 +27,47 @@ describe("frontmatter serialization", () => {
       expect(parsed.content).toBe("Body")
     }))
 
+  // The flag warns the user before they edit, rather than only when the push
+  // is refused, so it has to survive the write/read cycle.
+  it.effect("round-trips the roundTrip: unsafe flag", () =>
+    Effect.gen(function*() {
+      const serialized = serializeMarkdown(
+        {
+          pageId: PageId("123"),
+          version: 7,
+          title: "A page",
+          updated: new Date("2026-06-24T10:00:00.000Z"),
+          contentHash: ContentHash("a".repeat(64)),
+          roundTrip: "unsafe"
+        },
+        "Body\n"
+      )
+
+      expect(serialized).toContain("roundTrip: unsafe")
+
+      const parsed = yield* parseMarkdown("page.md", serialized)
+      expect(parsed.frontMatter?.roundTrip).toBe("unsafe")
+    }))
+
+  it.effect("omits the flag for an ordinary page", () =>
+    Effect.gen(function*() {
+      const serialized = serializeMarkdown(
+        {
+          pageId: PageId("123"),
+          version: 7,
+          title: "A page",
+          updated: new Date("2026-06-24T10:00:00.000Z"),
+          contentHash: ContentHash("a".repeat(64))
+        },
+        "Body\n"
+      )
+
+      expect(serialized).not.toContain("roundTrip")
+
+      const parsed = yield* parseMarkdown("page.md", serialized)
+      expect(parsed.frontMatter?.roundTrip).toBeUndefined()
+    }))
+
   it("serializes new page frontmatter", () => {
     const serialized = serializeNewPageMarkdown(
       {

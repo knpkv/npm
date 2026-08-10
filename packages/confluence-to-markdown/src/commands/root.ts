@@ -13,7 +13,10 @@ import {
   diffCommand,
   logCommand,
   newCommand,
+  pageCreateCommand,
   pageGetCommand,
+  pagePatchCommand,
+  pagePutCommand,
   pullCommand,
   pushCommand,
   statusCommand
@@ -67,11 +70,14 @@ const pageCommand = (pageGet: typeof pageGetCommand) =>
   Command.make(
     "page",
     {},
-    () => Console.log("Usage: confluence page get|new|delete|attachment")
+    () => Console.log("Usage: confluence page get|create|put|patch|new|delete|attachment")
   ).pipe(
     Command.withDescription("Confluence page resource commands"),
     Command.withSubcommands([
       pageGet,
+      pageCreateCommand,
+      pagePutCommand,
+      pagePatchCommand,
       attachmentCommand,
       newCommand,
       deleteCommand

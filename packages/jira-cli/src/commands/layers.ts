@@ -54,7 +54,8 @@ const DummyVersionServiceLayer = Layer.succeed(
     getVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     updateVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     listRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
-    addRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
+    addRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    deleteRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 

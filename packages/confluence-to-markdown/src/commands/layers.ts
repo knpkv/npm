@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeTerminal from "@effect/platform-node/NodeTerminal"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type { Command } from "effect/unstable/cli"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
 import { PageId } from "../Brand.js"
@@ -21,11 +22,34 @@ import { UserCacheLayer } from "../internal/userCache.js"
 import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
+// Type-only: these feed the layer-coverage assertions below and must not create
+// a runtime import cycle (clone.ts imports `ConverterPipeline` from here).
+import type { pageCreateCommand, pagePatchCommand, pagePutCommand } from "./adfPage.js"
+import type { attachmentCommand } from "./attachment.js"
+import type { authCommand } from "./auth.js"
+import type { cloneCommand } from "./clone.js"
+import type { deleteCommand } from "./delete.js"
+import type { pageGetCommand } from "./fetch.js"
+import type { commitCommand, diffCommand, logCommand } from "./git.js"
+import type { newCommand } from "./new.js"
 import { getAuth } from "./shared.js"
+import type { pullCommand, pushCommand, statusCommand } from "./sync.js"
 
-const ConverterPipeline = MarkdownConverterLayer.pipe(
+/**
+ * `MarkdownConverter` plus the validator it is built from.
+ *
+ * `AdfSchemaValidator` is merged rather than merely provided: `page put`,
+ * `page patch` and `page create` resolve it directly (adfPage.ts) to check a
+ * hand-authored document before writing it, so every layer that carries the
+ * converter must re-export the validator too. Using `Layer.provide` here left
+ * it consumed-but-unexported and the three commands died at startup with
+ * `Service not found`.
+ *
+ * @internal
+ */
+export const ConverterPipeline = MarkdownConverterLayer.pipe(
   Layer.provide(AtlaskitTransformersLayer),
-  Layer.provide(AdfSchemaValidatorLayer)
+  Layer.provideMerge(AdfSchemaValidatorLayer)
 )
 
 // Dummy config layer for help/init
@@ -220,6 +244,59 @@ export const FetchLayer = DummySyncEngineLayer.pipe(
 )
 
 /**
+ * Compile-time proof that each layer exports every service the commands routed
+ * to it resolve.
+ *
+ * Nothing else checks this. `Command.withSubcommands` collapses subcommand
+ * requirements to `never` — `ExtractSubcommandContext` infers through
+ * `T[number]`, a union, and that conditional is not distributive — so the root
+ * command's `R` is `never` no matter what its leaves need, and `Effect.provide`
+ * in `bin.ts` has nothing left to verify. `page put` shipped resolving
+ * `AdfSchemaValidator` from a layer that did not export it, and `pnpm check`
+ * stayed green. The leaf commands *do* still carry their real requirements, so
+ * asserting against those, layer by layer, restores the check.
+ *
+ * A leaf added to `getLayerType` below belongs in the matching union here.
+ */
+type CommandRequirements<C> = C extends Command.Command<infer _N, infer _I, infer _CI, infer _E, infer R> ? R
+  : never
+type LayerServices<L> = L extends Layer.Layer<infer A, infer _E, infer _R> ? A : never
+type Unprovided<C, L> = Exclude<CommandRequirements<C>, LayerServices<L> | Command.Environment>
+type AssertNothingUnprovided<T extends never> = T
+
+export type _FetchLayerCoversItsCommands = AssertNothingUnprovided<
+  Unprovided<
+    typeof pageGetCommand | typeof pagePutCommand | typeof pagePatchCommand | typeof pageCreateCommand,
+    typeof FetchLayer
+  >
+>
+export type _CloneLayerCoversItsCommands = AssertNothingUnprovided<
+  Unprovided<typeof cloneCommand, typeof CloneLayer>
+>
+export type _AuthLayerCoversItsCommands = AssertNothingUnprovided<
+  Unprovided<typeof authCommand, typeof AuthOnlyLayer>
+>
+// `page attachment upload --dry-run` is routed to the minimal layer, so that
+// layer has to satisfy the attachment command too — not just the full one.
+export type _MinimalLayerCoversItsCommands = AssertNothingUnprovided<
+  Unprovided<typeof attachmentCommand, typeof MinimalLayer>
+>
+export type _AppLayerCoversItsCommands = AssertNothingUnprovided<
+  Unprovided<
+    | typeof statusCommand
+    | typeof diffCommand
+    | typeof pullCommand
+    | typeof pushCommand
+    | typeof commitCommand
+    | typeof logCommand
+    | typeof newCommand
+    | typeof deleteCommand
+    | typeof attachmentCommand,
+    typeof AppLayer
+  >
+>
+
+/**
  * Determine which layer to use based on command.
  */
 export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "fetch" | "minimal" => {
@@ -236,8 +313,13 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
   if (cmd === "workspace" && subcommand === "clone") {
     return "clone"
   }
-  // page get needs auth + converter but no existing config
-  if (cmd === "page" && subcommand === "get") {
+  // page get/create/put/patch talk to the API directly — auth + converter, no
+  // workspace. `create` is the one that writes to a space rather than an
+  // existing page, and it shares this layer and the base-URL allowlist path.
+  if (
+    cmd === "page" &&
+    (subcommand === "get" || subcommand === "put" || subcommand === "patch" || subcommand === "create")
+  ) {
     return "fetch"
   }
   if (

@@ -8,8 +8,6 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
-import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
-import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
 import { PageId } from "../Brand.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { createConfigFile, layerFromValues as ConfluenceConfigLayerFromValues } from "../ConfluenceConfig.js"
@@ -18,15 +16,10 @@ import { GitService, layer as GitServiceLayer } from "../GitService.js"
 import { writeStdout } from "../internal/stdio.js"
 import { UserCacheLayerWith } from "../internal/userCache.js"
 import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
-import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
+import { ConverterPipeline } from "./layers.js"
 import { resolvePageInput } from "./pageInput.js"
 import { getAuth } from "./shared.js"
-
-const ConverterPipeline = MarkdownConverterLayer.pipe(
-  Layer.provide(AtlaskitTransformersLayer),
-  Layer.provide(AdfSchemaValidatorLayer)
-)
 
 /** @internal */
 export const makeCloneOperationLayer = (

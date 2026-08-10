@@ -180,9 +180,21 @@ jira version related-work add 10042 \
   --title "Release notes" \
   --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
   --category Communication
+
+# Reconcile the category to exactly this set — idempotent, safe to re-run
+jira version related-work sync 10042 \
+  --link "Release notes=https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
+  --link "Test report=https://example.atlassian.net/wiki/spaces/PROJ/pages/124" \
+  --category Communication \
+  --prune
 ```
 
 `related-work add` requires the `write:jira-work` scope.
+
+`related-work sync` is what a release scaffold should use: repeated `add` calls pile up duplicate links, while
+`sync` matches on URL (the only stable identity a link has, since Jira assigns the id and the title is editable)
+and adds only what is missing. `--prune` additionally removes links in the category that are not in the desired
+set, including surplus copies of a URL that _is_ desired. Other categories are never touched.
 
 ## Auth Commands
 

@@ -319,11 +319,43 @@ export class AttachmentResolutionError extends Data.TaggedError("AttachmentResol
 }
 
 /**
+ * Error thrown when a push would send a page through the markdown projection
+ * that the projection cannot represent.
+ *
+ * Datasource cards and extensions have no markdown spelling, so converting
+ * them out and back silently mangles them. Rather than write the damage, the
+ * push stops and points at the ADF path.
+ *
+ * @category Errors
+ */
+export class RoundTripUnsafeError extends Data.TaggedError("RoundTripUnsafeError")<{
+  readonly pageId: string
+  readonly path: string
+  readonly nodeTypes: ReadonlyArray<string>
+  readonly message: string
+}> {
+  constructor(params: { pageId: string; path: string; nodeTypes: ReadonlyArray<string> }) {
+    super({
+      ...params,
+      message: `${params.path} contains ${params.nodeTypes.join(", ")} node(s) that markdown cannot ` +
+        `represent, so pushing it would corrupt them.\n` +
+        `  Edit it as ADF instead:\n` +
+        `    confluence page get --page-id ${params.pageId} --base-url <site> --format adf > page.json\n` +
+        `    confluence page put --page-id ${params.pageId} --base-url <site> --adf page.json --if-version <n>\n` +
+        `  --if-version is the version 'page get' printed to stderr; without it a write lands on whatever\n` +
+        `  the current version is and would overwrite an edit made in Confluence in between.\n` +
+        `  Or make a targeted edit with 'confluence page patch'. Use --force to push anyway.`
+    })
+  }
+}
+
+/**
  * Union of all Confluence errors.
  *
  * @category Errors
  */
 export type ConfluenceError =
+  | RoundTripUnsafeError
   | ConfigNotFoundError
   | ConfigParseError
   | ConfigError
@@ -366,5 +398,6 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "OAuthError",
     "FrontMatterError",
     "StructureError",
-    "AttachmentResolutionError"
+    "AttachmentResolutionError",
+    "RoundTripUnsafeError"
   ].includes(error._tag)

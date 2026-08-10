@@ -13,7 +13,8 @@ Use the `confluence` binary to manage a local markdown mirror of Confluence Clou
 - Authenticate before clone or sync with `confluence auth create`, `confluence auth configure`, and `confluence auth login`.
 - For multi-account or multi-site setups, inspect `confluence auth profiles` and switch with `confluence auth use <profile>` before pulling or pushing content. When the `atlassian` binary is available, use `atlassian profiles doctor` to check Jira, Confluence, and Jira Clockify profile state together.
 - Use OAuth for normal operation. API-token env vars may be available as `CONFLUENCE_API_KEY` and `CONFLUENCE_EMAIL`.
-- Confirm before running `confluence sync push`, because it writes to Confluence.
+- Confirm before running `confluence sync push`, because it writes to Confluence. `--force` additionally pushes a page markdown cannot round-trip, which corrupts the nodes the refusal was protecting — confirm it separately.
+- Confirm before running `confluence page create`, `confluence page put`, and `confluence page patch`, because each writes to Confluence directly, bypassing the markdown workspace.
 - Confirm before running `confluence page delete`, because it removes a local page that will be deleted remotely on the next push.
 - Treat `confluence page get --clean-markdown` output as read-only/export output. Do not push it back unless the user explicitly accepts metadata loss.
 
