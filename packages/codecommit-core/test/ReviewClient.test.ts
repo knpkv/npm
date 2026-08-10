@@ -300,6 +300,38 @@ describe("CodeCommitReviewClient", () => {
       }
     }))
 
+  it.effect("preserves an unclassified post-dispatch merge failure for outcome recovery", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Ref.update(providerCalls, (count) => count + 1).pipe(
+              Effect.andThen(Effect.fail(
+                new AwsApiError({
+                  operation: "mergePullRequestBySquash",
+                  profile: account.profile,
+                  region: account.region,
+                  cause: { _tag: "HttpClientError" }
+                })
+              ))
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, AwsApiError)
+        assert.strictEqual(result.failure.operation, "mergePullRequestBySquash")
+      }
+    }))
+
   it.effect("reloads merge reference races while retaining manual strategy conflicts", () =>
     Effect.gen(function*() {
       const cases: ReadonlyArray<

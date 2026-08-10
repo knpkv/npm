@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, Errors, ReadClient } from "@knpkv/codecommit-core"
 import { applyPatch, parsePatch } from "diff"
 import { Effect, Option, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
@@ -47,6 +47,7 @@ import {
   localEditorReady,
   localRevisionDriftMessage,
   mergeDialogWorkspaceSelection,
+  mergeFailureWorkspaceRefreshReason,
   mergeFailureWorkspaceReloadPolicy,
   mergeResultSettlement,
   mergeStrategySelectionEnabled,
@@ -471,6 +472,34 @@ describe("PR detail workspace", () => {
         operation: "merge-squash"
       })
     ).toBe("verified-revision-a")
+    expect(
+      mergeFailureWorkspaceRefreshReason(
+        new Errors.AwsApiError({
+          cause: { _tag: "HttpClientError" },
+          operation: "mergePullRequestBySquash",
+          profile: Domain.AwsProfileName.make("production"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        })
+      )
+    ).toBe("merge-outcome-unknown")
+    expect(
+      mergeFailureWorkspaceRefreshReason(
+        new Errors.AwsApiError({
+          cause: { _tag: "HttpClientError" },
+          operation: "getPullRequest",
+          profile: Domain.AwsProfileName.make("production"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        })
+      )
+    ).toBeNull()
+    expect(
+      mergeFailureWorkspaceRefreshReason(
+        new ReadClient.CodeCommitMalformedResponseError({
+          diagnosticCode: "provider-response-schema-invalid",
+          operation: "merge-pull-request"
+        })
+      )
+    ).toBe("merge-outcome-unknown")
     expect(mergeResultSettlement("merge-1", { _tag: "failure" })).toBe("ambiguous")
     expect(mergeResultSettlement("merge-1", { _tag: "success", requestId: "merge-2" })).toBe("ignore")
     expect(mergeResultSettlement("merge-1", { _tag: "success", requestId: "merge-1" })).toBe("settle")

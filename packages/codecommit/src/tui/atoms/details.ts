@@ -21,7 +21,7 @@ import {
   actionOutcome,
   changedFilePath,
   fileDiffIdentity,
-  mergeWorkspaceRefreshReason,
+  mergeFailureWorkspaceRefreshReason,
   pullRequestWorkspaceIdentity,
   WorkspaceRefreshActionError
 } from "../details-model.js"
@@ -380,9 +380,7 @@ export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput
       }
       const receipt = yield* client.execute(action).pipe(
         Effect.mapError((error) => {
-          const workspaceRefreshReason = error._tag === "CodeCommitReviewConflictError"
-            ? mergeWorkspaceRefreshReason(error.reason)
-            : null
+          const workspaceRefreshReason = mergeFailureWorkspaceRefreshReason(error)
           return workspaceRefreshReason === null
             ? new WorktreeError({
               operation: `merge-${input.strategy}`,

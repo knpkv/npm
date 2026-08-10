@@ -141,6 +141,7 @@ export type WorkspaceRefreshReason =
   | "destination-commit-changed"
   | "destination-reference-changed"
   | "repository-changed"
+  | "merge-outcome-unknown"
 
 /** Typed action failure whose immutable workspace must be reloaded before another attempt. */
 export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<WorkspaceRefreshActionError>()(
@@ -153,7 +154,8 @@ export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<Workspa
       "source-commit-changed",
       "destination-commit-changed",
       "destination-reference-changed",
-      "repository-changed"
+      "repository-changed",
+      "merge-outcome-unknown"
     ])
   }
 ) {}
@@ -177,11 +179,33 @@ export const mergeWorkspaceRefreshReason = (
   }
 }
 
+/** Classifies merge failures by the authoritative refresh required before another attempt. */
+export const mergeFailureWorkspaceRefreshReason = (
+  error: ReviewClient.CodeCommitReviewError
+): WorkspaceRefreshReason | null => {
+  if (error._tag === "CodeCommitReviewConflictError") return mergeWorkspaceRefreshReason(error.reason)
+  if (error._tag === "CodeCommitMalformedResponseError") {
+    return error.operation === "merge-pull-request" ? "merge-outcome-unknown" : null
+  }
+  if (error._tag !== "AwsApiError") return null
+  switch (error.operation) {
+    case "mergePullRequestByFastForward":
+    case "mergePullRequestBySquash":
+    case "mergePullRequestByThreeWay":
+      return "merge-outcome-unknown"
+    default:
+      return null
+  }
+}
+
 /** Reloads stale revisions narrowly, but refreshes the PR list when selection identity changed. */
 export const mergeFailureWorkspaceReloadPolicy = (
   diagnostic: ActionDiagnostic
 ): "refresh-list" | "reload" | "retain" => {
-  if (diagnostic.workspaceRefreshReason === "repository-changed") return "refresh-list"
+  if (
+    diagnostic.workspaceRefreshReason === "repository-changed" ||
+    diagnostic.workspaceRefreshReason === "merge-outcome-unknown"
+  ) return "refresh-list"
   return diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
 }
 
