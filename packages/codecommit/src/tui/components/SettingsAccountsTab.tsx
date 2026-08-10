@@ -67,46 +67,46 @@ export function SettingsAccountsTab({ items, selectedIndex }: SettingsAccountsTa
         style={{
           height: 1,
           width: "100%",
-          backgroundColor: theme.backgroundElement,
+          backgroundColor: theme.backgroundPanel,
           flexDirection: "row",
           paddingLeft: 1
         }}
       >
         {isFiltering ? (
           <>
-            <text fg={theme.background} bg={theme.primary}>
+            <text fg={theme.textAccent} bg={theme.accentTint}>
               {" / "}
             </text>
-            <text fg={theme.textMuted}>{" Filter: "}</text>
+            <text fg={theme.textMuted}>{" Filter accounts  "}</text>
             <text fg={theme.text}>{settingsFilter}</text>
-            <text fg={theme.primary}>{"│"}</text>
+            <text fg={theme.textAccent}>{"│"}</text>
           </>
         ) : (
           <>
             <text fg={theme.textMuted}>{`[←→] `}</text>
             {!settingsFilter.startsWith("on:") && !settingsFilter.startsWith("off:") ? (
-              <text fg={theme.selectedText} bg={theme.primary}>
+              <text fg={theme.textAccent} bg={theme.accentTint}>
                 {" all "}
               </text>
             ) : (
               <text fg={theme.textMuted}>{" all "}</text>
             )}
             {settingsFilter.startsWith("on:") ? (
-              <text fg={theme.selectedText} bg={theme.primary}>
+              <text fg={theme.textAccent} bg={theme.accentTint}>
                 {" on "}
               </text>
             ) : (
               <text fg={theme.textMuted}>{" on "}</text>
             )}
             {settingsFilter.startsWith("off:") ? (
-              <text fg={theme.selectedText} bg={theme.primary}>
+              <text fg={theme.textAccent} bg={theme.accentTint}>
                 {" off "}
               </text>
             ) : (
               <text fg={theme.textMuted}>{" off "}</text>
             )}
             <text fg={theme.textMuted}>{`  [/] Filter  [a] Enable  [d] Disable  `}</text>
-            <text fg={theme.primary}>{`${enabledCount}/${totalCount}`}</text>
+            <text fg={theme.textAccent}>{`${enabledCount}/${totalCount}`}</text>
           </>
         )}
       </box>

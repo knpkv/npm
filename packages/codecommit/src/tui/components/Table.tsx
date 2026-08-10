@@ -40,13 +40,18 @@ export function Table<T>({
   }, [selectedIndex])
 
   return (
-    <box flexDirection="column" style={{ flexGrow: 1 }} border={["left"]} borderColor={theme.primary}>
+    <box
+      flexDirection="column"
+      style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1 }}
+      border={["left"]}
+      borderColor={theme.border}
+    >
       {/* Header */}
       {!hideHeader && (
         <box
           flexDirection="row"
           border={["bottom"]}
-          borderColor={theme.textMuted}
+          borderColor={theme.border}
           style={{ width: "100%", paddingBottom: 0 }}
         >
           {columns.map((col, i) => (
@@ -82,7 +87,7 @@ export function Table<T>({
                 style={{
                   width: "100%",
                   paddingTop: 0,
-                  paddingBottom: 1,
+                  paddingBottom: 0,
                   ...(selected ? { backgroundColor: theme.selectedBackground } : {})
                 }}
               >

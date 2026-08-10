@@ -1,16 +1,15 @@
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 export const VIEW_TITLES: Record<string, string> = {
-  prs: "CodeCommit PRs",
+  prs: "Pull requests",
   settings: "Settings",
   notifications: "Notifications",
-  details: "PR Details"
+  details: "Pull request"
 }
 
 export const HINTS: Record<string, string> = {
-  prs: "Enter: Details | /: Filter | 1-9: Quick Filter | r: Refresh | n: Notif | [:] Commands",
-  settings: "Tab: Switch Section | 1-4: Jump | Esc: Back | [:] Commands",
-  notifications: "Enter: Action | r: Refresh | Esc: Back | [:] Commands",
-  details:
-    "j/k: Files | ↑/↓: Scroll panes | 1/2: Changes/Comments | r/s/t/e: Relay | w: Worktree | Enter: Run | x: Cancel | o: Open | Esc: Back"
+  prs: "enter details   / filter   1–9 filters   r refresh   n notifications   : commands",
+  settings: "tab section   1–4 jump   esc back   : commands",
+  notifications: "enter action   r refresh   esc back   : commands",
+  details: "j/k files   [/] findings   u unresolved   d discuss   V verify   m target   p/a/x decide   esc back"
 }

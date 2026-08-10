@@ -38,8 +38,12 @@ function resolveTuiTheme(json: TuiThemeJson, mode: "dark" | "light"): Theme {
   const background = resolveColor(t.background ?? fallbackBg)
   const backgroundPanel = resolveColor(t.backgroundPanel ?? fallbackBg)
   const backgroundElement = resolveColor(t.backgroundElement ?? t.backgroundPanel ?? fallbackBg)
+  const backgroundRaised = resolveColor(t.backgroundRaised ?? t.backgroundElement ?? t.backgroundPanel ?? fallbackBg)
   const text = resolveColor(t.text ?? fallbackText)
   const textMuted = resolveColor(t.textMuted ?? fallbackGray)
+  const border = resolveColor(t.border ?? t.backgroundElement ?? fallbackGray)
+  const borderStrong = resolveColor(t.borderActive ?? t.border ?? fallbackGray)
+  const focus = resolveColor(t.focus ?? t.borderActive ?? t.primary ?? fallbackGray)
   const errColor = resolveColor(t.error ?? t.diffRemovedBg ?? "#E53E3E")
   const warnColor = resolveColor(t.warning ?? t.diffChangedBg ?? "#DD6B20")
   const successColor = resolveColor(t.success ?? t.diffAddedBg ?? "#38A169")
@@ -51,10 +55,19 @@ function resolveTuiTheme(json: TuiThemeJson, mode: "dark" | "light"): Theme {
     background: rgbaToHex(background),
     backgroundPanel: rgbaToHex(backgroundPanel),
     backgroundElement: rgbaToHex(backgroundElement),
+    backgroundRaised: rgbaToHex(backgroundRaised),
     backgroundHeader: rgbaToHex(bgHeader),
     backgroundHeaderLoading: rgbaToHex(primary),
     backgroundHeaderError: rgbaToHex(errColor),
     backgroundHeaderWarning: rgbaToHex(warnColor),
+
+    border: rgbaToHex(border),
+    borderStrong: rgbaToHex(borderStrong),
+    focus: rgbaToHex(focus),
+    accentTint: rgbaToHex(resolveColor(t.accentTint ?? t.backgroundElement ?? fallbackBg)),
+    errorTint: rgbaToHex(resolveColor(t.errorTint ?? t.diffRemovedBg ?? t.backgroundElement ?? fallbackBg)),
+    warningTint: rgbaToHex(resolveColor(t.warningTint ?? t.diffChangedBg ?? t.backgroundElement ?? fallbackBg)),
+    successTint: rgbaToHex(resolveColor(t.successTint ?? t.diffAddedBg ?? t.backgroundElement ?? fallbackBg)),
 
     text: rgbaToHex(text),
     textMuted: rgbaToHex(textMuted),

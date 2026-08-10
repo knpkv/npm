@@ -301,6 +301,10 @@ export interface CommentThread {
   readonly replies: ReadonlyArray<CommentThread>
 }
 
+/** Provider-relative side of a pull-request file position. */
+export const RelativeFileVersion = Schema.Literals(["BEFORE", "AFTER"])
+export type RelativeFileVersion = typeof RelativeFileVersion.Type
+
 /**
  * Comments grouped by file location in a pull request.
  *
@@ -310,6 +314,7 @@ export interface PRCommentLocation {
   readonly filePath?: string
   readonly beforeCommitId?: string
   readonly afterCommitId?: string
+  readonly relativeFileVersion?: RelativeFileVersion
   readonly comments: ReadonlyArray<CommentThread>
 }
 
@@ -333,9 +338,9 @@ export interface CommentThreadJsonEncoded {
   readonly replies: ReadonlyArray<CommentThreadJsonEncoded>
 }
 
-const CommentThreadJson: Schema.Schema<CommentThreadJsonEncoded> = Schema.Struct({
+const CommentThreadJson: Schema.Codec<CommentThreadJsonEncoded> = Schema.Struct({
   root: PRCommentJson,
-  replies: Schema.Array(Schema.suspend((): Schema.Schema<CommentThreadJsonEncoded> => CommentThreadJson))
+  replies: Schema.Array(Schema.suspend((): Schema.Codec<CommentThreadJsonEncoded> => CommentThreadJson))
 })
 
 /**
@@ -348,6 +353,7 @@ export const PRCommentLocationJson = Schema.Struct({
   filePath: Schema.optional(Schema.String),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
+  relativeFileVersion: Schema.optional(RelativeFileVersion),
   comments: Schema.Array(CommentThreadJson)
 })
 
@@ -379,6 +385,7 @@ export const encodeCommentLocations = (
     ...(loc.filePath != null ? { filePath: loc.filePath } : {}),
     ...(loc.beforeCommitId != null ? { beforeCommitId: loc.beforeCommitId } : {}),
     ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
+    ...(loc.relativeFileVersion != null ? { relativeFileVersion: loc.relativeFileVersion } : {}),
     comments: loc.comments.map(serializeThread)
   }))
 

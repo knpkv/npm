@@ -3,7 +3,7 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { Deferred, Effect } from "effect"
 import { App } from "./tui/App.js"
-import { makeTuiApplicationRegistry } from "./tui/atoms/applicationScope.js"
+import { makeTuiApplicationRegistry, TuiTerminalSession } from "./tui/atoms/applicationScope.js"
 import { cleanup } from "./tui/atoms/app.js"
 
 const escape = "\u001b"
@@ -33,7 +33,15 @@ const program = Effect.gen(function* makeProgram() {
     (renderer) => Effect.sync(() => renderer.destroy())
   )
   const registry = yield* Effect.acquireRelease(
-    Effect.sync(() => makeTuiApplicationRegistry(ownerScope)),
+    Effect.sync(() =>
+      makeTuiApplicationRegistry(
+        ownerScope,
+        TuiTerminalSession.of({
+          resume: Effect.sync(() => renderer.resume()),
+          suspend: Effect.sync(() => renderer.suspend())
+        })
+      )
+    ),
     (registry) => Effect.sync(() => registry.dispose())
   )
 

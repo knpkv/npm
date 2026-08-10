@@ -4,6 +4,7 @@ import { parseColor } from "@opentui/core"
 import { Option } from "effect"
 import { useMemo } from "react"
 import { useTheme } from "../context/theme.js"
+import { terminalSafeCompactText } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
 import { Badge } from "./Badge.js"
 
@@ -28,22 +29,22 @@ export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
         style={{
           width: "100%",
           backgroundColor: theme.backgroundPanel,
-          paddingLeft: 2,
+          paddingLeft: 1,
           paddingTop: isFirst ? 0 : 1,
           flexDirection: "column"
         }}
       >
         <box
           border={["bottom"]}
-          borderColor={theme.textMuted}
+          borderColor={theme.border}
           style={{
             flexDirection: "row",
-            paddingBottom: 1,
+            paddingBottom: 0,
             width: "100%"
           }}
         >
-          <text fg={theme.textWarning}>{item.label.toUpperCase()}</text>
-          {item.count > 0 && <text fg={theme.textMuted}>{`(${item.count})`}</text>}
+          <text fg={theme.textMuted}>{item.label.toUpperCase()}</text>
+          {item.count > 0 && <text fg={theme.textMuted}>{`  ${item.count}`}</text>}
         </box>
       </box>
     )
@@ -53,10 +54,10 @@ export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
     return (
       <box
         border={["left"]}
-        borderColor={parseColor(theme.primary)}
+        borderColor={parseColor(theme.border)}
         style={{
           width: "100%",
-          paddingLeft: 4,
+          paddingLeft: 2,
           paddingBottom: 1,
           flexDirection: "row",
           flexWrap: "no-wrap"
@@ -99,54 +100,58 @@ function PRItemRow({
           : theme.error
 
   const badge = !pr.isMergeable ? (
-    <Badge variant="error" minWidth={14}>
+    <Badge variant="error" minWidth={12}>
       CONFLICT
     </Badge>
   ) : pr.isApproved ? (
-    <Badge variant="success" minWidth={14}>
+    <Badge variant="success" minWidth={12}>
       APPROVED
     </Badge>
   ) : (
-    <Badge variant="neutral" minWidth={14}>
-      NOT APPROVED
+    <Badge variant="neutral" minWidth={12}>
+      PENDING
     </Badge>
   )
 
-  const description = pr.description ? pr.description.split("\n").slice(0, 5).join("\n") : ""
+  const description =
+    pr.description
+      ?.split("\n")
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? ""
+  const metadata = `${pr.sourceBranch} → ${pr.destinationBranch}  ·  ${pr.author}  ·  ${DateUtils.formatDate(pr.creationDate)}${
+    pr.commentCount !== undefined && pr.commentCount > 0
+      ? `  ·  ${pr.commentCount} comment${pr.commentCount === 1 ? "" : "s"}`
+      : ""
+  }`
 
   return (
     <box
       border={["left"]}
-      borderColor={parseColor(theme.primary)}
+      borderColor={parseColor(bg ? theme.primary : theme.border)}
       style={{
         width: "100%",
         ...(bg ? { backgroundColor: bg } : {}),
-        paddingLeft: 2,
-        paddingBottom: 1,
-        marginBottom: 1,
+        paddingLeft: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
         flexDirection: "column",
         flexWrap: "no-wrap"
       }}
     >
-      <box style={{ flexDirection: "row", width: "100%", paddingBottom: 0 }}>
-        {badge}
-        <text fg={scoreColor}>{` ${score ? score.total.toFixed(1) : "---"} `}</text>
+      <box style={{ flexDirection: "row", width: "100%" }}>
+        <text fg={theme.textAccent}>{`CODECOMMIT  PR #${pr.id}  `}</text>
+        <text fg={theme.textMuted}>{terminalSafeCompactText(pr.repositoryName, 24)}</text>
         <box style={{ flexGrow: 1 }} />
-        {pr.commentCount !== undefined && pr.commentCount > 0 && (
-          <text fg={theme.textMuted}>{`${pr.commentCount}c `}</text>
-        )}
-        <text fg={theme.textMuted}>{`${pr.author} • ${DateUtils.formatDate(pr.creationDate)}`}</text>
+        {badge}
+        <text fg={scoreColor}>{`  health ${score ? score.total.toFixed(1) : "—"}`}</text>
       </box>
       <box style={{ flexDirection: "row", width: "100%" }}>
-        <text fg={fg}>{`${pr.repositoryName} `}</text>
-        <text fg={theme.textMuted}>›</text>
-        <text fg={fg}>{` ${pr.title}`}</text>
+        <text fg={fg}>{terminalSafeCompactText(pr.title, 72)}</text>
       </box>
-      {description && (
-        <text fg={theme.textMuted} style={{ paddingLeft: 0, paddingTop: 0 }}>
-          {description}
-        </text>
-      )}
+      <box style={{ flexDirection: "row", width: "100%" }}>
+        <text fg={theme.textMuted}>{terminalSafeCompactText(metadata, 72)}</text>
+      </box>
+      {description && <text fg={theme.textMuted}>{terminalSafeCompactText(description, 72)}</text>}
     </box>
   )
 }

@@ -7,9 +7,9 @@
  *
  * Uses `@effect/vitest` for consistency with the rest of the codebase.
  */
+import { describe, expect, it } from "@effect/vitest"
 import { Domain } from "@knpkv/codecommit-core"
 import { Schema } from "effect"
-import { describe, expect, it } from "vitest"
 import {
   applySettingsFilter,
   computeItemPositions,
@@ -17,6 +17,7 @@ import {
   findStableIndex,
   parseSettingsFilter
 } from "../src/tui/components/mainlist-utils.js"
+import { pullRequestSelectionKey } from "../src/tui/details-model.js"
 import type { ListItem } from "../src/tui/ListBuilder.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
@@ -35,18 +36,22 @@ const mkHeader = (label: string, count: number): ListItem => ({
   count
 })
 
-const mkPR = (id: string, description?: string): ListItem => ({
+const mkPR = (
+  id: string,
+  description?: string,
+  identity: { readonly profile?: string; readonly region?: string; readonly repositoryName?: string } = {}
+): ListItem => ({
   type: "pr",
   pr: decodePullRequest({
     id,
     title: `PR ${id}`,
     description,
     author: "alice",
-    repositoryName: "repo",
+    repositoryName: identity.repositoryName ?? "repo",
     creationDate: new Date(),
     lastModifiedDate: new Date(),
     link: "https://example.com",
-    account: { profile: "dev", region: "us-east-1" },
+    account: { profile: identity.profile ?? "dev", region: identity.region ?? "us-east-1" },
     status: "OPEN",
     sourceBranch: "feat",
     destinationBranch: "main",
@@ -58,6 +63,11 @@ const mkPR = (id: string, description?: string): ListItem => ({
 })
 
 const empty: ListItem = { type: "empty" }
+
+const prSelectionKey = (item: ListItem): string => {
+  if (item.type !== "pr") throw new Error("expected PR fixture")
+  return pullRequestSelectionKey(item.pr)
+}
 
 // ── Tests ────────────────────────────────────────────────────────────
 
@@ -129,22 +139,26 @@ describe("applySettingsFilter", () => {
 })
 
 describe("findStableIndex", () => {
-  const items: ReadonlyArray<ListItem> = [
-    mkHeader("group", 2),
-    mkPR("pr-1"),
-    mkPR("pr-2"),
-    mkPR("pr-3")
-  ]
+  const items: ReadonlyArray<ListItem> = [mkHeader("group", 2), mkPR("pr-1"), mkPR("pr-2"), mkPR("pr-3")]
 
-  // In prs/details view with a selected PR ID, the function should
+  // In prs/details view with a selected PR key, the function should
   // find the matching PR regardless of the numeric index.
-  it("finds PR by id in prs view", () => {
-    expect(findStableIndex(items, "prs", "pr-2", 0)).toBe(2)
+  it("finds PR by composite key in prs view", () => {
+    expect(findStableIndex(items, "prs", prSelectionKey(items[2]!), 0)).toBe(2)
   })
 
   // Same behavior in details view — preserves selection across refresh.
-  it("finds PR by id in details view", () => {
-    expect(findStableIndex(items, "details", "pr-3", 0)).toBe(3)
+  it("finds PR by composite key in details view", () => {
+    expect(findStableIndex(items, "details", prSelectionKey(items[3]!), 0)).toBe(3)
+  })
+
+  it("distinguishes duplicate provider-local PR numbers across AWS scopes", () => {
+    const duplicates: ReadonlyArray<ListItem> = [
+      mkPR("1", undefined, { profile: "dev", repositoryName: "payments" }),
+      mkPR("1", undefined, { profile: "prod", repositoryName: "payments" }),
+      mkPR("1", undefined, { profile: "prod", repositoryName: "identity" })
+    ]
+    expect(findStableIndex(duplicates, "prs", prSelectionKey(duplicates[2]!), 0)).toBe(2)
   })
 
   // Falls back to numeric index when PR ID is not found.
@@ -222,40 +236,30 @@ describe("computeItemPositions", () => {
   // First header has height 2 (no margin above), subsequent headers
   // have height 3 (1 extra line for visual separator).
   it("first header is height 2, subsequent headers height 3", () => {
-    const items: ReadonlyArray<ListItem> = [
-      mkHeader("A", 1),
-      mkPR("1"),
-      mkHeader("B", 1)
-    ]
+    const items: ReadonlyArray<ListItem> = [mkHeader("A", 1), mkPR("1"), mkHeader("B", 1)]
     const pos = computeItemPositions(items)
     expect(pos[0]).toEqual({ start: 0, end: 2 }) // first header: h=2
-    expect(pos[1]).toEqual({ start: 2, end: 6 }) // PR: h=4
-    expect(pos[2]).toEqual({ start: 6, end: 9 }) // second header: h=3
+    expect(pos[1]).toEqual({ start: 2, end: 5 }) // compact PR: h=3
+    expect(pos[2]).toEqual({ start: 5, end: 8 }) // second header: h=3
   })
 
-  // PR without description: 1 (content) + 1 (spacing) + 0 (desc) + 1 + 1 = 4
-  it("PR without description has height 4", () => {
+  it("PR without description has the rendered compact height", () => {
     const items: ReadonlyArray<ListItem> = [mkPR("1")]
+    const pos = computeItemPositions(items)
+    expect(pos[0]).toEqual({ start: 0, end: 3 })
+  })
+
+  it("PR with a multiline description renders only its first non-empty line", () => {
+    const items: ReadonlyArray<ListItem> = [mkPR("1", "line1\nline2\nline3")]
     const pos = computeItemPositions(items)
     expect(pos[0]).toEqual({ start: 0, end: 4 })
   })
 
-  // PR with multi-line description adds line count (capped at 5).
-  it("PR with description adds lines (capped at 5)", () => {
-    const items: ReadonlyArray<ListItem> = [mkPR("1", "line1\nline2\nline3")]
-    const pos = computeItemPositions(items)
-    // height = 1 + 1 + 3 + 1 + 1 = 7
-    expect(pos[0]).toEqual({ start: 0, end: 7 })
-  })
-
-  // Description with more than 5 lines is capped to prevent
-  // overflow in the scroll calculations.
-  it("caps description lines at 5", () => {
+  it("does not let long descriptions drift compact-row scroll offsets", () => {
     const desc = Array.from({ length: 10 }, (_, i) => `line${i}`).join("\n")
     const items: ReadonlyArray<ListItem> = [mkPR("1", desc)]
     const pos = computeItemPositions(items)
-    // height = 1 + 1 + 5 + 1 + 1 = 9
-    expect(pos[0]).toEqual({ start: 0, end: 9 })
+    expect(pos[0]).toEqual({ start: 0, end: 4 })
   })
 
   // "empty" and other item types default to height 2.
@@ -267,15 +271,11 @@ describe("computeItemPositions", () => {
 
   // Positions are cumulative — each item starts where the previous ended.
   it("positions are cumulative", () => {
-    const items: ReadonlyArray<ListItem> = [
-      mkHeader("A", 1),
-      mkPR("1"),
-      empty
-    ]
+    const items: ReadonlyArray<ListItem> = [mkHeader("A", 1), mkPR("1"), empty]
     const pos = computeItemPositions(items)
     expect(pos[0]).toEqual({ start: 0, end: 2 })
-    expect(pos[1]).toEqual({ start: 2, end: 6 })
-    expect(pos[2]).toEqual({ start: 6, end: 8 })
+    expect(pos[1]).toEqual({ start: 2, end: 5 })
+    expect(pos[2]).toEqual({ start: 5, end: 7 })
   })
 
   // Empty list produces no positions.

@@ -1,0 +1,64 @@
+import { useKeyboard } from "@opentui/react"
+import { useRef, useState } from "react"
+import {
+  relayFindingPublicationLabel,
+  relayFindingPublicationOptions,
+  type RelayReviewFinding,
+  type RelayFindingPublicationTarget
+} from "../../RelayReview.js"
+import { useDialog } from "../context/dialog.js"
+import { useTheme } from "../context/theme.js"
+import { terminalSafeCompactText } from "../details-model.js"
+import { transitionBoundedSelection } from "../text-filter-input.js"
+import { Dialog } from "./Dialog.js"
+
+export function DialogFindingTarget({
+  finding,
+  onApply
+}: {
+  readonly finding: RelayReviewFinding
+  readonly onApply: (target: RelayFindingPublicationTarget) => void
+}) {
+  const { theme } = useTheme()
+  const dialog = useDialog()
+  const options = relayFindingPublicationOptions(finding)
+  const initialIndex = Math.max(0, options.indexOf(finding.publicationTarget))
+  const [cursor, setCursor] = useState(initialIndex)
+  const cursorRef = useRef(initialIndex)
+
+  useKeyboard((key) => {
+    if (key.name === "escape") dialog.hide()
+    else {
+      const transition = transitionBoundedSelection(cursorRef.current, key, options.length)
+      cursorRef.current = transition.cursor
+      if (key.name !== "return") {
+        setCursor(transition.cursor)
+        return
+      }
+      if (transition.submittedIndex === null) return
+      const target = options[transition.submittedIndex]
+      if (target === undefined) return
+      onApply(target)
+      dialog.hide()
+    }
+  })
+
+  return (
+    <Dialog title={`PUBLISH ${terminalSafeCompactText(finding.id, 32)}`}>
+      <text fg={theme.textMuted}>Choose where this finding belongs. No AWS write happens here.</text>
+      <box flexDirection="column" style={{ paddingBottom: 1, paddingTop: 1 }}>
+        {options.map((target, index) => (
+          <text
+            {...(index === cursor ? { bg: theme.selectedBackground } : {})}
+            fg={index === cursor ? theme.text : theme.textMuted}
+            key={target}
+          >{`${index === cursor ? "›" : " "} ${target === finding.publicationTarget ? "◉" : "○"} ${relayFindingPublicationLabel(target)}`}</text>
+        ))}
+      </box>
+      <text fg={theme.textMuted}>
+        File and line targets appear only when the finding has that exact evidence anchor.
+      </text>
+      <text fg={theme.textAccent}>↑/↓ move · Enter apply · Esc cancel</text>
+    </Dialog>
+  )
+}

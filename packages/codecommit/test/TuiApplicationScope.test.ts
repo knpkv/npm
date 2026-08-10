@@ -4,7 +4,8 @@ import * as Atom from "effect/unstable/reactivity/Atom"
 import {
   makeTuiApplicationRegistry,
   TuiApplicationScope,
-  tuiApplicationScopeLayer
+  tuiApplicationScopeLayer,
+  TuiTerminalSession
 } from "../src/tui/atoms/applicationScope.js"
 
 describe("TUI application scope", () => {
@@ -32,7 +33,12 @@ describe("TUI application scope", () => {
         Effect.gen(function*() {
           const applicationScope = yield* Effect.scope
           const registry = yield* Effect.acquireRelease(
-            Effect.sync(() => makeTuiApplicationRegistry(applicationScope)),
+            Effect.sync(() =>
+              makeTuiApplicationRegistry(
+                applicationScope,
+                TuiTerminalSession.of({ resume: Effect.void, suspend: Effect.void })
+              )
+            ),
             (registry) => Effect.sync(() => registry.dispose())
           )
 

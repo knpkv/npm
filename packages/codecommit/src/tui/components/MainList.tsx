@@ -18,6 +18,7 @@ import {
 } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { useListNavigation } from "../hooks/useListNavigation.js"
+import { pullRequestSelectionKey } from "../details-model.js"
 import { buildListItems, type ListItem, type TuiView } from "../ListBuilder.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { applySettingsFilter, computeItemPositions, findGroupHeader, findStableIndex } from "./mainlist-utils.js"
@@ -87,7 +88,10 @@ const useSyncCurrentPR = (items: ReadonlyArray<ListItem>, stableIndex: number, v
   useEffect(() => {
     if (view === "details") return
     setCurrentPR(currentPR)
-    if (currentPR && currentPR.id !== selectedPrId) setSelectedPrId(currentPR.id)
+    if (currentPR) {
+      const selectionKey = pullRequestSelectionKey(currentPR)
+      if (selectionKey !== selectedPrId) setSelectedPrId(selectionKey)
+    }
   }, [currentPR, setCurrentPR, setSelectedPrId, selectedPrId, view])
 }
 
@@ -137,6 +141,8 @@ export function MainList({ onSelectPR }: MainListProps) {
   const items = useFilteredItems(state, view)
   const stableIndex = useStableIndex(items, view)
   const currentGroupHeader = useMemo(() => findGroupHeader(items, stableIndex), [items, stableIndex])
+  const currentGroupIndex = currentGroupHeader === null ? -1 : items.indexOf(currentGroupHeader)
+  const showStickyGroupHeader = currentGroupHeader !== null && stableIndex > currentGroupIndex + 1
 
   useSyncCurrentPR(items, stableIndex, view)
   useScrollToSelected(scrollRef, items, stableIndex)
@@ -164,7 +170,7 @@ export function MainList({ onSelectPR }: MainListProps) {
           width: "100%",
           padding: 1,
           paddingLeft: 2,
-          backgroundColor: theme.backgroundPanel,
+          backgroundColor: theme.background,
           justifyContent: "center",
           alignItems: "center"
         }}
@@ -178,15 +184,15 @@ export function MainList({ onSelectPR }: MainListProps) {
   if (view === "notifications") return <NotificationsTable items={items} selectedIndex={stableIndex} />
 
   return (
-    <box style={{ flexGrow: 1, width: "100%", paddingLeft: 1 }}>
-      <scrollbox ref={scrollRef} style={{ flexGrow: 1, width: "100%", backgroundColor: theme.backgroundPanel }}>
+    <box style={{ backgroundColor: theme.background, flexGrow: 1, width: "100%", paddingLeft: 1 }}>
+      <scrollbox ref={scrollRef} style={{ flexGrow: 1, width: "100%", backgroundColor: theme.background }}>
         <box style={{ flexDirection: "column", width: "100%" }}>
           {items.map((item, i) => (
             <ListItemRow key={i} item={item} selected={i === stableIndex} isFirst={i === 0} />
           ))}
         </box>
       </scrollbox>
-      {currentGroupHeader && (
+      {showStickyGroupHeader && (
         <box style={{ position: "absolute", top: 0, width: "100%" }}>
           <ListItemRow item={currentGroupHeader} selected={items[stableIndex] === currentGroupHeader} isFirst={true} />
         </box>

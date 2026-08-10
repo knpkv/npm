@@ -6,7 +6,7 @@ import type { GetCommentsForPullRequestError } from "@distilled.cloud/aws/codeco
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
 import type { HttpClient } from "effect/unstable/http"
-import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"
+import { type CommentThread, PRComment, type PRCommentLocation, RelativeFileVersion } from "../Domain.js"
 import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,8 @@ const buildThreads = (comments: ReadonlyArray<PRComment>): Array<CommentThread> 
 const RawCommentLocation = Schema.Struct({
   location: Schema.optional(Schema.Struct({
     filePath: Schema.optional(Schema.String),
-    filePosition: Schema.optional(Schema.Number)
+    filePosition: Schema.optional(Schema.Number),
+    relativeFileVersion: Schema.optional(RelativeFileVersion)
   })),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
@@ -85,6 +86,7 @@ const PRCommentLocationSchema = Schema.Struct({
   filePath: Schema.optional(Schema.String),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
+  relativeFileVersion: Schema.optional(RelativeFileVersion),
   comments: Schema.Array(Schema.Any)
 })
 
@@ -94,6 +96,7 @@ const RawToCommentLocation = RawCommentLocation.pipe(
       filePath: raw.location?.filePath,
       beforeCommitId: raw.beforeCommitId,
       afterCommitId: raw.afterCommitId,
+      relativeFileVersion: raw.location?.relativeFileVersion,
       comments: buildThreads((raw.comments ?? []).map((c) =>
         decodeComment({
           ...c,
@@ -103,7 +106,9 @@ const RawToCommentLocation = RawCommentLocation.pipe(
       ))
     })),
     encode: SchemaGetter.transform((loc) => ({
-      location: loc.filePath ? { filePath: loc.filePath } : undefined,
+      location: loc.filePath
+        ? { filePath: loc.filePath, relativeFileVersion: loc.relativeFileVersion }
+        : undefined,
       beforeCommitId: loc.beforeCommitId,
       afterCommitId: loc.afterCommitId,
       comments: []
@@ -112,11 +117,13 @@ const RawToCommentLocation = RawCommentLocation.pipe(
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodeCommentLocation = (raw: unknown) =>
+/** @internal Decodes one provider comment group without dropping its before/after side. */
+export const decodeCommentLocation = (raw: unknown) =>
   Schema.decodeUnknownEffect(RawToCommentLocation)(raw).pipe(Effect.map((result): PRCommentLocation => ({
     ...(result.filePath === undefined ? {} : { filePath: result.filePath }),
     ...(result.beforeCommitId === undefined ? {} : { beforeCommitId: result.beforeCommitId }),
     ...(result.afterCommitId === undefined ? {} : { afterCommitId: result.afterCommitId }),
+    ...(result.relativeFileVersion === undefined ? {} : { relativeFileVersion: result.relativeFileVersion }),
     comments: result.comments
   })))
 

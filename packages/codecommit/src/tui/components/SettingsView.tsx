@@ -24,13 +24,13 @@ export function SettingsView({ items, selectedIndex }: SettingsViewProps) {
   const activeTab = useAtomValue(settingsTabAtom)
 
   return (
-    <box style={{ flexDirection: "row", flexGrow: 1, width: "100%" }}>
+    <box style={{ backgroundColor: theme.background, flexDirection: "row", flexGrow: 1, width: "100%" }}>
       {/* Left: vertical tab list */}
       <box
         style={{
-          width: 20,
+          width: 19,
           flexDirection: "column",
-          backgroundColor: theme.backgroundPanel,
+          backgroundColor: theme.background,
           paddingTop: 1
         }}
       >
@@ -43,16 +43,22 @@ export function SettingsView({ items, selectedIndex }: SettingsViewProps) {
                 height: 1,
                 paddingLeft: 1,
                 paddingRight: 1,
-                ...(isActive && { backgroundColor: theme.primary })
+                ...(isActive && { backgroundColor: theme.backgroundRaised })
               }}
             >
-              <text fg={isActive ? theme.selectedText : theme.textMuted}>{`${i + 1}. ${TabLabels[id] ?? id}`}</text>
+              <text fg={isActive ? theme.text : theme.textMuted}>
+                {`${isActive ? "│" : " "} ${i + 1}  ${TabLabels[id] ?? id}`}
+              </text>
             </box>
           )
         })}
       </box>
       {/* Right: active tab content */}
-      <box style={{ flexGrow: 1, flexDirection: "column", paddingLeft: 1 }}>
+      <box
+        border={["left"]}
+        borderColor={theme.border}
+        style={{ backgroundColor: theme.backgroundPanel, flexGrow: 1, flexDirection: "column", paddingLeft: 1 }}
+      >
         {activeTab === "accounts" && <SettingsAccountsTab items={items} selectedIndex={selectedIndex} />}
         {activeTab === "theme" && <SettingsThemeTab />}
         {activeTab === "config" && <SettingsConfigTab />}

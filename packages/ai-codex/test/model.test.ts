@@ -228,7 +228,17 @@ describe("model", () => {
           expect(command.args[index - 1]).toBe("--disable")
         }
         expect(PROMPT_ONLY_DISABLED_FEATURES).toEqual(
-          expect.arrayContaining(["hooks", "plugins", "skill_mcp_dependency_install", "skill_search"])
+          expect.arrayContaining([
+            "hooks",
+            "plugins",
+            "recommended_plugins",
+            "skill_mcp_dependency_install",
+            "skill_search",
+            "view_image"
+          ])
+        )
+        expect(PROMPT_ONLY_SAFE_FEATURES).toEqual(
+          expect.arrayContaining(["executed_tool_call_metadata", "image_resize_notice"])
         )
       }
     }))

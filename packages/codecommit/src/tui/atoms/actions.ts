@@ -1,7 +1,11 @@
 import { AwsClient, CacheService, ChildEnv, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Predicate, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { assumeConsoleArgs } from "../browser-command.js"
+import { fetchPrComments } from "../comment-fetch.js"
 import { runtimeAtom, TuiApplicationScope } from "./runtime.js"
+
+export { fetchPrComments } from "../comment-fetch.js"
 
 // ---------------------------------------------------------------------------
 // Shared Helpers
@@ -127,7 +131,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
     })
 
     yield* Effect.forkIn(
-      exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
+      exitCode(ChildProcess.make("assume", assumeConsoleArgs(pr.link, profile), {
         stdout: "inherit",
         stderr: "inherit",
         // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
@@ -236,33 +240,7 @@ export const createPrAtom = runtimeAtom.fn((input: CreatePRInput) =>
  * Fetch comments for a specific PR and return them
  * @category atoms
  */
-const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
-
-export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
-  Effect.gen(function*() {
-    const awsClient = yield* AwsClient.AwsClient
-    const comments = yield* awsClient.getCommentsForPullRequest({
-      account: { profile: pr.account.profile, region: pr.account.region },
-      pullRequestId: pr.id,
-      repositoryName: pr.repositoryName
-    }).pipe(
-      Effect.tapError((e) => notifyError("Fetch Comments Failed", e)),
-      Effect.catchTag("AwsApiError", () => Effect.succeed(emptyCommentLocations())),
-      Effect.catchTag("AwsCredentialError", () => Effect.succeed(emptyCommentLocations())),
-      Effect.catchTag("AwsThrottleError", () => Effect.succeed(emptyCommentLocations())),
-      Effect.withSpan("fetchPrComments", { attributes: { prId: pr.id } })
-    )
-    return {
-      comments,
-      identity: {
-        profile: pr.account.profile,
-        pullRequestId: pr.id,
-        region: pr.account.region,
-        repositoryName: pr.repositoryName
-      }
-    }
-  })
-)
+export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) => fetchPrComments(pr))
 
 /**
  * List branches for a repository

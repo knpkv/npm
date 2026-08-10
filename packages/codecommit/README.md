@@ -10,26 +10,34 @@ CLI and TUI for AWS CodeCommit pull requests.
 - Health score ranking (staleness, review urgency)
 - SSO login/logout management
 - Full-text search across cached PRs
-- Exact-revision PR workspace with changed-file navigation and native diff previews
-- Prompt-only local Codex Relay passes for review, security, tests, and risk explanation
-- Deterministic detached worktree checkout for the selected PR head
+- Exact-revision PR workspace with hierarchical navigation and locally cached native diff previews
+- Prompt-only local Codex Relay passes with description suggestions, file-anchored PR comments, or exact line comments that a human can discuss, publish, acknowledge, or reject
+- Automatic deterministic detached checkout of the selected PR head
 
 ## Prerequisites
 
 - AWS SSO configured (`~/.aws/config`)
-- Git with the AWS CodeCommit credential helper configured for HTTPS checkout
+- Git and the AWS CLI. Exact-head checkout configures the AWS CodeCommit HTTPS
+  credential helper per command for the selected profile; no global Git helper
+  setup is required.
+- [Granted](https://granted.dev) with the `assume` executable configured for
+  opening a selected pull request in the matching AWS account console
 - A locally authenticated `codex` executable for optional Relay actions
+- `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
+  for the external editor shortcut
 - On macOS or Linux, `/bin/sh`, `/bin/cat`, and either `lockf` or `flock` for
   owner-death-safe repository/worktree locking. Checkout and Relay actions fail
   closed when neither locking command is installed; those actions are not
   currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
-  - `codecommit:GetDifferences`, `codecommit:GetBlob` — exact-revision changed files and diff previews
-  - `codecommit:GitPull` — detached worktree checkout and Relay review
+  - `codecommit:GetDifferences` — exact-revision changed files
+  - `codecommit:GetBlob` — mandatory exact-line publication validation and diff-preview fallback when automatic local checkout is unavailable
+  - `codecommit:GitPull` — automatic exact-head local diffs, detached worktrees, and Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
-  - `codecommit:GetCommentsForPullRequest` — export
+  - `codecommit:GetCommentsForPullRequest` — export and idempotent review-comment reconciliation
+  - `codecommit:PostCommentForPullRequest` — explicitly post a reviewed Relay finding
   - `codecommit:ListBranches` — branch listing
 
 ## Quick Start
@@ -54,10 +62,12 @@ codecommit
 codecommit tui
 ```
 
-Open a pull request to enter the exact-revision review workspace. The left pane
-navigates changed files, the center renders immutable blob diffs, and the right
-pane keeps local Relay actions separate from CodeCommit approval and
-mergeability. After explicit preflight, Relay has the host produce a bounded
+Open a pull request to enter the exact-revision review workspace. The TUI first
+prepares a detached checkout of the advertised immutable head. The left pane
+navigates changed files as a shared-directory tree, the center renders diffs
+from raw objects in that local Git database, and the right pane keeps local
+Relay actions separate from CodeCommit approval and mergeability. After explicit
+action confirmation, Relay has the host produce a bounded
 exact-commit patch with Git hooks disabled, then runs the local Codex CLI in
 prompt-only mode. Prompt-only mode disables user and repository instructions,
 host tools, and inherited shell variables, so repository-authored text cannot
@@ -72,7 +82,13 @@ request's advertised source and destination branch refs, then verified by exact
 commit ID before checkout; raw commit IDs are never used as fetch refspecs.
 Invocation from a Git hook therefore cannot redirect commands
 into the caller's repository, and authentication failures return to the TUI
-instead of waiting on an invisible prompt. Worktrees are detached at the displayed head under
+instead of waiting on an invisible prompt. After a successful checkout, the TUI
+preloads the first 25 bounded file previews from immutable local objects before
+exposing the workspace. Larger reviews load remaining previews on demand from
+that same exact local checkout, never from mutable provider state. Warm previews
+remain keyed in memory by exact base, head, path, and blob pair. If
+automatic checkout is unavailable, the pane
+labels the fallback and uses bounded `GetBlob` reads instead. Worktrees are detached at the displayed head under
 `~/.codecommit/worktrees`, with private bare repository caches retained under
 `~/.codecommit/repositories`. Both storage roots are enforced as user-only
 directories (`0700`) before checkout. Cache and worktree coordinates include the
@@ -83,8 +99,104 @@ repository account identity is unavailable. Both directories can grow over time.
 Close the TUI, then remove a no-longer-needed repository's matching directories
 from both roots; removing all of `~/.codecommit/worktrees` and
 `~/.codecommit/repositories` clears every retained checkout and cache, which the
-next checkout recreates. The comments tab shows only general comments without a
-revision locator and threads attached to the displayed base/head pair.
+next checkout recreates. The comments tab shows every posted thread, placing
+threads for the displayed base/head pair first and retaining comments from older
+revisions. Each thread group starts with an explicit `GENERAL`, `FILE`, or
+`LINE N` coordinate so its relationship to the pull request or changed file is
+visible before the comment body. File and line threads also state whether their
+coordinate belongs to the current revision, an older head, or an unspecified
+revision.
+
+In the Changes tab, `n` opens the selected exact-head file in Neovim using the
+same terminal. The TUI suspends while Neovim owns the terminal and restores the
+same PR workspace when Neovim exits. `v` opens the file in an existing VS Code
+window through `code --goto`. When a selected Relay finding supplies a line
+anchor for that file on the after/head side, both shortcuts open at that line.
+Before/base-side anchors open a surviving head file without applying the base
+line number. Deleted files cannot be opened from the exact-head checkout unless
+a separate verified base artifact is explicitly materialized.
+Editor targets are
+canonicalized and must remain regular files inside the verified detached
+worktree; deleted files and paths or symlinks that escape it are rejected. Text
+changes render side by side by default, with the base revision on the left and
+head revision on the right. Both panes keep aligned line numbers and synchronized
+scrolling.
+
+Relay returns decoded findings anchored to the whole PR, a changed file, or an
+exact before/after line and proposes one publication target: the PR description,
+a PR comment (including file-anchored findings), or an exact line comment. Press `g` before starting a review to choose one or
+both trusted, prompt-only review playbooks: **PR Review** for broad defect
+coverage and **PR Diff Review** for high-confidence, evidence-led diff review.
+The selection is snapshotted when the action starts. Findings use the same
+P1–P4 issue contract as those playbooks and separate Summary, Details,
+Recommendation, Verification, publication target, and Location in both the TUI
+and posted comment. `[`/`]` wraps through the finding deck, `u` jumps to the
+next undecided finding, and selecting a finding selects its file in the diff.
+Press `m` to change among the targets supported by its evidence anchor. Press
+`d` to continue a finding-specific conversation with the read-only local agent.
+Every follow-up receives the full current review and can revise, add, merge, or
+withdraw other findings; the TUI reports the reconciliation and reopens affected
+local decisions. A changed finding that was already published is marked stale
+instead of pretending the provider copy changed.
+
+When the PR author pushes a fix, press `V` on the finding to verify it. Relay
+refreshes CodeCommit's latest revision, prepares a clean exact-head checkout,
+and re-runs the relevant review reasoning against the complete new patch. The
+receipt distinguishes **resolved**, **still open**, **superseded**, and
+**inconclusive**, states whether the head changed, and reconciles the whole
+finding deck because one fix can change other review decisions. Verification is
+read-only and never publishes or updates the PR. Lowercase `v` continues to open
+the selected file in VS Code.
+
+The human must explicitly choose `p` to publish one finding to CodeCommit, `a`
+to acknowledge it locally, or `x` to reject it locally. CodeCommit does not offer
+a conditional description update, so description suggestions fail closed and
+must be copied manually; this prevents overwriting concurrent author edits.
+File-scoped findings publish as PR comments with their file anchor in the body,
+while exact changed-side line findings use provider line coordinates. Comment targets use a hexadecimal
+SHA-256 digest as their deterministic idempotency token. The canonical identity
+is the UTF-8 JSON serialization of this versioned array, preserving this exact
+order:
+
+```json
+[
+  "relay-finding-v2",
+  "111122223333",
+  "eu-west-1",
+  "npm-control-center-review",
+  "35",
+  "revision-id",
+  "<40-hex-base-commit>",
+  "<40-hex-head-commit>",
+  "P1",
+  "Finding title",
+  "Finding summary",
+  "Finding evidence and impact",
+  "Recommended remediation",
+  "Verification procedure",
+  "line-comment",
+  ["line", "src/example.ts", 42, "after"]
+]
+```
+
+The array elements are, after the version: resolved CodeCommit repository account ID, AWS region, repository
+name, pull request ID, revision ID, destination commit, source commit, finding
+priority, title, summary, details, recommendation, verification, publication
+target, and location. Session-local finding IDs are excluded because the same
+provider-visible finding may be renumbered by a later review. JSON escaping makes embedded NULs and field
+boundaries unambiguous. The location is `["general"]`,
+`["file", filePath]`, or `["line", filePath, line, side]`. Presentation order is deliberately excluded, so
+reordering the finding deck cannot create a duplicate provider comment. The
+resolved repository account ID is a server-private provider coordinate used
+only in this in-process canonical preimage; raw credentials and local profile
+aliases are excluded. Only the 64-character SHA-256 `clientRequestToken` is
+sent to and persisted by CodeCommit, and the raw account ID must not appear in
+comment content or other public output. File findings post as general
+comments with their file anchor in the body because CodeCommit exposes only
+general and line comment locations.
+Long tree rows retain their complete bounded name instead of losing characters
+as nesting grows; use `←`/`→` to pan the file rail when the terminal viewport is
+narrower than the hierarchy.
 
 ### Web Mode
 

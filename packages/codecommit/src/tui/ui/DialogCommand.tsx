@@ -13,6 +13,8 @@ import {
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
+import { textFromKeyboardKey } from "../keyboard-text.js"
+import { quickFilterCommands } from "../quick-filter-config.js"
 import { DialogCreatePR } from "./DialogCreatePR.js"
 
 interface Command {
@@ -105,14 +107,12 @@ export function DialogCommand() {
       { id: "view-prs", label: "View: Pull Requests", shortcut: "Esc", action: () => setView("prs") },
       { id: "view-notifications", label: "View: Notifications", shortcut: "n", action: () => setView("notifications") },
       // Filters
-      { id: "filter-all", label: "Filter: All PRs", shortcut: "1", action: () => setQuickFilterType("all") },
-      { id: "filter-mine", label: "Filter: My PRs", shortcut: "2", action: () => setQuickFilterType("mine") },
-      { id: "filter-account", label: "Filter: By Account", shortcut: "3", action: () => setQuickFilterType("account") },
-      { id: "filter-author", label: "Filter: By Author", shortcut: "4", action: () => setQuickFilterType("author") },
-      { id: "filter-scope", label: "Filter: By Scope", shortcut: "5", action: () => setQuickFilterType("scope") },
-      { id: "filter-date", label: "Filter: By Age", shortcut: "6", action: () => setQuickFilterType("date") },
-      { id: "filter-repo", label: "Filter: By Repo", shortcut: "7", action: () => setQuickFilterType("repo") },
-      { id: "filter-status", label: "Filter: By Status", shortcut: "8", action: () => setQuickFilterType("status") },
+      ...quickFilterCommands.map(({ label, shortcut, type }) => ({
+        id: `filter-${type}`,
+        label: `Filter: ${label}`,
+        shortcut,
+        action: () => setQuickFilterType(type)
+      })),
       // Settings actions
       {
         id: "settings-filter",
@@ -179,7 +179,7 @@ export function DialogCommand() {
       setSelectedIndex(0)
       setScrollOffset(0)
     } else {
-      const char = key.char || (key.name?.length === 1 ? key.name : null)
+      const char = textFromKeyboardKey(key)
       if (char && char.length === 1) {
         setSearch((s) => s + char)
         setSelectedIndex(0)
@@ -196,9 +196,9 @@ export function DialogCommand() {
         left: "20%",
         width: "60%",
         height: Math.min(filteredCommands.length + 3, 15),
-        backgroundColor: theme.backgroundElement,
+        backgroundColor: theme.backgroundPanel,
         borderStyle: "rounded",
-        borderColor: theme.primary,
+        borderColor: theme.borderStrong,
         flexDirection: "column"
       }}
     >
@@ -209,11 +209,12 @@ export function DialogCommand() {
           paddingLeft: 1,
           paddingRight: 1,
           flexDirection: "row",
-          backgroundColor: theme.backgroundHeader
+          backgroundColor: theme.backgroundElement
         }}
       >
-        <text fg={theme.text}>{`> ${search}`}</text>
-        <text fg={theme.primary}>{"│"}</text>
+        <text fg={theme.textAccent}>{"⌘  "}</text>
+        <text fg={theme.text}>{search || "Search commands"}</text>
+        <text fg={theme.textAccent}>{search ? "│" : ""}</text>
       </box>
       <scrollbox
         ref={scrollRef}
@@ -231,11 +232,11 @@ export function DialogCommand() {
               paddingLeft: 1,
               paddingRight: 1,
               flexDirection: "row",
-              ...(i === selectedIndex && { backgroundColor: theme.primary })
+              ...(i === selectedIndex && { backgroundColor: theme.backgroundRaised })
             }}
           >
-            <text fg={i === selectedIndex ? theme.selectedText : theme.text}>
-              {cmd.shortcut ? `${cmd.label}  [${cmd.shortcut}]` : cmd.label}
+            <text fg={i === selectedIndex ? theme.text : theme.textMuted}>
+              {`${i === selectedIndex ? "› " : "  "}${cmd.label}${cmd.shortcut ? `  ${cmd.shortcut}` : ""}`}
             </text>
           </box>
         ))}

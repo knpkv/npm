@@ -1,8 +1,8 @@
 import { type Domain, ReadClient } from "@knpkv/codecommit-core"
-import { structuredPatch } from "diff"
+import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
-import { WorktreeError } from "../WorktreeService.js"
+import { WorktreeError, type WorktreePlan, type WorktreeResult } from "../WorktreeService.js"
 
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
@@ -32,6 +32,14 @@ export interface PullRequestWorkspaceIdentity {
   readonly repositoryName: string
 }
 
+/** Collision-safe selection key for provider-local pull-request numbers. */
+export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
+  JSON.stringify([pr.account.profile, pr.account.region, pr.repositoryName, pr.id])
+
+/** Exact-head path accepted by local editors; deleted files have no head path. */
+export const changedFileHeadPath = (file: ReadClient.CodeCommitChangedFile | null): string | null =>
+  file?.after?.path ?? null
+
 export type WorkspaceActionPhase = "idle" | "preflight" | "ready" | "running-review" | "running-worktree" | "terminal"
 
 export type WorkspaceLifecycleTransition =
@@ -39,7 +47,10 @@ export type WorkspaceLifecycleTransition =
   | {
     readonly _tag: "reset"
     readonly interrupt: "checkout" | "none" | "preflight" | "review"
+    readonly preserveFindingPost: boolean
   }
+
+export type WorkspaceResetInterruption = "checkout" | "conversation" | "preflight" | "review" | "verification"
 
 export interface FileDiffIdentity extends PullRequestWorkspaceIdentity {
   readonly afterBlobId: string | null
@@ -65,6 +76,44 @@ export interface ActionDiagnostic {
 export type ActionOutcome<A> =
   | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }
   | { readonly _tag: "success"; readonly requestId: string; readonly value: A }
+
+export interface FindingPostSession {
+  readonly findingId: string
+  readonly findingIndex: number
+  readonly fingerprint: string
+  readonly requestId: string
+  readonly workspaceReloadKey: string
+}
+
+/** Starts posting synchronously so a second key in the same terminal batch observes the in-flight write. */
+export const beginFindingPostSession = (
+  current: FindingPostSession | null,
+  next: FindingPostSession
+): FindingPostSession => current ?? next
+
+type WorktreeLocalDiff =
+  | { readonly _tag: "ready"; readonly plan: WorktreePlan; readonly worktree: WorktreeResult }
+  | { readonly _tag: "unavailable"; readonly diagnostic: ActionDiagnostic }
+
+/** Promotes only the receipt for the expected exact-head checkout into local workspace readiness. */
+export const worktreeCheckoutLocalDiff = (
+  current: WorktreeLocalDiff,
+  pending: { readonly plan: WorktreePlan; readonly requestId: string },
+  outcome: ActionOutcome<WorktreeResult>
+): WorktreeLocalDiff =>
+  outcome._tag === "success" &&
+    outcome.requestId === pending.requestId &&
+    outcome.value.path === pending.plan.targetPath &&
+    outcome.value.sourceCommit === pending.plan.sourceCommit
+    ? { _tag: "ready", plan: pending.plan, worktree: outcome.value }
+    : current
+
+/** Enables editors only for a surviving head file in an exact-head local worktree. */
+export const localEditorReady = (
+  localDiff: { readonly _tag: "ready" | "unavailable" },
+  headPath: string | null,
+  actionCancelable: boolean
+): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
 
 const isWorktreeError = Schema.is(WorktreeError)
 
@@ -102,41 +151,147 @@ export const actionOutcome = <A, E, R>(requestId: string, effect: Effect.Effect<
   )
 
 export type DetailsKeyIntent =
+  | "ack-finding"
   | "back"
   | "cancel-action"
+  | "consume"
+  | "choose-review-skills"
   | "checkout-worktree"
   | "confirm-action"
+  | "discuss-finding"
   | "explain-risk"
   | "next-file"
   | "open-browser"
+  | "open-neovim"
+  | "open-vscode"
+  | "next-finding"
+  | "next-pending-finding"
   | "previous-file"
+  | "post-finding"
+  | "previous-finding"
+  | "reject-finding"
   | "review-pr"
   | "review-security"
   | "review-tests"
   | "scroll-content-down"
   | "scroll-content-up"
+  | "scroll-files-left"
+  | "scroll-files-right"
   | "show-comments"
   | "show-diff"
+  | "choose-finding-target"
+  | "verify-finding"
   | "yield"
 
 /** Decides whether the exact-head workspace consumes a key or yields it to dialogs/focused controls. */
 export const detailsKeyIntent = (input: {
   readonly actionCancelable: boolean
   readonly actionReady: boolean
+  readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
+  readonly findingPostRunning?: boolean
+  readonly findingReviewActive?: boolean
   readonly keyName: string
   readonly modified: boolean
+  readonly shifted?: boolean
   readonly tab: "comments" | "diff"
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
+  if (
+    input.findingPostRunning === true &&
+    ["escape", "r", "s", "t", "e", "w"].includes(input.keyName)
+  ) {
+    return "consume"
+  }
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    (input.keyName === "h" || input.keyName === "[")
+  ) return "previous-finding"
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    (input.keyName === "l" || input.keyName === "]")
+  ) return "next-finding"
+  if (input.tab === "diff" && input.findingReviewActive === true && input.keyName === "u") {
+    return "next-pending-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.keyName === "d" &&
+    input.conversationRunning !== true
+  ) {
+    return "discuss-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.keyName === "m" &&
+    input.conversationRunning !== true
+  ) {
+    return "choose-finding-target"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    (input.keyName === "V" || (input.keyName === "v" && input.shifted === true)) &&
+    input.conversationRunning !== true
+  ) {
+    return "verify-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "p"
+  ) {
+    return "post-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "a"
+  ) {
+    return "ack-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    input.findingReviewActive === true &&
+    input.conversationRunning !== true &&
+    input.keyName === "x"
+  ) {
+    return "reject-finding"
+  }
+  if (
+    input.tab === "diff" &&
+    !input.actionCancelable &&
+    input.conversationRunning !== true &&
+    input.keyName === "n"
+  ) {
+    return "open-neovim"
+  }
+  if (
+    input.tab === "diff" &&
+    !input.actionCancelable &&
+    input.conversationRunning !== true &&
+    input.keyName === "v" &&
+    input.shifted !== true
+  ) {
+    return "open-vscode"
+  }
+  if (input.tab === "diff" && !input.actionCancelable && input.keyName === "g") return "choose-review-skills"
   if (input.tab === "diff" && input.keyName === "k") return "previous-file"
   if (input.tab === "diff" && input.keyName === "j") return "next-file"
   if (input.tab === "diff" && input.keyName === "up") return "scroll-content-up"
   if (input.tab === "diff" && input.keyName === "down") return "scroll-content-down"
+  if (input.tab === "diff" && input.keyName === "left") return "scroll-files-left"
+  if (input.tab === "diff" && input.keyName === "right") return "scroll-files-right"
   if (input.tab === "diff" && input.keyName === "w") return "checkout-worktree"
   if (input.tab === "diff" && input.keyName === "r") return "review-pr"
   if (input.tab === "diff" && input.keyName === "s") return "review-security"
@@ -186,7 +341,7 @@ export const pullRequestWorkspaceReloadKey = (pr: Domain.PullRequest): string =>
     pr.lastModifiedDate.getTime()
   ].join("\u0000")
 
-/** Stable comment request key for one PR and its exact provider revision pair. */
+/** Stable comment request key for one PR revision and its latest observed comment activity. */
 export const pullRequestCommentsRequestKey = (
   pr: Domain.PullRequest,
   revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
@@ -197,6 +352,8 @@ export const pullRequestCommentsRequestKey = (
     pr.account.repoAccountId ?? "",
     pr.repositoryName,
     pr.id,
+    pr.lastModifiedDate.getTime(),
+    pr.commentCount ?? "",
     revision.destinationCommit,
     revision.sourceCommit
   ].join("\u0000")
@@ -205,7 +362,8 @@ export const pullRequestCommentsRequestKey = (
 export const workspaceLifecycleTransition = (
   previousKey: string | null,
   nextKey: string | null,
-  phase: WorkspaceActionPhase
+  phase: WorkspaceActionPhase,
+  findingPostRunning = false
 ): WorkspaceLifecycleTransition => {
   if (previousKey === nextKey) return { _tag: "preserve" }
   const interrupt = phase === "preflight"
@@ -215,8 +373,43 @@ export const workspaceLifecycleTransition = (
     : phase === "running-review"
     ? "review"
     : "none"
-  return { _tag: "reset", interrupt }
+  return { _tag: "reset", interrupt, preserveFindingPost: findingPostRunning }
 }
+
+/** Retires an old review deck once its post settles against a replacement workspace. */
+export const workspaceFindingPostSettlement = (
+  postingWorkspaceReloadKey: string,
+  currentWorkspaceReloadKey: string | null
+): "retain-review-deck" | "retire-review-deck" =>
+  postingWorkspaceReloadKey === currentWorkspaceReloadKey ? "retain-review-deck" : "retire-review-deck"
+
+/** Retains the finding deck that owns an in-flight post so its receipt remains visible. */
+export const workspaceReviewDeckAfterReset = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  preserveFindingPost: boolean,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  preserveFindingPost ? current : { action: idleAction, selectedFindingIndex: 0 }
+
+/** Makes a replaced workspace's old findings non-interactive as soon as their post settles. */
+export const workspaceReviewDeckAfterPostSettlement = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  postingWorkspaceReloadKey: string,
+  currentWorkspaceReloadKey: string | null,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  workspaceFindingPostSettlement(postingWorkspaceReloadKey, currentWorkspaceReloadKey) === "retain-review-deck"
+    ? current
+    : { action: idleAction, selectedFindingIndex: 0 }
+
+/** Includes review children that must never outlive the exact workspace they inspect. */
+export const workspaceResetInterruptions = (
+  interrupt: Extract<WorkspaceLifecycleTransition, { readonly _tag: "reset" }>["interrupt"]
+): ReadonlyArray<WorkspaceResetInterruption> => [
+  ...(interrupt === "none" ? [] : [interrupt]),
+  "conversation",
+  "verification"
+]
 
 export const workspaceIdentityMatches = (
   actual: PullRequestWorkspaceIdentity,
@@ -248,16 +441,85 @@ export const currentWorkspaceSelection = <
     : { _tag: "stale" }
 }
 
-/** Keeps exact-pair threads plus explicitly commitless general PR comments. */
-export const currentRevisionCommentLocations = (
+export type CommentRevisionContext =
+  | { readonly _tag: "current" }
+  | { readonly _tag: "historical"; readonly headCommit: string | undefined }
+  | { readonly _tag: "pull-request" }
+  | { readonly _tag: "unlocated" }
+
+/** Describes which immutable PR revision owns a fetched review coordinate. */
+export const commentRevisionContext = (
+  location: Pick<Domain.PRCommentLocation, "afterCommitId" | "beforeCommitId" | "filePath">,
+  revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
+): CommentRevisionContext => {
+  const commitless = location.beforeCommitId === undefined && location.afterCommitId === undefined
+  if (commitless) return { _tag: location.filePath === undefined ? "pull-request" : "unlocated" }
+  if (location.beforeCommitId === revision.destinationCommit && location.afterCommitId === revision.sourceCommit) {
+    return { _tag: "current" }
+  }
+  return { _tag: "historical", headCommit: location.afterCommitId }
+}
+
+/** Keeps every posted thread visible while placing exact-revision comments first. */
+export const displayedCommentLocations = (
   locations: ReadonlyArray<Domain.PRCommentLocation>,
   revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
-): ReadonlyArray<Domain.PRCommentLocation> =>
-  locations.filter((location) => {
-    const commitless = location.beforeCommitId === undefined && location.afterCommitId === undefined
-    if (commitless) return location.filePath === undefined
-    return location.beforeCommitId === revision.destinationCommit && location.afterCommitId === revision.sourceCommit
-  })
+): ReadonlyArray<Domain.PRCommentLocation> => {
+  const rank = (location: Domain.PRCommentLocation): number =>
+    ({ current: 0, "pull-request": 1, unlocated: 1, historical: 2 })[commentRevisionContext(location, revision)._tag]
+  return locations
+    .map((location, index) => ({ index, location }))
+    .sort((left, right) => rank(left.location) - rank(right.location) || left.index - right.index)
+    .map(({ location }) => location)
+}
+
+export type PostedCommentsPresentation = "workspace-failure" | "failure" | "loading" | "empty" | "threads"
+
+/** Keeps provider failures distinct from a successful read with no posted threads. */
+export const postedCommentsPresentation = (input: {
+  readonly commentCount: number
+  readonly commentsFailed: boolean
+  readonly commentsReady: boolean
+  readonly revisionReady: boolean
+  readonly workspaceFailed: boolean
+}): PostedCommentsPresentation => {
+  if (input.workspaceFailed) return "workspace-failure"
+  if (input.commentsFailed) return "failure"
+  if (!input.commentsReady || !input.revisionReady) return "loading"
+  return input.commentCount === 0 ? "empty" : "threads"
+}
+
+export type CommentLocationAnchor =
+  | { readonly _tag: "general"; readonly label: "Pull request" }
+  | { readonly _tag: "file"; readonly filePath: string }
+  | {
+    readonly _tag: "line"
+    readonly filePath: string
+    readonly lineNumber: number
+    readonly side: "before" | "after" | undefined
+  }
+
+/** Turns CodeCommit's grouped comment shape into one scan-friendly review coordinate. */
+export const commentLocationAnchor = (
+  location: Pick<Domain.PRCommentLocation, "comments" | "filePath" | "relativeFileVersion">
+): CommentLocationAnchor => {
+  if (location.filePath === undefined) return { _tag: "general", label: "Pull request" }
+  const lineNumber = location.comments
+    .map((thread) => thread.root.lineNumber)
+    .find((candidate): candidate is number => candidate !== undefined)
+  return lineNumber === undefined
+    ? { _tag: "file", filePath: location.filePath }
+    : {
+      _tag: "line",
+      filePath: location.filePath,
+      lineNumber,
+      side: location.relativeFileVersion === "BEFORE"
+        ? "before"
+        : location.relativeFileVersion === "AFTER"
+        ? "after"
+        : undefined
+    }
+}
 
 export const fileDiffIdentity = (
   identity: PullRequestWorkspaceIdentity,
@@ -281,6 +543,21 @@ export const fileDiffIdentityMatches = (actual: FileDiffIdentity, expected: File
   actual.beforePath === expected.beforePath &&
   actual.destinationCommit === expected.destinationCommit &&
   actual.sourceCommit === expected.sourceCommit
+
+/** Stable in-memory cache key for one exact file revision and both immutable blob identities. */
+export const fileDiffIdentityKey = (identity: FileDiffIdentity): string =>
+  [
+    identity.profile,
+    identity.region,
+    identity.repositoryName,
+    identity.pullRequestId,
+    identity.destinationCommit,
+    identity.sourceCommit,
+    identity.beforePath ?? "",
+    identity.beforeBlobId ?? "",
+    identity.afterPath ?? "",
+    identity.afterBlobId ?? ""
+  ].join("\u0000")
 
 /** Keeps a retained async result only when it belongs to the file currently on screen. */
 export const currentFileDiffOutcome = <A extends { readonly identity: FileDiffIdentity }>(
@@ -308,6 +585,110 @@ export const changedFilePath = (file: ReadClient.CodeCommitChangedFile): string 
 
 export const changedFileRowId = (index: number): string => `changed-file-${index}`
 
+export type ChangedFileTreeRow =
+  | {
+    readonly _tag: "directory"
+    readonly depth: number
+    readonly key: string
+    readonly name: string
+  }
+  | {
+    readonly _tag: "file"
+    readonly depth: number
+    readonly fileIndex: number
+    readonly key: string
+    readonly name: string
+  }
+
+const MAXIMUM_CHANGED_FILE_TREE_NAME_CHARACTERS = 120
+
+/** Preserves ordinary file names while bounding hostile provider text independently of tree depth. */
+export const changedFileTreeVisibleName = (row: ChangedFileTreeRow): string =>
+  terminalSafeCompactText(row.name, MAXIMUM_CHANGED_FILE_TREE_NAME_CHARACTERS)
+
+/** Natural horizontal width required to expose every bounded tree row without wrapping. */
+export const changedFileTreeContentWidth = (rows: ReadonlyArray<ChangedFileTreeRow>): number =>
+  rows.reduce(
+    (maximum, row) =>
+      Math.max(
+        maximum,
+        (row._tag === "directory" ? 3 : 5) + row.depth * 2 + Array.from(changedFileTreeVisibleName(row)).length
+      ),
+    1
+  )
+
+interface MutableChangedFileTreeDirectory {
+  readonly children: Map<string, MutableChangedFileTreeDirectory>
+  readonly entries: Array<
+    | { readonly _tag: "directory"; readonly name: string }
+    | { readonly _tag: "file"; readonly fileIndex: number; readonly name: string }
+  >
+}
+
+const mutableChangedFileTreeDirectory = (): MutableChangedFileTreeDirectory => ({
+  children: new Map(),
+  entries: []
+})
+
+/** Groups shared path prefixes once while retaining stable first-seen sibling order and original file identities. */
+export const changedFileTreeRows = (
+  files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
+): ReadonlyArray<ChangedFileTreeRow> => {
+  const root = mutableChangedFileTreeDirectory()
+  files.forEach((file, fileIndex) => {
+    const path = changedFilePath(file)
+    const segments = path.split("/").filter((segment) => segment.length > 0)
+    const fileName = segments.pop() ?? path
+    let directory = root
+    for (const segment of segments) {
+      let child = directory.children.get(segment)
+      if (child === undefined) {
+        child = mutableChangedFileTreeDirectory()
+        directory.children.set(segment, child)
+        directory.entries.push({ _tag: "directory", name: segment })
+      }
+      directory = child
+    }
+    directory.entries.push({ _tag: "file", fileIndex, name: fileName })
+  })
+
+  const rows: Array<ChangedFileTreeRow> = []
+  const append = (directory: MutableChangedFileTreeDirectory, depth: number, prefix: string): void => {
+    for (const entry of directory.entries) {
+      if (entry._tag === "file") {
+        rows.push({
+          _tag: "file",
+          depth,
+          fileIndex: entry.fileIndex,
+          key: `${prefix}${entry.name}\u0000${entry.fileIndex}`,
+          name: entry.name
+        })
+        continue
+      }
+      const path = `${prefix}${entry.name}/`
+      rows.push({ _tag: "directory", depth, key: path, name: entry.name })
+      const child = directory.children.get(entry.name)
+      if (child !== undefined) append(child, depth + 1, path)
+    }
+  }
+  append(root, 0, "")
+  return rows
+}
+
+/** Moves between selectable file leaves in visual tree order; directory rows never receive focus. */
+export const adjacentChangedFileIndex = (
+  rows: ReadonlyArray<ChangedFileTreeRow>,
+  currentFileIndex: number,
+  direction: -1 | 1
+): number => {
+  const fileIndexes = rows.flatMap((row) => (row._tag === "file" ? [row.fileIndex] : []))
+  if (fileIndexes.length === 0) return 0
+  const currentPosition = fileIndexes.indexOf(currentFileIndex)
+  if (currentPosition < 0) return fileIndexes[0] ?? 0
+  const nextPosition = Math.max(0, Math.min(fileIndexes.length - 1, currentPosition + direction))
+  return fileIndexes[nextPosition] ?? currentFileIndex
+}
+
 export const filetypeForPath = (path: string): string | undefined => {
   const extension = path.includes(".") ? path.slice(path.lastIndexOf(".") + 1).toLowerCase() : ""
   return FILETYPE_ALIASES[extension] ?? (extension.length > 0 ? extension : undefined)
@@ -330,6 +711,15 @@ export const terminalSafeText = (value: string): string =>
     const codePoint = character.codePointAt(0)
     return codePoint !== undefined && isTerminalUnsafe(character, codePoint) ? escapedCodePoint(character) : character
   }).join("")
+
+/** Keeps untrusted single-line text within a fixed terminal column budget. */
+export const terminalSafeCompactText = (value: string, maxLength: number): string => {
+  if (maxLength <= 0) return ""
+  const safeCharacters = Array.from(terminalSafeText(value))
+  if (safeCharacters.length <= maxLength) return safeCharacters.join("")
+  if (maxLength === 1) return "…"
+  return `${safeCharacters.slice(0, maxLength - 1).join("")}…`
+}
 
 /** Formats untrusted provider revision metadata for a single terminal-safe header. */
 export const revisionHeaderText = (
@@ -423,4 +813,91 @@ export const buildUnifiedDiff = (
     metadata: metadata.length === 0 ? null : metadata.join("\n"),
     truncated
   }
+}
+
+/** Validates that one exact-side line is an addition or deletion in the complete immutable blob diff. */
+export const isChangedDiffLine = (
+  beforeText: string,
+  afterText: string,
+  side: "before" | "after",
+  line: number
+): boolean => {
+  const patch = structuredPatch("before", "after", beforeText, afterText, "", "", {
+    context: 0,
+    maxEditLength: 20_000,
+    timeout: 1_000
+  })
+  if (patch === undefined) return false
+  for (const hunk of patch.hunks) {
+    let beforeLine = hunk.oldStart
+    let afterLine = hunk.newStart
+    for (const content of hunk.lines) {
+      const prefix = content[0]
+      if (prefix === "\\") continue
+      if (prefix === "-" && side === "before" && beforeLine === line) return true
+      if (prefix === "+" && side === "after" && afterLine === line) return true
+      if (prefix !== "+") beforeLine += 1
+      if (prefix !== "-") afterLine += 1
+    }
+  }
+  return false
+}
+
+/** Resolves an exact provider line coordinate to OpenTUI's zero-based split-diff row. */
+export const splitDiffLineRow = (diff: string, side: "before" | "after", line: number): number | null => {
+  if (!Number.isInteger(line) || line < 1) return null
+  let patches: ReturnType<typeof parsePatch>
+  try {
+    patches = parsePatch(diff)
+  } catch {
+    return null
+  }
+  const patch = patches[0]
+  if (patch === undefined) return null
+  let row = 0
+  for (const hunk of patch.hunks) {
+    let beforeLine = hunk.oldStart
+    let afterLine = hunk.newStart
+    let index = 0
+    while (index < hunk.lines.length) {
+      const content = hunk.lines[index]
+      const prefix = content?.[0]
+      if (prefix === " ") {
+        if (side === "before" ? beforeLine === line : afterLine === line) return row
+        beforeLine += 1
+        afterLine += 1
+        row += 1
+        index += 1
+        continue
+      }
+      if (prefix === "\\") {
+        index += 1
+        continue
+      }
+      const beforeStart = beforeLine
+      const afterStart = afterLine
+      let removed = 0
+      let added = 0
+      while (index < hunk.lines.length) {
+        const changePrefix = hunk.lines[index]?.[0]
+        if (changePrefix === " " || changePrefix === "\\") break
+        if (changePrefix === "-") {
+          removed += 1
+          beforeLine += 1
+        } else if (changePrefix === "+") {
+          added += 1
+          afterLine += 1
+        }
+        index += 1
+      }
+      if (side === "before" && line >= beforeStart && line < beforeStart + removed) {
+        return row + line - beforeStart
+      }
+      if (side === "after" && line >= afterStart && line < afterStart + added) {
+        return row + line - afterStart
+      }
+      row += Math.max(removed, added)
+    }
+  }
+  return null
 }

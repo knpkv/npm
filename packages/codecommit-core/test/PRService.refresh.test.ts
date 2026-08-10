@@ -1,14 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, SubscriptionRef } from "effect"
+import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
-import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../src/CacheService/repos/SyncMetadataRepo.js"
 import { ConfigService } from "../src/ConfigService/index.js"
-import type { AppState } from "../src/Domain.js"
+import { TuiConfig } from "../src/ConfigService/internal.js"
+import { type AppState, PullRequest } from "../src/Domain.js"
 import { makeRefresh } from "../src/PRService/refresh.js"
 
 const dependencies = (load: ConfigService["Service"]["load"]) =>
@@ -32,6 +33,106 @@ const makeState = SubscriptionRef.make<AppState>({
 })
 
 describe("PRService.refresh", () => {
+  it.effect("publishes a newly fetched PR during the same refresh", () =>
+    Effect.gen(function*() {
+      const state = yield* makeState
+      const rows = yield* Ref.make<Array<typeof CachedPullRequest.Type>>([])
+      const fetchedPR = Schema.decodeSync(PullRequest)({
+        id: "35",
+        title: "Visible after one refresh",
+        author: "author",
+        repositoryName: "example-repository",
+        creationDate: new Date("2026-08-01T00:00:00.000Z"),
+        lastModifiedDate: new Date("2026-08-02T00:00:00.000Z"),
+        link: "https://example.invalid/pr/35",
+        account: { profile: "test-profile", region: "us-east-1" },
+        status: "OPEN",
+        sourceBranch: "feature",
+        destinationBranch: "main",
+        isMergeable: true,
+        isApproved: false,
+        approvedBy: [],
+        commentedBy: [],
+        approvalRules: []
+      })
+      const cachedPR = Schema.decodeSync(CachedPullRequest)({
+        id: "35",
+        awsAccountId: "123456789012",
+        repoAccountId: null,
+        accountProfile: "test-profile",
+        accountRegion: "us-east-1",
+        title: "Visible after one refresh",
+        description: null,
+        author: "author",
+        repositoryName: "example-repository",
+        creationDate: "2026-08-01T00:00:00.000Z",
+        lastModifiedDate: "2026-08-02T00:00:00.000Z",
+        status: "OPEN",
+        sourceBranch: "feature",
+        destinationBranch: "main",
+        isMergeable: 1,
+        isApproved: 0,
+        commentCount: 0,
+        healthScore: null,
+        link: "https://example.invalid/pr/35",
+        fetchedAt: "2026-08-02T00:00:00.000Z",
+        filesAdded: 0,
+        filesModified: 1,
+        filesDeleted: 0,
+        closedAt: null,
+        mergedBy: null,
+        approvedBy: null,
+        approvedByArns: null,
+        commentedBy: null,
+        approvalRules: null
+      })
+      const config = Schema.decodeSync(TuiConfig)({
+        accounts: [{ profile: "test-profile", regions: ["us-east-1"], enabled: true }]
+      })
+      const liveDependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+          getPullRequests: () => Stream.make(fetchedPR),
+          getCommentsForPullRequest: () => Effect.succeed([])
+        }),
+        Layer.mock(EventsHub, {
+          batch: (effect) => effect
+        }),
+        Layer.mock(CommentRepo, {
+          upsert: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(PullRequestRepo, {
+          findAll: () => Ref.get(rows),
+          findStaleOpen: () => Effect.succeed([]),
+          findMissingDiffStats: () => Effect.succeed([]),
+          upsert: () => Ref.set(rows, [cachedPR]),
+          updateCommentCount: () => Effect.void,
+          refreshCommentedBy: () => Effect.void,
+          updateHealthScore: () => Effect.void,
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(SubscriptionRepo, {
+          findAll: () => Effect.succeed([])
+        }),
+        Layer.mock(SyncMetadataRepo, {
+          update: () => Effect.void
+        }),
+        Layer.mock(ConfigService, {
+          load: Effect.succeed(config),
+          detectProfiles: Effect.succeed([])
+        })
+      )
+
+      yield* makeRefresh(state).pipe(Effect.provide(liveDependencies))
+
+      const finalState = yield* SubscriptionRef.get(state)
+      expect(finalState.status).toBe("idle")
+      expect(finalState.pullRequests).toHaveLength(1)
+      expect(finalState.pullRequests[0]?.id).toBe("35")
+      expect(finalState.pullRequests[0]?.title).toBe("Visible after one refresh")
+    }))
+
   it.effect("records an unexpected defect while preserving its original Cause", () =>
     Effect.gen(function*() {
       const defect = new Error("config defect")

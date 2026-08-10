@@ -1,9 +1,8 @@
 import { useTheme } from "../context/theme.js"
 import type { ListItem } from "../ListBuilder.js"
+import { isAwsAuthenticationNotification } from "../notification-auth.js"
 import { Badge } from "./Badge.js"
 import { type Column, Table } from "./Table.js"
-
-const isAuthError = (message: string) => /ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials/i.test(message)
 
 interface NotificationsTableProps {
   readonly items: ReadonlyArray<ListItem>
@@ -66,9 +65,9 @@ export function NotificationsTable({ items, selectedIndex }: NotificationsTableP
       width: 22,
       render: (item, selected) => {
         if (item.type !== "notification") return null
-        if (isAuthError(item.notification.message)) {
-          const bg = selected ? theme.success : theme.primary
-          const fg = "#ffffff"
+        if (isAwsAuthenticationNotification(item.notification.message)) {
+          const bg = selected ? theme.successTint : theme.accentTint
+          const fg = selected ? theme.textSuccess : theme.textAccent
           return (
             <box
               style={{
@@ -77,7 +76,7 @@ export function NotificationsTable({ items, selectedIndex }: NotificationsTableP
                 paddingRight: 1
               }}
             >
-              <text fg={fg}>{selected ? "⏎ SSO Login" : "  SSO Login"}</text>
+              <text fg={fg}>{selected ? "⏎ Sign in" : "  Sign in"}</text>
             </box>
           )
         }

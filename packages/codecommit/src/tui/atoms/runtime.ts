@@ -1,15 +1,23 @@
 import { BunServices } from "@effect/platform-bun"
-import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService, ReadClient } from "@knpkv/codecommit-core"
+import {
+  AwsClient,
+  AwsClientConfig,
+  CacheService,
+  ConfigService,
+  PRService,
+  ReadClient,
+  ReviewClient
+} from "@knpkv/codecommit-core"
 import { Layer } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import { WorktreeService } from "../../WorktreeService.js"
-import { tuiApplicationScopeLayer } from "./applicationScope.js"
+import { tuiApplicationScopeLayer, tuiTerminalSessionLayer } from "./applicationScope.js"
 
 // Leaf layers — fully closed (R = never)
 const EventsHubLive = CacheService.EventsHub.Default
 
-export { TuiApplicationScope } from "./applicationScope.js"
+export { TuiApplicationScope, TuiTerminalSession } from "./applicationScope.js"
 
 const AwsLive = AwsClient.AwsClientLive.pipe(
   Layer.provide(FetchHttpClient.layer),
@@ -43,11 +51,27 @@ const ReadLayer = ReadClient.CodeCommitReadClient.live.pipe(
   Layer.provide(AwsClientConfig.Default)
 )
 
+const ReviewLayer = ReviewClient.CodeCommitReviewClient.live.pipe(
+  Layer.provide(ReadLayer),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+
 const WorktreeLayer = WorktreeService.live
 
 // Expose PRService + repos + EventsHub + AwsClient for atoms
 const MainLayer = (get: Atom.AtomContext) =>
-  Layer.mergeAll(PRLayer, ReposLive, EventsHubLive, AwsLive, ReadLayer, WorktreeLayer, tuiApplicationScopeLayer(get))
+  Layer.mergeAll(
+    PRLayer,
+    ReposLive,
+    EventsHubLive,
+    AwsLive,
+    ReadLayer,
+    ReviewLayer,
+    WorktreeLayer,
+    tuiApplicationScopeLayer(get),
+    tuiTerminalSessionLayer(get)
+  )
 
 // Merge BunServices into output for child process actions.
 const AppLayer = (get: Atom.AtomContext) => MainLayer(get).pipe(Layer.provideMerge(BunServices.layer))

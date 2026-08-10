@@ -125,7 +125,8 @@ const materializationGitEnvironment = (request: WorktreeRequest, home: string) =
   HOME: home
 })
 
-const gitCommand = (
+/** @internal Constructs the profile-scoped Git command used by exact-head checkout. */
+export const makeCodeCommitGitCommand = (
   request: WorktreeRequest,
   args: ReadonlyArray<string>,
   options: {
@@ -141,6 +142,12 @@ const gitCommand = (
       "core.hooksPath=/dev/null",
       "-c",
       "credential.interactive=false",
+      "-c",
+      "credential.helper=",
+      "-c",
+      "credential.helper=!aws codecommit credential-helper $@",
+      "-c",
+      "credential.UseHttpPath=true",
       ...args
     ], {
       ...(cwd === undefined ? {} : { cwd }),
@@ -162,7 +169,7 @@ const runChecked = Effect.fn("WorktreeService.runChecked")(function*(
   args: ReadonlyArray<string>,
   options?: { readonly cwd?: string }
 ) {
-  const exitCode = yield* spawner.exitCode(gitCommand(request, args, options)).pipe(
+  const exitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(request, args, options)).pipe(
     Effect.mapError((cause) => commandFailure(operation, "Unable to run git", cause))
   )
   if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
@@ -176,7 +183,7 @@ const runSucceeds = (
   args: ReadonlyArray<string>,
   options?: { readonly cwd?: string }
 ) =>
-  spawner.exitCode(gitCommand(request, args, options)).pipe(
+  spawner.exitCode(makeCodeCommitGitCommand(request, args, options)).pipe(
     Effect.match({
       onFailure: () => false,
       onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
@@ -188,7 +195,7 @@ const isBareRepository = (
   request: WorktreeRequest,
   repositoryPath: string
 ) =>
-  spawner.string(gitCommand(request, [
+  spawner.string(makeCodeCommitGitCommand(request, [
     `--git-dir=${repositoryPath}`,
     "rev-parse",
     "--is-bare-repository"
@@ -205,7 +212,9 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   targetPath: string
 ) {
   const isAncestor = (left: string, right: string) =>
-    spawner.exitCode(gitCommand(request, ["merge-base", "--is-ancestor", left, right], { cwd: targetPath })).pipe(
+    spawner.exitCode(
+      makeCodeCommitGitCommand(request, ["merge-base", "--is-ancestor", left, right], { cwd: targetPath })
+    ).pipe(
       Effect.match({
         onFailure: () => false,
         onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
@@ -214,7 +223,7 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   const [headBeforeTarget, targetBeforeHead, symbolicHeadExitCode] = yield* Effect.all([
     isAncestor("HEAD", request.sourceCommit),
     isAncestor(request.sourceCommit, "HEAD"),
-    spawner.exitCode(gitCommand(request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })).pipe(
+    spawner.exitCode(makeCodeCommitGitCommand(request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })).pipe(
       Effect.orElseSucceed(() => ChildProcessSpawner.ExitCode(128))
     )
   ])
@@ -679,7 +688,7 @@ export const makeWorktreeService = (
         return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
       }
 
-      const addExitCode = yield* spawner.exitCode(gitCommand(plan, [
+      const addExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(plan, [
         `--git-dir=${plan.cachePath}`,
         "worktree",
         "add",
@@ -712,7 +721,7 @@ export const makeWorktreeService = (
           plan.targetPath
         ])
         if (removedStaleRegistration) {
-          const retryExitCode = yield* spawner.exitCode(gitCommand(plan, [
+          const retryExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(plan, [
             `--git-dir=${plan.cachePath}`,
             "worktree",
             "add",
