@@ -194,8 +194,10 @@ export const fetchAndUpsertPRs = (params: {
               .pipe(
                 Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
                 Effect.catch(() =>
-                  prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(
-                    Effect.catch(() => withholdScopeSuccess(pr.accountProfile, pr.accountRegion))
+                  withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
+                    Effect.andThen(
+                      prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
+                    )
                   )
                 )
               ),

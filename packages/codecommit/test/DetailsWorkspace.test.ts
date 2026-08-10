@@ -1184,16 +1184,18 @@ describe("PR detail workspace", () => {
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
-    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target], 2, [
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 2, [
       { profile: Domain.AwsProfileName.make("staging"), region: Domain.AwsRegion.make("eu-west-1") }
     ])
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+    expect(Object.keys(guards)).toEqual([pullRequestSelectionKey(target)])
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target], 3, [
       { profile: target.account.profile, region: target.account.region }
     ])
     expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+    expect(Object.keys(guards)).toEqual([pullRequestSelectionKey(target)])
 
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
     guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 4, [
