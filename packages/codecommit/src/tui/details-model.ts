@@ -197,7 +197,12 @@ export const detailsKeyIntent = (input: {
   readonly tab: "comments" | "diff"
 }): DetailsKeyIntent => {
   if (input.dialogOpen || input.modified) return "yield"
-  if (input.keyName === "escape" && input.findingPostRunning === true) return "consume"
+  if (
+    input.findingPostRunning === true &&
+    ["escape", "r", "s", "t", "e", "w"].includes(input.keyName)
+  ) {
+    return "consume"
+  }
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
@@ -336,7 +341,7 @@ export const pullRequestWorkspaceReloadKey = (pr: Domain.PullRequest): string =>
     pr.lastModifiedDate.getTime()
   ].join("\u0000")
 
-/** Stable comment request key for one PR and its exact provider revision pair. */
+/** Stable comment request key for one PR revision and its latest observed comment activity. */
 export const pullRequestCommentsRequestKey = (
   pr: Domain.PullRequest,
   revision: Pick<ReadClient.CodeCommitPullRequestRevision, "destinationCommit" | "sourceCommit">
@@ -347,6 +352,8 @@ export const pullRequestCommentsRequestKey = (
     pr.account.repoAccountId ?? "",
     pr.repositoryName,
     pr.id,
+    pr.lastModifiedDate.getTime(),
+    pr.commentCount ?? "",
     revision.destinationCommit,
     revision.sourceCommit
   ].join("\u0000")
@@ -464,6 +471,22 @@ export const displayedCommentLocations = (
     .map((location, index) => ({ index, location }))
     .sort((left, right) => rank(left.location) - rank(right.location) || left.index - right.index)
     .map(({ location }) => location)
+}
+
+export type PostedCommentsPresentation = "workspace-failure" | "failure" | "loading" | "empty" | "threads"
+
+/** Keeps provider failures distinct from a successful read with no posted threads. */
+export const postedCommentsPresentation = (input: {
+  readonly commentCount: number
+  readonly commentsFailed: boolean
+  readonly commentsReady: boolean
+  readonly revisionReady: boolean
+  readonly workspaceFailed: boolean
+}): PostedCommentsPresentation => {
+  if (input.workspaceFailed) return "workspace-failure"
+  if (input.commentsFailed) return "failure"
+  if (!input.commentsReady || !input.revisionReady) return "loading"
+  return input.commentCount === 0 ? "empty" : "threads"
 }
 
 export type CommentLocationAnchor =

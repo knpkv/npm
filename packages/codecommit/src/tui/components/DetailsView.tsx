@@ -52,6 +52,7 @@ import {
   fileDiffIdentity,
   fileDiffIdentityKey,
   localEditorReady,
+  postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
@@ -249,19 +250,32 @@ function CommentsPanel({
     commentsResult === null || revision === null
       ? emptyCommentLocations()
       : displayedCommentLocations(commentsResult, revision)
+  const commentsFailed = AsyncResult.isFailure(result) && !AsyncResult.isWaiting(result)
+  const presentation = postedCommentsPresentation({
+    commentCount: comments.length,
+    commentsFailed,
+    commentsReady: commentsResult !== null,
+    revisionReady: revision !== null,
+    workspaceFailed
+  })
+  useKeyboard((key) => {
+    if (presentation !== "failure" || key.ctrl === true || key.meta === true || key.name !== "r") return
+    key.stopPropagation()
+    fetchComments(pr)
+  })
   return (
     <scrollbox
       focused
       style={{ backgroundColor: theme.background, flexGrow: 1, padding: 1, paddingLeft: 2, width: "100%" }}
     >
-      {workspaceFailed ? (
+      {presentation === "workspace-failure" ? (
         <text fg={theme.textError}>Exact-head read failed.</text>
-      ) : commentsResult === null || revision === null ? (
+      ) : presentation === "failure" ? (
+        <text fg={theme.textError}>Posted comments unavailable · R retry</text>
+      ) : presentation === "loading" ? (
         <text fg={theme.textMuted}>Loading review thread…</text>
       ) : null}
-      {!workspaceFailed && commentsResult !== null && revision !== null && comments.length === 0 && (
-        <text fg={theme.textMuted}>No posted comments</text>
-      )}
+      {presentation === "empty" ? <text fg={theme.textMuted}>No posted comments</text> : null}
       {revision === null
         ? null
         : comments.map((location, locationIndex) => (
@@ -1131,7 +1145,14 @@ export function DetailsView() {
   }
 
   const beginAction = (next: PendingAction) => {
-    if (pr === null || workspace === null || action._tag === "running" || agentRunning) return
+    if (
+      pr === null ||
+      workspace === null ||
+      action._tag === "running" ||
+      agentRunning ||
+      postingFindingRef.current !== null
+    )
+      return
     nextActionRequestSequence += 1
     setFindingPostReceipt(null)
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:${nextActionRequestSequence}`

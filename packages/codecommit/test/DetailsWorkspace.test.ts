@@ -44,6 +44,7 @@ import {
   humanReviewState,
   isChangedDiffLine,
   localEditorReady,
+  postedCommentsPresentation,
   pullRequestCommentsRequestKey,
   pullRequestWorkspaceReloadKey,
   revisionHeaderText,
@@ -460,6 +461,13 @@ describe("PR detail workspace", () => {
     const key = pullRequestCommentsRequestKey(pr, revision)
 
     expect(pullRequestCommentsRequestKey(pr, { ...revision })).toBe(key)
+    expect(pullRequestCommentsRequestKey(new Domain.PullRequest({ ...pr }), revision)).toBe(key)
+    expect(
+      pullRequestCommentsRequestKey(
+        new Domain.PullRequest({ ...pr, commentCount: 1, lastModifiedDate: new Date(2_000) }),
+        revision
+      )
+    ).not.toBe(key)
     expect(
       pullRequestCommentsRequestKey(pr, {
         ...revision,
@@ -760,7 +768,7 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "right" })).toBe("scroll-files-right")
   })
 
-  it("blocks same-batch Escape as soon as a finding post starts", () => {
+  it("blocks review reruns and Escape as soon as a finding post starts", () => {
     const posting = beginFindingPostSession(null, {
       findingId: "F1",
       findingIndex: 0,
@@ -780,7 +788,54 @@ describe("PR detail workspace", () => {
         tab: "diff"
       })
     ).toBe("consume")
+    for (const keyName of ["r", "s", "t", "e", "w"]) {
+      expect(
+        detailsKeyIntent({
+          actionCancelable: false,
+          actionReady: false,
+          dialogOpen: false,
+          findingPostRunning: posting !== null,
+          findingReviewActive: true,
+          keyName,
+          modified: false,
+          tab: "diff"
+        })
+      ).toBe("consume")
+    }
+    expect(
+      detailsKeyIntent({
+        actionCancelable: false,
+        actionReady: false,
+        dialogOpen: false,
+        findingPostRunning: false,
+        findingReviewActive: true,
+        keyName: "r",
+        modified: false,
+        tab: "diff"
+      })
+    ).toBe("review-pr")
     expect(beginFindingPostSession(posting, { ...posting, requestId: "post-2" })).toBe(posting)
+  })
+
+  it("distinguishes failed comment reads from a successful empty thread list", () => {
+    expect(
+      postedCommentsPresentation({
+        commentCount: 0,
+        commentsFailed: true,
+        commentsReady: false,
+        revisionReady: true,
+        workspaceFailed: false
+      })
+    ).toBe("failure")
+    expect(
+      postedCommentsPresentation({
+        commentCount: 0,
+        commentsFailed: false,
+        commentsReady: true,
+        revisionReady: true,
+        workspaceFailed: false
+      })
+    ).toBe("empty")
   })
 
   it("adopts only the matching successful manual checkout as the local diff", () => {
