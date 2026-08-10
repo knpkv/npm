@@ -298,11 +298,16 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("reloads merge reference races while retaining manual strategy conflicts", () =>
     Effect.gen(function*() {
-      const cases = [
+      const cases: ReadonlyArray<
+        readonly [
+          "ConcurrentReferenceUpdateException" | "ManualMergeRequiredException" | "ReferenceDoesNotExistException",
+          CodeCommitReviewConflictError["reason"]
+        ]
+      > = [
         ["ConcurrentReferenceUpdateException", "destination-reference-changed"],
         ["ReferenceDoesNotExistException", "destination-reference-changed"],
         ["ManualMergeRequiredException", "merge-conflict"]
-      ] as const
+      ]
 
       for (const [tag, expectedReason] of cases) {
         const result = yield* runWithClients(
