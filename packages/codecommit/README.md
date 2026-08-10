@@ -82,8 +82,11 @@ or **three-way**, then review the displayed base, head, and destination ref.
 Press `Enter` to send the merge. This path stays API-first and never creates a
 worktree: immediately before writing, it re-reads the pull request and verifies
 the exact repository, revision, base, head, and destination reference. The AWS
-request also pins `sourceCommitId` to the displayed head, so CodeCommit rejects
-a branch that moves after preflight. Once submitted, the TUI waits for the
+request pins `sourceCommitId` to the displayed head, so CodeCommit rejects a
+source branch that moves after preflight. CodeCommit exposes no destination
+compare-and-set for this operation: if the destination advances after preflight,
+the provider may use that newer destination, including for a three-way merge.
+Once submitted, the TUI waits for the
 CodeCommit receipt because cancelling a non-idempotent merge request could hide
 a merge that already completed. Approval-rule failures, stale revisions,
 closed pull requests, and merge conflicts return to the action card without

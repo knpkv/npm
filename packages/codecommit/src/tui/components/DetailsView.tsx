@@ -85,7 +85,9 @@ import {
   workspaceLifecycleTransition,
   workspaceMergeResetPolicy,
   workspaceReviewDeckAfterPostSettlement,
+  workspaceReviewDeckAfterRevisionChange,
   workspaceReviewDeckAfterReset,
+  workspaceReviewRevisionKey,
   workspaceResetInterruptions,
   worktreeCheckoutLocalDiff,
   workspaceIdentityMatches
@@ -345,6 +347,7 @@ type ActionStatus =
       readonly action: RelayReviewKind
       readonly plan: WorktreePlan
       readonly result: RelayReviewResult
+      readonly workspaceRevisionKey: string
     } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
@@ -574,6 +577,8 @@ export function DetailsView() {
           },
     [activeProviderDrift, localCheckout, providerWorkspace]
   )
+  const currentWorkspaceRevisionKey =
+    workspace === null ? null : workspaceReviewRevisionKey(workspace.identity, workspace.revision)
   const fileTreeRows = useMemo(() => changedFileTreeRows(workspace?.files ?? []), [workspace?.files])
   const fileTreeContentWidth = useMemo(() => changedFileTreeContentWidth(fileTreeRows), [fileTreeRows])
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
@@ -671,6 +676,30 @@ export function DetailsView() {
   ])
 
   useEffect(() => {
+    if (currentWorkspaceRevisionKey === null) return
+    const currentAction = actionRef.current
+    if (currentAction._tag !== "reviewed") return
+    const reviewDeck = workspaceReviewDeckAfterRevisionChange<ActionStatus>(
+      { action: currentAction, selectedFindingIndex: selectedFindingIndexRef.current },
+      currentAction.workspaceRevisionKey,
+      currentWorkspaceRevisionKey,
+      postingFindingRef.current !== null,
+      { _tag: "idle" }
+    )
+    if (reviewDeck.action === currentAction) return
+    continueReview(Atom.Interrupt)
+    verifyFindingAction(Atom.Interrupt)
+    setSelectedFindingIndex(reviewDeck.selectedFindingIndex)
+    setFindingDispositions({})
+    setFindingPostDiagnostics({})
+    setFindingPostReceipt(null)
+    setConversationTurns([])
+    setConversationStatus({ _tag: "idle" })
+    setVerificationStatus({ _tag: "idle" })
+    setAction(reviewDeck.action)
+  }, [continueReview, currentWorkspaceRevisionKey, verifyFindingAction])
+
+  useEffect(() => {
     if (providerDriftPending || pr === null || workspace === null || selectedFile === null || selectedDiffKey === null)
       return
     if (diffCache.has(selectedDiffKey)) return
@@ -759,7 +788,13 @@ export function DetailsView() {
   }, [action, checkoutResult, loadDiff, workspace])
 
   useEffect(() => {
-    if (action._tag !== "running" || action.action === "worktree" || AsyncResult.isWaiting(reviewResult)) return
+    if (
+      action._tag !== "running" ||
+      action.action === "worktree" ||
+      AsyncResult.isWaiting(reviewResult) ||
+      workspace === null
+    )
+      return
     if (!AsyncResult.isSuccess(reviewResult) || reviewResult.value.requestId !== action.requestId) return
     const outcome = reviewResult.value
     if (outcome._tag === "failure") {
@@ -769,7 +804,9 @@ export function DetailsView() {
     if (
       outcome.value.kind === action.action &&
       outcome.value.worktree.path === action.plan.targetPath &&
-      outcome.value.worktree.sourceCommit === action.plan.sourceCommit
+      outcome.value.worktree.sourceCommit === action.plan.sourceCommit &&
+      workspace.revision.destinationCommit === action.plan.destinationCommit &&
+      workspace.revision.sourceCommit === action.plan.sourceCommit
     ) {
       setSelectedFindingIndex(0)
       setFindingDispositions({})
@@ -782,21 +819,25 @@ export function DetailsView() {
         action: action.action,
         plan: action.plan,
         result: outcome.value.summary,
-        reviewSkills: action.reviewSkills
+        reviewSkills: action.reviewSkills,
+        workspaceRevisionKey: workspaceReviewRevisionKey(workspace.identity, workspace.revision)
       })
     }
-  }, [action, reviewResult])
+  }, [action, reviewResult, workspace])
 
   useEffect(() => {
     if (postingFinding === null || AsyncResult.isWaiting(postFindingResult)) return
     if (!AsyncResult.isSuccess(postFindingResult) || postFindingResult.value.requestId !== postingFinding.requestId)
       return
     const outcome = postFindingResult.value
-    const postSettlement = workspaceFindingPostSettlement(postingFinding.workspaceReloadKey, workspaceReloadKey)
+    const postSettlement = workspaceFindingPostSettlement(
+      postingFinding.workspaceReloadKey,
+      currentWorkspaceRevisionKey
+    )
     const settledReviewDeck = workspaceReviewDeckAfterPostSettlement(
       { action: actionRef.current, selectedFindingIndex: selectedFindingIndexRef.current },
       postingFinding.workspaceReloadKey,
-      workspaceReloadKey,
+      currentWorkspaceRevisionKey,
       { _tag: "idle" }
     )
     if (outcome._tag === "failure") {
@@ -895,7 +936,7 @@ export function DetailsView() {
     postingFinding,
     verificationStatus,
     verifyFindingResult,
-    workspaceReloadKey
+    currentWorkspaceRevisionKey
   ])
 
   useEffect(() => {
@@ -1087,7 +1128,10 @@ export function DetailsView() {
     setView
   ])
 
-  const reviewedFindings = action._tag === "reviewed" ? action.result.findings : []
+  const reviewedFindings =
+    action._tag === "reviewed" && action.workspaceRevisionKey === currentWorkspaceRevisionKey
+      ? action.result.findings
+      : []
   const selectedFinding: RelayReviewFinding | null = reviewedFindings[selectedFindingIndex] ?? null
   const selectedFindingDiffRow = useMemo(() => {
     if (selectedFinding?.location.scope !== "line" || renderedDiff === null || selectedFile === null) return null
@@ -1378,6 +1422,7 @@ export function DetailsView() {
     if (
       action._tag !== "reviewed" ||
       workspace === null ||
+      currentWorkspaceRevisionKey === null ||
       selectedFinding === null ||
       agentRunning ||
       !findingConversationSubmissionEnabled(providerDriftPendingRef.current)
@@ -1438,9 +1483,11 @@ export function DetailsView() {
   }
 
   const publishFinding = () => {
+    const postingWorkspaceRevisionKey = currentWorkspaceRevisionKey
     if (
       pr === null ||
       workspace === null ||
+      postingWorkspaceRevisionKey === null ||
       selectedFinding === null ||
       postingFindingRef.current !== null ||
       !selectedFindingNeedsResolution
@@ -1459,7 +1506,7 @@ export function DetailsView() {
       findingIndex: selectedFindingIndex,
       fingerprint: relayFindingFingerprint(selectedFinding),
       requestId,
-      workspaceReloadKey: pullRequestWorkspaceReloadKey(pr)
+      workspaceReloadKey: postingWorkspaceRevisionKey
     })
     setFindingPostReceipt(null)
     updatePostingFinding(nextPostingFinding)

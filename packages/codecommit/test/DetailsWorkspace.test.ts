@@ -64,6 +64,7 @@ import {
   pullRequestRevisionPollingEnabled,
   pullRequestRevisionPollTickEnabled,
   pullRequestSelectionKey,
+  pullRequestWorkspaceIdentity,
   pullRequestWorkspaceReloadKey,
   resolvePullRequestSelection,
   revisionHeaderText,
@@ -80,6 +81,8 @@ import {
   workspaceResetInterruptions,
   workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
+  workspaceReviewDeckAfterRevisionChange,
+  workspaceReviewRevisionKey,
   worktreeCheckoutLocalDiff
 } from "../src/tui/details-model.js"
 import {
@@ -685,6 +688,33 @@ describe("PR detail workspace", () => {
         { _tag: "idle" }
       )
     ).toEqual({ action: reviewed, selectedFindingIndex: 1 })
+    expect(
+      workspaceReviewDeckAfterRevisionChange<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        "revision-a",
+        "revision-b",
+        false,
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: { _tag: "idle" }, selectedFindingIndex: 0 })
+    expect(
+      workspaceReviewDeckAfterRevisionChange<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        "revision-a",
+        "revision-a",
+        false,
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: reviewed, selectedFindingIndex: 1 })
+    expect(
+      workspaceReviewDeckAfterRevisionChange<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        "revision-a",
+        "revision-b",
+        true,
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: reviewed, selectedFindingIndex: 1 })
   })
 
   it("keys comments by the exact revision pair", () => {
@@ -716,9 +746,31 @@ describe("PR detail workspace", () => {
       sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40))
     }
     const key = pullRequestCommentsRequestKey(pr, revision)
+    const reviewRevision = {
+      ...revision,
+      destinationReference: "refs/heads/main",
+      pullRequestId: pr.id,
+      repositoryName: pr.repositoryName,
+      revisionId: "revision-a",
+      sourceReference: "refs/heads/feature",
+      status: Domain.PullRequestStatus.make("OPEN")
+    }
+    const reviewRevisionKey = workspaceReviewRevisionKey(pullRequestWorkspaceIdentity(pr), reviewRevision)
 
     expect(pullRequestCommentsRequestKey(pr, { ...revision })).toBe(key)
     expect(pullRequestCommentsRequestKey(new Domain.PullRequest({ ...pr }), revision)).toBe(key)
+    expect(
+      workspaceReviewRevisionKey(
+        pullRequestWorkspaceIdentity(new Domain.PullRequest({ ...pr, commentCount: 1 })),
+        reviewRevision
+      )
+    ).toBe(reviewRevisionKey)
+    expect(
+      workspaceReviewRevisionKey(pullRequestWorkspaceIdentity(pr), {
+        ...reviewRevision,
+        sourceCommit: ReadClient.CodeCommitCommitId.make("c".repeat(40))
+      })
+    ).not.toBe(reviewRevisionKey)
     expect(
       pullRequestCommentsRequestKey(
         new Domain.PullRequest({ ...pr, commentCount: 1, lastModifiedDate: new Date(2_000) }),

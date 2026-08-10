@@ -855,6 +855,18 @@ export const workspaceReviewDeckAfterReset = <Action>(
 ): { readonly action: Action; readonly selectedFindingIndex: number } =>
   preserveFindingPost ? current : { action: idleAction, selectedFindingIndex: 0 }
 
+/** Retires findings when their exact reviewed revision no longer matches the provider workspace. */
+export const workspaceReviewDeckAfterRevisionChange = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  reviewedRevisionKey: string,
+  currentRevisionKey: string,
+  preserveFindingPost: boolean,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  reviewedRevisionKey === currentRevisionKey
+    ? current
+    : workspaceReviewDeckAfterReset(current, preserveFindingPost, idleAction)
+
 /** Makes a replaced workspace's old findings non-interactive as soon as their post settles. */
 export const workspaceReviewDeckAfterPostSettlement = <Action>(
   current: { readonly action: Action; readonly selectedFindingIndex: number },
@@ -865,6 +877,35 @@ export const workspaceReviewDeckAfterPostSettlement = <Action>(
   workspaceFindingPostSettlement(postingWorkspaceReloadKey, currentWorkspaceReloadKey) === "retain-review-deck"
     ? current
     : { action: idleAction, selectedFindingIndex: 0 }
+
+/** Exact content identity that binds a Relay finding deck and its publication receipts. */
+export const workspaceReviewRevisionKey = (
+  identity: PullRequestWorkspaceIdentity,
+  revision: Pick<
+    ReadClient.CodeCommitPullRequestRevision,
+    | "destinationCommit"
+    | "destinationReference"
+    | "pullRequestId"
+    | "repositoryName"
+    | "revisionId"
+    | "sourceCommit"
+    | "sourceReference"
+    | "status"
+  >
+): string =>
+  JSON.stringify([
+    identity.profile,
+    identity.region,
+    Domain.normalizeAccountId(identity.repoAccountId) ?? null,
+    revision.repositoryName,
+    revision.pullRequestId,
+    revision.revisionId,
+    revision.status,
+    revision.destinationReference,
+    revision.sourceReference,
+    revision.destinationCommit,
+    revision.sourceCommit
+  ])
 
 /** Includes review children that must never outlive the exact workspace they inspect. */
 export const workspaceResetInterruptions = (

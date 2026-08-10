@@ -247,6 +247,14 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep CodeCommit merge capability copy synchronized across
+  `packages/codecommit/src/tui/ui/**`, `packages/codecommit/README.md`, and
+  `packages/codecommit-core/README.md`. The provider request pins the reviewed
+  source commit, while destination validation is preflight-only because
+  CodeCommit exposes no destination compare-and-set. Copy must not promise that
+  a three-way merge uses the reviewed base if the destination advances after
+  preflight. Generated and vendor documentation are excluded; providers with a
+  real destination compare-and-set still require capability-specific judgment.
 - Keep CodeCommit review-publication terminology synchronized across
   `.changeset/*.md`, `packages/codecommit/README.md`, and the publication schema.
   CodeCommit has no native file-comment target: describe file-scoped findings as

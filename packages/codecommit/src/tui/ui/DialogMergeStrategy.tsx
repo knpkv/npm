@@ -24,7 +24,7 @@ const strategies: ReadonlyArray<{
   {
     id: "three-way",
     label: "Three-way",
-    description: "Create a merge commit from the reviewed base and head."
+    description: "Pin the reviewed head; CodeCommit may use a newer destination after preflight."
   }
 ]
 

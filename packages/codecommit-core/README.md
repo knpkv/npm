@@ -69,7 +69,7 @@ const program = Effect.gen(function* () {
 
 The exported `merge` action is an authority-bearing, non-idempotent direct provider mutation for an interactive client that pins `sourceCommitId`, prevents cancellation after submission, and waits for the provider receipt without interrupting the submitted call at the generic operation timeout. It is not a governed server-review action: Control Center deliberately excludes `merge` from its accepted action union and reconciliation locators. Other server integrations must exclude it unless they explicitly own the same non-idempotent execution and receipt-settlement lifecycle.
 
-Governed merge remains deliberately unavailable. CodeCommit’s pull-request merge operation honors the provider’s current approval or approval-rule override state and can pin the authorized source commit. It cannot compare-and-set the authorized destination commit. Callers must not describe the exported direct merge action as an atomic governed PR merge.
+Governed merge remains deliberately unavailable. CodeCommit’s pull-request merge operation honors the provider’s current approval or approval-rule override state and can pin the authorized source commit. Destination commit validation is preflight-only: the operation cannot compare-and-set the authorized destination commit, so CodeCommit may merge against a destination that advances after preflight. Callers must not describe the exported direct merge action as an atomic governed PR merge or promise that a three-way merge uses the reviewed base.
 
 ### CacheService (SQLite)
 
