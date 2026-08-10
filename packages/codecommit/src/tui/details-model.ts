@@ -324,6 +324,8 @@ export type WorkspaceRefreshReason =
   | "destination-commit-changed"
   | "destination-reference-changed"
   | "repository-changed"
+  | "caller-account-changed"
+  | "repository-account-changed"
   | "pull-request-closed"
   | "merge-target-not-found"
   | "merge-outcome-unknown"
@@ -340,6 +342,8 @@ export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<Workspa
       "destination-commit-changed",
       "destination-reference-changed",
       "repository-changed",
+      "caller-account-changed",
+      "repository-account-changed",
       "pull-request-closed",
       "merge-target-not-found",
       "merge-outcome-unknown"
@@ -357,6 +361,8 @@ export const mergeWorkspaceRefreshReason = (
     case "destination-commit-changed":
     case "destination-reference-changed":
     case "repository-changed":
+    case "caller-account-changed":
+    case "repository-account-changed":
     case "pull-request-closed":
       return reason
     case "approval-by-author":
@@ -385,6 +391,8 @@ export const mergeFailureWorkspaceReloadPolicy = (
 ): "refresh-list" | "reload" | "retain" => {
   if (
     diagnostic.workspaceRefreshReason === "repository-changed" ||
+    diagnostic.workspaceRefreshReason === "caller-account-changed" ||
+    diagnostic.workspaceRefreshReason === "repository-account-changed" ||
     diagnostic.workspaceRefreshReason === "pull-request-closed" ||
     diagnostic.workspaceRefreshReason === "merge-target-not-found" ||
     diagnostic.workspaceRefreshReason === "merge-outcome-unknown"

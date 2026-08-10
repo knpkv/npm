@@ -18,6 +18,7 @@ import {
   CodeCommitChangedFilesPage,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
+  CodeCommitRepositoryIdentity,
   CodeCommitRepositoryPage
 } from "../src/ReadClient/models.js"
 import { CodeCommitReadClient, type CodeCommitReadClientService } from "../src/ReadClient/ReadClient.js"
@@ -108,7 +109,11 @@ const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
 
 const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   _tag: "merge",
-  target: commentAction.target,
+  target: {
+    ...commentAction.target,
+    expectedCallerAccountId: "123456789012",
+    expectedRepositoryAccountId: "123456789012"
+  },
   strategy: "squash"
 })
 
@@ -135,6 +140,10 @@ const baseReadClient = (
     Effect.succeed(new CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
   streamPullRequests: () => Stream.make(pullRequest),
   getPullRequest: () => Effect.succeed(pullRequest),
+  getRepositoryIdentity: () =>
+    Effect.succeed(
+      new CodeCommitRepositoryIdentity({ accountId: "123456789012", repositoryName: "payments-api" })
+    ),
   getChangedFilesPage: () =>
     Effect.succeed(new CodeCommitChangedFilesPage({ files: [], nextToken: null, providerPageLimit: 100 })),
   streamChangedFiles: () => Stream.empty,
@@ -268,6 +277,63 @@ describe("CodeCommitReviewClient", () => {
       if (Result.isFailure(result)) {
         assert.instanceOf(result.failure, CodeCommitReviewConflictError)
         assert.strictEqual(result.failure.reason, "source-commit-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("does not call the merge provider when the profile resolves to another AWS account", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient({
+          discoverAccount: () =>
+            Effect.succeed(
+              new CodeCommitAccountIdentity({
+                accountId: "210987654321",
+                arn: "arn:aws:iam::210987654321:user/reviewer"
+              })
+            )
+        }),
+        baseProvider({
+          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "caller-account-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("does not call the merge provider when the repository resolves to another owner account", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient({
+          getRepositoryIdentity: () =>
+            Effect.succeed(
+              new CodeCommitRepositoryIdentity({ accountId: "210987654321", repositoryName: "payments-api" })
+            )
+        }),
+        baseProvider({
+          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "repository-account-changed")
       }
       assert.strictEqual(yield* Ref.get(providerCalls), 0)
     }))

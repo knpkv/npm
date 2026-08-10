@@ -41,6 +41,16 @@ export const CodeCommitReviewTarget = Schema.Struct({
 /** Decoded immutable review target. */
 export type CodeCommitReviewTarget = typeof CodeCommitReviewTarget.Type
 
+/** Merge target additionally bound to the resolved caller and repository-owner accounts. */
+export const CodeCommitMergeTarget = Schema.Struct({
+  ...CodeCommitReviewTarget.fields,
+  expectedCallerAccountId: NonEmptyString,
+  expectedRepositoryAccountId: NonEmptyString
+}).annotate({ identifier: "CodeCommitMergeTarget" })
+
+/** Decoded merge target with captured account authority. */
+export type CodeCommitMergeTarget = typeof CodeCommitMergeTarget.Type
+
 /** Exact CodeCommit file position for one inline pull-request comment. */
 export class CodeCommitReviewLocation extends Schema.Class<CodeCommitReviewLocation>(
   "CodeCommitReviewLocation"
@@ -76,7 +86,7 @@ export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("approve", { target: CodeCommitReviewTarget }),
   Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget }),
   Schema.TaggedStruct("merge", {
-    target: CodeCommitReviewTarget,
+    target: CodeCommitMergeTarget,
     strategy: CodeCommitMergeStrategy
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))

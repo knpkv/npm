@@ -472,6 +472,19 @@ describe("PR detail workspace", () => {
         workspaceRefreshReason: "repository-changed"
       })
     ).toBe("refresh-list")
+    const accountRefreshReasons: ReadonlyArray<"caller-account-changed" | "repository-account-changed"> = [
+      "caller-account-changed",
+      "repository-account-changed"
+    ]
+    for (const workspaceRefreshReason of accountRefreshReasons) {
+      expect(
+        mergeFailureWorkspaceReloadPolicy({
+          message: "The selected AWS account identity changed",
+          operation: "merge-squash",
+          workspaceRefreshReason
+        })
+      ).toBe("refresh-list")
+    }
     expect(
       mergeFailureWorkspaceRefreshReason(
         new ReadClient.CodeCommitReadNotFoundError({ operation: "get-pull-request" })

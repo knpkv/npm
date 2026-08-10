@@ -66,12 +66,30 @@ const baseProvider = (overrides: Partial<CodeCommitReadProviderService> = {}): C
   getBlob: () => Effect.succeed({ content: new Uint8Array([1, 2, 3]) }),
   listPullRequestsPage: () => Effect.succeed({ pullRequestIds: ["17"], nextToken: "next-pr-page" }),
   getPullRequest: ({ pullRequestId }) => Effect.succeed(pullRequestResponse(pullRequestId)),
+  getRepository: () =>
+    Effect.succeed({ repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" } }),
   getDifferencesPage: () => Effect.succeed({ differences: [] }),
   listRepositoriesPage: () => Effect.succeed({ repositories: [] }),
   ...overrides
 })
 
 describe("CodeCommitReadClient", () => {
+  it.effect("decodes repository ownership for authority revalidation", () =>
+    runWithProvider(
+      baseProvider({
+        getRepository: () =>
+          Effect.succeed({
+            repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+          })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const identity = yield* client.getRepositoryIdentity({ account, repositoryName: "payments-api" })
+        assert.strictEqual(identity.accountId, "123456789012")
+        assert.strictEqual(identity.repositoryName, "payments-api")
+      })
+    ))
+
   it.effect("decodes a bounded repository discovery page", () =>
     runWithProvider(
       baseProvider({

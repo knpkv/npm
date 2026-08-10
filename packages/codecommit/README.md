@@ -86,6 +86,10 @@ request pins `sourceCommitId` to the displayed head, so CodeCommit rejects a
 source branch that moves after preflight. CodeCommit exposes no destination
 compare-and-set for this operation: if the destination advances after preflight,
 the provider may use that newer destination, including for a three-way merge.
+The submitted action also captures the resolved STS caller account and
+repository-owner account from the selected PR. Immediately before the merge
+write, the TUI resolves both identities again with `GetCallerIdentity` and
+`GetRepository`; either mismatch makes zero merge calls and forces a refresh.
 Once submitted, the TUI waits for the
 CodeCommit receipt because cancelling a non-idempotent merge request could hide
 a merge that already completed. Approval-rule failures, stale revisions,

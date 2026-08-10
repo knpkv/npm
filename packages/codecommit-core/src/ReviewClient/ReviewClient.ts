@@ -13,6 +13,7 @@ import type { CodeCommitAccountIdentity, CodeCommitPullRequestRevision } from ".
 import { CodeCommitReadClient } from "../ReadClient/ReadClient.js"
 import { CodeCommitReviewConflictError, type CodeCommitReviewError } from "./errors.js"
 import {
+  type CodeCommitMergeTarget,
   type CodeCommitReviewAction,
   CodeCommitReviewReceipt,
   type CodeCommitReviewReconciliation,
@@ -169,6 +170,36 @@ const preflightTarget = Effect.fn("CodeCommitReviewClient.preflightTarget")(func
   return pullRequest
 })
 
+/** Re-resolves mutable profile credentials and repository ownership immediately before merge dispatch. */
+const verifyMergeTargetIdentity = Effect.fn("CodeCommitReviewClient.verifyMergeTargetIdentity")(function*(
+  readClient: CodeCommitReadClient["Service"],
+  target: CodeCommitMergeTarget
+) {
+  const repository = yield* readClient.getRepositoryIdentity({
+    account: target.account,
+    repositoryName: target.repositoryName
+  })
+  if (repository.repositoryName !== target.repositoryName) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-changed"
+    })
+  }
+  if (repository.accountId !== target.expectedRepositoryAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-account-changed"
+    })
+  }
+  const caller = yield* readClient.discoverAccount(target.account)
+  if (caller.accountId !== target.expectedCallerAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "caller-account-changed"
+    })
+  }
+})
+
 const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
   switch (tag) {
     case "request-review":
@@ -277,6 +308,7 @@ export class CodeCommitReviewClient extends Context.Service<
           }
           case "merge": {
             yield* preflightTarget(readClient, action.target)
+            yield* verifyMergeTargetIdentity(readClient, action.target)
             const raw = yield* provider.mergePullRequest(action).pipe(
               Effect.mapError(mapProviderError("merge-pull-request"))
             )

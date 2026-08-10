@@ -1,4 +1,4 @@
-import { CacheService, type Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { CacheService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Crypto, Effect, Stream } from "effect"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import {
@@ -361,6 +361,22 @@ export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput
   actionOutcome(
     input.requestId,
     Effect.gen(function*() {
+      const expectedCallerAccountId = Domain.normalizeAccountId(input.pr.account.awsAccountId)
+      if (expectedCallerAccountId === undefined) {
+        return yield* new WorkspaceRefreshActionError({
+          operation: `merge-${input.strategy}`,
+          message: "The selected AWS caller account identity is unresolved; refresh before merging",
+          workspaceRefreshReason: "caller-account-changed"
+        })
+      }
+      const expectedRepositoryAccountId = Domain.normalizeAccountId(input.pr.account.repoAccountId)
+      if (expectedRepositoryAccountId === undefined) {
+        return yield* new WorkspaceRefreshActionError({
+          operation: `merge-${input.strategy}`,
+          message: "The selected repository owner account identity is unresolved; refresh before merging",
+          workspaceRefreshReason: "repository-account-changed"
+        })
+      }
       const client = yield* ReviewClient.CodeCommitReviewClient
       const action: Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "merge" }> = {
         _tag: "merge",
@@ -372,6 +388,8 @@ export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput
           },
           destinationCommit: input.revision.destinationCommit,
           destinationReference: input.revision.destinationReference,
+          expectedCallerAccountId,
+          expectedRepositoryAccountId,
           pullRequestId: input.revision.pullRequestId,
           repositoryName: input.revision.repositoryName,
           revisionId: input.revision.revisionId,
