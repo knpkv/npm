@@ -64,6 +64,7 @@ import {
   type FindingPostSession,
   type WorkspaceActionPhase,
   workspaceLifecycleTransition,
+  workspaceReviewDeckAfterReset,
   workspaceResetInterruptions,
   worktreeCheckoutLocalDiff,
   workspaceIdentityMatches
@@ -422,6 +423,7 @@ export function DetailsView() {
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
   const actionRef = useRef<ActionStatus>(action)
+  const selectedFindingIndexRef = useRef(selectedFindingIndex)
   const diffRef = useRef<DiffRenderable>(null)
   const highlightedFindingRef = useRef<{ readonly diff: DiffRenderable; readonly row: number } | null>(null)
   const filesScrollRef = useRef<ScrollBoxRenderable>(null)
@@ -429,6 +431,7 @@ export function DetailsView() {
   const pendingDiffKeyRef = useRef<string | null>(null)
   const postingFindingRef = useRef<FindingPostSession | null>(null)
   actionRef.current = action
+  selectedFindingIndexRef.current = selectedFindingIndex
 
   const updatePostingFinding = (next: FindingPostSession | null) => {
     postingFindingRef.current = next
@@ -503,8 +506,13 @@ export function DetailsView() {
       else if (interrupt === "conversation") continueReview(Atom.Interrupt)
       else verifyFindingAction(Atom.Interrupt)
     }
+    const reviewDeck = workspaceReviewDeckAfterReset(
+      { action: actionRef.current, selectedFindingIndex: selectedFindingIndexRef.current },
+      transition.preserveFindingPost,
+      { _tag: "idle" }
+    )
     setSelectedFileIndex(0)
-    setSelectedFindingIndex(0)
+    setSelectedFindingIndex(reviewDeck.selectedFindingIndex)
     if (!transition.preserveFindingPost) {
       setFindingDispositions({})
       setFindingPostDiagnostics({})
@@ -518,7 +526,7 @@ export function DetailsView() {
     setEditorStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
     setTab("diff")
-    setAction({ _tag: "idle" })
+    setAction(reviewDeck.action)
     if (pr !== null) loadWorkspace(pr)
   }, [checkout, continueReview, loadWorkspace, preflight, pr, runReview, verifyFindingAction, workspaceReloadKey])
 

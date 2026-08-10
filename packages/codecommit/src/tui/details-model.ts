@@ -368,6 +368,14 @@ export const workspaceLifecycleTransition = (
   return { _tag: "reset", interrupt, preserveFindingPost: findingPostRunning }
 }
 
+/** Retains the finding deck that owns an in-flight post so its receipt remains visible. */
+export const workspaceReviewDeckAfterReset = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  preserveFindingPost: boolean,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  preserveFindingPost ? current : { action: idleAction, selectedFindingIndex: 0 }
+
 /** Includes review children that must never outlive the exact workspace they inspect. */
 export const workspaceResetInterruptions = (
   interrupt: Extract<WorkspaceLifecycleTransition, { readonly _tag: "reset" }>["interrupt"]

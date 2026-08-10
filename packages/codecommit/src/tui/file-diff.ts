@@ -268,11 +268,13 @@ export const preloadLocalFileDiffs = Effect.fn("preloadLocalFileDiffs")(function
     const identity = fileDiffIdentity(request.identity, request.revision, file)
     return loadFileDiff(client, fileRequest).pipe(
       Effect.match({
-        onFailure: (): FileDiffOutcome => ({ _tag: "failure", identity }),
-        onSuccess: (value): FileDiffOutcome => ({ _tag: "success", identity, value })
-      }),
-      Effect.map((outcome): FileDiffCacheEntry => [fileDiffIdentityKey(identity), outcome])
+        onFailure: (): FileDiffCacheEntry | null => null,
+        onSuccess: (value): FileDiffCacheEntry => [
+          fileDiffIdentityKey(identity),
+          { _tag: "success", identity, value }
+        ]
+      })
     )
   }, { concurrency: 4 })
-  return new Map(entries)
+  return new Map(entries.flatMap((entry) => entry === null ? [] : [entry]))
 })

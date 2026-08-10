@@ -25,6 +25,15 @@ export interface BoundedSelectionTransition {
   readonly submittedIndex: number | null
 }
 
+export interface BoundedMultiSelectionState<Value> {
+  readonly cursor: number
+  readonly selection: ReadonlyArray<Value>
+}
+
+export interface BoundedMultiSelectionTransition<Value> extends BoundedMultiSelectionState<Value> {
+  readonly submission: ReadonlyArray<Value> | null
+}
+
 /** Advances a bounded selection synchronously and snapshots Return against that cursor. */
 export const transitionBoundedSelection = (
   cursor: number,
@@ -38,6 +47,30 @@ export const transitionBoundedSelection = (
   return {
     cursor: boundedCursor,
     submittedIndex: key.name === "return" ? boundedCursor : null
+  }
+}
+
+/** Advances and submits a bounded multi-selection without waiting for a render. */
+export const transitionBoundedMultiSelection = <Value>(
+  state: BoundedMultiSelectionState<Value>,
+  key: TextFilterInputKey,
+  options: ReadonlyArray<Value>,
+  minimumSelections: number
+): BoundedMultiSelectionTransition<Value> => {
+  const cursorTransition = transitionBoundedSelection(state.cursor, key, options.length)
+  let selection = state.selection
+  if (key.name === "space") {
+    const current = options[cursorTransition.cursor]
+    if (current !== undefined) {
+      const isSelected = selection.includes(current)
+      if (!isSelected) selection = [...selection, current]
+      else if (selection.length > minimumSelections) selection = selection.filter((value) => value !== current)
+    }
+  }
+  return {
+    cursor: cursorTransition.cursor,
+    selection,
+    submission: key.name === "return" ? selection : null
   }
 }
 

@@ -54,9 +54,11 @@ import {
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
   workspaceResetInterruptions,
+  workspaceReviewDeckAfterReset,
   worktreeCheckoutLocalDiff
 } from "../src/tui/details-model.js"
 import {
+  type FileDiffRequest,
   loadFileDiff,
   loadLocalGitBlob,
   MAXIMUM_PRELOADED_FILE_DIFFS,
@@ -383,6 +385,28 @@ describe("PR detail workspace", () => {
     expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
     expect(workspaceResetInterruptions("none")).toEqual(["conversation", "verification"])
     expect(workspaceResetInterruptions("review")).toEqual(["review", "conversation", "verification"])
+  })
+
+  it("retains the reviewed finding deck until an in-flight post receipt can be shown", () => {
+    type TestAction =
+      | { readonly _tag: "idle" }
+      | { readonly _tag: "reviewed"; readonly findingIds: ReadonlyArray<string> }
+    const reviewed: TestAction = { _tag: "reviewed", findingIds: ["finding-1", "finding-2"] }
+
+    expect(
+      workspaceReviewDeckAfterReset<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        true,
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: reviewed, selectedFindingIndex: 1 })
+    expect(
+      workspaceReviewDeckAfterReset<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        false,
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: { _tag: "idle" }, selectedFindingIndex: 0 })
   })
 
   it("keys comments by the exact revision pair", () => {
@@ -1361,7 +1385,7 @@ describe("PR detail workspace", () => {
           getLocalBlob: ({ blobId }) =>
             Effect.succeed(
               new ReadClient.CodeCommitBlobContent({
-                blobId,
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
                 bytes: new TextEncoder().encode(blobId.startsWith("before") ? "before\n" : "after\n")
               })
             )
@@ -1400,6 +1424,83 @@ describe("PR detail workspace", () => {
         expect(previews.has(deferredKey)).toBe(false)
       }
       expect(providerReads).toBe(0)
+    }))
+
+  it.effect("omits failed preloads so selecting the file can retry after recovery", () =>
+    Effect.gen(function*() {
+      const account = new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      })
+      const repositoryName = Domain.RepositoryName.make("payments")
+      const pullRequestId = Domain.PullRequestId.make("42")
+      const destinationCommit = ReadClient.CodeCommitCommitId.make("a".repeat(40))
+      const sourceCommit = ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      const file = decodeChangedFile({
+        status: "modified",
+        before: { blobId: "before-retry", path: "src/retry.ts", mode: "100644" },
+        after: { blobId: "after-retry", path: "src/retry.ts", mode: "100644" }
+      })
+      const revision = new ReadClient.CodeCommitPullRequestRevision({
+        authorArn: null,
+        creationDate: new Date(0),
+        destinationCommit,
+        destinationReference: "refs/heads/main",
+        lastActivityDate: new Date(0),
+        mergeBase: destinationCommit,
+        pullRequestId,
+        repositoryName,
+        revisionId: "revision-1",
+        sourceCommit,
+        sourceReference: "refs/heads/feature",
+        status: "OPEN",
+        title: "Review"
+      })
+      const identity = { profile: account.profile, pullRequestId, region: account.region, repositoryName }
+      const request: FileDiffRequest = {
+        account,
+        file,
+        identity,
+        localWorktreePath: "/private/exact-head",
+        repositoryName,
+        revision
+      }
+      const failed = yield* preloadLocalFileDiffs(
+        {
+          getBlob: () => Effect.fail(new ReadClient.CodeCommitReadNotFoundError({ operation: "getBlob" })),
+          getLocalBlob: () =>
+            Effect.fail(new WorktreeError({ operation: "read-local-blob", message: "missing object" }))
+        },
+        {
+          account,
+          files: [file],
+          identity,
+          localWorktreePath: "/private/exact-head",
+          repositoryName,
+          revision
+        }
+      )
+      const key = fileDiffIdentityKey(fileDiffIdentity(identity, revision, file))
+      let recoveredReads = 0
+      const recovered = yield* loadFileDiff(
+        {
+          getBlob: ({ blobId }) => {
+            recoveredReads += 1
+            return Effect.succeed(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new TextEncoder().encode(blobId === file.before?.blobId ? "before\n" : "after\n")
+              })
+            )
+          }
+        },
+        request
+      )
+
+      expect(failed.has(key)).toBe(false)
+      expect(recovered.diff).toContain("-before")
+      expect(recovered.diff).toContain("+after")
+      expect(recoveredReads).toBe(2)
     }))
 
   it.live("reads the immutable local object instead of the mutable worktree path", () =>

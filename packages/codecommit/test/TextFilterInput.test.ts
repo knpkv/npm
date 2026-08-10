@@ -6,6 +6,7 @@ import {
   textFilterActionScope,
   type TextFilterInputKey,
   type TextFilterInputState,
+  transitionBoundedMultiSelection,
   transitionBoundedSelection,
   transitionSingleLineDraft,
   transitionTextFilterInput
@@ -65,6 +66,42 @@ describe("text filter input", () => {
     expect(transitionBoundedSelection(1, { name: "return" }, 3).submittedIndex).toBe(1)
     expect(transitionBoundedSelection(2, { name: "down" }, 3).cursor).toBe(2)
     expect(transitionBoundedSelection(0, { name: "up" }, 3).cursor).toBe(0)
+  })
+
+  it("submits the synchronously toggled review skills when Space and Return share a batch", () => {
+    let state: { cursor: number; selection: ReadonlyArray<string> } = {
+      cursor: 0,
+      selection: ["pr-review", "pr-diff-review"]
+    }
+    let submission: ReadonlyArray<string> | null = null
+    for (const key of [{ name: "space" }, { name: "return" }]) {
+      const transition = transitionBoundedMultiSelection(
+        state,
+        key,
+        ["pr-review", "pr-diff-review"],
+        1
+      )
+      state = { cursor: transition.cursor, selection: transition.selection }
+      submission = transition.submission ?? submission
+    }
+
+    expect(submission).toEqual(["pr-diff-review"])
+    expect(
+      transitionBoundedMultiSelection(
+        { cursor: 1, selection: ["pr-review", "pr-diff-review"] },
+        { name: "return" },
+        ["pr-review", "pr-diff-review"],
+        1
+      ).submission
+    ).toEqual(["pr-review", "pr-diff-review"])
+    expect(
+      transitionBoundedMultiSelection(
+        { cursor: 0, selection: ["pr-review"] },
+        { name: "space" },
+        ["pr-review", "pr-diff-review"],
+        1
+      ).selection
+    ).toEqual(["pr-review"])
   })
 
   it("keeps settings-filter shortcut letters inside a pasted account search", () => {

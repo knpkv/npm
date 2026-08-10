@@ -1,6 +1,7 @@
 import { useKeyboard } from "@opentui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { normalizeRelayReviewSkills, relayReviewSkills, type RelayReviewSkillId } from "../../ReviewSkills.js"
+import { transitionBoundedMultiSelection } from "../text-filter-input.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { Dialog } from "./Dialog.js"
@@ -14,27 +15,27 @@ export function DialogReviewSkills({
 }) {
   const { theme } = useTheme()
   const dialog = useDialog()
-  const [cursor, setCursor] = useState(0)
-  const [selection, setSelection] = useState<ReadonlyArray<RelayReviewSkillId>>(() =>
-    normalizeRelayReviewSkills(selected)
-  )
-
-  const toggleCurrent = () => {
-    const skill = relayReviewSkills[cursor]
-    if (skill === undefined) return
-    const isSelected = selection.includes(skill.id)
-    if (isSelected && selection.length === 1) return
-    setSelection(isSelected ? selection.filter((id) => id !== skill.id) : [...selection, skill.id])
-  }
+  const initialSelection = normalizeRelayReviewSkills(selected)
+  const selectionRef = useRef({ cursor: 0, selection: initialSelection })
+  const [cursor, setCursor] = useState(selectionRef.current.cursor)
+  const [selection, setSelection] = useState<ReadonlyArray<RelayReviewSkillId>>(selectionRef.current.selection)
 
   useKeyboard((key) => {
     if (key.name === "escape") dialog.hide()
-    else if (key.name === "up") setCursor((index) => Math.max(0, index - 1))
-    else if (key.name === "down") setCursor((index) => Math.min(relayReviewSkills.length - 1, index + 1))
-    else if (key.name === "space") toggleCurrent()
-    else if (key.name === "return") {
-      onApply(selection)
-      dialog.hide()
+    else {
+      const transition = transitionBoundedMultiSelection(
+        selectionRef.current,
+        key,
+        relayReviewSkills.map((skill) => skill.id),
+        1
+      )
+      selectionRef.current = { cursor: transition.cursor, selection: transition.selection }
+      setCursor(transition.cursor)
+      setSelection(transition.selection)
+      if (transition.submission !== null) {
+        onApply(transition.submission)
+        dialog.hide()
+      }
     }
   })
 
