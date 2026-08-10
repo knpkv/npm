@@ -139,16 +139,20 @@ describe("pull request workspace loading", () => {
     })
     const outdated = localDiffForWorkspace(checkout.identity, newerRevision, checkout)
     expect(outdated).toEqual({ _tag: "outdated", plan, worktree: checkout.worktree })
+    const newerBaseRevision = new ReadClient.CodeCommitPullRequestRevision({
+      ...revision,
+      destinationCommit: ReadClient.CodeCommitCommitId.make("f".repeat(40))
+    })
+    expect(localDiffForWorkspace(checkout.identity, newerBaseRevision, checkout)).toEqual({
+      _tag: "outdated",
+      plan,
+      worktree: checkout.worktree
+    })
     expect(localWorktreePathForDiff(ready)).toBe(plan.targetPath)
     expect(localWorktreePathForDiff(outdated)).toBeUndefined()
     expect(localWorktreePathForDiff({ _tag: "provider" })).toBeUndefined()
     expect(providerRevisionChanged(revision, revision)).toBe(false)
     expect(providerRevisionChanged(revision, newerRevision)).toBe(true)
-    expect(
-      providerRevisionChanged(revision, {
-        ...revision,
-        destinationCommit: ReadClient.CodeCommitCommitId.make("f".repeat(40))
-      })
-    ).toBe(true)
+    expect(providerRevisionChanged(revision, newerBaseRevision)).toBe(true)
   })
 })

@@ -872,6 +872,7 @@ describe("PR detail workspace", () => {
     expect(localEditorReady(ready, "src/surviving.ts", false)).toBe(true)
     expect(localEditorReady(ready, null, false)).toBe(false)
     expect(localEditorReady(provider, "src/surviving.ts", false)).toBe(false)
+    expect(localEditorReady({ ...ready, _tag: "outdated" }, "src/surviving.ts", false)).toBe(false)
     expect(worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-2" }, success)).toBe(provider)
     expect(
       worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, {
