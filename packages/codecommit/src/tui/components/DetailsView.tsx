@@ -1042,10 +1042,10 @@ export function DetailsView() {
     const observation: MergeResultObservation = AsyncResult.isWaiting(mergePullRequestResult)
       ? { _tag: "pending" }
       : AsyncResult.isFailure(mergePullRequestResult)
-      ? { _tag: "failure" }
-      : AsyncResult.isSuccess(mergePullRequestResult)
-      ? { _tag: "success", requestId: mergePullRequestResult.value.requestId }
-      : { _tag: "pending" }
+        ? { _tag: "failure" }
+        : AsyncResult.isSuccess(mergePullRequestResult)
+          ? { _tag: "success", requestId: mergePullRequestResult.value.requestId }
+          : { _tag: "pending" }
     const settlement = mergeResultSettlement(mergeStatus._tag === "running" ? mergeStatus.requestId : null, observation)
     if (settlement === "ignore") return
     if (settlement === "ambiguous") {
