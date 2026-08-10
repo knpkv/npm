@@ -79,6 +79,7 @@ export const resolveAccounts = (state: PRState) =>
       ...s,
       pullRequests: cachedPRs.map(decodeCachedPR),
       status: loadingStatus,
+      successfulRefreshScopes: [],
       ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
     }))
 

@@ -63,15 +63,23 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     const staleNow = yield* Clock.currentTimeMillis
     const staleThreshold = DateTime.toDate(DateTime.makeUnsafe(staleNow)).toISOString().slice(0, 19) + "Z"
 
-    yield* hub.batch(
+    const successfulRefreshScopes = yield* hub.batch(
       Effect.gen(function*() {
-        yield* fetchAndUpsertPRs({ state, enabledAccounts, accountIdMap, subscribedRef, currentUser, staleThreshold })
+        const scopes = yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts,
+          accountIdMap,
+          subscribedRef,
+          currentUser,
+          staleThreshold
+        })
         yield* enrichComments({ state, subscribedRef })
         yield* enrichDiffs(state)
         yield* calculateHealthScores(state)
         // All enrichment writes land in the cache. Publish that final snapshot
         // during this refresh so newly fetched PRs do not require a second run.
         yield* publishCachedPullRequests(state)
+        return scopes
       })
     )
 
@@ -80,7 +88,8 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
       status: idleStatus,
-      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now))
+      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
+      successfulRefreshScopes
     }))
 
     // Sync metadata

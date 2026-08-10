@@ -464,6 +464,12 @@ export interface AccountState {
   readonly enabled: boolean
 }
 
+/** Account-region scope whose pull-request list completed in the latest refresh. */
+export interface PullRequestRefreshScope {
+  readonly profile: AwsProfileName
+  readonly region: AwsRegion
+}
+
 /**
  * Application state.
  *
@@ -478,4 +484,5 @@ export interface AppState {
   readonly lastUpdated?: Date
   readonly currentUser?: string
   readonly pendingReviewCount?: number
+  readonly successfulRefreshScopes?: ReadonlyArray<PullRequestRefreshScope>
 }

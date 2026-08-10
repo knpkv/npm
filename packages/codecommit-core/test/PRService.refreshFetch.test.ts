@@ -92,14 +92,20 @@ describe("fetchAndUpsertPRs", () => {
       const subscribedRef = yield* Ref.make(new Set<string>())
       const deleteCalls = yield* Ref.make(0)
       const detailCalls = yield* Ref.make(0)
-      const account = Schema.decodeSync(AccountConfig)({
+      const failedAccount = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
         enabled: true
       })
+      const successfulAccount = Schema.decodeSync(AccountConfig)({
+        profile: "other-profile",
+        regions: ["eu-west-1"],
+        enabled: true
+      })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.fail(new Error("provider unavailable")),
+          getPullRequests: ({ profile }) =>
+            profile === failedAccount.profile ? Stream.fail(new Error("provider unavailable")) : Stream.empty,
           getPullRequest: () =>
             Ref.update(detailCalls, (count) => count + 1).pipe(
               Effect.andThen(Effect.die("unexpected stale detail fetch"))
@@ -116,10 +122,13 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(SubscriptionRepo, {})
       )
 
-      yield* fetchAndUpsertPRs({
+      const successfulScopes = yield* fetchAndUpsertPRs({
         state,
-        enabledAccounts: [account],
-        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        enabledAccounts: [failedAccount, successfulAccount],
+        accountIdMap: new Map([
+          ["test-profile", "123456789012"],
+          ["other-profile", "210987654321"]
+        ]),
         subscribedRef,
         currentUser: undefined,
         staleThreshold: "2026-08-03T00:00:00Z"
@@ -127,5 +136,6 @@ describe("fetchAndUpsertPRs", () => {
 
       expect(yield* Ref.get(detailCalls)).toBe(0)
       expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([{ profile: "other-profile", region: "eu-west-1" }])
     }))
 })

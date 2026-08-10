@@ -1144,12 +1144,14 @@ describe("PR detail workspace", () => {
       title: "Review"
     })
     const otherTarget = new Domain.PullRequest({ ...target, id: Domain.PullRequestId.make("43") })
-    let guard: AmbiguousMergeGuard | null = beginAmbiguousMergeGuard(
-      pullRequestSelectionKey(target),
-      new Date(1_000)
-    )
+    const enrichedTarget = new Domain.PullRequest({
+      ...target,
+      account: new Domain.Account({ ...target.account, repoAccountId: "111122223333" })
+    })
+    let guard: AmbiguousMergeGuard | null = beginAmbiguousMergeGuard(target, new Date(1_000))
 
     expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+    expect(pullRequestOpeningBlocked(guard, enrichedTarget)).toBe(true)
     expect(pullRequestOpeningBlocked(guard, otherTarget)).toBe(false)
     guard = ambiguousMergeGuardAfterAppStatus(guard, "idle")
     expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
@@ -1158,12 +1160,22 @@ describe("PR detail workspace", () => {
     expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
 
     guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle")
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000), [
+      { profile: Domain.AwsProfileName.make("staging"), region: Domain.AwsRegion.make("eu-west-1") }
+    ])
+    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(3_000), [
+      { profile: target.account.profile, region: target.account.region }
+    ])
     expect(guard).toBeNull()
     expect(pullRequestOpeningBlocked(guard, target)).toBe(false)
 
-    guard = beginAmbiguousMergeGuard(pullRequestSelectionKey(target), new Date(1_000))
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000))
+    guard = beginAmbiguousMergeGuard(target, new Date(1_000))
+    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000), [
+      { profile: target.account.profile, region: target.account.region }
+    ])
     expect(guard).toBeNull()
   })
 

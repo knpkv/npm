@@ -70,7 +70,6 @@ import {
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
   pullRequestRevisionPollTickEnabled,
-  pullRequestSelectionKey,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
   revisionHeaderText,
@@ -1046,7 +1045,7 @@ export function DetailsView() {
       })
       setVerifiedWorkspace(null)
       if (pr !== null) {
-        setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pullRequestSelectionKey(pr), appState.lastUpdated))
+        setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pr, appState.lastUpdated))
       }
       refresh()
       setView("prs")
@@ -1060,7 +1059,7 @@ export function DetailsView() {
       setVerifiedWorkspace((current) => verifiedWorkspaceAfterMergeFailure(current, outcome.diagnostic))
       if (reloadPolicy === "refresh-list") {
         if (outcome.diagnostic.workspaceRefreshReason === "merge-outcome-unknown" && pr !== null) {
-          setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pullRequestSelectionKey(pr), appState.lastUpdated))
+          setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pr, appState.lastUpdated))
         }
         refresh()
         setView("prs")

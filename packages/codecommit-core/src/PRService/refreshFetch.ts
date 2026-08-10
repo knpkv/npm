@@ -19,6 +19,7 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
+import type { PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 
 /** Resolve a stale OPEN PR: delete if still open, update status if merged/closed. */
@@ -48,7 +49,11 @@ export const fetchAndUpsertPRs = (params: {
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
   readonly staleThreshold: string
-}): Effect.Effect<void, never, AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo> =>
+}): Effect.Effect<
+  ReadonlyArray<PullRequestRefreshScope>,
+  never,
+  AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo
+> =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo
@@ -190,6 +195,14 @@ export const fetchAndUpsertPRs = (params: {
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
+
+    return enabledAccounts.flatMap((account) =>
+      (account.regions ?? []).flatMap((region) =>
+        successfulScopes.has(accountRegionKey(account.profile, region))
+          ? [{ profile: account.profile, region }]
+          : []
+      )
+    )
   }).pipe(
     Effect.tapCauseIf(Cause.hasDies, (cause) => Effect.logWarning("fetchAndUpsertPRs failed", cause))
   )

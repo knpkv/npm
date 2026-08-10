@@ -38,7 +38,8 @@ function AppContent({ onQuit }: AppProps) {
     const next = ambiguousMergeGuardAfterAppStatus(
       ambiguousMergeGuard,
       appStateResult.value.status,
-      appStateResult.value.lastUpdated
+      appStateResult.value.lastUpdated,
+      appStateResult.value.successfulRefreshScopes
     )
     if (next !== ambiguousMergeGuard) setAmbiguousMergeGuard(next)
   }, [ambiguousMergeGuard, appStateResult, setAmbiguousMergeGuard])

@@ -160,30 +160,38 @@ export const claimMergeConfirmation = (
 export interface AmbiguousMergeGuard {
   readonly baselineLastUpdated: number | null
   readonly phase: "awaiting-refresh" | "refreshing" | "refresh-failed"
+  readonly profile: Domain.AwsProfileName
+  readonly region: Domain.AwsRegion
   readonly selectionKey: string
 }
 
 /** Blocks a non-idempotent merge target before starting its authoritative list refresh. */
 export const beginAmbiguousMergeGuard = (
-  selectionKey: string,
+  pr: Domain.PullRequest,
   lastUpdated: Date | undefined = undefined
 ): AmbiguousMergeGuard => ({
   baselineLastUpdated: lastUpdated?.getTime() ?? null,
   phase: "awaiting-refresh",
-  selectionKey
+  profile: pr.account.profile,
+  region: pr.account.region,
+  selectionKey: pullRequestSelectionKey(pr)
 })
 
 /** Keeps an ambiguous target blocked through refresh failure and clears it only after a completed refresh. */
 export const ambiguousMergeGuardAfterAppStatus = (
   guard: AmbiguousMergeGuard | null,
   status: Domain.AppStatus,
-  lastUpdated: Date | undefined = undefined
+  lastUpdated: Date | undefined = undefined,
+  successfulRefreshScopes: ReadonlyArray<Domain.PullRequestRefreshScope> = []
 ): AmbiguousMergeGuard | null => {
   if (guard === null) return null
   if (status === "loading") return guard.phase === "refreshing" ? guard : { ...guard, phase: "refreshing" }
   if (status === "error" && guard.phase === "refreshing") return { ...guard, phase: "refresh-failed" }
   if (
     status === "idle" &&
+    successfulRefreshScopes.some(
+      (scope) => scope.profile === guard.profile && scope.region === guard.region
+    ) &&
     (guard.phase === "refreshing" ||
       (lastUpdated !== undefined && lastUpdated.getTime() !== guard.baselineLastUpdated))
   ) return null
@@ -194,7 +202,7 @@ export const ambiguousMergeGuardAfterAppStatus = (
 export const pullRequestOpeningBlocked = (
   guard: AmbiguousMergeGuard | null,
   pr: Domain.PullRequest
-): boolean => guard?.selectionKey === pullRequestSelectionKey(pr)
+): boolean => guard !== null && resolvePullRequestSelection([pr], guard.selectionKey) !== null
 
 export type WorkspaceRefreshReason =
   | "revision-changed"
