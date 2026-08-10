@@ -7,6 +7,7 @@
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import type * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import type * as DistilledRegion from "@distilled.cloud/aws/Region"
+import * as sts from "@distilled.cloud/aws/sts"
 import { Context, Effect, Layer } from "effect"
 import { HttpClient } from "effect/unstable/http"
 
@@ -19,6 +20,12 @@ import type { CodeCommitReviewAction, CodeCommitReviewTarget } from "./models.js
 export interface GetReviewCommentsProviderPageRequest {
   readonly target: CodeCommitReviewTarget
   readonly nextToken: string | null
+}
+
+/** Raw identity evidence captured by the same AWS runtime that will dispatch a merge. */
+export interface CodeCommitMergeAuthorizationEvidence {
+  readonly callerIdentity: unknown
+  readonly repositoryIdentity: unknown
 }
 
 /** Raw provider operations needed by the schema-decoded review client. */
@@ -35,9 +42,10 @@ export interface CodeCommitReviewProviderService {
   readonly updateApprovalState: (
     action: Extract<CodeCommitReviewAction, { readonly _tag: "approve" | "revoke-approval" }>
   ) => Effect.Effect<unknown, AwsClientError>
-  readonly mergePullRequest: (
-    action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>
-  ) => Effect.Effect<unknown, AwsClientError>
+  readonly mergePullRequest: <E>(
+    action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>,
+    authorize: (evidence: CodeCommitMergeAuthorizationEvidence) => Effect.Effect<void, E>
+  ) => Effect.Effect<unknown, AwsClientError | E>
   readonly getApprovalStates: (target: CodeCommitReviewTarget) => Effect.Effect<unknown, AwsClientError>
   readonly getCommentsPage: (
     request: GetReviewCommentsProviderPageRequest
@@ -79,6 +87,58 @@ const callProvider = <A, E>(
     ),
     reviewProviderTimeoutPolicy(operation) === "none" ? { retry: false, timeout: "none" } : { retry: false }
   )
+
+const mapRawProviderError = (operation: string, target: CodeCommitReviewTarget) => (cause: unknown) =>
+  makeApiError(operation, target.account.profile, target.account.region, cause)
+
+const mergeOperation = (strategy: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>["strategy"]) => {
+  switch (strategy) {
+    case "fast-forward":
+      return "mergePullRequestByFastForward"
+    case "squash":
+      return "mergePullRequestBySquash"
+    case "three-way":
+      return "mergePullRequestByThreeWay"
+  }
+}
+
+/**
+ * Verify caller and repository ownership, then dispatch under one credential snapshot.
+ * The authorization callback owns Schema decoding while this provider owns runtime atomicity.
+ */
+const callAuthorizedMerge = <E>(
+  action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>,
+  authorize: (evidence: CodeCommitMergeAuthorizationEvidence) => Effect.Effect<void, E>
+) => {
+  const operation = mergeOperation(action.strategy)
+  const request = makeMergePullRequestRequest(action)
+  const mapError = mapRawProviderError(operation, action.target)
+  const merge = (() => {
+    switch (action.strategy) {
+      case "fast-forward":
+        return codecommit.mergePullRequestByFastForward(request)
+      case "squash":
+        return codecommit.mergePullRequestBySquash(request)
+      case "three-way":
+        return codecommit.mergePullRequestByThreeWay(request)
+    }
+  })()
+
+  return withAwsContext(
+    operation,
+    action.target.account,
+    Effect.gen(function*() {
+      const repositoryIdentity = yield* codecommit.getRepository({
+        repositoryName: action.target.repositoryName
+      }).pipe(Effect.mapError(mapError))
+      // STS is intentionally last: authorization immediately precedes the destructive call.
+      const callerIdentity = yield* sts.getCallerIdentity({}).pipe(Effect.mapError(mapError))
+      yield* authorize({ callerIdentity, repositoryIdentity })
+      return yield* merge.pipe(Effect.mapError(mapError))
+    }),
+    { retry: false, timeout: "none" }
+  )
+}
 
 /** Map one decoded comment action to the exact Distilled CodeCommit request. */
 export const makePostCommentForPullRequestRequest = (
@@ -169,29 +229,7 @@ export const CodeCommitReviewProviderLive = Layer.effect(
             approvalState: action._tag === "approve" ? "APPROVE" : "REVOKE"
           })
         )),
-      mergePullRequest: (action) => {
-        const request = makeMergePullRequestRequest(action)
-        switch (action.strategy) {
-          case "fast-forward":
-            return provideRuntime(callProvider(
-              "mergePullRequestByFastForward",
-              action.target,
-              codecommit.mergePullRequestByFastForward(request)
-            ))
-          case "squash":
-            return provideRuntime(callProvider(
-              "mergePullRequestBySquash",
-              action.target,
-              codecommit.mergePullRequestBySquash(request)
-            ))
-          case "three-way":
-            return provideRuntime(callProvider(
-              "mergePullRequestByThreeWay",
-              action.target,
-              codecommit.mergePullRequestByThreeWay(request)
-            ))
-        }
-      },
+      mergePullRequest: (action, authorize) => provideRuntime(callAuthorizedMerge(action, authorize)),
       getApprovalStates: (target) =>
         provideRuntime(callProvider(
           "getPullRequestApprovalStates",

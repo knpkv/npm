@@ -166,10 +166,15 @@ const baseProvider = (
       comment: { commentId: "reply-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
-  mergePullRequest: () =>
-    Effect.succeed({
-      pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" }
-    }),
+  mergePullRequest: (_, authorize) =>
+    authorize({
+      callerIdentity: { Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/reviewer" },
+      repositoryIdentity: {
+        repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+      }
+    }).pipe(
+      Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+    ),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
   getCommentsPage: () => Effect.succeed({ commentsForPullRequestData: [], nextToken: undefined }),
   ...overrides
@@ -239,8 +244,17 @@ describe("CodeCommitReviewClient", () => {
       const receipt = yield* runWithClients(
         baseReadClient(),
         baseProvider({
-          mergePullRequest: (action) =>
-            Ref.update(providerCalls, (calls) => [...calls, action.strategy]).pipe(
+          mergePullRequest: (action, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "123456789012",
+                Arn: "arn:aws:iam::123456789012:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (calls) => [...calls, action.strategy])),
               Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
             )
         }),
@@ -285,17 +299,20 @@ describe("CodeCommitReviewClient", () => {
     Effect.gen(function*() {
       const providerCalls = yield* Ref.make(0)
       const result = yield* runWithClients(
-        baseReadClient({
-          discoverAccount: () =>
-            Effect.succeed(
-              new CodeCommitAccountIdentity({
-                accountId: "210987654321",
-                arn: "arn:aws:iam::210987654321:user/reviewer"
-              })
-            )
-        }),
+        baseReadClient(),
         baseProvider({
-          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+          mergePullRequest: (_, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "210987654321",
+                Arn: "arn:aws:iam::210987654321:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (count) => count + 1))
+            )
         }),
         Effect.gen(function*() {
           const client = yield* CodeCommitReviewClient
@@ -311,18 +328,65 @@ describe("CodeCommitReviewClient", () => {
       assert.strictEqual(yield* Ref.get(providerCalls), 0)
     }))
 
+  it.effect("does not dispatch a merge when credentials change between preflight and merge runtime", () =>
+    Effect.gen(function*() {
+      const activeAccount = yield* Ref.make("123456789012")
+      const mergeCallsByAccount = yield* Ref.make<Record<string, number>>({})
+      const result = yield* runWithClients(
+        baseReadClient({
+          getPullRequest: () => Ref.set(activeAccount, "210987654321").pipe(Effect.as(pullRequest))
+        }),
+        baseProvider({
+          mergePullRequest: (_, authorize) =>
+            Ref.get(activeAccount).pipe(
+              Effect.flatMap((accountId) =>
+                authorize({
+                  callerIdentity: { Account: accountId, Arn: `arn:aws:iam::${accountId}:user/reviewer` },
+                  repositoryIdentity: {
+                    repositoryMetadata: { accountId, repositoryName: "payments-api" }
+                  }
+                }).pipe(
+                  Effect.andThen(Ref.update(mergeCallsByAccount, (calls) => ({
+                    ...calls,
+                    [accountId]: (calls[accountId] ?? 0) + 1
+                  })))
+                )
+              ),
+              Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "repository-account-changed")
+      }
+      assert.deepStrictEqual(yield* Ref.get(mergeCallsByAccount), {})
+    }))
+
   it.effect("does not call the merge provider when the repository resolves to another owner account", () =>
     Effect.gen(function*() {
       const providerCalls = yield* Ref.make(0)
       const result = yield* runWithClients(
-        baseReadClient({
-          getRepositoryIdentity: () =>
-            Effect.succeed(
-              new CodeCommitRepositoryIdentity({ accountId: "210987654321", repositoryName: "payments-api" })
-            )
-        }),
+        baseReadClient(),
         baseProvider({
-          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+          mergePullRequest: (_, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "123456789012",
+                Arn: "arn:aws:iam::123456789012:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "210987654321", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (count) => count + 1))
+            )
         }),
         Effect.gen(function*() {
           const client = yield* CodeCommitReviewClient

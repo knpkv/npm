@@ -10,7 +10,11 @@ import { identityMatches } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../ReadClient/errors.js"
 import type { CodeCommitAccountIdentity, CodeCommitPullRequestRevision } from "../ReadClient/models.js"
-import { CodeCommitReadClient } from "../ReadClient/ReadClient.js"
+import {
+  CodeCommitReadClient,
+  decodeAccountIdentityProviderResponse,
+  decodeRepositoryIdentityProviderResponse
+} from "../ReadClient/ReadClient.js"
 import { CodeCommitReviewConflictError, type CodeCommitReviewError } from "./errors.js"
 import {
   type CodeCommitMergeTarget,
@@ -19,7 +23,11 @@ import {
   type CodeCommitReviewReconciliation,
   type CodeCommitReviewTarget
 } from "./models.js"
-import { CodeCommitReviewProvider, CodeCommitReviewProviderLive } from "./ReviewProvider.js"
+import {
+  type CodeCommitMergeAuthorizationEvidence,
+  CodeCommitReviewProvider,
+  CodeCommitReviewProviderLive
+} from "./ReviewProvider.js"
 
 const MAXIMUM_COMMENT_PAGES = 20
 const COMMENT_MARKER_PREFIX = "<!-- knpkv-codecommit-review:"
@@ -126,6 +134,9 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
   return error
 }
 
+const isAwsClientError = (error: CodeCommitReviewError): error is AwsClientError =>
+  error._tag === "AwsApiError" || error._tag === "AwsCredentialError" || error._tag === "AwsThrottleError"
+
 const targetConflict = (
   target: CodeCommitReviewTarget,
   pullRequest: CodeCommitPullRequestRevision
@@ -170,15 +181,12 @@ const preflightTarget = Effect.fn("CodeCommitReviewClient.preflightTarget")(func
   return pullRequest
 })
 
-/** Re-resolves mutable profile credentials and repository ownership immediately before merge dispatch. */
+/** Authorizes raw evidence captured by the exact AWS runtime that will dispatch the merge. */
 const verifyMergeTargetIdentity = Effect.fn("CodeCommitReviewClient.verifyMergeTargetIdentity")(function*(
-  readClient: CodeCommitReadClient["Service"],
-  target: CodeCommitMergeTarget
+  target: CodeCommitMergeTarget,
+  evidence: CodeCommitMergeAuthorizationEvidence
 ) {
-  const repository = yield* readClient.getRepositoryIdentity({
-    account: target.account,
-    repositoryName: target.repositoryName
-  })
+  const repository = yield* decodeRepositoryIdentityProviderResponse(evidence.repositoryIdentity)
   if (repository.repositoryName !== target.repositoryName) {
     return yield* new CodeCommitReviewConflictError({
       operation: "preflight-merge-identity",
@@ -191,7 +199,7 @@ const verifyMergeTargetIdentity = Effect.fn("CodeCommitReviewClient.verifyMergeT
       reason: "repository-account-changed"
     })
   }
-  const caller = yield* readClient.discoverAccount(target.account)
+  const caller = yield* decodeAccountIdentityProviderResponse(evidence.callerIdentity)
   if (caller.accountId !== target.expectedCallerAccountId) {
     return yield* new CodeCommitReviewConflictError({
       operation: "preflight-merge-identity",
@@ -308,9 +316,13 @@ export class CodeCommitReviewClient extends Context.Service<
           }
           case "merge": {
             yield* preflightTarget(readClient, action.target)
-            yield* verifyMergeTargetIdentity(readClient, action.target)
-            const raw = yield* provider.mergePullRequest(action).pipe(
-              Effect.mapError(mapProviderError("merge-pull-request"))
+            const raw = yield* provider.mergePullRequest<CodeCommitReviewError>(
+              action,
+              (evidence) => verifyMergeTargetIdentity(action.target, evidence)
+            ).pipe(
+              Effect.mapError((error) =>
+                isAwsClientError(error) ? mapProviderError("merge-pull-request")(error) : error
+              )
             )
             const response = yield* decodeProvider("merge-pull-request", RawMergeResponse, raw)
             if (response.pullRequest.pullRequestId !== action.target.pullRequestId) {
