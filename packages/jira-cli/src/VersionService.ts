@@ -170,6 +170,8 @@ export interface VersionServiceShape {
   readonly listRelatedWork: (id: string) => Effect.Effect<ReadonlyArray<RelatedWork>, JiraApiError>
   /** Attach a "Related work" link (e.g. a Confluence page) to a version. Needs `manage:jira-project`. */
   readonly addRelatedWork: (id: string, input: AddRelatedWorkInput) => Effect.Effect<RelatedWork, JiraApiError>
+  /** Remove a "Related work" link from a version. Needs `manage:jira-project`. */
+  readonly deleteRelatedWork: (id: string, relatedWorkId: string) => Effect.Effect<void, JiraApiError>
 }
 
 /**
@@ -613,14 +615,102 @@ const make = Effect.gen(function*() {
       })
     )
 
+  const deleteRelatedWork = (id: string, relatedWorkId: string): Effect.Effect<void, JiraApiError> =>
+    client.deleteRelatedWork(id, relatedWorkId, undefined).pipe(
+      Effect.mapError((cause) =>
+        new JiraApiError({ message: `Failed to remove related work ${relatedWorkId} from version ${id}`, cause })
+      ),
+      Effect.asVoid
+    )
+
   return VersionService.of({
     listProjectVersions,
     getVersion,
     updateVersion,
     listRelatedWork,
-    addRelatedWork
+    addRelatedWork,
+    deleteRelatedWork
   })
 })
+
+/**
+ * Desired related-work link for {@link planRelatedWorkSync}.
+ *
+ * @category Types
+ */
+export interface DesiredRelatedWork {
+  readonly title: string
+  readonly url: string
+}
+
+/**
+ * Plan for reconciling a version's related-work links.
+ *
+ * @category Types
+ */
+export interface RelatedWorkSyncPlan {
+  readonly toAdd: ReadonlyArray<DesiredRelatedWork>
+  readonly kept: ReadonlyArray<string>
+  // `url` is nullable because Jira can return a related-work entry without one;
+  // pruning still has to be able to remove it.
+  readonly toRemove: ReadonlyArray<{ readonly relatedWorkId: string; readonly url: string | null }>
+}
+
+/**
+ * Work out which related-work links to add, keep and remove.
+ *
+ * Matching is by URL: Jira assigns the id, and the title is editable, so the
+ * URL is the only stable identity a link has. Scoped to one category so a
+ * `Communication` reconcile cannot disturb `Testing` links. Removal is opt-in
+ * (`prune`) because links added by hand in the Jira UI are legitimate.
+ *
+ * URL identity is applied on both sides, which is what makes "exactly the given
+ * set" true: repeated desired entries collapse to one, and `prune` removes
+ * surplus copies of a desired URL as well as links to undesired ones — a pile-up
+ * of identical `Release notes` links is the case this exists to clean up, so
+ * keeping every copy merely because its URL is wanted would defeat it.
+ *
+ * Pure so that repeated scaffolding runs can be tested without the API — the
+ * property that matters is that running it twice adds nothing the second time.
+ *
+ * @category Utilities
+ */
+export const planRelatedWorkSync = (
+  existing: ReadonlyArray<RelatedWork>,
+  desired: ReadonlyArray<DesiredRelatedWork>,
+  options: { readonly category: string; readonly prune: boolean }
+): RelatedWorkSyncPlan => {
+  const inCategory = existing.filter((w) => w.category === options.category)
+  const existingUrls = new Set(inCategory.flatMap((w) => (w.url === null ? [] : [w.url])))
+
+  const desiredByUrl = new Map<string, DesiredRelatedWork>()
+  for (const entry of desired) {
+    if (!desiredByUrl.has(entry.url)) desiredByUrl.set(entry.url, entry)
+  }
+  const unique = [...desiredByUrl.values()]
+
+  const toAdd = unique.filter((d) => !existingUrls.has(d.url))
+  const kept = unique.filter((d) => existingUrls.has(d.url)).map((d) => d.url)
+
+  const keptUrls = new Set<string>()
+  const toRemove = options.prune
+    ? inCategory.flatMap((w) => {
+      // Nothing to delete with; leave it alone whatever its url.
+      if (w.relatedWorkId === null) return []
+      // A url-less entry can never match a desired link — every desired link
+      // has one — so pruning must remove it rather than skip it, or the
+      // category is not reconciled to the requested set and the command
+      // reports success while the stale entry stays.
+      if (w.url !== null && desiredByUrl.has(w.url) && !keptUrls.has(w.url)) {
+        keptUrls.add(w.url)
+        return []
+      }
+      return [{ relatedWorkId: w.relatedWorkId, url: w.url }]
+    })
+    : []
+
+  return { toAdd, kept, toRemove }
+}
 
 /**
  * Layer for VersionService.

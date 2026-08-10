@@ -12,7 +12,7 @@ import * as Option from "effect/Option"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { JiraApiError } from "../JiraCliError.js"
 import type { Person, Version } from "../VersionService.js"
-import { VersionService } from "../VersionService.js"
+import { planRelatedWorkSync, VersionService } from "../VersionService.js"
 
 /**
  * Return a copy of `version` with every resolved {@link Person.emailAddress}
@@ -256,9 +256,91 @@ const relatedWorkAddCommand = Command.make("add", {
     )
   )
 
+const linkOption = Options.string("link").pipe(
+  Options.withAlias("l"),
+  Options.withDescription("Desired link as `title=url` (repeatable). Category comes from --category."),
+  Options.atLeast(0)
+)
+
+const pruneOption = Options.boolean("prune").pipe(
+  Options.withDescription("Also remove links in the category that are not in the desired set")
+)
+
+/**
+ * Reconcile a version's related-work links against a desired set.
+ *
+ * Re-running a release scaffold should not pile up duplicate "Release notes"
+ * links, which is what repeated `add` calls produce. Matching is by URL, the
+ * only stable identity a link has — Jira assigns the id and the title is
+ * editable.
+ */
+const relatedWorkSyncCommand = Command.make("sync", {
+  id: idArg,
+  link: linkOption,
+  category: categoryOption,
+  prune: pruneOption,
+  json: jsonOption
+}, ({ category, id, json, link, prune }) =>
+  Effect.gen(function*() {
+    yield* ensureNumericId(id)
+
+    const desired: Array<{ readonly title: string; readonly url: string }> = []
+    for (const raw of link) {
+      const separator = raw.indexOf("=")
+      // Check the trimmed halves, not the separator position: `" =url"` and
+      // `"title= "` both put a non-empty span either side of the `=` and would
+      // otherwise reach Jira as a link with an empty title or url.
+      const title = separator < 0 ? "" : raw.slice(0, separator).trim()
+      const url = separator < 0 ? "" : raw.slice(separator + 1).trim()
+      if (separator < 0 || title.length === 0 || url.length === 0) {
+        return yield* Effect.fail(
+          new JiraApiError({ message: `Invalid --link ${JSON.stringify(raw)}. Expected title=url.` })
+        )
+      }
+      desired.push({ title, url })
+    }
+    if (desired.length === 0) {
+      return yield* Effect.fail(new JiraApiError({ message: "Pass at least one --link title=url." }))
+    }
+
+    const service = yield* VersionService
+    const existing = yield* service.listRelatedWork(id)
+    const plan = planRelatedWorkSync(existing, desired, { category, prune })
+
+    for (const item of plan.toAdd) {
+      yield* service.addRelatedWork(id, { title: item.title, category, url: item.url })
+    }
+    for (const item of plan.toRemove) {
+      yield* service.deleteRelatedWork(id, item.relatedWorkId)
+    }
+
+    const added = plan.toAdd.map((d) => d.url)
+    const removed = plan.toRemove.map((d) => d.url)
+    if (json) {
+      yield* Console.log(JSON.stringify({ added, kept: plan.kept, removed }, null, 2))
+      return
+    }
+    yield* Console.log(
+      `Version ${id} (${category}): ${added.length} added, ${plan.kept.length} unchanged, ${removed.length} removed`
+    )
+    for (const url of added) yield* Console.log(`  + ${url}`)
+    for (const url of removed) yield* Console.log(`  - ${url}`)
+  })).pipe(
+    // The help text is what a user reads before a remote write, so it has to
+    // say that pruning is opt-in: without --prune nothing is ever removed, and
+    // "reconcile to exactly the given set" reads as a promise that stale links
+    // were cleaned up.
+    Command.withDescription(
+      "Remote write: add any missing related-work links in a category, matched by URL (idempotent); " +
+        "pass --prune to also remove links that are not in the given set"
+    )
+  )
+
 const relatedWorkCommand = Command.make("related-work").pipe(
-  Command.withDescription("List or attach version related-work links (Confluence pages on the release report)"),
-  Command.withSubcommands([relatedWorkListCommand, relatedWorkAddCommand])
+  Command.withDescription(
+    "List, attach or reconcile version related-work links (Confluence pages on the release report)"
+  ),
+  Command.withSubcommands([relatedWorkListCommand, relatedWorkAddCommand, relatedWorkSyncCommand])
 )
 
 export const versionCommand = Command.make("version").pipe(
