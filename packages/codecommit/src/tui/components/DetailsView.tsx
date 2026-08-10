@@ -64,8 +64,8 @@ import {
   pullRequestRevisionPollTickEnabled,
   pullRequestWorkspaceReloadKey,
   pullRequestWorkspaceIdentity,
-  pullRequestSelectionKey,
   revisionHeaderText,
+  resolvePullRequestSelection,
   splitDiffLineRow,
   terminalSafeCompactText,
   terminalSafeMultilineText,
@@ -424,6 +424,7 @@ export function DetailsView() {
   const { theme } = useTheme()
   const dialog = useDialog()
   const selectedPrId = useAtomValue(selectedPrIdAtom)
+  const setSelectedPrId = useAtomSet(selectedPrIdAtom)
   const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
   const setView = useAtomSet(viewAtom)
   const openPr = useAtomSet(openPrAtom)
@@ -487,13 +488,14 @@ export function DetailsView() {
     setPostingFinding(next)
   }
 
-  const pr = useMemo(
-    () =>
-      selectedPrId === null
-        ? null
-        : (appState.pullRequests.find((candidate) => pullRequestSelectionKey(candidate) === selectedPrId) ?? null),
+  const prSelection = useMemo(
+    () => resolvePullRequestSelection(appState.pullRequests, selectedPrId),
     [appState.pullRequests, selectedPrId]
   )
+  const pr = prSelection?.pullRequest ?? null
+  useEffect(() => {
+    if (prSelection !== null && prSelection.key !== selectedPrId) setSelectedPrId(prSelection.key)
+  }, [prSelection, selectedPrId, setSelectedPrId])
   const loadedWorkspaceCandidate =
     AsyncResult.isSuccess(workspaceResult) && !AsyncResult.isWaiting(workspaceResult) ? workspaceResult.value : null
   const expectedWorkspaceIdentity = pr === null ? null : pullRequestWorkspaceIdentity(pr)

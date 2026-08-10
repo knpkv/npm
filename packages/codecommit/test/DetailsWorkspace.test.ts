@@ -52,7 +52,9 @@ import {
   pullRequestRevisionObservationEnabled,
   pullRequestRevisionPollingEnabled,
   pullRequestRevisionPollTickEnabled,
+  pullRequestSelectionKey,
   pullRequestWorkspaceReloadKey,
+  resolvePullRequestSelection,
   revisionHeaderText,
   splitDiffLineRow,
   terminalSafeCompactText,
@@ -394,6 +396,50 @@ describe("PR detail workspace", () => {
     expect(workspaceLifecycleTransition(null, null, "running-review")).toEqual({ _tag: "preserve" })
     expect(workspaceResetInterruptions("none")).toEqual(["conversation", "verification"])
     expect(workspaceResetInterruptions("review")).toEqual(["review", "conversation", "verification"])
+  })
+
+  it("reconciles only unambiguous unknown-to-known repository account selection", () => {
+    const unknown = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: false,
+      isMergeable: true,
+      lastModifiedDate: new Date(1_000),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature",
+      status: "OPEN",
+      title: "Review"
+    })
+    const known = new Domain.PullRequest({
+      ...unknown,
+      account: new Domain.Account({ ...unknown.account, repoAccountId: "111122223333" })
+    })
+    const otherKnown = new Domain.PullRequest({
+      ...unknown,
+      account: new Domain.Account({ ...unknown.account, repoAccountId: "999900001111" })
+    })
+
+    expect(resolvePullRequestSelection([known], pullRequestSelectionKey(unknown))).toEqual({
+      key: pullRequestSelectionKey(known),
+      pullRequest: known
+    })
+    expect(resolvePullRequestSelection([known, otherKnown], pullRequestSelectionKey(unknown))).toBeNull()
+    expect(resolvePullRequestSelection([otherKnown], pullRequestSelectionKey(known))).toBeNull()
+    expect(resolvePullRequestSelection([known, otherKnown], pullRequestSelectionKey(otherKnown))).toEqual({
+      key: pullRequestSelectionKey(otherKnown),
+      pullRequest: otherKnown
+    })
   })
 
   it("retains the reviewed finding deck until an in-flight post receipt can be shown", () => {

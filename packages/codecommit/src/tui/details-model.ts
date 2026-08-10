@@ -37,6 +37,60 @@ export interface PullRequestWorkspaceIdentity {
 export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
   JSON.stringify([pr.account.profile, pr.account.region, pr.account.repoAccountId ?? null, pr.repositoryName, pr.id])
 
+interface PullRequestSelectionResolution {
+  readonly key: string
+  readonly pullRequest: Domain.PullRequest
+}
+
+const unknownAccountPullRequestSelection = (
+  selectionKey: string
+): {
+  readonly profile: string
+  readonly pullRequestId: string
+  readonly region: string
+  readonly repositoryName: string
+} | null => {
+  try {
+    const value: unknown = JSON.parse(selectionKey)
+    if (
+      !Array.isArray(value) ||
+      value.length !== 5 ||
+      typeof value[0] !== "string" ||
+      typeof value[1] !== "string" ||
+      value[2] !== null ||
+      typeof value[3] !== "string" ||
+      typeof value[4] !== "string"
+    ) {
+      return null
+    }
+    return { profile: value[0], region: value[1], repositoryName: value[3], pullRequestId: value[4] }
+  } catch {
+    return null
+  }
+}
+
+/** Reconciles only the unambiguous unknown-to-known repository-account enrichment of an open PR selection. */
+export const resolvePullRequestSelection = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  selectionKey: string | null
+): PullRequestSelectionResolution | null => {
+  if (selectionKey === null) return null
+  const exact = pullRequests.find((candidate) => pullRequestSelectionKey(candidate) === selectionKey)
+  if (exact !== undefined) return { key: selectionKey, pullRequest: exact }
+  const unknownAccount = unknownAccountPullRequestSelection(selectionKey)
+  if (unknownAccount === null) return null
+  const candidates = pullRequests.filter(
+    (candidate) =>
+      candidate.account.profile === unknownAccount.profile &&
+      candidate.account.region === unknownAccount.region &&
+      candidate.repositoryName === unknownAccount.repositoryName &&
+      candidate.id === unknownAccount.pullRequestId
+  )
+  return candidates.length === 1
+    ? { key: pullRequestSelectionKey(candidates[0]!), pullRequest: candidates[0]! }
+    : null
+}
+
 /** Exact-head path accepted by local editors; deleted files have no head path. */
 export const changedFileHeadPath = (file: ReadClient.CodeCommitChangedFile | null): string | null =>
   file?.after?.path ?? null
