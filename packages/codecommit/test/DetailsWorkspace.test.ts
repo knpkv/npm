@@ -435,7 +435,18 @@ describe("PR detail workspace", () => {
       key: pullRequestSelectionKey(known),
       pullRequest: known
     })
+    expect(
+      resolvePullRequestSelection(
+        [known],
+        JSON.stringify([unknown.account.profile, unknown.account.region, unknown.repositoryName, unknown.id])
+      )
+    ).toEqual({
+      key: pullRequestSelectionKey(known),
+      pullRequest: known
+    })
     expect(resolvePullRequestSelection([known, otherKnown], pullRequestSelectionKey(unknown))).toBeNull()
+    expect(resolvePullRequestSelection([known], JSON.stringify(["production", "eu-west-1", null, "payments"])))
+      .toBeNull()
     expect(resolvePullRequestSelection([otherKnown], pullRequestSelectionKey(known))).toBeNull()
     expect(resolvePullRequestSelection([known, otherKnown], pullRequestSelectionKey(otherKnown))).toEqual({
       key: pullRequestSelectionKey(otherKnown),

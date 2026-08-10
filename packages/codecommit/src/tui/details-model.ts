@@ -52,18 +52,24 @@ const unknownAccountPullRequestSelection = (
 } | null => {
   try {
     const value: unknown = JSON.parse(selectionKey)
+    if (!Array.isArray(value)) return null
     if (
-      !Array.isArray(value) ||
-      value.length !== 5 ||
-      typeof value[0] !== "string" ||
-      typeof value[1] !== "string" ||
-      value[2] !== null ||
-      typeof value[3] !== "string" ||
-      typeof value[4] !== "string"
+      value.length === 4 &&
+      typeof value[0] === "string" &&
+      typeof value[1] === "string" &&
+      typeof value[2] === "string" &&
+      typeof value[3] === "string"
     ) {
-      return null
+      return { profile: value[0], region: value[1], repositoryName: value[2], pullRequestId: value[3] }
     }
-    return { profile: value[0], region: value[1], repositoryName: value[3], pullRequestId: value[4] }
+    return value.length === 5 &&
+        typeof value[0] === "string" &&
+        typeof value[1] === "string" &&
+        value[2] === null &&
+        typeof value[3] === "string" &&
+        typeof value[4] === "string"
+      ? { profile: value[0], region: value[1], repositoryName: value[3], pullRequestId: value[4] }
+      : null
   } catch {
     return null
   }
