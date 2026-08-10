@@ -173,6 +173,12 @@ export const fetchAndUpsertPRs = (params: {
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
     const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
+    const withholdScopeSuccess = (profile: string, region: string) =>
+      Ref.update(successfullyFetchedScopes, (scopes) => {
+        const next = new Set(scopes)
+        next.delete(accountRegionKey(profile, region))
+        return next
+      })
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
@@ -185,20 +191,25 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
-                Effect.catch(() => prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void)))
+                Effect.catch(() =>
+                  prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(
+                    Effect.catch(() => withholdScopeSuccess(pr.accountProfile, pr.accountRegion))
+                  )
+                )
               ),
           { concurrency: 5, discard: true }
         )
       ),
-      Effect.catch(() => Effect.void)
+      Effect.catch(() => Ref.set(successfullyFetchedScopes, new Set()))
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
 
+    const reconciledScopes = yield* Ref.get(successfullyFetchedScopes)
     return enabledAccounts.flatMap((account) =>
       (account.regions ?? []).flatMap((region) =>
-        successfulScopes.has(accountRegionKey(account.profile, region))
+        reconciledScopes.has(accountRegionKey(account.profile, region))
           ? [{ profile: account.profile, region }]
           : []
       )

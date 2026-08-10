@@ -1,11 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
+import { CacheError } from "../src/CacheService/CacheError.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
 import type { AppState } from "../src/Domain.js"
+import { AwsApiError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 
 describe("fetchAndUpsertPRs", () => {
@@ -137,5 +139,87 @@ describe("fetchAndUpsertPRs", () => {
       expect(yield* Ref.get(detailCalls)).toBe(0)
       expect(yield* Ref.get(deleteCalls)).toBe(0)
       expect(successfulScopes).toEqual([{ profile: "other-profile", region: "eu-west-1" }])
+    }))
+
+  it.effect("withholds scope success when stale-row discovery fails", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({
+        pullRequests: [],
+        accounts: [],
+        status: "loading"
+      })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () =>
+            Effect.fail(new CacheError({ operation: "find-stale-open", cause: new Error("database unavailable") })),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("withholds scope success when a stale row cannot be refreshed or removed", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                cause: new Error("provider unavailable"),
+                operation: "getPullRequest",
+                profile: account.profile,
+                region: account.regions[0]!
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () =>
+            Effect.fail(new CacheError({ operation: "delete-pull-request", cause: new Error("database unavailable") })),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(successfulScopes).toEqual([])
     }))
 })
