@@ -1035,6 +1035,7 @@ export function DetailsView() {
           : { _tag: "pending" }
     const settlement = mergeResultSettlement(mergeStatus._tag === "running" ? mergeStatus.requestId : null, observation)
     if (settlement === "ignore") return
+    const submittedTarget = mergeStatus._tag === "running" ? mergeStatus.target : null
     if (settlement === "ambiguous") {
       updateMergeStatus({
         _tag: "failed",
@@ -1044,8 +1045,10 @@ export function DetailsView() {
         }
       })
       setVerifiedWorkspace(null)
-      if (pr !== null) {
-        setAmbiguousMergeGuards((current) => addAmbiguousMergeGuard(current, pr, appState.refreshGeneration))
+      if (submittedTarget !== null) {
+        setAmbiguousMergeGuards((current) =>
+          addAmbiguousMergeGuard(current, submittedTarget, appState.refreshGeneration)
+        )
       }
       refresh()
       setView("prs")
@@ -1058,8 +1061,10 @@ export function DetailsView() {
       const reloadPolicy = mergeFailureWorkspaceReloadPolicy(outcome.diagnostic)
       setVerifiedWorkspace((current) => verifiedWorkspaceAfterMergeFailure(current, outcome.diagnostic))
       if (reloadPolicy === "refresh-list") {
-        if (outcome.diagnostic.workspaceRefreshReason === "merge-outcome-unknown" && pr !== null) {
-          setAmbiguousMergeGuards((current) => addAmbiguousMergeGuard(current, pr, appState.refreshGeneration))
+        if (outcome.diagnostic.workspaceRefreshReason === "merge-outcome-unknown" && submittedTarget !== null) {
+          setAmbiguousMergeGuards((current) =>
+            addAmbiguousMergeGuard(current, submittedTarget, appState.refreshGeneration)
+          )
         }
         refresh()
         setView("prs")
@@ -1503,13 +1508,14 @@ export function DetailsView() {
       cachedMergeable: current.currentWorkspace?.pr.isMergeable ?? false,
       currentWorkspace: current.currentWorkspace,
       findingPostRunning: postingFindingRef.current !== null,
+      providerStatus: current.currentWorkspace?.workspace.revision.status ?? null,
       providerDriftPending: current.providerDriftPending
     })
     if (selection === null) return
     const { workspace } = selection
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:merge:${strategy}:${nextActionRequestSequence}`
-    updateMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy })
+    updateMergeStatus({ _tag: "ready", requestId, revision: workspace.revision, strategy, target: selection.pr })
   }
 
   useKeyboard((key) => {
@@ -1553,7 +1559,16 @@ export function DetailsView() {
     else if (intent === "choose-review-skills") {
       dialog.show(() => <DialogReviewSkills onApply={setReviewSkills} selected={reviewSkills} />)
     } else if (intent === "choose-merge-strategy") {
-      dialog.show(() => <DialogMergeStrategy onApply={beginMerge} />)
+      const current = mergeDialogWorkspaceRef.current
+      const selection = mergeDialogWorkspaceSelection({
+        actionCancelable: current.actionCancelable,
+        cachedMergeable: current.currentWorkspace?.pr.isMergeable ?? false,
+        currentWorkspace: current.currentWorkspace,
+        findingPostRunning: postingFindingRef.current !== null,
+        providerStatus: current.currentWorkspace?.workspace.revision.status ?? null,
+        providerDriftPending: current.providerDriftPending
+      })
+      if (selection !== null) dialog.show(() => <DialogMergeStrategy onApply={beginMerge} />)
     } else if (intent === "open-neovim") openSelectedInEditor("neovim")
     else if (intent === "open-vscode") openSelectedInEditor("vscode")
     else if (intent === "previous-finding") {
@@ -1593,12 +1608,12 @@ export function DetailsView() {
     else if (intent === "review-security") beginAction("security")
     else if (intent === "review-tests") beginAction("tests")
     else if (intent === "explain-risk") beginAction("explain")
-    else if (intent === "confirm-merge" && pr !== null) {
+    else if (intent === "confirm-merge") {
       const running = claimMergeConfirmation(mergeStatusRef.current)
       if (running === null) return
       updateMergeStatus(running)
       mergePullRequest({
-        pr,
+        pr: running.target,
         requestId: running.requestId,
         revision: running.revision,
         strategy: running.strategy

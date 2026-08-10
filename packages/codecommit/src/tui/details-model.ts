@@ -187,12 +187,14 @@ export type MergeStatus =
     readonly requestId: string
     readonly revision: ReadClient.CodeCommitPullRequestRevision
     readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    readonly target: Domain.PullRequest
   }
   | {
     readonly _tag: "running"
     readonly requestId: string
     readonly revision: ReadClient.CodeCommitPullRequestRevision
     readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    readonly target: Domain.PullRequest
   }
   | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
 
@@ -207,6 +209,7 @@ export interface AmbiguousMergeGuard {
   readonly baselineRefreshGeneration: number
   readonly phase: "awaiting-refresh" | "refreshing" | "refresh-failed"
   readonly profile: Domain.AwsProfileName
+  readonly pullRequestId: Domain.PullRequestId
   readonly region: Domain.AwsRegion
   readonly selectionKey: string
 }
@@ -223,9 +226,25 @@ export const beginAmbiguousMergeGuard = (
   baselineRefreshGeneration: refreshGeneration,
   phase: "awaiting-refresh",
   profile: pr.account.profile,
+  pullRequestId: pr.id,
   region: pr.account.region,
   selectionKey: pullRequestSelectionKey(pr)
 })
+
+/** Matches a submitted target across provider metadata changes such as a repository rename. */
+const ambiguousMergeGuardMatchesPullRequest = (
+  guard: AmbiguousMergeGuard,
+  pr: Domain.PullRequest
+): boolean => {
+  if (guard.awsAccountId === null) return resolvePullRequestSelection([pr], guard.selectionKey) !== null
+  const candidateAwsAccountId = Domain.normalizeAccountId(pr.account.awsAccountId)
+  return (
+    pr.account.profile === guard.profile &&
+    pr.account.region === guard.region &&
+    pr.id === guard.pullRequestId &&
+    (candidateAwsAccountId === undefined || candidateAwsAccountId === guard.awsAccountId)
+  )
+}
 
 /** Adds an ambiguous merge without discarding locks for other pull requests. */
 export const addAmbiguousMergeGuard = (
@@ -259,8 +278,8 @@ const ambiguousMergeGuardAfterAppStatus = (
     ) &&
     refreshGeneration > guard.baselineRefreshGeneration
   ) {
-    const observation = resolvePullRequestSelection(pullRequests, guard.selectionKey)
-    return observation === null || observation.pullRequest.status !== "OPEN" ? null : guard
+    const observations = pullRequests.filter((pr) => ambiguousMergeGuardMatchesPullRequest(guard, pr))
+    return observations.length === 0 || observations.every((pr) => pr.status !== "OPEN") ? null : guard
   }
   return guard
 }
@@ -297,7 +316,7 @@ export const ambiguousMergeGuardsAfterAppStatus = (
 export const pullRequestOpeningBlocked = (
   guards: AmbiguousMergeGuards,
   pr: Domain.PullRequest
-): boolean => Object.values(guards).some((guard) => resolvePullRequestSelection([pr], guard.selectionKey) !== null)
+): boolean => Object.values(guards).some((guard) => ambiguousMergeGuardMatchesPullRequest(guard, pr))
 
 export type WorkspaceRefreshReason =
   | "revision-changed"
@@ -401,9 +420,11 @@ export const mergeStrategySelectionEnabled = (input: {
   readonly cachedMergeable: boolean
   readonly exactRevisionLoaded: boolean
   readonly findingPostRunning: boolean
+  readonly providerStatus: Domain.PullRequestStatus | null
   readonly providerDriftPending: boolean
 }): boolean =>
   input.exactRevisionLoaded &&
+  input.providerStatus === "OPEN" &&
   !input.actionCancelable &&
   !input.findingPostRunning &&
   !input.providerDriftPending
@@ -414,6 +435,7 @@ export const mergeDialogWorkspaceSelection = <A>(input: {
   readonly cachedMergeable: boolean
   readonly currentWorkspace: A | null
   readonly findingPostRunning: boolean
+  readonly providerStatus: Domain.PullRequestStatus | null
   readonly providerDriftPending: boolean
 }): A | null =>
   input.currentWorkspace !== null &&
@@ -422,6 +444,7 @@ export const mergeDialogWorkspaceSelection = <A>(input: {
       cachedMergeable: input.cachedMergeable,
       exactRevisionLoaded: true,
       findingPostRunning: input.findingPostRunning,
+      providerStatus: input.providerStatus,
       providerDriftPending: input.providerDriftPending
     })
     ? input.currentWorkspace

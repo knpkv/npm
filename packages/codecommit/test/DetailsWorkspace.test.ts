@@ -422,6 +422,7 @@ describe("PR detail workspace", () => {
         cachedMergeable: false,
         exactRevisionLoaded: true,
         findingPostRunning: false,
+        providerStatus: "OPEN",
         providerDriftPending: false
       })
     ).toBe(true)
@@ -431,9 +432,23 @@ describe("PR detail workspace", () => {
         cachedMergeable: true,
         exactRevisionLoaded: true,
         findingPostRunning: false,
+        providerStatus: "OPEN",
         providerDriftPending: true
       })
     ).toBe(false)
+    const settledProviderStatuses: ReadonlyArray<Domain.PullRequestStatus> = ["CLOSED", "MERGED"]
+    for (const providerStatus of settledProviderStatuses) {
+      expect(
+        mergeStrategySelectionEnabled({
+          actionCancelable: false,
+          cachedMergeable: true,
+          exactRevisionLoaded: true,
+          findingPostRunning: false,
+          providerStatus,
+          providerDriftPending: false
+        })
+      ).toBe(false)
+    }
     expect(
       mergeFailureWorkspaceReloadPolicy({
         message: "The source changed",
@@ -473,6 +488,7 @@ describe("PR detail workspace", () => {
         cachedMergeable: false,
         currentWorkspace: currentRevision.current,
         findingPostRunning: false,
+        providerStatus: "OPEN",
         providerDriftPending: false
       })
     currentRevision.current = "revision-b"
@@ -1114,11 +1130,35 @@ describe("PR detail workspace", () => {
       status: "OPEN",
       title: "Review"
     })
+    const target = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1"),
+        awsAccountId: "123456789012"
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: true,
+      isMergeable: true,
+      lastModifiedDate: new Date(0),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature",
+      status: "OPEN",
+      title: "Review"
+    })
     let status: MergeStatus = {
       _tag: "ready",
       requestId: "merge-1",
       revision,
-      strategy: "squash"
+      strategy: "squash",
+      target
     }
     let providerCalls = 0
     const confirm = () => {
@@ -1132,6 +1172,7 @@ describe("PR detail workspace", () => {
     confirm()
     expect(providerCalls).toBe(1)
     expect(status._tag).toBe("running")
+    expect(status).toMatchObject({ _tag: "running", target })
 
     status = { _tag: "failed", diagnostic: { message: "Approval rules are not satisfied", operation: "merge" } }
     expect(claimMergeConfirmation(status)).toBeNull()
@@ -1139,7 +1180,8 @@ describe("PR detail workspace", () => {
       _tag: "ready",
       requestId: "merge-2",
       revision,
-      strategy: "squash"
+      strategy: "squash",
+      target
     }
     confirm()
     expect(providerCalls).toBe(2)
@@ -1173,6 +1215,11 @@ describe("PR detail workspace", () => {
     const enrichedTarget = new Domain.PullRequest({
       ...target,
       account: new Domain.Account({ ...target.account, repoAccountId: "111122223333" })
+    })
+    const renamedTarget = new Domain.PullRequest({
+      ...target,
+      link: "https://example.invalid/pr/42-renamed",
+      repositoryName: Domain.RepositoryName.make("payments-renamed")
     })
     let guards: AmbiguousMergeGuards = addAmbiguousMergeGuard({}, target, 1)
 
@@ -1231,6 +1278,27 @@ describe("PR detail workspace", () => {
       [{ profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }]
     )
     expect(pullRequestOpeningBlocked(guards, target)).toBe(false)
+
+    guards = addAmbiguousMergeGuard({}, target, 6)
+    expect(pullRequestOpeningBlocked(guards, renamedTarget)).toBe(true)
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [renamedTarget])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [renamedTarget], 7, [
+      { profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }
+    ])
+    expect(pullRequestOpeningBlocked(guards, renamedTarget)).toBe(true)
+    guards = ambiguousMergeGuardsAfterAppStatus(
+      guards,
+      "loading",
+      [new Domain.PullRequest({ ...renamedTarget, status: "CLOSED" })]
+    )
+    guards = ambiguousMergeGuardsAfterAppStatus(
+      guards,
+      "idle",
+      [new Domain.PullRequest({ ...renamedTarget, status: "CLOSED" })],
+      8,
+      [{ profile: target.account.profile, region: target.account.region, awsAccountId: "123456789012" }]
+    )
+    expect(pullRequestOpeningBlocked(guards, renamedTarget)).toBe(false)
   })
 
   it("tracks ambiguous merge targets independently until each one settles", () => {
