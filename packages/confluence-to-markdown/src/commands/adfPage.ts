@@ -188,6 +188,22 @@ const makeDefaultClientLayer = (clientConfig: ConfluenceClientConfig) =>
   ConfluenceClientLayer(clientConfig).pipe(Layer.provide(NodeHttpClient.layerFetch))
 
 /**
+ * The `--if-version` check, shared by the write and its preview so the two
+ * cannot disagree about whether a page has moved on.
+ */
+const checkExpectedVersion = (
+  pageId: PageId,
+  current: number,
+  expected: number | undefined
+): Effect.Effect<void, ConfigError> =>
+  expected === undefined || expected === current ? Effect.void : Effect.fail(
+    new ConfigError({
+      message: `Page ${pageId} is at version ${current}, not ${expected}. ` +
+        `Someone edited it since you read it — re-read it before writing, or drop --if-version to overwrite.`
+    })
+  )
+
+/**
  * The page a read-modify-write was derived from.
  *
  * Threading it through is what keeps Confluence's optimistic-version check
@@ -229,14 +245,7 @@ const putAdf = (
       client.getPage(pageId),
       (page): PageBase => ({ version: page.version.number, title: page.title })
     ))
-    if (options.expectedVersion !== undefined && options.expectedVersion !== current.version) {
-      return yield* Effect.fail(
-        new ConfigError({
-          message: `Page ${pageId} is at version ${current.version}, not ${options.expectedVersion}. ` +
-            `Someone edited it since you read it — re-read it before writing, or drop --if-version to overwrite.`
-        })
-      )
-    }
+    yield* checkExpectedVersion(pageId, current.version, options.expectedVersion)
     return yield* client.updatePage({
       id: pageId,
       title: options.title ?? current.title,
@@ -287,15 +296,27 @@ export const makePagePutCommand = (options: AdfPageCommandOptions = {}) => {
           baseUrl: optionValue(baseUrl)
         })
         const doc = yield* readAdfFile(adf, yield* parseSetFlags(set))
+        const expected = Option.isSome(ifVersion) ? ifVersion.value : undefined
 
+        // A plain dry run stays offline, but `--if-version` is a *check*, and a
+        // preview that skips it reports the write would succeed at the exact
+        // moment the real command refuses — misleading precisely for the
+        // concurrency-safe workflow the flag exists to support.
         if (dryRun) {
+          if (expected !== undefined) {
+            const auth = yield* getAuth()
+            yield* Effect.gen(function*() {
+              const client = yield* ConfluenceClient
+              const page = yield* client.getPage(PageId(input.pageId))
+              yield* checkExpectedVersion(PageId(input.pageId), page.version.number, expected)
+            }).pipe(Effect.provide(makeClientLayer({ baseUrl: input.baseUrl, auth })))
+          }
           yield* Console.log(`Would write ${adf} to page ${input.pageId} (${input.baseUrl}).`)
           return
         }
 
         const auth = yield* getAuth()
         const clientLayer = makeClientLayer({ baseUrl: input.baseUrl, auth })
-        const expected = Option.isSome(ifVersion) ? ifVersion.value : undefined
         const updated = yield* putAdf(PageId(input.pageId), JSON.stringify(doc), {
           title: optionValue(title),
           message: optionValue(message),

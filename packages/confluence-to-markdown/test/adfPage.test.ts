@@ -287,6 +287,50 @@ describe("page put", () => {
       expect(exit._tag).toBe("Success")
       expect(yield* Ref.get(updates)).toEqual([{ version: 10 }])
     }))
+
+  // `--if-version` is a check, so the preview has to run it. Reporting that the
+  // write would succeed at the exact moment the real command refuses is
+  // misleading precisely for the workflow the flag was added to protect.
+  it.effect("--dry-run still runs the --if-version check", () =>
+    Effect.gen(function*() {
+      const updates = yield* Ref.make<ReadonlyArray<UpdateCall>>([])
+      const command = makePagePutCommand({ makeClientLayer: () => MovedOnClientLayer(updates) })
+
+      const { exit } = yield* runCommand(command, [
+        "--url",
+        pageUrl,
+        "--adf",
+        adfFixture,
+        "--if-version",
+        "7",
+        "--dry-run"
+      ])
+
+      expect(exit._tag).toBe("Failure")
+      expect(JSON.stringify(exit)).toContain("is at version 9, not 7")
+      expect(yield* Ref.get(updates)).toEqual([])
+    }))
+
+  // The nearby valid fixture: a matching version previews cleanly, and a dry
+  // run still writes nothing.
+  it.effect("--dry-run passes when the version matches, and writes nothing", () =>
+    Effect.gen(function*() {
+      const updates = yield* Ref.make<ReadonlyArray<UpdateCall>>([])
+      const command = makePagePutCommand({ makeClientLayer: () => MovedOnClientLayer(updates) })
+
+      const { exit } = yield* runCommand(command, [
+        "--url",
+        pageUrl,
+        "--adf",
+        adfFixture,
+        "--if-version",
+        "9",
+        "--dry-run"
+      ])
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(updates)).toEqual([])
+    }))
 })
 
 describe("page create", () => {

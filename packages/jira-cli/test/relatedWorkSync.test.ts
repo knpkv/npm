@@ -149,6 +149,21 @@ describe("planRelatedWorkSync", () => {
     expect(plan.toRemove).toEqual([{ relatedWorkId: "id-orphan", url: null }])
   })
 
+  // Jira can hand back a desired URL twice with only the second copy
+  // deletable. Skipping the undeletable one before designating a keeper let the
+  // deletable duplicate claim that role, so both survived a reconcile that
+  // reported success.
+  it("prunes the deletable duplicate when the keeper has no id", () => {
+    const existing = [
+      { relatedWorkId: null, title: "Release Notes", category: "Communication", url: notes.url },
+      link("Release Notes", notes.url, "Communication", "id-second")
+    ]
+
+    const plan = planRelatedWorkSync(existing, [notes], { category: "Communication", prune: true })
+
+    expect(plan.toRemove).toEqual([{ relatedWorkId: "id-second", url: notes.url }])
+  })
+
   // The nearby valid fixture: with no id there is nothing to delete with, so
   // it stays skipped however it is pruned.
   it("leaves a url-less entry alone when Jira gave no id either", () => {

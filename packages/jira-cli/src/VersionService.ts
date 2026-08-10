@@ -695,16 +695,20 @@ export const planRelatedWorkSync = (
   const keptUrls = new Set<string>()
   const toRemove = options.prune
     ? inCategory.flatMap((w) => {
+      // Designate the keeper before asking whether this copy is deletable. An
+      // undeletable first copy that skipped straight out never claimed the
+      // URL, so the next duplicate claimed it instead and *both* survived a
+      // reconcile that reported success.
+      if (w.url !== null && desiredByUrl.has(w.url) && !keptUrls.has(w.url)) {
+        keptUrls.add(w.url)
+        return []
+      }
       // Nothing to delete with; leave it alone whatever its url.
       if (w.relatedWorkId === null) return []
       // A url-less entry can never match a desired link — every desired link
       // has one — so pruning must remove it rather than skip it, or the
       // category is not reconciled to the requested set and the command
       // reports success while the stale entry stays.
-      if (w.url !== null && desiredByUrl.has(w.url) && !keptUrls.has(w.url)) {
-        keptUrls.add(w.url)
-        return []
-      }
       return [{ relatedWorkId: w.relatedWorkId, url: w.url }]
     })
     : []
