@@ -21,10 +21,10 @@ import { defaultRelayReviewSkills, normalizeRelayReviewSkills, relayReviewSkills
 import {
   actionDiagnostic,
   actionOutcome,
+  addAmbiguousMergeGuard,
   adjacentChangedFileIndex,
-  type AmbiguousMergeGuard,
-  ambiguousMergeGuardAfterAppStatus,
-  beginAmbiguousMergeGuard,
+  type AmbiguousMergeGuards,
+  ambiguousMergeGuardsAfterAppStatus,
   beginFindingPostSession,
   blobPreviewDisposition,
   buildUnifiedDiff,
@@ -1120,7 +1120,7 @@ describe("PR detail workspace", () => {
     expect(providerCalls).toBe(2)
   })
 
-  it("blocks an ambiguous merge target until a later authoritative refresh completes", () => {
+  it("blocks an ambiguous merge target until an authoritative refresh observes it settled", () => {
     const target = new Domain.PullRequest({
       account: new Domain.Account({
         profile: Domain.AwsProfileName.make("production"),
@@ -1148,35 +1148,85 @@ describe("PR detail workspace", () => {
       ...target,
       account: new Domain.Account({ ...target.account, repoAccountId: "111122223333" })
     })
-    let guard: AmbiguousMergeGuard | null = beginAmbiguousMergeGuard(target, new Date(1_000))
+    let guards: AmbiguousMergeGuards = addAmbiguousMergeGuard({}, target, 1)
 
-    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
-    expect(pullRequestOpeningBlocked(guard, enrichedTarget)).toBe(true)
-    expect(pullRequestOpeningBlocked(guard, otherTarget)).toBe(false)
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle")
-    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "error")
-    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+    expect(pullRequestOpeningBlocked(guards, enrichedTarget)).toBe(true)
+    expect(pullRequestOpeningBlocked(guards, otherTarget)).toBe(false)
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target])
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "error", [target])
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
 
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000), [
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 1, [
+      { profile: target.account.profile, region: target.account.region }
+    ])
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
+
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target], 2, [
       { profile: Domain.AwsProfileName.make("staging"), region: Domain.AwsRegion.make("eu-west-1") }
     ])
-    expect(pullRequestOpeningBlocked(guard, target)).toBe(true)
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
 
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "loading")
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(3_000), [
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [target], 3, [
       { profile: target.account.profile, region: target.account.region }
     ])
-    expect(guard).toBeNull()
-    expect(pullRequestOpeningBlocked(guard, target)).toBe(false)
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(true)
 
-    guard = beginAmbiguousMergeGuard(target, new Date(1_000))
-    guard = ambiguousMergeGuardAfterAppStatus(guard, "idle", new Date(2_000), [
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [target])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [], 4, [
       { profile: target.account.profile, region: target.account.region }
     ])
-    expect(guard).toBeNull()
+    expect(pullRequestOpeningBlocked(guards, target)).toBe(false)
+  })
+
+  it("tracks ambiguous merge targets independently until each one settles", () => {
+    const targetA = new Domain.PullRequest({
+      account: new Domain.Account({
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      }),
+      approvalRules: [],
+      approvedBy: [],
+      approvedByArns: [],
+      author: "reviewer",
+      commentedBy: [],
+      creationDate: new Date(0),
+      destinationBranch: "main",
+      id: Domain.PullRequestId.make("42"),
+      isApproved: true,
+      isMergeable: true,
+      lastModifiedDate: new Date(1_000),
+      link: "https://example.invalid/pr/42",
+      repositoryName: Domain.RepositoryName.make("payments"),
+      sourceBranch: "feature-a",
+      status: "OPEN",
+      title: "Review A"
+    })
+    const targetB = new Domain.PullRequest({
+      ...targetA,
+      id: Domain.PullRequestId.make("43"),
+      link: "https://example.invalid/pr/43",
+      sourceBranch: "feature-b",
+      title: "Review B"
+    })
+    let guards: AmbiguousMergeGuards = addAmbiguousMergeGuard({}, targetA, 1)
+    guards = addAmbiguousMergeGuard(guards, targetB, 1)
+
+    expect(pullRequestOpeningBlocked(guards, targetA)).toBe(true)
+    expect(pullRequestOpeningBlocked(guards, targetB)).toBe(true)
+
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "loading", [targetA, targetB])
+    guards = ambiguousMergeGuardsAfterAppStatus(guards, "idle", [targetB], 2, [
+      { profile: targetA.account.profile, region: targetA.account.region }
+    ])
+
+    expect(pullRequestOpeningBlocked(guards, targetA)).toBe(false)
+    expect(pullRequestOpeningBlocked(guards, targetB)).toBe(true)
   })
 
   it("retries A-to-B drift after a correlated return to A", () => {

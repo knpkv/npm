@@ -128,6 +128,7 @@ describe("PRService.refresh", () => {
 
       const finalState = yield* SubscriptionRef.get(state)
       expect(finalState.status).toBe("idle")
+      expect(finalState.refreshGeneration).toBe(1)
       expect(finalState.pullRequests).toHaveLength(1)
       expect(finalState.pullRequests[0]?.id).toBe("35")
       expect(finalState.pullRequests[0]?.title).toBe("Visible after one refresh")

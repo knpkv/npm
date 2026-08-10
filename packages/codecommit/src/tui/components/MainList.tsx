@@ -6,7 +6,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
 import {
-  ambiguousMergeGuardAtom,
+  ambiguousMergeGuardsAtom,
   currentPRAtom,
   currentUserAtom,
   filterTextAtom,
@@ -137,7 +137,7 @@ export function MainList({ onSelectPR }: MainListProps) {
   const view = useAtomValue(viewAtom)
   const setView = useAtomSet(viewAtom)
   const toggleAccount = useAtomSet(toggleAccountAtom)
-  const ambiguousMergeGuard = useAtomValue(ambiguousMergeGuardAtom)
+  const ambiguousMergeGuards = useAtomValue(ambiguousMergeGuardsAtom)
 
   const state = useCachedAppState(result)
   const items = useFilteredItems(state, view)
@@ -153,7 +153,7 @@ export function MainList({ onSelectPR }: MainListProps) {
     items,
     () => {
       const item = items[stableIndex]
-      if (item?.type === "pr" && onSelectPR && !pullRequestOpeningBlocked(ambiguousMergeGuard, item.pr)) {
+      if (item?.type === "pr" && onSelectPR && !pullRequestOpeningBlocked(ambiguousMergeGuards, item.pr)) {
         onSelectPR(item.pr)
       } else if (item?.type === "account") setView("prs")
     },
@@ -193,7 +193,7 @@ export function MainList({ onSelectPR }: MainListProps) {
           {items.map((item, i) => (
             <ListItemRow
               key={i}
-              blocked={item.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuard, item.pr)}
+              blocked={item.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuards, item.pr)}
               item={item}
               selected={i === stableIndex}
               isFirst={i === 0}
@@ -205,7 +205,7 @@ export function MainList({ onSelectPR }: MainListProps) {
         <box style={{ position: "absolute", top: 0, width: "100%" }}>
           <ListItemRow
             blocked={
-              currentGroupHeader.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuard, currentGroupHeader.pr)
+              currentGroupHeader.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuards, currentGroupHeader.pr)
             }
             item={currentGroupHeader}
             selected={items[stableIndex] === currentGroupHeader}

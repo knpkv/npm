@@ -484,5 +484,7 @@ export interface AppState {
   readonly lastUpdated?: Date
   readonly currentUser?: string
   readonly pendingReviewCount?: number
+  /** Monotonic sequence incremented when a list refresh starts. */
+  readonly refreshGeneration?: number
   readonly successfulRefreshScopes?: ReadonlyArray<PullRequestRefreshScope>
 }

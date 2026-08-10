@@ -38,8 +38,8 @@ import {
 } from "../atoms/details.js"
 import {
   type ActionDiagnostic,
+  addAmbiguousMergeGuard,
   adjacentChangedFileIndex,
-  beginAmbiguousMergeGuard,
   beginFindingPostSession,
   changedFileHeadPath,
   changedFileRowId,
@@ -92,7 +92,7 @@ import {
 } from "../details-model.js"
 import type { FileDiffOutcome } from "../file-diff.js"
 import type { LocalEditor } from "../editor-launch.js"
-import { ambiguousMergeGuardAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { ambiguousMergeGuardsAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import {
   localDiffForWorkspace,
   localWorktreePathForDiff,
@@ -445,7 +445,7 @@ export function DetailsView() {
   const setSelectedPrId = useAtomSet(selectedPrIdAtom)
   const appState = AsyncResult.getOrElse(useAtomValue(appStateAtom), () => defaultState)
   const refresh = useAtomSet(refreshAtom)
-  const setAmbiguousMergeGuard = useAtomSet(ambiguousMergeGuardAtom)
+  const setAmbiguousMergeGuards = useAtomSet(ambiguousMergeGuardsAtom)
   const setView = useAtomSet(viewAtom)
   const openPr = useAtomSet(openPrAtom)
   const loadWorkspace = useAtomSet(loadPullRequestWorkspaceAtom)
@@ -1045,7 +1045,7 @@ export function DetailsView() {
       })
       setVerifiedWorkspace(null)
       if (pr !== null) {
-        setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pr, appState.lastUpdated))
+        setAmbiguousMergeGuards((current) => addAmbiguousMergeGuard(current, pr, appState.refreshGeneration))
       }
       refresh()
       setView("prs")
@@ -1059,7 +1059,7 @@ export function DetailsView() {
       setVerifiedWorkspace((current) => verifiedWorkspaceAfterMergeFailure(current, outcome.diagnostic))
       if (reloadPolicy === "refresh-list") {
         if (outcome.diagnostic.workspaceRefreshReason === "merge-outcome-unknown" && pr !== null) {
-          setAmbiguousMergeGuard(beginAmbiguousMergeGuard(pr, appState.lastUpdated))
+          setAmbiguousMergeGuards((current) => addAmbiguousMergeGuard(current, pr, appState.refreshGeneration))
         }
         refresh()
         setView("prs")
@@ -1078,7 +1078,7 @@ export function DetailsView() {
     mergeStatus,
     pr,
     refresh,
-    setAmbiguousMergeGuard,
+    setAmbiguousMergeGuards,
     setView
   ])
 

@@ -1,6 +1,6 @@
 import type { Domain } from "@knpkv/codecommit-core"
 import * as Atom from "effect/unstable/reactivity/Atom"
-import type { AmbiguousMergeGuard } from "../details-model.js"
+import type { AmbiguousMergeGuards } from "../details-model.js"
 
 /**
  * TUI view type
@@ -38,8 +38,8 @@ export const showHelpAtom = Atom.make(false).pipe(Atom.keepAlive)
  */
 export const currentPRAtom = Atom.make<Domain.PullRequest | null>(null).pipe(Atom.keepAlive)
 
-/** Application-scoped lock for a PR whose non-idempotent merge outcome is unknown. */
-export const ambiguousMergeGuardAtom = Atom.make<AmbiguousMergeGuard | null>(null).pipe(Atom.keepAlive)
+/** Application-scoped locks for PRs whose non-idempotent merge outcomes are unknown. */
+export const ambiguousMergeGuardsAtom = Atom.make<AmbiguousMergeGuards>({}).pipe(Atom.keepAlive)
 
 /**
  * Currently selected list index
