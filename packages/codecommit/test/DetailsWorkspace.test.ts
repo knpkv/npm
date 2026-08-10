@@ -51,9 +51,11 @@ import {
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
+  workspaceFindingPostSettlement,
   workspaceIdentityMatches,
   workspaceLifecycleTransition,
   workspaceResetInterruptions,
+  workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
   worktreeCheckoutLocalDiff
 } from "../src/tui/details-model.js"
@@ -407,6 +409,24 @@ describe("PR detail workspace", () => {
         { _tag: "idle" }
       )
     ).toEqual({ action: { _tag: "idle" }, selectedFindingIndex: 0 })
+    expect(workspaceFindingPostSettlement("workspace-a", "workspace-b")).toBe("retire-review-deck")
+    expect(workspaceFindingPostSettlement("workspace-a", "workspace-a")).toBe("retain-review-deck")
+    expect(
+      workspaceReviewDeckAfterPostSettlement<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        "workspace-a",
+        "workspace-b",
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: { _tag: "idle" }, selectedFindingIndex: 0 })
+    expect(
+      workspaceReviewDeckAfterPostSettlement<TestAction>(
+        { action: reviewed, selectedFindingIndex: 1 },
+        "workspace-a",
+        "workspace-a",
+        { _tag: "idle" }
+      )
+    ).toEqual({ action: reviewed, selectedFindingIndex: 1 })
   })
 
   it("keys comments by the exact revision pair", () => {
@@ -745,7 +765,8 @@ describe("PR detail workspace", () => {
       findingId: "F1",
       findingIndex: 0,
       fingerprint: "fingerprint",
-      requestId: "post-1"
+      requestId: "post-1",
+      workspaceReloadKey: "workspace-a"
     })
 
     expect(

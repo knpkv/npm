@@ -63,7 +63,9 @@ import {
   terminalSafeText,
   type FindingPostSession,
   type WorkspaceActionPhase,
+  workspaceFindingPostSettlement,
   workspaceLifecycleTransition,
+  workspaceReviewDeckAfterPostSettlement,
   workspaceReviewDeckAfterReset,
   workspaceResetInterruptions,
   worktreeCheckoutLocalDiff,
@@ -345,6 +347,12 @@ type VerificationStatus =
       readonly reply: string
     }
 
+type FindingPostReceipt = {
+  readonly findingId: string
+  readonly message: string
+  readonly status: "failed" | "posted-stale"
+}
+
 const actionLabel = (action: PendingAction): string =>
   ({
     review: "Review",
@@ -411,6 +419,7 @@ export function DetailsView() {
   const [findingDispositions, setFindingDispositions] = useState<Record<string, FindingDisposition>>({})
   const [findingPostDiagnostics, setFindingPostDiagnostics] = useState<Record<string, ActionDiagnostic>>({})
   const [postingFinding, setPostingFinding] = useState<FindingPostSession | null>(null)
+  const [findingPostReceipt, setFindingPostReceipt] = useState<FindingPostReceipt | null>(null)
   const [conversationTurns, setConversationTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
   const [conversationStatus, setConversationStatus] = useState<ConversationStatus>({ _tag: "idle" })
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>({ _tag: "idle" })
@@ -516,6 +525,7 @@ export function DetailsView() {
     if (!transition.preserveFindingPost) {
       setFindingDispositions({})
       setFindingPostDiagnostics({})
+      setFindingPostReceipt(null)
       updatePostingFinding(null)
     }
     setConversationTurns([])
@@ -647,7 +657,27 @@ export function DetailsView() {
     if (!AsyncResult.isSuccess(postFindingResult) || postFindingResult.value.requestId !== postingFinding.requestId)
       return
     const outcome = postFindingResult.value
+    const postSettlement = workspaceFindingPostSettlement(postingFinding.workspaceReloadKey, workspaceReloadKey)
+    const settledReviewDeck = workspaceReviewDeckAfterPostSettlement(
+      { action: actionRef.current, selectedFindingIndex: selectedFindingIndexRef.current },
+      postingFinding.workspaceReloadKey,
+      workspaceReloadKey,
+      { _tag: "idle" }
+    )
     if (outcome._tag === "failure") {
+      if (postSettlement === "retire-review-deck") {
+        setFindingPostReceipt({
+          findingId: postingFinding.findingId,
+          message: `${outcome.diagnostic.operation}: ${outcome.diagnostic.message}`,
+          status: "failed"
+        })
+        setFindingDispositions({})
+        setFindingPostDiagnostics({})
+        setSelectedFindingIndex(settledReviewDeck.selectedFindingIndex)
+        setAction(settledReviewDeck.action)
+        updatePostingFinding(null)
+        return
+      }
       setFindingDispositions((current) => ({ ...current, [postingFinding.findingId]: "failed" }))
       setFindingPostDiagnostics((current) => ({
         ...current,
@@ -680,6 +710,19 @@ export function DetailsView() {
     }
     const currentFinding = receiptReview?.findings.find((finding) => finding.id === postingFinding.findingId)
     const postDisposition = relayFindingPostReceiptDisposition(postingFinding, currentFinding, outcome.value)
+    if (postSettlement === "retire-review-deck") {
+      setFindingPostReceipt({
+        findingId: postingFinding.findingId,
+        message: "The provider accepted a finding from the previous workspace; its old review deck was retired",
+        status: "posted-stale"
+      })
+      setFindingDispositions({})
+      setFindingPostDiagnostics({})
+      setSelectedFindingIndex(settledReviewDeck.selectedFindingIndex)
+      setAction(settledReviewDeck.action)
+      updatePostingFinding(null)
+      return
+    }
     if (postDisposition === "posted-stale") {
       setFindingDispositions((current) => ({
         ...current,
@@ -716,7 +759,8 @@ export function DetailsView() {
     postFindingResult,
     postingFinding,
     verificationStatus,
-    verifyFindingResult
+    verifyFindingResult,
+    workspaceReloadKey
   ])
 
   useEffect(() => {
@@ -1071,8 +1115,10 @@ export function DetailsView() {
       findingId: selectedFinding.id,
       findingIndex: selectedFindingIndex,
       fingerprint: relayFindingFingerprint(selectedFinding),
-      requestId
+      requestId,
+      workspaceReloadKey: pullRequestWorkspaceReloadKey(pr)
     })
+    setFindingPostReceipt(null)
     updatePostingFinding(nextPostingFinding)
     postFinding({
       files: workspace.files,
@@ -1087,6 +1133,7 @@ export function DetailsView() {
   const beginAction = (next: PendingAction) => {
     if (pr === null || workspace === null || action._tag === "running" || agentRunning) return
     nextActionRequestSequence += 1
+    setFindingPostReceipt(null)
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:${nextActionRequestSequence}`
     const reviewSkillSnapshot = next === "worktree" ? [] : reviewSkills
     if (workspace.localDiff._tag === "ready") {
@@ -1457,6 +1504,19 @@ export function DetailsView() {
             )}
             {action._tag === "idle" && (
               <text fg={theme.textMuted}>Read-only sandbox. Human approval stays separate.</text>
+            )}
+            {findingPostReceipt === null ? null : (
+              <box
+                border={["left"]}
+                borderColor={findingPostReceipt.status === "failed" ? theme.error : theme.warning}
+                flexDirection="column"
+                style={{ paddingLeft: 1 }}
+              >
+                <text fg={findingPostReceipt.status === "failed" ? theme.textError : theme.textWarning}>
+                  {`${findingPostReceipt.status === "failed" ? "POST FAILED" : "STALE PROVIDER POST"} · ${findingPostReceipt.findingId}`}
+                </text>
+                <text fg={theme.textMuted}>{terminalSafeMultilineText(findingPostReceipt.message)}</text>
+              </box>
             )}
             {action._tag === "preflight" && (
               <text fg={theme.textWarning}>{`Preparing ${actionLabel(action.action)} preflight…`}</text>

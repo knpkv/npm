@@ -82,6 +82,7 @@ export interface FindingPostSession {
   readonly findingIndex: number
   readonly fingerprint: string
   readonly requestId: string
+  readonly workspaceReloadKey: string
 }
 
 /** Starts posting synchronously so a second key in the same terminal batch observes the in-flight write. */
@@ -368,6 +369,13 @@ export const workspaceLifecycleTransition = (
   return { _tag: "reset", interrupt, preserveFindingPost: findingPostRunning }
 }
 
+/** Retires an old review deck once its post settles against a replacement workspace. */
+export const workspaceFindingPostSettlement = (
+  postingWorkspaceReloadKey: string,
+  currentWorkspaceReloadKey: string | null
+): "retain-review-deck" | "retire-review-deck" =>
+  postingWorkspaceReloadKey === currentWorkspaceReloadKey ? "retain-review-deck" : "retire-review-deck"
+
 /** Retains the finding deck that owns an in-flight post so its receipt remains visible. */
 export const workspaceReviewDeckAfterReset = <Action>(
   current: { readonly action: Action; readonly selectedFindingIndex: number },
@@ -375,6 +383,17 @@ export const workspaceReviewDeckAfterReset = <Action>(
   idleAction: Action
 ): { readonly action: Action; readonly selectedFindingIndex: number } =>
   preserveFindingPost ? current : { action: idleAction, selectedFindingIndex: 0 }
+
+/** Makes a replaced workspace's old findings non-interactive as soon as their post settles. */
+export const workspaceReviewDeckAfterPostSettlement = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  postingWorkspaceReloadKey: string,
+  currentWorkspaceReloadKey: string | null,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  workspaceFindingPostSettlement(postingWorkspaceReloadKey, currentWorkspaceReloadKey) === "retain-review-deck"
+    ? current
+    : { action: idleAction, selectedFindingIndex: 0 }
 
 /** Includes review children that must never outlive the exact workspace they inspect. */
 export const workspaceResetInterruptions = (
