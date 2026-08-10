@@ -50,7 +50,7 @@ The models preserve the exact pull request revision, base/head commits, merge ba
 
 ### ReviewClient
 
-The supported `@knpkv/codecommit-core/ReviewClient.js` entry exposes immutable pull-request review actions for server integrations. Every action carries the exact repository, pull request revision, base commit, and head commit that a caller authorized. `preflight` rejects a changed or closed target before a write, `execute` returns a secret-free provider receipt, and `reconcile` inspects provider state without replaying an ambiguous mutation.
+The supported `@knpkv/codecommit-core/ReviewClient.js` entry exposes immutable pull-request review actions plus an explicitly confirmed native CodeCommit merge action. Every action carries the exact repository, pull request revision, base commit, and head commit that a caller authorized. `preflight` rejects a changed or closed target before a write, `execute` returns a secret-free provider receipt, and `reconcile` inspects provider state without replaying an ambiguous mutation.
 
 ```typescript
 import { ReviewClient } from "@knpkv/codecommit-core"
@@ -67,7 +67,9 @@ const program = Effect.gen(function* () {
 
 `CodeCommitReviewClient.live` supplies the raw mutation provider and still requires a `CodeCommitReadClient`, `AwsClientConfig`, and `HttpClient` when layers are composed. CodeCommit natively supports approve and revoke approval. It has no request-review or request-changes state mutation, so those actions are target-bound idempotent comments attached to the authorized base/head commits. Comment reconciliation searches by AWS client request token; approval reconciliation reads the signed-in identity’s state and treats an absent caller as a completed revoke.
 
-Governed merge is deliberately not exposed. CodeCommit’s pull-request merge operation enforces provider approval rules but cannot compare-and-set the authorized destination commit, while its branch fast-forward operation can compare-and-set the destination but bypasses pull-request approval rules. Until the provider offers one atomic operation with both guarantees, callers must not model either endpoint as a governed PR merge.
+The exported `merge` action is an authority-bearing, non-idempotent direct provider mutation for an interactive client that pins `sourceCommitId`, prevents cancellation after submission, and waits for the provider receipt. It is not a governed server-review action: Control Center deliberately excludes `merge` from its accepted action union and reconciliation locators. Other server integrations must exclude it unless they explicitly own the same non-idempotent execution and receipt-settlement lifecycle.
+
+Governed merge remains deliberately unavailable. CodeCommit’s pull-request merge operation enforces provider approval rules and can pin the authorized source commit, but it cannot compare-and-set the authorized destination commit. Callers must not describe the exported direct merge action as an atomic governed PR merge.
 
 ### CacheService (SQLite)
 
