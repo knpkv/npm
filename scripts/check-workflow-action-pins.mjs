@@ -27,27 +27,48 @@ const collectUses = (value, location, results = []) => {
   return results
 }
 
-export const validateWorkflowActionPins = (document, location) => {
+export const validateWorkflowActionPins = (document, location, localActions = new Map()) => {
   const diagnostics = []
-  for (const entry of collectUses(document, location)) {
-    if (entry.uses.startsWith("./")) continue
-    if (entry.uses.startsWith("docker://")) {
-      if (!dockerDigest.test(entry.uses)) {
-        diagnostics.push(`${entry.location}: docker actions must use an immutable sha256 digest`)
+  const visit = (currentDocument, currentLocation, stack) => {
+    for (const entry of collectUses(currentDocument, currentLocation)) {
+      if (entry.uses.startsWith("./")) {
+        if (entry.uses.includes("${{")) {
+          diagnostics.push(`${entry.location}: dynamic local action references require explicit review`)
+          continue
+        }
+        const localPath = entry.uses.slice(2).replace(/\/+$/u, "")
+        if (/\.ya?ml$/u.test(localPath)) continue
+        if (stack.has(localPath)) {
+          diagnostics.push(`${entry.location}: cyclic local action reference to ${entry.uses}`)
+          continue
+        }
+        const localAction = localActions.get(localPath)
+        if (localAction === undefined) {
+          diagnostics.push(`${entry.location}: local action ${entry.uses} has no action.yml or action.yaml manifest`)
+          continue
+        }
+        visit(localAction.document, localAction.location, new Set([...stack, localPath]))
+        continue
       }
-      continue
-    }
-    const separator = entry.uses.lastIndexOf("@")
-    const reference = separator === -1 ? "" : entry.uses.slice(separator + 1)
-    const action = separator === -1 ? entry.uses : entry.uses.slice(0, separator).toLowerCase()
-    if (!fullCommitSha.test(reference)) {
-      diagnostics.push(`${entry.location}: external action ${entry.uses} must use a full 40-character commit SHA`)
-      continue
-    }
-    if (action === "actions/checkout" && entry.step.with?.["persist-credentials"] !== false) {
-      diagnostics.push(`${entry.location}: actions/checkout must set with.persist-credentials to false`)
+      if (entry.uses.startsWith("docker://")) {
+        if (!dockerDigest.test(entry.uses)) {
+          diagnostics.push(`${entry.location}: docker actions must use an immutable sha256 digest`)
+        }
+        continue
+      }
+      const separator = entry.uses.lastIndexOf("@")
+      const reference = separator === -1 ? "" : entry.uses.slice(separator + 1)
+      const action = separator === -1 ? entry.uses : entry.uses.slice(0, separator).toLowerCase()
+      if (!fullCommitSha.test(reference)) {
+        diagnostics.push(`${entry.location}: external action ${entry.uses} must use a full 40-character commit SHA`)
+        continue
+      }
+      if (action === "actions/checkout" && entry.step.with?.["persist-credentials"] !== false) {
+        diagnostics.push(`${entry.location}: actions/checkout must set with.persist-credentials to false`)
+      }
     }
   }
+  visit(document, location, new Set())
   return diagnostics
 }
 
@@ -67,7 +88,6 @@ jobs:
       - uses: actions/checkout@${"a".repeat(40)}
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
 `)
   const invalidMixedCaseCheckout = parse(`
 jobs:
@@ -81,10 +101,79 @@ jobs:
     steps:
       - uses: Actions/Setup-Node@${"a".repeat(40)}
 `)
+  const invalidLocalActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/build
+`)
+  const invalidLocalAction = parse(`
+runs:
+  using: composite
+  steps:
+    - uses: third-party/build@v1
+`)
+  const validLocalActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/trusted-build
+`)
+  const validLocalAction = parse(`
+runs:
+  using: composite
+  steps:
+    - uses: third-party/build@${"c".repeat(40)}
+`)
+  const cyclicLocalActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/cycle-a
+`)
+  const cyclicLocalActionA = parse(`
+runs:
+  using: composite
+  steps:
+    - uses: ./ci/cycle-b
+`)
+  const cyclicLocalActionB = parse(`
+runs:
+  using: composite
+  steps:
+    - uses: ./ci/cycle-a
+`)
   assert.equal(validateWorkflowActionPins(invalid, "invalid fixture").length, 2)
   assert.equal(validateWorkflowActionPins(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.deepEqual(validateWorkflowActionPins(valid, "valid fixture"), [])
   assert.deepEqual(validateWorkflowActionPins(validMixedCaseNonCheckout, "mixed-case action fixture"), [])
+  assert.equal(
+    validateWorkflowActionPins(
+      invalidLocalActionCaller,
+      "invalid local action caller",
+      new Map([["ci/build", { document: invalidLocalAction, location: "ci/build/action.yml" }]])
+    ).length,
+    1
+  )
+  assert.deepEqual(
+    validateWorkflowActionPins(
+      validLocalActionCaller,
+      "valid local action caller",
+      new Map([["ci/trusted-build", { document: validLocalAction, location: "ci/trusted-build/action.yml" }]])
+    ),
+    []
+  )
+  assert.equal(
+    validateWorkflowActionPins(
+      cyclicLocalActionCaller,
+      "cyclic local action caller",
+      new Map([
+        ["ci/cycle-a", { document: cyclicLocalActionA, location: "ci/cycle-a/action.yml" }],
+        ["ci/cycle-b", { document: cyclicLocalActionB, location: "ci/cycle-b/action.yml" }]
+      ])
+    ).length,
+    1
+  )
 }
 
 const program = Effect.gen(function* () {
@@ -92,12 +181,30 @@ const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const workflowFiles = yield* Effect.tryPromise({
     try: () =>
-      Glob.glob([".github/workflows/**/*.{yml,yaml}", ".github/actions/**/*.{yml,yaml}"], {
+      Glob.glob([".github/workflows/**/*.{yml,yaml}"], {
         ignore: ["**/generated/**", "**/vendor/**", "**/node_modules/**"],
         nodir: true
       }),
     catch: (cause) => new Error("Failed to enumerate GitHub workflow files", { cause })
   })
+  const localActionFiles = yield* Effect.tryPromise({
+    try: () =>
+      Glob.glob(["**/action.{yml,yaml}"], {
+        dot: true,
+        ignore: ["**/generated/**", "**/vendor/**", "**/node_modules/**"],
+        nodir: true
+      }),
+    catch: (cause) => new Error("Failed to enumerate local action manifests", { cause })
+  })
+  const localActions = new Map()
+  for (const file of localActionFiles.toSorted()) {
+    const content = yield* fileSystem.readFileString(file)
+    const document = yield* Effect.try({
+      try: () => parse(content),
+      catch: (cause) => new Error(`${file}: invalid YAML`, { cause })
+    })
+    localActions.set(file.replace(/\/action\.ya?ml$/u, ""), { document, location: file })
+  }
   const diagnostics = []
   for (const file of workflowFiles.toSorted()) {
     const content = yield* fileSystem.readFileString(file)
@@ -105,12 +212,14 @@ const program = Effect.gen(function* () {
       try: () => parse(content),
       catch: (cause) => new Error(`${file}: invalid YAML`, { cause })
     })
-    diagnostics.push(...validateWorkflowActionPins(document, file))
+    diagnostics.push(...validateWorkflowActionPins(document, file, localActions))
   }
   if (diagnostics.length > 0) {
     return yield* Effect.fail(new Error(`Unsafe GitHub action references:\n${diagnostics.join("\n")}`))
   }
-  yield* Console.log(`GitHub action pins checked across ${workflowFiles.length} workflow files`)
+  yield* Console.log(
+    `GitHub action pins checked across ${workflowFiles.length} workflows and ${localActionFiles.length} local actions`
+  )
 })
 
 NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)))

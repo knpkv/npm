@@ -128,6 +128,14 @@ attacker-controlled checkout, conservatively treat every later `run`, local
 action, or external action step as capable of executing the workspace; a
 metadata-only external action needs explicit human judgment before any narrow
 allowlist exception is added.
+Credential authority must follow static local reusable-workflow calls
+transitively, including `secrets: inherit`; reject cycles and missing local
+callees, while remote or dynamically constructed reusable-workflow references
+still require explicit review. Parse `${{ ... }}` delimiters without treating
+`}}` inside quoted GitHub expression strings as the end of the expression.
+Workflow action-pin validation must traverse every reachable repository-local
+action manifest, regardless of its directory, reject missing or cyclic local
+action references, and apply immutable external-reference rules transitively.
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 

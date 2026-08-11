@@ -8,11 +8,44 @@ import * as FileSystem from "effect/FileSystem"
 import * as Glob from "glob"
 import { parse } from "yaml"
 
-const actionsExpression = /\$\{\{([\s\S]*?)\}\}/gu
 const secretReference = /\bsecrets(?:\.([A-Z0-9_]+)|\s*\[([^\]]+)\])/giu
 const staticIndexedProperty = /\[\s*(['"])([A-Z_][A-Z0-9_-]*)\1\s*\]/giu
 const dynamicSecretName = "<DYNAMIC_SECRET>"
 const normalizeStaticIndexedProperties = (value) => value.replace(staticIndexedProperty, ".$2")
+const actionsExpressionsIn = (source) => {
+  const expressions = []
+  let searchFrom = 0
+  while (searchFrom < source.length) {
+    const start = source.indexOf("${{", searchFrom)
+    if (start === -1) break
+    let quote
+    let cursor = start + 3
+    for (; cursor < source.length - 1; cursor += 1) {
+      const character = source[cursor]
+      if (quote !== undefined) {
+        if (character === quote) {
+          if (source[cursor + 1] === quote) {
+            cursor += 1
+          } else {
+            quote = undefined
+          }
+        }
+        continue
+      }
+      if (character === "'" || character === '"') {
+        quote = character
+        continue
+      }
+      if (character === "}" && source[cursor + 1] === "}") {
+        expressions.push(source.slice(start + 3, cursor))
+        cursor += 1
+        break
+      }
+    }
+    searchFrom = cursor + 1
+  }
+  return expressions
+}
 const stringsIn = (value) => {
   if (typeof value === "string") return [value]
   if (Array.isArray(value)) return value.flatMap(stringsIn)
@@ -21,8 +54,8 @@ const stringsIn = (value) => {
 }
 const referencedSecretNames = (value) =>
   stringsIn(value).flatMap((source) =>
-    Array.from(source.matchAll(actionsExpression)).flatMap((expressionMatch) => {
-      const expression = normalizeStaticIndexedProperties(expressionMatch[1])
+    actionsExpressionsIn(source).flatMap((sourceExpression) => {
+      const expression = normalizeStaticIndexedProperties(sourceExpression)
       return Array.from(expression.matchAll(secretReference), (secretMatch) =>
         secretMatch[1] === undefined ? dynamicSecretName : secretMatch[1].toUpperCase()
       )
@@ -32,8 +65,8 @@ const referencesSecrets = (value) => referencedSecretNames(value).length > 0
 const referencesLongLivedSecrets = (value) => referencedSecretNames(value).some((name) => name !== "GITHUB_TOKEN")
 const referencesGithubToken = (value) =>
   stringsIn(value).some((source) =>
-    Array.from(source.matchAll(actionsExpression)).some((expressionMatch) =>
-      /\bgithub\.token\b/iu.test(normalizeStaticIndexedProperties(expressionMatch[1]))
+    actionsExpressionsIn(source).some((sourceExpression) =>
+      /\bgithub\.token\b/iu.test(normalizeStaticIndexedProperties(sourceExpression))
     )
   )
 const referencesPullRequestCredentials = (value) => referencesSecrets(value) || referencesGithubToken(value)
@@ -98,32 +131,61 @@ const pinsMain = (condition) => {
     .some((term) => /^\s*\(*\s*github\.ref\s*==\s*['"]refs\/heads\/main['"]\s*\)*\s*$/u.test(term))
 }
 
-export const validateWorkflowSecretBoundaries = (document, location) => {
+const localReusableWorkflowPath = (uses) => {
+  if (typeof uses !== "string" || !uses.startsWith("./") || uses.includes("${{")) return undefined
+  const path = uses.slice(2)
+  return path.startsWith(".github/workflows/") && /\.ya?ml$/u.test(path) ? path : undefined
+}
+
+export const validateWorkflowSecretBoundaries = (document, location, workflowDocuments = new Map()) => {
   const diagnostics = []
   const triggers = workflowTriggers(document)
   const pullRequestTriggers = ["pull_request", "pull_request_target"].filter((trigger) => hasTrigger(triggers, trigger))
   const manuallyTriggered = hasTrigger(triggers, "workflow_dispatch")
-  for (const [jobName, job] of Object.entries(document?.jobs ?? {})) {
-    const jobLocation = `${location}: job ${jobName}`
-    const inheritedSecretContext = { workflowEnv: document?.env, job }
-    const effectivePermissions = job.permissions === undefined ? document?.permissions : job.permissions
-    const executesPullRequestCode = pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger))
-    const checksOutPullRequestCode = pullRequestTriggers.some((trigger) => checksOutPullRequestRevision(job, trigger))
-    if (
-      (executesPullRequestCode && referencesPullRequestCredentials(inheritedSecretContext)) ||
-      (checksOutPullRequestCode && grantsOidcAuthority(effectivePermissions))
-    ) {
-      diagnostics.push(`${jobLocation} executes pull-request code with repository credential or OIDC authority`)
-    }
-    if (manuallyTriggered && referencesLongLivedSecrets(inheritedSecretContext)) {
-      if (!pinsMain(job.if)) {
-        diagnostics.push(`${jobLocation} must pin credentialed manual runs to refs/heads/main`)
+  const visit = (currentDocument, currentLocation, authority, stack) => {
+    for (const [jobName, job] of Object.entries(currentDocument?.jobs ?? {})) {
+      const jobLocation = `${currentLocation}: job ${jobName}`
+      const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
+      const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
+      const credentialAuthority =
+        authority.credentials || job.secrets === "inherit" || referencesPullRequestCredentials(inheritedSecretContext)
+      const oidcAuthority = authority.oidc || grantsOidcAuthority(effectivePermissions)
+      const executesPullRequestCode = pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger))
+      const checksOutPullRequestCode = pullRequestTriggers.some((trigger) => checksOutPullRequestRevision(job, trigger))
+      if ((executesPullRequestCode && credentialAuthority) || (checksOutPullRequestCode && oidcAuthority)) {
+        diagnostics.push(`${jobLocation} executes pull-request code with repository credential or OIDC authority`)
       }
-      if (typeof job.environment !== "string" || job.environment.length === 0) {
-        diagnostics.push(`${jobLocation} must use a protected GitHub environment for long-lived credentials`)
+
+      const reusablePath = localReusableWorkflowPath(job.uses)
+      if (reusablePath !== undefined) {
+        if (stack.has(reusablePath)) {
+          diagnostics.push(`${jobLocation} has a cyclic local reusable-workflow call to ${reusablePath}`)
+        } else {
+          const reusable = workflowDocuments.get(reusablePath)
+          if (reusable === undefined) {
+            diagnostics.push(`${jobLocation} references missing local reusable workflow ${reusablePath}`)
+          } else {
+            visit(
+              reusable.document,
+              reusable.location,
+              { credentials: credentialAuthority, oidc: oidcAuthority },
+              new Set([...stack, reusablePath])
+            )
+          }
+        }
+      }
+
+      if (currentDocument === document && manuallyTriggered && referencesLongLivedSecrets(inheritedSecretContext)) {
+        if (!pinsMain(job.if)) {
+          diagnostics.push(`${jobLocation} must pin credentialed manual runs to refs/heads/main`)
+        }
+        if (typeof job.environment !== "string" || job.environment.length === 0) {
+          diagnostics.push(`${jobLocation} must use a protected GitHub environment for long-lived credentials`)
+        }
       }
     }
   }
+  visit(document, location, { credentials: false, oidc: false }, new Set([location]))
   return diagnostics
 }
 
@@ -315,6 +377,89 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
       - run: pnpm test:integration
+`)
+  const invalidQuotedBracesSecret = parse(`
+on:
+  pull_request:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: pnpm test:integration
+        env:
+          DEPLOY_TOKEN: \${{ format('{{x}}{0}', secrets.DEPLOY_TOKEN) }}
+`)
+  const safeQuotedBracesExpression = parse(`
+on:
+  pull_request:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: pnpm test:integration
+        env:
+          LABEL: \${{ format('{{x}}{0}', github.actor) }}
+`)
+  const invalidReusableWorkflowCaller = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    uses: ./.github/workflows/reusable-pr.yml
+    secrets: inherit
+`)
+  const invalidReusableWorkflowCallee = parse(`
+on:
+  workflow_call:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeReusableWorkflowCaller = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    uses: ./.github/workflows/reusable-trusted.yml
+`)
+  const safeReusableWorkflowCallee = parse(`
+on:
+  workflow_call:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: refs/heads/main
+      - run: pnpm test:integration
+`)
+  const cyclicReusableWorkflowCaller = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    uses: ./.github/workflows/cycle-a.yml
+    secrets: inherit
+`)
+  const cyclicReusableWorkflowA = parse(`
+on:
+  workflow_call:
+jobs:
+  nested:
+    uses: ./.github/workflows/cycle-b.yml
+    secrets: inherit
+`)
+  const cyclicReusableWorkflowB = parse(`
+on:
+  workflow_call:
+jobs:
+  nested:
+    uses: ./.github/workflows/cycle-a.yml
+    secrets: inherit
 `)
   const invalidExplicitEventSha = parse(`
 on:
@@ -541,6 +686,23 @@ jobs:
     1
   )
   assert.equal(
+    validateWorkflowSecretBoundaries(
+      cyclicReusableWorkflowCaller,
+      ".github/workflows/cyclic-reusable-caller.yml",
+      new Map([
+        [
+          ".github/workflows/cycle-a.yml",
+          { document: cyclicReusableWorkflowA, location: ".github/workflows/cycle-a.yml" }
+        ],
+        [
+          ".github/workflows/cycle-b.yml",
+          { document: cyclicReusableWorkflowB, location: ".github/workflows/cycle-b.yml" }
+        ]
+      ])
+    ).length,
+    1
+  )
+  assert.equal(
     validateWorkflowSecretBoundaries(invalidPullRequestTargetHeadRepository, "PR target head repository fixture")
       .length,
     1
@@ -562,6 +724,20 @@ jobs:
   assert.equal(validateWorkflowSecretBoundaries(invalidSingleQuotedBracket, "single-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidDoubleQuotedBracket, "double-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidWorkflowEnvironment, "workflow environment fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidQuotedBracesSecret, "quoted braces secret fixture").length, 1)
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidReusableWorkflowCaller,
+      ".github/workflows/invalid-reusable-caller.yml",
+      new Map([
+        [
+          ".github/workflows/reusable-pr.yml",
+          { document: invalidReusableWorkflowCallee, location: ".github/workflows/reusable-pr.yml" }
+        ]
+      ])
+    ).length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventSha, "explicit event SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventRef, "explicit event ref fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidHeadRef, "head ref fixture").length, 1)
@@ -596,6 +772,20 @@ jobs:
     []
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeQuotedBracesExpression, "safe quoted braces fixture"), [])
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(
+      safeReusableWorkflowCaller,
+      ".github/workflows/safe-reusable-caller.yml",
+      new Map([
+        [
+          ".github/workflows/reusable-trusted.yml",
+          { document: safeReusableWorkflowCallee, location: ".github/workflows/reusable-trusted.yml" }
+        ]
+      ])
+    ),
+    []
+  )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
   assert.deepEqual(
@@ -619,13 +809,17 @@ const program = Effect.gen(function* () {
     catch: (cause) => new Error("Failed to enumerate GitHub workflows", { cause })
   })
   const diagnostics = []
+  const workflowDocuments = new Map()
   for (const file of workflowFiles.toSorted()) {
     const content = yield* fileSystem.readFileString(file)
     const document = yield* Effect.try({
       try: () => parse(content),
       catch: (cause) => new Error(`${file}: invalid YAML`, { cause })
     })
-    for (const diagnostic of validateWorkflowSecretBoundaries(document, file)) {
+    workflowDocuments.set(file, { document, location: file })
+  }
+  for (const [file, { document }] of workflowDocuments) {
+    for (const diagnostic of validateWorkflowSecretBoundaries(document, file, workflowDocuments)) {
       diagnostics.push(diagnostic)
     }
   }
