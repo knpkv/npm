@@ -3,22 +3,17 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
+import { COMMAND_PRESETS, MOUNT_PRESETS, type SandboxVolumeMount } from "../sandbox-presets.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
-
-interface VolumeMount {
-  readonly hostPath: string
-  readonly containerPath: string
-  readonly readonly: boolean
-}
 
 interface SandboxSettings {
   readonly image: string
   readonly extensions: ReadonlyArray<string>
   readonly setupCommands: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
-  readonly volumeMounts: ReadonlyArray<VolumeMount>
+  readonly volumeMounts: ReadonlyArray<SandboxVolumeMount>
   readonly cloneDepth: number
 }
 
@@ -451,45 +446,6 @@ function ExtensionPresets({
     </div>
   )
 }
-
-const COMMAND_PRESETS: ReadonlyArray<{ label: string; cmd: string }> = [
-  {
-    label: "Node 22",
-    cmd: "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
-  },
-  { label: "pnpm", cmd: "sudo npm i -g pnpm" },
-  {
-    label: "Bun",
-    cmd: "curl -fsSL https://bun.sh/install | bash && echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.bashrc && echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.profile"
-  }
-]
-
-const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
-  {
-    label: "VS Code Extensions",
-    mount: {
-      hostPath: "~/.codecommit/sandbox-volumes/extensions",
-      containerPath: "/home/coder/.local/share/code-server/extensions",
-      readonly: false
-    }
-  },
-  {
-    label: "VS Code Settings",
-    mount: {
-      hostPath: "~/.codecommit/sandbox-volumes/settings.json",
-      containerPath: "/home/coder/.local/share/code-server/User/settings.json",
-      readonly: true
-    }
-  },
-  {
-    label: "VS Code Keybindings",
-    mount: {
-      hostPath: "~/.codecommit/sandbox-volumes/keybindings.json",
-      containerPath: "/home/coder/.local/share/code-server/User/keybindings.json",
-      readonly: true
-    }
-  }
-]
 
 function CommandPresets({
   onChange,

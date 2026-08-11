@@ -253,9 +253,12 @@ Review sandboxes use a digest-pinned code-server image, a random password, a
 non-root user mapped to the workspace owner, dropped Linux capabilities, and a Docker port explicitly bound
 to `127.0.0.1`. User-configured host mounts must exist and canonically resolve to children of
 `~/.codecommit/sandbox-volumes`, and container targets must be children of
-`/home/coder`; AWS credentials, SSH keys, the Docker socket, and broad home or
-root mounts are rejected before configuration persistence and again before
-Docker execution.
+`/home/coder` or the exact `/tmp/.local/share/code-server` runtime data subtree;
+the built-in Node, pnpm, and Bun setup presets run without privilege escalation.
+AWS credentials, SSH keys, the Docker socket, and broad home or root mounts are
+rejected before configuration persistence and again before Docker execution.
+The cache directory and database that persist the sandbox password are repaired
+to owner-only `0700` and `0600` permissions before use.
 The authenticated credential response is non-cacheable, and the UI masks the
 password until the owner explicitly reveals or copies it.
 

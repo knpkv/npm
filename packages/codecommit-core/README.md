@@ -111,7 +111,8 @@ never returned.
 Sandbox settings are validated before persistence. Images must use an immutable
 `sha256` digest, reserved code-server credential variables cannot be overridden,
 and existing host mounts must canonically resolve to children of
-`~/.codecommit/sandbox-volumes` while targeting children of `/home/coder`.
+`~/.codecommit/sandbox-volumes` while targeting children of `/home/coder` or
+the exact `/tmp/.local/share/code-server` runtime data subtree.
 
 ### SandboxService
 
@@ -122,6 +123,8 @@ password, runs code-server as the non-root owner of its bind-mounted workspace
 dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
 exclude both the access password and workspace path; the authenticated web
 owner retrieves the password through the single-sandbox credential route.
+The local cache directory and database are created or repaired as owner-only
+`0700` and `0600` paths before that password is persisted.
 Legacy containers without a password are stopped during reconciliation and must
 be recreated. Custom runtime composition must provide Effect `Crypto`, `Path`,
 filesystem, process, and configuration services required by the sandbox layer.

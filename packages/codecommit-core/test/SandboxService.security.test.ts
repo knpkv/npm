@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ensurePrivateDatabasePath } from "../src/CacheService/Database.js"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
 import { renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
@@ -81,6 +82,19 @@ describe("sandbox security boundary", () => {
           ]
         }
         yield* validateSandboxConfig(safeConfig, scopedHome)
+        yield* validateSandboxConfig({
+          ...safeConfig,
+          volumeMounts: [{
+            ...safeConfig.volumeMounts[0],
+            containerPath: "/tmp/.local/share/code-server/extensions"
+          }]
+        }, scopedHome)
+
+        const broadTemporaryMount = yield* validateSandboxConfig({
+          ...safeConfig,
+          volumeMounts: [{ ...safeConfig.volumeMounts[0], containerPath: "/tmp/credentials" }]
+        }, scopedHome).pipe(Effect.flip)
+        expect(broadTemporaryMount._tag).toBe("SandboxConfigurationError")
 
         const escapedMount = path.join(allowedRoot, "escaped")
         yield* fileSystem.symlink(outside, escapedMount)
@@ -119,6 +133,33 @@ describe("sandbox security boundary", () => {
         }, scopedHome).pipe(Effect.flip)
 
         expect(error._tag).toBe("SandboxConfigurationError")
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("creates and repairs the credential-bearing database with owner-only permissions", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-private-database-" })
+
+        const newDirectory = path.join(root, "new", ".codecommit")
+        const newDatabase = path.join(newDirectory, "cache.db")
+        yield* ensurePrivateDatabasePath(newDirectory, newDatabase)
+        expect((yield* fileSystem.stat(newDirectory)).mode & 0o777).toBe(0o700)
+        expect((yield* fileSystem.stat(newDatabase)).mode & 0o777).toBe(0o600)
+
+        const existingDirectory = path.join(root, "existing", ".codecommit")
+        const existingDatabase = path.join(existingDirectory, "cache.db")
+        yield* fileSystem.makeDirectory(existingDirectory, { mode: 0o755, recursive: true })
+        yield* fileSystem.chmod(existingDirectory, 0o755)
+        yield* fileSystem.writeFile(existingDatabase, Uint8Array.of(42), { mode: 0o644 })
+        yield* fileSystem.chmod(existingDatabase, 0o644)
+
+        yield* ensurePrivateDatabasePath(existingDirectory, existingDatabase)
+        expect((yield* fileSystem.stat(existingDirectory)).mode & 0o777).toBe(0o700)
+        expect((yield* fileSystem.stat(existingDatabase)).mode & 0o777).toBe(0o600)
+        expect(Array.from(yield* fileSystem.readFile(existingDatabase))).toEqual([42])
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 

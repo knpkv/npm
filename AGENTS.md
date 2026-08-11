@@ -253,8 +253,11 @@ When writing Effect code:
   validate before persistence and Docker execution; require immutable image
   digests; reserve code-server credential variables; accept only existing
   canonical children of the physical `~/.codecommit/sandbox-volumes` directory
-  mounted below `/home/coder`; persist the generated access password but expose
-  it only through the authenticated, non-cacheable single-sandbox route; map the
+  mounted below `/home/coder` or the exact `/tmp/.local/share/code-server`
+  runtime data subtree; keep built-in setup presets unprivileged; persist the
+  generated access password only in an owner-only `0700` cache directory and
+  `0600` database, and expose it only through the authenticated, non-cacheable
+  single-sandbox route; map the
   non-root container identity to the workspace owner (repair root-owned clones
   to a fixed non-root identity); drop all capabilities and publish only on
   loopback; keep sandbox browser origins on the alternate loopback hostname so

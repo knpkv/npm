@@ -6,6 +6,7 @@ import type { SandboxConfig } from "./internal.js"
 
 const digestPinnedImage = /@sha256:[0-9a-f]{64}$/u
 const reservedEnvironmentKeys = new Set(["HASHED_PASSWORD", "PASSWORD"])
+const permittedContainerRoots = ["/home/coder", "/tmp/.local/share/code-server"]
 
 const reject = (message: string) => new SandboxConfigurationError({ message })
 
@@ -79,14 +80,17 @@ export const validateSandboxConfig = Effect.fn("SandboxPolicy.validateSandboxCon
       }
 
       const containerPath = path.normalize(mount.containerPath)
-      const relativeContainerPath = path.relative("/home/coder", containerPath)
-      if (
-        relativeContainerPath === "" ||
-        relativeContainerPath === ".." ||
-        relativeContainerPath.startsWith(`..${path.sep}`) ||
-        path.isAbsolute(relativeContainerPath)
-      ) {
-        return yield* reject(`Sandbox mount target ${mount.containerPath} must be a child of /home/coder`)
+      const isPermittedContainerChild = permittedContainerRoots.some((root) => {
+        const relativeContainerPath = path.relative(root, containerPath)
+        return relativeContainerPath !== "" &&
+          relativeContainerPath !== ".." &&
+          !relativeContainerPath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relativeContainerPath)
+      })
+      if (!isPermittedContainerChild) {
+        return yield* reject(
+          `Sandbox mount target ${mount.containerPath} must be a child of /home/coder or the code-server runtime data root`
+        )
       }
     }
     return config

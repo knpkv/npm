@@ -64,6 +64,8 @@ export const sandboxContainerIdentityForWorkspaceOwner = (
     : { user: "1000:1000", repairRootOwnedWorkspace: false }
 
 const SANDBOX_BASE_PORT = 18080
+export const sandboxRuntimeHome = "/tmp"
+export const sandboxRuntimeXdgDataHome = `${sandboxRuntimeHome}/.local/share`
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -101,10 +103,10 @@ export const makeContainerConfig = (
   },
   Env: [
     ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`),
-    "HOME=/tmp",
-    "XDG_CACHE_HOME=/tmp/.cache",
-    "XDG_CONFIG_HOME=/tmp/.config",
-    "XDG_DATA_HOME=/tmp/.local/share",
+    `HOME=${sandboxRuntimeHome}`,
+    `XDG_CACHE_HOME=${sandboxRuntimeHome}/.cache`,
+    `XDG_CONFIG_HOME=${sandboxRuntimeHome}/.config`,
+    `XDG_DATA_HOME=${sandboxRuntimeXdgDataHome}`,
     `PASSWORD=${accessPassword}`
   ],
   Labels: {

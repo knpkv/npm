@@ -3,7 +3,8 @@
  *
  * Manages the `~/.codecommit/cache.db` database lifecycle: directory creation,
  * libsql client configuration (with camelCase column transform), and sequential
- * migration execution (0001 through 0015).
+ * migration execution (0001 through 0016). The credential-bearing directory
+ * and database are created or repaired with owner-only permissions first.
  *
  * @module
  */
@@ -34,13 +35,21 @@ const homeDir = Config.string("HOME").pipe(
 
 const dbUrl = homeDir.pipe(Config.map((h) => `file:${h}/.codecommit/cache.db`))
 
+/** Create or repair the local credential-bearing database with owner-only permissions. */
+export const ensurePrivateDatabasePath = Effect.fn("CacheService.ensurePrivateDatabasePath")(
+  function*(directory: string, database: string) {
+    const fs = yield* FileSystem.FileSystem
+    yield* fs.makeDirectory(directory, { mode: 0o700, recursive: true })
+    yield* fs.chmod(directory, 0o700)
+    yield* fs.writeFile(database, new Uint8Array(), { flag: "a", mode: 0o600 })
+    yield* fs.chmod(database, 0o600)
+  }
+)
+
 const EnsureDbDir = Layer.effectDiscard(
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const h = yield* homeDir
-    yield* fs.makeDirectory(`${h}/.codecommit`, { recursive: true }).pipe(
-      Effect.catchIf(() => true, () => Effect.void)
-    )
+    yield* ensurePrivateDatabasePath(`${h}/.codecommit`, `${h}/.codecommit/cache.db`)
   })
 )
 

@@ -30,6 +30,13 @@ const referencedSecretNames = (value) =>
   )
 const referencesSecrets = (value) => referencedSecretNames(value).length > 0
 const referencesLongLivedSecrets = (value) => referencedSecretNames(value).some((name) => name !== "GITHUB_TOKEN")
+const referencesGithubToken = (value) =>
+  stringsIn(value).some((source) =>
+    Array.from(source.matchAll(actionsExpression)).some((expressionMatch) =>
+      /\bgithub\.token\b/iu.test(normalizeStaticIndexedProperties(expressionMatch[1]))
+    )
+  )
+const referencesPullRequestCredentials = (value) => referencesSecrets(value) || referencesGithubToken(value)
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
   typeof value === "string" &&
@@ -61,8 +68,17 @@ const hasTrigger = (triggers, name) =>
     : Array.isArray(triggers)
       ? triggers.includes(name)
       : triggers !== null && typeof triggers === "object" && Object.hasOwn(triggers, name)
-const pinsMain = (condition) =>
-  typeof condition === "string" && /github\.ref\s*==\s*['"]refs\/heads\/main['"]/u.test(condition)
+const pinsMain = (condition) => {
+  if (typeof condition !== "string") return false
+  const normalized = normalizeStaticIndexedProperties(condition)
+    .trim()
+    .replace(/^\$\{\{\s*/u, "")
+    .replace(/\s*\}\}$/u, "")
+  if (normalized.includes("||")) return false
+  return normalized
+    .split("&&")
+    .some((term) => /^\s*\(*\s*github\.ref\s*==\s*['"]refs\/heads\/main['"]\s*\)*\s*$/u.test(term))
+}
 
 export const validateWorkflowSecretBoundaries = (document, location) => {
   const diagnostics = []
@@ -74,7 +90,7 @@ export const validateWorkflowSecretBoundaries = (document, location) => {
     const inheritedSecretContext = { workflowEnv: document?.env, job }
     if (
       pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger)) &&
-      referencesSecrets(inheritedSecretContext)
+      referencesPullRequestCredentials(inheritedSecretContext)
     ) {
       diagnostics.push(`${jobLocation} executes pull-request code while referencing repository secrets`)
     }
@@ -196,6 +212,21 @@ jobs:
         env:
           SECRET: \${{ secrets[env.SECRET_NAME] }}
 `)
+  const invalidHeadShaWithGithubToken = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: write
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+        env:
+          GH_TOKEN: \${{ github['token'] }}
+`)
   const safeTrustedRef = parse(`
 on:
   pull_request:
@@ -221,6 +252,21 @@ jobs:
       - run: pnpm test:integration
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const safePullRequestTargetShaWithGithubToken = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: write
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.sha }}
+      - run: pnpm test:integration
+        env:
+          GH_TOKEN: \${{ github.token }}
 `)
   const safeWorkflowEnvironment = parse(`
 on:
@@ -263,12 +309,24 @@ jobs:
         env:
           GH_TOKEN: \${{ secrets["GITHUB_TOKEN"] }}
 `)
+  const invalidDisjunctiveMain = parse(`
+on:
+  workflow_dispatch:
+jobs:
+  integration:
+    if: github.ref == 'refs/heads/main' || github.actor == 'collaborator'
+    environment: control-center-live
+    steps:
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
   const protectedMain = parse(`
 on:
   workflow_dispatch:
 jobs:
   integration:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
     environment: control-center-live
     steps:
       - run: pnpm test:integration
@@ -289,15 +347,21 @@ jobs:
     ).length,
     1
   )
+  assert.equal(validateWorkflowSecretBoundaries(invalidHeadShaWithGithubToken, "GitHub token fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidManualDynamicSecret, "manual dynamic secret fixture").length, 2)
+  assert.equal(validateWorkflowSecretBoundaries(invalidDisjunctiveMain, "disjunctive main fixture").length, 1)
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(safePullRequestTargetShaWithGithubToken, "trusted GitHub token fixture"),
+    []
+  )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeIndexedGithubToken, "indexed GitHub token fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
