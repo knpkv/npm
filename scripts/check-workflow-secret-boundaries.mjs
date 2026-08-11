@@ -12,7 +12,7 @@ const secretReference = /\bsecrets(?:\.([A-Z0-9_]+)|\s*\[([^\]]+)\])/giu
 const staticIndexedProperty = /\[\s*(['"])([A-Z_][A-Z0-9_-]*)\1\s*\]/giu
 const dynamicSecretName = "<DYNAMIC_SECRET>"
 const normalizeStaticIndexedProperties = (value) => value.replace(staticIndexedProperty, ".$2")
-const actionsExpressionsIn = (source) => {
+const actionsExpressionSpansIn = (source) => {
   const expressions = []
   let searchFrom = 0
   while (searchFrom < source.length) {
@@ -37,7 +37,11 @@ const actionsExpressionsIn = (source) => {
         continue
       }
       if (character === "}" && source[cursor + 1] === "}") {
-        expressions.push(source.slice(start + 3, cursor))
+        expressions.push({
+          expression: source.slice(start + 3, cursor),
+          start,
+          end: cursor + 2
+        })
         cursor += 1
         break
       }
@@ -46,6 +50,7 @@ const actionsExpressionsIn = (source) => {
   }
   return expressions
 }
+const actionsExpressionsIn = (source) => actionsExpressionSpansIn(source).map(({ expression }) => expression)
 const stringsIn = (value) => {
   if (typeof value === "string") return [value]
   if (Array.isArray(value)) return value.flatMap(stringsIn)
@@ -111,8 +116,51 @@ const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (ref === undefined) return trigger === "pull_request"
   return referencesPullRequestRevision(ref, trigger)
 }
-const shellWords = (command) =>
-  Array.from(command.matchAll(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\$\{\{.*?\}\}|[^\s]+/gu), ([word]) => word)
+const shellWords = (command) => {
+  const expressionSpans = new Map(actionsExpressionSpansIn(command).map((span) => [span.start, span]))
+  const words = []
+  let word = ""
+  let quote
+  let cursor = 0
+  while (cursor < command.length) {
+    const expression = expressionSpans.get(cursor)
+    if (expression !== undefined) {
+      word += command.slice(expression.start, expression.end)
+      cursor = expression.end
+      continue
+    }
+    const character = command[cursor]
+    if (quote !== undefined) {
+      word += character
+      if (character === "\\" && cursor + 1 < command.length) {
+        cursor += 1
+        word += command[cursor]
+      } else if (character === quote) {
+        quote = undefined
+      }
+      cursor += 1
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      word += character
+      cursor += 1
+      continue
+    }
+    if (/\s/u.test(character)) {
+      if (word.length > 0) {
+        words.push(word)
+        word = ""
+      }
+      cursor += 1
+      continue
+    }
+    word += character
+    cursor += 1
+  }
+  if (word.length > 0) words.push(word)
+  return words
+}
 const gitGlobalOptionsWithValues = new Set([
   "-C",
   "-c",
@@ -773,6 +821,17 @@ jobs:
       - run: git -c advice.detachedHead=false -C "$GITHUB_WORKSPACE" checkout \${{ github.event.pull_request.head.sha }}
       - run: pnpm test:integration
 `)
+  const invalidShellCheckoutWithQuotedExpressionBraces = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: git checkout \${{ format('{1}', '}}', github.event.pull_request.head.sha) }}
+      - run: pnpm test:integration
+`)
   const safeLoggedHeadSha = parse(`
 on:
   pull_request_target:
@@ -794,6 +853,18 @@ jobs:
       - run: |
           echo \${{ github.event.pull_request.head.sha }}
           git -C "$GITHUB_WORKSPACE" checkout refs/heads/main
+`)
+  const safeLoggedQuotedExpressionBeforeTrustedShellCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: |
+          echo \${{ format('{1}', '}}', github.event.pull_request.head.sha) }}
+          git checkout refs/heads/main
 `)
   const safeTrustedRef = parse(`
 on:
@@ -1048,6 +1119,13 @@ jobs:
     1
   )
   assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidShellCheckoutWithQuotedExpressionBraces,
+      "shell checkout with quoted expression braces fixture"
+    ).length,
+    1
+  )
+  assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
   )
@@ -1092,6 +1170,13 @@ jobs:
     validateWorkflowSecretBoundaries(
       safeLoggedHeadShaBeforeTrustedShellCheckout,
       "logged head SHA before trusted shell checkout fixture"
+    ),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(
+      safeLoggedQuotedExpressionBeforeTrustedShellCheckout,
+      "logged quoted expression before trusted shell checkout fixture"
     ),
     []
   )

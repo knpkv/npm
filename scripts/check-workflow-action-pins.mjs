@@ -27,6 +27,20 @@ const collectUses = (value, location, results = []) => {
   return results
 }
 
+const normalizedActionInputs = (step) => {
+  const inputs = new Map()
+  const duplicates = new Set()
+  if (step?.with === null || typeof step?.with !== "object" || Array.isArray(step.with)) {
+    return { inputs, duplicates }
+  }
+  for (const [name, value] of Object.entries(step.with)) {
+    const normalizedName = name.toLowerCase()
+    if (inputs.has(normalizedName)) duplicates.add(normalizedName)
+    else inputs.set(normalizedName, value)
+  }
+  return { inputs, duplicates }
+}
+
 export const validateWorkflowActionPins = (document, location, localActions = new Map()) => {
   const diagnostics = []
   const visit = (currentDocument, currentLocation, stack) => {
@@ -67,8 +81,14 @@ export const validateWorkflowActionPins = (document, location, localActions = ne
         diagnostics.push(`${entry.location}: external action ${entry.uses} must use a full 40-character commit SHA`)
         continue
       }
-      if (action === "actions/checkout" && entry.step.with?.["persist-credentials"] !== false) {
-        diagnostics.push(`${entry.location}: actions/checkout must set with.persist-credentials to false`)
+      if (action === "actions/checkout") {
+        const { inputs, duplicates } = normalizedActionInputs(entry.step)
+        for (const duplicate of duplicates) {
+          diagnostics.push(`${entry.location}: duplicate action input ${duplicate} after case normalization`)
+        }
+        if (inputs.get("persist-credentials") !== false) {
+          diagnostics.push(`${entry.location}: actions/checkout must set with.persist-credentials to false`)
+        }
       }
     }
   }
@@ -104,6 +124,31 @@ jobs:
   release:
     steps:
       - uses: Actions/Setup-Node@${"a".repeat(40)}
+`)
+  const validMixedCaseCheckoutInput = parse(`
+jobs:
+  release:
+    steps:
+      - uses: Actions/Checkout@${"a".repeat(40)}
+        with:
+          Persist-Credentials: false
+`)
+  const invalidMixedCaseCheckoutInput = parse(`
+jobs:
+  release:
+    steps:
+      - uses: Actions/Checkout@${"a".repeat(40)}
+        with:
+          Persist-Credentials: true
+`)
+  const invalidDuplicateCheckoutInput = parse(`
+jobs:
+  release:
+    steps:
+      - uses: Actions/Checkout@${"a".repeat(40)}
+        with:
+          persist-credentials: false
+          Persist-Credentials: false
 `)
   const invalidLocalActionCaller = parse(`
 jobs:
@@ -182,8 +227,11 @@ runs:
 `)
   assert.equal(validateWorkflowActionPins(invalid, "invalid fixture").length, 2)
   assert.equal(validateWorkflowActionPins(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
+  assert.equal(validateWorkflowActionPins(invalidMixedCaseCheckoutInput, "mixed-case checkout input fixture").length, 1)
+  assert.equal(validateWorkflowActionPins(invalidDuplicateCheckoutInput, "duplicate checkout input fixture").length, 1)
   assert.deepEqual(validateWorkflowActionPins(valid, "valid fixture"), [])
   assert.deepEqual(validateWorkflowActionPins(validMixedCaseNonCheckout, "mixed-case action fixture"), [])
+  assert.deepEqual(validateWorkflowActionPins(validMixedCaseCheckoutInput, "mixed-case checkout input fixture"), [])
   assert.equal(
     validateWorkflowActionPins(
       invalidLocalActionCaller,

@@ -116,7 +116,8 @@ an alternate authorization path must not contradict a provider-enforced prerequi
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 GitHub workflow guards must compare external action owner/repository names
-case-insensitively and normalize action input names before inspecting them. In
+case-insensitively, normalize action input names before inspecting them, and
+reject duplicate inputs that collide after case normalization. In
 `pull_request_target`, treat every pull-request-derived
 revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 `merge_commit_sha`, plus `head.repo.full_name` checkout repositories, in dot or
