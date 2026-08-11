@@ -119,7 +119,9 @@ GitHub workflow guards must compare external action owner/repository names
 case-insensitively. In `pull_request_target`, treat every pull-request-derived
 revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 `merge_commit_sha` in dot or static indexed syntax, as attacker-controlled when
-the job can access repository credentials.
+the job can access repository credentials. Treat effective workflow/job
+`id-token: write` and `write-all` permissions as credential authority too;
+OIDC-bearing jobs must not checkout or build pull-request revisions.
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 

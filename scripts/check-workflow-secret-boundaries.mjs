@@ -37,6 +37,14 @@ const referencesGithubToken = (value) =>
     )
   )
 const referencesPullRequestCredentials = (value) => referencesSecrets(value) || referencesGithubToken(value)
+const grantsOidcAuthority = (permissions) => {
+  if (typeof permissions === "string") return permissions.toLowerCase() === "write-all"
+  if (permissions === null || typeof permissions !== "object") return false
+  return Object.entries(permissions).some(
+    ([name, access]) =>
+      name.toLowerCase() === "id-token" && typeof access === "string" && access.toLowerCase() === "write"
+  )
+}
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
   typeof value === "string" &&
@@ -91,11 +99,12 @@ export const validateWorkflowSecretBoundaries = (document, location) => {
   for (const [jobName, job] of Object.entries(document?.jobs ?? {})) {
     const jobLocation = `${location}: job ${jobName}`
     const inheritedSecretContext = { workflowEnv: document?.env, job }
+    const effectivePermissions = job.permissions === undefined ? document?.permissions : job.permissions
     if (
       pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger)) &&
-      referencesPullRequestCredentials(inheritedSecretContext)
+      (referencesPullRequestCredentials(inheritedSecretContext) || grantsOidcAuthority(effectivePermissions))
     ) {
-      diagnostics.push(`${jobLocation} executes pull-request code while referencing repository secrets`)
+      diagnostics.push(`${jobLocation} executes pull-request code with repository credential or OIDC authority`)
     }
     if (manuallyTriggered && referencesLongLivedSecrets(inheritedSecretContext)) {
       if (!pinsMain(job.if)) {
@@ -129,6 +138,52 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
       - run: pnpm test
+`)
+  const invalidJobOidcAuthority = parse(`
+on:
+  pull_request:
+jobs:
+  snapshot:
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: pnpm build
+`)
+  const invalidInheritedOidcAuthority = parse(`
+on:
+  pull_request:
+permissions:
+  id-token: write
+jobs:
+  snapshot:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: pnpm build
+`)
+  const safeCredentialOnlyOidcJob = parse(`
+on:
+  pull_request:
+jobs:
+  publish:
+    permissions:
+      id-token: write
+    steps:
+      - run: sfw publish-verified-artifact
+`)
+  const safeJobPermissionOverride = parse(`
+on:
+  pull_request:
+permissions:
+  id-token: write
+jobs:
+  build:
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - run: pnpm build
 `)
   const invalidSingleQuotedBracket = parse(`
 on:
@@ -374,6 +429,8 @@ jobs:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
   assert.equal(validateWorkflowSecretBoundaries(invalid, "invalid fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidJobOidcAuthority, "job OIDC fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidInheritedOidcAuthority, "inherited OIDC fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidSingleQuotedBracket, "single-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidDoubleQuotedBracket, "double-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidWorkflowEnvironment, "workflow environment fixture").length, 1)
@@ -397,6 +454,8 @@ jobs:
   assert.equal(validateWorkflowSecretBoundaries(invalidManualDynamicSecret, "manual dynamic secret fixture").length, 2)
   assert.equal(validateWorkflowSecretBoundaries(invalidDisjunctiveMain, "disjunctive main fixture").length, 1)
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeCredentialOnlyOidcJob, "credential-only OIDC fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeJobPermissionOverride, "permission override fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
