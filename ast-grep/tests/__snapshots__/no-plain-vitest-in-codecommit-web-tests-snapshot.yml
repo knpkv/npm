@@ -12,6 +12,17 @@ snapshots:
         start: 24
         end: 32
   ? |
+    import { describe } from 'vitest'
+  : labels:
+      - source: import { describe } from 'vitest'
+        style: primary
+        start: 0
+        end: 33
+      - source: "'vitest'"
+        style: secondary
+        start: 25
+        end: 33
+  ? |
     import { describe, expect, it } from "vitest"
   : labels:
       - source: import { describe, expect, it } from "vitest"

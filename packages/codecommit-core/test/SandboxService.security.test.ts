@@ -163,6 +163,58 @@ describe("sandbox security boundary", () => {
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("rejects a symlinked cache directory before changing its target", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-database-directory-link-" })
+        const attackerDirectory = path.join(root, "attacker-directory")
+        const linkedDirectory = path.join(root, ".codecommit")
+        const marker = path.join(attackerDirectory, "marker")
+
+        yield* fileSystem.makeDirectory(attackerDirectory, { mode: 0o755 })
+        yield* fileSystem.chmod(attackerDirectory, 0o755)
+        yield* fileSystem.writeFile(marker, Uint8Array.of(42), { mode: 0o644 })
+        yield* fileSystem.symlink(attackerDirectory, linkedDirectory)
+
+        const result = yield* ensurePrivateDatabasePath(
+          linkedDirectory,
+          path.join(linkedDirectory, "cache.db")
+        ).pipe(Effect.result)
+
+        expect(result._tag).toBe("Failure")
+        expect((yield* fileSystem.stat(attackerDirectory)).mode & 0o777).toBe(0o755)
+        expect(Array.from(yield* fileSystem.readFile(marker))).toEqual([42])
+        expect(yield* fileSystem.exists(path.join(attackerDirectory, "cache.db"))).toBe(false)
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("rejects a symlinked database before changing either target mode", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-database-file-link-" })
+        const directory = path.join(root, ".codecommit")
+        const attackerDatabase = path.join(root, "attacker.db")
+        const linkedDatabase = path.join(directory, "cache.db")
+
+        yield* fileSystem.makeDirectory(directory, { mode: 0o755 })
+        yield* fileSystem.chmod(directory, 0o755)
+        yield* fileSystem.writeFile(attackerDatabase, Uint8Array.of(99), { mode: 0o644 })
+        yield* fileSystem.chmod(attackerDatabase, 0o644)
+        yield* fileSystem.symlink(attackerDatabase, linkedDatabase)
+
+        const result = yield* ensurePrivateDatabasePath(directory, linkedDatabase).pipe(Effect.result)
+
+        expect(result._tag).toBe("Failure")
+        expect((yield* fileSystem.stat(directory)).mode & 0o777).toBe(0o755)
+        expect((yield* fileSystem.stat(attackerDatabase)).mode & 0o777).toBe(0o644)
+        expect(Array.from(yield* fileSystem.readFile(attackerDatabase))).toEqual([99])
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
   it("constructs an authenticated loopback-only code-server container", () => {
     const config = makeContainerConfig(
       "/Users/security-test/.codecommit/sandboxes/sbx-1",

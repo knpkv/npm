@@ -261,7 +261,8 @@ AWS credentials, SSH keys, the Docker socket, and broad home or root mounts are
 rejected before configuration persistence, before its database row is inserted,
 and again before Docker execution.
 The cache directory and database that persist the sandbox password are repaired
-to owner-only `0700` and `0600` permissions before use.
+to owner-only `0700` and `0600` permissions before use, and symbolic-link paths
+are rejected before either target is mutated.
 The authenticated credential response is non-cacheable, and the UI masks the
 password until the owner explicitly reveals or copies it.
 

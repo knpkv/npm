@@ -264,7 +264,8 @@ When writing Effect code:
   mounted below `/home/coder` or the exact `/tmp/.local/share/code-server`
   runtime data subtree; keep built-in setup presets unprivileged; persist the
   generated access password only in an owner-only `0700` cache directory and
-  `0600` database, and expose it only through the authenticated, non-cacheable
+  `0600` database after rejecting symbolic-link paths, and expose it only
+  through the authenticated, non-cacheable
   single-sandbox route; map the
   non-root container identity to the workspace owner (repair root-owned clones
   to a fixed non-root identity); drop all capabilities and publish only on

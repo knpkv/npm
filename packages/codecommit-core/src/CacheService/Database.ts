@@ -10,8 +10,9 @@
  */
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
-import { Config, Effect, Layer } from "effect"
+import { Config, Effect, Layer, Result } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import { CacheError } from "./CacheError.js"
 import migration0001 from "./migrations/0001_initial.js"
 import migration0002 from "./migrations/0002_indexes.js"
 import migration0003 from "./migrations/0003_add_health_score.js"
@@ -39,9 +40,53 @@ const dbUrl = homeDir.pipe(Config.map((h) => `file:${h}/.codecommit/cache.db`))
 export const ensurePrivateDatabasePath = Effect.fn("CacheService.ensurePrivateDatabasePath")(
   function*(directory: string, database: string) {
     const fs = yield* FileSystem.FileSystem
+
+    const rejectSymbolicLink = (path: string, kind: "directory" | "database") =>
+      fs.readLink(path).pipe(
+        Effect.result,
+        Effect.flatMap((link) =>
+          Result.isSuccess(link)
+            ? Effect.fail(
+              new CacheError({
+                operation: "ensure-private-database-path",
+                cause: new Error(`Refusing symbolic-link ${kind} path: ${path}`)
+              })
+            )
+            : Effect.void
+        )
+      )
+
+    // Check both existing paths before changing either mode. `readLink` is
+    // intentional: stat and realPath follow the link and hide this condition.
+    yield* rejectSymbolicLink(directory, "directory")
+    yield* rejectSymbolicLink(database, "database")
+
     yield* fs.makeDirectory(directory, { mode: 0o700, recursive: true })
+    yield* rejectSymbolicLink(directory, "directory")
+    yield* rejectSymbolicLink(database, "database")
     yield* fs.chmod(directory, 0o700)
-    yield* fs.writeFile(database, new Uint8Array(), { flag: "a", mode: 0o600 })
+
+    const created = yield* fs.writeFile(database, new Uint8Array(), { flag: "wx", mode: 0o600 }).pipe(
+      Effect.result
+    )
+    if (Result.isFailure(created)) {
+      if (created.failure.reason._tag !== "AlreadyExists") {
+        return yield* new CacheError({
+          operation: "create-private-database",
+          cause: created.failure
+        })
+      }
+      yield* rejectSymbolicLink(database, "database")
+      const info = yield* fs.stat(database)
+      if (info.type !== "File") {
+        return yield* new CacheError({
+          operation: "ensure-private-database-path",
+          cause: new Error(`Database path is not a regular file: ${database}`)
+        })
+      }
+    }
+
+    yield* rejectSymbolicLink(database, "database")
     yield* fs.chmod(database, 0o600)
   }
 )

@@ -126,8 +126,11 @@ password, runs code-server as the non-root owner of its bind-mounted workspace
 dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
 exclude both the access password and workspace path; the authenticated web
 owner retrieves the password through the single-sandbox credential route.
+That response is non-cacheable, and sandbox browser pages use the alternate
+loopback hostname so the host-only owner cookie is not sent to sandbox ports.
 The local cache directory and database are created or repaired as owner-only
-`0700` and `0600` paths before that password is persisted.
+`0700` and `0600` paths before that password is persisted; symbolic-link paths
+are rejected before either target is mutated.
 Legacy containers without a password are stopped during reconciliation and must
 be recreated. Custom runtime composition must provide Effect `Crypto`, `Path`,
 filesystem, process, and configuration services required by the sandbox layer.

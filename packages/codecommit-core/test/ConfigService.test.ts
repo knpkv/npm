@@ -148,6 +148,8 @@ describe("ConfigService", () => {
         const loaded = yield* service.load
         expect(loaded.sandbox.image).toBe(defaultSandboxImage)
         yield* service.save(loaded)
+        const reloaded = yield* service.load
+        expect(reloaded.sandbox.image).toBe(defaultSandboxImage)
       })
     ))
 

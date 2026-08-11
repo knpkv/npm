@@ -9,3 +9,5 @@ invalid:
     import { describe, expect, it } from "vitest"
   - |
     import * as Vitest from "vitest"
+  - |
+    import { describe } from 'vitest'
