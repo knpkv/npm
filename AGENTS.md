@@ -122,7 +122,11 @@ revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 static indexed syntax, as attacker-controlled when the job can access repository
 credentials. Treat effective workflow/job
 `id-token: write` and `write-all` permissions as credential authority too;
-OIDC-bearing jobs must not checkout or build pull-request revisions.
+OIDC-bearing jobs must not checkout or build pull-request revisions. After an
+attacker-controlled checkout, conservatively treat every later `run`, local
+action, or external action step as capable of executing the workspace; a
+metadata-only external action needs explicit human judgment before any narrow
+allowlist exception is added.
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 

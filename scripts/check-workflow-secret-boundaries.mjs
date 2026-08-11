@@ -73,8 +73,9 @@ const checkoutUsesPullRequestRevision = (step, trigger) => {
 }
 const executesPullRequestRevision = (job, trigger) => {
   const steps = Array.isArray(job?.steps) ? job.steps : []
-  const checksOutEventRevision = steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
-  return checksOutEventRevision && steps.some((step) => typeof step?.run === "string" || step?.uses?.startsWith("./"))
+  const checkoutIndex = steps.findIndex((step) => checkoutUsesPullRequestRevision(step, trigger))
+  if (checkoutIndex === -1) return false
+  return steps.slice(checkoutIndex + 1).some((step) => typeof step?.run === "string" || typeof step?.uses === "string")
 }
 const checksOutPullRequestRevision = (job, trigger) =>
   Array.isArray(job?.steps) && job.steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
@@ -182,6 +183,17 @@ jobs:
       - uses: actions/checkout@${"a".repeat(40)}
       - uses: example/build-workspace@${"b".repeat(40)}
 `)
+  const invalidExternalWorkspaceActionWithSecret = parse(`
+on:
+  pull_request:
+jobs:
+  snapshot:
+    env:
+      SNAPSHOT_TOKEN: \${{ secrets.SNAPSHOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - uses: example/build-workspace@${"b".repeat(40)}
+`)
   const invalidPullRequestTargetHeadRepository = parse(`
 on:
   pull_request_target:
@@ -220,6 +232,20 @@ jobs:
       - run: pnpm test:integration
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const safeExternalActionWithTrustedCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          repository: knpkv/npm
+          ref: refs/heads/main
+      - uses: example/build-workspace@${"b".repeat(40)}
 `)
   const safeCredentialOnlyOidcJob = parse(`
 on:
@@ -495,6 +521,13 @@ jobs:
     1
   )
   assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidExternalWorkspaceActionWithSecret,
+      "external workspace action with secret fixture"
+    ).length,
+    1
+  )
+  assert.equal(
     validateWorkflowSecretBoundaries(invalidPullRequestTargetHeadRepository, "PR target head repository fixture")
       .length,
     1
@@ -533,6 +566,13 @@ jobs:
   assert.deepEqual(validateWorkflowSecretBoundaries(safeJobPermissionOverride, "permission override fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(safePullRequestTargetTrustedRepository, "trusted PR target repository fixture"),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(
+      safeExternalActionWithTrustedCheckout,
+      "trusted external workspace action fixture"
+    ),
     []
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
