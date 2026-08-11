@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 import type { Success } from "effect/Effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { DockerError } from "../Errors.js"
@@ -13,11 +13,13 @@ import { DockerError } from "../Errors.js"
 export interface ContainerConfig {
   readonly Image: string
   readonly Cmd: ReadonlyArray<string>
+  readonly User?: string
   readonly ExposedPorts: Record<string, Record<string, never>>
   readonly HostConfig: {
     readonly Binds: ReadonlyArray<string>
-    readonly PortBindings: Record<string, ReadonlyArray<{ HostPort: string }>>
+    readonly PortBindings: Record<string, ReadonlyArray<{ HostIp: string; HostPort: string }>>
     readonly NetworkMode?: string
+    readonly CapDrop?: ReadonlyArray<string>
   }
   readonly Env?: ReadonlyArray<string>
   readonly Labels?: Record<string, string>
@@ -72,10 +74,24 @@ const dockerError = (operation: string) => <A, E, R>(effect: Effect.Effect<A, E,
 
 const shellEscape = (s: string) => `'${s.replace(/'/g, "'\\''")}'`
 
+export const renderDockerPortBinding = (
+  containerPort: string,
+  binding: { readonly HostIp: string; readonly HostPort: string }
+): string => `${binding.HostIp}:${binding.HostPort}:${containerPort.replace("/tcp", "")}`
+
 const makeDockerService = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const docker = (...args: Array<string>) =>
     spawner.string(ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`]))
+  const dockerWithInput = (input: string, ...args: Array<string>) =>
+    spawner.string(
+      ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`], {
+        stdin: {
+          stream: Stream.make(input).pipe(Stream.encodeText),
+          endOnDone: true
+        }
+      })
+    )
 
   const service = {
     isAvailable: () =>
@@ -92,7 +108,7 @@ const makeDockerService = Effect.gen(function*() {
       // Port bindings
       for (const [containerPort, bindings] of Object.entries(config.HostConfig.PortBindings)) {
         for (const b of bindings) {
-          args.push("-p", `${b.HostPort}:${containerPort.replace("/tcp", "")}`)
+          args.push("-p", renderDockerPortBinding(containerPort, b))
         }
       }
 
@@ -106,10 +122,18 @@ const makeDockerService = Effect.gen(function*() {
         args.push("--network", config.HostConfig.NetworkMode)
       }
 
-      // Env vars
-      for (const env of config.Env ?? []) {
-        args.push("-e", env)
+      for (const capability of config.HostConfig.CapDrop ?? []) {
+        args.push("--cap-drop", capability)
       }
+
+      if (config.User) {
+        args.push("--user", config.User)
+      }
+
+      // Keep environment values, including the generated access password, out
+      // of process arguments. Docker reads the protected parent-child pipe.
+      const environment = config.Env ?? []
+      if (environment.length > 0) args.push("--env-file", "/dev/stdin")
 
       // Labels
       for (const [k, v] of Object.entries(config.Labels ?? {})) {
@@ -120,7 +144,9 @@ const makeDockerService = Effect.gen(function*() {
       args.push(config.Image)
       for (const c of config.Cmd) args.push(c)
 
-      return docker(...args).pipe(dockerError("createContainer"))
+      return (environment.length > 0
+        ? dockerWithInput(`${environment.join("\n")}\n`, ...args)
+        : docker(...args)).pipe(dockerError("createContainer"))
     },
 
     startContainer: (containerId: string) =>

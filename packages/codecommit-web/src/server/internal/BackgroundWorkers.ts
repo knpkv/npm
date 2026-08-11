@@ -18,6 +18,34 @@ const continueAfterNonInterruptFailure = (
     )
   )
 
+interface SandboxReconciliationPolicy {
+  readonly dockerUnavailable: "defer" | "retry"
+  readonly reconciliationIncomplete: "defer" | "retry"
+  readonly retryDelay: Duration.Duration
+  readonly unavailableMessage?: string
+}
+
+const reconcileSandbox = Effect.fn("BackgroundWorkers.reconcileSandbox")(function*(
+  dockerAvailable: () => Effect.Effect<boolean>,
+  reconcile: () => Effect.Effect<boolean>,
+  policy: SandboxReconciliationPolicy
+) {
+  while (true) {
+    if (!(yield* dockerAvailable())) {
+      if (policy.unavailableMessage !== undefined) {
+        yield* Effect.logWarning(policy.unavailableMessage)
+      }
+      if (policy.dockerUnavailable === "defer") return false
+      yield* Effect.sleep(policy.retryDelay)
+      continue
+    }
+
+    const reconciled = yield* reconcile()
+    if (reconciled || policy.reconciliationIncomplete === "defer") return reconciled
+    yield* Effect.sleep(policy.retryDelay)
+  }
+})
+
 /** Auto-refresh worker owned by the server layer scope. @internal */
 export const autoRefreshLayer = Layer.effectDiscard(
   Effect.gen(function*() {
@@ -65,13 +93,33 @@ export const sandboxStartupLayer = Layer.effectDiscard(
   Effect.gen(function*() {
     const sandboxService = yield* SandboxService.SandboxService
     const docker = yield* SandboxService.DockerService
-    const available = yield* docker.isAvailable()
-    if (!available) {
-      yield* Effect.logWarning("Docker not available — sandbox feature disabled")
-      return
+    const dockerAvailable = () => docker.isAvailable().pipe(Effect.catch(() => Effect.succeed(false)))
+    const hasLegacyUnauthenticated = yield* sandboxService.hasLegacyUnauthenticated()
+    if (hasLegacyUnauthenticated) {
+      yield* reconcileSandbox(dockerAvailable, sandboxService.reconcile, {
+        dockerUnavailable: "retry",
+        reconciliationIncomplete: "retry",
+        retryDelay: Duration.seconds(1),
+        unavailableMessage: "Docker not available — waiting before legacy sandbox reconciliation"
+      })
+    } else {
+      yield* reconcileSandbox(dockerAvailable, sandboxService.reconcile, {
+        dockerUnavailable: "defer",
+        reconciliationIncomplete: "defer",
+        retryDelay: Duration.seconds(1),
+        unavailableMessage: "Docker not available — sandbox maintenance deferred"
+      })
     }
-    yield* sandboxService.reconcile()
     yield* Effect.logInfo("Sandbox service ready")
+
+    const reconciliationPass = Effect.gen(function*() {
+      yield* Effect.sleep(Duration.minutes(1))
+      yield* reconcileSandbox(dockerAvailable, sandboxService.reconcile, {
+        dockerUnavailable: "defer",
+        reconciliationIncomplete: "defer",
+        retryDelay: Duration.seconds(1)
+      })
+    }).pipe(continueAfterNonInterruptFailure("Sandbox reconciliation failed"))
 
     const gcPass = Effect.gen(function*() {
       yield* Effect.sleep(Duration.minutes(5))
@@ -80,6 +128,7 @@ export const sandboxStartupLayer = Layer.effectDiscard(
       continueAfterNonInterruptFailure("Sandbox GC failed")
     )
 
+    yield* Effect.forkScoped(Effect.forever(reconciliationPass))
     yield* Effect.forkScoped(Effect.forever(gcPass))
   })
 )

@@ -4,7 +4,12 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { SystemError } from "effect/PlatformError"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
-import { ConfigService, ConfigServiceLive, discoverAwsProfiles } from "../src/ConfigService/index.js"
+import {
+  ConfigService,
+  ConfigServiceLive,
+  defaultSandboxImage,
+  discoverAwsProfiles
+} from "../src/ConfigService/index.js"
 
 const MockPath = Path.layer
 
@@ -127,6 +132,39 @@ describe("ConfigService", () => {
         expect(config.accounts[0]!.regions).toEqual(["us-east-1"])
         expect(config.accounts[0]!.enabled).toBe(true)
         expect(config.autoDetect).toBe(true)
+      })
+    ))
+
+  it("migrates the former default sandbox image to the pinned digest", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          sandbox: { image: "codercom/code-server:latest" }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.sandbox.image).toBe(defaultSandboxImage)
+        yield* service.save(loaded)
+        const reloaded = yield* service.load
+        expect(reloaded.sandbox.image).toBe(defaultSandboxImage)
+      })
+    ))
+
+  it("preserves an already pinned sandbox image while loading", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          sandbox: { image: defaultSandboxImage }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.sandbox.image).toBe(defaultSandboxImage)
       })
     ))
 

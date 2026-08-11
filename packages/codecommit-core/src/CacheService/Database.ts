@@ -3,14 +3,15 @@
  *
  * Manages the `~/.codecommit/cache.db` database lifecycle: directory creation,
  * libsql client configuration (with camelCase column transform), and sequential
- * migration execution (0001 through 0015).
+ * migration execution (0001 through 0016). The credential-bearing directory
+ * and database are created or repaired with owner-only permissions first.
  *
  * @module
  */
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
 import { Config, Effect, Layer } from "effect"
-import * as FileSystem from "effect/FileSystem"
+import { ensurePrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 import migration0001 from "./migrations/0001_initial.js"
 import migration0002 from "./migrations/0002_indexes.js"
 import migration0003 from "./migrations/0003_add_health_score.js"
@@ -26,6 +27,9 @@ import migration0012 from "./migrations/0012_audit_log_indexes.js"
 import migration0013 from "./migrations/0013_approval_rules.js"
 import migration0014 from "./migrations/0014_approved_by_arns.js"
 import migration0015 from "./migrations/0015_repo_account_id.js"
+import migration0016 from "./migrations/0016_sandbox_access_password.js"
+
+export { ensurePrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -35,11 +39,8 @@ const dbUrl = homeDir.pipe(Config.map((h) => `file:${h}/.codecommit/cache.db`))
 
 const EnsureDbDir = Layer.effectDiscard(
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const h = yield* homeDir
-    yield* fs.makeDirectory(`${h}/.codecommit`, { recursive: true }).pipe(
-      Effect.catchIf(() => true, () => Effect.void)
-    )
+    yield* ensurePrivateDatabasePath(`${h}/.codecommit`, `${h}/.codecommit/cache.db`)
   })
 )
 
@@ -67,7 +68,8 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0012_audit_log_indexes": migration0012,
     "0013_approval_rules": migration0013,
     "0014_approved_by_arns": migration0014,
-    "0015_repo_account_id": migration0015
+    "0015_repo_account_id": migration0015,
+    "0016_sandbox_access_password": migration0016
   })
 })
 

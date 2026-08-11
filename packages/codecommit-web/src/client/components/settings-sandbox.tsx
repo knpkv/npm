@@ -1,29 +1,25 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { Predicate } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
+import { COMMAND_PRESETS, MOUNT_PRESETS, type SandboxVolumeMount } from "../sandbox-presets.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
-
-interface VolumeMount {
-  readonly hostPath: string
-  readonly containerPath: string
-  readonly readonly: boolean
-}
 
 interface SandboxSettings {
   readonly image: string
   readonly extensions: ReadonlyArray<string>
   readonly setupCommands: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
-  readonly volumeMounts: ReadonlyArray<VolumeMount>
+  readonly volumeMounts: ReadonlyArray<SandboxVolumeMount>
   readonly cloneDepth: number
 }
 
 const DEFAULTS: SandboxSettings = {
-  image: "codercom/code-server:latest",
+  image: "codercom/code-server@sha256:b88ed46a6ace76a0294a17a24f39aa88032ed0a3692c3d8ab5433b47ab57ccbf",
   extensions: [],
   setupCommands: [],
   env: {},
@@ -33,12 +29,22 @@ const DEFAULTS: SandboxSettings = {
 
 export function SettingsSandbox() {
   const config = useAtomValue(configQueryAtom)
-  const saveConfig = useAtomSet(configSaveAtom)
+  const saveConfig = useAtomSet(configSaveAtom, { mode: "promise" })
   type ConfigValue = Extract<typeof config, { readonly _tag: "Success" }>["value"]
   const configRef = useRef<ConfigValue | null>(null)
   const [local, setLocal] = useState<SandboxSettings | null>(null)
   const [saved, setSaved] = useState<SandboxSettings | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveSucceeded, setSaveSucceeded] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const savedNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (savedNoticeTimer.current !== null) clearTimeout(savedNoticeTimer.current)
+    },
+    []
+  )
 
   useEffect(() => {
     if (AsyncResult.isSuccess(config)) {
@@ -57,28 +63,40 @@ export function SettingsSandbox() {
   )
 
   const update = useCallback((patch: Partial<SandboxSettings>) => {
+    setSaveSucceeded(false)
+    setSaveError(null)
     setLocal((prev) => (prev ? { ...prev, ...patch } : prev))
   }, [])
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     const data = configRef.current
     if (!data || !local) return
     setSaving(true)
-    saveConfig({
-      payload: {
-        accounts: data.accounts.map((a) => ({
-          profile: a.profile,
-          regions: [...a.regions],
-          enabled: a.enabled
-        })),
-        autoDetect: data.autoDetect,
-        autoRefresh: data.autoRefresh,
-        refreshIntervalSeconds: data.refreshIntervalSeconds,
-        sandbox: local
-      }
-    })
-    setSaved(local)
-    setTimeout(() => setSaving(false), 600)
+    setSaveSucceeded(false)
+    setSaveError(null)
+    try {
+      await saveConfig({
+        payload: {
+          accounts: data.accounts.map((a) => ({
+            profile: a.profile,
+            regions: [...a.regions],
+            enabled: a.enabled
+          })),
+          autoDetect: data.autoDetect,
+          autoRefresh: data.autoRefresh,
+          refreshIntervalSeconds: data.refreshIntervalSeconds,
+          sandbox: local
+        }
+      })
+      setSaved(local)
+      setSaveSucceeded(true)
+      if (savedNoticeTimer.current !== null) clearTimeout(savedNoticeTimer.current)
+      savedNoticeTimer.current = setTimeout(() => setSaveSucceeded(false), 600)
+    } catch (error) {
+      setSaveError(Predicate.isError(error) ? error.message : "Failed to save sandbox settings")
+    } finally {
+      setSaving(false)
+    }
   }, [saveConfig, local])
 
   return (
@@ -89,8 +107,10 @@ export function SettingsSandbox() {
           <p className="text-sm text-muted-foreground">Docker sandbox defaults for code review environments</p>
         </div>
         {local && (
-          <Button size="sm" className="h-8 gap-1.5 px-3" disabled={!dirty && !saving} onClick={handleSave}>
+          <Button size="sm" className="h-8 gap-1.5 px-3" disabled={!dirty || saving} onClick={handleSave}>
             {saving ? (
+              "Saving…"
+            ) : saveSucceeded ? (
               <>
                 <CheckIcon className="size-3.5" /> Saved
               </>
@@ -100,6 +120,11 @@ export function SettingsSandbox() {
           </Button>
         )}
       </div>
+      {saveError !== null && (
+        <p role="alert" className="text-sm text-destructive">
+          {saveError}
+        </p>
+      )}
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
@@ -132,12 +157,12 @@ function SandboxForm({
         <label className="text-sm font-medium">Docker Image</label>
         <Input
           value={settings.image}
-          placeholder="codercom/code-server:latest"
+          placeholder="codercom/code-server@sha256:…"
           onChange={(e) => onChange({ image: e.target.value })}
           className="h-8 text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          Base image for sandboxes. Must have code-server or install via setup commands.
+          Digest-pinned base image for sandboxes. Must have code-server or install via setup commands.
         </p>
       </div>
 
@@ -451,57 +476,6 @@ function ExtensionPresets({
     </div>
   )
 }
-
-const COMMAND_PRESETS: ReadonlyArray<{ label: string; cmd: string }> = [
-  {
-    label: "Node 22",
-    cmd: "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
-  },
-  { label: "pnpm", cmd: "sudo npm i -g pnpm" },
-  {
-    label: "Bun",
-    cmd: "curl -fsSL https://bun.sh/install | bash && echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.bashrc && echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.profile"
-  }
-]
-
-const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
-  {
-    label: "VS Code Extensions",
-    mount: {
-      hostPath: "~/.vscode/extensions",
-      containerPath: "/home/coder/.local/share/code-server/extensions",
-      readonly: false
-    }
-  },
-  {
-    label: "VS Code Settings",
-    mount: {
-      hostPath: "~/Library/Application Support/Code/User/settings.json",
-      containerPath: "/home/coder/.local/share/code-server/User/settings.json",
-      readonly: true
-    }
-  },
-  {
-    label: "VS Code Keybindings",
-    mount: {
-      hostPath: "~/Library/Application Support/Code/User/keybindings.json",
-      containerPath: "/home/coder/.local/share/code-server/User/keybindings.json",
-      readonly: true
-    }
-  },
-  {
-    label: "SSH Keys",
-    mount: { hostPath: "~/.ssh", containerPath: "/home/coder/.ssh", readonly: true }
-  },
-  {
-    label: "Git Config",
-    mount: { hostPath: "~/.gitconfig", containerPath: "/home/coder/.gitconfig", readonly: true }
-  },
-  {
-    label: "AWS Credentials",
-    mount: { hostPath: "~/.aws", containerPath: "/home/coder/.aws", readonly: true }
-  }
-]
 
 function CommandPresets({
   onChange,

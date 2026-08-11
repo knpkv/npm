@@ -4,8 +4,14 @@ import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { makeServer } from "@knpkv/codecommit-web"
-import { Console, Effect, Layer, Schema, Stream } from "effect"
+import {
+  makeOwnerSessionSecrets,
+  makeServer,
+  ownerSessionOrigin,
+  ownerSessionUrl,
+  requireLoopbackHostname
+} from "@knpkv/codecommit-web"
+import { Console, Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
@@ -36,10 +42,19 @@ const web = Command.make("web", {
   hostname: Options.string("hostname").pipe(Options.withDefault("127.0.0.1"))
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
-    yield* Effect.logInfo(`Starting web server at http://${hostname}:${port}`)
+    yield* requireLoopbackHostname(hostname)
+    const security = yield* makeOwnerSessionSecrets()
+    const ready = yield* Deferred.make<void>()
+    const url = ownerSessionUrl(hostname, port, security)
+    const stdio = yield* Stdio.Stdio
+    const serverFiber = yield* Layer.launch(makeServer({ port, hostname, ready, security })).pipe(
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+    yield* Effect.logInfo(`Authenticated web server ready at ${ownerSessionOrigin(hostname, port)}`)
+    yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
 
     // Open browser
-    const url = `http://${hostname}:${port}`
     const exitCode = (command: ChildProcess.Command) =>
       Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
     yield* exitCode(ChildProcess.make("open", [url])).pipe(
@@ -51,8 +66,8 @@ const web = Command.make("web", {
       Effect.catchIf(() => true, () => Effect.void)
     )
 
-    // Run server with configured port/hostname
-    return yield* Layer.launch(makeServer({ port, hostname }))
+    // Keep the supervised server alive after readiness and bootstrap handoff.
+    return yield* Fiber.join(serverFiber)
   }))
 
 // PR Create Command

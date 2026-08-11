@@ -28,12 +28,35 @@ import {
 } from "@knpkv/codecommit-core/Domain.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 
 // API error returned to clients for AWS failures
 export class ApiError extends Schema.TaggedErrorClass<ApiError>()("ApiError", {
   message: Schema.String
 }) {}
+
+export class UnauthorizedApiError extends Schema.TaggedErrorClass<UnauthorizedApiError>()(
+  "UnauthorizedApiError",
+  { message: Schema.String },
+  { httpApiStatus: 401 }
+) {}
+
+export class ForbiddenApiError extends Schema.TaggedErrorClass<ForbiddenApiError>()(
+  "ForbiddenApiError",
+  { message: Schema.String },
+  { httpApiStatus: 403 }
+) {}
+
+/** Process-scoped owner session required by every CodeCommit API endpoint. */
+export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth>()(
+  "@knpkv/codecommit-web/OwnerSessionAuth",
+  {
+    error: [UnauthorizedApiError, ForbiddenApiError],
+    security: {
+      ownerCookie: HttpApiSecurity.apiKey({ in: "cookie", key: "cc_owner" })
+    }
+  }
+) {}
 
 // Cached PR schema (flat row from SQLite)
 export const CachedPullRequestResponse = Schema.Struct({
@@ -371,6 +394,10 @@ export const SandboxResponse = Schema.Struct({
   lastActivityAt: Schema.String
 })
 
+export const SandboxCredentialsResponse = Schema.Struct({
+  password: Schema.String
+})
+
 const CreateSandboxPayload = Schema.Struct({
   pullRequestId: PullRequestId,
   awsAccountId: Schema.String,
@@ -397,6 +424,13 @@ export class SandboxGroup extends HttpApiGroup.make("sandbox")
     HttpApiEndpoint.get("get", "/:sandboxId", {
       params: SandboxIdPath,
       success: SandboxResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("credentials", "/:sandboxId/credentials", {
+      params: SandboxIdPath,
+      success: SandboxCredentialsResponse,
       error: ApiError
     })
   )
@@ -574,4 +608,5 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(StatsGroup)
   .add(PermissionsGroup)
   .add(AuditGroup)
+  .middleware(OwnerSessionAuth)
 {}

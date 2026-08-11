@@ -115,10 +115,59 @@ an alternate authorization path must not contradict a provider-enforced prerequi
 
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
+GitHub workflow guards must compare external action owner/repository names
+case-insensitively, normalize action input names before inspecting them, and
+reject duplicate inputs that collide after case normalization. In
+`pull_request_target`, treat every pull-request-derived
+revision, including `head.sha`, `head.ref`, `github.head_ref`, and
+`merge_commit_sha`, plus `head.repo.full_name` checkout repositories, in dot or
+static indexed syntax, as attacker-controlled when the job can access repository
+credentials. Match the `head.repo` expression prefix so composed owner/name
+repository inputs cannot bypass the guard. Treat effective workflow/job
+`id-token: write`, any token permission with `write` access, and `write-all` as
+credential authority too. On `pull_request_target`, omitted effective
+permissions conservatively imply privileged token authority; an explicit
+read-only permission map remains non-authoritative;
+OIDC-bearing jobs must not checkout or build pull-request revisions. After an
+attacker-controlled checkout, conservatively treat every later `run`, local
+action, or external action step as capable of executing the workspace; a
+metadata-only external action needs explicit human judgment before any narrow
+allowlist exception is added.
+Credential authority must follow static local reusable-workflow calls
+transitively, including `secrets: inherit`; reject cycles and missing local
+callees. Credential- or OIDC-bearing remote and dynamically constructed
+reusable-workflow references must emit an explicit-review diagnostic unless a
+repository-maintained reviewed allowlist proves them metadata-only. Parse `${{ ... }}` delimiters without treating
+`}}` inside quoted GitHub expression strings as the end of the expression.
+Treat mechanically recognizable `git checkout`, `git switch`, and
+`git reset --hard` commands that reference pull-request head/ref or merge
+expressions in their parsed revision operand as attacker-controlled worktree
+transitions. Account for value-taking global Git options such as `-C` and `-c`;
+only parse `git` in a simple shell executable position, and keep metadata-only
+logging of expressions or complete Git command text allowed.
+Manual local reusable-workflow calls using `secrets: inherit` require the same
+main-ref condition and protected environment as direct long-lived secret use.
+Workflow action-pin validation must distinguish job-level reusable workflows
+from step-level local actions using YAML context rather than path suffix, and
+traverse every reachable repository-local action manifest, regardless of its directory, reject missing or cyclic local
+action references, and apply immutable external-reference rules transitively;
+Docker action `runs.image` references must use a digest, while a local
+`Dockerfile` remains subject to explicit base-image review.
+
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
 Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
 Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
+Sandbox startup must not report readiness while legacy unauthenticated
+containers may remain active; transient Docker unavailability and reconciliation
+failures must retry under the supervised startup lifecycle until shutdown is
+confirmed. When the database proves there are no legacy unauthenticated rows,
+Docker may remain unavailable without blocking web readiness and ordinary
+maintenance must retry in a supervised background loop. Query terminal as well
+as active legacy rows; every legacy row must discover every container bearing
+its `codecommit.sandbox.id` label and block readiness until all discovered and
+persisted containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
+URL only after the authenticated listener layer has built successfully.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
@@ -224,6 +273,11 @@ When writing Effect code:
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+- The sole raw Node filesystem exception is
+  `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
+  it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory
+  and database handles through `fchmod` and verify path identity before return.
+  Do not broaden its ast-grep exclusion or move ordinary filesystem work into it.
 - `ChildProcess.make` options that set `env` must also state `extendEnv`; it
   defaults to falsy, so `env` alone replaces the child environment and drops
   `PATH`. `local-rules/require-explicit-child-process-env-inheritance` is the
@@ -247,6 +301,31 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep sandbox capability boundaries synchronized across
+  `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
+  owning policy, service, projection, and security tests. The invariant is:
+  validate before persistence and Docker execution; require immutable image
+  digests, migrating only the former built-in `codercom/code-server:latest`
+  default to the current pinned digest during load; reserve code-server
+  credential variables; accept only existing
+  canonical children of the physical `~/.codecommit/sandbox-volumes` directory
+  mounted below `/home/coder` or the exact `/tmp/.local/share/code-server`
+  runtime data subtree; keep built-in setup presets unprivileged; persist the
+  generated access password only in an owner-only `0700` cache directory and
+  `0600` database after rejecting symbolic-link paths, and expose it only
+  through the authenticated, non-cacheable
+  single-sandbox route; map the
+  non-root container identity to the workspace owner (repair root-owned clones
+  to a fixed non-root identity); drop all capabilities and publish only on
+  loopback; keep sandbox browser origins on the alternate loopback hostname so
+  the host-only owner cookie cannot reach sandbox ports; advertise the Vite
+  origin during development while proxying bootstrap/API requests through the
+  exact backend origin; redact
+  credentials and workspace paths from list/event projections; and recreate
+  legacy passwordless containers. Pass container environment, including the
+  generated password, through a protected pipe-backed Docker env file rather
+  than process arguments; environment names must be portable identifiers and
+  values must be single-line so env-file parsing cannot inject variables.
 - Keep CodeCommit merge capability copy synchronized across
   `packages/codecommit/src/tui/ui/**`, `packages/codecommit/README.md`, and
   `packages/codecommit-core/README.md`. The provider request pins the reviewed

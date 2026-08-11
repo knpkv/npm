@@ -67,7 +67,7 @@ import * as Ref from "effect/Ref"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
-import { startCallbackServer } from "./internal/oauthServer.js"
+import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
 import { openBrowser } from "./internal/openBrowser.js"
 import type { AuthMissingError } from "./JiraCliError.js"
 import { authMissing } from "./JiraCliError.js"
@@ -317,6 +317,7 @@ const make = Effect.gen(function*() {
             clientId: config.clientId,
             state,
             port,
+            redirectUri: callbackUrl(port),
             scopes: JIRA_CLI_SCOPES,
             codeChallenge
           })
@@ -338,7 +339,11 @@ const make = Effect.gen(function*() {
       )
 
       yield* Console.log("Exchanging code for tokens...")
-      const tokens = yield* exchangeCodeForTokens(code, config, { port, codeVerifier }).pipe(
+      const tokens = yield* exchangeCodeForTokens(code, config, {
+        port,
+        redirectUri: callbackUrl(port),
+        codeVerifier
+      }).pipe(
         Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
       )
 

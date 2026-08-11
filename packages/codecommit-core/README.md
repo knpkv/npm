@@ -108,6 +108,40 @@ It reads the standard AWS config and credentials files, deduplicates profile
 names, and returns safe profile/region metadata only; credential values are
 never returned.
 
+Sandbox settings are validated before persistence. Images must use an immutable
+`sha256` digest; the former built-in `codercom/code-server:latest` default is
+migrated to the current pinned digest during load, while other mutable tags
+remain invalid. Reserved code-server credential variables cannot be overridden,
+environment names must be portable identifiers, and values must be single-line
+so Docker env-file parsing cannot introduce extra variables. Container
+environment values, including the generated password, travel through Docker's
+pipe-backed env-file input and never appear in child-process arguments.
+Existing host mounts must canonically resolve to children of
+`~/.codecommit/sandbox-volumes` while targeting children of `/home/coder` or
+the exact `/tmp/.local/share/code-server` runtime data subtree.
+
+### SandboxService
+
+Sandbox creation validates the loaded policy before inserting its database row
+and revalidates it immediately before Docker execution. Each sandbox receives a
+cryptographically random persisted access
+password, runs code-server as the non-root owner of its bind-mounted workspace
+(repairing root-owned clones to `1000:1000`) with all Linux capabilities
+dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
+exclude both the access password and workspace path; the authenticated web
+owner retrieves the password through the single-sandbox credential route.
+That response is non-cacheable, and sandbox browser pages use the alternate
+loopback hostname so the host-only owner cookie is not sent to sandbox ports.
+The local cache directory and database are created or repaired as owner-only
+`0700` and `0600` paths before that password is persisted; symbolic-link paths
+are rejected before either target is mutated.
+Legacy containers without a password are stopped during reconciliation and must
+be recreated. Active and terminal legacy rows are both checked; reconciliation
+finds every container by its `codecommit.sandbox.id` label, includes any
+persisted container ID, and remains unready until every shutdown succeeds.
+Custom runtime composition must provide Effect `Crypto`, `Path`,
+filesystem, process, and configuration services required by the sandbox layer.
+
 ## Deep Imports
 
 Client-side code must use deep imports to avoid pulling in server-only deps:

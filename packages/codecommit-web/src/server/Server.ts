@@ -15,9 +15,10 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Effect, Layer, Predicate, Ref } from "effect"
+import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Stdio from "effect/Stdio"
 import {
   Etag,
   FetchHttpClient,
@@ -42,6 +43,29 @@ import {
 } from "./handlers/index.js"
 import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
 import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
+import {
+  activateOwnerSessionBootstrap,
+  makeOwnerSessionSecrets,
+  ownerSessionAuthLayer,
+  OwnerSessionBootstrapRouter,
+  ownerSessionOrigin,
+  OwnerSessionSecrets,
+  type OwnerSessionSecretsShape,
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
+} from "./internal/OwnerSessionSecurity.js"
+
+export {
+  makeOwnerSessionSecrets,
+  ownerSessionOrigin,
+  OwnerSessionSecrets,
+  type OwnerSessionSecretsShape,
+  ownerSessionUrl,
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
+} from "./internal/OwnerSessionSecurity.js"
 
 // MIME types for common files
 const mimeTypes: Record<string, string> = {
@@ -244,6 +268,7 @@ const ApiLive = Layer.mergeAll(
   AuditPrune,
   sandboxStartupLayer
 ).pipe(
+  Layer.provide(ownerSessionAuthLayer),
   Layer.provide(AllServicesLive),
   Layer.provide(FetchHttpClient.layer)
 )
@@ -262,12 +287,12 @@ const CorsLive = Layer.unwrap(
     HttpRouter.cors({
       allowedOrigins,
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"]
+      allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"]
     }))
 )
 
 // Combined routes with CORS — orDie for remaining service construction errors
-const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
+const AllRoutes = Layer.mergeAll(ApiLive, OwnerSessionBootstrapRouter, StaticRouter).pipe(
   Layer.provide(CorsLive),
   Layer.orDie
 )
@@ -275,17 +300,45 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
 // HttpPlatform + Etag — required by addHttpApi for OpenAPI/multipart support
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.layer))
 
-export const makeServer = (options: { port: number; hostname?: string }) =>
-  HttpRouter.serve(AllRoutes).pipe(
-    // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
-    Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 0 })),
-    Layer.provide(Etag.layer),
-    Layer.provide(HttpPlatformLive)
-  )
+export interface CodeCommitServerOptions {
+  readonly hostname?: string
+  readonly port: number
+  readonly ready?: Deferred.Deferred<void>
+  readonly security: OwnerSessionSecretsShape
+}
 
-export const makeCodeCommitServer = (port: number) => makeServer({ port })
+export const makeServer = (options: CodeCommitServerOptions) => {
+  const hostname = options.hostname ?? "127.0.0.1"
+  return Layer.unwrap(
+    requireLoopbackHostname(hostname).pipe(
+      Effect.map(() => {
+        const server = HttpRouter.serve(AllRoutes).pipe(
+          // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
+          Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
+          Layer.provide(Etag.layer),
+          Layer.provide(HttpPlatformLive),
+          Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security))
+        )
+        return server.pipe(
+          Layer.tap(() =>
+            activateOwnerSessionBootstrap(options.security).pipe(
+              Effect.andThen(
+                options.ready === undefined
+                  ? Effect.void
+                  : Deferred.succeed(options.ready, undefined)
+              )
+            )
+          )
+        )
+      })
+    )
+  )
+}
+
+export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsShape) => makeServer({ port, security })
 
 export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
+const PublicOrigin = Config.option(Config.string("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
 const updatePortOnConflict = (
   portRef: Ref.Ref<number>,
@@ -306,14 +359,31 @@ const updatePortOnConflict = (
   )
 
 export const CodeCommitServerLive = Effect.gen(function*() {
+  const stdio = yield* Stdio.Stdio
   const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
   const retriesRef = yield* Ref.make(10)
+  const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      yield* Effect.logInfo(`Starting server on http://localhost:${p}`)
-      return yield* Layer.launch(makeCodeCommitServer(p))
+      // Rotate every authority-bearing secret on each bind attempt so a URL
+      // emitted for an occupied port cannot authenticate to a later retry.
+      const security = yield* makeOwnerSessionSecrets()
+      const ready = yield* Deferred.make<void>()
+      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
+      const publicOrigin = yield* requireLoopbackOrigin(
+        Option.getOrElse(publicOriginOverride, () => directOrigin)
+      )
+      const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+      yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
+      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
+        Stream.run(stdio.stdout())
+      )
+      return yield* Fiber.join(serverFiber)
     }).pipe(updatePortOnConflict(portRef, retriesRef))
   )
 })

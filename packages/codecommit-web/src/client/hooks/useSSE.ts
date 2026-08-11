@@ -24,6 +24,7 @@ import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import type { AppState } from "../atoms/app.js"
+import { ownerSessionReady } from "../ownerSession.js"
 
 const PullRequestWire = Schema.Struct({
   id: Schema.String,
@@ -180,6 +181,7 @@ export function useSSE(
     let es: EventSource | null = null
     let retryCount = 0
     let retryTimeout: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
 
     const connect = () => {
       es = new EventSource("/api/events/")
@@ -250,8 +252,13 @@ export function useSSE(
       }
     }
 
-    connect()
+    void ownerSessionReady.then((status) => {
+      if (disposed) return
+      if (status._tag === "Ready") connect()
+      else setConnectionState("disconnected")
+    })
     return () => {
+      disposed = true
       es?.close()
       if (retryTimeout) clearTimeout(retryTimeout)
     }

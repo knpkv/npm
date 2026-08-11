@@ -24,12 +24,24 @@ type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
  * @category Services
  */
 export interface HttpServerFactory {
-  readonly createServerLayer: (port: number) => Layer.Layer<
+  readonly createServerLayer: (options: CallbackServerListenOptions) => Layer.Layer<
     HttpServer.HttpServer,
     HttpServerError.ServeError,
     never
   >
 }
+
+export interface CallbackServerListenOptions {
+  readonly host: "localhost"
+  readonly port: number
+}
+
+export const callbackServerListenOptions = (port: number): CallbackServerListenOptions => ({
+  host: "localhost",
+  port
+})
+
+export const callbackUrl = (port: number): string => `http://localhost:${port}/callback`
 
 /**
  * Tag for the HttpServerFactory service.
@@ -51,7 +63,9 @@ export class HttpServerFactoryTag extends Context.Service<
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
+  createLayerFn: (
+    options: CallbackServerListenOptions
+  ) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
@@ -91,7 +105,7 @@ export const startCallbackServer = (
     const scope = yield* Effect.scope
 
     const buildServer = (port: number): Effect.Effect<HttpServerInstance, HttpServerError.ServeError> =>
-      Layer.build(factory.createServerLayer(port)).pipe(
+      Layer.build(factory.createServerLayer(callbackServerListenOptions(port))).pipe(
         Scope.provide(scope),
         Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
         Effect.catchIf(
@@ -117,11 +131,19 @@ export const startCallbackServer = (
       "/callback",
       Effect.gen(function*() {
         const req = yield* HttpServerRequest.HttpServerRequest
-        const url = new URL(req.url, `http://localhost:${port}`)
+        const url = new URL(req.url, callbackUrl(port))
         const code = url.searchParams.get("code")
         const state = url.searchParams.get("state")
         const error = url.searchParams.get("error")
         const errorDescription = url.searchParams.get("error_description")
+
+        if (state !== expectedState) {
+          return HttpServerResponse.html(
+            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
+          ).pipe(
+            HttpServerResponse.setStatus(403)
+          )
+        }
 
         if (error) {
           yield* Deferred.fail(
@@ -130,16 +152,6 @@ export const startCallbackServer = (
           )
           return HttpServerResponse.html(
             "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
-          )
-        }
-
-        if (state !== expectedState) {
-          yield* Deferred.fail(
-            deferred,
-            new OAuthError({ step: "authorize", cause: "State mismatch - possible CSRF attack" })
-          )
-          return HttpServerResponse.html(
-            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
           )
         }
 

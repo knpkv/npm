@@ -92,17 +92,27 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Pull requests to `main` branch
 - Manual workflow dispatch
 
-**Condition**: Only runs if repository owner is 'knpkv'
+**Condition**: Verification runs only when the repository owner is `knpkv`.
+Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 
 **Jobs**:
 
 #### Snapshot
 
 - Builds all packages
-- Creates snapshot releases using `pkg-pr-new`
-- Publishes to temporary registry for testing
+- Runs for pull requests with a read-only `GITHUB_TOKEN` for checkout, without
+  OIDC authority; checkout credentials are not persisted
 - **Commands**:
   - `pnpm build` - Build all packages
+
+#### Publish snapshot
+
+- Runs only for pushes to `main` or a `main` workflow dispatch
+- Checks out `refs/heads/main`, rebuilds, and alone receives `id-token: write`
+- Creates snapshot releases using `pkg-pr-new`
+- Publishes to the temporary registry for testing
+- **Commands**:
+  - `pnpm build` - Build all packages from trusted `main`
   - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
 - **Node Version**: 24.10.0

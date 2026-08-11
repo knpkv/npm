@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "start": "bun run src/main.ts",
-    "dev": "bun run --watch src/main.ts & vite --clearScreen false",
+    "dev": "CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false",
     "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",

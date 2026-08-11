@@ -24,6 +24,8 @@ CLI and TUI for AWS CodeCommit pull requests.
 - [Granted](https://granted.dev) with the `assume` executable configured for
   opening a selected pull request in the matching AWS account console
 - A locally authenticated `codex` executable for optional Relay actions
+- Docker for optional web-mode review sandboxes. Sandbox IDE ports are
+  loopback-only and require the per-sandbox password shown by the web UI.
 - `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
   for the external editor shortcut
 - On macOS or Linux, `/bin/sh`, `/bin/cat`, and either `lockf` or `flock` for
@@ -232,6 +234,47 @@ narrower than the hierarchy.
 ```bash
 codecommit web [--port 3000] [--hostname 127.0.0.1]
 ```
+
+Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
+fragment contains a short-lived, single-use bootstrap token. The token is
+exchanged for an HttpOnly SameSite cookie and a separate CSRF proof, then removed
+from the address bar; the process-scoped owner secret never enters the URL.
+The token's 60-second lifetime begins only after the authenticated listener is
+ready, including any Docker-dependent legacy sandbox reconciliation; the URL is
+printed and opened only after that readiness boundary. Docker remains optional
+when the database contains no legacy unauthenticated sandbox, and ordinary
+sandbox maintenance resumes in the background when Docker becomes available.
+Both active and terminal legacy rows require Docker admission until every
+persisted or `codecommit.sandbox.id`-labeled container has confirmed shutdown.
+Every `/api/**` route requires the cookie, and mutations additionally require
+the same-origin CSRF proof shared across tabs for that loopback origin. Do not
+publish or proxy this local HTTP listener onto another network.
+
+The development launcher advertises the Vite origin while proxying bootstrap
+and API traffic to the backend with its exact loopback origin. Sandbox iframes
+use the alternate loopback hostname (`localhost` versus `127.0.0.1`) because
+cookies are host-scoped but not port-scoped; this prevents the owner cookie from
+being sent to a sandbox port.
+
+Review sandboxes use a digest-pinned code-server image; the former built-in
+`codercom/code-server:latest` default is migrated to the current pinned digest,
+while other mutable tags remain invalid. A sandbox receives a random password, a
+non-root user mapped to the workspace owner, dropped Linux capabilities, and a Docker port explicitly bound
+to `127.0.0.1`. Docker receives container environment values, including that
+password, through pipe-backed env-file input rather than process arguments;
+environment names must be portable identifiers and values must be single-line.
+User-configured host mounts must exist and canonically resolve to children of
+`~/.codecommit/sandbox-volumes`, and container targets must be children of
+`/home/coder` or the exact `/tmp/.local/share/code-server` runtime data subtree;
+the built-in Node, pnpm, and Bun setup presets run without privilege escalation.
+AWS credentials, SSH keys, the Docker socket, and broad home or root mounts are
+rejected before configuration persistence, before its database row is inserted,
+and again before Docker execution.
+The cache directory and database that persist the sandbox password are repaired
+to owner-only `0700` and `0600` permissions before use, and symbolic-link paths
+are rejected before either target is mutated.
+The authenticated credential response is non-cacheable, and the UI masks the
+password until the owner explicitly reveals or copies it.
 
 ### Pull Request Commands
 
