@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "@effect/vitest"
 
 const makeStorage = () => {
   const values = new Map<string, string>()
@@ -58,5 +58,36 @@ describe("owner session bootstrap", () => {
       _tag: "Failed",
       message: "Owner session bootstrap failed with status 401"
     })
+  })
+
+  it("removes a consumed bootstrap token before a storage failure", async () => {
+    const replaceState = vi.fn()
+    vi.stubGlobal("window", {
+      fetch: vi.fn(async () =>
+        new Response(JSON.stringify({ csrfToken: "csrf-proof" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      ),
+      history: { replaceState },
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("storage unavailable")
+        }
+      },
+      location: {
+        hash: "#bootstrap_token=single-use-token",
+        pathname: "/sandboxes/sbx-1",
+        search: "?view=editor"
+      }
+    })
+
+    const ownerSession = await import("../src/client/ownerSession.js")
+    await expect(ownerSession.ownerSessionReady).resolves.toEqual({
+      _tag: "Failed",
+      message: "storage unavailable"
+    })
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/sandboxes/sbx-1?view=editor")
   })
 })

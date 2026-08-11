@@ -28,6 +28,7 @@ const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => 
   if (bootstrapToken === null) return ready
 
   try {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`)
     const response = await window.fetch("/auth/bootstrap", {
       method: "POST",
       credentials: "same-origin",
@@ -36,7 +37,6 @@ const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => 
     if (!response.ok) return failed(`Owner session bootstrap failed with status ${response.status}`)
     const payload = await Schema.decodeUnknownPromise(BootstrapResponse)(await response.json())
     window.localStorage.setItem(csrfStorageKey, payload.csrfToken)
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`)
     return ready
   } catch (cause) {
     return failed(Predicate.isError(cause) ? cause.message : "Owner session bootstrap failed")

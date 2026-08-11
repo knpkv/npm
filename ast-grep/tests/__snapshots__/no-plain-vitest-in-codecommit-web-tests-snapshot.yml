@@ -1,0 +1,24 @@
+id: no-plain-vitest-in-codecommit-web-tests
+snapshots:
+  ? |
+    import * as Vitest from "vitest"
+  : labels:
+      - source: import * as Vitest from "vitest"
+        style: primary
+        start: 0
+        end: 32
+      - source: '"vitest"'
+        style: secondary
+        start: 24
+        end: 32
+  ? |
+    import { describe, expect, it } from "vitest"
+  : labels:
+      - source: import { describe, expect, it } from "vitest"
+        style: primary
+        start: 0
+        end: 45
+      - source: '"vitest"'
+        style: secondary
+        start: 37
+        end: 45

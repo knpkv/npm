@@ -8,15 +8,32 @@ import * as FileSystem from "effect/FileSystem"
 import * as Glob from "glob"
 import { parse } from "yaml"
 
-const serialized = (value) => JSON.stringify(value)
-const secretReference = /\$\{\{\s*secrets(?:\.([A-Z0-9_]+)|\[\s*(?:'([A-Z0-9_]+)'|\\"([A-Z0-9_]+)\\")\s*\])/giu
+const actionsExpression = /\$\{\{([\s\S]*?)\}\}/gu
+const secretReference = /\bsecrets(?:\.([A-Z0-9_]+)|\s*\[([^\]]+)\])/giu
+const staticIndexedProperty = /\[\s*(['"])([A-Z_][A-Z0-9_-]*)\1\s*\]/giu
+const dynamicSecretName = "<DYNAMIC_SECRET>"
+const normalizeStaticIndexedProperties = (value) => value.replace(staticIndexedProperty, ".$2")
+const stringsIn = (value) => {
+  if (typeof value === "string") return [value]
+  if (Array.isArray(value)) return value.flatMap(stringsIn)
+  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringsIn)
+  return []
+}
 const referencedSecretNames = (value) =>
-  Array.from(serialized(value).matchAll(secretReference), (match) => (match[1] ?? match[2] ?? match[3]).toUpperCase())
+  stringsIn(value).flatMap((source) =>
+    Array.from(source.matchAll(actionsExpression)).flatMap((expressionMatch) => {
+      const expression = normalizeStaticIndexedProperties(expressionMatch[1])
+      return Array.from(expression.matchAll(secretReference), (secretMatch) =>
+        secretMatch[1] === undefined ? dynamicSecretName : secretMatch[1].toUpperCase()
+      )
+    })
+  )
 const referencesSecrets = (value) => referencedSecretNames(value).length > 0
 const referencesLongLivedSecrets = (value) => referencedSecretNames(value).some((name) => name !== "GITHUB_TOKEN")
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
-  typeof value === "string" && new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(value)
+  typeof value === "string" &&
+  new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(normalizeStaticIndexedProperties(value))
 const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (typeof step?.uses !== "string" || !step.uses.startsWith("actions/checkout@")) return false
   const ref = step.with?.ref
@@ -166,6 +183,19 @@ jobs:
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
+  const invalidIndexedHeadShaWithDynamicSecret = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github['event']["pull_request"]['head']["sha"] }}
+      - run: pnpm test:integration
+        env:
+          SECRET: \${{ secrets[env.SECRET_NAME] }}
+`)
   const safeTrustedRef = parse(`
 on:
   pull_request:
@@ -213,6 +243,26 @@ jobs:
     steps:
       - run: pnpm test:integration
 `)
+  const invalidManualDynamicSecret = parse(`
+on:
+  workflow_dispatch:
+jobs:
+  integration:
+    steps:
+      - run: pnpm test:integration
+        env:
+          SECRET: \${{ secrets[inputs.secret_name] }}
+`)
+  const safeIndexedGithubToken = parse(`
+on:
+  workflow_dispatch:
+jobs:
+  metadata:
+    steps:
+      - run: gh api /rate_limit
+        env:
+          GH_TOKEN: \${{ secrets["GITHUB_TOKEN"] }}
+`)
   const protectedMain = parse(`
 on:
   workflow_dispatch:
@@ -233,13 +283,22 @@ jobs:
   assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventRef, "explicit event ref fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidHeadRef, "head ref fixture").length, 1)
   assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidIndexedHeadShaWithDynamicSecret,
+      "indexed head SHA with dynamic secret fixture"
+    ).length,
+    1
+  )
+  assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
   )
+  assert.equal(validateWorkflowSecretBoundaries(invalidManualDynamicSecret, "manual dynamic secret fixture").length, 2)
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeIndexedGithubToken, "indexed GitHub token fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 
