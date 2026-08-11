@@ -1,8 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
+import { Layer, Sink, Stream } from "effect"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { rename as nodeRename, symlink as nodeSymlink } from "node:fs/promises"
 import { ensurePrivateDatabasePath } from "../src/CacheService/Database.js"
 import {
@@ -11,7 +14,7 @@ import {
 } from "../src/CacheService/internal/PrivateDatabasePathNode.js"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
-import { renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
+import { DockerService, renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
 import { makeContainerConfig, sandboxContainerIdentityForWorkspaceOwner } from "../src/SandboxService/SandboxService.js"
 
 const homePath = "/Users/security-test"
@@ -49,6 +52,10 @@ describe("sandbox security boundary", () => {
         {
           ...validConfig,
           env: { PASSWORD: "must-not-override-server-credential" }
+        },
+        {
+          ...validConfig,
+          env: { SAFE_NAME: "value\nPASSWORD=injected" }
         }
       ]
 
@@ -324,6 +331,69 @@ describe("sandbox security boundary", () => {
       renderDockerPortBinding("8080/tcp", { HostIp: "127.0.0.1", HostPort: "18080" })
     ).toBe("127.0.0.1:18080:8080")
   })
+
+  it.effect("pipes container environment without exposing secrets in process arguments", () =>
+    Effect.gen(function*() {
+      const commands: Array<ChildProcess.Command> = []
+      const output = Stream.make("container-id\n").pipe(Stream.encodeText)
+      const processLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          commands.push(command)
+          return Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              all: output,
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              pid: ChildProcessSpawner.ProcessId(42),
+              reref: Effect.void,
+              stderr: Stream.empty,
+              stdin: Sink.drain,
+              stdout: output,
+              unref: Effect.succeed(Effect.void)
+            })
+          )
+        })
+      )
+      const config = makeContainerConfig(
+        "/Users/security-test/.codecommit/sandboxes/sbx-1",
+        18080,
+        "sbx-1",
+        "42",
+        { ...validConfig, env: { EDITOR_THEME: "dark" } },
+        homePath,
+        "1001:1001",
+        "process-visible-secret"
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const docker = yield* DockerService
+          yield* docker.createContainer(config)
+        }).pipe(
+          Effect.provide(DockerService.Default.pipe(Layer.provide(processLayer)))
+        )
+      )
+
+      expect(commands).toHaveLength(1)
+      const command = commands[0]
+      expect(ChildProcess.isStandardCommand(command)).toBe(true)
+      if (!ChildProcess.isStandardCommand(command)) return
+      const processArguments = [command.command, ...command.args].join("\0")
+      expect(processArguments).not.toContain("process-visible-secret")
+      expect(processArguments).not.toContain("EDITOR_THEME=dark")
+      const stdin = command.options.stdin
+      expect(stdin).toBeTypeOf("object")
+      if (stdin === null || typeof stdin !== "object" || typeof stdin.stream === "string") return
+      const chunks = yield* Stream.runCollect(stdin.stream)
+      const bytes = Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))
+      const environment = new TextDecoder().decode(bytes)
+      expect(environment).toContain("EDITOR_THEME=dark\n")
+      expect(environment).toContain("PASSWORD=process-visible-secret\n")
+    }))
 
   it("matches a non-root workspace owner and repairs root-owned workspaces without running as root", () => {
     expect(sandboxContainerIdentityForWorkspaceOwner(1001, 1002)).toEqual({

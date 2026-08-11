@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 import type { Success } from "effect/Effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { DockerError } from "../Errors.js"
@@ -83,6 +83,15 @@ const makeDockerService = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const docker = (...args: Array<string>) =>
     spawner.string(ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`]))
+  const dockerWithInput = (input: string, ...args: Array<string>) =>
+    spawner.string(
+      ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`], {
+        stdin: {
+          stream: Stream.make(input).pipe(Stream.encodeText),
+          endOnDone: true
+        }
+      })
+    )
 
   const service = {
     isAvailable: () =>
@@ -121,10 +130,10 @@ const makeDockerService = Effect.gen(function*() {
         args.push("--user", config.User)
       }
 
-      // Env vars
-      for (const env of config.Env ?? []) {
-        args.push("-e", env)
-      }
+      // Keep environment values, including the generated access password, out
+      // of process arguments. Docker reads the protected parent-child pipe.
+      const environment = config.Env ?? []
+      if (environment.length > 0) args.push("--env-file", "/dev/stdin")
 
       // Labels
       for (const [k, v] of Object.entries(config.Labels ?? {})) {
@@ -135,7 +144,9 @@ const makeDockerService = Effect.gen(function*() {
       args.push(config.Image)
       for (const c of config.Cmd) args.push(c)
 
-      return docker(...args).pipe(dockerError("createContainer"))
+      return (environment.length > 0
+        ? dockerWithInput(`${environment.join("\n")}\n`, ...args)
+        : docker(...args)).pipe(dockerError("createContainer"))
     },
 
     startContainer: (containerId: string) =>

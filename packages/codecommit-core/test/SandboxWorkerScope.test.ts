@@ -71,7 +71,13 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
     findByPr: () => Effect.succeed(Option.none<SandboxRow>()),
-    findActive: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
+    findActive: () =>
+      Ref.get(rowRef).pipe(
+        Effect.map((row) =>
+          row !== undefined && ["creating", "cloning", "starting", "running"].includes(row.status) ? [row] : []
+        )
+      ),
+    findAll: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
     insert: (input) =>
       Ref.update(insertCalls, (count) => count + 1).pipe(
         Effect.andThen(
@@ -386,5 +392,49 @@ describe("SandboxWorkerScope", () => {
         status: "error",
         error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
       })
+    }))
+
+  it.effect("discovers and stops a labeled container for a terminal legacy row", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        {
+          initialRow: { ...legacyRow, containerId: null, status: "error" },
+          untrackedContainers: [{
+            Id: "terminal-legacy-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": legacyRow.id }
+          }]
+        }
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          expect(yield* sandboxes.hasLegacyUnauthenticated()).toBe(true)
+          expect(yield* sandboxes.reconcile()).toBe(true)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+    }))
+
+  it.effect("does not require Docker admission for a terminal authenticated row", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        { initialRow: { ...legacyRow, accessPassword: "protected", status: "error" } }
+      )
+
+      const hasLegacy = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.hasLegacyUnauthenticated()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(hasLegacy).toBe(false)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
     }))
 })

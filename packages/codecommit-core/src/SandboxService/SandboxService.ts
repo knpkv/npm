@@ -460,16 +460,19 @@ const makeSandboxService = Effect.gen(function*() {
     reconcile: () =>
       Effect.gen(function*() {
         const active = yield* repo.findActive()
-        yield* Effect.forEach(active, (row) =>
+        const all = yield* repo.findAll()
+        const activeIds = new Set(active.map((row) => row.id))
+        const rows = all.filter((row) => row.accessPassword === null || activeIds.has(row.id))
+        yield* Effect.forEach(rows, (row) =>
           Effect.gen(function*() {
             if (row.accessPassword === null) {
-              const containerIds = row.containerId
-                ? [row.containerId]
-                : (yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)).map(
-                  (container) => container.Id
-                )
-              // Keep the row active when discovery or shutdown fails so the next
-              // reconciliation cannot abandon a published passwordless container.
+              const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)
+              const containerIds = new Set([
+                ...(row.containerId === null ? [] : [row.containerId]),
+                ...discovered.map((container) => container.Id)
+              ])
+              // Do not consider any legacy row reconciled until every persisted
+              // or labeled passwordless container has confirmed shutdown.
               yield* Effect.forEach(
                 containerIds,
                 (containerId) => docker.stopContainer(containerId),
@@ -498,7 +501,7 @@ const makeSandboxService = Effect.gen(function*() {
       ),
 
     hasLegacyUnauthenticated: () =>
-      repo.findActive().pipe(
+      repo.findAll().pipe(
         Effect.map((rows) => rows.some((row) => row.accessPassword === null))
       ),
 

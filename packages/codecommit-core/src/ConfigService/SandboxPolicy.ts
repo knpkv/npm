@@ -5,6 +5,7 @@ import { SandboxConfigurationError } from "../Errors.js"
 import type { SandboxConfig } from "./internal.js"
 
 const digestPinnedImage = /@sha256:[0-9a-f]{64}$/u
+const environmentVariableName = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const reservedEnvironmentKeys = new Set(["HASHED_PASSWORD", "PASSWORD"])
 const permittedContainerRoots = ["/home/coder", "/tmp/.local/share/code-server"]
 
@@ -26,9 +27,15 @@ export const validateSandboxConfig = Effect.fn("SandboxPolicy.validateSandboxCon
     if (!digestPinnedImage.test(config.image)) {
       return yield* reject("Sandbox image must be pinned to an immutable sha256 digest")
     }
-    for (const key of Object.keys(config.env)) {
+    for (const [key, value] of Object.entries(config.env)) {
+      if (!environmentVariableName.test(key)) {
+        return yield* reject(`Sandbox environment variable ${key} has an invalid name`)
+      }
       if (reservedEnvironmentKeys.has(key.toUpperCase())) {
         return yield* reject(`Sandbox environment variable ${key} is reserved`)
+      }
+      if (/\r|\n/u.test(value)) {
+        return yield* reject(`Sandbox environment variable ${key} must be a single line`)
       }
     }
 

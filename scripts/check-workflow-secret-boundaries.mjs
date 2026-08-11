@@ -89,6 +89,11 @@ const referencesExpression = (value, expression) =>
   new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(normalizeStaticIndexedProperties(value))
 const usesAction = (value, action) =>
   typeof value === "string" && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
+const actionInput = (step, name) => {
+  if (step?.with === null || typeof step?.with !== "object" || Array.isArray(step.with)) return undefined
+  const entry = Object.entries(step.with).find(([inputName]) => inputName.toLowerCase() === name)
+  return entry?.[1]
+}
 const referencesPullRequestRevision = (value, trigger) =>
   referencesExpression(value, "github.event.pull_request.head.sha") ||
   referencesExpression(value, "github.event.pull_request.head.ref") ||
@@ -98,20 +103,85 @@ const referencesPullRequestRevision = (value, trigger) =>
     (referencesExpression(value, "github.sha") || referencesExpression(value, "github.ref")))
 const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (!usesAction(step?.uses, "actions/checkout")) return false
-  const repository = step.with?.repository
+  const repository = actionInput(step, "repository")
   if (referencesExpression(repository, "github.event.pull_request.head.repo")) {
     return true
   }
-  const ref = step.with?.ref
+  const ref = actionInput(step, "ref")
   if (ref === undefined) return trigger === "pull_request"
   return referencesPullRequestRevision(ref, trigger)
 }
+const shellWords = (command) =>
+  Array.from(command.matchAll(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\$\{\{.*?\}\}|[^\s]+/gu), ([word]) => word)
+const gitGlobalOptionsWithValues = new Set([
+  "-C",
+  "-c",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--super-prefix",
+  "--work-tree"
+])
+const gitGlobalOptionHasAttachedValue = (word) =>
+  /^--(?:config-env|exec-path|git-dir|namespace|super-prefix|work-tree)=/u.test(word) || /^-(?:C|c).+/u.test(word)
+const gitSubcommand = (words) => {
+  let cursor = 1
+  while (cursor < words.length) {
+    const word = words[cursor]
+    if (gitGlobalOptionsWithValues.has(word)) {
+      cursor += 2
+      continue
+    }
+    if (gitGlobalOptionHasAttachedValue(word) || word.startsWith("-")) {
+      cursor += 1
+      continue
+    }
+    return { name: word.toLowerCase(), operands: words.slice(cursor + 1) }
+  }
+  return undefined
+}
+const revisionOperand = (subcommand, operands) => {
+  const optionsWithValues =
+    subcommand === "checkout"
+      ? new Set(["-b", "-B", "--conflict", "--orphan", "--pathspec-from-file"])
+      : subcommand === "switch"
+        ? new Set(["-c", "-C", "--conflict", "--orphan"])
+        : new Set(["--pathspec-from-file"])
+  let cursor = 0
+  while (cursor < operands.length) {
+    const word = operands[cursor]
+    if (word === "--") return undefined
+    if (optionsWithValues.has(word)) {
+      cursor += 2
+      continue
+    }
+    if (word.startsWith("-")) {
+      cursor += 1
+      continue
+    }
+    return word
+  }
+  return undefined
+}
+const shellGitCommands = (source) => {
+  const commands = []
+  const normalized = source.replace(/\\\r?\n/gu, " ")
+  for (const match of normalized.matchAll(/\bgit\b([^\n;&|]*)/giu)) {
+    const words = shellWords(`git${match[1]}`)
+    const subcommand = gitSubcommand(words)
+    if (subcommand !== undefined) commands.push(subcommand)
+  }
+  return commands
+}
 const shellChecksOutPullRequestRevision = (step, trigger) => {
-  if (typeof step?.run !== "string" || !referencesPullRequestRevision(step.run, trigger)) return false
-  return (
-    /\bgit\s+(?:(?:-[A-Za-z]\S*|--[A-Za-z][A-Za-z-]*(?:=\S+)?)\s+)*(?:checkout|switch)\b/iu.test(step.run) ||
-    /\bgit\s+(?:(?:-[A-Za-z]\S*|--[A-Za-z][A-Za-z-]*(?:=\S+)?)\s+)*reset\s+--hard\b/iu.test(step.run)
-  )
+  if (typeof step?.run !== "string") return false
+  return shellGitCommands(step.run).some(({ name, operands }) => {
+    if (name !== "checkout" && name !== "switch" && name !== "reset") return false
+    if (name === "reset" && !operands.includes("--hard")) return false
+    const revision = revisionOperand(name, operands)
+    return revision !== undefined && referencesPullRequestRevision(revision, trigger)
+  })
 }
 const stepChecksOutPullRequestRevision = (step, trigger) =>
   checkoutUsesPullRequestRevision(step, trigger) || shellChecksOutPullRequestRevision(step, trigger)
@@ -654,6 +724,28 @@ jobs:
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
+  const invalidMixedCaseCheckoutInput = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          Ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeMixedCaseTrustedCheckoutInput = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          Ref: refs/heads/main
+      - run: pnpm test:integration
+`)
   const invalidShellCheckout = parse(`
 on:
   pull_request_target:
@@ -670,6 +762,17 @@ jobs:
           git checkout --detach \${{ github.event.pull_request.head.sha }}
       - run: pnpm test:integration
 `)
+  const invalidShellCheckoutWithGlobalOptions = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: git -c advice.detachedHead=false -C "$GITHUB_WORKSPACE" checkout \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
   const safeLoggedHeadSha = parse(`
 on:
   pull_request_target:
@@ -679,6 +782,18 @@ jobs:
       JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
     steps:
       - run: echo \${{ github.event.pull_request.head.sha }}
+`)
+  const safeLoggedHeadShaBeforeTrustedShellCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: |
+          echo \${{ github.event.pull_request.head.sha }}
+          git -C "$GITHUB_WORKSPACE" checkout refs/heads/main
 `)
   const safeTrustedRef = parse(`
 on:
@@ -920,7 +1035,18 @@ jobs:
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidMergeCommitSha, "merge commit SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidMixedCaseCheckoutInput, "mixed-case checkout input fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidShellCheckout, "shell checkout fixture").length, 1)
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidShellCheckoutWithGlobalOptions,
+      "shell checkout with global options fixture"
+    ).length,
+    1
+  )
   assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
@@ -964,6 +1090,13 @@ jobs:
   assert.deepEqual(validateWorkflowSecretBoundaries(safeLoggedHeadSha, "logged head SHA fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(
+      safeLoggedHeadShaBeforeTrustedShellCheckout,
+      "logged head SHA before trusted shell checkout fixture"
+    ),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(
       safeReusableWorkflowCaller,
       ".github/workflows/safe-reusable-caller.yml",
       new Map([
@@ -1001,6 +1134,10 @@ jobs:
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeIndexedGithubToken, "indexed GitHub token fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeMixedCaseNonCheckout, "mixed-case action fixture"), [])
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(safeMixedCaseTrustedCheckoutInput, "mixed-case trusted checkout input fixture"),
+    []
+  )
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 

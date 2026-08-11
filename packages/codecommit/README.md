@@ -244,6 +244,8 @@ ready, including any Docker-dependent legacy sandbox reconciliation; the URL is
 printed and opened only after that readiness boundary. Docker remains optional
 when the database contains no legacy unauthenticated sandbox, and ordinary
 sandbox maintenance resumes in the background when Docker becomes available.
+Both active and terminal legacy rows require Docker admission until every
+persisted or `codecommit.sandbox.id`-labeled container has confirmed shutdown.
 Every `/api/**` route requires the cookie, and mutations additionally require
 the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.
@@ -258,7 +260,10 @@ Review sandboxes use a digest-pinned code-server image; the former built-in
 `codercom/code-server:latest` default is migrated to the current pinned digest,
 while other mutable tags remain invalid. A sandbox receives a random password, a
 non-root user mapped to the workspace owner, dropped Linux capabilities, and a Docker port explicitly bound
-to `127.0.0.1`. User-configured host mounts must exist and canonically resolve to children of
+to `127.0.0.1`. Docker receives container environment values, including that
+password, through pipe-backed env-file input rather than process arguments;
+environment names must be portable identifiers and values must be single-line.
+User-configured host mounts must exist and canonically resolve to children of
 `~/.codecommit/sandbox-volumes`, and container targets must be children of
 `/home/coder` or the exact `/tmp/.local/share/code-server` runtime data subtree;
 the built-in Node, pnpm, and Bun setup presets run without privilege escalation.

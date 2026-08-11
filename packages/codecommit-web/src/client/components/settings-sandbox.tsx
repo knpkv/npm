@@ -1,4 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { Predicate } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -28,12 +29,22 @@ const DEFAULTS: SandboxSettings = {
 
 export function SettingsSandbox() {
   const config = useAtomValue(configQueryAtom)
-  const saveConfig = useAtomSet(configSaveAtom)
+  const saveConfig = useAtomSet(configSaveAtom, { mode: "promise" })
   type ConfigValue = Extract<typeof config, { readonly _tag: "Success" }>["value"]
   const configRef = useRef<ConfigValue | null>(null)
   const [local, setLocal] = useState<SandboxSettings | null>(null)
   const [saved, setSaved] = useState<SandboxSettings | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveSucceeded, setSaveSucceeded] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const savedNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (savedNoticeTimer.current !== null) clearTimeout(savedNoticeTimer.current)
+    },
+    []
+  )
 
   useEffect(() => {
     if (AsyncResult.isSuccess(config)) {
@@ -52,28 +63,40 @@ export function SettingsSandbox() {
   )
 
   const update = useCallback((patch: Partial<SandboxSettings>) => {
+    setSaveSucceeded(false)
+    setSaveError(null)
     setLocal((prev) => (prev ? { ...prev, ...patch } : prev))
   }, [])
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     const data = configRef.current
     if (!data || !local) return
     setSaving(true)
-    saveConfig({
-      payload: {
-        accounts: data.accounts.map((a) => ({
-          profile: a.profile,
-          regions: [...a.regions],
-          enabled: a.enabled
-        })),
-        autoDetect: data.autoDetect,
-        autoRefresh: data.autoRefresh,
-        refreshIntervalSeconds: data.refreshIntervalSeconds,
-        sandbox: local
-      }
-    })
-    setSaved(local)
-    setTimeout(() => setSaving(false), 600)
+    setSaveSucceeded(false)
+    setSaveError(null)
+    try {
+      await saveConfig({
+        payload: {
+          accounts: data.accounts.map((a) => ({
+            profile: a.profile,
+            regions: [...a.regions],
+            enabled: a.enabled
+          })),
+          autoDetect: data.autoDetect,
+          autoRefresh: data.autoRefresh,
+          refreshIntervalSeconds: data.refreshIntervalSeconds,
+          sandbox: local
+        }
+      })
+      setSaved(local)
+      setSaveSucceeded(true)
+      if (savedNoticeTimer.current !== null) clearTimeout(savedNoticeTimer.current)
+      savedNoticeTimer.current = setTimeout(() => setSaveSucceeded(false), 600)
+    } catch (error) {
+      setSaveError(Predicate.isError(error) ? error.message : "Failed to save sandbox settings")
+    } finally {
+      setSaving(false)
+    }
   }, [saveConfig, local])
 
   return (
@@ -84,8 +107,10 @@ export function SettingsSandbox() {
           <p className="text-sm text-muted-foreground">Docker sandbox defaults for code review environments</p>
         </div>
         {local && (
-          <Button size="sm" className="h-8 gap-1.5 px-3" disabled={!dirty && !saving} onClick={handleSave}>
+          <Button size="sm" className="h-8 gap-1.5 px-3" disabled={!dirty || saving} onClick={handleSave}>
             {saving ? (
+              "Saving…"
+            ) : saveSucceeded ? (
               <>
                 <CheckIcon className="size-3.5" /> Saved
               </>
@@ -95,6 +120,11 @@ export function SettingsSandbox() {
           </Button>
         )}
       </div>
+      {saveError !== null && (
+        <p role="alert" className="text-sm text-destructive">
+          {saveError}
+        </p>
+      )}
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)

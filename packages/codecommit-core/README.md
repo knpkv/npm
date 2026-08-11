@@ -112,7 +112,11 @@ Sandbox settings are validated before persistence. Images must use an immutable
 `sha256` digest; the former built-in `codercom/code-server:latest` default is
 migrated to the current pinned digest during load, while other mutable tags
 remain invalid. Reserved code-server credential variables cannot be overridden,
-and existing host mounts must canonically resolve to children of
+environment names must be portable identifiers, and values must be single-line
+so Docker env-file parsing cannot introduce extra variables. Container
+environment values, including the generated password, travel through Docker's
+pipe-backed env-file input and never appear in child-process arguments.
+Existing host mounts must canonically resolve to children of
 `~/.codecommit/sandbox-volumes` while targeting children of `/home/coder` or
 the exact `/tmp/.local/share/code-server` runtime data subtree.
 
@@ -132,9 +136,10 @@ The local cache directory and database are created or repaired as owner-only
 `0700` and `0600` paths before that password is persisted; symbolic-link paths
 are rejected before either target is mutated.
 Legacy containers without a password are stopped during reconciliation and must
-be recreated. If a crash left no persisted container ID, reconciliation finds
-the container by its `codecommit.sandbox.id` label and remains unready until
-shutdown succeeds. Custom runtime composition must provide Effect `Crypto`, `Path`,
+be recreated. Active and terminal legacy rows are both checked; reconciliation
+finds every container by its `codecommit.sandbox.id` label, includes any
+persisted container ID, and remains unready until every shutdown succeeds.
+Custom runtime composition must provide Effect `Crypto`, `Path`,
 filesystem, process, and configuration services required by the sandbox layer.
 
 ## Deep Imports

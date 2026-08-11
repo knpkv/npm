@@ -116,7 +116,8 @@ an alternate authorization path must not contradict a provider-enforced prerequi
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 GitHub workflow guards must compare external action owner/repository names
-case-insensitively. In `pull_request_target`, treat every pull-request-derived
+case-insensitively and normalize action input names before inspecting them. In
+`pull_request_target`, treat every pull-request-derived
 revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 `merge_commit_sha`, plus `head.repo.full_name` checkout repositories, in dot or
 static indexed syntax, as attacker-controlled when the job can access repository
@@ -139,8 +140,9 @@ repository-maintained reviewed allowlist proves them metadata-only. Parse `${{ .
 `}}` inside quoted GitHub expression strings as the end of the expression.
 Treat mechanically recognizable `git checkout`, `git switch`, and
 `git reset --hard` commands that reference pull-request head/ref or merge
-expressions as attacker-controlled worktree transitions; metadata-only logging
-of the same expressions must remain allowed.
+expressions in their parsed revision operand as attacker-controlled worktree
+transitions. Account for value-taking global Git options such as `-C` and `-c`;
+metadata-only logging of the same expressions must remain allowed.
 Manual local reusable-workflow calls using `secrets: inherit` require the same
 main-ref condition and protected environment as direct long-lived secret use.
 Workflow action-pin validation must traverse every reachable repository-local
@@ -158,9 +160,10 @@ containers may remain active; transient Docker unavailability and reconciliation
 failures must retry under the supervised startup lifecycle until shutdown is
 confirmed. When the database proves there are no legacy unauthenticated rows,
 Docker may remain unavailable without blocking web readiness and ordinary
-maintenance must retry in a supervised background loop. A legacy row without a persisted container ID must discover every
-container bearing its `codecommit.sandbox.id` label and block readiness until
-all discovered containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
+maintenance must retry in a supervised background loop. Query terminal as well
+as active legacy rows; every legacy row must discover every container bearing
+its `codecommit.sandbox.id` label and block readiness until all discovered and
+persisted containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
 URL only after the authenticated listener layer has built successfully.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
@@ -316,7 +319,10 @@ When writing Effect code:
   origin during development while proxying bootstrap/API requests through the
   exact backend origin; redact
   credentials and workspace paths from list/event projections; and recreate
-  legacy passwordless containers.
+  legacy passwordless containers. Pass container environment, including the
+  generated password, through a protected pipe-backed Docker env file rather
+  than process arguments; environment names must be portable identifiers and
+  values must be single-line so env-file parsing cannot inject variables.
 - Keep CodeCommit merge capability copy synchronized across
   `packages/codecommit/src/tui/ui/**`, `packages/codecommit/README.md`, and
   `packages/codecommit-core/README.md`. The provider request pins the reviewed

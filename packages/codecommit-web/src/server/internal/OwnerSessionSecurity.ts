@@ -154,7 +154,7 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
       return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
     }
     const now = yield* Clock.currentTimeMillis
-    if (now > expiresAt) {
+    if (now >= expiresAt) {
       return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
     }
     const available = yield* Ref.getAndSet(secrets.bootstrapAvailable, false)

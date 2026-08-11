@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Redacted, Ref, Result } from "effect"
+import { Duration, Effect, Redacted, Ref, Result } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
@@ -155,6 +155,29 @@ describe("CodeCommit web security boundary", () => {
       }, expired))
       expect(Result.isFailure(afterLifetime)).toBe(true)
       if (Result.isFailure(afterLifetime)) expect(afterLifetime.failure._tag).toBe("UnauthorizedApiError")
+    }))
+
+  it.effect("rejects the bootstrap token at the exact expiry instant", () =>
+    Effect.gen(function*() {
+      const justBeforeExpiry = yield* makeSecrets(false)
+      yield* activateOwnerSessionBootstrap(justBeforeExpiry)
+      yield* TestClock.adjust(Duration.millis(59_999))
+      yield* authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, justBeforeExpiry)
+
+      const atExpiry = yield* makeSecrets(false)
+      yield* activateOwnerSessionBootstrap(atExpiry)
+      yield* TestClock.adjust(Duration.seconds(60))
+      const result = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, atExpiry))
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) expect(result.failure._tag).toBe("UnauthorizedApiError")
     }))
 
   it.effect("allows loopback listeners and rejects peer-facing hostnames", () =>
