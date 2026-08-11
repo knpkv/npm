@@ -251,7 +251,9 @@ describe("sandbox security boundary", () => {
           path.join(directory, "cache.db")
         ).pipe(Effect.result)
 
-        expect(result._tag).toBe("Failure")
+        expect(result).toMatchObject({
+          failure: { _tag: "CacheError", operation: "ensure-private-database-path" }
+        })
         expect((yield* fileSystem.stat(attackerDirectory)).mode & 0o777).toBe(0o755)
         expect(Array.from(yield* fileSystem.readFile(marker))).toEqual([42])
         expect(yield* fileSystem.exists(path.join(attackerDirectory, "cache.db"))).toBe(false)
@@ -287,7 +289,9 @@ describe("sandbox security boundary", () => {
         }
         const result = yield* makeEnsurePrivateDatabasePath(racedOperations)(directory, database).pipe(Effect.result)
 
-        expect(result._tag).toBe("Failure")
+        expect(result).toMatchObject({
+          failure: { _tag: "CacheError", operation: "ensure-private-database-path" }
+        })
         expect((yield* fileSystem.stat(attackerDatabase)).mode & 0o777).toBe(0o644)
         expect(Array.from(yield* fileSystem.readFile(attackerDatabase))).toEqual([99])
         expect((yield* fileSystem.stat(displacedDatabase)).mode & 0o777).toBe(0o644)

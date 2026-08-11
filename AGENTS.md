@@ -120,7 +120,8 @@ case-insensitively. In `pull_request_target`, treat every pull-request-derived
 revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 `merge_commit_sha`, plus `head.repo.full_name` checkout repositories, in dot or
 static indexed syntax, as attacker-controlled when the job can access repository
-credentials. Treat effective workflow/job
+credentials. Match the `head.repo` expression prefix so composed owner/name
+repository inputs cannot bypass the guard. Treat effective workflow/job
 `id-token: write` and `write-all` permissions as credential authority too;
 OIDC-bearing jobs must not checkout or build pull-request revisions. After an
 attacker-controlled checkout, conservatively treat every later `run`, local

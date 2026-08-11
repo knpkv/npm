@@ -9,13 +9,13 @@
  */
 import * as Effect from "effect/Effect"
 import { constants } from "node:fs"
-import { lstat, mkdir, open } from "node:fs/promises"
+import { type FileHandle, lstat, mkdir, open } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { CacheError } from "../CacheError.js"
 
 interface PrivatePathInfo {
-  readonly dev: number | bigint
-  readonly ino: number | bigint
+  readonly dev: bigint
+  readonly ino: bigint
   readonly isDirectory: () => boolean
   readonly isFile: () => boolean
   readonly isSymbolicLink: () => boolean
@@ -35,12 +35,19 @@ export interface PrivateDatabasePathOperations {
 }
 
 const descriptorFlags = constants.O_NOFOLLOW
+const privatePathHandle = (handle: FileHandle): PrivatePathHandle => ({
+  stat: () => handle.stat({ bigint: true }),
+  chmod: (mode) => handle.chmod(mode),
+  close: () => handle.close()
+})
 
 export const nodePrivateDatabasePathOperations: PrivateDatabasePathOperations = {
   makeDirectory: (path) => mkdir(path, { mode: 0o700, recursive: true }).then(() => undefined),
-  openDirectory: (path) => open(path, constants.O_RDONLY | constants.O_DIRECTORY | descriptorFlags),
-  openDatabase: (path) => open(path, constants.O_RDWR | constants.O_CREAT | descriptorFlags, 0o600),
-  pathInfo: (path) => lstat(path)
+  openDirectory: (path) =>
+    open(path, constants.O_RDONLY | constants.O_DIRECTORY | descriptorFlags).then(privatePathHandle),
+  openDatabase: (path) =>
+    open(path, constants.O_RDWR | constants.O_CREAT | descriptorFlags, 0o600).then(privatePathHandle),
+  pathInfo: (path) => lstat(path, { bigint: true })
 }
 
 const sameIdentity = (left: PrivatePathInfo, right: PrivatePathInfo): boolean =>

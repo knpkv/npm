@@ -54,7 +54,7 @@ const usesAction = (value, action) =>
 const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (!usesAction(step?.uses, "actions/checkout")) return false
   const repository = step.with?.repository
-  if (referencesExpression(repository, "github.event.pull_request.head.repo.full_name")) {
+  if (referencesExpression(repository, "github.event.pull_request.head.repo")) {
     return true
   }
   const ref = step.with?.ref
@@ -217,6 +217,19 @@ jobs:
         with:
           repository: \${{ github['event']['pull_request']['head']['repo']['full_name'] }}
       - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidComposedPullRequestTargetHeadRepository = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          repository: \${{ format('{0}/{1}', github['event'].pull_request.head.repo.owner.login, github.event.pull_request.head.repo.name) }}
+      - uses: example/build-workspace@${"b".repeat(40)}
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
@@ -536,6 +549,13 @@ jobs:
     validateWorkflowSecretBoundaries(
       invalidIndexedPullRequestTargetHeadRepository,
       "indexed PR target head repository fixture"
+    ).length,
+    1
+  )
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidComposedPullRequestTargetHeadRepository,
+      "composed PR target head repository fixture"
     ).length,
     1
   )

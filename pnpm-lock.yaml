@@ -372,6 +372,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1(supports-color@7.2.0))
+      '@types/node':
+        specifier: 26.1.2
+        version: 26.1.2
 
   packages/codecommit-web:
     dependencies:
