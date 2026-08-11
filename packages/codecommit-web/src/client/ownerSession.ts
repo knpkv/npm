@@ -2,6 +2,7 @@ import { Predicate, Schema } from "effect"
 
 const csrfStorageKey = "codecommit_web_csrf"
 const BootstrapResponse = Schema.Struct({ csrfToken: Schema.String })
+let inMemoryCsrfToken: string | null = null
 
 export type OwnerSessionBootstrapStatus =
   | { readonly _tag: "Ready" }
@@ -14,6 +15,7 @@ const browserAvailable = (): boolean => typeof window !== "undefined"
 
 export const readOwnerCsrfToken = (): string | null => {
   if (!browserAvailable()) return null
+  if (inMemoryCsrfToken !== null) return inMemoryCsrfToken
   try {
     return window.localStorage.getItem(csrfStorageKey)
   } catch {
@@ -36,7 +38,12 @@ const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => 
     })
     if (!response.ok) return failed(`Owner session bootstrap failed with status ${response.status}`)
     const payload = await Schema.decodeUnknownPromise(BootstrapResponse)(await response.json())
-    window.localStorage.setItem(csrfStorageKey, payload.csrfToken)
+    inMemoryCsrfToken = payload.csrfToken
+    try {
+      window.localStorage.setItem(csrfStorageKey, payload.csrfToken)
+    } catch {
+      // The current tab can continue with the in-memory proof when storage is blocked.
+    }
     return ready
   } catch (cause) {
     return failed(Predicate.isError(cause) ? cause.message : "Owner session bootstrap failed")

@@ -72,6 +72,8 @@ const executesPullRequestRevision = (job, trigger) => {
   const checksOutEventRevision = steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
   return checksOutEventRevision && steps.some((step) => typeof step?.run === "string" || step?.uses?.startsWith("./"))
 }
+const checksOutPullRequestRevision = (job, trigger) =>
+  Array.isArray(job?.steps) && job.steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
 const workflowTriggers = (document) => document?.on ?? document?.true ?? {}
 const hasTrigger = (triggers, name) =>
   typeof triggers === "string"
@@ -100,9 +102,11 @@ export const validateWorkflowSecretBoundaries = (document, location) => {
     const jobLocation = `${location}: job ${jobName}`
     const inheritedSecretContext = { workflowEnv: document?.env, job }
     const effectivePermissions = job.permissions === undefined ? document?.permissions : job.permissions
+    const executesPullRequestCode = pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger))
+    const checksOutPullRequestCode = pullRequestTriggers.some((trigger) => checksOutPullRequestRevision(job, trigger))
     if (
-      pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger)) &&
-      (referencesPullRequestCredentials(inheritedSecretContext) || grantsOidcAuthority(effectivePermissions))
+      (executesPullRequestCode && referencesPullRequestCredentials(inheritedSecretContext)) ||
+      (checksOutPullRequestCode && grantsOidcAuthority(effectivePermissions))
     ) {
       diagnostics.push(`${jobLocation} executes pull-request code with repository credential or OIDC authority`)
     }
@@ -161,6 +165,18 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
       - run: pnpm build
+`)
+  const invalidExternalActionOidcAuthority = parse(`
+on:
+  pull_request:
+jobs:
+  snapshot:
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+      - uses: example/build-workspace@${"b".repeat(40)}
 `)
   const safeCredentialOnlyOidcJob = parse(`
 on:
@@ -431,6 +447,10 @@ jobs:
   assert.equal(validateWorkflowSecretBoundaries(invalid, "invalid fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidJobOidcAuthority, "job OIDC fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidInheritedOidcAuthority, "inherited OIDC fixture").length, 1)
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidExternalActionOidcAuthority, "external action OIDC fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidSingleQuotedBracket, "single-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidDoubleQuotedBracket, "double-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidWorkflowEnvironment, "workflow environment fixture").length, 1)
@@ -486,7 +506,9 @@ const program = Effect.gen(function* () {
       try: () => parse(content),
       catch: (cause) => new Error(`${file}: invalid YAML`, { cause })
     })
-    diagnostics.push(...validateWorkflowSecretBoundaries(document, file))
+    for (const diagnostic of validateWorkflowSecretBoundaries(document, file)) {
+      diagnostics.push(diagnostic)
+    }
   }
   if (diagnostics.length > 0) {
     return yield* Effect.fail(new Error(`Unsafe workflow secret boundaries:\n${diagnostics.join("\n")}`))

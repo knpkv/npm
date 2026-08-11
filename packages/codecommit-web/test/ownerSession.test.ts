@@ -60,7 +60,7 @@ describe("owner session bootstrap", () => {
     })
   })
 
-  it("removes a consumed bootstrap token before a storage failure", async () => {
+  it("retains the CSRF proof in memory when local storage is unavailable", async () => {
     const replaceState = vi.fn()
     vi.stubGlobal("window", {
       fetch: vi.fn(async () =>
@@ -84,10 +84,8 @@ describe("owner session bootstrap", () => {
     })
 
     const ownerSession = await import("../src/client/ownerSession.js")
-    await expect(ownerSession.ownerSessionReady).resolves.toEqual({
-      _tag: "Failed",
-      message: "storage unavailable"
-    })
+    await expect(ownerSession.ownerSessionReady).resolves.toEqual({ _tag: "Ready" })
+    expect(ownerSession.readOwnerCsrfToken()).toBe("csrf-proof")
     expect(replaceState).toHaveBeenCalledWith(null, "", "/sandboxes/sbx-1?view=editor")
   })
 })
