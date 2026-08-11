@@ -15,7 +15,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Effect, Layer, Predicate, Ref, Stream } from "effect"
+import { Config, Effect, Layer, Option, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
@@ -50,8 +50,9 @@ import {
   ownerSessionOrigin,
   OwnerSessionSecrets,
   type OwnerSessionSecretsShape,
-  ownerSessionUrl,
-  requireLoopbackHostname
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
 } from "./internal/OwnerSessionSecurity.js"
 
 export {
@@ -60,7 +61,9 @@ export {
   OwnerSessionSecrets,
   type OwnerSessionSecretsShape,
   ownerSessionUrl,
-  requireLoopbackHostname
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
 } from "./internal/OwnerSessionSecurity.js"
 
 // MIME types for common files
@@ -322,6 +325,7 @@ export const makeServer = (options: CodeCommitServerOptions) => {
 export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsShape) => makeServer({ port, security })
 
 export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
+const PublicOrigin = Config.option(Config.string("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
 const updatePortOnConflict = (
   portRef: Ref.Ref<number>,
@@ -345,6 +349,7 @@ export const CodeCommitServerLive = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
   const retriesRef = yield* Ref.make(10)
+  const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
@@ -352,8 +357,12 @@ export const CodeCommitServerLive = Effect.gen(function*() {
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSessionSecrets()
+      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
+      const publicOrigin = yield* requireLoopbackOrigin(
+        Option.getOrElse(publicOriginOverride, () => directOrigin)
+      )
       yield* Effect.logInfo(`Starting authenticated server at ${ownerSessionOrigin("127.0.0.1", p)}`)
-      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrl("127.0.0.1", p, security)}\n`).pipe(
+      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
         Stream.run(stdio.stdout())
       )
       return yield* Layer.launch(makeCodeCommitServer(p, security))

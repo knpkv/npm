@@ -14,13 +14,27 @@ const referencedSecretNames = (value) =>
   Array.from(serialized(value).matchAll(secretReference), (match) => (match[1] ?? match[2] ?? match[3]).toUpperCase())
 const referencesSecrets = (value) => referencedSecretNames(value).length > 0
 const referencesLongLivedSecrets = (value) => referencedSecretNames(value).some((name) => name !== "GITHUB_TOKEN")
-const checkoutUsesEventRevision = (step) =>
-  typeof step?.uses === "string" &&
-  step.uses.startsWith("actions/checkout@") &&
-  (step.with?.ref === undefined || serialized(step.with.ref).includes("github.event.pull_request"))
-const executesEventRevision = (job) => {
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+const referencesExpression = (value, expression) =>
+  typeof value === "string" && new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(value)
+const checkoutUsesPullRequestRevision = (step, trigger) => {
+  if (typeof step?.uses !== "string" || !step.uses.startsWith("actions/checkout@")) return false
+  const ref = step.with?.ref
+  if (ref === undefined) return trigger === "pull_request"
+  if (
+    referencesExpression(ref, "github.event.pull_request.head.sha") ||
+    referencesExpression(ref, "github.event.pull_request.head.ref") ||
+    referencesExpression(ref, "github.head_ref")
+  ) {
+    return true
+  }
+  return (
+    trigger === "pull_request" && (referencesExpression(ref, "github.sha") || referencesExpression(ref, "github.ref"))
+  )
+}
+const executesPullRequestRevision = (job, trigger) => {
   const steps = Array.isArray(job?.steps) ? job.steps : []
-  const checksOutEventRevision = steps.some(checkoutUsesEventRevision)
+  const checksOutEventRevision = steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
   return checksOutEventRevision && steps.some((step) => typeof step?.run === "string" || step?.uses?.startsWith("./"))
 }
 const workflowTriggers = (document) => document?.on ?? document?.true ?? {}
@@ -36,12 +50,15 @@ const pinsMain = (condition) =>
 export const validateWorkflowSecretBoundaries = (document, location) => {
   const diagnostics = []
   const triggers = workflowTriggers(document)
-  const pullRequestTriggered = hasTrigger(triggers, "pull_request") || hasTrigger(triggers, "pull_request_target")
+  const pullRequestTriggers = ["pull_request", "pull_request_target"].filter((trigger) => hasTrigger(triggers, trigger))
   const manuallyTriggered = hasTrigger(triggers, "workflow_dispatch")
   for (const [jobName, job] of Object.entries(document?.jobs ?? {})) {
     const jobLocation = `${location}: job ${jobName}`
     const inheritedSecretContext = { workflowEnv: document?.env, job }
-    if (pullRequestTriggered && executesEventRevision(job) && referencesSecrets(inheritedSecretContext)) {
+    if (
+      pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger)) &&
+      referencesSecrets(inheritedSecretContext)
+    ) {
       diagnostics.push(`${jobLocation} executes pull-request code while referencing repository secrets`)
     }
     if (manuallyTriggered && referencesLongLivedSecrets(inheritedSecretContext)) {
@@ -110,6 +127,71 @@ jobs:
       - uses: actions/checkout@${"a".repeat(40)}
       - run: pnpm test:integration
 `)
+  const invalidExplicitEventSha = parse(`
+on:
+  pull_request:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.sha }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidExplicitEventRef = parse(`
+on:
+  pull_request:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.ref }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidHeadRef = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.head_ref }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const safeTrustedRef = parse(`
+on:
+  pull_request:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: refs/heads/main
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const safePullRequestTargetSha = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.sha }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
   const safeWorkflowEnvironment = parse(`
 on:
   pull_request:
@@ -147,12 +229,17 @@ jobs:
   assert.equal(validateWorkflowSecretBoundaries(invalidSingleQuotedBracket, "single-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidDoubleQuotedBracket, "double-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidWorkflowEnvironment, "workflow environment fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventSha, "explicit event SHA fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventRef, "explicit event ref fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidHeadRef, "head ref fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 

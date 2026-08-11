@@ -219,8 +219,14 @@ Every `/api/**` route requires the cookie, and mutations additionally require
 the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.
 
+The development launcher advertises the Vite origin while proxying bootstrap
+and API traffic to the backend with its exact loopback origin. Sandbox iframes
+use the alternate loopback hostname (`localhost` versus `127.0.0.1`) because
+cookies are host-scoped but not port-scoped; this prevents the owner cookie from
+being sent to a sandbox port.
+
 Review sandboxes use a digest-pinned code-server image, a random password, a
-non-root user, dropped Linux capabilities, and a Docker port explicitly bound
+non-root user mapped to the workspace owner, dropped Linux capabilities, and a Docker port explicitly bound
 to `127.0.0.1`. User-configured host mounts must exist and canonically resolve to children of
 `~/.codecommit/sandbox-volumes`, and container targets must be children of
 `/home/coder`; AWS credentials, SSH keys, the Docker socket, and broad home or

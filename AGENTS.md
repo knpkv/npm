@@ -254,8 +254,13 @@ When writing Effect code:
   digests; reserve code-server credential variables; accept only existing
   canonical children of the physical `~/.codecommit/sandbox-volumes` directory
   mounted below `/home/coder`; persist the generated access password but expose
-  it only through the authenticated, non-cacheable single-sandbox route; run as
-  non-root with all capabilities dropped and loopback-only publishing; redact
+  it only through the authenticated, non-cacheable single-sandbox route; map the
+  non-root container identity to the workspace owner (repair root-owned clones
+  to a fixed non-root identity); drop all capabilities and publish only on
+  loopback; keep sandbox browser origins on the alternate loopback hostname so
+  the host-only owner cookie cannot reach sandbox ports; advertise the Vite
+  origin during development while proxying bootstrap/API requests through the
+  exact backend origin; redact
   credentials and workspace paths from list/event projections; and recreate
   legacy passwordless containers.
 - Keep CodeCommit review-publication terminology synchronized across

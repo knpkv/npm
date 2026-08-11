@@ -5,9 +5,12 @@ import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
   authorizeBootstrapRequest,
   authorizeOwnerRequest,
+  ownerSessionCookie,
   type OwnerSessionSecretsShape,
   ownerSessionUrl,
-  requireLoopbackHostname
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
@@ -113,11 +116,19 @@ describe("CodeCommit web security boundary", () => {
       expect(url).toContain("#bootstrap_token=bootstrap-secret")
       expect(url).not.toContain("owner-secret")
       expect(url).not.toContain("csrf-secret")
+      expect(ownerSessionUrlForOrigin("http://localhost:5173", secrets)).toBe(
+        "http://localhost:5173/#bootstrap_token=bootstrap-secret"
+      )
+      const cookie = ownerSessionCookie(secrets)
+      expect(cookie).toContain("HttpOnly")
+      expect(cookie).toContain("Path=/api")
+      expect(cookie).not.toContain("Domain=")
     }))
 
   it.effect("allows loopback listeners and rejects peer-facing hostnames", () =>
     Effect.gen(function*() {
       expect(yield* requireLoopbackHostname("127.0.0.1")).toBe("127.0.0.1")
+      expect(yield* requireLoopbackOrigin("http://localhost:5173")).toBe("http://localhost:5173")
       const result = yield* Effect.result(requireLoopbackHostname("0.0.0.0"))
       expect(Result.isFailure(result)).toBe(true)
     }))

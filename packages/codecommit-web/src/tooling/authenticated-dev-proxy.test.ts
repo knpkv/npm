@@ -1,7 +1,12 @@
+import { Redacted } from "effect"
 import { describe, expect, it, vi } from "vitest"
+import packageJson from "../../package.json" with { type: "json" }
+import { ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevProxyConfig,
+  authenticatedDevPublicOrigin,
+  authenticatedDevPublicOriginEnvironment,
   setAuthenticatedDevProxyOrigin
 } from "./authenticated-dev-proxy.js"
 
@@ -16,5 +21,14 @@ describe("authenticated development proxy", () => {
     const setHeader = vi.fn()
     setAuthenticatedDevProxyOrigin({ setHeader })
     expect(setHeader).toHaveBeenCalledWith("origin", authenticatedDevBackendOrigin)
+  })
+
+  it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
+    expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
+    const url = ownerSessionUrlForOrigin(authenticatedDevPublicOrigin, {
+      bootstrapToken: Redacted.make("bootstrap-secret")
+    })
+    expect(url).toBe("http://localhost:5173/#bootstrap_token=bootstrap-secret")
+    expect(url).not.toContain(authenticatedDevBackendOrigin)
   })
 })

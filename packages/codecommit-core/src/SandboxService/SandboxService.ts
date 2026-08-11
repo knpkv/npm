@@ -47,6 +47,22 @@ export interface CreateSandboxParams {
   readonly region: string
 }
 
+export interface SandboxContainerIdentity {
+  readonly repairRootOwnedWorkspace: boolean
+  readonly user: string
+}
+
+/** Keep the container non-root while matching the bind-mounted workspace owner when available. */
+export const sandboxContainerIdentityForWorkspaceOwner = (
+  uid: number | undefined,
+  gid: number | undefined
+): SandboxContainerIdentity =>
+  uid === 0
+    ? { user: "1000:1000", repairRootOwnedWorkspace: true }
+    : uid !== undefined
+    ? { user: `${uid}:${gid ?? uid}`, repairRootOwnedWorkspace: false }
+    : { user: "1000:1000", repairRootOwnedWorkspace: false }
+
 const SANDBOX_BASE_PORT = 18080
 
 const homeDir = Config.string("HOME").pipe(
@@ -66,10 +82,11 @@ export const makeContainerConfig = (
   pullRequestId: string,
   sandboxConfig: SandboxConfig,
   homePath: string,
+  containerUser: string,
   accessPassword: string
 ): ContainerConfig => ({
   Image: sandboxConfig.image,
-  User: "1000:1000",
+  User: containerUser,
   Cmd: ["--bind-addr", "0.0.0.0:8080", "--auth", "password", "/workspace"],
   ExposedPorts: { "8080/tcp": {} },
   HostConfig: {
@@ -84,6 +101,10 @@ export const makeContainerConfig = (
   },
   Env: [
     ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`),
+    "HOME=/tmp",
+    "XDG_CACHE_HOME=/tmp/.cache",
+    "XDG_CONFIG_HOME=/tmp/.config",
+    "XDG_DATA_HOME=/tmp/.local/share",
     `PASSWORD=${accessPassword}`
   ],
   Labels: {
@@ -246,6 +267,26 @@ const makeSandboxService = Effect.gen(function*() {
             }
             yield* log("Clone complete")
 
+            const workspaceInfo = yield* fs.stat(workspacePath)
+            const containerIdentity = sandboxContainerIdentityForWorkspaceOwner(
+              Option.getOrUndefined(workspaceInfo.uid),
+              Option.getOrUndefined(workspaceInfo.gid)
+            )
+            if (containerIdentity.repairRootOwnedWorkspace) {
+              yield* log("Preparing root-owned workspace for the non-root sandbox user")
+              const chownExitCode = yield* Effect.scoped(
+                ChildProcess.make("chown", ["-R", "1000:1000", "--", workspacePath]).pipe(
+                  Effect.flatMap((handle) => handle.exitCode)
+                )
+              )
+              if (chownExitCode !== 0) {
+                return yield* new SandboxError({
+                  sandboxId: id,
+                  message: "Failed to prepare root-owned workspace for the non-root sandbox user"
+                })
+              }
+            }
+
             // Pull image
             yield* updateStatus(id, "starting")
             yield* log(`Pulling image ${sandboxCfg.image}`)
@@ -264,6 +305,7 @@ const makeSandboxService = Effect.gen(function*() {
               params.pullRequestId,
               sandboxCfg,
               homePath,
+              containerIdentity.user,
               accessPassword
             )
             const containerId = yield* docker.createContainer(containerConfig)
@@ -272,15 +314,6 @@ const makeSandboxService = Effect.gen(function*() {
             yield* docker.startContainer(cid)
             yield* updateStatus(id, "starting", { containerId: cid, port })
             yield* log(`Container started on port ${port}`)
-
-            // Fix ownership of dirs that Docker may have created as root (from volume mounts)
-            yield* docker.exec(cid, [
-              "sudo",
-              "chown",
-              "-R",
-              "coder:coder",
-              "/home/coder/.local"
-            ]).pipe(Effect.catchIf(() => true, () => Effect.void))
 
             // Wait for code-server to be ready (poll health)
             yield* log("Waiting for code-server health check")

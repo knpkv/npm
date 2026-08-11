@@ -115,7 +115,8 @@ and existing host mounts must canonically resolve to children of
 
 Sandbox creation revalidates the persisted policy immediately before Docker
 execution. Each sandbox receives a cryptographically random persisted access
-password, runs code-server as UID/GID `1000:1000` with all Linux capabilities
+password, runs code-server as the non-root owner of its bind-mounted workspace
+(repairing root-owned clones to `1000:1000`) with all Linux capabilities
 dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
 exclude both the access password and workspace path; the authenticated web
 owner retrieves the password through the single-sandbox credential route.

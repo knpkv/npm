@@ -6,7 +6,7 @@ import * as Path from "effect/Path"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
 import { renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
-import { makeContainerConfig } from "../src/SandboxService/SandboxService.js"
+import { makeContainerConfig, sandboxContainerIdentityForWorkspaceOwner } from "../src/SandboxService/SandboxService.js"
 
 const homePath = "/Users/security-test"
 const validConfig: SandboxConfig = {
@@ -130,13 +130,15 @@ describe("sandbox security boundary", () => {
       "42",
       validConfig,
       homePath,
+      "1001:1001",
       "high-entropy-password"
     )
 
     expect(config.Cmd).toContain("password")
     expect(config.Cmd).not.toContain("none")
     expect(config.Env).toContain("PASSWORD=high-entropy-password")
-    expect(config.User).toBe("1000:1000")
+    expect(config.User).toBe("1001:1001")
+    expect(config.Env).toContain("HOME=/tmp")
     expect(config.HostConfig.CapDrop).toEqual(["ALL"])
     expect(config.HostConfig.PortBindings["8080/tcp"]).toEqual([
       { HostIp: "127.0.0.1", HostPort: "18080" }
@@ -144,5 +146,20 @@ describe("sandbox security boundary", () => {
     expect(
       renderDockerPortBinding("8080/tcp", { HostIp: "127.0.0.1", HostPort: "18080" })
     ).toBe("127.0.0.1:18080:8080")
+  })
+
+  it("matches a non-root workspace owner and repairs root-owned workspaces without running as root", () => {
+    expect(sandboxContainerIdentityForWorkspaceOwner(1001, 1002)).toEqual({
+      user: "1001:1002",
+      repairRootOwnedWorkspace: false
+    })
+    expect(sandboxContainerIdentityForWorkspaceOwner(0, 0)).toEqual({
+      user: "1000:1000",
+      repairRootOwnedWorkspace: true
+    })
+    expect(sandboxContainerIdentityForWorkspaceOwner(undefined, undefined)).toEqual({
+      user: "1000:1000",
+      repairRootOwnedWorkspace: false
+    })
   })
 })

@@ -22,6 +22,7 @@ import {
   sandboxCredentialsAtom,
   stopSandboxAtom
 } from "../atoms/app.js"
+import { sandboxBrowserUrl } from "../sandbox-origin.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 
@@ -252,7 +253,11 @@ export function SandboxView() {
           )}
         </div>
       ) : (
-        <iframe src={`http://127.0.0.1:${sandbox.port}/`} className="flex-1 w-full border-0" title="Code Sandbox" />
+        <iframe
+          src={sandbox.port === null ? undefined : sandboxBrowserUrl(window.location.hostname, sandbox.port)}
+          className="flex-1 w-full border-0"
+          title="Code Sandbox"
+        />
       )}
     </div>
   )

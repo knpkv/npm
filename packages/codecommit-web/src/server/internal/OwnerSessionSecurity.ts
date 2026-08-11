@@ -64,10 +64,41 @@ export const ownerSessionUrl = (
   hostname: string,
   port: number,
   secrets: OwnerSessionSecretsShape
+): string => ownerSessionUrlForOrigin(ownerSessionOrigin(hostname, port), secrets)
+
+export const ownerSessionUrlForOrigin = (
+  origin: string,
+  secrets: Pick<OwnerSessionSecretsShape, "bootstrapToken">
 ): string => {
   const bootstrapToken = encodeURIComponent(Redacted.value(secrets.bootstrapToken))
-  return `${ownerSessionOrigin(hostname, port)}#bootstrap_token=${bootstrapToken}`
+  return `${origin.replace(/\/+$/u, "")}/#bootstrap_token=${bootstrapToken}`
 }
+
+export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoopbackOrigin")(
+  function*(origin: string) {
+    const url = yield* Effect.try({
+      try: () => new URL(origin),
+      catch: () =>
+        new UnsafeServerHostnameError({
+          hostname: origin,
+          message: "CodeCommit public origin must be a valid loopback HTTP origin"
+        })
+    })
+    if (
+      url.protocol !== "http:" || !isLoopbackHostname(url.hostname) || url.pathname !== "/" || url.search || url.hash
+    ) {
+      return yield* new UnsafeServerHostnameError({
+        hostname: origin,
+        message: "CodeCommit public origin must be an HTTP loopback origin without a path, query, or fragment"
+      })
+    }
+    return url.origin
+  }
+)
+
+export const ownerSessionCookie = (
+  secrets: Pick<OwnerSessionSecretsShape, "ownerToken">
+): string => `cc_owner=${Redacted.value(secrets.ownerToken)}; HttpOnly; Path=/api; SameSite=Strict`
 
 interface OwnerRequestAuthorization {
   readonly credential: string
@@ -174,7 +205,7 @@ export const OwnerSessionBootstrapRouter = HttpRouter.use((router) =>
         status: 200,
         headers: {
           "cache-control": "no-store",
-          "set-cookie": `cc_owner=${Redacted.value(secrets.ownerToken)}; HttpOnly; Path=/api; SameSite=Strict`
+          "set-cookie": ownerSessionCookie(secrets)
         }
       })
     })
