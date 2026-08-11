@@ -7,7 +7,14 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/unstable/http"
 import { createServer } from "node:http"
-import { callbackServerListenOptions, makeHttpServerFactory, startCallbackServer } from "../src/internal/oauthServer.js"
+import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
+import {
+  callbackServerListenOptions,
+  callbackUrl,
+  HttpServerFactoryTag,
+  makeHttpServerFactory,
+  startCallbackServer
+} from "../src/internal/oauthServer.js"
 
 const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
   () => NodeHttpServer.layerServer(createServer, { port: 0 })
@@ -20,9 +27,17 @@ const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
   })
 
 describe("oauth callback server lifecycle", () => {
-  it("binds the production callback listener to IPv4 loopback", () => {
-    expect(callbackServerListenOptions(8585)).toEqual({ hostname: "127.0.0.1", port: 8585 })
-  })
+  it.effect("binds the production callback listener to IPv4 loopback", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const factory = yield* HttpServerFactoryTag
+        const server = yield* HttpServer.HttpServer.pipe(
+          Effect.provide(factory.createServerLayer(callbackServerListenOptions(0)))
+        )
+        expect(server.address).toMatchObject({ _tag: "TcpAddress", hostname: "127.0.0.1" })
+        expect(callbackUrl(8585)).toBe("http://127.0.0.1:8585/callback")
+      }).pipe(Effect.provide(HttpServerFactoryLive))
+    ))
 
   it.effect("releases the port when authorization exits before receiving a code", () =>
     Effect.gen(function*() {
@@ -112,11 +127,12 @@ describe("oauth callback server lifecycle", () => {
         const codeReceiver = yield* Effect.forkChild(codePromise)
         const client = yield* HttpClient.HttpClient
 
-        yield* client.execute(
+        const forgedResponse = yield* client.execute(
           HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
             HttpClientRequest.setUrlParam("error", "access_denied")
           )
         )
+        expect(forgedResponse.status).toBe(403)
         yield* client.execute(
           HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
             HttpClientRequest.setUrlParam("code", "legitimate-code"),

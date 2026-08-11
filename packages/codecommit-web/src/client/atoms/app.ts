@@ -180,11 +180,13 @@ export const sandboxListAtom = ApiClient.query("sandbox", "list", {
   reactivityKeys: ["sandbox"],
   timeToLive: "5 seconds"
 })
-export const sandboxCredentialsAtom = (sandboxId: Domain.SandboxId) =>
+export const sandboxCredentialsAtom = Atom.family((sandboxId: Domain.SandboxId) =>
   ApiClient.query("sandbox", "credentials", {
     params: { sandboxId },
+    reactivityKeys: ["sandbox"],
     timeToLive: "30 seconds"
   })
+)
 export const createSandboxAtom = ApiClient.mutation("sandbox", "create")
 export const stopSandboxAtom = ApiClient.mutation("sandbox", "stop")
 export const restartSandboxAtom = ApiClient.mutation("sandbox", "restart")

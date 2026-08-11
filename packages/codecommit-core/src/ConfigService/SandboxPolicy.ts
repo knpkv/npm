@@ -31,7 +31,8 @@ export const validateSandboxConfig = Effect.fn("SandboxPolicy.validateSandboxCon
       }
     }
 
-    const allowedRoot = path.resolve(sandboxVolumeRoot(homePath))
+    const resolvedHomePath = path.resolve(homePath)
+    const allowedRoot = path.resolve(sandboxVolumeRoot(resolvedHomePath))
     for (const mount of config.volumeMounts) {
       const hostPath = path.resolve(expandHome(mount.hostPath, homePath))
       const relativeHostPath = path.relative(allowedRoot, hostPath)
@@ -49,6 +50,19 @@ export const validateSandboxConfig = Effect.fn("SandboxPolicy.validateSandboxCon
       const canonicalRoot = yield* fileSystem.realPath(allowedRoot).pipe(
         Effect.mapError(() => reject("Sandbox volume root must exist before adding mounts"))
       )
+      const canonicalHomePath = yield* fileSystem.realPath(resolvedHomePath).pipe(
+        Effect.mapError(() => reject("Sandbox home directory must exist before adding mounts"))
+      )
+      const expectedCanonicalRoot = path.resolve(
+        canonicalHomePath,
+        ".codecommit",
+        "sandbox-volumes"
+      )
+      if (canonicalRoot !== expectedCanonicalRoot) {
+        return yield* reject(
+          "Sandbox volume root must not redirect outside ~/.codecommit/sandbox-volumes"
+        )
+      }
       const canonicalHostPath = yield* fileSystem.realPath(hostPath).pipe(
         Effect.mapError(() => reject(`Sandbox mount ${mount.hostPath} must already exist`))
       )

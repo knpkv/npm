@@ -15,9 +15,10 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Effect, Layer, Predicate, Ref } from "effect"
+import { Config, Effect, Layer, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Stdio from "effect/Stdio"
 import {
   Etag,
   FetchHttpClient,
@@ -46,6 +47,7 @@ import {
   makeOwnerSessionSecrets,
   ownerSessionAuthLayer,
   OwnerSessionBootstrapRouter,
+  ownerSessionOrigin,
   OwnerSessionSecrets,
   type OwnerSessionSecretsShape,
   ownerSessionUrl,
@@ -54,6 +56,7 @@ import {
 
 export {
   makeOwnerSessionSecrets,
+  ownerSessionOrigin,
   OwnerSessionSecrets,
   type OwnerSessionSecretsShape,
   ownerSessionUrl,
@@ -339,14 +342,20 @@ const updatePortOnConflict = (
   )
 
 export const CodeCommitServerLive = Effect.gen(function*() {
-  const security = yield* makeOwnerSessionSecrets()
+  const stdio = yield* Stdio.Stdio
   const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
   const retriesRef = yield* Ref.make(10)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      yield* Effect.logInfo(`Starting authenticated server at ${ownerSessionUrl("127.0.0.1", p, security)}`)
+      // Rotate every authority-bearing secret on each bind attempt so a URL
+      // emitted for an occupied port cannot authenticate to a later retry.
+      const security = yield* makeOwnerSessionSecrets()
+      yield* Effect.logInfo(`Starting authenticated server at ${ownerSessionOrigin("127.0.0.1", p)}`)
+      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrl("127.0.0.1", p, security)}\n`).pipe(
+        Stream.run(stdio.stdout())
+      )
       return yield* Layer.launch(makeCodeCommitServer(p, security))
     }).pipe(updatePortOnConflict(portRef, retriesRef))
   )

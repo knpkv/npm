@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react"
 import path from "path"
 import { defineConfig } from "vite"
 import { productionPrototypeBoundary } from "./src/tooling/production-prototype-boundary.js"
+import { authenticatedDevProxyConfig } from "./src/tooling/authenticated-dev-proxy.js"
 
 const clientRoot = path.resolve(__dirname, "src/client")
 
@@ -29,11 +30,6 @@ export default defineConfig({
     }
   },
   server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:3000",
-        changeOrigin: true
-      }
-    }
+    proxy: authenticatedDevProxyConfig
   }
 })

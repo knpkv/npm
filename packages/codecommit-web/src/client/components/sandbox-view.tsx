@@ -1,7 +1,18 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { AsyncResult } from "effect/unstable/reactivity"
-import { ArrowLeftIcon, CodeIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CodeIcon,
+  CopyIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LoaderIcon,
+  PlayIcon,
+  ScrollTextIcon,
+  SquareIcon,
+  Trash2Icon
+} from "lucide-react"
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import {
@@ -69,6 +80,49 @@ function LogPanel({ logs }: { readonly logs: string }) {
   )
 }
 
+function SandboxCredentialsBar({ sandboxId }: { readonly sandboxId: SandboxId }) {
+  const credentials = useAtomValue(sandboxCredentialsAtom(sandboxId))
+  const [revealed, setRevealed] = useState(false)
+
+  if (AsyncResult.isFailure(credentials)) {
+    return (
+      <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs text-destructive">
+        Unable to load the code-server password.
+      </div>
+    )
+  }
+
+  const accessPassword = AsyncResult.isSuccess(credentials) ? credentials.value.password : null
+  return (
+    <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs">
+      <span className="text-muted-foreground">code-server password</span>
+      <code className="rounded bg-background px-2 py-1 font-mono">
+        {accessPassword === null ? "Loading…" : revealed ? accessPassword : "••••••••••••"}
+      </code>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={accessPassword === null}
+        onClick={() => setRevealed((current) => !current)}
+        aria-label={revealed ? "Hide code-server password" : "Reveal code-server password"}
+      >
+        {revealed ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={accessPassword === null}
+        onClick={() => {
+          if (accessPassword !== null) void navigator.clipboard.writeText(accessPassword)
+        }}
+        aria-label="Copy code-server password"
+      >
+        <CopyIcon className="size-3.5" />
+      </Button>
+    </div>
+  )
+}
+
 export function SandboxView() {
   const { sandboxId } = useParams<{ sandboxId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -77,9 +131,6 @@ export function SandboxView() {
   const restartSandbox = useAtomSet(restartSandboxAtom)
   const deleteSandbox = useAtomSet(deleteSandboxAtom)
   const navigate = useNavigate()
-  const credentialsAtom = useMemo(() => sandboxCredentialsAtom(SandboxId.make(sandboxId ?? "missing")), [sandboxId])
-  const credentials = useAtomValue(credentialsAtom)
-
   const viewFromUrl = searchParams.get("view")
   const [showLogs, setShowLogs] = useState(viewFromUrl === "logs")
 
@@ -111,8 +162,6 @@ export function SandboxView() {
 
   const isRunning = sandbox.status === "running"
   const isActive = ["creating", "cloning", "starting"].includes(sandbox.status)
-  const accessPassword = AsyncResult.isSuccess(credentials) ? credentials.value.password : null
-
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Header bar */}
@@ -185,12 +234,7 @@ export function SandboxView() {
       </div>
 
       {/* Content */}
-      {isRunning && !showLogs && (
-        <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs">
-          <span className="text-muted-foreground">code-server password</span>
-          <code className="select-all rounded bg-background px-2 py-1 font-mono">{accessPassword ?? "Loading…"}</code>
-        </div>
-      )}
+      {isRunning && !showLogs && <SandboxCredentialsBar sandboxId={SandboxId.make(sandbox.id)} />}
       {showLogs || !isRunning ? (
         <div className="flex-1 min-h-0 flex flex-col gap-3 p-4">
           {sandbox.statusDetail && <p className="text-sm text-muted-foreground shrink-0">{sandbox.statusDetail}</p>}

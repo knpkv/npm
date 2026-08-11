@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { DockerError } from "../src/Errors.js"
 import { DockerService } from "../src/SandboxService/DockerService.js"
 import { PluginService } from "../src/SandboxService/PluginService.js"
 import { SandboxService } from "../src/SandboxService/SandboxService.js"
@@ -27,15 +28,41 @@ const config = {
   sandbox: defaultSandboxConfig
 }
 
+const legacyRow: SandboxRow = {
+  id: "legacy-sandbox",
+  pullRequestId: "42",
+  awsAccountId: "123456789012",
+  repositoryName: "repository",
+  sourceBranch: "refs/heads/feature",
+  accessPassword: null,
+  workspacePath: "/tmp/codecommit-sandbox-worker-test/legacy-sandbox",
+  containerId: "legacy-container",
+  port: 18080,
+  status: "running",
+  statusDetail: null,
+  logs: null,
+  error: null,
+  createdAt: "2026-08-10T00:00:00.000Z",
+  lastActivityAt: "2026-08-10T00:00:00.000Z"
+}
+
+interface FixtureOptions {
+  readonly initialRow?: SandboxRow
+  readonly stopContainer?: Effect.Effect<void, DockerError>
+}
+
 const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
-  makeDirectory: FileSystem.FileSystem["makeDirectory"]
+  makeDirectory: FileSystem.FileSystem["makeDirectory"],
+  options?: FixtureOptions
 ) {
-  const rowRef = yield* Ref.make<SandboxRow | undefined>(undefined)
+  const rowRef = yield* Ref.make<SandboxRow | undefined>(options?.initialRow)
+  const stopContainerCalls = yield* Ref.make(0)
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
     findByPr: () => Effect.succeed(Option.none<SandboxRow>()),
+    findActive: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
     insert: (input) =>
       Ref.set(rowRef, {
         ...input,
@@ -78,7 +105,12 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   const dependencies = Layer.mergeAll(
     repositoryLayer,
-    Layer.mock(DockerService, {}),
+    Layer.mock(DockerService, {
+      stopContainer: () =>
+        Ref.update(stopContainerCalls, (count) => count + 1).pipe(
+          Effect.andThen(options?.stopContainer ?? Effect.void)
+        )
+    }),
     Layer.mock(PluginService, {}),
     Layer.mock(ConfigService, { load: Effect.succeed(config) }),
     Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of({ makeDirectory })),
@@ -115,6 +147,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     errorTransitioned,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
+    stopContainerCalls,
     workerCause
   }
 })
@@ -219,6 +252,47 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
         status: "cloning",
         error: null
+      })
+    }))
+
+  it.effect("keeps a legacy sandbox retryable until its container shutdown succeeds", () =>
+    Effect.gen(function*() {
+      const stopFailure = new DockerError({ operation: "stopContainer", cause: "daemon unavailable" })
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        { initialRow: legacyRow, stopContainer: Effect.fail(stopFailure) }
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.reconcile()
+          yield* sandboxes.reconcile()
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(2)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running", error: null })
+    }))
+
+  it.effect("marks a legacy sandbox terminal only after confirmed container shutdown", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        { initialRow: legacyRow, stopContainer: Effect.void }
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.reconcile()
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
       })
     }))
 })

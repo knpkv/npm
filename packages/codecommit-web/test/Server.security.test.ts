@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Redacted, Result } from "effect"
+import { Effect, Redacted, Ref, Result } from "effect"
 import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
@@ -10,22 +10,33 @@ import {
   requireLoopbackHostname
 } from "../src/server/internal/OwnerSessionSecurity.js"
 
-const secrets: OwnerSessionSecretsShape = {
-  ownerToken: Redacted.make("owner-secret"),
-  csrfToken: Redacted.make("csrf-secret")
-}
+const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
+  function*(): Effect.fn.Return<OwnerSessionSecretsShape> {
+    return {
+      ownerToken: Redacted.make("owner-secret"),
+      csrfToken: Redacted.make("csrf-secret"),
+      bootstrapToken: Redacted.make("bootstrap-secret"),
+      bootstrapAvailable: yield* Ref.make(true),
+      bootstrapExpiresAtMillis: Number.MAX_SAFE_INTEGER
+    }
+  }
+)
 
 describe("CodeCommit web security boundary", () => {
   it("attaches owner authentication to every API endpoint", () => {
+    let checked = 0
     for (const group of Object.values(CodeCommitApi.groups)) {
       for (const endpoint of Object.values(group.endpoints)) {
         expect(endpoint.middlewares.has(OwnerSessionAuth)).toBe(true)
+        checked++
       }
     }
+    expect(checked).toBeGreaterThan(0)
   })
 
   it.effect("rejects unauthenticated reads before endpoint execution", () =>
     Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
       const result = yield* Effect.result(authorizeOwnerRequest({
         credential: "",
         csrfToken: undefined,
@@ -39,6 +50,7 @@ describe("CodeCommit web security boundary", () => {
 
   it.effect("rejects cross-origin reads while allowing non-browser and same-origin owner reads", () =>
     Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
       const base = {
         credential: "owner-secret",
         csrfToken: undefined,
@@ -55,6 +67,7 @@ describe("CodeCommit web security boundary", () => {
 
   it.effect("rejects cross-site and missing-origin mutations but preserves an owner mutation", () =>
     Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
       const base = {
         credential: "owner-secret",
         csrfToken: "csrf-secret",
@@ -66,11 +79,19 @@ describe("CodeCommit web security boundary", () => {
         expect(Result.isFailure(result)).toBe(true)
         if (Result.isFailure(result)) expect(result.failure._tag).toBe("ForbiddenApiError")
       }
+      const invalidCsrf = yield* Effect.result(authorizeOwnerRequest({
+        ...base,
+        csrfToken: "wrong",
+        origin: "http://127.0.0.1:3000"
+      }, secrets))
+      expect(Result.isFailure(invalidCsrf)).toBe(true)
+      if (Result.isFailure(invalidCsrf)) expect(invalidCsrf.failure._tag).toBe("ForbiddenApiError")
       yield* authorizeOwnerRequest({ ...base, origin: "http://127.0.0.1:3000" }, secrets)
     }))
 
   it.effect("requires the URL-fragment bootstrap secret and exact local origin", () =>
     Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
       const invalid = yield* Effect.result(authorizeBootstrapRequest({
         authorization: "Bearer wrong",
         host: "127.0.0.1:3000",
@@ -78,11 +99,20 @@ describe("CodeCommit web security boundary", () => {
       }, secrets))
       expect(Result.isFailure(invalid)).toBe(true)
       yield* authorizeBootstrapRequest({
-        authorization: "Bearer owner-secret",
+        authorization: "Bearer bootstrap-secret",
         host: "127.0.0.1:3000",
         origin: "http://127.0.0.1:3000"
       }, secrets)
-      expect(ownerSessionUrl("127.0.0.1", 3000, secrets)).toContain("#owner_token=owner-secret&csrf_token=csrf-secret")
+      const reused = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, secrets))
+      expect(Result.isFailure(reused)).toBe(true)
+      const url = ownerSessionUrl("127.0.0.1", 3000, secrets)
+      expect(url).toContain("#bootstrap_token=bootstrap-secret")
+      expect(url).not.toContain("owner-secret")
+      expect(url).not.toContain("csrf-secret")
     }))
 
   it.effect("allows loopback listeners and rejects peer-facing hostnames", () =>

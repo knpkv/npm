@@ -1,8 +1,11 @@
-import { Context, Crypto, Effect, Layer, Redacted, Schema } from "effect"
+import { Clock, Context, Crypto, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
 
 export interface OwnerSessionSecretsShape {
+  readonly bootstrapAvailable: Ref.Ref<boolean>
+  readonly bootstrapExpiresAtMillis: number
+  readonly bootstrapToken: Redacted.Redacted<string>
   readonly csrfToken: Redacted.Redacted<string>
   readonly ownerToken: Redacted.Redacted<string>
 }
@@ -36,25 +39,34 @@ export const requireLoopbackHostname = Effect.fn("OwnerSessionSecurity.requireLo
 
 export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecrets")(function*() {
   const cryptoService = yield* Crypto.Crypto
-  const [ownerToken, csrfToken] = yield* Effect.all([
+  const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
+    cryptoService.randomUUIDv4,
     cryptoService.randomUUIDv4,
     cryptoService.randomUUIDv4
   ])
+  const bootstrapAvailable = yield* Ref.make(true)
+  const now = yield* Clock.currentTimeMillis
   return OwnerSessionSecrets.of({
     ownerToken: Redacted.make(ownerToken),
-    csrfToken: Redacted.make(csrfToken)
+    csrfToken: Redacted.make(csrfToken),
+    bootstrapToken: Redacted.make(bootstrapToken),
+    bootstrapAvailable,
+    bootstrapExpiresAtMillis: now + 60_000
   })
 })
+
+export const ownerSessionOrigin = (hostname: string, port: number): string => {
+  const urlHostname = hostname === "::1" ? "[::1]" : hostname
+  return `http://${urlHostname}:${port}/`
+}
 
 export const ownerSessionUrl = (
   hostname: string,
   port: number,
   secrets: OwnerSessionSecretsShape
 ): string => {
-  const urlHostname = hostname === "::1" ? "[::1]" : hostname
-  const ownerToken = encodeURIComponent(Redacted.value(secrets.ownerToken))
-  const csrfToken = encodeURIComponent(Redacted.value(secrets.csrfToken))
-  return `http://${urlHostname}:${port}/#owner_token=${ownerToken}&csrf_token=${csrfToken}`
+  const bootstrapToken = encodeURIComponent(Redacted.value(secrets.bootstrapToken))
+  return `${ownerSessionOrigin(hostname, port)}#bootstrap_token=${bootstrapToken}`
 }
 
 interface OwnerRequestAuthorization {
@@ -70,11 +82,14 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRe
     if (request.credential !== Redacted.value(secrets.ownerToken)) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
-    if (request.origin !== undefined && (request.host === undefined || request.origin !== `http://${request.host}`)) {
+    const sameOrigin = request.host !== undefined && request.origin === `http://${request.host}`
+    if (request.origin !== undefined && !sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Request origin does not match the CodeCommit server" })
     }
+    // Safe reads intentionally allow non-browser callers without Origin or CSRF
+    // headers; every read still requires the process-scoped owner credential.
     if (safeMethods.has(request.method.toUpperCase())) return
-    if (request.host === undefined || request.origin !== `http://${request.host}`) {
+    if (!sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Mutation origin does not match the CodeCommit server" })
     }
     if (request.csrfToken !== Redacted.value(secrets.csrfToken)) {
@@ -91,11 +106,19 @@ interface BootstrapAuthorization {
 
 export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authorizeBootstrap")(
   function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsShape) {
-    if (request.authorization !== `Bearer ${Redacted.value(secrets.ownerToken)}`) {
+    if (request.authorization !== `Bearer ${Redacted.value(secrets.bootstrapToken)}`) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
     }
     if (request.host === undefined || request.origin !== `http://${request.host}`) {
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
+    }
+    const now = yield* Clock.currentTimeMillis
+    if (now > secrets.bootstrapExpiresAtMillis) {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
+    }
+    const available = yield* Ref.getAndSet(secrets.bootstrapAvailable, false)
+    if (!available) {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
     }
   }
 )
@@ -147,8 +170,8 @@ export const OwnerSessionBootstrapRouter = HttpRouter.use((router) =>
           status: error._tag === "UnauthorizedApiError" ? 401 : 403
         })
       }
-      return HttpServerResponse.empty({
-        status: 204,
+      return yield* HttpServerResponse.json({ csrfToken: Redacted.value(secrets.csrfToken) }, {
+        status: 200,
         headers: {
           "cache-control": "no-store",
           "set-cookie": `cc_owner=${Redacted.value(secrets.ownerToken)}; HttpOnly; Path=/api; SameSite=Strict`

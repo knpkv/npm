@@ -38,14 +38,16 @@ export interface HttpServerFactory {
 }
 
 export interface CallbackServerListenOptions {
-  readonly hostname: "127.0.0.1"
+  readonly host: "127.0.0.1"
   readonly port: number
 }
 
 export const callbackServerListenOptions = (port: number): CallbackServerListenOptions => ({
-  hostname: "127.0.0.1",
+  host: "127.0.0.1",
   port
 })
+
+export const callbackUrl = (port: number): string => `http://127.0.0.1:${port}/callback`
 
 /**
  * Tag for the HttpServerFactory service.
@@ -130,7 +132,7 @@ export const startCallbackServer = (
       "/callback",
       (req) =>
         Effect.gen(function*() {
-          const url = new URL(req.url, `http://localhost:${port}`)
+          const url = new URL(req.url, callbackUrl(port))
           const code = url.searchParams.get("code")
           const state = url.searchParams.get("state")
           const error = url.searchParams.get("error")

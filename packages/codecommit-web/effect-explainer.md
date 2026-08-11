@@ -390,8 +390,10 @@ Every handler maps domain errors to `ApiError` for consistent HTTP error respons
 
 ## Gotchas
 
-1. **Owner session** — Startup creates a one-time bootstrap URL. Every API route requires the resulting
-   `HttpOnly` owner cookie, and mutations additionally require the same-origin CSRF header.
+1. **Owner session** — Startup creates a short-lived, single-use bootstrap URL that contains neither
+   the owner secret nor the CSRF proof. The exchange returns the CSRF proof and installs the `HttpOnly`
+   owner cookie. Every API route requires that cookie, and mutations additionally require the
+   same-origin CSRF header.
 2. **Static files vs API** — Static middleware runs first; API router handles `/api/*`. Order matters.
 3. **Bun vs Node** — Server uses `@effect/platform-bun`. For Node deployment, swap to `@effect/platform-node`.
 4. **SSE cleanup** — When client disconnects, the SubscriptionRef stream is interrupted automatically.

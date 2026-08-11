@@ -429,7 +429,9 @@ const makeSandboxService = Effect.gen(function*() {
           Effect.gen(function*() {
             if (row.accessPassword === null) {
               if (row.containerId) {
-                yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
+                // Keep the row active when shutdown fails so the next reconciliation
+                // retries instead of abandoning a still-published passwordless container.
+                yield* docker.stopContainer(row.containerId)
               }
               yield* updateStatus(SandboxId.make(row.id), "error", {
                 error: "Legacy unauthenticated sandbox stopped; delete and recreate it"

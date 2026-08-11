@@ -212,11 +212,12 @@ codecommit web [--port 3000] [--hostname 127.0.0.1]
 ```
 
 Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
-fragment contains process-scoped bootstrap and CSRF secrets; the bootstrap
-secret is exchanged for an HttpOnly SameSite cookie, removed from the address
-bar, and required by every `/api/**` route. Mutations additionally require the
-independent same-origin CSRF proof. Do not publish or proxy this local HTTP
-listener onto another network.
+fragment contains a short-lived, single-use bootstrap token. The token is
+exchanged for an HttpOnly SameSite cookie and a separate CSRF proof, then removed
+from the address bar; the process-scoped owner secret never enters the URL.
+Every `/api/**` route requires the cookie, and mutations additionally require
+the same-origin CSRF proof shared across tabs for that loopback origin. Do not
+publish or proxy this local HTTP listener onto another network.
 
 Review sandboxes use a digest-pinned code-server image, a random password, a
 non-root user, dropped Linux capabilities, and a Docker port explicitly bound
@@ -225,6 +226,8 @@ to `127.0.0.1`. User-configured host mounts must exist and canonically resolve t
 `/home/coder`; AWS credentials, SSH keys, the Docker socket, and broad home or
 root mounts are rejected before configuration persistence and again before
 Docker execution.
+The authenticated credential response is non-cacheable, and the UI masks the
+password until the owner explicitly reveals or copies it.
 
 ### Pull Request Commands
 

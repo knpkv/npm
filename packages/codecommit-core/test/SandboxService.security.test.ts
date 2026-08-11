@@ -4,16 +4,17 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
+import type { SandboxConfig } from "../src/ConfigService/internal.js"
 import { renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
 import { makeContainerConfig } from "../src/SandboxService/SandboxService.js"
 
 const homePath = "/Users/security-test"
-const validConfig = {
+const validConfig: SandboxConfig = {
   ...defaultSandboxConfig,
   volumeMounts: []
 }
 
-const validate = (config: typeof validConfig) =>
+const validate = (config: SandboxConfig) =>
   validateSandboxConfig(config, homePath).pipe(Effect.provide(NodeServices.layer))
 
 describe("sandbox security boundary", () => {
@@ -38,6 +39,10 @@ describe("sandbox security boundary", () => {
               readonly: false
             }
           ]
+        },
+        {
+          ...validConfig,
+          env: { PASSWORD: "must-not-override-server-credential" }
         }
       ]
 
@@ -84,6 +89,36 @@ describe("sandbox security boundary", () => {
           volumeMounts: [{ ...safeConfig.volumeMounts[0], hostPath: escapedMount }]
         }, scopedHome).pipe(Effect.flip)
         expect(escaped._tag).toBe("SandboxConfigurationError")
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("rejects a sandbox volume root that redirects through a symlink", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-sandbox-root-" })
+        const scopedHome = path.join(root, "home")
+        const codecommitDirectory = path.join(scopedHome, ".codecommit")
+        const redirectedRoot = path.join(root, "redirected")
+        const redirectedMount = path.join(redirectedRoot, "credentials")
+        yield* fileSystem.makeDirectory(codecommitDirectory, { recursive: true })
+        yield* fileSystem.makeDirectory(redirectedMount, { recursive: true })
+        yield* fileSystem.symlink(
+          redirectedRoot,
+          path.join(codecommitDirectory, "sandbox-volumes")
+        )
+
+        const error = yield* validateSandboxConfig({
+          ...validConfig,
+          volumeMounts: [{
+            hostPath: path.join(codecommitDirectory, "sandbox-volumes", "credentials"),
+            containerPath: "/home/coder/credentials",
+            readonly: true
+          }]
+        }, scopedHome).pipe(Effect.flip)
+
+        expect(error._tag).toBe("SandboxConfigurationError")
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 

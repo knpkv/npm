@@ -8,6 +8,8 @@ import { ownerSessionReady, readOwnerCsrfToken } from "../ownerSession.js"
 const AtomHttpApiRuntimeMarker = Context.Service<unknown, unknown>("@knpkv/codecommit-web/AtomHttpApiRuntimeMarker")
 const OwnerSessionClient = HttpApiMiddleware.layerClient(
   OwnerSessionAuth,
+  // The relative base URL uses same-origin fetch, which automatically sends
+  // the HttpOnly cc_owner cookie. Absolute URLs or a custom fetch must preserve that behavior.
   Effect.fn("OwnerSessionClient.cookie")(function*({ next, request }) {
     return yield* next(request)
   })
@@ -22,7 +24,10 @@ const authorizeClient = (client: HttpClient.HttpClient): HttpClient.HttpClient =
   client.pipe(
     HttpClient.mapRequestEffect((request) =>
       Effect.promise(() => ownerSessionReady).pipe(
-        Effect.map(() => {
+        Effect.map((status) => {
+          // A failed bootstrap deliberately proceeds without credentials so the
+          // HttpApi client returns its typed UnauthorizedApiError instead of a defect.
+          if (status._tag === "Failed") return request
           const csrfToken = readOwnerCsrfToken()
           return csrfToken === null
             ? request

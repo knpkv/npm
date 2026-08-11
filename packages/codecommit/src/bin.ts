@@ -4,7 +4,13 @@ import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { makeOwnerSessionSecrets, makeServer, ownerSessionUrl, requireLoopbackHostname } from "@knpkv/codecommit-web"
+import {
+  makeOwnerSessionSecrets,
+  makeServer,
+  ownerSessionOrigin,
+  ownerSessionUrl,
+  requireLoopbackHostname
+} from "@knpkv/codecommit-web"
 import { Console, Effect, Layer, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
@@ -39,7 +45,9 @@ const web = Command.make("web", {
     yield* requireLoopbackHostname(hostname)
     const security = yield* makeOwnerSessionSecrets()
     const url = ownerSessionUrl(hostname, port, security)
-    yield* Effect.logInfo(`Starting authenticated web server at ${url}`)
+    const stdio = yield* Stdio.Stdio
+    yield* Effect.logInfo(`Starting authenticated web server at ${ownerSessionOrigin(hostname, port)}`)
+    yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
 
     // Open browser
     const exitCode = (command: ChildProcess.Command) =>

@@ -40,7 +40,7 @@ Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 **Callback URL:**
 
 ```
-http://localhost:8585/callback
+http://127.0.0.1:8585/callback
 ```
 
 The callback listener binds explicitly to `127.0.0.1`. Requests with a missing

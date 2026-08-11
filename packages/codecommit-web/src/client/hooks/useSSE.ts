@@ -252,9 +252,11 @@ export function useSSE(
       }
     }
 
-    void ownerSessionReady.then(() => {
-      if (!disposed) connect()
-    }).catch(() => setConnectionState("disconnected"))
+    void ownerSessionReady.then((status) => {
+      if (disposed) return
+      if (status._tag === "Ready") connect()
+      else setConnectionState("disconnected")
+    })
     return () => {
       disposed = true
       es?.close()

@@ -247,6 +247,17 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep sandbox capability boundaries synchronized across
+  `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
+  owning policy, service, projection, and security tests. The invariant is:
+  validate before persistence and Docker execution; require immutable image
+  digests; reserve code-server credential variables; accept only existing
+  canonical children of the physical `~/.codecommit/sandbox-volumes` directory
+  mounted below `/home/coder`; persist the generated access password but expose
+  it only through the authenticated, non-cacheable single-sandbox route; run as
+  non-root with all capabilities dropped and loopback-only publishing; redact
+  credentials and workspace paths from list/event projections; and recreate
+  legacy passwordless containers.
 - Keep CodeCommit review-publication terminology synchronized across
   `.changeset/*.md`, `packages/codecommit/README.md`, and the publication schema.
   CodeCommit has no native file-comment target: describe file-scoped findings as
