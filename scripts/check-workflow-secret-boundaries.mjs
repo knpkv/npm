@@ -148,7 +148,8 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
   const pullRequestTriggers = ["pull_request", "pull_request_target"].filter((trigger) => hasTrigger(triggers, trigger))
   const manuallyTriggered = hasTrigger(triggers, "workflow_dispatch")
   const visit = (currentDocument, currentLocation, authority, stack) => {
-    for (const [jobName, job] of Object.entries(currentDocument?.jobs ?? {})) {
+    for (const [jobName, rawJob] of Object.entries(currentDocument?.jobs ?? {})) {
+      const job = rawJob ?? {}
       const jobLocation = `${currentLocation}: job ${jobName}`
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
       const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
@@ -221,6 +222,12 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
       - run: pnpm test
+`)
+  const emptyJob = parse(`
+on:
+  pull_request:
+jobs:
+  mock:
 `)
   const invalidJobOidcAuthority = parse(`
 on:
@@ -841,6 +848,7 @@ jobs:
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidDisjunctiveMain, "disjunctive main fixture").length, 1)
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(emptyJob, "empty job fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeCredentialOnlyOidcJob, "credential-only OIDC fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeJobPermissionOverride, "permission override fixture"), [])
   assert.deepEqual(
