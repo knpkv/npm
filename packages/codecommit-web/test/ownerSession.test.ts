@@ -42,6 +42,8 @@ describe("owner session bootstrap", () => {
       headers: { Authorization: "Bearer single-use-token" }
     })
     expect(ownerSession.readOwnerCsrfToken()).toBe("csrf-proof")
+    localStorage.setItem("codecommit_web_csrf", "rotated-proof")
+    expect(ownerSession.readOwnerCsrfToken()).toBe("rotated-proof")
     expect(replaceState).toHaveBeenCalledWith(null, "", "/sandboxes/sbx-1?view=editor")
   })
 

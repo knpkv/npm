@@ -53,6 +53,10 @@ const usesAction = (value, action) =>
   typeof value === "string" && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
 const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (!usesAction(step?.uses, "actions/checkout")) return false
+  const repository = step.with?.repository
+  if (referencesExpression(repository, "github.event.pull_request.head.repo.full_name")) {
+    return true
+  }
   const ref = step.with?.ref
   if (ref === undefined) return trigger === "pull_request"
   if (
@@ -177,6 +181,45 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
       - uses: example/build-workspace@${"b".repeat(40)}
+`)
+  const invalidPullRequestTargetHeadRepository = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          repository: \${{ github.event.pull_request.head.repo.full_name }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidIndexedPullRequestTargetHeadRepository = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          repository: \${{ github['event']['pull_request']['head']['repo']['full_name'] }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const safePullRequestTargetTrustedRepository = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          repository: knpkv/npm
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
 `)
   const safeCredentialOnlyOidcJob = parse(`
 on:
@@ -451,6 +494,18 @@ jobs:
     validateWorkflowSecretBoundaries(invalidExternalActionOidcAuthority, "external action OIDC fixture").length,
     1
   )
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidPullRequestTargetHeadRepository, "PR target head repository fixture")
+      .length,
+    1
+  )
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidIndexedPullRequestTargetHeadRepository,
+      "indexed PR target head repository fixture"
+    ).length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidSingleQuotedBracket, "single-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidDoubleQuotedBracket, "double-quoted bracket fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidWorkflowEnvironment, "workflow environment fixture").length, 1)
@@ -476,6 +531,10 @@ jobs:
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeCredentialOnlyOidcJob, "credential-only OIDC fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeJobPermissionOverride, "permission override fixture"), [])
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(safePullRequestTargetTrustedRepository, "trusted PR target repository fixture"),
+    []
+  )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeTrustedRef, "trusted ref fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])

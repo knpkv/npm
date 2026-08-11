@@ -3,6 +3,7 @@ import { Predicate, Schema } from "effect"
 const csrfStorageKey = "codecommit_web_csrf"
 const BootstrapResponse = Schema.Struct({ csrfToken: Schema.String })
 let inMemoryCsrfToken: string | null = null
+let storageUnavailable = false
 
 export type OwnerSessionBootstrapStatus =
   | { readonly _tag: "Ready" }
@@ -15,11 +16,12 @@ const browserAvailable = (): boolean => typeof window !== "undefined"
 
 export const readOwnerCsrfToken = (): string | null => {
   if (!browserAvailable()) return null
-  if (inMemoryCsrfToken !== null) return inMemoryCsrfToken
+  if (storageUnavailable) return inMemoryCsrfToken
   try {
     return window.localStorage.getItem(csrfStorageKey)
   } catch {
-    return null
+    storageUnavailable = true
+    return inMemoryCsrfToken
   }
 }
 
@@ -42,6 +44,7 @@ const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => 
     try {
       window.localStorage.setItem(csrfStorageKey, payload.csrfToken)
     } catch {
+      storageUnavailable = true
       // The current tab can continue with the in-memory proof when storage is blocked.
     }
     return ready
