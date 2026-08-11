@@ -89,6 +89,13 @@ const referencesExpression = (value, expression) =>
   new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(normalizeStaticIndexedProperties(value))
 const usesAction = (value, action) =>
   typeof value === "string" && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
+const referencesPullRequestRevision = (value, trigger) =>
+  referencesExpression(value, "github.event.pull_request.head.sha") ||
+  referencesExpression(value, "github.event.pull_request.head.ref") ||
+  referencesExpression(value, "github.event.pull_request.merge_commit_sha") ||
+  referencesExpression(value, "github.head_ref") ||
+  (trigger === "pull_request" &&
+    (referencesExpression(value, "github.sha") || referencesExpression(value, "github.ref")))
 const checkoutUsesPullRequestRevision = (step, trigger) => {
   if (!usesAction(step?.uses, "actions/checkout")) return false
   const repository = step.with?.repository
@@ -97,26 +104,26 @@ const checkoutUsesPullRequestRevision = (step, trigger) => {
   }
   const ref = step.with?.ref
   if (ref === undefined) return trigger === "pull_request"
-  if (
-    referencesExpression(ref, "github.event.pull_request.head.sha") ||
-    referencesExpression(ref, "github.event.pull_request.head.ref") ||
-    referencesExpression(ref, "github.event.pull_request.merge_commit_sha") ||
-    referencesExpression(ref, "github.head_ref")
-  ) {
-    return true
-  }
+  return referencesPullRequestRevision(ref, trigger)
+}
+const shellChecksOutPullRequestRevision = (step, trigger) => {
+  if (typeof step?.run !== "string" || !referencesPullRequestRevision(step.run, trigger)) return false
   return (
-    trigger === "pull_request" && (referencesExpression(ref, "github.sha") || referencesExpression(ref, "github.ref"))
+    /\bgit\s+(?:(?:-[A-Za-z]\S*|--[A-Za-z][A-Za-z-]*(?:=\S+)?)\s+)*(?:checkout|switch)\b/iu.test(step.run) ||
+    /\bgit\s+(?:(?:-[A-Za-z]\S*|--[A-Za-z][A-Za-z-]*(?:=\S+)?)\s+)*reset\s+--hard\b/iu.test(step.run)
   )
 }
+const stepChecksOutPullRequestRevision = (step, trigger) =>
+  checkoutUsesPullRequestRevision(step, trigger) || shellChecksOutPullRequestRevision(step, trigger)
 const executesPullRequestRevision = (job, trigger) => {
   const steps = Array.isArray(job?.steps) ? job.steps : []
-  const checkoutIndex = steps.findIndex((step) => checkoutUsesPullRequestRevision(step, trigger))
+  const checkoutIndex = steps.findIndex((step) => stepChecksOutPullRequestRevision(step, trigger))
   if (checkoutIndex === -1) return false
+  if (shellChecksOutPullRequestRevision(steps[checkoutIndex], trigger)) return true
   return steps.slice(checkoutIndex + 1).some((step) => typeof step?.run === "string" || typeof step?.uses === "string")
 }
 const checksOutPullRequestRevision = (job, trigger) =>
-  Array.isArray(job?.steps) && job.steps.some((step) => checkoutUsesPullRequestRevision(step, trigger))
+  Array.isArray(job?.steps) && job.steps.some((step) => stepChecksOutPullRequestRevision(step, trigger))
 const workflowTriggers = (document) => document?.on ?? document?.true ?? {}
 const hasTrigger = (triggers, name) =>
   typeof triggers === "string"
@@ -182,6 +189,8 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
             )
           }
         }
+      } else if (typeof job.uses === "string" && (credentialAuthority || oidcAuthority)) {
+        diagnostics.push(`${jobLocation} calls an uninspectable reusable workflow with credential or OIDC authority`)
       }
 
       if (
@@ -438,6 +447,21 @@ jobs:
           ref: \${{ github.event.pull_request.head.sha }}
       - run: pnpm test:integration
 `)
+  const invalidRemoteReusableWorkflowCaller = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    uses: example/automation/.github/workflows/review.yml@${"b".repeat(40)}
+    secrets: inherit
+`)
+  const safeRemoteReusableWorkflowCaller = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    uses: example/automation/.github/workflows/metadata.yml@${"b".repeat(40)}
+`)
   const safeReusableWorkflowCaller = parse(`
 on:
   pull_request_target:
@@ -598,6 +622,32 @@ jobs:
       - run: pnpm test:integration
         env:
           JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidShellCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: refs/heads/main
+      - run: |
+          git fetch origin \${{ github.event.pull_request.head.sha }}
+          git checkout --detach \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeLoggedHeadSha = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: echo \${{ github.event.pull_request.head.sha }}
 `)
   const safeTrustedRef = parse(`
 on:
@@ -811,6 +861,10 @@ jobs:
     ).length,
     1
   )
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidRemoteReusableWorkflowCaller, "remote reusable workflow fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventSha, "explicit event SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidExplicitEventRef, "explicit event ref fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidHeadRef, "head ref fixture").length, 1)
@@ -828,6 +882,7 @@ jobs:
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidMergeCommitSha, "merge commit SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidShellCheckout, "shell checkout fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
@@ -864,6 +919,11 @@ jobs:
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeWorkflowEnvironment, "safe workflow environment fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeQuotedBracesExpression, "safe quoted braces fixture"), [])
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(safeRemoteReusableWorkflowCaller, "safe remote reusable workflow fixture"),
+    []
+  )
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeLoggedHeadSha, "logged head SHA fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(
       safeReusableWorkflowCaller,

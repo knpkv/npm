@@ -132,7 +132,9 @@ The local cache directory and database are created or repaired as owner-only
 `0700` and `0600` paths before that password is persisted; symbolic-link paths
 are rejected before either target is mutated.
 Legacy containers without a password are stopped during reconciliation and must
-be recreated. Custom runtime composition must provide Effect `Crypto`, `Path`,
+be recreated. If a crash left no persisted container ID, reconciliation finds
+the container by its `codecommit.sandbox.id` label and remains unready until
+shutdown succeeds. Custom runtime composition must provide Effect `Crypto`, `Path`,
 filesystem, process, and configuration services required by the sandbox layer.
 
 ## Deep Imports

@@ -50,6 +50,12 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly stopContainer?: Effect.Effect<void, DockerError>
+  readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
+  readonly untrackedContainers?: ReadonlyArray<{
+    readonly Id: string
+    readonly State: string
+    readonly Labels: Record<string, string>
+  }>
 }
 
 const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
@@ -58,6 +64,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 ) {
   const rowRef = yield* Ref.make<SandboxRow | undefined>(options?.initialRow)
   const insertCalls = yield* Ref.make(0)
+  const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
@@ -113,8 +120,14 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     repositoryLayer,
     Layer.mock(DockerService, {
       stopContainer: () =>
-        Ref.update(stopContainerCalls, (count) => count + 1).pipe(
-          Effect.andThen(options?.stopContainer ?? Effect.void)
+        Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
+          Effect.flatMap((attempt) =>
+            options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
+          )
+        ),
+      listContainersByLabel: () =>
+        Ref.update(containerDiscoveryCalls, (count) => count + 1).pipe(
+          Effect.as([...(options?.untrackedContainers ?? [])])
         )
     }),
     Layer.mock(PluginService, {}),
@@ -150,6 +163,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   )
 
   return {
+    containerDiscoveryCalls,
     errorTransitioned,
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
@@ -336,6 +350,38 @@ describe("SandboxWorkerScope", () => {
       )
 
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
+    }))
+
+  it.effect("discovers an untracked legacy container and retries until shutdown succeeds", () =>
+    Effect.gen(function*() {
+      const stopFailure = new DockerError({ operation: "stopContainer", cause: "daemon unavailable" })
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        {
+          initialRow: { ...legacyRow, containerId: null, status: "starting" },
+          stopContainerByAttempt: (attempt) => attempt === 0 ? Effect.fail(stopFailure) : Effect.void,
+          untrackedContainers: [{
+            Id: "untracked-legacy-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": legacyRow.id }
+          }]
+        }
+      )
+
+      const outcomes = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          return [yield* sandboxes.reconcile(), yield* sandboxes.reconcile()]
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(outcomes).toEqual([false, true])
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(2)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(2)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
         status: "error",
         error: "Legacy unauthenticated sandbox stopped; delete and recreate it"

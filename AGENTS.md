@@ -131,9 +131,14 @@ metadata-only external action needs explicit human judgment before any narrow
 allowlist exception is added.
 Credential authority must follow static local reusable-workflow calls
 transitively, including `secrets: inherit`; reject cycles and missing local
-callees, while remote or dynamically constructed reusable-workflow references
-still require explicit review. Parse `${{ ... }}` delimiters without treating
+callees. Credential- or OIDC-bearing remote and dynamically constructed
+reusable-workflow references must emit an explicit-review diagnostic unless a
+repository-maintained reviewed allowlist proves them metadata-only. Parse `${{ ... }}` delimiters without treating
 `}}` inside quoted GitHub expression strings as the end of the expression.
+Treat mechanically recognizable `git checkout`, `git switch`, and
+`git reset --hard` commands that reference pull-request head/ref or merge
+expressions as attacker-controlled worktree transitions; metadata-only logging
+of the same expressions must remain allowed.
 Manual local reusable-workflow calls using `secrets: inherit` require the same
 main-ref condition and protected environment as direct long-lived secret use.
 Workflow action-pin validation must traverse every reachable repository-local
@@ -149,7 +154,9 @@ Lifecycle polling, admission, and drain sequencing shared by multiple workers mu
 Sandbox startup must not report readiness while legacy unauthenticated
 containers may remain active; transient Docker unavailability and reconciliation
 failures must retry under the supervised startup lifecycle until shutdown is
-confirmed. Activate the owner bootstrap token's expiry and advertise or open its
+confirmed. A legacy row without a persisted container ID must discover every
+container bearing its `codecommit.sandbox.id` label and block readiness until
+all discovered containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
 URL only after the authenticated listener layer has built successfully.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
