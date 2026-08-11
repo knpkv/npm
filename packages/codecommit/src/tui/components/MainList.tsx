@@ -6,6 +6,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
 import {
+  ambiguousMergeGuardsAtom,
   currentPRAtom,
   currentUserAtom,
   filterTextAtom,
@@ -18,7 +19,7 @@ import {
 } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { useListNavigation } from "../hooks/useListNavigation.js"
-import { pullRequestSelectionKey } from "../details-model.js"
+import { pullRequestOpeningBlocked, pullRequestSelectionKey } from "../details-model.js"
 import { buildListItems, type ListItem, type TuiView } from "../ListBuilder.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { applySettingsFilter, computeItemPositions, findGroupHeader, findStableIndex } from "./mainlist-utils.js"
@@ -136,6 +137,7 @@ export function MainList({ onSelectPR }: MainListProps) {
   const view = useAtomValue(viewAtom)
   const setView = useAtomSet(viewAtom)
   const toggleAccount = useAtomSet(toggleAccountAtom)
+  const ambiguousMergeGuards = useAtomValue(ambiguousMergeGuardsAtom)
 
   const state = useCachedAppState(result)
   const items = useFilteredItems(state, view)
@@ -151,8 +153,9 @@ export function MainList({ onSelectPR }: MainListProps) {
     items,
     () => {
       const item = items[stableIndex]
-      if (item?.type === "pr" && onSelectPR) onSelectPR(item.pr)
-      else if (item?.type === "account") setView("prs")
+      if (item?.type === "pr" && onSelectPR && !pullRequestOpeningBlocked(ambiguousMergeGuards, item.pr)) {
+        onSelectPR(item.pr)
+      } else if (item?.type === "account") setView("prs")
     },
     () => {
       const item = items[stableIndex]
@@ -188,13 +191,26 @@ export function MainList({ onSelectPR }: MainListProps) {
       <scrollbox ref={scrollRef} style={{ flexGrow: 1, width: "100%", backgroundColor: theme.background }}>
         <box style={{ flexDirection: "column", width: "100%" }}>
           {items.map((item, i) => (
-            <ListItemRow key={i} item={item} selected={i === stableIndex} isFirst={i === 0} />
+            <ListItemRow
+              key={i}
+              blocked={item.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuards, item.pr)}
+              item={item}
+              selected={i === stableIndex}
+              isFirst={i === 0}
+            />
           ))}
         </box>
       </scrollbox>
       {showStickyGroupHeader && (
         <box style={{ position: "absolute", top: 0, width: "100%" }}>
-          <ListItemRow item={currentGroupHeader} selected={items[stableIndex] === currentGroupHeader} isFirst={true} />
+          <ListItemRow
+            blocked={
+              currentGroupHeader.type === "pr" && pullRequestOpeningBlocked(ambiguousMergeGuards, currentGroupHeader.pr)
+            }
+            item={currentGroupHeader}
+            selected={items[stableIndex] === currentGroupHeader}
+            isFirst={true}
+          />
         </box>
       )}
     </box>

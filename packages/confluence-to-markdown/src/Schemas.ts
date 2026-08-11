@@ -83,6 +83,13 @@ export const PageFrontMatterSchema = Schema.Struct({
   position: Schema.optional(Schema.Number),
   /** SHA256 hash of content for change detection */
   contentHash: ContentHashSchema,
+  /**
+   * Set to `unsafe` when the page holds nodes the markdown projection cannot
+   * represent (datasource cards, extensions). Editing such a page as markdown
+   * and pushing it back corrupts those nodes, so `sync push` refuses it and
+   * points at `page put --adf` instead.
+   */
+  roundTrip: Schema.optional(Schema.Literals(["unsafe"])),
   /** Version message from Confluence (used as git commit message) */
   versionMessage: Schema.optional(Schema.String),
   /** Author display name */

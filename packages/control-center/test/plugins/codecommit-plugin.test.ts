@@ -125,6 +125,13 @@ const baseReadClient = (
     ),
   streamPullRequests: () => Stream.make(pullRequest),
   getPullRequest: () => Effect.succeed(pullRequest),
+  getRepositoryIdentity: () =>
+    Effect.succeed(
+      new ReadClient.CodeCommitRepositoryIdentity({
+        accountId: "123456789012",
+        repositoryName: pullRequest.repositoryName
+      })
+    ),
   getChangedFilesPage: () =>
     Effect.succeed(
       new ReadClient.CodeCommitChangedFilesPage({

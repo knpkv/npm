@@ -454,7 +454,9 @@ const make = Effect.gen(function*() {
 
       const refresh = Effect.gen(function*() {
         const config = yield* getConfig()
-        yield* Console.log("Token expired, refreshing...")
+        // stderr: stdout carries machine-readable payloads (`page get --format adf`,
+        // `--json`), and a progress line there corrupts them.
+        yield* Console.error("Token expired, refreshing...")
         return yield* refreshTokenImpl(token, config)
       }).pipe(
         Effect.catchTag("OAuthError", (error) => {

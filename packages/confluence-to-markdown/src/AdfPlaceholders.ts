@@ -386,11 +386,27 @@ const parseEncodedBlockNodeParagraph = (node: AdfNode): { readonly type: string;
   return { type: match[1]!, node: decoded }
 }
 
-const isEncodedBlockNodeEnd = (node: AdfNode, type: string): boolean => {
+/**
+ * Whether a paragraph *looks like* an open marker, regardless of whether its
+ * payload decodes.
+ *
+ * Depth counting must use this rather than `parseEncodedBlockNodeParagraph`:
+ * ends are matched syntactically, so counting opens semantically makes the two
+ * predicates asymmetric, and an open whose payload fails to decode would let a
+ * nested end be read as the outer one's — restoring the outer node from its
+ * payload while the inner markers are reverted again as siblings.
+ */
+const isEncodedBlockNodeOpen = (node: AdfNode): boolean => {
   const child = soleTextChild(node)
   if (child === null || typeof child.text !== "string") return false
+  return ENCODED_BLOCK_NODE_RE.test(child.text)
+}
+
+const encodedBlockNodeEndType = (node: AdfNode): string | null => {
+  const child = soleTextChild(node)
+  if (child === null || typeof child.text !== "string") return null
   const match = ENCODED_BLOCK_NODE_END_RE.exec(child.text)
-  return match?.[1] === type
+  return match?.[1] ?? null
 }
 
 const textContent = (node: AdfNode): string => node.text ?? (node.content ?? []).map(textContent).join("")
@@ -1239,13 +1255,30 @@ const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray
       continue
     }
 
+    // Find the close marker that belongs to *this* open, counting nested
+    // encoded blocks on the way. Blocks legitimately nest — an expand holding a
+    // blockCard or a table, a layoutSection holding either — and the open
+    // marker already carries the whole subtree in its payload. Stopping the
+    // scan at the first nested open (as this once did) leaves the parent
+    // unpaired, so the parent is restored from its payload *and* the inner
+    // marker is reverted again as a sibling: one extra copy of the nested node
+    // per round-trip, compounding on every push.
     let end = -1
+    let depth = 0
     for (let j = i + 1; j < children.length; j++) {
-      if (isEncodedBlockNodeEnd(children[j]!, marker.type)) {
-        end = j
-        break
+      const closeType = encodedBlockNodeEndType(children[j]!)
+      if (closeType !== null) {
+        // A close at depth 0 either matches this open or the markers are
+        // malformed; either way the scan stops, so an unpaired open cannot
+        // steal a later block's end marker.
+        if (depth === 0) {
+          if (closeType === marker.type) end = j
+          break
+        }
+        depth--
+        continue
       }
-      if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
+      if (isEncodedBlockNodeOpen(children[j]!)) depth++
     }
 
     out.push(end === -1 ? marker.node : resolveEncodedBlockNode(marker, children.slice(i + 1, end)))

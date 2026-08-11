@@ -33,6 +33,14 @@ confluence sync pull --replay-history      # replay each version as separate git
 # Push local changes to Confluence
 confluence sync push
 confluence sync push -n, --dry-run         # preview changes without applying
+confluence sync push --force               # push even a page markdown cannot round-trip
+
+# Read or write a page as raw ADF, bypassing the markdown projection
+confluence page get --url <PAGE_URL> --format adf
+confluence page create --space <SPACE_ID> --title <TITLE> --adf <FILE> [--parent <ID>] [--base-url <URL>]
+confluence page put --url <PAGE_URL> --adf <FILE> [--title <TITLE>] [-m <MESSAGE>]
+confluence page patch --url <PAGE_URL> --replace <TEXT> --with <TEXT>
+confluence page patch --url <PAGE_URL> --delete-node <SELECTOR>   # e.g. blockCard[1]
 
 # Delete a page (interactive selector, deletes local file)
 confluence page delete
@@ -125,7 +133,39 @@ confluence sync diff --commit HEAD~1   # compare with commit
 
 `confluence page get --clean-markdown` removes Confluence round-trip metadata comments such as `<!-- adf:... -->`
 from the printed output. This is intended for readable exports and is not suitable for editing and pushing back to
-Confluence.
+Confluence. It applies to `--format md` only; combining it with `--format adf` is rejected rather than ignored.
+
+### Pages markdown cannot represent
+
+Most nodes do survive the trip back, because block-level nodes travel whole inside an
+`<!-- adf:… node=… -->` marker and macros carry their attributes in an `<!-- adf:extension … attrs=… -->` one.
+A Jira datasource card, a TOC, an excerpt and a children-display macro all round-trip and stay pushable — and so
+does anything nested inside a table, whose marker carries every descendant.
+
+Three shapes do not: a `blockCard`/`embedCard` with no resolvable url, which degrades to a placeholder comment; a
+`multiBodiedExtension`, which the walker has no case for; and a bodied macro inside a table cell, which cannot be
+converted back at all. The url-less card is refused wherever it sits, including under a marker that would in fact
+carry it — the guard deliberately over-refuses, because the refusal names a way forward and a wrong exemption
+would surface as an opaque conversion error instead.
+
+Pulling a page that holds one of the unsafe nodes marks it `roundTrip: unsafe` in its front matter, and
+`confluence sync push` refuses it rather than corrupting the node. Edit such a page with `page put --adf` or
+`page patch`, which never go through markdown. `--force` overrides the refusal; because a refused push leaves the
+commit unpushed, the retry still has something to push. Deletions already applied in Confluence are replayed
+harmlessly on that retry, so a partially completed push is never stuck.
+
+Any push error — not just a refusal — holds `origin/confluence` back, so work Confluence did not receive is never
+recorded as pushed. The consequence is that a page which cannot succeed (one deleted in the Confluence UI, say)
+makes every later `sync push` repeat the same failure until you resolve it or remove the file. `--force` covers
+only the round-trip refusal, and applies to the whole run rather than a single page.
+
+`page put` writes onto whatever version the page is currently at. When you use it as the remedy above —
+`page get --format adf`, edit, `page put` — pass `--if-version <n>` so an edit made in Confluence in between
+fails as a conflict instead of being overwritten. `page get --format adf` prints `Read page <id> at version <n>.`
+to stderr for exactly this, leaving stdout the machine-readable document.
+
+`page patch` writes the version it read, so a page edited in Confluence between the read and the write is
+reported as a conflict instead of being silently overwritten.
 
 ### Conversion pipeline
 

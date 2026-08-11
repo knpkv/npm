@@ -25,6 +25,7 @@ import {
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
   type CodeCommitReadAccount,
+  CodeCommitRepositoryIdentity,
   CodeCommitRepositoryPage
 } from "./models.js"
 import {
@@ -33,6 +34,7 @@ import {
   type GetBlobProviderRequest,
   type GetDifferencesProviderPageRequest,
   type GetPullRequestProviderRequest,
+  type GetRepositoryProviderRequest,
   type ListPullRequestsProviderPageRequest,
   type ListRepositoriesProviderPageRequest
 } from "./ReadProvider.js"
@@ -51,6 +53,13 @@ const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
 const RawCallerIdentity = Schema.Struct({
   Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+})
+
+const RawRepositoryIdentity = Schema.Struct({
+  repositoryMetadata: Schema.Struct({
+    accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+  })
 })
 
 const RawBlobResponse = Schema.Struct({ content: Schema.Uint8Array })
@@ -188,6 +197,24 @@ const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(fu
   }).pipe(Effect.mapError(() => malformed("get-pull-request")))
 })
 
+/** Decode caller identity evidence obtained inside an already-bound AWS runtime. @internal */
+export const decodeAccountIdentityProviderResponse = Effect.fn(
+  "CodeCommitReadClient.decodeAccountIdentityProviderResponse"
+)(function*(value: unknown) {
+  const identity = yield* decodeProvider("discover-account", RawCallerIdentity, value)
+  return new CodeCommitAccountIdentity({ accountId: identity.Account, arn: identity.Arn })
+})
+
+/** Decode repository ownership evidence obtained inside an already-bound AWS runtime. @internal */
+export const decodeRepositoryIdentityProviderResponse = Effect.fn(
+  "CodeCommitReadClient.decodeRepositoryIdentityProviderResponse"
+)(function*(value: unknown) {
+  const response = yield* decodeProvider("get-repository-identity", RawRepositoryIdentity, value)
+  return yield* Schema.decodeUnknownEffect(CodeCommitRepositoryIdentity)(response.repositoryMetadata).pipe(
+    Effect.mapError(() => malformed("get-repository-identity"))
+  )
+})
+
 const toBlobMetadata = (blob: typeof RawBlob.Type): CodeCommitBlobMetadata =>
   new CodeCommitBlobMetadata({ blobId: CodeCommitBlobId.make(blob.blobId), path: blob.path, mode: blob.mode })
 
@@ -230,6 +257,9 @@ export interface CodeCommitReadClientService {
   readonly getPullRequest: (
     request: GetPullRequestProviderRequest
   ) => Effect.Effect<CodeCommitPullRequestRevision, CodeCommitReadError>
+  readonly getRepositoryIdentity: (
+    request: GetRepositoryProviderRequest
+  ) => Effect.Effect<CodeCommitRepositoryIdentity, CodeCommitReadError>
   readonly getChangedFilesPage: (
     request: Omit<GetDifferencesProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitChangedFilesPage, CodeCommitReadError>
@@ -253,8 +283,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           const raw = yield* provider.getCallerIdentity(account).pipe(
             Effect.mapError(mapProviderError("discover-account"))
           )
-          const identity = yield* decodeProvider("discover-account", RawCallerIdentity, raw)
-          return new CodeCommitAccountIdentity({ accountId: identity.Account, arn: identity.Arn })
+          return yield* decodeAccountIdentityProviderResponse(raw)
         }
       )
 
@@ -265,6 +294,15 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           Effect.mapError(mapProviderError("get-pull-request"))
         )
         return yield* decodePullRequest(raw)
+      })
+
+      const getRepositoryIdentity = Effect.fn("CodeCommitReadClient.getRepositoryIdentity")(function*(
+        request: GetRepositoryProviderRequest
+      ) {
+        const raw = yield* provider.getRepository(request).pipe(
+          Effect.mapError(mapProviderError("get-repository-identity"))
+        )
+        return yield* decodeRepositoryIdentityProviderResponse(raw)
       })
 
       const listRepositoriesPage = Effect.fn("CodeCommitReadClient.listRepositoriesPage")(function*(
@@ -360,6 +398,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         getBlob,
         getChangedFilesPage,
         getPullRequest,
+        getRepositoryIdentity,
         listPullRequestsPage,
         listRepositoriesPage,
         streamChangedFiles,

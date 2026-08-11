@@ -42,7 +42,14 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
-import { Account, ApprovalRule, codecommitConsoleUrl, PullRequest, type PullRequestStatus } from "../Domain.js"
+import {
+  Account,
+  ApprovalRule,
+  codecommitConsoleUrl,
+  normalizeAccountId,
+  PullRequest,
+  type PullRequestStatus
+} from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { parseRuleContent } from "./approvalRuleContent.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
@@ -304,11 +311,11 @@ const listAllRepositories = () =>
 
 export const fetchRepoAccountId = (
   repoName: string
-): Effect.Effect<string, never, AwsStreamEnv> =>
+): Effect.Effect<string | undefined, never, AwsStreamEnv> =>
   codecommit.getRepository({ repositoryName: repoName }).pipe(
-    Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
+    Effect.map((r) => normalizeAccountId(r.repositoryMetadata?.accountId)),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
-    Effect.catch(() => Effect.succeed(""))
+    Effect.catch(() => Effect.succeed(undefined))
   )
 
 const listPullRequestIds = (
@@ -339,10 +346,10 @@ export const getPullRequests = (
     const status = options?.status ?? "OPEN"
 
     // Cache repo account IDs (one getRepository call per repo, not per PR)
-    const repoAccountCache = new Map<string, string>()
+    const repoAccountCache = new Map<string, string | undefined>()
     const getRepoAccount = (repoName: string) => {
       const cached = repoAccountCache.get(repoName)
-      if (cached !== undefined) return Effect.succeed(cached)
+      if (repoAccountCache.has(repoName)) return Effect.succeed(cached)
       return fetchRepoAccountId(repoName).pipe(
         Effect.tap((id) => Effect.sync(() => repoAccountCache.set(repoName, id)))
       )

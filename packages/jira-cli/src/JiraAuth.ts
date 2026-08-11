@@ -453,7 +453,11 @@ const make = Effect.gen(function*() {
 
       const refresh = Effect.gen(function*() {
         const config = yield* getConfig()
-        yield* Console.log("Token expired, refreshing...")
+        // stderr, not stdout: this fires from inside layer construction, so it
+        // lands ahead of whatever the command prints. On `--json` that used to
+        // put a line of prose in front of the document, and the release
+        // automation parsing it failed *after* the remote writes had happened.
+        yield* Console.error("Token expired, refreshing...")
         return yield* refreshTokenImpl(token, config)
       }).pipe(
         Effect.catchTag("OAuthError", (error) => {

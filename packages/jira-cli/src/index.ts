@@ -30,3 +30,13 @@ export {
 } from "./JiraAuth.js"
 export * from "./JiraCliError.js"
 export { layer as MarkdownWriterLayer, MarkdownWriter, type MarkdownWriterShape } from "./MarkdownWriter.js"
+export {
+  type DesiredRelatedWork,
+  layer as VersionServiceLayer,
+  planRelatedWorkSync,
+  type RelatedWork,
+  type RelatedWorkSyncPlan,
+  type Version,
+  VersionService,
+  type VersionServiceShape
+} from "./VersionService.js"

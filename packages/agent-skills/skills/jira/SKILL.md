@@ -13,7 +13,7 @@ Use the `jira` binary for Jira Cloud issue export and release-version workflows.
 - For multi-account or multi-site setups, inspect `jira auth profiles` and switch with `jira auth use <profile>` before reading or writing project data. When the `atlassian` binary is available, prefer `atlassian profiles doctor` for a cross-tool Jira/Confluence/Jira Clockify check and `atlassian auth refresh` for expired active tokens.
 - Use `--json` on version commands when the agent needs structured data.
 - Use numeric version ids for `jira version get`, `jira version update`, and `jira version related-work`.
-- Confirm before remote write commands: `jira version update` and `jira version related-work add`.
+- Confirm before remote write commands: `jira version update`, `jira version related-work add`, and `jira version related-work sync`. `sync` with `--prune` also deletes links, including surplus copies of a desired URL.
 
 ## Authentication
 

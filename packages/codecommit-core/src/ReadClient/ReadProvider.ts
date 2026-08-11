@@ -36,6 +36,12 @@ export interface GetPullRequestProviderRequest {
   readonly pullRequestId: string
 }
 
+/** Parameters for one CodeCommit repository identity read. */
+export interface GetRepositoryProviderRequest {
+  readonly account: CodeCommitReadAccount
+  readonly repositoryName: string
+}
+
 /** Parameters for one immutable blob read. */
 export interface GetBlobProviderRequest {
   readonly account: CodeCommitReadAccount
@@ -67,6 +73,7 @@ export interface CodeCommitReadProviderService {
     request: ListPullRequestsProviderPageRequest
   ) => Effect.Effect<unknown, AwsClientError>
   readonly getPullRequest: (request: GetPullRequestProviderRequest) => Effect.Effect<unknown, AwsClientError>
+  readonly getRepository: (request: GetRepositoryProviderRequest) => Effect.Effect<unknown, AwsClientError>
   readonly getDifferencesPage: (
     request: GetDifferencesProviderPageRequest
   ) => Effect.Effect<unknown, AwsClientError>
@@ -143,6 +150,14 @@ export const CodeCommitReadProviderLive = Layer.effect(
             "getPullRequestRevision",
             request.account,
             codecommit.getPullRequest({ pullRequestId: request.pullRequestId })
+          )
+        ),
+      getRepository: (request) =>
+        provideRuntime(
+          callProvider(
+            "getRepositoryIdentity",
+            request.account,
+            codecommit.getRepository({ repositoryName: request.repositoryName })
           )
         ),
       getDifferencesPage: (request) =>

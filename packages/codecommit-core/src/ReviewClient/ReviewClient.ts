@@ -10,15 +10,24 @@ import { identityMatches } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../ReadClient/errors.js"
 import type { CodeCommitAccountIdentity, CodeCommitPullRequestRevision } from "../ReadClient/models.js"
-import { CodeCommitReadClient } from "../ReadClient/ReadClient.js"
+import {
+  CodeCommitReadClient,
+  decodeAccountIdentityProviderResponse,
+  decodeRepositoryIdentityProviderResponse
+} from "../ReadClient/ReadClient.js"
 import { CodeCommitReviewConflictError, type CodeCommitReviewError } from "./errors.js"
 import {
+  type CodeCommitMergeTarget,
   type CodeCommitReviewAction,
   CodeCommitReviewReceipt,
   type CodeCommitReviewReconciliation,
   type CodeCommitReviewTarget
 } from "./models.js"
-import { CodeCommitReviewProvider, CodeCommitReviewProviderLive } from "./ReviewProvider.js"
+import {
+  type CodeCommitMergeAuthorizationEvidence,
+  CodeCommitReviewProvider,
+  CodeCommitReviewProviderLive
+} from "./ReviewProvider.js"
 
 const MAXIMUM_COMMENT_PAGES = 20
 const COMMENT_MARKER_PREFIX = "<!-- knpkv-codecommit-review:"
@@ -36,6 +45,13 @@ const RawApprovalStates = Schema.Struct({
     userArn: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
     approvalState: Schema.optional(Schema.Literals(["APPROVE", "REVOKE"]))
   })))
+})
+
+const RawMergeResponse = Schema.Struct({
+  pullRequest: Schema.Struct({
+    pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    pullRequestStatus: Schema.Literal("CLOSED")
+  })
 })
 
 const RawCommentsPage = Schema.Struct({
@@ -89,16 +105,27 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
     Predicate.isTagged(cause, "CommentDoesNotExistException") ||
     Predicate.isTagged(cause, "InvalidCommentIdException")
   ) return "revision-changed"
-  if (
-    Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
-    Predicate.isTagged(cause, "ManualMergeRequiredException")
-  ) return "merge-conflict"
+  if (Predicate.isTagged(cause, "ManualMergeRequiredException")) return "merge-conflict"
   return null
+}
+
+const providerConflictReason = (
+  operation: string,
+  cause: unknown
+): CodeCommitReviewConflictError["reason"] | null => {
+  if (
+    operation === "merge-pull-request" &&
+    (Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
+      Predicate.isTagged(cause, "ReferenceDoesNotExistException"))
+  ) {
+    return "destination-reference-changed"
+  }
+  return conflictReason(cause)
 }
 
 const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReviewError => {
   if (error._tag !== "AwsApiError") return error
-  const reason = conflictReason(error.cause)
+  const reason = providerConflictReason(operation, error.cause)
   if (reason !== null) return new CodeCommitReviewConflictError({ operation, reason })
   if (
     Predicate.isTagged(error.cause, "PullRequestDoesNotExistException") ||
@@ -106,6 +133,9 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
   ) return new CodeCommitReadNotFoundError({ operation })
   return error
 }
+
+const isAwsClientError = (error: CodeCommitReviewError): error is AwsClientError =>
+  error._tag === "AwsApiError" || error._tag === "AwsCredentialError" || error._tag === "AwsThrottleError"
 
 const targetConflict = (
   target: CodeCommitReviewTarget,
@@ -151,6 +181,33 @@ const preflightTarget = Effect.fn("CodeCommitReviewClient.preflightTarget")(func
   return pullRequest
 })
 
+/** Authorizes raw evidence captured by the exact AWS runtime that will dispatch the merge. */
+const verifyMergeTargetIdentity = Effect.fn("CodeCommitReviewClient.verifyMergeTargetIdentity")(function*(
+  target: CodeCommitMergeTarget,
+  evidence: CodeCommitMergeAuthorizationEvidence
+) {
+  const repository = yield* decodeRepositoryIdentityProviderResponse(evidence.repositoryIdentity)
+  if (repository.repositoryName !== target.repositoryName) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-changed"
+    })
+  }
+  if (repository.accountId !== target.expectedRepositoryAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-account-changed"
+    })
+  }
+  const caller = yield* decodeAccountIdentityProviderResponse(evidence.callerIdentity)
+  if (caller.accountId !== target.expectedCallerAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "caller-account-changed"
+    })
+  }
+})
+
 const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
   switch (tag) {
     case "request-review":
@@ -167,6 +224,8 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
       return "Pull request revision approved"
     case "revoke-approval":
       return "Pull request approval revoked"
+    case "merge":
+      return "Pull request merged"
   }
 }
 
@@ -255,6 +314,25 @@ export class CodeCommitReviewClient extends Context.Service<
               summary: commentSummary(action._tag)
             })
           }
+          case "merge": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.mergePullRequest<CodeCommitReviewError>(
+              action,
+              (evidence) => verifyMergeTargetIdentity(action.target, evidence)
+            ).pipe(
+              Effect.mapError((error) =>
+                isAwsClientError(error) ? mapProviderError("merge-pull-request")(error) : error
+              )
+            )
+            const response = yield* decodeProvider("merge-pull-request", RawMergeResponse, raw)
+            if (response.pullRequest.pullRequestId !== action.target.pullRequestId) {
+              return yield* malformed("merge-pull-request")
+            }
+            return new CodeCommitReviewReceipt({
+              operationId: `merge:${action.strategy}:${action.target.pullRequestId}:${action.target.sourceCommit}`,
+              summary: `${commentSummary(action._tag)} using ${action.strategy}`
+            })
+          }
         }
       })
 
@@ -333,6 +411,8 @@ export class CodeCommitReviewClient extends Context.Service<
               } satisfies CodeCommitReviewReconciliation
               : { _tag: "pending" } satisfies CodeCommitReviewReconciliation
           }
+          case "merge":
+            return { _tag: "pending" } satisfies CodeCommitReviewReconciliation
         }
       })
 

@@ -19,7 +19,7 @@ import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
 import type { ApiError, ConversionError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
-import { AttachmentResolutionError, FileSystemError, StructureError } from "./ConfluenceError.js"
+import { AttachmentResolutionError, FileSystemError, RoundTripUnsafeError, StructureError } from "./ConfluenceError.js"
 import type { GitServiceError } from "./GitService.js"
 import { GitService } from "./GitService.js"
 import type { AdfMetadataSidecar } from "./internal/adfMetadata.js"
@@ -29,6 +29,7 @@ import {
   externalizeAdfMetadata,
   hydrateAdfMetadata
 } from "./internal/adfMetadata.js"
+import { roundTripUnsafeNodeTypes, structuralCensusDelta } from "./internal/adfNodes.js"
 import { resolveMediaAttachmentReferences, resolveMediaAttachmentUrls } from "./internal/attachments.js"
 import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
@@ -123,8 +124,18 @@ type SyncError =
   | GitServiceError
   | StructureError
   | AttachmentResolutionError
+  | RoundTripUnsafeError
 
 const syncErrorMessage = (error: SyncError): string => `${error._tag}: ${String(error.message)}`
+
+/**
+ * Whether a failed deletion means the page is already gone.
+ *
+ * Deliberately only 404: a 403 or a 409 is a real failure that must keep the
+ * branch parked so the user sees it again.
+ */
+const isPageAlreadyGone = (error: ApiError | RateLimitError): boolean =>
+  error._tag === "ApiError" && error.status === 404
 
 /**
  * Pretty-print an ADF JSON wire string for the `.source.json` companion file.
@@ -145,6 +156,19 @@ const prettyAdf = (raw: string): string => {
  * read sees a "changed" file and `push` keeps pushing a no-op update.
  */
 const hashBody = (markdown: string) => computeHash(markdown.trim()).pipe(Effect.provide(HashServiceLive))
+
+/**
+ * Mark a page whose ADF holds nodes the markdown projection cannot represent,
+ * so the flag is visible in the file the user is about to edit rather than
+ * only surfacing when their push is refused.
+ */
+const roundTripFlag = (adfJson: string): { readonly roundTrip?: "unsafe" } => {
+  try {
+    return roundTripUnsafeNodeTypes(JSON.parse(adfJson)).length > 0 ? { roundTrip: "unsafe" } : {}
+  } catch {
+    return {}
+  }
+}
 
 /**
  * Sync engine service for Confluence <-> Markdown operations.
@@ -176,7 +200,9 @@ export class SyncEngine extends Context.Service<
     /**
      * Push local markdown changes to Confluence.
      */
-    readonly push: (options: { dryRun: boolean; message?: string }) => Effect.Effect<PushResult, SyncError>
+    readonly push: (
+      options: { dryRun: boolean; message?: string; force?: boolean }
+    ) => Effect.Effect<PushResult, SyncError>
 
     /**
      * Get sync status for all files.
@@ -489,6 +515,7 @@ export const layer: Layer.Layer<
           ...(parentId ? { parentId: PageId(parentId) } : {}),
           ...(position !== undefined ? { position } : {}),
           contentHash,
+          ...roundTripFlag(resolvedAdfJson),
           ...(version.message ? { versionMessage: version.message } : {}),
           ...(author?.displayName ? { authorName: author.displayName } : {}),
           ...(author?.email ? { authorEmail: author.email } : {})
@@ -679,6 +706,7 @@ export const layer: Layer.Layer<
             ...(effectiveParentId ? { parentId: PageId(effectiveParentId) } : {}),
             ...(page.position !== undefined ? { position: page.position } : {}),
             contentHash,
+            ...roundTripFlag(adfJson),
             ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
             ...(author?.displayName ? { authorName: author.displayName } : {}),
             ...(author?.email ? { authorEmail: author.email } : {})
@@ -778,6 +806,121 @@ export const layer: Layer.Layer<
       })
 
     /**
+     * Refuse or flag a push whose ADF disagrees structurally with what is live.
+     *
+     * Two checks, deliberately different in severity:
+     *  - a round-trip-unsafe node in the *remote* document is fatal, because
+     *    markdown cannot carry it and the push would overwrite it with a
+     *    degraded copy. There is no version of that write worth making by
+     *    accident, so `--force` is the only way through;
+     *  - any other structural drift is reported but allowed, since adding a
+     *    table or removing a task list are ordinary edits. The report is what
+     *    matters: silent drift is how a duplicated node reaches production.
+     */
+    const guardOutgoingAdf = (params: {
+      readonly path: string
+      readonly pageId: string
+      readonly remoteAdf: string | undefined
+      readonly outgoingAdf: string
+      readonly force: boolean
+    }): Effect.Effect<void, RoundTripUnsafeError> =>
+      Effect.gen(function*() {
+        const remoteAdf = params.remoteAdf
+        if (remoteAdf === undefined) return
+
+        const remoteDoc = yield* Effect.try({
+          try: (): unknown => JSON.parse(remoteAdf),
+          catch: () => null
+        }).pipe(Effect.orElseSucceed(() => null))
+        if (remoteDoc === null) return
+
+        const unsafe = roundTripUnsafeNodeTypes(remoteDoc)
+        if (unsafe.length > 0 && !params.force) {
+          return yield* Effect.fail(
+            new RoundTripUnsafeError({ pageId: params.pageId, path: params.path, nodeTypes: unsafe })
+          )
+        }
+
+        const outgoingDoc = yield* Effect.try({
+          try: (): unknown => JSON.parse(params.outgoingAdf),
+          catch: () => null
+        }).pipe(Effect.orElseSucceed(() => null))
+        if (outgoingDoc === null) return
+
+        const drift = structuralCensusDelta(remoteDoc, outgoingDoc)
+        if (drift.length > 0) {
+          yield* Effect.logWarning(
+            `${params.path}: structural change on push — ${
+              drift.map((d) => `${d.type} ${d.before}->${d.after}`).join(", ")
+            }`
+          )
+        }
+      })
+
+    /**
+     * The read-only half of `pushFile`: work out what would be written and run
+     * the guard over it, without writing.
+     *
+     * `--dry-run` previously returned a bare commit count, so a preview of a
+     * workspace holding a round-trip-unsafe page reported no errors and the
+     * real push then refused it — and, since any error now holds
+     * `origin/confluence`, parked the workspace. A preview that cannot surface
+     * the one failure the guard exists to raise is the least useful place for
+     * it to stay quiet. Sharing this helper is what keeps the two paths from
+     * disagreeing again.
+     */
+    const previewFile = (
+      filePath: string,
+      force: boolean
+    ): Effect.Effect<{ readonly pushed: boolean; readonly created: boolean }, SyncError> =>
+      Effect.gen(function*() {
+        const localFile = yield* localFs.readMarkdownFile(filePath)
+        // A new page has nothing live to compare against yet. It is reported the
+        // way `pushFile` reports it — as a create, not a push — or the preview
+        // and the real run print different counts for the same workspace.
+        if (localFile.isNew || !localFile.frontMatter) return { pushed: false, created: true }
+
+        const fm = localFile.frontMatter
+        const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+        if (currentHash === fm.contentHash) return { pushed: false, created: false }
+
+        const remotePage = yield* client.getPage(fm.pageId)
+        const hydratedContent = yield* hydrateMarkdownForFile(filePath, localFile.content)
+        const adfValue = yield* converter.markdownToAdf(hydratedContent)
+
+        yield* guardOutgoingAdf({
+          path: pathService.relative(cwd, filePath),
+          pageId: fm.pageId,
+          remoteAdf: remotePage.body?.atlas_doc_format?.value,
+          outgoingAdf: adfValue,
+          force
+        })
+
+        return { pushed: true, created: false }
+      })
+
+    const previewAll = (files: ReadonlyArray<string>, force: boolean) =>
+      Effect.gen(function*() {
+        const errors: Array<string> = []
+        let pushed = 0
+        let created = 0
+        for (const filePath of files) {
+          const result = yield* previewFile(filePath, force).pipe(
+            Effect.catchIf(() => true, (error) =>
+              Effect.succeed({
+                pushed: false,
+                created: false,
+                error: `Would fail to push ${filePath}: ${syncErrorMessage(error)}`
+              }))
+          )
+          if ("error" in result && result.error !== undefined) errors.push(result.error)
+          if (result.pushed) pushed++
+          if (result.created) created++
+        }
+        return { pushed, created, errors }
+      })
+
+    /**
      * Push a single file's content to Confluence.
      * Returns the canonical content after push.
      */
@@ -785,7 +928,8 @@ export const layer: Layer.Layer<
       filePath: string,
       revisionMessage: string,
       spaceId: string,
-      pageIdMap: Map<string, string>
+      pageIdMap: Map<string, string>,
+      force: boolean
     ): Effect.Effect<
       { pushed: boolean; created: boolean; newPageId?: string; error?: string },
       SyncError
@@ -874,6 +1018,20 @@ export const layer: Layer.Layer<
         const remotePage = yield* client.getPage(fm.pageId)
         const hydratedContent = yield* hydrateMarkdownForFile(filePath, localFile.content)
         const adfValue = yield* converter.markdownToAdf(hydratedContent)
+
+        // The markdown projection is lossy for a handful of node types. Compare
+        // what is about to be written against what is live before writing it:
+        // a page holding one of those nodes must not be pushed as markdown at
+        // all, and any other structural drift is worth surfacing, because a
+        // wording edit has no business changing the shape of the document.
+        yield* guardOutgoingAdf({
+          path: pathService.relative(cwd, filePath),
+          pageId: fm.pageId,
+          remoteAdf: remotePage.body?.atlas_doc_format?.value,
+          outgoingAdf: adfValue,
+          force
+        })
+
         const updatedPage = yield* client.updatePage({
           id: fm.pageId,
           title: fm.title,
@@ -899,12 +1057,18 @@ export const layer: Layer.Layer<
           ? new Date(canonicalPage.version.createdAt)
           : yield* DateTime.nowAsDate
 
-        // Write canonical content with updated front-matter
+        // Write canonical content with updated front-matter. `roundTrip` is
+        // recomputed from what Confluence now holds rather than inherited: a
+        // --force push degrades the unsafe nodes, so keeping the old flag
+        // would go on warning about a page that is no longer unsafe until the
+        // next pull rewrote the front matter. Matches the pull paths.
+        const { roundTrip: _staleRoundTrip, ...carriedFrontMatter } = fm
         const newFrontMatter: PageFrontMatter = {
-          ...fm,
+          ...carriedFrontMatter,
           version: updatedPage.version.number,
           updated: updatedAt,
-          contentHash: canonicalHash
+          contentHash: canonicalHash,
+          ...roundTripFlag(canonicalAdf)
         }
         yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)
 
@@ -978,7 +1142,42 @@ export const layer: Layer.Layer<
         )
       })
 
-    const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
+    /**
+     * The pages this push has to delete remotely: files present on
+     * `origin/confluence` and gone from HEAD, paired with the pageId their
+     * front matter recorded there.
+     *
+     * The preview shares it with the real push deliberately. Walking only the
+     * files still on disk made `--dry-run` report `deleted: 0` for a workspace
+     * whose one pending change was a deletion, so `sync push --dry-run` printed
+     * "Nothing to push" immediately before an irreversible remote delete.
+     */
+    const pendingDeletions = (): Effect.Effect<
+      ReadonlyArray<{ readonly path: string; readonly pageId: string }>,
+      SyncError
+    > =>
+      Effect.gen(function*() {
+        // Note: Git repo is inside .confluence/, so paths are relative to that
+        // (e.g., "docs/page.md" not ".confluence/docs/page.md")
+        const deletedFiles = yield* git.getDeletedFiles("origin/confluence", "HEAD", "docs")
+        const pending: Array<{ path: string; pageId: string }> = []
+        for (const deletedPath of deletedFiles) {
+          // Read the file from origin/confluence to get pageId
+          const pageId = yield* git.getFileContentAt("origin/confluence", deletedPath).pipe(
+            Effect.map((content) => {
+              const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
+              return match ? match[1] : null
+            }),
+            Effect.catchIf(() => true, () => Effect.succeed(null))
+          )
+          if (pageId) pending.push({ path: deletedPath, pageId })
+        }
+        return pending
+      })
+
+    const push = (
+      options: { dryRun: boolean; message?: string; force?: boolean }
+    ): Effect.Effect<PushResult, SyncError> =>
       Effect.gen(function*() {
         // Validate structure before push
         yield* validateStructure()
@@ -1005,16 +1204,24 @@ export const layer: Layer.Layer<
           let created = 0
           const errors: Array<string> = []
 
-          for (const filePath of sortedFiles) {
-            if (options.dryRun) {
-              pushed++
-              continue
+          if (options.dryRun) {
+            const preview = yield* previewAll(sortedFiles, options.force ?? false)
+            return {
+              pushed: preview.pushed,
+              created: preview.created,
+              deleted: 0,
+              skipped: 0,
+              errors: preview.errors
             }
+          }
+
+          for (const filePath of sortedFiles) {
             const result = yield* pushFile(
               filePath,
               options.message ?? "Updated via confluence-to-markdown",
               spaceId,
-              pageIdMap
+              pageIdMap,
+              options.force ?? false
             ).pipe(
               Effect.catchIf(() => true, (error) =>
                 Effect.succeed({
@@ -1046,12 +1253,14 @@ export const layer: Layer.Layer<
         }
 
         if (options.dryRun) {
+          const preview = yield* previewAll(sortedFiles, options.force ?? false)
+          const deletions = (yield* git.branchExists("origin/confluence")) ? yield* pendingDeletions() : []
           return {
-            pushed: unpushedCommits.length,
-            created: 0,
+            pushed: preview.pushed,
+            created: preview.created,
             skipped: 0,
-            deleted: 0,
-            errors: []
+            deleted: deletions.length,
+            errors: preview.errors
           }
         }
 
@@ -1060,41 +1269,39 @@ export const layer: Layer.Layer<
         const revisionMessage = options.message ?? lastCommit.message
 
         // Find deleted files by comparing origin/confluence with current HEAD
-        // Note: Git repo is inside .confluence/, so paths are relative to that
-        // (e.g., "docs/page.md" not ".confluence/docs/page.md")
         const hasRemoteBranch = yield* git.branchExists("origin/confluence")
         if (hasRemoteBranch) {
-          const deletedFiles = yield* git.getDeletedFiles("origin/confluence", "HEAD", "docs")
-
           // Delete pages from Confluence
-          for (const deletedPath of deletedFiles) {
-            // Read the file from origin/confluence to get pageId
-            // deletedPath is already relative to git root (e.g., "docs/page.md")
-            const pageIdFromOrigin = yield* git.getFileContentAt(
-              "origin/confluence",
-              deletedPath
-            ).pipe(
-              Effect.map((content) => {
-                const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
-                return match ? match[1] : null
-              }),
-              Effect.catchIf(() => true, () => Effect.succeed(null))
+          for (const pending of yield* pendingDeletions()) {
+            yield* client.deletePage(PageId(pending.pageId)).pipe(
+              Effect.tap(() => Effect.sync(() => deleted++)),
+              // A replay is the normal case, not a failure. Deletions come
+              // from the origin/confluence↔HEAD diff, and that diff does not
+              // move until the whole push succeeds — so a push that deletes a
+              // page and then hits a refusal replays the deletion next time.
+              // Counting the resulting 404 as an error would wedge the
+              // workspace permanently: the branch could never advance, not
+              // even under --force, because the already-completed deletion
+              // would fail again on every attempt.
+              //
+              // It is still logged: a 404 also covers a deletion this run never
+              // performed — a stale pageId, a page moved out of the space — and
+              // that leaves the page live while the deletion drops out of the
+              // diff for good. Silence there reads as a completed delete.
+              Effect.catchIf(isPageAlreadyGone, () =>
+                Effect.logWarning(
+                  `Page ${pending.pageId} (${pending.path}) was already gone; treating the deletion as applied.`
+                )),
+              Effect.catchIf(() => true, (error) => {
+                errors.push(`Failed to delete page ${pending.pageId}: ${error.message}`)
+                return Effect.void
+              })
             )
-
-            if (pageIdFromOrigin) {
-              yield* client.deletePage(PageId(pageIdFromOrigin)).pipe(
-                Effect.tap(() => Effect.sync(() => deleted++)),
-                Effect.catchIf(() => true, (error) => {
-                  errors.push(`Failed to delete page ${pageIdFromOrigin}: ${error.message}`)
-                  return Effect.void
-                })
-              )
-            }
           }
         }
 
         for (const filePath of sortedFiles) {
-          const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap).pipe(
+          const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap, options.force ?? false).pipe(
             Effect.catchIf(() => true, (error) =>
               Effect.succeed({
                 pushed: false,
@@ -1113,8 +1320,11 @@ export const layer: Layer.Layer<
           Effect.catchIf(() => true, () => Effect.void)
         )
 
-        // Two-branch model: update origin/confluence to match HEAD
-        if (hasRemoteBranch) {
+        // Two-branch model: update origin/confluence to match HEAD.
+        // Only when every intended remote operation succeeded — advancing the
+        // branch after a failure would make findUnpushedCommits report nothing,
+        // so the refused file could never be retried (not even with --force).
+        if (hasRemoteBranch && errors.length === 0) {
           yield* git.updateBranch("origin/confluence", "HEAD")
         }
 

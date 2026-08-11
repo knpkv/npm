@@ -76,6 +76,14 @@ export class CodeCommitAccountIdentity extends Schema.Class<CodeCommitAccountIde
   arn: NonEmptyString
 }) {}
 
+/** Secret-free owning account identity for one CodeCommit repository. */
+export class CodeCommitRepositoryIdentity extends Schema.Class<CodeCommitRepositoryIdentity>(
+  "CodeCommitRepositoryIdentity"
+)({
+  accountId: NonEmptyString,
+  repositoryName: RepositoryName
+}) {}
+
 /** Immutable CodeCommit pull request revision and its exact base/head commits. */
 export class CodeCommitPullRequestRevision extends Schema.Class<CodeCommitPullRequestRevision>(
   "CodeCommitPullRequestRevision"

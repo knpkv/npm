@@ -143,6 +143,23 @@ export const makeApiError = (operation: string, profile: AwsProfileName, region:
  */
 export type AccountParams = Pick<Account, "profile" | "region">
 
+/** Applies the interrupting timeout only to operations whose outcome remains safely retryable. */
+export const applyAwsOperationTimeout = <A, E, R>(
+  operation: string,
+  account: AccountParams,
+  effect: Effect.Effect<A, E, R>,
+  timeout: Duration.Input | null
+): Effect.Effect<A, E | AwsApiError, R> =>
+  timeout === null
+    ? effect
+    : effect.pipe(
+      Effect.timeout(timeout),
+      Effect.catchTag(
+        "TimeoutError",
+        (cause) => Effect.fail(makeApiError(operation, account.profile, account.region, cause))
+      )
+    )
+
 /**
  * Shared combinator: acquire credentials → build Layer → provide → optional retry → timeout.
  * Eliminates boilerplate repeated across all AwsClient method files.
@@ -151,13 +168,17 @@ export const withAwsContext = <A, E>(
   operation: string,
   account: AccountParams,
   effect: Effect.Effect<A, E, AwsRuntimeEnv>,
-  options?: { readonly retry?: boolean; readonly timeout?: "stream" }
+  options?: { readonly retry?: boolean; readonly timeout?: "none" | "stream" }
 ): Effect.Effect<A, E | AwsCredentialError | AwsApiError, AwsClientConfig | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const config = yield* AwsClientConfig
     const httpClient = yield* HttpClient.HttpClient
     const credentials = yield* acquireCredentials(account.profile, account.region)
-    const timeout = options?.timeout === "stream" ? config.streamTimeout : config.operationTimeout
+    const timeout = options?.timeout === "none"
+      ? null
+      : options?.timeout === "stream"
+      ? config.streamTimeout
+      : config.operationTimeout
 
     const provided = Effect.provide(
       effect,
@@ -170,13 +191,7 @@ export const withAwsContext = <A, E>(
     )
     const attempted = options?.retry === false ? provided : throttleRetry(provided)
 
-    return yield* attempted.pipe(
-      Effect.timeout(timeout),
-      Effect.catchTag(
-        "TimeoutError",
-        (cause) => Effect.fail(makeApiError(operation, account.profile, account.region, cause))
-      )
-    )
+    return yield* applyAwsOperationTimeout(operation, account, attempted, timeout)
   })
 
 // ---------------------------------------------------------------------------

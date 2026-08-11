@@ -33,6 +33,10 @@
       "import": "./dist/IssueService.js",
       "types": "./dist/IssueService.d.ts"
     },
+    "./VersionService": {
+      "import": "./dist/VersionService.js",
+      "types": "./dist/VersionService.d.ts"
+    },
     "./AttachmentService": {
       "import": "./dist/AttachmentService.js",
       "types": "./dist/AttachmentService.d.ts"

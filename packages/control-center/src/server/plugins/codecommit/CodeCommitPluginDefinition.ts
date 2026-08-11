@@ -419,6 +419,12 @@ const CodeCommitActionPayload = Schema.Union([
 
 type CodeCommitActionPayload = typeof CodeCommitActionPayload.Type
 
+/** Review mutations governed by Control Center; TUI-only merge is intentionally excluded. */
+type GovernedCodeCommitReviewAction = Exclude<
+  ReviewClient.CodeCommitReviewAction,
+  { readonly _tag: "merge" }
+>
+
 const actionKinds: readonly [
   "request-review",
   "comment",
@@ -750,7 +756,7 @@ const actionFromPayload = (
   pullRequestId: Domain.PullRequestId,
   revisionId: string,
   payload: CodeCommitActionPayload
-): ReviewClient.CodeCommitReviewAction => {
+): GovernedCodeCommitReviewAction => {
   const target = {
     account,
     repositoryName,
@@ -796,7 +802,7 @@ const actionFromLocator = (
   account: ReadClient.CodeCommitReadAccount,
   repositoryName: Domain.RepositoryName,
   locator: ReconciliationLocator
-): ReviewClient.CodeCommitReviewAction => {
+): GovernedCodeCommitReviewAction => {
   const target = {
     account,
     repositoryName,
@@ -832,7 +838,7 @@ const actionFromLocator = (
 }
 
 const locatorForAction = (
-  action: ReviewClient.CodeCommitReviewAction
+  action: GovernedCodeCommitReviewAction
 ): PluginActionReconciliationKey =>
   encodeReconciliationLocator({
     actionKind: action._tag,
