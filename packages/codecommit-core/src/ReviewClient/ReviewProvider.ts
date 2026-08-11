@@ -112,7 +112,7 @@ const callAuthorizedMerge = <E>(
 ) => {
   const operation = mergeOperation(action.strategy)
   const request = makeMergePullRequestRequest(action)
-  const mapError = mapRawProviderError(operation, action.target)
+  const mapMergeError = mapRawProviderError(operation, action.target)
   const merge = (() => {
     switch (action.strategy) {
       case "fast-forward":
@@ -130,11 +130,13 @@ const callAuthorizedMerge = <E>(
     Effect.gen(function*() {
       const repositoryIdentity = yield* codecommit.getRepository({
         repositoryName: action.target.repositoryName
-      }).pipe(Effect.mapError(mapError))
+      }).pipe(Effect.mapError(mapRawProviderError("getRepository", action.target)))
       // STS is intentionally last: authorization immediately precedes the destructive call.
-      const callerIdentity = yield* sts.getCallerIdentity({}).pipe(Effect.mapError(mapError))
+      const callerIdentity = yield* sts.getCallerIdentity({}).pipe(
+        Effect.mapError(mapRawProviderError("getCallerIdentity", action.target))
+      )
       yield* authorize({ callerIdentity, repositoryIdentity })
-      return yield* merge.pipe(Effect.mapError(mapError))
+      return yield* merge.pipe(Effect.mapError(mapMergeError))
     }),
     { retry: false, timeout: "none" }
   )
