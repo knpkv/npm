@@ -160,8 +160,13 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
       const jobLocation = `${currentLocation}: job ${jobName}`
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
       const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
+      const implicitPullRequestTargetAuthority =
+        currentDocument === document &&
+        pullRequestTriggers.includes("pull_request_target") &&
+        effectivePermissions === undefined
       const credentialAuthority =
         authority.credentials ||
+        implicitPullRequestTargetAuthority ||
         job.secrets === "inherit" ||
         referencesPullRequestCredentials(inheritedSecretContext) ||
         grantsTokenWriteAuthority(effectivePermissions)
@@ -458,6 +463,8 @@ jobs:
   const safeRemoteReusableWorkflowCaller = parse(`
 on:
   pull_request_target:
+permissions:
+  contents: read
 jobs:
   metadata:
     uses: example/automation/.github/workflows/metadata.yml@${"b".repeat(40)}
@@ -583,6 +590,30 @@ jobs:
         with:
           ref: \${{ github.event.pull_request.head.sha }}
       - uses: ./attacker-controlled-action
+`)
+  const invalidHeadShaWithImplicitTokenAuthority = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeHeadShaWithReadOnlyToken = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: read
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
 `)
   const safeTrustedRefWithWriteTokenAuthority = parse(`
 on:
@@ -880,6 +911,13 @@ jobs:
     validateWorkflowSecretBoundaries(invalidHeadShaWithWriteTokenAuthority, "write-token authority fixture").length,
     1
   )
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidHeadShaWithImplicitTokenAuthority,
+      "implicit PR-target token authority fixture"
+    ).length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidMergeCommitSha, "merge commit SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidShellCheckout, "shell checkout fixture").length, 1)
@@ -947,6 +985,7 @@ jobs:
     validateWorkflowSecretBoundaries(safeTrustedRefWithWriteTokenAuthority, "trusted write-token fixture"),
     []
   )
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeHeadShaWithReadOnlyToken, "read-only token fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(
       validManualReusableWorkflowCaller,

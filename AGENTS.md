@@ -123,7 +123,9 @@ static indexed syntax, as attacker-controlled when the job can access repository
 credentials. Match the `head.repo` expression prefix so composed owner/name
 repository inputs cannot bypass the guard. Treat effective workflow/job
 `id-token: write`, any token permission with `write` access, and `write-all` as
-credential authority too;
+credential authority too. On `pull_request_target`, omitted effective
+permissions conservatively imply privileged token authority; an explicit
+read-only permission map remains non-authoritative;
 OIDC-bearing jobs must not checkout or build pull-request revisions. After an
 attacker-controlled checkout, conservatively treat every later `run`, local
 action, or external action step as capable of executing the workspace; a
@@ -154,7 +156,9 @@ Lifecycle polling, admission, and drain sequencing shared by multiple workers mu
 Sandbox startup must not report readiness while legacy unauthenticated
 containers may remain active; transient Docker unavailability and reconciliation
 failures must retry under the supervised startup lifecycle until shutdown is
-confirmed. A legacy row without a persisted container ID must discover every
+confirmed. When the database proves there are no legacy unauthenticated rows,
+Docker may remain unavailable without blocking web readiness and ordinary
+maintenance must retry in a supervised background loop. A legacy row without a persisted container ID must discover every
 container bearing its `codecommit.sandbox.id` label and block readiness until
 all discovered containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
 URL only after the authenticated listener layer has built successfully.

@@ -497,6 +497,11 @@ const makeSandboxService = Effect.gen(function*() {
         Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause).pipe(Effect.as(false)))
       ),
 
+    hasLegacyUnauthenticated: () =>
+      repo.findActive().pipe(
+        Effect.map((rows) => rows.some((row) => row.accessPassword === null))
+      ),
+
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>
       Effect.gen(function*() {
         const all = yield* repo.findAll()

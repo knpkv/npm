@@ -166,6 +166,7 @@ describe("background workers", () => {
         )
       const dependencies = Layer.mergeAll(
         Layer.mock(SandboxService.SandboxService, {
+          hasLegacyUnauthenticated: () => Effect.succeed(true),
           reconcile,
           gcIdle: () => Effect.void
         }),
@@ -198,6 +199,7 @@ describe("background workers", () => {
       const reconcileAttempts = yield* Ref.make(0)
       const dependencies = Layer.mergeAll(
         Layer.mock(SandboxService.SandboxService, {
+          hasLegacyUnauthenticated: () => Effect.succeed(true),
           reconcile: () =>
             Ref.update(reconcileAttempts, (attempt) => attempt + 1).pipe(
               Effect.andThen(Deferred.succeed(reconciled, undefined)),
@@ -235,11 +237,40 @@ describe("background workers", () => {
       expect(yield* Ref.get(reconcileAttempts)).toBe(1)
     }))
 
+  it.effect("reports readiness without Docker when no legacy sandbox requires shutdown", () =>
+    Effect.gen(function*() {
+      const availabilityChecked = yield* Deferred.make<void>()
+      const ready = yield* Deferred.make<void>()
+      const reconcileAttempts = yield* Ref.make(0)
+      const dependencies = Layer.mergeAll(
+        Layer.mock(SandboxService.SandboxService, {
+          hasLegacyUnauthenticated: () => Effect.succeed(false),
+          reconcile: () => Ref.update(reconcileAttempts, (attempt) => attempt + 1).pipe(Effect.as(true)),
+          gcIdle: () => Effect.void
+        }),
+        Layer.mock(SandboxService.DockerService, {
+          isAvailable: () => Deferred.succeed(availabilityChecked, undefined).pipe(Effect.as(false))
+        })
+      )
+
+      const startup = Deferred.succeed(ready, undefined).pipe(
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+      )
+      const fiber = yield* Effect.forkChild(startup)
+
+      yield* Deferred.await(availabilityChecked)
+      yield* Deferred.await(ready)
+      yield* Fiber.join(fiber)
+
+      expect(yield* Ref.get(reconcileAttempts)).toBe(0)
+    }))
+
   it.effect("reports startup readiness after one successful sandbox reconciliation", () =>
     Effect.gen(function*() {
       const attempts = yield* Ref.make(0)
       const dependencies = Layer.mergeAll(
         Layer.mock(SandboxService.SandboxService, {
+          hasLegacyUnauthenticated: () => Effect.succeed(true),
           reconcile: () => Ref.update(attempts, (attempt) => attempt + 1).pipe(Effect.as(true)),
           gcIdle: () => Effect.void
         }),
@@ -278,6 +309,7 @@ describe("background workers", () => {
         )
       const dependencies = Layer.mergeAll(
         Layer.mock(SandboxService.SandboxService, {
+          hasLegacyUnauthenticated: () => Effect.succeed(false),
           reconcile: () => Effect.succeed(true),
           gcIdle
         }),

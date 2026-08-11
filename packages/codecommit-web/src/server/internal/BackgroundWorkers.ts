@@ -65,22 +65,37 @@ export const sandboxStartupLayer = Layer.effectDiscard(
   Effect.gen(function*() {
     const sandboxService = yield* SandboxService.SandboxService
     const docker = yield* SandboxService.DockerService
-    let available = false
-    while (!available) {
-      available = yield* docker.isAvailable()
-      if (!available) {
-        yield* Effect.logWarning("Docker not available — waiting before sandbox reconciliation")
-        yield* Effect.sleep(Duration.seconds(1))
+    const dockerAvailable = () => docker.isAvailable().pipe(Effect.catch(() => Effect.succeed(false)))
+    const hasLegacyUnauthenticated = yield* sandboxService.hasLegacyUnauthenticated()
+    if (hasLegacyUnauthenticated) {
+      let available = false
+      while (!available) {
+        available = yield* dockerAvailable()
+        if (!available) {
+          yield* Effect.logWarning("Docker not available — waiting before legacy sandbox reconciliation")
+          yield* Effect.sleep(Duration.seconds(1))
+        }
       }
-    }
-    let reconciled = false
-    while (!reconciled) {
-      reconciled = yield* sandboxService.reconcile()
-      if (!reconciled) {
-        yield* Effect.sleep(Duration.seconds(1))
+      let reconciled = false
+      while (!reconciled) {
+        reconciled = yield* sandboxService.reconcile()
+        if (!reconciled) {
+          yield* Effect.sleep(Duration.seconds(1))
+        }
       }
+    } else if (yield* dockerAvailable()) {
+      yield* sandboxService.reconcile()
+    } else {
+      yield* Effect.logWarning("Docker not available — sandbox maintenance deferred")
     }
     yield* Effect.logInfo("Sandbox service ready")
+
+    const reconciliationPass = Effect.gen(function*() {
+      yield* Effect.sleep(Duration.minutes(1))
+      if (yield* dockerAvailable()) {
+        yield* sandboxService.reconcile()
+      }
+    }).pipe(continueAfterNonInterruptFailure("Sandbox reconciliation failed"))
 
     const gcPass = Effect.gen(function*() {
       yield* Effect.sleep(Duration.minutes(5))
@@ -89,6 +104,7 @@ export const sandboxStartupLayer = Layer.effectDiscard(
       continueAfterNonInterruptFailure("Sandbox GC failed")
     )
 
+    yield* Effect.forkScoped(Effect.forever(reconciliationPass))
     yield* Effect.forkScoped(Effect.forever(gcPass))
   })
 )
