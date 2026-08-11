@@ -285,9 +285,9 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
 
-The provider-facing callback URL remains `localhost` for compatibility with
-existing Atlassian app registrations, while the callback listener binds
-explicitly to `127.0.0.1`. Requests with a missing
+The provider-facing callback URL and callback listener both use `localhost`, so
+the browser and listener select the same loopback family on IPv4-only and
+IPv6-only hosts. Requests with a missing
 or mismatched OAuth state are rejected without consuming the pending login, so
 only the provider callback carrying the expected state can complete or fail it.
 

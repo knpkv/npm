@@ -161,6 +161,62 @@ const shellWords = (command) => {
   if (word.length > 0) words.push(word)
   return words
 }
+const shellCommandSegments = (source) => {
+  const expressionSpans = new Map(actionsExpressionSpansIn(source).map((span) => [span.start, span]))
+  const commands = []
+  let command = ""
+  let quote
+  let cursor = 0
+  const finishCommand = () => {
+    const trimmed = command.trim()
+    if (trimmed.length > 0) commands.push(trimmed)
+    command = ""
+  }
+  while (cursor < source.length) {
+    const expression = expressionSpans.get(cursor)
+    if (expression !== undefined) {
+      command += source.slice(expression.start, expression.end)
+      cursor = expression.end
+      continue
+    }
+    const character = source[cursor]
+    if (quote !== undefined) {
+      command += character
+      if (character === "\\" && cursor + 1 < source.length) {
+        cursor += 1
+        command += source[cursor]
+      } else if (character === quote) {
+        quote = undefined
+      }
+      cursor += 1
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      command += character
+      cursor += 1
+      continue
+    }
+    if (character === "\\" && cursor + 1 < source.length) {
+      command += character
+      cursor += 1
+      command += source[cursor]
+      cursor += 1
+      continue
+    }
+    if (character === "\n" || character === ";" || character === "&" || character === "|") {
+      finishCommand()
+      const separator = character
+      cursor += 1
+      if ((separator === "&" || separator === "|") && source[cursor] === separator) cursor += 1
+      continue
+    }
+    command += character
+    cursor += 1
+  }
+  finishCommand()
+  return commands
+}
 const gitGlobalOptionsWithValues = new Set([
   "-C",
   "-c",
@@ -215,9 +271,12 @@ const revisionOperand = (subcommand, operands) => {
 const shellGitCommands = (source) => {
   const commands = []
   const normalized = source.replace(/\\\r?\n/gu, " ")
-  for (const match of normalized.matchAll(/\bgit\b([^\n;&|]*)/giu)) {
-    const words = shellWords(`git${match[1]}`)
-    const subcommand = gitSubcommand(words)
+  for (const command of shellCommandSegments(normalized)) {
+    const words = shellWords(command)
+    let executableIndex = 0
+    while (/^[A-Z_][A-Z0-9_]*=/iu.test(words[executableIndex] ?? "")) executableIndex += 1
+    if (!["git", "'git'", '"git"'].includes(words[executableIndex] ?? "")) continue
+    const subcommand = gitSubcommand(words.slice(executableIndex))
     if (subcommand !== undefined) commands.push(subcommand)
   }
   return commands
@@ -866,6 +925,16 @@ jobs:
           echo \${{ format('{1}', '}}', github.event.pull_request.head.sha) }}
           git checkout refs/heads/main
 `)
+  const safeLoggedGitCheckoutCommand = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    env:
+      JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+    steps:
+      - run: echo "git checkout \${{ github.event.pull_request.head.sha }}"
+`)
   const safeTrustedRef = parse(`
 on:
   pull_request:
@@ -1180,6 +1249,7 @@ jobs:
     ),
     []
   )
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeLoggedGitCheckoutCommand, "logged git command fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(
       safeReusableWorkflowCaller,

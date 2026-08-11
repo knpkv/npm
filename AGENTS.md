@@ -143,11 +143,13 @@ Treat mechanically recognizable `git checkout`, `git switch`, and
 `git reset --hard` commands that reference pull-request head/ref or merge
 expressions in their parsed revision operand as attacker-controlled worktree
 transitions. Account for value-taking global Git options such as `-C` and `-c`;
-metadata-only logging of the same expressions must remain allowed.
+only parse `git` in a simple shell executable position, and keep metadata-only
+logging of expressions or complete Git command text allowed.
 Manual local reusable-workflow calls using `secrets: inherit` require the same
 main-ref condition and protected environment as direct long-lived secret use.
-Workflow action-pin validation must traverse every reachable repository-local
-action manifest, regardless of its directory, reject missing or cyclic local
+Workflow action-pin validation must distinguish job-level reusable workflows
+from step-level local actions using YAML context rather than path suffix, and
+traverse every reachable repository-local action manifest, regardless of its directory, reject missing or cyclic local
 action references, and apply immutable external-reference rules transitively;
 Docker action `runs.image` references must use a digest, while a local
 `Dockerfile` remains subject to explicit base-image review.

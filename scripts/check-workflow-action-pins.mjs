@@ -11,16 +11,27 @@ import { parse } from "yaml"
 const fullCommitSha = /^[0-9a-f]{40}$/u
 const dockerDigest = /@sha256:[0-9a-f]{64}$/u
 
-const collectUses = (value, location, results = []) => {
+const collectUses = (value, location, results = [], kind) => {
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectUses(entry, `${location}[${index}]`, results))
+    value.forEach((entry, index) => collectUses(entry, `${location}[${index}]`, results, kind))
     return results
   }
   if (value === null || typeof value !== "object") return results
+  if (typeof value.uses === "string") {
+    results.push({ location: `${location}.uses`, uses: value.uses, step: value, kind })
+  }
   for (const [key, entry] of Object.entries(value)) {
     const entryLocation = `${location}.${key}`
-    if (key === "uses" && typeof entry === "string") {
-      results.push({ location: entryLocation, uses: entry, step: value })
+    if (key === "uses") continue
+    if (key === "jobs" && entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+      for (const [jobName, job] of Object.entries(entry)) {
+        collectUses(job, `${entryLocation}.${jobName}`, results, "job")
+      }
+      continue
+    }
+    if (key === "steps" && Array.isArray(entry)) {
+      entry.forEach((step, index) => collectUses(step, `${entryLocation}[${index}]`, results, "step"))
+      continue
     }
     collectUses(entry, entryLocation, results)
   }
@@ -55,7 +66,7 @@ export const validateWorkflowActionPins = (document, location, localActions = ne
           continue
         }
         const localPath = entry.uses.slice(2).replace(/\/+$/u, "")
-        if (/\.ya?ml$/u.test(localPath)) continue
+        if (entry.kind === "job" && /\.ya?ml$/u.test(localPath)) continue
         if (stack.has(localPath)) {
           diagnostics.push(`${entry.location}: cyclic local action reference to ${entry.uses}`)
           continue
@@ -162,6 +173,17 @@ runs:
   steps:
     - uses: third-party/build@v1
 `)
+  const invalidYamlDirectoryActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/build.yml
+`)
+  const validLocalReusableWorkflowCaller = parse(`
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+`)
   const validLocalActionCaller = parse(`
 jobs:
   build:
@@ -239,6 +261,18 @@ runs:
       new Map([["ci/build", { document: invalidLocalAction, location: "ci/build/action.yml" }]])
     ).length,
     1
+  )
+  assert.equal(
+    validateWorkflowActionPins(
+      invalidYamlDirectoryActionCaller,
+      "invalid YAML-directory local action caller",
+      new Map([["ci/build.yml", { document: invalidLocalAction, location: "ci/build.yml/action.yml" }]])
+    ).length,
+    1
+  )
+  assert.deepEqual(
+    validateWorkflowActionPins(validLocalReusableWorkflowCaller, "valid local reusable workflow caller"),
+    []
   )
   assert.deepEqual(
     validateWorkflowActionPins(

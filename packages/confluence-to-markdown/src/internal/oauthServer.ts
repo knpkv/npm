@@ -32,12 +32,12 @@ export interface HttpServerFactory {
 }
 
 export interface CallbackServerListenOptions {
-  readonly host: "127.0.0.1"
+  readonly host: "localhost"
   readonly port: number
 }
 
 export const callbackServerListenOptions = (port: number): CallbackServerListenOptions => ({
-  host: "127.0.0.1",
+  host: "localhost",
   port
 })
 

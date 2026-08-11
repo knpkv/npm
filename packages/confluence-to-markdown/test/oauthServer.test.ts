@@ -28,15 +28,20 @@ const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
 
 describe("oauthServer", () => {
   describe("startCallbackServer", () => {
-    it.effect("binds to IPv4 loopback while preserving the registered callback URL", () =>
+    it.effect("binds the same localhost name advertised by the callback URL", () =>
       Effect.scoped(
         Effect.gen(function*() {
+          const listenOptions = callbackServerListenOptions(0)
           const factory = yield* HttpServerFactoryTag
           const server = yield* HttpServer.HttpServer.pipe(
-            Effect.provide(factory.createServerLayer(callbackServerListenOptions(0)))
+            Effect.provide(factory.createServerLayer(listenOptions))
           )
-          expect(server.address).toMatchObject({ _tag: "TcpAddress", hostname: "127.0.0.1" })
-          expect(callbackUrl(8585)).toBe("http://localhost:8585/callback")
+          const advertisedUrl = new URL(callbackUrl(8585))
+          const ipv6OnlyLocalhost = (hostname: string) => (hostname === "localhost" ? "::1" : undefined)
+          expect(server.address._tag).toBe("TcpAddress")
+          expect(listenOptions.host).toBe(advertisedUrl.hostname)
+          expect(ipv6OnlyLocalhost(listenOptions.host)).toBe("::1")
+          expect(ipv6OnlyLocalhost(advertisedUrl.hostname)).toBe("::1")
         }).pipe(Effect.provide(HttpServerFactoryLive))
       ))
 
