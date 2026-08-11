@@ -30,6 +30,10 @@ const collectUses = (value, location, results = []) => {
 export const validateWorkflowActionPins = (document, location, localActions = new Map()) => {
   const diagnostics = []
   const visit = (currentDocument, currentLocation, stack) => {
+    const dockerImage = currentDocument?.runs?.using === "docker" ? currentDocument.runs.image : undefined
+    if (typeof dockerImage === "string" && dockerImage.startsWith("docker://") && !dockerDigest.test(dockerImage)) {
+      diagnostics.push(`${currentLocation}.runs.image: Docker actions must use an immutable sha256 digest`)
+    }
     for (const entry of collectUses(currentDocument, currentLocation)) {
       if (entry.uses.startsWith("./")) {
         if (entry.uses.includes("${{")) {
@@ -143,6 +147,39 @@ runs:
   steps:
     - uses: ./ci/cycle-a
 `)
+  const invalidDockerActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/docker-build
+`)
+  const invalidDockerAction = parse(`
+runs:
+  using: docker
+  image: docker://owner/image:latest
+`)
+  const validDigestDockerActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/digest-build
+`)
+  const validDigestDockerAction = parse(`
+runs:
+  using: docker
+  image: docker://owner/image@sha256:${"d".repeat(64)}
+`)
+  const validDockerfileActionCaller = parse(`
+jobs:
+  build:
+    steps:
+      - uses: ./ci/dockerfile-build
+`)
+  const validDockerfileAction = parse(`
+runs:
+  using: docker
+  image: Dockerfile
+`)
   assert.equal(validateWorkflowActionPins(invalid, "invalid fixture").length, 2)
   assert.equal(validateWorkflowActionPins(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.deepEqual(validateWorkflowActionPins(valid, "valid fixture"), [])
@@ -173,6 +210,32 @@ runs:
       ])
     ).length,
     1
+  )
+  assert.equal(
+    validateWorkflowActionPins(
+      invalidDockerActionCaller,
+      "invalid Docker action caller",
+      new Map([["ci/docker-build", { document: invalidDockerAction, location: "ci/docker-build/action.yml" }]])
+    ).length,
+    1
+  )
+  assert.deepEqual(
+    validateWorkflowActionPins(
+      validDigestDockerActionCaller,
+      "digest Docker action caller",
+      new Map([["ci/digest-build", { document: validDigestDockerAction, location: "ci/digest-build/action.yml" }]])
+    ),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowActionPins(
+      validDockerfileActionCaller,
+      "Dockerfile action caller",
+      new Map([
+        ["ci/dockerfile-build", { document: validDockerfileAction, location: "ci/dockerfile-build/action.yml" }]
+      ])
+    ),
+    []
   )
 }
 

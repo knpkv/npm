@@ -70,7 +70,13 @@ export const sandboxStartupLayer = Layer.effectDiscard(
       yield* Effect.logWarning("Docker not available — sandbox feature disabled")
       return
     }
-    yield* sandboxService.reconcile()
+    let reconciled = false
+    while (!reconciled) {
+      reconciled = yield* sandboxService.reconcile()
+      if (!reconciled) {
+        yield* Effect.sleep(Duration.seconds(1))
+      }
+    }
     yield* Effect.logInfo("Sandbox service ready")
 
     const gcPass = Effect.gen(function*() {

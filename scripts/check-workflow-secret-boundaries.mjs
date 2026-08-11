@@ -78,6 +78,11 @@ const grantsOidcAuthority = (permissions) => {
       name.toLowerCase() === "id-token" && typeof access === "string" && access.toLowerCase() === "write"
   )
 }
+const grantsTokenWriteAuthority = (permissions) => {
+  if (typeof permissions === "string") return permissions.toLowerCase() === "write-all"
+  if (permissions === null || typeof permissions !== "object") return false
+  return Object.values(permissions).some((access) => typeof access === "string" && access.toLowerCase() === "write")
+}
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
   typeof value === "string" &&
@@ -148,7 +153,10 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
       const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
       const credentialAuthority =
-        authority.credentials || job.secrets === "inherit" || referencesPullRequestCredentials(inheritedSecretContext)
+        authority.credentials ||
+        job.secrets === "inherit" ||
+        referencesPullRequestCredentials(inheritedSecretContext) ||
+        grantsTokenWriteAuthority(effectivePermissions)
       const oidcAuthority = authority.oidc || grantsOidcAuthority(effectivePermissions)
       const executesPullRequestCode = pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger))
       const checksOutPullRequestCode = pullRequestTriggers.some((trigger) => checksOutPullRequestRevision(job, trigger))
@@ -175,7 +183,11 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
         }
       }
 
-      if (currentDocument === document && manuallyTriggered && referencesLongLivedSecrets(inheritedSecretContext)) {
+      if (
+        currentDocument === document &&
+        manuallyTriggered &&
+        (job.secrets === "inherit" || referencesLongLivedSecrets(inheritedSecretContext))
+      ) {
         if (!pinsMain(job.if)) {
           diagnostics.push(`${jobLocation} must pin credentialed manual runs to refs/heads/main`)
         }
@@ -528,6 +540,32 @@ jobs:
         env:
           GH_TOKEN: \${{ github['token'] }}
 `)
+  const invalidHeadShaWithWriteTokenAuthority = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: write
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - uses: ./attacker-controlled-action
+`)
+  const safeTrustedRefWithWriteTokenAuthority = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: write
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: refs/heads/main
+      - uses: ./trusted-action
+`)
   const invalidMergeCommitSha = parse(`
 on:
   pull_request_target:
@@ -625,6 +663,34 @@ jobs:
       - run: pnpm test:integration
         env:
           SECRET: \${{ secrets[inputs.secret_name] }}
+`)
+  const invalidManualReusableWorkflowCaller = parse(`
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    uses: ./.github/workflows/reusable-deploy.yml
+    secrets: inherit
+`)
+  const validManualReusableWorkflowCaller = parse(`
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    uses: ./.github/workflows/reusable-deploy.yml
+    secrets: inherit
+`)
+  const manualReusableWorkflowCallee = parse(`
+on:
+  workflow_call:
+jobs:
+  deploy:
+    steps:
+      - run: ./deploy
+        env:
+          DEPLOY_TOKEN: \${{ secrets.DEPLOY_TOKEN }}
 `)
   const safeIndexedGithubToken = parse(`
 on:
@@ -749,6 +815,10 @@ jobs:
     1
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidHeadShaWithGithubToken, "GitHub token fixture").length, 1)
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidHeadShaWithWriteTokenAuthority, "write-token authority fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidMergeCommitSha, "merge commit SHA fixture").length, 1)
   assert.equal(validateWorkflowSecretBoundaries(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.equal(
@@ -756,6 +826,19 @@ jobs:
     2
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidManualDynamicSecret, "manual dynamic secret fixture").length, 2)
+  assert.equal(
+    validateWorkflowSecretBoundaries(
+      invalidManualReusableWorkflowCaller,
+      ".github/workflows/invalid-manual-reusable-caller.yml",
+      new Map([
+        [
+          ".github/workflows/reusable-deploy.yml",
+          { document: manualReusableWorkflowCallee, location: ".github/workflows/reusable-deploy.yml" }
+        ]
+      ])
+    ).length,
+    2
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidDisjunctiveMain, "disjunctive main fixture").length, 1)
   assert.deepEqual(validateWorkflowSecretBoundaries(prMock, "PR mock fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(safeCredentialOnlyOidcJob, "credential-only OIDC fixture"), [])
@@ -790,6 +873,23 @@ jobs:
   assert.deepEqual(validateWorkflowSecretBoundaries(safePullRequestTargetSha, "pull request target SHA fixture"), [])
   assert.deepEqual(
     validateWorkflowSecretBoundaries(safePullRequestTargetShaWithGithubToken, "trusted GitHub token fixture"),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(safeTrustedRefWithWriteTokenAuthority, "trusted write-token fixture"),
+    []
+  )
+  assert.deepEqual(
+    validateWorkflowSecretBoundaries(
+      validManualReusableWorkflowCaller,
+      ".github/workflows/valid-manual-reusable-caller.yml",
+      new Map([
+        [
+          ".github/workflows/reusable-deploy.yml",
+          { document: manualReusableWorkflowCallee, location: ".github/workflows/reusable-deploy.yml" }
+        ]
+      ])
+    ),
     []
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeIndexedGithubToken, "indexed GitHub token fixture"), [])

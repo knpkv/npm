@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, PRService, SandboxService } from "@knpkv/codecommit-core"
 import type { Duration } from "effect"
-import { Deferred, Effect, Layer, Ref } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { autoRefreshLayer, sandboxStartupLayer } from "../src/server/internal/BackgroundWorkers.js"
 
@@ -150,6 +150,66 @@ describe("background workers", () => {
       expect(yield* Ref.get(refreshAttempts)).toBe(2)
     }))
 
+  it.effect("waits for legacy sandbox reconciliation before reporting startup readiness", () =>
+    Effect.gen(function*() {
+      const firstAttempt = yield* Deferred.make<void>()
+      const secondAttempt = yield* Deferred.make<void>()
+      const ready = yield* Deferred.make<void>()
+      const attempts = yield* Ref.make(0)
+      const reconcile = () =>
+        Ref.getAndUpdate(attempts, (attempt) => attempt + 1).pipe(
+          Effect.flatMap((attempt) =>
+            Deferred.succeed(attempt === 0 ? firstAttempt : secondAttempt, undefined).pipe(
+              Effect.as(attempt > 0)
+            )
+          )
+        )
+      const dependencies = Layer.mergeAll(
+        Layer.mock(SandboxService.SandboxService, {
+          reconcile,
+          gcIdle: () => Effect.void
+        }),
+        Layer.mock(SandboxService.DockerService, {
+          isAvailable: () => Effect.succeed(true)
+        })
+      )
+      const startup = Deferred.succeed(ready, undefined).pipe(
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+      )
+      const fiber = yield* Effect.forkChild(startup)
+
+      yield* Deferred.await(firstAttempt)
+      expect(yield* Deferred.isDone(ready)).toBe(false)
+      yield* advanceClockUntil(secondAttempt, "1 second", 3)
+      yield* Deferred.await(secondAttempt)
+      yield* Deferred.await(ready)
+      yield* Fiber.join(fiber)
+
+      expect(yield* Ref.get(attempts)).toBe(2)
+    }))
+
+  it.effect("reports startup readiness after one successful sandbox reconciliation", () =>
+    Effect.gen(function*() {
+      const attempts = yield* Ref.make(0)
+      const dependencies = Layer.mergeAll(
+        Layer.mock(SandboxService.SandboxService, {
+          reconcile: () => Ref.update(attempts, (attempt) => attempt + 1).pipe(Effect.as(true)),
+          gcIdle: () => Effect.void
+        }),
+        Layer.mock(SandboxService.DockerService, {
+          isAvailable: () => Effect.succeed(true)
+        })
+      )
+
+      yield* Effect.scoped(
+        Effect.void.pipe(
+          Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+        )
+      )
+
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }))
+
   it.effect("supervises the actual sandbox GC worker and interrupts it with the layer", () =>
     Effect.gen(function*() {
       const firstPass = yield* Deferred.make<void>()
@@ -171,7 +231,7 @@ describe("background workers", () => {
         )
       const dependencies = Layer.mergeAll(
         Layer.mock(SandboxService.SandboxService, {
-          reconcile: () => Effect.void,
+          reconcile: () => Effect.succeed(true),
           gcIdle
         }),
         Layer.mock(SandboxService.DockerService, {

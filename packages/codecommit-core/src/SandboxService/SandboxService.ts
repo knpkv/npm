@@ -485,7 +485,10 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Effect.logInfo(`Reconciled orphaned sandbox ${row.id}`)
             }
           }), { discard: true })
-      }).pipe(Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause))),
+      }).pipe(
+        Effect.as(true),
+        Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause).pipe(Effect.as(false)))
+      ),
 
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>
       Effect.gen(function*() {

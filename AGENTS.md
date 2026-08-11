@@ -122,7 +122,8 @@ revision, including `head.sha`, `head.ref`, `github.head_ref`, and
 static indexed syntax, as attacker-controlled when the job can access repository
 credentials. Match the `head.repo` expression prefix so composed owner/name
 repository inputs cannot bypass the guard. Treat effective workflow/job
-`id-token: write` and `write-all` permissions as credential authority too;
+`id-token: write`, any token permission with `write` access, and `write-all` as
+credential authority too;
 OIDC-bearing jobs must not checkout or build pull-request revisions. After an
 attacker-controlled checkout, conservatively treat every later `run`, local
 action, or external action step as capable of executing the workspace; a
@@ -133,14 +134,21 @@ transitively, including `secrets: inherit`; reject cycles and missing local
 callees, while remote or dynamically constructed reusable-workflow references
 still require explicit review. Parse `${{ ... }}` delimiters without treating
 `}}` inside quoted GitHub expression strings as the end of the expression.
+Manual local reusable-workflow calls using `secrets: inherit` require the same
+main-ref condition and protected environment as direct long-lived secret use.
 Workflow action-pin validation must traverse every reachable repository-local
 action manifest, regardless of its directory, reject missing or cyclic local
-action references, and apply immutable external-reference rules transitively.
+action references, and apply immutable external-reference rules transitively;
+Docker action `runs.image` references must use a digest, while a local
+`Dockerfile` remains subject to explicit base-image review.
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
 Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
 Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
+Sandbox startup must not report readiness while legacy unauthenticated
+containers remain active; transient reconciliation failures must retry under the
+supervised startup lifecycle until shutdown is confirmed.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
