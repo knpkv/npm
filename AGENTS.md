@@ -147,8 +147,10 @@ External-resource tests must register scope cleanup immediately after successful
 Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
 Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
 Sandbox startup must not report readiness while legacy unauthenticated
-containers remain active; transient reconciliation failures must retry under the
-supervised startup lifecycle until shutdown is confirmed.
+containers may remain active; transient Docker unavailability and reconciliation
+failures must retry under the supervised startup lifecycle until shutdown is
+confirmed. Activate the owner bootstrap token's expiry and advertise or open its
+URL only after the authenticated listener layer has built successfully.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 

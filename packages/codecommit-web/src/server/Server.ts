@@ -15,7 +15,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Effect, Layer, Option, Predicate, Ref, Stream } from "effect"
+import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
@@ -44,6 +44,7 @@ import {
 import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
 import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
 import {
+  activateOwnerSessionBootstrap,
   makeOwnerSessionSecrets,
   ownerSessionAuthLayer,
   OwnerSessionBootstrapRouter,
@@ -302,6 +303,7 @@ const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.lay
 export interface CodeCommitServerOptions {
   readonly hostname?: string
   readonly port: number
+  readonly ready?: Deferred.Deferred<void>
   readonly security: OwnerSessionSecretsShape
 }
 
@@ -309,15 +311,26 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   const hostname = options.hostname ?? "127.0.0.1"
   return Layer.unwrap(
     requireLoopbackHostname(hostname).pipe(
-      Effect.map(() =>
-        HttpRouter.serve(AllRoutes).pipe(
+      Effect.map(() => {
+        const server = HttpRouter.serve(AllRoutes).pipe(
           // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
           Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
           Layer.provide(Etag.layer),
           Layer.provide(HttpPlatformLive),
           Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security))
         )
-      )
+        return server.pipe(
+          Layer.tap(() =>
+            activateOwnerSessionBootstrap(options.security).pipe(
+              Effect.andThen(
+                options.ready === undefined
+                  ? Effect.void
+                  : Deferred.succeed(options.ready, undefined)
+              )
+            )
+          )
+        )
+      })
     )
   )
 }
@@ -357,15 +370,20 @@ export const CodeCommitServerLive = Effect.gen(function*() {
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSessionSecrets()
+      const ready = yield* Deferred.make<void>()
       const directOrigin = ownerSessionOrigin("127.0.0.1", p)
       const publicOrigin = yield* requireLoopbackOrigin(
         Option.getOrElse(publicOriginOverride, () => directOrigin)
       )
-      yield* Effect.logInfo(`Starting authenticated server at ${ownerSessionOrigin("127.0.0.1", p)}`)
+      const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+      yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
       yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
         Stream.run(stdio.stdout())
       )
-      return yield* Layer.launch(makeCodeCommitServer(p, security))
+      return yield* Fiber.join(serverFiber)
     }).pipe(updatePortOnConflict(portRef, retriesRef))
   )
 })

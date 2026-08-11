@@ -11,7 +11,7 @@ import {
   ownerSessionUrl,
   requireLoopbackHostname
 } from "@knpkv/codecommit-web"
-import { Console, Effect, Layer, Schema, Stream } from "effect"
+import { Console, Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
@@ -44,9 +44,14 @@ const web = Command.make("web", {
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
     const security = yield* makeOwnerSessionSecrets()
+    const ready = yield* Deferred.make<void>()
     const url = ownerSessionUrl(hostname, port, security)
     const stdio = yield* Stdio.Stdio
-    yield* Effect.logInfo(`Starting authenticated web server at ${ownerSessionOrigin(hostname, port)}`)
+    const serverFiber = yield* Layer.launch(makeServer({ port, hostname, ready, security })).pipe(
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+    yield* Effect.logInfo(`Authenticated web server ready at ${ownerSessionOrigin(hostname, port)}`)
     yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
 
     // Open browser
@@ -61,8 +66,8 @@ const web = Command.make("web", {
       Effect.catchIf(() => true, () => Effect.void)
     )
 
-    // Run server with configured port/hostname
-    return yield* Layer.launch(makeServer({ port, hostname, security }))
+    // Keep the supervised server alive after readiness and bootstrap handoff.
+    return yield* Fiber.join(serverFiber)
   }))
 
 // PR Create Command

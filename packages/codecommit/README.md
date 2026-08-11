@@ -239,6 +239,9 @@ Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
 fragment contains a short-lived, single-use bootstrap token. The token is
 exchanged for an HttpOnly SameSite cookie and a separate CSRF proof, then removed
 from the address bar; the process-scoped owner secret never enters the URL.
+The token's 60-second lifetime begins only after the authenticated listener is
+ready, including Docker availability and legacy sandbox reconciliation; the URL
+is printed and opened only after that readiness boundary.
 Every `/api/**` route requires the cookie, and mutations additionally require
 the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.

@@ -65,10 +65,13 @@ export const sandboxStartupLayer = Layer.effectDiscard(
   Effect.gen(function*() {
     const sandboxService = yield* SandboxService.SandboxService
     const docker = yield* SandboxService.DockerService
-    const available = yield* docker.isAvailable()
-    if (!available) {
-      yield* Effect.logWarning("Docker not available — sandbox feature disabled")
-      return
+    let available = false
+    while (!available) {
+      available = yield* docker.isAvailable()
+      if (!available) {
+        yield* Effect.logWarning("Docker not available — waiting before sandbox reconciliation")
+        yield* Effect.sleep(Duration.seconds(1))
+      }
     }
     let reconciled = false
     while (!reconciled) {

@@ -393,7 +393,8 @@ Every handler maps domain errors to `ApiError` for consistent HTTP error respons
 1. **Owner session** — Startup creates a short-lived, single-use bootstrap URL that contains neither
    the owner secret nor the CSRF proof. The exchange returns the CSRF proof and installs the `HttpOnly`
    owner cookie. Every API route requires that cookie, and mutations additionally require the
-   same-origin CSRF header. Development advertises the Vite origin and proxies bootstrap/API requests
+   same-origin CSRF header. Its 60-second lifetime starts only after the authenticated listener is
+   ready, and the URL is advertised only after that point. Development advertises the Vite origin and proxies bootstrap/API requests
    with the backend origin. Sandbox iframes use the alternate loopback hostname so the host-only owner
    cookie cannot cross to a sandbox port.
 2. **Static files vs API** — Static middleware runs first; API router handles `/api/*`. Order matters.

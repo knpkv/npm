@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Redacted, Ref, Result } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
+  activateOwnerSessionBootstrap,
   authorizeBootstrapRequest,
   authorizeOwnerRequest,
   ownerSessionCookie,
@@ -14,13 +16,13 @@ import {
 } from "../src/server/internal/OwnerSessionSecurity.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
-  function*(): Effect.fn.Return<OwnerSessionSecretsShape> {
+  function*(active = true): Effect.fn.Return<OwnerSessionSecretsShape> {
     return {
       ownerToken: Redacted.make("owner-secret"),
       csrfToken: Redacted.make("csrf-secret"),
       bootstrapToken: Redacted.make("bootstrap-secret"),
       bootstrapAvailable: yield* Ref.make(true),
-      bootstrapExpiresAtMillis: Number.MAX_SAFE_INTEGER
+      bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(active ? Number.MAX_SAFE_INTEGER : undefined)
     }
   }
 )
@@ -123,6 +125,36 @@ describe("CodeCommit web security boundary", () => {
       expect(cookie).toContain("HttpOnly")
       expect(cookie).toContain("Path=/api")
       expect(cookie).not.toContain("Domain=")
+    }))
+
+  it.effect("starts bootstrap expiry only after server readiness", () =>
+    Effect.gen(function*() {
+      const delayed = yield* makeSecrets(false)
+      yield* TestClock.adjust("61 seconds")
+      const inactive = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, delayed))
+      expect(Result.isFailure(inactive)).toBe(true)
+
+      yield* activateOwnerSessionBootstrap(delayed)
+      yield* authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, delayed)
+
+      const expired = yield* makeSecrets(false)
+      yield* activateOwnerSessionBootstrap(expired)
+      yield* TestClock.adjust("61 seconds")
+      const afterLifetime = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: "Bearer bootstrap-secret",
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000"
+      }, expired))
+      expect(Result.isFailure(afterLifetime)).toBe(true)
+      if (Result.isFailure(afterLifetime)) expect(afterLifetime.failure._tag).toBe("UnauthorizedApiError")
     }))
 
   it.effect("allows loopback listeners and rejects peer-facing hostnames", () =>

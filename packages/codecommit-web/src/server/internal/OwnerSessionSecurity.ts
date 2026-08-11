@@ -4,7 +4,7 @@ import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Ap
 
 export interface OwnerSessionSecretsShape {
   readonly bootstrapAvailable: Ref.Ref<boolean>
-  readonly bootstrapExpiresAtMillis: number
+  readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
   readonly bootstrapToken: Redacted.Redacted<string>
   readonly csrfToken: Redacted.Redacted<string>
   readonly ownerToken: Redacted.Redacted<string>
@@ -45,15 +45,21 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecre
     cryptoService.randomUUIDv4
   ])
   const bootstrapAvailable = yield* Ref.make(true)
-  const now = yield* Clock.currentTimeMillis
   return OwnerSessionSecrets.of({
     ownerToken: Redacted.make(ownerToken),
     csrfToken: Redacted.make(csrfToken),
     bootstrapToken: Redacted.make(bootstrapToken),
     bootstrapAvailable,
-    bootstrapExpiresAtMillis: now + 60_000
+    bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined)
   })
 })
+
+export const activateOwnerSessionBootstrap = Effect.fn("OwnerSessionSecurity.activateBootstrap")(
+  function*(secrets: OwnerSessionSecretsShape) {
+    const now = yield* Clock.currentTimeMillis
+    yield* Ref.set(secrets.bootstrapExpiresAtMillis, now + 60_000)
+  }
+)
 
 export const ownerSessionOrigin = (hostname: string, port: number): string => {
   const urlHostname = hostname === "::1" ? "[::1]" : hostname
@@ -143,8 +149,12 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
     if (request.host === undefined || request.origin !== `http://${request.host}`) {
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
     }
+    const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
+    if (expiresAt === undefined) {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
+    }
     const now = yield* Clock.currentTimeMillis
-    if (now > secrets.bootstrapExpiresAtMillis) {
+    if (now > expiresAt) {
       return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
     }
     const available = yield* Ref.getAndSet(secrets.bootstrapAvailable, false)

@@ -188,6 +188,53 @@ describe("background workers", () => {
       expect(yield* Ref.get(attempts)).toBe(2)
     }))
 
+  it.effect("waits for Docker availability before reconciling and reporting readiness", () =>
+    Effect.gen(function*() {
+      const firstAvailabilityCheck = yield* Deferred.make<void>()
+      const secondAvailabilityCheck = yield* Deferred.make<void>()
+      const reconciled = yield* Deferred.make<void>()
+      const ready = yield* Deferred.make<void>()
+      const availabilityAttempts = yield* Ref.make(0)
+      const reconcileAttempts = yield* Ref.make(0)
+      const dependencies = Layer.mergeAll(
+        Layer.mock(SandboxService.SandboxService, {
+          reconcile: () =>
+            Ref.update(reconcileAttempts, (attempt) => attempt + 1).pipe(
+              Effect.andThen(Deferred.succeed(reconciled, undefined)),
+              Effect.as(true)
+            ),
+          gcIdle: () => Effect.void
+        }),
+        Layer.mock(SandboxService.DockerService, {
+          isAvailable: () =>
+            Ref.getAndUpdate(availabilityAttempts, (attempt) => attempt + 1).pipe(
+              Effect.flatMap((attempt) =>
+                Deferred.succeed(
+                  attempt === 0 ? firstAvailabilityCheck : secondAvailabilityCheck,
+                  undefined
+                ).pipe(Effect.as(attempt > 0))
+              )
+            )
+        })
+      )
+      const startup = Deferred.succeed(ready, undefined).pipe(
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+      )
+      const fiber = yield* Effect.forkChild(startup)
+
+      yield* Deferred.await(firstAvailabilityCheck)
+      expect(yield* Deferred.isDone(ready)).toBe(false)
+      expect(yield* Ref.get(reconcileAttempts)).toBe(0)
+      yield* advanceClockUntil(secondAvailabilityCheck, "1 second", 3)
+      yield* Deferred.await(secondAvailabilityCheck)
+      yield* Deferred.await(reconciled)
+      yield* Deferred.await(ready)
+      yield* Fiber.join(fiber)
+
+      expect(yield* Ref.get(availabilityAttempts)).toBe(2)
+      expect(yield* Ref.get(reconcileAttempts)).toBe(1)
+    }))
+
   it.effect("reports startup readiness after one successful sandbox reconciliation", () =>
     Effect.gen(function*() {
       const attempts = yield* Ref.make(0)
