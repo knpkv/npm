@@ -283,12 +283,11 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
      - `write:attachment:confluence` - upload page attachments
    - Add **User Identity API**:
      - `read:me` - get current user info
-5. In **Authorization** tab, set callback URL: `http://127.0.0.1:8585/callback`
+5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
 
-   Existing applications configured with `http://localhost:8585/callback` must
-   replace it with this `127.0.0.1` URL in the Developer Console before login.
-
-The callback listener binds explicitly to `127.0.0.1`. Requests with a missing
+The provider-facing callback URL remains `localhost` for compatibility with
+existing Atlassian app registrations, while the callback listener binds
+explicitly to `127.0.0.1`. Requests with a missing
 or mismatched OAuth state are rejected without consuming the pending login, so
 only the provider callback carrying the expected state can complete or fail it.
 

@@ -35,7 +35,7 @@ Creating OAuth app in Atlassian Developer Console...
    - Confluence API (granular): read:page:confluence, write:page:confluence, delete:page:confluence
    - User Identity API: read:me
 4. Go to "Authorization" and set callback URL:
-   http://127.0.0.1:8585/callback
+   http://localhost:8585/callback
 5. Go to "Settings" and copy Client ID and Secret
 6. Run: confluence auth configure --client-id <ID> --client-secret <SECRET>
 `)

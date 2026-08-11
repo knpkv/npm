@@ -28,7 +28,7 @@ const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
 
 describe("oauthServer", () => {
   describe("startCallbackServer", () => {
-    it.effect("binds the production callback listener to IPv4 loopback", () =>
+    it.effect("binds to IPv4 loopback while preserving the registered callback URL", () =>
       Effect.scoped(
         Effect.gen(function*() {
           const factory = yield* HttpServerFactoryTag
@@ -36,7 +36,7 @@ describe("oauthServer", () => {
             Effect.provide(factory.createServerLayer(callbackServerListenOptions(0)))
           )
           expect(server.address).toMatchObject({ _tag: "TcpAddress", hostname: "127.0.0.1" })
-          expect(callbackUrl(8585)).toBe("http://127.0.0.1:8585/callback")
+          expect(callbackUrl(8585)).toBe("http://localhost:8585/callback")
         }).pipe(Effect.provide(HttpServerFactoryLive))
       ))
 
@@ -62,7 +62,7 @@ describe("oauthServer", () => {
 
           // Simulate OAuth callback using Effect HttpClient
           const client = yield* HttpClient.HttpClient
-          const request = HttpClientRequest.get(callbackUrl(port)).pipe(
+          const request = HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
             HttpClientRequest.setUrlParam("code", "auth_code_123"),
             HttpClientRequest.setUrlParam("state", expectedState)
           )

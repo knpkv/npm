@@ -47,7 +47,7 @@ export const callbackServerListenOptions = (port: number): CallbackServerListenO
   port
 })
 
-export const callbackUrl = (port: number): string => `http://127.0.0.1:${port}/callback`
+export const callbackUrl = (port: number): string => `http://localhost:${port}/callback`
 
 /**
  * Tag for the HttpServerFactory service.
