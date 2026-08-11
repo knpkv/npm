@@ -13,6 +13,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - Exact-revision PR workspace with hierarchical navigation, API-first diff previews, and optional local worktrees
 - Prompt-only local Codex Relay passes with description suggestions, file-anchored PR comments, or exact line comments that a human can discuss, publish, acknowledge, or reject
 - Explicit deterministic detached checkout of the selected PR head with provider-drift detection
+- Exact-head pull-request merge with explicit strategy selection and confirmation
 
 ## Prerequisites
 
@@ -38,6 +39,8 @@ CLI and TUI for AWS CodeCommit pull requests.
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export and idempotent review-comment reconciliation
   - `codecommit:PostCommentForPullRequest` — explicitly post a reviewed Relay finding
+  - `codecommit:GetMergeConflicts` — advisory mergeability status for the exact pull-request revision
+  - `codecommit:MergePullRequestByFastForward`, `codecommit:MergePullRequestBySquash`, `codecommit:MergePullRequestByThreeWay` — explicitly confirmed TUI merge using the selected native strategy
   - `codecommit:ListBranches` — branch listing
 
 ## Quick Start
@@ -73,6 +76,27 @@ detached worktree and switch subsequent previews to immutable local Git blobs.
 While a local worktree is active, the TUI checks provider revision metadata
 every 30 seconds. A changed base or head immediately returns the preview to API
 mode, labels the retained checkout as outdated, and offers `w` to update it.
+
+Press uppercase `M` in the Changes tab to choose **squash**, **fast-forward**,
+or **three-way**, then review the displayed base, head, and destination ref.
+Press `Enter` to send the merge. This path stays API-first and never creates a
+worktree: immediately before writing, it re-reads the pull request and verifies
+the exact repository, revision, base, head, and destination reference. The AWS
+request pins `sourceCommitId` to the displayed head, so CodeCommit rejects a
+source branch that moves after preflight. CodeCommit exposes no destination
+compare-and-set for this operation: if the destination advances after preflight,
+the provider may use that newer destination, including for a three-way merge.
+The submitted action also captures the resolved STS caller account and
+repository-owner account from the selected PR. Immediately before the merge
+write, `GetCallerIdentity`, `GetRepository`, authorization, and the merge share
+one credential snapshot; either mismatch makes zero merge calls and forces a
+refresh.
+Once submitted, the TUI waits for the
+CodeCommit receipt because cancelling a non-idempotent merge request could hide
+a merge that already completed. Approval-rule failures, stale revisions,
+closed pull requests, and merge conflicts return to the action card without
+replaying the write. A successful merge records a notification, refreshes the
+pull-request list, and returns to it.
 
 After explicit action confirmation, Relay has the host produce a bounded
 exact-commit patch with Git hooks disabled, then runs the local Codex CLI in

@@ -9,6 +9,7 @@ import type { ListItem } from "../ListBuilder.js"
 import { Badge } from "./Badge.js"
 
 interface ListItemRowProps {
+  readonly blocked?: boolean
   readonly item: ListItem
   readonly selected: boolean
   readonly isFirst?: boolean
@@ -18,7 +19,7 @@ interface ListItemRowProps {
  * Renders a single row in the main PR list
  * @category components
  */
-export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
+export function ListItemRow({ blocked = false, isFirst, item, selected }: ListItemRowProps) {
   const { theme } = useTheme()
   const bg = selected ? theme.selectedBackground : undefined
   const fg = selected ? theme.selectedText : theme.text
@@ -69,7 +70,7 @@ export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
   }
 
   if (item.type === "pr") {
-    return <PRItemRow pr={item.pr} bg={bg} fg={fg} />
+    return <PRItemRow blocked={blocked} pr={item.pr} bg={bg} fg={fg} />
   }
 
   return null
@@ -77,11 +78,13 @@ export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
 
 function PRItemRow({
   bg,
+  blocked,
   fg,
   pr
 }: {
   readonly pr: Domain.PullRequest
   readonly bg: string | undefined
+  readonly blocked: boolean
   readonly fg: string
 }) {
   const { theme } = useTheme()
@@ -99,7 +102,11 @@ function PRItemRow({
           ? theme.textMuted
           : theme.error
 
-  const badge = !pr.isMergeable ? (
+  const badge = blocked ? (
+    <Badge variant="warning" minWidth={12}>
+      MERGE ?
+    </Badge>
+  ) : !pr.isMergeable ? (
     <Badge variant="error" minWidth={12}>
       CONFLICT
     </Badge>

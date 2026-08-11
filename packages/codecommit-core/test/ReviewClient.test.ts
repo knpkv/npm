@@ -1,11 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { TestClock } from "effect/testing"
 
+import { applyAwsOperationTimeout } from "../src/AwsClient/internal.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import {
@@ -15,18 +18,21 @@ import {
   CodeCommitChangedFilesPage,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
+  CodeCommitRepositoryIdentity,
   CodeCommitRepositoryPage
 } from "../src/ReadClient/models.js"
 import { CodeCommitReadClient, type CodeCommitReadClientService } from "../src/ReadClient/ReadClient.js"
-import { CodeCommitReviewConflictError } from "../src/ReviewClient/errors.js"
+import { CodeCommitReviewConflictError, isAmbiguousMergeProviderError } from "../src/ReviewClient/errors.js"
 import { CodeCommitReviewAction } from "../src/ReviewClient/models.js"
 import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
 import {
   CodeCommitReviewProvider,
   type CodeCommitReviewProviderService,
+  makeMergePullRequestRequest,
   makePostCommentForPullRequestRequest,
   makePostCommentReplyRequest,
-  makeUpdateCommentRequest
+  makeUpdateCommentRequest,
+  reviewProviderTimeoutPolicy
 } from "../src/ReviewClient/ReviewProvider.js"
 
 const account = {
@@ -101,6 +107,16 @@ const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "5".repeat(64)
 })
 
+const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "merge",
+  target: {
+    ...commentAction.target,
+    expectedCallerAccountId: "123456789012",
+    expectedRepositoryAccountId: "123456789012"
+  },
+  strategy: "squash"
+})
+
 const baseReadClient = (
   overrides: Partial<CodeCommitReadClientService> = {}
 ): CodeCommitReadClientService => ({
@@ -124,6 +140,10 @@ const baseReadClient = (
     Effect.succeed(new CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
   streamPullRequests: () => Stream.make(pullRequest),
   getPullRequest: () => Effect.succeed(pullRequest),
+  getRepositoryIdentity: () =>
+    Effect.succeed(
+      new CodeCommitRepositoryIdentity({ accountId: "123456789012", repositoryName: "payments-api" })
+    ),
   getChangedFilesPage: () =>
     Effect.succeed(new CodeCommitChangedFilesPage({ files: [], nextToken: null, providerPageLimit: 100 })),
   streamChangedFiles: () => Stream.empty,
@@ -146,6 +166,15 @@ const baseProvider = (
       comment: { commentId: "reply-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
+  mergePullRequest: (_, authorize) =>
+    authorize({
+      callerIdentity: { Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/reviewer" },
+      repositoryIdentity: {
+        repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+      }
+    }).pipe(
+      Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+    ),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
   getCommentsPage: () => Effect.succeed({ commentsForPullRequestData: [], nextToken: undefined }),
   ...overrides
@@ -200,6 +229,336 @@ describe("CodeCommitReviewClient", () => {
       clientRequestToken: "5".repeat(64)
     })
   })
+
+  it("pins merge requests to the decoded pull-request head", () => {
+    assert.deepStrictEqual(makeMergePullRequestRequest(mergeAction), {
+      pullRequestId: "17",
+      repositoryName: "payments-api",
+      sourceCommitId: "head-commit-17"
+    })
+  })
+
+  it.effect("preflights and executes the selected native merge strategy exactly once", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make<Array<string>>([])
+      const receipt = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: (action, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "123456789012",
+                Arn: "arn:aws:iam::123456789012:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (calls) => [...calls, action.strategy])),
+              Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(mergeAction)
+        })
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(providerCalls), ["squash"])
+      assert.strictEqual(receipt.operationId, "merge:squash:17:head-commit-17")
+      assert.strictEqual(receipt.summary, "Pull request merged using squash")
+    }))
+
+  it.effect("does not call the merge provider when the reviewed head is stale", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const stalePullRequest = new CodeCommitPullRequestRevision({
+        ...pullRequest,
+        sourceCommit: "new-head-commit-17"
+      })
+      const result = yield* runWithClients(
+        baseReadClient({ getPullRequest: () => Effect.succeed(stalePullRequest) }),
+        baseProvider({
+          mergePullRequest: () => Ref.update(providerCalls, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "source-commit-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("does not call the merge provider when the profile resolves to another AWS account", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: (_, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "210987654321",
+                Arn: "arn:aws:iam::210987654321:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (count) => count + 1))
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "caller-account-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("does not dispatch a merge when credentials change between preflight and merge runtime", () =>
+    Effect.gen(function*() {
+      const activeAccount = yield* Ref.make("123456789012")
+      const mergeCallsByAccount = yield* Ref.make<Record<string, number>>({})
+      const result = yield* runWithClients(
+        baseReadClient({
+          getPullRequest: () => Ref.set(activeAccount, "210987654321").pipe(Effect.as(pullRequest))
+        }),
+        baseProvider({
+          mergePullRequest: (_, authorize) =>
+            Ref.get(activeAccount).pipe(
+              Effect.flatMap((accountId) =>
+                authorize({
+                  callerIdentity: { Account: accountId, Arn: `arn:aws:iam::${accountId}:user/reviewer` },
+                  repositoryIdentity: {
+                    repositoryMetadata: { accountId, repositoryName: "payments-api" }
+                  }
+                }).pipe(
+                  Effect.andThen(Ref.update(mergeCallsByAccount, (calls) => ({
+                    ...calls,
+                    [accountId]: (calls[accountId] ?? 0) + 1
+                  })))
+                )
+              ),
+              Effect.as({ pullRequest: { pullRequestId: "17", pullRequestStatus: "CLOSED" } })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "repository-account-changed")
+      }
+      assert.deepStrictEqual(yield* Ref.get(mergeCallsByAccount), {})
+    }))
+
+  it.effect("does not call the merge provider when the repository resolves to another owner account", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: (_, authorize) =>
+            authorize({
+              callerIdentity: {
+                Account: "123456789012",
+                Arn: "arn:aws:iam::123456789012:user/reviewer"
+              },
+              repositoryIdentity: {
+                repositoryMetadata: { accountId: "210987654321", repositoryName: "payments-api" }
+              }
+            }).pipe(
+              Effect.andThen(Ref.update(providerCalls, (count) => count + 1))
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "repository-account-changed")
+      }
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
+    }))
+
+  it.effect("maps provider approval-rule rejection to a merge conflict", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "MergePullRequestBySquash",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "PullRequestApprovalRulesNotSatisfiedException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+        assert.strictEqual(result.failure.reason, "approval-rules-unsatisfied")
+      }
+    }))
+
+  it.effect("preserves an unclassified post-dispatch merge failure for outcome recovery", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Ref.update(providerCalls, (count) => count + 1).pipe(
+              Effect.andThen(Effect.fail(
+                new AwsApiError({
+                  operation: "mergePullRequestBySquash",
+                  profile: account.profile,
+                  region: account.region,
+                  cause: { _tag: "HttpClientError" }
+                })
+              ))
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, AwsApiError)
+        assert.strictEqual(result.failure.operation, "mergePullRequestBySquash")
+        assert.strictEqual(isAmbiguousMergeProviderError(result.failure), true)
+      }
+    }))
+
+  it.effect("preserves a definitive provider merge rejection without making it transport-shaped", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergePullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "mergePullRequestBySquash",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "AccessDeniedException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* Effect.result(client.execute(mergeAction))
+        })
+      )
+
+      assert.strictEqual(Result.isFailure(result), true)
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, AwsApiError)
+        assert.deepStrictEqual(result.failure.cause, { _tag: "AccessDeniedException" })
+        assert.strictEqual(isAmbiguousMergeProviderError(result.failure), false)
+      }
+    }))
+
+  it.effect("reloads merge reference races while retaining manual strategy conflicts", () =>
+    Effect.gen(function*() {
+      const cases: ReadonlyArray<
+        readonly [
+          "ConcurrentReferenceUpdateException" | "ManualMergeRequiredException" | "ReferenceDoesNotExistException",
+          CodeCommitReviewConflictError["reason"]
+        ]
+      > = [
+        ["ConcurrentReferenceUpdateException", "destination-reference-changed"],
+        ["ReferenceDoesNotExistException", "destination-reference-changed"],
+        ["ManualMergeRequiredException", "merge-conflict"]
+      ]
+
+      for (const [tag, expectedReason] of cases) {
+        const result = yield* runWithClients(
+          baseReadClient(),
+          baseProvider({
+            mergePullRequest: () =>
+              Effect.fail(
+                new AwsApiError({
+                  operation: "MergePullRequestBySquash",
+                  profile: account.profile,
+                  region: account.region,
+                  cause: { _tag: tag }
+                })
+              )
+          }),
+          Effect.gen(function*() {
+            const client = yield* CodeCommitReviewClient
+            return yield* Effect.result(client.execute(mergeAction))
+          })
+        )
+
+        assert.strictEqual(Result.isFailure(result), true)
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+          assert.strictEqual(result.failure.reason, expectedReason)
+        }
+      }
+    }))
+
+  it.effect("keeps accepted merge receipts supervised past the ordinary operation timeout", () =>
+    Effect.gen(function*() {
+      const mergeTimeout = reviewProviderTimeoutPolicy("mergePullRequestBySquash") === "none"
+        ? null
+        : "30 seconds"
+      const readTimeout = reviewProviderTimeoutPolicy("getPullRequest") === "none" ? null : "30 seconds"
+      const supervisedMerge = yield* Effect.forkChild(applyAwsOperationTimeout(
+        "mergePullRequestBySquash",
+        account,
+        Effect.sleep("31 seconds").pipe(Effect.as("merge-receipt")),
+        mergeTimeout
+      ))
+      const ordinaryRead = yield* Effect.forkChild(applyAwsOperationTimeout(
+        "getPullRequest",
+        account,
+        Effect.never,
+        readTimeout
+      ))
+
+      yield* TestClock.adjust("31 seconds")
+
+      assert.strictEqual(yield* Fiber.join(supervisedMerge), "merge-receipt")
+      const readResult = yield* Fiber.join(ordinaryRead).pipe(Effect.result)
+      assert.strictEqual(Result.isFailure(readResult), true)
+      if (Result.isFailure(readResult)) assert.instanceOf(readResult.failure, AwsApiError)
+    }))
 
   it.effect("executes and reconciles update and reply actions without replay", () =>
     Effect.gen(function*() {

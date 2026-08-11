@@ -319,6 +319,7 @@ const unusedCodeCommitClients = (() => {
     listPullRequestsPage: () => Effect.die("unused listPullRequestsPage"),
     streamPullRequests: () => Stream.empty,
     getPullRequest: () => Effect.die("unused getPullRequest"),
+    getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
     getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
     streamChangedFiles: () => Stream.empty
   })
@@ -327,6 +328,7 @@ const unusedCodeCommitClients = (() => {
     updateComment: () => Effect.die("unused updateComment"),
     postReply: () => Effect.die("unused postReply"),
     updateApprovalState: () => Effect.die("unused updateApprovalState"),
+    mergePullRequest: () => Effect.die("unused mergePullRequest"),
     getApprovalStates: () => Effect.die("unused getApprovalStates"),
     getCommentsPage: () => Effect.die("unused getCommentsPage")
   })
@@ -397,6 +399,7 @@ describe("first-party plugin runtime", () => {
           Effect.succeed(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
         streamPullRequests: () => Stream.make(pullRequest),
         getPullRequest: () => Ref.update(readCalls, (count) => count + 1).pipe(Effect.as(pullRequest)),
+        getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
         getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
         streamChangedFiles: () => Stream.empty
       })
@@ -413,6 +416,7 @@ describe("first-party plugin runtime", () => {
         updateComment: () => Effect.die("unused updateComment"),
         postReply: () => Effect.die("unused postReply"),
         updateApprovalState: () => Effect.die("unused updateApprovalState"),
+        mergePullRequest: () => Effect.die("unused mergePullRequest"),
         getApprovalStates: () => Effect.die("unused getApprovalStates"),
         getCommentsPage: () => Effect.die("unused getCommentsPage")
       })
@@ -2563,6 +2567,7 @@ describe("first-party plugin runtime", () => {
                 : Effect.succeed(pullRequest)
             )
           ),
+        getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
         getChangedFilesPage: ({ account }) =>
           Ref.update(changedFileProfiles, (profiles) => [...profiles, account.profile]).pipe(
             Effect.as(

@@ -7,6 +7,7 @@ export type { AppState } from "./app.js"
 
 // UI state
 export {
+  ambiguousMergeGuardsAtom,
   currentPRAtom,
   currentUserAtom,
   filterTextAtom,

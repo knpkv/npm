@@ -21,6 +21,12 @@ const ReviewFilePosition = Schema.Int.check(
 )
 const ReviewCommentId = NonEmptyString.check(Schema.isMaxLength(512))
 
+/** Native CodeCommit strategy used to merge an exact pull-request head. */
+export const CodeCommitMergeStrategy = Schema.Literals(["fast-forward", "squash", "three-way"])
+
+/** Decoded native CodeCommit pull-request merge strategy. */
+export type CodeCommitMergeStrategy = typeof CodeCommitMergeStrategy.Type
+
 /** Exact provider revision against which a review action was authorized. */
 export const CodeCommitReviewTarget = Schema.Struct({
   account: CodeCommitReadAccount,
@@ -34,6 +40,16 @@ export const CodeCommitReviewTarget = Schema.Struct({
 
 /** Decoded immutable review target. */
 export type CodeCommitReviewTarget = typeof CodeCommitReviewTarget.Type
+
+/** Merge target additionally bound to the resolved caller and repository-owner accounts. */
+export const CodeCommitMergeTarget = Schema.Struct({
+  ...CodeCommitReviewTarget.fields,
+  expectedCallerAccountId: NonEmptyString,
+  expectedRepositoryAccountId: NonEmptyString
+}).annotate({ identifier: "CodeCommitMergeTarget" })
+
+/** Decoded merge target with captured account authority. */
+export type CodeCommitMergeTarget = typeof CodeCommitMergeTarget.Type
 
 /** Exact CodeCommit file position for one inline pull-request comment. */
 export class CodeCommitReviewLocation extends Schema.Class<CodeCommitReviewLocation>(
@@ -57,7 +73,7 @@ const ExistingCommentActionFields = {
   clientRequestToken: ClientRequestToken
 }
 
-/** Closed set of CodeCommit review mutations supported by the owning package. */
+/** Closed set of CodeCommit pull-request review and merge mutations supported by the owning package. */
 export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("request-review", CommentActionFields),
   Schema.TaggedStruct("comment", {
@@ -68,7 +84,11 @@ export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("reply-comment", ExistingCommentActionFields),
   Schema.TaggedStruct("request-changes", CommentActionFields),
   Schema.TaggedStruct("approve", { target: CodeCommitReviewTarget }),
-  Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget })
+  Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget }),
+  Schema.TaggedStruct("merge", {
+    target: CodeCommitMergeTarget,
+    strategy: CodeCommitMergeStrategy
+  })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Decoded CodeCommit review mutation. */

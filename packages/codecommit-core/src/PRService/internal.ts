@@ -19,6 +19,7 @@ import {
   AwsProfileName,
   AwsRegion,
   type CommentThread,
+  normalizeAccountId,
   type PRCommentLocation,
   PullRequest,
   PullRequestId,
@@ -53,7 +54,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
         profile: row.accountProfile,
         region: row.accountRegion,
         awsAccountId: row.awsAccountId,
-        repoAccountId: row.repoAccountId ?? undefined
+        repoAccountId: normalizeAccountId(row.repoAccountId)
       },
       status: row.status,
       sourceBranch: row.sourceBranch,
@@ -72,7 +73,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
     encode: SchemaGetter.transform((pr) => ({
       id: decodePullRequestId(pr.id),
       awsAccountId: pr.account.awsAccountId ?? "",
-      repoAccountId: pr.account.repoAccountId ?? null,
+      repoAccountId: normalizeAccountId(pr.account.repoAccountId) ?? null,
       accountProfile: decodeAwsProfileName(pr.account.profile),
       accountRegion: decodeAwsRegion(pr.account.region),
       title: pr.title,
@@ -120,7 +121,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
         profile: row.accountProfile,
         region: row.accountRegion,
         awsAccountId: row.awsAccountId,
-        repoAccountId: row.repoAccountId ?? undefined
+        repoAccountId: normalizeAccountId(row.repoAccountId)
       },
       status: row.status,
       sourceBranch: row.sourceBranch,
@@ -139,7 +140,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
     encode: SchemaGetter.transform((pr) => ({
       id: pr.id,
       awsAccountId: pr.account.awsAccountId ?? "",
-      repoAccountId: pr.account.repoAccountId ?? null,
+      repoAccountId: normalizeAccountId(pr.account.repoAccountId) ?? null,
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region,
       title: pr.title,

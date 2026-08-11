@@ -1,4 +1,4 @@
-import { type Domain, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
@@ -35,18 +35,27 @@ export interface PullRequestWorkspaceIdentity {
 
 /** Collision-safe selection key for provider-local pull-request numbers. */
 export const pullRequestSelectionKey = (pr: Domain.PullRequest): string =>
-  JSON.stringify([pr.account.profile, pr.account.region, pr.account.repoAccountId ?? null, pr.repositoryName, pr.id])
+  JSON.stringify([
+    pr.account.profile,
+    pr.account.region,
+    Domain.normalizeAccountId(pr.account.awsAccountId) ?? null,
+    Domain.normalizeAccountId(pr.account.repoAccountId) ?? null,
+    pr.repositoryName,
+    pr.id
+  ])
 
 interface PullRequestSelectionResolution {
   readonly key: string
   readonly pullRequest: Domain.PullRequest
 }
 
-const unknownAccountPullRequestSelection = (
+const unresolvedAccountPullRequestSelection = (
   selectionKey: string
 ): {
+  readonly awsAccountId: string | null
   readonly profile: string
   readonly pullRequestId: string
+  readonly repoAccountId: string | null
   readonly region: string
   readonly repositoryName: string
 } | null => {
@@ -60,15 +69,47 @@ const unknownAccountPullRequestSelection = (
       typeof value[2] === "string" &&
       typeof value[3] === "string"
     ) {
-      return { profile: value[0], region: value[1], repositoryName: value[2], pullRequestId: value[3] }
+      return {
+        awsAccountId: null,
+        profile: value[0],
+        pullRequestId: value[3],
+        repoAccountId: null,
+        region: value[1],
+        repositoryName: value[2]
+      }
     }
-    return value.length === 5 &&
+    if (
+      value.length === 5 &&
+      typeof value[0] === "string" &&
+      typeof value[1] === "string" &&
+      (typeof value[2] === "string" || value[2] === null) &&
+      typeof value[3] === "string" &&
+      typeof value[4] === "string"
+    ) {
+      return {
+        awsAccountId: null,
+        profile: value[0],
+        pullRequestId: value[4],
+        repoAccountId: Domain.normalizeAccountId(value[2]) ?? null,
+        region: value[1],
+        repositoryName: value[3]
+      }
+    }
+    return value.length === 6 &&
         typeof value[0] === "string" &&
         typeof value[1] === "string" &&
-        value[2] === null &&
-        typeof value[3] === "string" &&
-        typeof value[4] === "string"
-      ? { profile: value[0], region: value[1], repositoryName: value[3], pullRequestId: value[4] }
+        (typeof value[2] === "string" || value[2] === null) &&
+        (typeof value[3] === "string" || value[3] === null) &&
+        typeof value[4] === "string" &&
+        typeof value[5] === "string"
+      ? {
+        awsAccountId: Domain.normalizeAccountId(value[2]) ?? null,
+        profile: value[0],
+        pullRequestId: value[5],
+        repoAccountId: Domain.normalizeAccountId(value[3]) ?? null,
+        region: value[1],
+        repositoryName: value[4]
+      }
       : null
   } catch {
     return null
@@ -83,14 +124,18 @@ export const resolvePullRequestSelection = (
   if (selectionKey === null) return null
   const exact = pullRequests.find((candidate) => pullRequestSelectionKey(candidate) === selectionKey)
   if (exact !== undefined) return { key: selectionKey, pullRequest: exact }
-  const unknownAccount = unknownAccountPullRequestSelection(selectionKey)
-  if (unknownAccount === null) return null
+  const unresolvedAccount = unresolvedAccountPullRequestSelection(selectionKey)
+  if (unresolvedAccount === null) return null
   const candidates = pullRequests.filter(
     (candidate) =>
-      candidate.account.profile === unknownAccount.profile &&
-      candidate.account.region === unknownAccount.region &&
-      candidate.repositoryName === unknownAccount.repositoryName &&
-      candidate.id === unknownAccount.pullRequestId
+      candidate.account.profile === unresolvedAccount.profile &&
+      candidate.account.region === unresolvedAccount.region &&
+      candidate.repositoryName === unresolvedAccount.repositoryName &&
+      candidate.id === unresolvedAccount.pullRequestId &&
+      (unresolvedAccount.awsAccountId === null ||
+        Domain.normalizeAccountId(candidate.account.awsAccountId) === unresolvedAccount.awsAccountId) &&
+      (unresolvedAccount.repoAccountId === null ||
+        Domain.normalizeAccountId(candidate.account.repoAccountId) === unresolvedAccount.repoAccountId)
   )
   return candidates.length === 1
     ? { key: pullRequestSelectionKey(candidates[0]!), pullRequest: candidates[0]! }
@@ -132,7 +177,286 @@ export type WorkspaceSelection<A> =
 export interface ActionDiagnostic {
   readonly message: string
   readonly operation: string
+  readonly workspaceRefreshReason?: WorkspaceRefreshReason
 }
+
+export type MergeStatus =
+  | { readonly _tag: "idle" }
+  | {
+    readonly _tag: "ready"
+    readonly requestId: string
+    readonly revision: ReadClient.CodeCommitPullRequestRevision
+    readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    readonly target: Domain.PullRequest
+  }
+  | {
+    readonly _tag: "running"
+    readonly requestId: string
+    readonly revision: ReadClient.CodeCommitPullRequestRevision
+    readonly strategy: ReviewClient.CodeCommitMergeStrategy
+    readonly target: Domain.PullRequest
+  }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+/** Atomically claims a ready merge so a terminal key batch can dispatch it only once. */
+export const claimMergeConfirmation = (
+  status: MergeStatus
+): Extract<MergeStatus, { readonly _tag: "running" }> | null =>
+  status._tag === "ready" ? { ...status, _tag: "running" } : null
+
+export interface AmbiguousMergeGuard {
+  readonly awsAccountId: string | null
+  readonly baselineRefreshGeneration: number
+  readonly phase: "awaiting-refresh" | "refreshing" | "refresh-failed"
+  readonly profile: Domain.AwsProfileName
+  readonly pullRequestId: Domain.PullRequestId
+  readonly region: Domain.AwsRegion
+  readonly selectionKey: string
+}
+
+/** Application-scoped locks keyed by collision-safe pull-request selection identity. */
+export type AmbiguousMergeGuards = Readonly<Record<string, AmbiguousMergeGuard>>
+
+/** Blocks a non-idempotent merge target before starting its authoritative list refresh. */
+export const beginAmbiguousMergeGuard = (
+  pr: Domain.PullRequest,
+  refreshGeneration = 0
+): AmbiguousMergeGuard => ({
+  awsAccountId: Domain.normalizeAccountId(pr.account.awsAccountId) ?? null,
+  baselineRefreshGeneration: refreshGeneration,
+  phase: "awaiting-refresh",
+  profile: pr.account.profile,
+  pullRequestId: pr.id,
+  region: pr.account.region,
+  selectionKey: pullRequestSelectionKey(pr)
+})
+
+/** Matches a submitted target across provider metadata changes such as a repository rename. */
+const ambiguousMergeGuardMatchesPullRequest = (
+  guard: AmbiguousMergeGuard,
+  pr: Domain.PullRequest
+): boolean => {
+  if (guard.awsAccountId === null) return resolvePullRequestSelection([pr], guard.selectionKey) !== null
+  const candidateAwsAccountId = Domain.normalizeAccountId(pr.account.awsAccountId)
+  return (
+    pr.account.profile === guard.profile &&
+    pr.account.region === guard.region &&
+    pr.id === guard.pullRequestId &&
+    (candidateAwsAccountId === undefined || candidateAwsAccountId === guard.awsAccountId)
+  )
+}
+
+/** Adds an ambiguous merge without discarding locks for other pull requests. */
+export const addAmbiguousMergeGuard = (
+  guards: AmbiguousMergeGuards,
+  pr: Domain.PullRequest,
+  refreshGeneration = 0
+): AmbiguousMergeGuards => {
+  const guard = beginAmbiguousMergeGuard(pr, refreshGeneration)
+  return { ...guards, [guard.selectionKey]: guard }
+}
+
+/** Keeps one ambiguous target blocked until an authoritative refresh observes it closed or absent. */
+const ambiguousMergeGuardAfterAppStatus = (
+  guard: AmbiguousMergeGuard | null,
+  status: Domain.AppStatus,
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  refreshGeneration = 0,
+  successfulRefreshScopes: ReadonlyArray<Domain.PullRequestRefreshScope> = []
+): AmbiguousMergeGuard | null => {
+  if (guard === null) return null
+  if (status === "loading") return guard.phase === "refreshing" ? guard : { ...guard, phase: "refreshing" }
+  if (status === "error" && guard.phase === "refreshing") return { ...guard, phase: "refresh-failed" }
+  if (
+    status === "idle" &&
+    guard.awsAccountId !== null &&
+    successfulRefreshScopes.some(
+      (scope) =>
+        scope.profile === guard.profile &&
+        scope.region === guard.region &&
+        scope.awsAccountId === guard.awsAccountId
+    ) &&
+    refreshGeneration > guard.baselineRefreshGeneration
+  ) {
+    const observations = pullRequests.filter((pr) => ambiguousMergeGuardMatchesPullRequest(guard, pr))
+    return observations.length === 0 || observations.every((pr) => pr.status !== "OPEN") ? null : guard
+  }
+  return guard
+}
+
+/** Reconciles every ambiguous merge independently against the latest authoritative list evidence. */
+export const ambiguousMergeGuardsAfterAppStatus = (
+  guards: AmbiguousMergeGuards,
+  status: Domain.AppStatus,
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  refreshGeneration = 0,
+  successfulRefreshScopes: ReadonlyArray<Domain.PullRequestRefreshScope> = []
+): AmbiguousMergeGuards => {
+  let changed = false
+  const next: Record<string, AmbiguousMergeGuard> = {}
+  for (const [key, guard] of Object.entries(guards)) {
+    const reconciled = ambiguousMergeGuardAfterAppStatus(
+      guard,
+      status,
+      pullRequests,
+      refreshGeneration,
+      successfulRefreshScopes
+    )
+    if (reconciled === null) {
+      changed = true
+      continue
+    }
+    next[key] = reconciled
+    if (reconciled !== guard) changed = true
+  }
+  return changed ? next : guards
+}
+
+/** Prevents cached list navigation into any target whose merge outcome is unknown. */
+export const pullRequestOpeningBlocked = (
+  guards: AmbiguousMergeGuards,
+  pr: Domain.PullRequest
+): boolean => Object.values(guards).some((guard) => ambiguousMergeGuardMatchesPullRequest(guard, pr))
+
+export type WorkspaceRefreshReason =
+  | "revision-changed"
+  | "source-commit-changed"
+  | "destination-commit-changed"
+  | "destination-reference-changed"
+  | "repository-changed"
+  | "caller-account-changed"
+  | "repository-account-changed"
+  | "pull-request-closed"
+  | "merge-target-not-found"
+  | "merge-outcome-unknown"
+
+/** Typed action failure whose immutable workspace must be reloaded before another attempt. */
+export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<WorkspaceRefreshActionError>()(
+  "WorkspaceRefreshActionError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    workspaceRefreshReason: Schema.Literals([
+      "revision-changed",
+      "source-commit-changed",
+      "destination-commit-changed",
+      "destination-reference-changed",
+      "repository-changed",
+      "caller-account-changed",
+      "repository-account-changed",
+      "pull-request-closed",
+      "merge-target-not-found",
+      "merge-outcome-unknown"
+    ])
+  }
+) {}
+
+/** Classifies only stale immutable-target conflicts as reasons to reload before an explicit retry. */
+export const mergeWorkspaceRefreshReason = (
+  reason: ReviewClient.CodeCommitReviewConflictError["reason"]
+): WorkspaceRefreshReason | null => {
+  switch (reason) {
+    case "revision-changed":
+    case "source-commit-changed":
+    case "destination-commit-changed":
+    case "destination-reference-changed":
+    case "repository-changed":
+    case "caller-account-changed":
+    case "repository-account-changed":
+    case "pull-request-closed":
+      return reason
+    case "approval-by-author":
+    case "approval-rules-unsatisfied":
+    case "merge-conflict":
+      return null
+  }
+}
+
+/** Classifies merge failures by the authoritative refresh required before another attempt. */
+export const mergeFailureWorkspaceRefreshReason = (
+  error: ReviewClient.CodeCommitReviewError
+): WorkspaceRefreshReason | null => {
+  if (error._tag === "CodeCommitReviewConflictError") return mergeWorkspaceRefreshReason(error.reason)
+  if (error._tag === "CodeCommitReadNotFoundError") return "merge-target-not-found"
+  if (error._tag === "CodeCommitMalformedResponseError") {
+    return error.operation === "merge-pull-request" ? "merge-outcome-unknown" : null
+  }
+  if (error._tag !== "AwsApiError") return null
+  return ReviewClient.isAmbiguousMergeProviderError(error) ? "merge-outcome-unknown" : null
+}
+
+/** Reloads stale revisions narrowly, but refreshes the PR list when selection identity changed. */
+export const mergeFailureWorkspaceReloadPolicy = (
+  diagnostic: ActionDiagnostic
+): "refresh-list" | "reload" | "retain" => {
+  if (
+    diagnostic.workspaceRefreshReason === "repository-changed" ||
+    diagnostic.workspaceRefreshReason === "caller-account-changed" ||
+    diagnostic.workspaceRefreshReason === "repository-account-changed" ||
+    diagnostic.workspaceRefreshReason === "pull-request-closed" ||
+    diagnostic.workspaceRefreshReason === "merge-target-not-found" ||
+    diagnostic.workspaceRefreshReason === "merge-outcome-unknown"
+  ) return "refresh-list"
+  return diagnostic.workspaceRefreshReason === undefined ? "retain" : "reload"
+}
+
+/** Clears an exact verification overlay whenever fresh provider workspace state is required. */
+export const verifiedWorkspaceAfterMergeFailure = <A>(current: A | null, diagnostic: ActionDiagnostic): A | null =>
+  mergeFailureWorkspaceReloadPolicy(diagnostic) === "retain" ? current : null
+
+export type MergeResultObservation =
+  | { readonly _tag: "failure" }
+  | { readonly _tag: "pending" }
+  | { readonly _tag: "success"; readonly requestId: string }
+
+/** Correlates merge settlement and treats untyped runtime failure as an ambiguous provider outcome. */
+export const mergeResultSettlement = (
+  runningRequestId: string | null,
+  observation: MergeResultObservation
+): "ambiguous" | "ignore" | "settle" => {
+  if (runningRequestId === null || observation._tag === "pending") return "ignore"
+  if (observation._tag === "failure") return "ambiguous"
+  return observation.requestId === runningRequestId ? "settle" : "ignore"
+}
+
+/**
+ * Allows merge selection for a loaded exact revision when no workspace mutation is active.
+ * Cached list-level mergeability is advisory; the conditional provider merge is authoritative.
+ */
+export const mergeStrategySelectionEnabled = (input: {
+  readonly actionCancelable: boolean
+  readonly cachedMergeable: boolean
+  readonly exactRevisionLoaded: boolean
+  readonly findingPostRunning: boolean
+  readonly providerStatus: Domain.PullRequestStatus | null
+  readonly providerDriftPending: boolean
+}): boolean =>
+  input.exactRevisionLoaded &&
+  input.providerStatus === "OPEN" &&
+  !input.actionCancelable &&
+  !input.findingPostRunning &&
+  !input.providerDriftPending
+
+/** Resolves an open merge dialog against the current render, never its captured opening revision. */
+export const mergeDialogWorkspaceSelection = <A>(input: {
+  readonly actionCancelable: boolean
+  readonly cachedMergeable: boolean
+  readonly currentWorkspace: A | null
+  readonly findingPostRunning: boolean
+  readonly providerStatus: Domain.PullRequestStatus | null
+  readonly providerDriftPending: boolean
+}): A | null =>
+  input.currentWorkspace !== null &&
+    mergeStrategySelectionEnabled({
+      actionCancelable: input.actionCancelable,
+      cachedMergeable: input.cachedMergeable,
+      exactRevisionLoaded: true,
+      findingPostRunning: input.findingPostRunning,
+      providerStatus: input.providerStatus,
+      providerDriftPending: input.providerDriftPending
+    })
+    ? input.currentWorkspace
+    : null
 
 export type ActionOutcome<A> =
   | { readonly _tag: "failure"; readonly diagnostic: ActionDiagnostic; readonly requestId: string }
@@ -209,9 +533,17 @@ export const pullRequestRevisionObservationEnabled = (input: {
 export const findingConversationSubmissionEnabled = (providerDriftPending: boolean): boolean => !providerDriftPending
 
 const isWorktreeError = Schema.is(WorktreeError)
+const isWorkspaceRefreshActionError = Schema.is(WorkspaceRefreshActionError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */
 export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
+  if (isWorkspaceRefreshActionError(error)) {
+    return {
+      message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
+      operation: error.operation,
+      workspaceRefreshReason: error.workspaceRefreshReason
+    }
+  }
   if (isWorktreeError(error)) {
     return {
       message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
@@ -249,8 +581,10 @@ export type DetailsKeyIntent =
   | "cancel-action"
   | "consume"
   | "choose-review-skills"
+  | "choose-merge-strategy"
   | "checkout-worktree"
   | "confirm-action"
+  | "confirm-merge"
   | "discuss-finding"
   | "explain-risk"
   | "next-file"
@@ -282,15 +616,20 @@ export const detailsKeyIntent = (input: {
   readonly actionReady: boolean
   readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
+  readonly exitShortcut?: boolean
   readonly findingPostRunning?: boolean
   readonly findingReviewActive?: boolean
   readonly keyName: string
+  readonly mergeReady?: boolean
+  readonly mergeRunning?: boolean
   readonly modified: boolean
   readonly shifted?: boolean
   readonly tab: "comments" | "diff"
   readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
-  if (input.dialogOpen || input.modified) return "yield"
+  if (input.dialogOpen || input.exitShortcut === true) return "yield"
+  if (input.mergeRunning === true) return "consume"
+  if (input.modified) return "yield"
   if (
     input.findingPostRunning === true &&
     ["escape", "r", "s", "t", "e", "w"].includes(input.keyName)
@@ -300,13 +639,26 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (
     input.workspaceRefreshing === true &&
-    ["a", "d", "e", "g", "m", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
+    ["a", "d", "e", "g", "m", "M", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
   ) {
     return "consume"
   }
+  if (input.tab === "diff" && input.keyName === "return" && input.mergeReady === true) return "confirm-merge"
+  if (input.tab === "diff" && input.keyName === "return" && input.actionReady) return "confirm-action"
+  if (
+    input.actionCancelable &&
+    (
+      ["a", "d", "e", "m", "M", "p", "r", "s", "t", "V", "w", "x"].includes(input.keyName) ||
+      (input.keyName === "v" && input.shifted === true)
+    )
+  ) return input.keyName === "x" ? "cancel-action" : "consume"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
+  if (
+    input.tab === "diff" &&
+    (input.keyName === "M" || (input.keyName === "m" && input.shifted === true))
+  ) return input.actionCancelable ? "consume" : "choose-merge-strategy"
   if (
     input.tab === "diff" &&
     input.findingReviewActive === true &&
@@ -397,8 +749,6 @@ export const detailsKeyIntent = (input: {
   if (input.tab === "diff" && input.keyName === "s") return "review-security"
   if (input.tab === "diff" && input.keyName === "t") return "review-tests"
   if (input.tab === "diff" && input.keyName === "e") return "explain-risk"
-  if (input.keyName === "x" && input.actionCancelable) return "cancel-action"
-  if (input.tab === "diff" && input.keyName === "return" && input.actionReady) return "confirm-action"
   return "yield"
 }
 
@@ -513,6 +863,18 @@ export const workspaceReviewDeckAfterReset = <Action>(
 ): { readonly action: Action; readonly selectedFindingIndex: number } =>
   preserveFindingPost ? current : { action: idleAction, selectedFindingIndex: 0 }
 
+/** Retires findings when their exact reviewed revision no longer matches the provider workspace. */
+export const workspaceReviewDeckAfterRevisionChange = <Action>(
+  current: { readonly action: Action; readonly selectedFindingIndex: number },
+  reviewedRevisionKey: string,
+  currentRevisionKey: string,
+  preserveFindingPost: boolean,
+  idleAction: Action
+): { readonly action: Action; readonly selectedFindingIndex: number } =>
+  reviewedRevisionKey === currentRevisionKey
+    ? current
+    : workspaceReviewDeckAfterReset(current, preserveFindingPost, idleAction)
+
 /** Makes a replaced workspace's old findings non-interactive as soon as their post settles. */
 export const workspaceReviewDeckAfterPostSettlement = <Action>(
   current: { readonly action: Action; readonly selectedFindingIndex: number },
@@ -524,6 +886,35 @@ export const workspaceReviewDeckAfterPostSettlement = <Action>(
     ? current
     : { action: idleAction, selectedFindingIndex: 0 }
 
+/** Exact content identity that binds a Relay finding deck and its publication receipts. */
+export const workspaceReviewRevisionKey = (
+  identity: PullRequestWorkspaceIdentity,
+  revision: Pick<
+    ReadClient.CodeCommitPullRequestRevision,
+    | "destinationCommit"
+    | "destinationReference"
+    | "pullRequestId"
+    | "repositoryName"
+    | "revisionId"
+    | "sourceCommit"
+    | "sourceReference"
+    | "status"
+  >
+): string =>
+  JSON.stringify([
+    identity.profile,
+    identity.region,
+    Domain.normalizeAccountId(identity.repoAccountId) ?? null,
+    revision.repositoryName,
+    revision.pullRequestId,
+    revision.revisionId,
+    revision.status,
+    revision.destinationReference,
+    revision.sourceReference,
+    revision.destinationCommit,
+    revision.sourceCommit
+  ])
+
 /** Includes review children that must never outlive the exact workspace they inspect. */
 export const workspaceResetInterruptions = (
   interrupt: Extract<WorkspaceLifecycleTransition, { readonly _tag: "reset" }>["interrupt"]
@@ -532,6 +923,11 @@ export const workspaceResetInterruptions = (
   "conversation",
   "verification"
 ]
+
+/** Keeps an external merge mutation alive while retiring merge state that has not started. */
+export const workspaceMergeResetPolicy = (
+  phase: "failed" | "idle" | "ready" | "running"
+): "interrupt" | "preserve" => phase === "running" ? "preserve" : "interrupt"
 
 export const workspaceIdentityMatches = (
   actual: PullRequestWorkspaceIdentity,
