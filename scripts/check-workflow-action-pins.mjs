@@ -39,11 +39,12 @@ export const validateWorkflowActionPins = (document, location) => {
     }
     const separator = entry.uses.lastIndexOf("@")
     const reference = separator === -1 ? "" : entry.uses.slice(separator + 1)
+    const action = separator === -1 ? entry.uses : entry.uses.slice(0, separator).toLowerCase()
     if (!fullCommitSha.test(reference)) {
       diagnostics.push(`${entry.location}: external action ${entry.uses} must use a full 40-character commit SHA`)
       continue
     }
-    if (entry.uses.startsWith("actions/checkout@") && entry.step.with?.["persist-credentials"] !== false) {
+    if (action === "actions/checkout" && entry.step.with?.["persist-credentials"] !== false) {
       diagnostics.push(`${entry.location}: actions/checkout must set with.persist-credentials to false`)
     }
   }
@@ -68,8 +69,22 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
 `)
+  const invalidMixedCaseCheckout = parse(`
+jobs:
+  release:
+    steps:
+      - uses: Actions/Checkout@${"a".repeat(40)}
+`)
+  const validMixedCaseNonCheckout = parse(`
+jobs:
+  release:
+    steps:
+      - uses: Actions/Setup-Node@${"a".repeat(40)}
+`)
   assert.equal(validateWorkflowActionPins(invalid, "invalid fixture").length, 2)
+  assert.equal(validateWorkflowActionPins(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.deepEqual(validateWorkflowActionPins(valid, "valid fixture"), [])
+  assert.deepEqual(validateWorkflowActionPins(validMixedCaseNonCheckout, "mixed-case action fixture"), [])
 }
 
 const program = Effect.gen(function* () {

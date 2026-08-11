@@ -115,6 +115,12 @@ an alternate authorization path must not contradict a provider-enforced prerequi
 
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
+GitHub workflow guards must compare external action owner/repository names
+case-insensitively. In `pull_request_target`, treat every pull-request-derived
+revision, including `head.sha`, `head.ref`, `github.head_ref`, and
+`merge_commit_sha` in dot or static indexed syntax, as attacker-controlled when
+the job can access repository credentials.
+
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
 Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
@@ -251,7 +257,9 @@ When writing Effect code:
   `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
   owning policy, service, projection, and security tests. The invariant is:
   validate before persistence and Docker execution; require immutable image
-  digests; reserve code-server credential variables; accept only existing
+  digests, migrating only the former built-in `codercom/code-server:latest`
+  default to the current pinned digest during load; reserve code-server
+  credential variables; accept only existing
   canonical children of the physical `~/.codecommit/sandbox-volumes` directory
   mounted below `/home/coder` or the exact `/tmp/.local/share/code-server`
   runtime data subtree; keep built-in setup presets unprivileged; persist the

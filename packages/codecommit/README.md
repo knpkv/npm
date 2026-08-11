@@ -249,14 +249,17 @@ use the alternate loopback hostname (`localhost` versus `127.0.0.1`) because
 cookies are host-scoped but not port-scoped; this prevents the owner cookie from
 being sent to a sandbox port.
 
-Review sandboxes use a digest-pinned code-server image, a random password, a
+Review sandboxes use a digest-pinned code-server image; the former built-in
+`codercom/code-server:latest` default is migrated to the current pinned digest,
+while other mutable tags remain invalid. A sandbox receives a random password, a
 non-root user mapped to the workspace owner, dropped Linux capabilities, and a Docker port explicitly bound
 to `127.0.0.1`. User-configured host mounts must exist and canonically resolve to children of
 `~/.codecommit/sandbox-volumes`, and container targets must be children of
 `/home/coder` or the exact `/tmp/.local/share/code-server` runtime data subtree;
 the built-in Node, pnpm, and Bun setup presets run without privilege escalation.
 AWS credentials, SSH keys, the Docker socket, and broad home or root mounts are
-rejected before configuration persistence and again before Docker execution.
+rejected before configuration persistence, before its database row is inserted,
+and again before Docker execution.
 The cache directory and database that persist the sandbox password are repaired
 to owner-only `0700` and `0600` permissions before use.
 The authenticated credential response is non-cacheable, and the UI masks the

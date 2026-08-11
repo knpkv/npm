@@ -184,6 +184,9 @@ const makeSandboxService = Effect.gen(function*() {
           return existing.value
         }
 
+        const sandboxCfg = yield* loadSandboxConfig
+        yield* validateSandboxConfig(sandboxCfg, homePath)
+
         const nowMs = yield* Clock.currentTimeMillis
         const rand = yield* Random.nextIntBetween(0, 2176782336)
         const id = SandboxId.make(`sbx-${nowMs}-${rand.toString(36).padStart(6, "0")}`)
@@ -211,10 +214,7 @@ const makeSandboxService = Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
             const log = (detail: string) => progress(id, detail)
 
-            // Load config at creation time
-            yield* log("Loading sandbox config")
-            const sandboxCfg = yield* loadSandboxConfig
-            yield* validateSandboxConfig(sandboxCfg, homePath)
+            yield* log("Sandbox config validated")
 
             // Clone via HTTPS + AWS credential helper
             yield* updateStatus(id, "cloning")

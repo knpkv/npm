@@ -109,15 +109,18 @@ names, and returns safe profile/region metadata only; credential values are
 never returned.
 
 Sandbox settings are validated before persistence. Images must use an immutable
-`sha256` digest, reserved code-server credential variables cannot be overridden,
+`sha256` digest; the former built-in `codercom/code-server:latest` default is
+migrated to the current pinned digest during load, while other mutable tags
+remain invalid. Reserved code-server credential variables cannot be overridden,
 and existing host mounts must canonically resolve to children of
 `~/.codecommit/sandbox-volumes` while targeting children of `/home/coder` or
 the exact `/tmp/.local/share/code-server` runtime data subtree.
 
 ### SandboxService
 
-Sandbox creation revalidates the persisted policy immediately before Docker
-execution. Each sandbox receives a cryptographically random persisted access
+Sandbox creation validates the loaded policy before inserting its database row
+and revalidates it immediately before Docker execution. Each sandbox receives a
+cryptographically random persisted access
 password, runs code-server as the non-root owner of its bind-mounted workspace
 (repairing root-owned clones to `1000:1000`) with all Linux capabilities
 dropped, and publishes its IDE only on `127.0.0.1`. List and event projections

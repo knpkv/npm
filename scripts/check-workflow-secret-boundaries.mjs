@@ -41,13 +41,16 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
   typeof value === "string" &&
   new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(normalizeStaticIndexedProperties(value))
+const usesAction = (value, action) =>
+  typeof value === "string" && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
 const checkoutUsesPullRequestRevision = (step, trigger) => {
-  if (typeof step?.uses !== "string" || !step.uses.startsWith("actions/checkout@")) return false
+  if (!usesAction(step?.uses, "actions/checkout")) return false
   const ref = step.with?.ref
   if (ref === undefined) return trigger === "pull_request"
   if (
     referencesExpression(ref, "github.event.pull_request.head.sha") ||
     referencesExpression(ref, "github.event.pull_request.head.ref") ||
+    referencesExpression(ref, "github.event.pull_request.merge_commit_sha") ||
     referencesExpression(ref, "github.head_ref")
   ) {
     return true
@@ -227,6 +230,32 @@ jobs:
         env:
           GH_TOKEN: \${{ github['token'] }}
 `)
+  const invalidMergeCommitSha = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github['event'].pull_request['merge_commit_sha'] }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
+  const invalidMixedCaseCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: Actions/Checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+        env:
+          JIRA_API_KEY: \${{ secrets.JIRA_API_KEY }}
+`)
   const safeTrustedRef = parse(`
 on:
   pull_request:
@@ -309,6 +338,17 @@ jobs:
         env:
           GH_TOKEN: \${{ secrets["GITHUB_TOKEN"] }}
 `)
+  const safeMixedCaseNonCheckout = parse(`
+on:
+  pull_request_target:
+jobs:
+  metadata:
+    steps:
+      - uses: Actions/Setup-Node@${"a".repeat(40)}
+      - run: node --version
+        env:
+          GH_TOKEN: \${{ github.token }}
+`)
   const invalidDisjunctiveMain = parse(`
 on:
   workflow_dispatch:
@@ -348,6 +388,8 @@ jobs:
     1
   )
   assert.equal(validateWorkflowSecretBoundaries(invalidHeadShaWithGithubToken, "GitHub token fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidMergeCommitSha, "merge commit SHA fixture").length, 1)
+  assert.equal(validateWorkflowSecretBoundaries(invalidMixedCaseCheckout, "mixed-case checkout fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(invalidManualWorkflowEnvironment, "manual workflow environment fixture").length,
     2
@@ -363,6 +405,7 @@ jobs:
     []
   )
   assert.deepEqual(validateWorkflowSecretBoundaries(safeIndexedGithubToken, "indexed GitHub token fixture"), [])
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeMixedCaseNonCheckout, "mixed-case action fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 

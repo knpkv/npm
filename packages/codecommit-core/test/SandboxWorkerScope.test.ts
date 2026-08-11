@@ -47,6 +47,7 @@ const legacyRow: SandboxRow = {
 }
 
 interface FixtureOptions {
+  readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly stopContainer?: Effect.Effect<void, DockerError>
 }
@@ -56,6 +57,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   options?: FixtureOptions
 ) {
   const rowRef = yield* Ref.make<SandboxRow | undefined>(options?.initialRow)
+  const insertCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
@@ -64,14 +66,18 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     findByPr: () => Effect.succeed(Option.none<SandboxRow>()),
     findActive: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
     insert: (input) =>
-      Ref.set(rowRef, {
-        ...input,
-        containerId: null,
-        port: null,
-        statusDetail: null,
-        logs: null,
-        error: null
-      }),
+      Ref.update(insertCalls, (count) => count + 1).pipe(
+        Effect.andThen(
+          Ref.set(rowRef, {
+            ...input,
+            containerId: null,
+            port: null,
+            statusDetail: null,
+            logs: null,
+            error: null
+          })
+        )
+      ),
     findById: () =>
       Ref.get(rowRef).pipe(
         Effect.flatMap((row) =>
@@ -112,7 +118,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         )
     }),
     Layer.mock(PluginService, {}),
-    Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+    Layer.mock(ConfigService, { load: Effect.succeed(options?.config ?? config) }),
     Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of({ makeDirectory })),
     NodePath.layer,
     Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
@@ -145,6 +151,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   return {
     errorTransitioned,
+    insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
     stopContainerCalls,
@@ -153,6 +160,45 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 })
 
 describe("SandboxWorkerScope", () => {
+  it.effect("rejects invalid sandbox settings before inserting a row", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(
+        () => Effect.void,
+        {
+          config: {
+            ...config,
+            sandbox: { ...config.sandbox, image: "codercom/code-server:latest" }
+          }
+        }
+      )
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer),
+          Effect.result
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toBeUndefined()
+    }))
+
+  it.effect("inserts exactly once after sandbox settings pass validation", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never)
+
+      yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("records a production sandbox worker defect as an error", () =>
     Effect.gen(function*() {
       const defect = new Error("sandbox worker defect")

@@ -24,6 +24,7 @@ const emptyVolumeMounts: Array<SandboxVolumeMountDefault> = []
 const defaultAccountRegions: Array<AwsRegion> = [decodeAwsRegion("us-east-1")]
 export const defaultSandboxImage =
   "codercom/code-server@sha256:b88ed46a6ace76a0294a17a24f39aa88032ed0a3692c3d8ab5433b47ab57ccbf"
+const legacyDefaultSandboxImage = "codercom/code-server:latest"
 
 export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProfile")({
   name: Schema.NonEmptyString.pipe(Schema.brand("AwsProfileName")),
@@ -80,6 +81,12 @@ export const TuiConfig = Schema.Struct({
 })
 
 export type TuiConfig = typeof TuiConfig.Type
+
+/** Migrate only the mutable image tag previously emitted by the settings UI. */
+export const migrateLegacySandboxImage = (config: TuiConfig): TuiConfig =>
+  config.sandbox.image === legacyDefaultSandboxImage
+    ? { ...config, sandbox: { ...config.sandbox, image: defaultSandboxImage } }
+    : config
 
 export const accountsFromDetected = (detected: ReadonlyArray<DetectedProfile>): TuiConfig["accounts"] =>
   detected.map((profile) => ({

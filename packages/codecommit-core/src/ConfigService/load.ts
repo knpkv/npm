@@ -6,7 +6,14 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
 import { ConfigError, ConfigParseError } from "../Errors.js"
 import type { ProfileDetectionError } from "../Errors.js"
-import { accountsFromDetected, ConfigPaths, type DetectedProfile, makeDefaultConfig, TuiConfig } from "./internal.js"
+import {
+  accountsFromDetected,
+  ConfigPaths,
+  type DetectedProfile,
+  makeDefaultConfig,
+  migrateLegacySandboxImage,
+  TuiConfig
+} from "./internal.js"
 
 const emptyDetectedProfiles = (): ReadonlyArray<DetectedProfile> => []
 
@@ -40,6 +47,7 @@ export const makeLoad = Effect.fn("ConfigService.load")(function*(
   )
 
   const config = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TuiConfig))(content).pipe(
+    Effect.map(migrateLegacySandboxImage),
     Effect.mapError((cause) => new ConfigParseError({ path: configPath, cause }))
   )
 
