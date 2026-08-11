@@ -100,7 +100,8 @@ Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 #### Snapshot
 
 - Builds all packages
-- Runs for pull requests without repository credential or OIDC authority
+- Runs for pull requests with a read-only `GITHUB_TOKEN` for checkout, without
+  OIDC authority; checkout credentials are not persisted
 - **Commands**:
   - `pnpm build` - Build all packages
 

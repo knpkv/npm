@@ -232,6 +232,11 @@ When writing Effect code:
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+- The sole raw Node filesystem exception is
+  `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
+  it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory
+  and database handles through `fchmod` and verify path identity before return.
+  Do not broaden its ast-grep exclusion or move ordinary filesystem work into it.
 - `ChildProcess.make` options that set `env` must also state `extendEnv`; it
   defaults to falsy, so `env` alone replaces the child environment and drops
   `PATH`. `local-rules/require-explicit-child-process-env-inheritance` is the

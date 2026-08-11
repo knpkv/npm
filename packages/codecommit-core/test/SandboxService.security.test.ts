@@ -3,7 +3,12 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { rename as nodeRename, symlink as nodeSymlink } from "node:fs/promises"
 import { ensurePrivateDatabasePath } from "../src/CacheService/Database.js"
+import {
+  makeEnsurePrivateDatabasePath,
+  nodePrivateDatabasePathOperations
+} from "../src/CacheService/internal/PrivateDatabasePathNode.js"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
 import { renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
@@ -212,6 +217,81 @@ describe("sandbox security boundary", () => {
         expect((yield* fileSystem.stat(directory)).mode & 0o777).toBe(0o755)
         expect((yield* fileSystem.stat(attackerDatabase)).mode & 0o777).toBe(0o644)
         expect(Array.from(yield* fileSystem.readFile(attackerDatabase))).toEqual([99])
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("retains the cache directory handle if its path is replaced before permission repair", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-database-directory-race-" })
+        const directory = path.join(root, ".codecommit")
+        const displacedDirectory = path.join(root, "displaced-directory")
+        const attackerDirectory = path.join(root, "attacker-directory")
+        const marker = path.join(attackerDirectory, "marker")
+
+        yield* fileSystem.makeDirectory(directory, { mode: 0o755 })
+        yield* fileSystem.chmod(directory, 0o755)
+        yield* fileSystem.makeDirectory(attackerDirectory, { mode: 0o755 })
+        yield* fileSystem.chmod(attackerDirectory, 0o755)
+        yield* fileSystem.writeFile(marker, Uint8Array.of(42), { mode: 0o644 })
+
+        const racedOperations = {
+          ...nodePrivateDatabasePathOperations,
+          openDirectory: async (target: string) => {
+            const handle = await nodePrivateDatabasePathOperations.openDirectory(target)
+            await nodeRename(target, displacedDirectory)
+            await nodeSymlink(attackerDirectory, target)
+            return handle
+          }
+        }
+        const result = yield* makeEnsurePrivateDatabasePath(racedOperations)(
+          directory,
+          path.join(directory, "cache.db")
+        ).pipe(Effect.result)
+
+        expect(result._tag).toBe("Failure")
+        expect((yield* fileSystem.stat(attackerDirectory)).mode & 0o777).toBe(0o755)
+        expect(Array.from(yield* fileSystem.readFile(marker))).toEqual([42])
+        expect(yield* fileSystem.exists(path.join(attackerDirectory, "cache.db"))).toBe(false)
+        expect((yield* fileSystem.stat(displacedDirectory)).mode & 0o777).toBe(0o755)
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("retains the database handle if its path is replaced before permission repair", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-database-file-race-" })
+        const directory = path.join(root, ".codecommit")
+        const database = path.join(directory, "cache.db")
+        const displacedDatabase = path.join(root, "displaced.db")
+        const attackerDatabase = path.join(root, "attacker.db")
+
+        yield* fileSystem.makeDirectory(directory, { mode: 0o755 })
+        yield* fileSystem.writeFile(database, Uint8Array.of(42), { mode: 0o644 })
+        yield* fileSystem.chmod(database, 0o644)
+        yield* fileSystem.writeFile(attackerDatabase, Uint8Array.of(99), { mode: 0o644 })
+        yield* fileSystem.chmod(attackerDatabase, 0o644)
+
+        const racedOperations = {
+          ...nodePrivateDatabasePathOperations,
+          openDatabase: async (target: string) => {
+            const handle = await nodePrivateDatabasePathOperations.openDatabase(target)
+            await nodeRename(target, displacedDatabase)
+            await nodeSymlink(attackerDatabase, target)
+            return handle
+          }
+        }
+        const result = yield* makeEnsurePrivateDatabasePath(racedOperations)(directory, database).pipe(Effect.result)
+
+        expect(result._tag).toBe("Failure")
+        expect((yield* fileSystem.stat(attackerDatabase)).mode & 0o777).toBe(0o644)
+        expect(Array.from(yield* fileSystem.readFile(attackerDatabase))).toEqual([99])
+        expect((yield* fileSystem.stat(displacedDatabase)).mode & 0o777).toBe(0o644)
+        expect(Array.from(yield* fileSystem.readFile(displacedDatabase))).toEqual([42])
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 
