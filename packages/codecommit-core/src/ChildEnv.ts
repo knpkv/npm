@@ -52,6 +52,13 @@
  * as well as the canonical names, which closes the gap without taking `PATH` and
  * every other inherited variable into this module's hands: the spawn stays
  * `extendEnv: true`.
+ *
+ * The folding is unconditional, on every platform. On POSIX a lowercase
+ * `aws_access_key_id` is a genuinely distinct variable that the AWS chain never
+ * reads, so dropping it is broader than strictly required — deliberately, because
+ * detecting a case-insensitive host would mean reading the platform from this
+ * module, and a variable differing only in case carries the same intent. Nothing
+ * we spawn (`git`, `aws`, `assume`, `docker`) reads the lowercase spellings.
  */
 import { Context, Layer } from "effect"
 

@@ -24,10 +24,10 @@ files:
 
 ignores:
   - "**/*.test.ts"
-  # Test fixtures are boundaries in the same sense as the tests that spawn them:
-  # the Bun-hosted ChildEnv probe must read the real inherited environment to prove
-  # what a child actually receives.
-  - "**/test/fixtures/**"
+  # A boundary in the same sense as the tests that spawn it: the Bun-hosted ChildEnv
+  # probe must read the real inherited environment to prove what a child receives.
+  # Named individually rather than exempting every fixture directory.
+  - "**/test/fixtures/bunChildEnv.ts"
   - "**/*.spec.ts"
   - "**/bin.ts"
   - "**/main.ts"

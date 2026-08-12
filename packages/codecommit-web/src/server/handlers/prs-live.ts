@@ -64,6 +64,10 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const awsClient = yield* AwsClient.AwsClient
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* BackgroundScope
+    // A process-wide environment snapshot is a stable application service, not a
+    // request-scoped one: acquiring it here keeps this group's layer closed over its
+    // own requirements instead of leaking them into every consumer of HandlersLive.
+    const host = yield* ChildEnv.HostEnvironment
 
     return handlers
       .handle("list", () =>
@@ -114,7 +118,6 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
-          const host = yield* ChildEnv.HostEnvironment
           yield* copyToClipboard(payload.link).pipe(
             Effect.catchIf(() => true, () => Effect.void)
           )

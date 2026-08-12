@@ -303,7 +303,9 @@ When writing Effect code:
   requested profile. Obtain that environment from `ChildEnv.HostEnvironment`, whose
   layer is bound at each executable boundary — the only place permitted to read the
   host process. Passing an empty map is never correct at a runtime call site: it
-  silently degrades to exact-case clearing.
+  silently degrades to exact-case clearing. The folding is unconditional on every
+  platform, which is broader than POSIX strictly needs; that is deliberate and
+  documented in the module rather than gated on a platform read.
 - When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
