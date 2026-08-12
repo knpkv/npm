@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
@@ -187,7 +188,8 @@ describe("ProfileManager", () => {
     const mock = makeMockFS()
     const program = Effect.gen(function*() {
       yield* saveOAuthConfig("tool-a", { clientId: "client-1", clientSecret: "secret-1" })
-      yield* saveProfileToken("tool-a", makeToken(1, "read:me offline_access", Date.now() - 1_000))
+      const nowMs = yield* Clock.currentTimeMillis
+      yield* saveProfileToken("tool-a", makeToken(1, "read:me offline_access", nowMs - 1_000))
 
       const issued = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()

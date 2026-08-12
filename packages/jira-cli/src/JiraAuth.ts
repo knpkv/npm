@@ -528,7 +528,8 @@ const make = Effect.gen(function*() {
                 new OAuthError({
                   step: "refresh",
                   cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate.",
-                  status
+                  status,
+                  errorCode
                 })
               )
             })

@@ -268,6 +268,23 @@ do
   eq(w.jobs_started, 1, "same-second: a sub-second write is still observed")
 end
 
+-- A state file that disappears must not leave the last active reading cached:
+-- the poll is gated on it, so a stale `active` would spawn a status process
+-- every tick for a timer that no longer exists.
+do
+  local w = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE })
+  w.state.start_poll({ binary = "jcf" }, 30000)
+
+  w.tick()
+  eq(w.jobs_started, 1, "removed file: starts from an active reading")
+  fire_exit(w, "removed file") -- release the single-flight guard
+
+  w.stat = nil -- the file is gone
+  w.tick()
+  eq(w.jobs_started, 1, "removed file: a missing state file stops the polling")
+  eq(w.state.read("/fake/state.json").active, false, "removed file: cache reports inactive")
+end
+
 -- An unchanged file must still be served from cache — the key must not be so
 -- volatile that every read re-parses.
 do

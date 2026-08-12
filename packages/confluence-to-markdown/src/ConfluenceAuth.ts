@@ -494,7 +494,8 @@ const make = Effect.gen(function*() {
                 new OAuthError({
                   step: "refresh",
                   cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
-                  status
+                  status,
+                  errorCode
                 })
               )
             })

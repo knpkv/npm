@@ -19,15 +19,14 @@ import {
   saveOAuthConfig,
   saveProfileToken
 } from "@knpkv/atlassian-common/config"
+import { ConfigProvider } from "effect"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { JiraAuth, layer as jiraAuthLayer } from "../src/JiraAuth.js"
 
 const TOOL = "jira-cli"
@@ -95,22 +94,18 @@ const gatedClient = (issued: Deferred.Deferred<void>, release: Deferred.Deferred
     )
   )
 
+// `HomeDirectoryLive` resolves HOME through the ambient ConfigProvider, so the
+// test home can be injected rather than set on `process.env` — a global that
+// parallel tests would race each other to overwrite and restore. The directory
+// is scoped, so it is removed when the effect finishes either way.
 const withHome = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  Effect.acquireUseRelease(
-    Effect.sync(() => {
-      const dir = mkdtempSync(join(tmpdir(), "jcf-auth-"))
-      const previous = process.env.HOME
-      process.env.HOME = dir
-      return { dir, previous }
-    }),
-    () => effect,
-    ({ dir, previous }) =>
-      Effect.sync(() => {
-        if (previous === undefined) delete process.env.HOME
-        else process.env.HOME = previous
-        rmSync(dir, { recursive: true, force: true })
-      })
-  )
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-auth-" })
+    return yield* effect.pipe(
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home } })))
+    )
+  }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer))
 
 const storedToken = loadActiveProfileToken(TOOL).pipe(Effect.provide(storage))
 

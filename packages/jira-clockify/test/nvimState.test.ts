@@ -25,9 +25,17 @@ describe("jcf nvim state plugin", () => {
     expect(hasNvim, "CI must provide neovim so these specs cannot silently skip").toBe(true)
 
     // `--clean` so the developer's own init.lua cannot affect the run or add
-    // output of its own.
-    const result = spawnSync("nvim", ["--clean", "--headless", "-l", specPath], { encoding: "utf8" })
+    // output of its own. The timeout matters because the specs drive a fake
+    // clock: a regression that leaves the module waiting on something real
+    // would hang nvim indefinitely, and without a bound that becomes a hung
+    // vitest worker rather than a failed test.
+    const result = spawnSync("nvim", ["--clean", "--headless", "-l", specPath], {
+      encoding: "utf8",
+      timeout: 60_000
+    })
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+
+    expect(result.signal, `nvim did not exit on its own: ${output}`).toBeNull()
 
     // The spec prints its own failure list; surface it verbatim so a failure
     // here is diagnosable without re-running nvim by hand. Matched loosely —

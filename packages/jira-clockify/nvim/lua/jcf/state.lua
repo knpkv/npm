@@ -25,6 +25,11 @@ function M.read(state_path)
   local path = state_path or vim.fn.expand("~/.jcf/state.json")
   local stat = uv.fs_stat(path)
   if not stat then
+    -- The file is gone, so whatever we cached describes a world that no longer
+    -- exists. Handing back a stale `active` reading would keep the poll below
+    -- spawning `jcf timer status` every tick against a timer that isn't there.
+    cached = { active = false }
+    last_key = nil
     return cached
   end
   local key = stat_key(stat)
