@@ -18,6 +18,7 @@ import {
   type RelayReviewResult
 } from "../src/RelayReview.js"
 import { defaultRelayReviewSkills, normalizeRelayReviewSkills, relayReviewSkillsLabel } from "../src/ReviewSkills.js"
+import { ConsoleLaunchError } from "../src/tui/console-launch.js"
 import {
   actionDiagnostic,
   actionOutcome,
@@ -28,6 +29,8 @@ import {
   beginFindingPostSession,
   blobPreviewDisposition,
   buildUnifiedDiff,
+  type ChangedFileConsoleTarget,
+  changedFileConsoleTarget,
   changedFileHeadPath,
   changedFileRowId,
   changedFileTreeContentWidth,
@@ -35,12 +38,18 @@ import {
   changedFileTreeRows,
   changedFileTreeVisibleName,
   claimMergeConfirmation,
+  clearSettledConsoleStatus,
+  clearSettledEditorStatus,
   commentLocationAnchor,
   commentRevisionContext,
+  consoleOutcomeMatchesSelection,
+  type ConsoleStatus,
+  consoleTargetReady,
   currentFileDiffOutcome,
   currentWorkspaceSelection,
   detailsKeyIntent,
   displayedCommentLocations,
+  type EditorLaunchStatus,
   exactRevisionReviewState,
   fileDiffIdentity,
   fileDiffIdentityKey,
@@ -69,6 +78,7 @@ import {
   resolvePullRequestSelection,
   revisionHeaderText,
   splitDiffLineRow,
+  terminalHandoverBusy,
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
@@ -193,6 +203,135 @@ describe("PR detail workspace", () => {
     })
     expect(changedFileHeadPath(deleted)).toBeNull()
     expect(changedFileHeadPath(modified)).toBe("src/current.ts")
+  })
+
+  it("addresses the console on the revision where the selected file actually exists", () => {
+    const revision = { destinationCommit: "dest-commit", sourceCommit: "source-commit" }
+    const deleted = decodeChangedFile({
+      status: "deleted",
+      before: { blobId: "before", path: "src/removed.ts", mode: "100644" },
+      after: null
+    })
+    const modified = decodeChangedFile({
+      status: "modified",
+      before: { blobId: "before", path: "src/current.ts", mode: "100644" },
+      after: { blobId: "after", path: "src/current.ts", mode: "100644" }
+    })
+    const renamed = decodeChangedFile({
+      status: "renamed",
+      before: { blobId: "before", path: "src/old.ts", mode: "100644" },
+      after: { blobId: "after", path: "src/new.ts", mode: "100644" }
+    })
+
+    expect(changedFileConsoleTarget(modified, revision)).toEqual({
+      commitId: "source-commit",
+      path: "src/current.ts",
+      side: "after"
+    })
+    expect(changedFileConsoleTarget(renamed, revision)).toEqual({
+      commitId: "source-commit",
+      path: "src/new.ts",
+      side: "after"
+    })
+    // The head commit no longer carries a deleted file, so only the destination can render it.
+    expect(changedFileConsoleTarget(deleted, revision)).toEqual({
+      commitId: "dest-commit",
+      path: "src/removed.ts",
+      side: "before"
+    })
+    expect(changedFileConsoleTarget(null, revision)).toBeNull()
+
+    expect(consoleTargetReady(changedFileConsoleTarget(deleted, revision), false, false)).toBe(true)
+    expect(consoleTargetReady(changedFileConsoleTarget(deleted, revision), true, false)).toBe(false)
+    expect(consoleTargetReady(null, false, false)).toBe(false)
+    // A dispatched launch still accepts keys until it suspends the renderer; a second
+    // press there would interrupt the running `assume` and race suspend against resume.
+    expect(consoleTargetReady(changedFileConsoleTarget(modified, revision), false, true)).toBe(false)
+    expect(consoleTargetReady(changedFileConsoleTarget(modified, revision), false, false)).toBe(true)
+  })
+
+  it("makes the console and Neovim handovers mutually exclusive over the one terminal", () => {
+    const ready: { readonly _tag: "ready" } = { _tag: "ready" }
+    const target: ChangedFileConsoleTarget = {
+      commitId: "source-commit",
+      path: "src/current.ts",
+      side: "after"
+    }
+    const consoleLaunching = terminalHandoverBusy({ consoleOpening: true, neovimOpening: false })
+    const neovimLaunching = terminalHandoverBusy({ consoleOpening: false, neovimOpening: true })
+
+    expect(terminalHandoverBusy({ consoleOpening: false, neovimOpening: false })).toBe(false)
+    // Neither may start while the other holds the tty.
+    expect(localEditorReady(ready, "src/current.ts", false, consoleLaunching)).toBe(false)
+    expect(consoleTargetReady(target, false, neovimLaunching)).toBe(false)
+    // Both are available again once nothing owns it.
+    expect(localEditorReady(ready, "src/current.ts", false, false)).toBe(true)
+    expect(consoleTargetReady(target, false, false)).toBe(true)
+  })
+
+  it("keeps an in-flight console launch alive across background workspace events", () => {
+    const opening: ConsoleStatus = {
+      _tag: "opening",
+      filePath: "src/current.ts",
+      link: "https://console",
+      profile: "dev-admin",
+      requestId: "console-1",
+      side: "after"
+    }
+
+    // `assume` can hold the terminal for minutes at an SSO prompt while the revision
+    // poll keeps running; clearing here would drop the outcome at the settle effect's
+    // `opening` guard and with it the GRANTED REQUIRED dialog.
+    expect(clearSettledConsoleStatus(opening)).toBe(opening)
+    expect(clearSettledConsoleStatus({ _tag: "done", side: "after" })).toEqual({ _tag: "idle" })
+    expect(
+      clearSettledConsoleStatus({
+        _tag: "failed",
+        diagnostic: { operation: "open-codecommit", message: "assume exited with status 1" }
+      })
+    ).toEqual({ _tag: "idle" })
+    // Returned by identity so an already-idle status does not re-render.
+    const idle: ConsoleStatus = { _tag: "idle" }
+    expect(clearSettledConsoleStatus(idle)).toBe(idle)
+
+    // The editor side feeds the same mutual exclusion, so it needs the same protection:
+    // clearing an in-flight Neovim launch would let a console handover take its tty.
+    const neovimOpening: EditorLaunchStatus = { _tag: "opening", editor: "neovim", requestId: "nvim-1" }
+    expect(clearSettledEditorStatus(neovimOpening)).toBe(neovimOpening)
+    expect(clearSettledEditorStatus({ _tag: "done", editor: "neovim" })).toEqual({ _tag: "idle" })
+    // VS Code holds no terminal, so an in-flight one has nothing to protect.
+    expect(clearSettledEditorStatus({ _tag: "opening", editor: "vscode", requestId: "code-1" })).toEqual({
+      _tag: "idle"
+    })
+  })
+
+  it("drops a console outcome that settled after the file selection moved", () => {
+    expect(consoleOutcomeMatchesSelection("src/current.ts", "src/current.ts")).toBe(true)
+    expect(consoleOutcomeMatchesSelection("src/current.ts", "src/other.ts")).toBe(false)
+    // Matched by path, not list position: a background refresh can reorder the files
+    // and leave the same index pointing at a different one.
+    expect(consoleOutcomeMatchesSelection("src/current.ts", null)).toBe(false)
+  })
+
+  it("keeps a missing assume executable distinguishable from a failed console attempt", () => {
+    const missing = actionDiagnostic(
+      new ConsoleLaunchError({
+        operation: "open-codecommit",
+        reason: "assume-missing",
+        message: "Granted's assume executable was not found on PATH"
+      })
+    )
+    const failed = actionDiagnostic(
+      new ConsoleLaunchError({
+        operation: "open-codecommit",
+        reason: "assume-failed",
+        message: "assume exited with status 1"
+      })
+    )
+
+    expect(missing.consoleLaunchReason).toBe("assume-missing")
+    expect(missing.operation).toBe("open-codecommit")
+    expect(failed.consoleLaunchReason).toBe("assume-failed")
   })
 
   it("keeps global filter shortcuts out of the details workspace", () => {
@@ -1031,6 +1170,13 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "c", modified: true })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "n" })).toBe("open-neovim")
     expect(detailsKeyIntent({ ...base, keyName: "v" })).toBe("open-vscode")
+    expect(detailsKeyIntent({ ...base, keyName: "C" })).toBe("open-codecommit")
+    expect(detailsKeyIntent({ ...base, keyName: "c", shifted: true })).toBe("open-codecommit")
+    expect(detailsKeyIntent({ ...base, keyName: "c" })).toBe("show-comments")
+    expect(detailsKeyIntent({ ...base, keyName: "C", tab: "comments" })).toBe("yield")
+    expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "C" })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, keyName: "C", workspaceRefreshing: true })).toBe("consume")
+    expect(detailsKeyIntent({ ...base, keyName: "c", shifted: true, workspaceRefreshing: true })).toBe("consume")
     expect(detailsKeyIntent({ ...base, conversationRunning: true, keyName: "n" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, conversationRunning: true, keyName: "v" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, findingReviewActive: true, keyName: "v", shifted: true })).toBe("verify-finding")
@@ -1573,10 +1719,14 @@ describe("PR detail workspace", () => {
       plan,
       worktree
     })
-    expect(localEditorReady(ready, "src/surviving.ts", false)).toBe(true)
-    expect(localEditorReady(ready, null, false)).toBe(false)
-    expect(localEditorReady(provider, "src/surviving.ts", false)).toBe(false)
-    expect(localEditorReady({ ...ready, _tag: "outdated" }, "src/surviving.ts", false)).toBe(false)
+    expect(localEditorReady(ready, "src/surviving.ts", false, false)).toBe(true)
+    expect(localEditorReady(ready, null, false, false)).toBe(false)
+    expect(localEditorReady(provider, "src/surviving.ts", false, false)).toBe(false)
+    expect(localEditorReady({ ...ready, _tag: "outdated" }, "src/surviving.ts", false, false)).toBe(false)
+    // A console launch already owns the tty, so Neovim must not start a second handover,
+    // while VS Code stays available because it never suspends the renderer.
+    expect(localEditorReady(ready, "src/surviving.ts", false, true)).toBe(false)
+    expect(localEditorReady(ready, "src/surviving.ts", false, false)).toBe(true)
     expect(worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-2" }, success)).toBe(provider)
     expect(
       worktreeCheckoutLocalDiff(provider, { plan, requestId: "checkout-1" }, {

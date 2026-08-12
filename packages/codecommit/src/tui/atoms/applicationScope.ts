@@ -1,3 +1,4 @@
+import { ChildEnv } from "@knpkv/codecommit-core"
 import type { Scope } from "effect"
 import { Context, Effect, Layer } from "effect"
 import * as Atom from "effect/unstable/reactivity/Atom"
@@ -26,15 +27,28 @@ export const tuiTerminalSessionAtom = Atom.make<TuiTerminalSessionShape | undefi
   Atom.keepAlive
 )
 
+/**
+ * Inherited environment seeded from the executable boundary. @internal
+ *
+ * Profile-scoped spawns must tombstone the ambient AWS variables actually present,
+ * which means reading the environment the child will extend. Only the entry point may
+ * touch the host process, so it is seeded here rather than read where it is used.
+ */
+export const tuiHostEnvironmentAtom = Atom.make<Record<string, string | undefined> | undefined>(undefined).pipe(
+  Atom.keepAlive
+)
+
 /** Creates the atom registry owned by one TUI program invocation. @internal */
 export const makeTuiApplicationRegistry = (
   applicationScope: Scope.Scope,
-  terminalSession: TuiTerminalSessionShape
+  terminalSession: TuiTerminalSessionShape,
+  hostEnvironment: Record<string, string | undefined>
 ) =>
   AtomRegistry.make({
     initialValues: [
       [tuiApplicationScopeAtom, applicationScope],
-      [tuiTerminalSessionAtom, terminalSession]
+      [tuiTerminalSessionAtom, terminalSession],
+      [tuiHostEnvironmentAtom, hostEnvironment]
     ]
   })
 
@@ -57,5 +71,16 @@ export const tuiTerminalSessionLayer = (get: Atom.AtomContext) => {
     terminalSession === undefined
       ? Effect.die(new Error("The TUI runtime must own a terminal session"))
       : Effect.succeed(TuiTerminalSession.of(terminalSession))
+  )
+}
+
+/** Provides the inherited environment to profile-scoped spawns evaluated by an atom runtime. @internal */
+export const tuiHostEnvironmentLayer = (get: Atom.AtomContext) => {
+  const variables = get(tuiHostEnvironmentAtom)
+  return Layer.effect(
+    ChildEnv.HostEnvironment,
+    variables === undefined
+      ? Effect.die(new Error("The TUI runtime must own the inherited environment"))
+      : Effect.succeed(ChildEnv.HostEnvironment.of({ variables }))
   )
 }

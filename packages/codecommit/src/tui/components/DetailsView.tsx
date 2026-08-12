@@ -28,6 +28,7 @@ import {
   loadPullRequestRevisionAtom,
   loadPullRequestWorkspaceAtom,
   mergePullRequestAtom,
+  openConsoleAtom,
   openEditorAtom,
   postRelayFindingAtom,
   preflightWorktreeAtom,
@@ -41,6 +42,7 @@ import {
   addAmbiguousMergeGuard,
   adjacentChangedFileIndex,
   beginFindingPostSession,
+  changedFileConsoleTarget,
   changedFileHeadPath,
   changedFileRowId,
   changedFileTreeContentWidth,
@@ -49,6 +51,12 @@ import {
   commentLocationAnchor,
   commentRevisionContext,
   claimMergeConfirmation,
+  clearSettledConsoleStatus,
+  clearSettledEditorStatus,
+  type ConsoleStatus,
+  type EditorLaunchStatus,
+  consoleOutcomeMatchesSelection,
+  consoleTargetReady,
   currentFileDiffOutcome,
   currentWorkspaceSelection,
   detailsKeyIntent,
@@ -75,6 +83,7 @@ import {
   revisionHeaderText,
   resolvePullRequestSelection,
   splitDiffLineRow,
+  terminalHandoverBusy,
   terminalSafeCompactText,
   terminalSafeMultilineText,
   terminalSafeText,
@@ -92,6 +101,7 @@ import {
   worktreeCheckoutLocalDiff,
   workspaceIdentityMatches
 } from "../details-model.js"
+import { codecommitFileConsoleUrl } from "../browser-command.js"
 import type { FileDiffOutcome } from "../file-diff.js"
 import type { LocalEditor } from "../editor-launch.js"
 import { ambiguousMergeGuardsAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
@@ -124,6 +134,7 @@ import {
   reconcileRelayVerificationResult,
   reconcileRelayReviewSession
 } from "../review-session.js"
+import { DialogAssumeRequired } from "../ui/DialogAssumeRequired.js"
 import { DialogFindingConversation } from "../ui/DialogFindingConversation.js"
 import { DialogFindingTarget } from "../ui/DialogFindingTarget.js"
 import { DialogMergeStrategy } from "../ui/DialogMergeStrategy.js"
@@ -351,11 +362,6 @@ type ActionStatus =
     } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
-type EditorStatus =
-  | { readonly _tag: "idle" }
-  | { readonly _tag: "opening"; readonly editor: LocalEditor; readonly requestId: string }
-  | { readonly _tag: "done"; readonly editor: LocalEditor }
-  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
 
 type ConversationStatus =
   | { readonly _tag: "idle" }
@@ -475,6 +481,8 @@ export function DetailsView() {
   const mergePullRequestResult = useAtomValue(mergePullRequestAtom)
   const openEditor = useAtomSet(openEditorAtom)
   const openEditorResult = useAtomValue(openEditorAtom)
+  const openConsole = useAtomSet(openConsoleAtom)
+  const openConsoleResult = useAtomValue(openConsoleAtom)
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [selectedFindingIndex, setSelectedFindingIndex] = useState(0)
   const [findingDispositions, setFindingDispositions] = useState<Record<string, FindingDisposition>>({})
@@ -491,12 +499,15 @@ export function DetailsView() {
   const [reviewSkills, setReviewSkills] = useState<ReadonlyArray<RelayReviewSkillId>>(defaultRelayReviewSkills)
   const [action, setAction] = useState<ActionStatus>({ _tag: "idle" })
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>({ _tag: "idle" })
-  const [editorStatus, setEditorStatus] = useState<EditorStatus>({ _tag: "idle" })
+  const [editorStatus, setEditorStatusState] = useState<EditorLaunchStatus>({ _tag: "idle" })
+  const [consoleStatus, setConsoleStatusState] = useState<ConsoleStatus>({ _tag: "idle" })
   const [diffCache, setDiffCache] = useState<ReadonlyMap<string, FileDiffOutcome>>(() => new Map())
   const [syntaxStyle, setSyntaxStyle] = useState<SyntaxStyle | null>(null)
   const actionScrollRef = useRef<ScrollBoxRenderable>(null)
   const actionRef = useRef<ActionStatus>(action)
   const mergeStatusRef = useRef<MergeStatus>(mergeStatus)
+  const consoleStatusRef = useRef<ConsoleStatus>({ _tag: "idle" })
+  const editorStatusRef = useRef<EditorLaunchStatus>({ _tag: "idle" })
   const selectedFindingIndexRef = useRef(selectedFindingIndex)
   const diffRef = useRef<DiffRenderable>(null)
   const highlightedFindingRef = useRef<{ readonly diff: DiffRenderable; readonly row: number } | null>(null)
@@ -524,6 +535,25 @@ export function DetailsView() {
     mergeStatusRef.current = next
     setMergeStatus(next)
   }
+
+  // Terminal ownership is claimed through refs, not render state: `setState` does not
+  // land before the next key in the same batch, so two presses would both read an idle
+  // status and start two handovers over the one tty.
+  const updateConsoleStatus = (next: ConsoleStatus | ((current: ConsoleStatus) => ConsoleStatus)) => {
+    consoleStatusRef.current = typeof next === "function" ? next(consoleStatusRef.current) : next
+    setConsoleStatusState(consoleStatusRef.current)
+  }
+
+  const updateEditorStatus = (next: EditorLaunchStatus | ((current: EditorLaunchStatus) => EditorLaunchStatus)) => {
+    editorStatusRef.current = typeof next === "function" ? next(editorStatusRef.current) : next
+    setEditorStatusState(editorStatusRef.current)
+  }
+
+  const claimedHandoverBusy = () =>
+    terminalHandoverBusy({
+      consoleOpening: consoleStatusRef.current._tag === "opening",
+      neovimOpening: editorStatusRef.current._tag === "opening" && editorStatusRef.current.editor === "neovim"
+    })
 
   const prSelection = useMemo(
     () => resolvePullRequestSelection(appState.pullRequests, selectedPrId),
@@ -583,6 +613,7 @@ export function DetailsView() {
   const fileTreeContentWidth = useMemo(() => changedFileTreeContentWidth(fileTreeRows), [fileTreeRows])
   const selectedFile = workspace?.files[selectedFileIndex] ?? null
   const headEditorPath = changedFileHeadPath(selectedFile)
+  const consoleTarget = workspace === null ? null : changedFileConsoleTarget(selectedFile, workspace.revision)
   const beforePath = selectedFile?.before?.path ?? "/dev/null"
   const afterPath = selectedFile?.after?.path ?? "/dev/null"
   const expectedFileIdentity =
@@ -657,7 +688,8 @@ export function DetailsView() {
         : null
     )
     setDiffCache(new Map())
-    setEditorStatus({ _tag: "idle" })
+    updateEditorStatus(clearSettledEditorStatus)
+    updateConsoleStatus(clearSettledConsoleStatus)
     if (mergeResetPolicy === "interrupt") updateMergeStatus({ _tag: "idle" })
     pendingDiffKeyRef.current = null
     setTab("diff")
@@ -1051,7 +1083,7 @@ export function DetailsView() {
   useEffect(() => {
     if (editorStatus._tag !== "opening" || AsyncResult.isWaiting(openEditorResult)) return
     if (AsyncResult.isFailure(openEditorResult)) {
-      setEditorStatus({
+      updateEditorStatus({
         _tag: "failed",
         diagnostic: { operation: "open-editor", message: "The editor action failed unexpectedly" }
       })
@@ -1060,11 +1092,48 @@ export function DetailsView() {
     if (!AsyncResult.isSuccess(openEditorResult) || openEditorResult.value.requestId !== editorStatus.requestId) return
     const outcome = openEditorResult.value
     if (outcome._tag === "failure") {
-      setEditorStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      updateEditorStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
       return
     }
-    setEditorStatus({ _tag: "done", editor: outcome.value.editor })
+    updateEditorStatus({ _tag: "done", editor: outcome.value.editor })
   }, [editorStatus, openEditorResult])
+
+  useEffect(() => {
+    if (consoleStatus._tag !== "opening" || AsyncResult.isWaiting(openConsoleResult)) return
+    if (AsyncResult.isFailure(openConsoleResult)) {
+      updateConsoleStatus({
+        _tag: "failed",
+        diagnostic: { operation: "open-codecommit", message: "The console action failed unexpectedly" }
+      })
+      return
+    }
+    if (!AsyncResult.isSuccess(openConsoleResult) || openConsoleResult.value.requestId !== consoleStatus.requestId) {
+      return
+    }
+    const outcome = openConsoleResult.value
+    if (outcome._tag === "failure") {
+      updateConsoleStatus({ _tag: "failed", diagnostic: outcome.diagnostic })
+      // A missing prerequisite is not a retryable attempt, so it is raised where it
+      // can explain the install instead of scrolling past as one more status line.
+      if (outcome.diagnostic.consoleLaunchReason === "assume-missing") {
+        const { link, profile } = consoleStatus
+        dialog.show(() => <DialogAssumeRequired link={link} profile={profile} />)
+      }
+      return
+    }
+    // A launch that settles after the selection moved would label the wrong file.
+    updateConsoleStatus(
+      consoleOutcomeMatchesSelection(consoleStatus.filePath, consoleTarget?.path ?? null)
+        ? { _tag: "done", side: consoleStatus.side }
+        : { _tag: "idle" }
+    )
+  }, [consoleStatus, dialog, openConsoleResult])
+
+  // A settled console line names the revision side it opened, so it cannot outlive
+  // the file selection it describes; an in-flight launch keeps its own status.
+  useEffect(() => {
+    updateConsoleStatus(clearSettledConsoleStatus)
+  }, [selectedFileIndex])
 
   useEffect(() => {
     const observation: MergeResultObservation = AsyncResult.isWaiting(mergePullRequestResult)
@@ -1229,9 +1298,21 @@ export function DetailsView() {
     currentWorkspace: pr === null || workspace === null ? null : { pr, workspace },
     providerDriftPending
   }
-  const editorReady =
-    workspace !== null &&
-    localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending)
+  // Neovim and the console both take the tty; a second handover started before the
+  // first suspends the renderer would leave one child on a tty the other restored.
+  const handoverBusy = terminalHandoverBusy({
+    consoleOpening: consoleStatus._tag === "opening",
+    neovimOpening: editorStatus._tag === "opening" && editorStatus.editor === "neovim"
+  })
+  // Two affordances, because only Neovim is blocked by a handover: showing `v` as
+  // unavailable while it still works would misreport what the key does.
+  const neovimReady = workspace !== null &&
+    localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending, handoverBusy)
+  const vscodeReady = workspace !== null &&
+    localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending, false)
+  // The console reads the provider directly, so it needs an addressable file but no local checkout.
+  const consoleReady = workspace !== null &&
+    consoleTargetReady(consoleTarget, actionCancelable || providerDriftPending, handoverBusy)
   const reviewCardExpanded = action._tag === "reviewed"
 
   useEffect(() => {
@@ -1307,7 +1388,8 @@ export function DetailsView() {
     setProviderDrift(drift)
     loadDiff(Atom.Interrupt)
     setDiffCache(new Map())
-    setEditorStatus({ _tag: "idle" })
+    updateEditorStatus(clearSettledEditorStatus)
+    updateConsoleStatus(clearSettledConsoleStatus)
     pendingDiffKeyRef.current = null
     if (
       !pullRequestDriftRefreshStartEnabled({
@@ -1348,7 +1430,8 @@ export function DetailsView() {
     setConversationStatus({ _tag: "idle" })
     setVerificationStatus({ _tag: "idle" })
     setDiffCache(new Map())
-    setEditorStatus({ _tag: "idle" })
+    updateEditorStatus(clearSettledEditorStatus)
+    updateConsoleStatus(clearSettledConsoleStatus)
     pendingDiffKeyRef.current = null
     setTab("diff")
     setAction({ _tag: "idle" })
@@ -1356,8 +1439,10 @@ export function DetailsView() {
 
   const openSelectedInEditor = (editor: LocalEditor) => {
     if (workspace === null || headEditorPath === null || actionCancelable || providerDriftPending) return
+    // Neovim shares the tty with the console launch; VS Code never suspends the renderer.
+    if (editor === "neovim" && claimedHandoverBusy()) return
     if (workspace.localDiff._tag !== "ready") {
-      setEditorStatus({
+      updateEditorStatus({
         _tag: "failed",
         diagnostic: {
           operation: `open-${editor}`,
@@ -1369,7 +1454,7 @@ export function DetailsView() {
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${workspace.revision.sourceCommit}:editor:${editor}:${nextActionRequestSequence}`
     const lineNumber = relayFindingHeadEditorLine(selectedFinding, headEditorPath)
-    setEditorStatus({ _tag: "opening", editor, requestId })
+    updateEditorStatus({ _tag: "opening", editor, requestId })
     openEditor({
       editor,
       filePath: headEditorPath,
@@ -1377,6 +1462,30 @@ export function DetailsView() {
       requestId,
       worktreePath: workspace.localDiff.worktree.path
     })
+  }
+
+  const openSelectedInConsole = () => {
+    if (workspace === null || pr === null || consoleTarget === null || actionCancelable || providerDriftPending) return
+    // Starting a second handover would interrupt the running child — killing it and
+    // racing its `resume` against the replacement's `suspend` — so the press is consumed.
+    if (claimedHandoverBusy()) return
+    const link = codecommitFileConsoleUrl({
+      commitId: consoleTarget.commitId,
+      filePath: consoleTarget.path,
+      region: workspace.identity.region,
+      repositoryName: workspace.identity.repositoryName
+    })
+    nextActionRequestSequence += 1
+    const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${consoleTarget.commitId}:console:${nextActionRequestSequence}`
+    updateConsoleStatus({
+      _tag: "opening",
+      filePath: consoleTarget.path,
+      link,
+      profile: pr.account.profile,
+      requestId,
+      side: consoleTarget.side
+    })
+    openConsole({ link, profile: pr.account.profile, requestId })
   }
 
   const decideFinding = (disposition: "acknowledged" | "rejected") => {
@@ -1618,6 +1727,7 @@ export function DetailsView() {
       if (selection !== null) dialog.show(() => <DialogMergeStrategy onApply={beginMerge} />)
     } else if (intent === "open-neovim") openSelectedInEditor("neovim")
     else if (intent === "open-vscode") openSelectedInEditor("vscode")
+    else if (intent === "open-codecommit") openSelectedInConsole()
     else if (intent === "previous-finding") {
       setSelectedFindingIndex((index) => adjacentFindingIndex(reviewedFindings.length, index, -1))
     } else if (intent === "next-finding") {
@@ -1912,8 +2022,30 @@ export function DetailsView() {
             {!reviewCardExpanded && (
               <>
                 <text fg={theme.textMuted}>OPEN SELECTED</text>
-                <ActionKey active={editorReady} keyName="n" label="Neovim" />
-                <ActionKey active={editorReady} keyName="v" label="VS Code" />
+                <ActionKey active={neovimReady} keyName="n" label="Neovim" />
+                <ActionKey active={vscodeReady} keyName="v" label="VS Code" />
+                <ActionKey active={consoleReady} keyName="C" label="CodeCommit" />
+                {consoleStatus._tag === "opening" && <text fg={theme.textWarning}>Opening CodeCommit console…</text>}
+                {consoleStatus._tag === "done" && (
+                  <text fg={theme.textSuccess}>
+                    {consoleStatus.side === "after" ? "Opened in CodeCommit" : "Opened deleted file at destination"}
+                  </text>
+                )}
+                {consoleStatus._tag === "failed" && (
+                  <text
+                    fg={consoleStatus.diagnostic.consoleLaunchReason === "assume-interrupted"
+                      ? theme.textWarning
+                      : theme.textError}
+                  >
+                    {terminalSafeText(
+                      consoleStatus.diagnostic.consoleLaunchReason === "assume-interrupted"
+                        // An unfinished sign-in is not a fault, but the signal is not always
+                        // the user's Ctrl-C either, so it warns rather than reading as normal.
+                        ? consoleStatus.diagnostic.message
+                        : `${consoleStatus.diagnostic.operation}: ${consoleStatus.diagnostic.message}`
+                    )}
+                  </text>
+                )}
                 {editorStatus._tag === "opening" && (
                   <text
                     fg={theme.textWarning}
@@ -2057,7 +2189,7 @@ export function DetailsView() {
                 <box flexDirection="row">
                   <ActionKey active={!agentRunning} keyName="g" label="Skills" />
                   <ActionKey active={!agentRunning} keyName="r" label="Rerun" />
-                  <ActionKey active={editorReady} keyName="n/v" label="Open" />
+                  <ActionKey active={neovimReady || vscodeReady} keyName="n/v" label="Open" />
                 </box>
                 {detachedStaleFindingIds.map((findingId) => {
                   const diagnostic = findingPostDiagnostics[findingId]

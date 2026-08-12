@@ -102,8 +102,10 @@ export const safePathSegment = Effect.fn("WorktreeService.safePathSegment")(func
   return `${safeLabel}-${readable}-${digest}`
 })
 
-const gitEnvironment = (request: WorktreeRequest) => ({
-  ...ChildEnv.profileScopedEnv({
+type HostVariables = Record<string, string | undefined>
+
+const gitEnvironment = (inherited: HostVariables, request: WorktreeRequest) => ({
+  ...ChildEnv.profileScopedEnv(inherited, {
     AWS_PROFILE: request.account.profile,
     AWS_REGION: request.account.region
   }),
@@ -116,8 +118,8 @@ const gitEnvironment = (request: WorktreeRequest) => ({
  * Remote transport keeps the normal Git configuration for the credential
  * helper, while the local materialization step has no authentication need.
  */
-const materializationGitEnvironment = (request: WorktreeRequest, home: string) => ({
-  ...gitEnvironment(request),
+const materializationGitEnvironment = (inherited: HostVariables, request: WorktreeRequest, home: string) => ({
+  ...gitEnvironment(inherited, request),
   GIT_ATTR_NOSYSTEM: "1",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
@@ -127,6 +129,7 @@ const materializationGitEnvironment = (request: WorktreeRequest, home: string) =
 
 /** @internal Constructs the profile-scoped Git command used by exact-head checkout. */
 export const makeCodeCommitGitCommand = (
+  inherited: HostVariables,
   request: WorktreeRequest,
   args: ReadonlyArray<string>,
   options: {
@@ -151,7 +154,7 @@ export const makeCodeCommitGitCommand = (
       ...args
     ], {
       ...(cwd === undefined ? {} : { cwd }),
-      env: environment ?? gitEnvironment(request),
+      env: environment ?? gitEnvironment(inherited, request),
       extendEnv: true,
       stdin: "ignore",
       stderr: "ignore",
@@ -164,12 +167,13 @@ const commandFailure = (operation: string, message: string, cause?: unknown) =>
 
 const runChecked = Effect.fn("WorktreeService.runChecked")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   operation: string,
   args: ReadonlyArray<string>,
   options?: { readonly cwd?: string }
 ) {
-  const exitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(request, args, options)).pipe(
+  const exitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(inherited, request, args, options)).pipe(
     Effect.mapError((cause) => commandFailure(operation, "Unable to run git", cause))
   )
   if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
@@ -179,11 +183,12 @@ const runChecked = Effect.fn("WorktreeService.runChecked")(function*(
 
 const runSucceeds = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   args: ReadonlyArray<string>,
   options?: { readonly cwd?: string }
 ) =>
-  spawner.exitCode(makeCodeCommitGitCommand(request, args, options)).pipe(
+  spawner.exitCode(makeCodeCommitGitCommand(inherited, request, args, options)).pipe(
     Effect.match({
       onFailure: () => false,
       onSuccess: (code) => code === ChildProcessSpawner.ExitCode(0)
@@ -192,10 +197,11 @@ const runSucceeds = (
 
 const isBareRepository = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   repositoryPath: string
 ) =>
-  spawner.string(makeCodeCommitGitCommand(request, [
+  spawner.string(makeCodeCommitGitCommand(inherited, request, [
     `--git-dir=${repositoryPath}`,
     "rev-parse",
     "--is-bare-repository"
@@ -208,12 +214,13 @@ const isBareRepository = (
 
 const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   targetPath: string
 ) {
   const isAncestor = (left: string, right: string) =>
     spawner.exitCode(
-      makeCodeCommitGitCommand(request, ["merge-base", "--is-ancestor", left, right], { cwd: targetPath })
+      makeCodeCommitGitCommand(inherited, request, ["merge-base", "--is-ancestor", left, right], { cwd: targetPath })
     ).pipe(
       Effect.match({
         onFailure: () => false,
@@ -223,7 +230,9 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
   const [headBeforeTarget, targetBeforeHead, symbolicHeadExitCode] = yield* Effect.all([
     isAncestor("HEAD", request.sourceCommit),
     isAncestor(request.sourceCommit, "HEAD"),
-    spawner.exitCode(makeCodeCommitGitCommand(request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })).pipe(
+    spawner.exitCode(
+      makeCodeCommitGitCommand(inherited, request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })
+    ).pipe(
       Effect.orElseSucceed(() => ChildProcessSpawner.ExitCode(128))
     )
   ])
@@ -232,6 +241,7 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
 
 const isCleanWorktree = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   targetPath: string,
   home: string
@@ -243,7 +253,7 @@ const isCleanWorktree = (
     "--ignored=matching"
   ], {
     cwd: targetPath,
-    env: materializationGitEnvironment(request, home),
+    env: materializationGitEnvironment(inherited, request, home),
     extendEnv: true,
     stderr: "ignore",
     stdout: "pipe"
@@ -256,12 +266,13 @@ const isCleanWorktree = (
 
 const isReusableWorktree = Effect.fn("WorktreeService.isReusableWorktree")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  inherited: HostVariables,
   request: WorktreeRequest,
   targetPath: string,
   home: string
 ) {
-  const exact = yield* isExactHead(spawner, request, targetPath)
-  return exact && (yield* isCleanWorktree(spawner, request, targetPath, home))
+  const exact = yield* isExactHead(spawner, inherited, request, targetPath)
+  return exact && (yield* isCleanWorktree(spawner, inherited, request, targetPath, home))
 })
 
 const LOCK_READY_LINE = "knpkv-codecommit-lock-ready"
@@ -357,6 +368,10 @@ export const makeWorktreeService = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    // Resolved once for the service: the git spawns tombstone the ambient AWS variables
+    // under whatever casing the host exported them with, so the requested profile stays
+    // authoritative even where environment names are case-insensitive.
+    const inherited = (yield* ChildEnv.HostEnvironment).variables
     const digestService = yield* Crypto.Crypto
     const home = yield* homeDirectory.pipe(
       Effect.mapError((cause) => commandFailure("resolve-home", "HOME or USERPROFILE is required", cause))
@@ -586,7 +601,7 @@ export const makeWorktreeService = (
       const remoteUrl = yield* remoteUrlFor(plan)
       if (cacheExists) {
         yield* assertCanonical("validate-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
-        const validCache = yield* isBareRepository(spawner, plan, plan.cachePath)
+        const validCache = yield* isBareRepository(spawner, inherited, plan, plan.cachePath)
         if (!validCache) {
           return yield* commandFailure(
             "validate-cache",
@@ -605,25 +620,26 @@ export const makeWorktreeService = (
               Effect.mapError((cause) => commandFailure("stage-cache", "Unable to stage repository cache", cause))
             )
             const stagedCache = path.join(stagingRoot, "repository.git")
-            yield* runChecked(spawner, plan, "clone-cache", ["clone", "--bare", remoteUrl, stagedCache]).pipe(
-              Effect.flatMap(() =>
-                fs.rename(stagedCache, plan.cachePath).pipe(
-                  Effect.catch((renameCause) =>
-                    isBareRepository(spawner, plan, plan.cachePath).pipe(
-                      Effect.flatMap((wonByAnotherProcess) =>
-                        wonByAnotherProcess
-                          ? Effect.void
-                          : commandFailure("install-cache", "Unable to install repository cache", renameCause)
+            yield* runChecked(spawner, inherited, plan, "clone-cache", ["clone", "--bare", remoteUrl, stagedCache])
+              .pipe(
+                Effect.flatMap(() =>
+                  fs.rename(stagedCache, plan.cachePath).pipe(
+                    Effect.catch((renameCause) =>
+                      isBareRepository(spawner, inherited, plan, plan.cachePath).pipe(
+                        Effect.flatMap((wonByAnotherProcess) =>
+                          wonByAnotherProcess
+                            ? Effect.void
+                            : commandFailure("install-cache", "Unable to install repository cache", renameCause)
+                        )
                       )
                     )
                   )
                 )
               )
-            )
           })
         )
       } else {
-        yield* runChecked(spawner, plan, "update-cache-remote", [
+        yield* runChecked(spawner, inherited, plan, "update-cache-remote", [
           `--git-dir=${plan.cachePath}`,
           "remote",
           "set-url",
@@ -635,21 +651,27 @@ export const makeWorktreeService = (
       yield* assertCanonical("validate-ready-cache-path", repositoriesRoot, canonicalRepositoriesRoot, plan.cachePath)
 
       const [baseAvailable, headAvailable] = yield* Effect.all([
-        runSucceeds(spawner, plan, [
+        runSucceeds(spawner, inherited, plan, [
           `--git-dir=${plan.cachePath}`,
           "cat-file",
           "-e",
           `${plan.destinationCommit}^{commit}`
         ]),
-        runSucceeds(spawner, plan, [`--git-dir=${plan.cachePath}`, "cat-file", "-e", `${plan.sourceCommit}^{commit}`])
+        runSucceeds(spawner, inherited, plan, [
+          `--git-dir=${plan.cachePath}`,
+          "cat-file",
+          "-e",
+          `${plan.sourceCommit}^{commit}`
+        ])
       ])
       if (!baseAvailable || !headAvailable) {
         const revisions = reviewRevisionSpecifiers(plan)
         yield* Effect.forEach(
           revisions,
-          (reference) => runChecked(spawner, plan, "validate-review-reference", ["check-ref-format", reference])
+          (reference) =>
+            runChecked(spawner, inherited, plan, "validate-review-reference", ["check-ref-format", reference])
         )
-        yield* runChecked(spawner, plan, "fetch-review-revisions", [
+        yield* runChecked(spawner, inherited, plan, "fetch-review-revisions", [
           `--git-dir=${plan.cachePath}`,
           "fetch",
           "--no-tags",
@@ -659,13 +681,13 @@ export const makeWorktreeService = (
         ])
       }
       yield* Effect.all([
-        runChecked(spawner, plan, "verify-base", [
+        runChecked(spawner, inherited, plan, "verify-base", [
           `--git-dir=${plan.cachePath}`,
           "cat-file",
           "-e",
           `${plan.destinationCommit}^{commit}`
         ]),
-        runChecked(spawner, plan, "verify-head", [
+        runChecked(spawner, inherited, plan, "verify-head", [
           `--git-dir=${plan.cachePath}`,
           "cat-file",
           "-e",
@@ -678,7 +700,7 @@ export const makeWorktreeService = (
       )
       if (targetExists) {
         yield* assertCanonical("validate-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-        const reusable = yield* isReusableWorktree(spawner, plan, plan.targetPath, home)
+        const reusable = yield* isReusableWorktree(spawner, inherited, plan, plan.targetPath, home)
         if (!reusable) {
           return yield* commandFailure(
             "validate-existing-target",
@@ -688,14 +710,14 @@ export const makeWorktreeService = (
         return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
       }
 
-      const addExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(plan, [
+      const addExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(inherited, plan, [
         `--git-dir=${plan.cachePath}`,
         "worktree",
         "add",
         "--detach",
         plan.targetPath,
         plan.sourceCommit
-      ], { environment: materializationGitEnvironment(plan, home) })).pipe(
+      ], { environment: materializationGitEnvironment(inherited, plan, home) })).pipe(
         Effect.mapError((cause) => commandFailure("add-worktree", "Unable to run git", cause))
       )
       if (addExitCode !== ChildProcessSpawner.ExitCode(0)) {
@@ -704,7 +726,7 @@ export const makeWorktreeService = (
         )
         if (racedTargetExists) {
           yield* assertCanonical("validate-raced-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-          if (yield* isReusableWorktree(spawner, plan, plan.targetPath, home)) {
+          if (yield* isReusableWorktree(spawner, inherited, plan, plan.targetPath, home)) {
             return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
           }
           return yield* commandFailure(
@@ -713,7 +735,7 @@ export const makeWorktreeService = (
           )
         }
 
-        const removedStaleRegistration = yield* runSucceeds(spawner, plan, [
+        const removedStaleRegistration = yield* runSucceeds(spawner, inherited, plan, [
           `--git-dir=${plan.cachePath}`,
           "worktree",
           "remove",
@@ -721,14 +743,14 @@ export const makeWorktreeService = (
           plan.targetPath
         ])
         if (removedStaleRegistration) {
-          const retryExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(plan, [
+          const retryExitCode = yield* spawner.exitCode(makeCodeCommitGitCommand(inherited, plan, [
             `--git-dir=${plan.cachePath}`,
             "worktree",
             "add",
             "--detach",
             plan.targetPath,
             plan.sourceCommit
-          ], { environment: materializationGitEnvironment(plan, home) })).pipe(
+          ], { environment: materializationGitEnvironment(inherited, plan, home) })).pipe(
             Effect.mapError((cause) => commandFailure("retry-add-worktree", "Unable to run git", cause))
           )
           if (retryExitCode === ChildProcessSpawner.ExitCode(0)) {
@@ -738,7 +760,7 @@ export const makeWorktreeService = (
               canonicalWorktreesRoot,
               plan.targetPath
             )
-            if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath, home))) {
+            if (!(yield* isReusableWorktree(spawner, inherited, plan, plan.targetPath, home))) {
               return yield* commandFailure(
                 "validate-retried-target",
                 "Retried worktree is not a clean exact-head checkout"
@@ -758,7 +780,7 @@ export const makeWorktreeService = (
               canonicalWorktreesRoot,
               plan.targetPath
             )
-            if (yield* isReusableWorktree(spawner, plan, plan.targetPath, home)) {
+            if (yield* isReusableWorktree(spawner, inherited, plan, plan.targetPath, home)) {
               return { path: plan.targetPath, reused: true, sourceCommit: plan.sourceCommit } satisfies WorktreeResult
             }
           }
@@ -768,7 +790,7 @@ export const makeWorktreeService = (
       }
 
       yield* assertCanonical("validate-created-target-path", worktreesRoot, canonicalWorktreesRoot, plan.targetPath)
-      if (!(yield* isReusableWorktree(spawner, plan, plan.targetPath, home))) {
+      if (!(yield* isReusableWorktree(spawner, inherited, plan, plan.targetPath, home))) {
         return yield* commandFailure("validate-created-target", "New worktree is not a clean exact-head checkout")
       }
       return { path: plan.targetPath, reused: false, sourceCommit: plan.sourceCommit } satisfies WorktreeResult

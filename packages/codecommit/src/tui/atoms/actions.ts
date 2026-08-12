@@ -37,7 +37,7 @@ const notifyError = Effect.fn("notifyError")(function*(title: string, error: Err
 const exitCode = (command: ChildProcess.Command) =>
   Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
 
-const copyToClipboard = Effect.fn("copyToClipboard")(
+export const copyToClipboard = Effect.fn("copyToClipboard")(
   function*(text: string) {
     const copyWith = (command: string, args: ReadonlyArray<string> = []) =>
       exitCode(ChildProcess.make(command, args, {
@@ -120,6 +120,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
   Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* TuiApplicationScope
+    const host = yield* ChildEnv.HostEnvironment
     const profile = pr.account.profile
 
     yield* copyToClipboard(pr.link)
@@ -137,7 +138,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
         // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
         // flag must be merged into the inherited environment. The profile argument
         // stays authoritative only if ambient AWS credentials are dropped.
-        env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+        env: ChildEnv.profileScopedEnv(host.variables, { GRANTED_ALIAS_CONFIGURED: "true" }),
         extendEnv: true
       })).pipe(
         Effect.tap(() =>

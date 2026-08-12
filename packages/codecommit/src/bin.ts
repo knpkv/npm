@@ -2,7 +2,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
-import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import {
   makeOwnerSessionSecrets,
@@ -457,7 +457,14 @@ const cli = Command.runWith(command, {
   version: pkg.version
 })
 
-const AppRuntimeLayer = Layer.mergeAll(NodeHttpClient.layerFetch, AwsClientConfig.Default)
+// The executable boundary is the only place permitted to read the host process.
+// Profile-scoped spawns need the environment they will actually inherit so ambient AWS
+// variables are tombstoned under whatever casing the host exported them with.
+const AppRuntimeLayer = Layer.mergeAll(
+  NodeHttpClient.layerFetch,
+  AwsClientConfig.Default,
+  ChildEnv.layerHostEnvironment(process.env)
+)
 
 const needsAppRuntime = (args: ReadonlyArray<string>): boolean => args[0] !== "skills"
 

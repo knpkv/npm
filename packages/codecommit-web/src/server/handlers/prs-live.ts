@@ -114,6 +114,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
+          const host = yield* ChildEnv.HostEnvironment
           yield* copyToClipboard(payload.link).pipe(
             Effect.catchIf(() => true, () => Effect.void)
           )
@@ -125,7 +126,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
             // flag must be merged into the inherited environment. The profile argument
             // stays authoritative only if ambient AWS credentials are dropped.
-            env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+            env: ChildEnv.profileScopedEnv(host.variables, { GRANTED_ALIAS_CONFIGURED: "true" }),
             extendEnv: true
           })
           yield* Effect.forkIn(

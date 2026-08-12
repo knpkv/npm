@@ -3,6 +3,8 @@ import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
 import * as AiError from "effect/unstable/ai/AiError"
 import { WorktreeError, type WorktreePlan, type WorktreeResult } from "../WorktreeService.js"
+import { ConsoleLaunchError, type ConsoleLaunchReason } from "./console-launch.js"
+import type { LocalEditor } from "./editor-launch.js"
 
 const MAX_RENDERED_LINES = 500
 const MAX_RENDERED_LINE_LENGTH = 2_000
@@ -146,6 +148,46 @@ export const resolvePullRequestSelection = (
 export const changedFileHeadPath = (file: ReadClient.CodeCommitChangedFile | null): string | null =>
   file?.after?.path ?? null
 
+export interface ChangedFileConsoleTarget {
+  readonly commitId: string
+  readonly path: string
+  /** Which side of the review the console page shows, so the caller can label it honestly. */
+  readonly side: "after" | "before"
+}
+
+/**
+ * Resolves the console browse coordinate for one selected file.
+ *
+ * A surviving file is addressed on the reviewed source commit. A deleted file
+ * does not exist there at all, so it resolves to the destination commit, which
+ * is the only revision in this review where the console can render it. Both
+ * coordinates name an exact commit, so neither page can drift to a newer head.
+ */
+export const changedFileConsoleTarget = (
+  file: ReadClient.CodeCommitChangedFile | null,
+  revision: { readonly destinationCommit: string; readonly sourceCommit: string }
+): ChangedFileConsoleTarget | null => {
+  const headPath = file?.after?.path ?? null
+  if (headPath !== null) return { commitId: revision.sourceCommit, path: headPath, side: "after" }
+  const basePath = file?.before?.path ?? null
+  if (basePath !== null) return { commitId: revision.destinationCommit, path: basePath, side: "before" }
+  return null
+}
+
+/**
+ * Enables the console action for any addressable file while nothing else owns the terminal.
+ *
+ * `launchInFlight` is a distinct condition from `actionCancelable`: a launch that
+ * has been dispatched but has not yet suspended the renderer still accepts keys,
+ * and a repeated press would interrupt the running `assume`, leaving its
+ * `resume` racing the replacement's `suspend`.
+ */
+export const consoleTargetReady = (
+  target: ChangedFileConsoleTarget | null,
+  actionCancelable: boolean,
+  launchInFlight: boolean
+): boolean => target !== null && !actionCancelable && !launchInFlight
+
 export type WorkspaceActionPhase = "idle" | "preflight" | "ready" | "running-review" | "running-worktree" | "terminal"
 
 export type WorkspaceLifecycleTransition =
@@ -175,6 +217,8 @@ export type WorkspaceSelection<A> =
   }
 
 export interface ActionDiagnostic {
+  /** Set only for console launches, so a missing prerequisite can be answered differently from a failed attempt. */
+  readonly consoleLaunchReason?: ConsoleLaunchReason
   readonly message: string
   readonly operation: string
   readonly workspaceRefreshReason?: WorkspaceRefreshReason
@@ -197,6 +241,63 @@ export type MergeStatus =
     readonly target: Domain.PullRequest
   }
   | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+export type ConsoleStatus =
+  | { readonly _tag: "idle" }
+  | {
+    readonly _tag: "opening"
+    /** Which file the launch describes, so a late outcome cannot mislabel another one. */
+    readonly filePath: string
+    readonly link: string
+    readonly profile: string
+    readonly requestId: string
+    readonly side: ChangedFileConsoleTarget["side"]
+  }
+  | { readonly _tag: "done"; readonly side: ChangedFileConsoleTarget["side"] }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+/**
+ * Clears a settled console line while leaving an in-flight launch alone.
+ *
+ * Only the launch's own settlement may end it. `assume` can hold the terminal for
+ * minutes at an expired-SSO prompt, and the 30s revision poll keeps running behind
+ * the suspended screen; a drift or refresh that cleared the status would make the
+ * settle effect drop the outcome at its `opening` guard, taking the
+ * GRANTED REQUIRED dialog with it and leaving `C` looking dead.
+ */
+export const clearSettledConsoleStatus = (current: ConsoleStatus): ConsoleStatus =>
+  current._tag === "done" || current._tag === "failed" ? { _tag: "idle" } : current
+
+export type EditorLaunchStatus =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "opening"; readonly editor: LocalEditor; readonly requestId: string }
+  | { readonly _tag: "done"; readonly editor: LocalEditor }
+  | { readonly _tag: "failed"; readonly diagnostic: ActionDiagnostic }
+
+/**
+ * The editor counterpart of {@link clearSettledConsoleStatus}.
+ *
+ * An in-flight Neovim launch decides whether a console handover may start, so a
+ * background workspace event that cleared it would drop the mutual exclusion and let
+ * a second child take the tty Neovim is holding. Only Neovim is preserved: VS Code
+ * never suspends the renderer, so an in-flight one owns nothing worth protecting and
+ * a reset should clear it like any other stale line.
+ */
+export const clearSettledEditorStatus = (current: EditorLaunchStatus): EditorLaunchStatus =>
+  current._tag === "opening" && current.editor === "neovim" ? current : { _tag: "idle" }
+
+/**
+ * Reports whether a settled console outcome still describes the selected file.
+ *
+ * The status line names the revision side it opened, so a launch settling after the
+ * selection moved would label the wrong file. The recorded path is compared rather
+ * than a list position, because a background refresh can reorder the file list and
+ * leave the same index pointing at a different file.
+ */
+export const consoleOutcomeMatchesSelection = (
+  launchedPath: string,
+  selectedPath: string | null
+): boolean => selectedPath === launchedPath
 
 /** Atomically claims a ready merge so a terminal key batch can dispatch it only once. */
 export const claimMergeConfirmation = (
@@ -494,12 +595,33 @@ export const worktreeCheckoutLocalDiff = (
     ? { _tag: "ready", plan: pending.plan, worktree: outcome.value }
     : current
 
-/** Enables editors only for a surviving head file in an exact-head local worktree. */
+/**
+ * Reports whether a child already owns the terminal.
+ *
+ * Only same-terminal handovers count. VS Code is spawned with detached stdio and
+ * never suspends the renderer, so it cannot interleave with one; Neovim and the
+ * console launch both take the tty through `TuiTerminalSession`, and two of those
+ * at once leaves one child reading a tty the other's `resume` has already
+ * restored to raw mode.
+ */
+export const terminalHandoverBusy = (input: {
+  readonly consoleOpening: boolean
+  readonly neovimOpening: boolean
+}): boolean => input.consoleOpening || input.neovimOpening
+
+/**
+ * Enables editors only for a surviving head file in an exact-head local worktree.
+ *
+ * `terminalHandoverBusy` is separate from `actionCancelable` because a dispatched
+ * handover has not necessarily suspended the renderer yet, so the TUI still
+ * accepts the key that would start a second one.
+ */
 export const localEditorReady = (
   localDiff: { readonly _tag: "ready" | "provider" | "outdated" },
   headPath: string | null,
-  actionCancelable: boolean
-): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable
+  actionCancelable: boolean,
+  terminalHandoverBusy: boolean
+): boolean => localDiff._tag === "ready" && headPath !== null && !actionCancelable && !terminalHandoverBusy
 
 /** Polls only while an exact local checkout is idle and no provider finding mutation owns the workspace. */
 export const pullRequestRevisionPollingEnabled = (input: {
@@ -534,9 +656,17 @@ export const findingConversationSubmissionEnabled = (providerDriftPending: boole
 
 const isWorktreeError = Schema.is(WorktreeError)
 const isWorkspaceRefreshActionError = Schema.is(WorkspaceRefreshActionError)
+const isConsoleLaunchError = Schema.is(ConsoleLaunchError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */
 export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
+  if (isConsoleLaunchError(error)) {
+    return {
+      consoleLaunchReason: error.reason,
+      message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
+      operation: error.operation
+    }
+  }
   if (isWorkspaceRefreshActionError(error)) {
     return {
       message: error.message.slice(0, MAX_ACTION_DIAGNOSTIC_CHARACTERS),
@@ -589,6 +719,7 @@ export type DetailsKeyIntent =
   | "explain-risk"
   | "next-file"
   | "open-browser"
+  | "open-codecommit"
   | "open-neovim"
   | "open-vscode"
   | "next-finding"
@@ -627,6 +758,10 @@ export const detailsKeyIntent = (input: {
   readonly tab: "comments" | "diff"
   readonly workspaceRefreshing?: boolean
 }): DetailsKeyIntent => {
+  // Shift+C reaches the console action. Terminals disagree on whether that arrives
+  // as an uppercase name or as `c` with the shift modifier, so both forms resolve
+  // here and unshifted `c` keeps opening the comments tab below.
+  const consoleKey = input.keyName === "C" || (input.keyName === "c" && input.shifted === true)
   if (input.dialogOpen || input.exitShortcut === true) return "yield"
   if (input.mergeRunning === true) return "consume"
   if (input.modified) return "yield"
@@ -639,7 +774,8 @@ export const detailsKeyIntent = (input: {
   if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
   if (
     input.workspaceRefreshing === true &&
-    ["a", "d", "e", "g", "m", "M", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName)
+    (consoleKey ||
+      ["a", "d", "e", "g", "m", "M", "n", "p", "r", "s", "t", "v", "V", "w", "x", "return"].includes(input.keyName))
   ) {
     return "consume"
   }
@@ -648,10 +784,12 @@ export const detailsKeyIntent = (input: {
   if (
     input.actionCancelable &&
     (
+      consoleKey ||
       ["a", "d", "e", "m", "M", "p", "r", "s", "t", "V", "w", "x"].includes(input.keyName) ||
       (input.keyName === "v" && input.shifted === true)
     )
   ) return input.keyName === "x" ? "cancel-action" : "consume"
+  if (consoleKey) return input.tab === "diff" ? "open-codecommit" : "yield"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
   if (input.keyName === "o") return "open-browser"
