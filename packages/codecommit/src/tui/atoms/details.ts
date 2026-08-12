@@ -17,6 +17,7 @@ import {
 } from "../../RelayReview.js"
 import type { RelayReviewSkillId } from "../../ReviewSkills.js"
 import { WorktreeError, type WorktreePlan, WorktreeService } from "../../WorktreeService.js"
+import { openConsoleAfterClipboard, type OpenConsoleInput } from "../console-launch.js"
 import {
   actionOutcome,
   changedFilePath,
@@ -40,6 +41,7 @@ import {
   type PullRequestRevisionCheck,
   type PullRequestWorkspace
 } from "../workspace.js"
+import { copyToClipboard } from "./actions.js"
 import { runtimeAtom } from "./runtime.js"
 
 export type { PullRequestWorkspace } from "../workspace.js"
@@ -134,6 +136,23 @@ export const loadFileDiffAtom = runtimeAtom.fn((request: FileDiffRequest) =>
 export const openEditorAtom = runtimeAtom.fn((input: OpenEditorInput) =>
   actionOutcome(input.requestId, openLocalEditor(input)).pipe(
     Effect.withSpan("openEditor", { attributes: { editor: input.editor, path: input.filePath } })
+  )
+)
+
+/**
+ * Opens the reviewed file in the CodeCommit console through `assume`.
+ *
+ * The link is copied first, best-effort, so the destination survives a missing
+ * `assume`: the prerequisite dialog renders the link itself, because a host
+ * without a clipboard tool reports that failure separately and the launch still
+ * has to proceed.
+ */
+export const openConsoleAtom = runtimeAtom.fn((input: OpenConsoleInput) =>
+  actionOutcome(
+    input.requestId,
+    openConsoleAfterClipboard(copyToClipboard(input.link), input)
+  ).pipe(
+    Effect.withSpan("openConsole", { attributes: { profile: input.profile } })
   )
 )
 

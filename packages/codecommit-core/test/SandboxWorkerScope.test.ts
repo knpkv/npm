@@ -4,6 +4,7 @@ import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, R
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
+import * as ChildEnv from "../src/ChildEnv.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
 import { DockerError } from "../src/Errors.js"
 import { DockerService } from "../src/SandboxService/DockerService.js"
@@ -124,6 +125,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   const dependencies = Layer.mergeAll(
     repositoryLayer,
+    // The clone spawn tombstones the ambient AWS variables it would otherwise inherit.
+    ChildEnv.layerHostEnvironment({ PATH: "/usr/bin" }),
     Layer.mock(DockerService, {
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(

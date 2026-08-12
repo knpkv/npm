@@ -110,7 +110,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("AWS_CREDENTIAL_EXPIRATION", "2030-01-01T00:00:00Z")
 
       const env = yield* childEnvironment(
-        ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile", AWS_DEFAULT_REGION: "eu-central-1" })
+        ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile", AWS_DEFAULT_REGION: "eu-central-1" })
       )
 
       // Absent, not the literal string "undefined" — the AWS chain would accept that.
@@ -124,6 +124,41 @@ describe("ChildEnv.profileScopedEnv", () => {
       assert.strictEqual(env.AWS_DEFAULT_REGION, "eu-central-1")
     }).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("drops mixed-case ambient credentials that a case-insensitive host would still resolve", () =>
+    Effect.gen(function*() {
+      // Windows environment names are case-insensitive, so `Aws_Access_Key_Id` is the
+      // same variable to the AWS CLI as the canonical spelling. An exact-case tombstone
+      // alone leaves it alive beside `AWS_ACCESS_KEY_ID` and it outranks AWS_PROFILE.
+      vi.stubEnv("Aws_Access_Key_Id", "AKIAAMBIENTEXAMPLE")
+      vi.stubEnv("aws_secret_access_key", "ambient-secret")
+      vi.stubEnv("Aws_Region", "us-west-1")
+
+      const env = yield* childEnvironment(
+        ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" })
+      )
+
+      assert.isFalse("Aws_Access_Key_Id" in env)
+      assert.isFalse("aws_secret_access_key" in env)
+      assert.isFalse("Aws_Region" in env)
+
+      assert.strictEqual(env.AWS_PROFILE, "target-profile")
+      // Unrelated mixed-case variables must survive: only the AWS families are dropped.
+      assert.isTrue(hasSearchPath(env))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it("keeps unrelated variables whose names merely resemble the AWS families", () => {
+    const result = ChildEnv.profileScopedEnv(
+      { AWS_PROFILE_NAME: "keep", AWSACCESSKEYID: "keep", Aws_Access_Key_Id: "drop", MY_AWS_REGION: "keep" },
+      { AWS_PROFILE: "target-profile" }
+    )
+
+    assert.isFalse("AWS_PROFILE_NAME" in result)
+    assert.isFalse("AWSACCESSKEYID" in result)
+    assert.isFalse("MY_AWS_REGION" in result)
+    assert.strictEqual(result.Aws_Access_Key_Id, undefined)
+    assert.isTrue("Aws_Access_Key_Id" in result)
+  })
+
   it.effect("drops the ambient web-identity provider, not just static credentials", () =>
     Effect.gen(function*() {
       // AWS_ROLE_ARN plus AWS_WEB_IDENTITY_TOKEN_FILE activate a second
@@ -133,7 +168,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("AWS_ROLE_SESSION_NAME", "ambient-session")
 
       const env = yield* childEnvironment(
-        ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile", AWS_DEFAULT_REGION: "eu-central-1" })
+        ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile", AWS_DEFAULT_REGION: "eu-central-1" })
       )
 
       assert.isFalse("AWS_ROLE_ARN" in env)
@@ -150,7 +185,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("AWS_CONFIG_FILE", "/custom/config")
       vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", "/custom/credentials")
 
-      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" }))
 
       assert.strictEqual(env.AWS_CONFIG_FILE, "/custom/config")
       assert.strictEqual(env.AWS_SHARED_CREDENTIALS_FILE, "/custom/credentials")
@@ -162,7 +197,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
 
       const env = yield* childEnvironment(
-        ChildEnv.profileScopedEnv({
+        ChildEnv.profileScopedEnv(process.env, {
           AWS_PROFILE: "target-profile",
           AWS_DEFAULT_REGION: "eu-central-1",
           AWS_REGION: "eu-central-1"
@@ -182,7 +217,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
 
       const env = yield* childEnvironment(
-        ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" })
+        ChildEnv.profileScopedEnv(process.env, { GRANTED_ALIAS_CONFIGURED: "true" })
       )
 
       assert.isFalse("AWS_REGION" in env)
@@ -231,7 +266,7 @@ describe("ChildEnv.profileScopedEnv", () => {
   it.effect("preserves the inherited PATH so the executable still resolves", () =>
     Effect.gen(function*() {
       const env = yield* childEnvironment(
-        ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" })
+        ChildEnv.profileScopedEnv(process.env, { GRANTED_ALIAS_CONFIGURED: "true" })
       )
 
       assert.isTrue(hasSearchPath(env))
@@ -240,7 +275,7 @@ describe("ChildEnv.profileScopedEnv", () => {
 
   it.effect("keeps non-AWS host variables the child may rely on", () =>
     Effect.gen(function*() {
-      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" }))
 
       // `git` and `aws` need a home locator to find ~/.gitconfig and ~/.aws.
       assert.isTrue(hasHomeLocator(env))
@@ -254,7 +289,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("HOME", undefined)
       vi.stubEnv("USERPROFILE", "C:\\Users\\example")
 
-      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" }))
 
       assert.isFalse("HOME" in env)
       assert.strictEqual(env.USERPROFILE, "C:\\Users\\example")
@@ -268,7 +303,7 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.stubEnv("HOME", undefined)
       vi.stubEnv("USERPROFILE", undefined)
 
-      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" }))
 
       assert.isFalse(hasHomeLocator(env))
     }).pipe(Effect.provide(NodeServices.layer)))

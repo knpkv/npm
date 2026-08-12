@@ -36,7 +36,8 @@ describe("TUI application scope", () => {
             Effect.sync(() =>
               makeTuiApplicationRegistry(
                 applicationScope,
-                TuiTerminalSession.of({ resume: Effect.void, suspend: Effect.void })
+                TuiTerminalSession.of({ resume: Effect.void, suspend: Effect.void }),
+                { PATH: "/usr/bin" }
               )
             ),
             (registry) => Effect.sync(() => registry.dispose())

@@ -296,7 +296,16 @@ When writing Effect code:
   is worse than clearing neither, because which one leaks then depends on the
   caller's shell. Use `ChildEnv.profileScopedEnv` in the `codecommit` packages
   rather than rebuilding the exclusion list; it documents which variables are
-  deliberately left alone and why.
+  deliberately left alone and why. It takes the environment the child will inherit
+  as its first argument and tombstones the spellings actually present as well as
+  the canonical names, because environment names are case-insensitive on Windows
+  and an exact-case tombstone alone leaves `Aws_Access_Key_Id` alive to outrank the
+  requested profile. Obtain that environment from `ChildEnv.HostEnvironment`, whose
+  layer is bound at each executable boundary — the only place permitted to read the
+  host process. Passing an empty map is never correct at a runtime call site: it
+  silently degrades to exact-case clearing. The folding is unconditional on every
+  platform, which is broader than POSIX strictly needs; that is deliberate and
+  documented in the module rather than gated on a platform read.
 - When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure

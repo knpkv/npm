@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { ConfigProvider, Effect, Exit, Fiber, Option, Sink, Stream } from "effect"
+import { ChildEnv, Domain, ReadClient } from "@knpkv/codecommit-core"
+import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Sink, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -32,7 +32,7 @@ describe("WorktreeService", () => {
       sourceCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
       sourceReference: "feature/review"
     }
-    const command = makeCodeCommitGitCommand(request, ["clone", "--bare", "remote", "cache"])
+    const command = makeCodeCommitGitCommand({}, request, ["clone", "--bare", "remote", "cache"])
 
     expect(ChildProcess.isStandardCommand(command)).toBe(true)
     if (!ChildProcess.isStandardCommand(command)) return
@@ -146,7 +146,11 @@ describe("WorktreeService", () => {
       const replacement = yield* acquireReadyLockHolder(spawner, lockPath)
       expect(yield* replacement.isRunning).toBe(true)
       yield* replacement.kill()
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // One combined provide: chaining them would give the layers separate lifecycles.
+      Effect.provide(Layer.mergeAll(NodeServices.layer, ChildEnv.layerHostEnvironment(process.env)))
+    ))
 
   it.effect("isolates repository accounts and resolves partition-aware Git endpoints", () =>
     Effect.gen(function*() {
@@ -240,7 +244,8 @@ describe("WorktreeService", () => {
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromUnknown({ HOME: "/tmp/codecommit-worktree-coordinate-test" })
       ),
-      Effect.provide(NodeServices.layer)
+      // One combined provide: chaining them would give the layers separate lifecycles.
+      Effect.provide(Layer.mergeAll(NodeServices.layer, ChildEnv.layerHostEnvironment(process.env)))
     ))
 
   it.effect("states every required lock-holder executable in unsupported-platform failures", () =>
@@ -278,7 +283,8 @@ describe("WorktreeService", () => {
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromUnknown({ HOME: "/tmp/codecommit-unsupported-platform" })
       ),
-      Effect.provide(NodeServices.layer)
+      // One combined provide: chaining them would give the layers separate lifecycles.
+      Effect.provide(Layer.mergeAll(NodeServices.layer, ChildEnv.layerHostEnvironment(process.env)))
     ))
 
   it.live("repairs an incomplete cache and converges concurrent exact-head checkouts", () =>
@@ -555,5 +561,9 @@ describe("WorktreeService", () => {
       )
 
       yield* scenario
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 30_000)
+    }).pipe(
+      Effect.scoped,
+      // One combined provide: chaining them would give the layers separate lifecycles.
+      Effect.provide(Layer.mergeAll(NodeServices.layer, ChildEnv.layerHostEnvironment(process.env)))
+    ), 30_000)
 })

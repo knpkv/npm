@@ -12,7 +12,7 @@ import { Layer } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import { WorktreeService } from "../../WorktreeService.js"
-import { tuiApplicationScopeLayer, tuiTerminalSessionLayer } from "./applicationScope.js"
+import { tuiApplicationScopeLayer, tuiHostEnvironmentLayer, tuiTerminalSessionLayer } from "./applicationScope.js"
 
 // Leaf layers — fully closed (R = never)
 const EventsHubLive = CacheService.EventsHub.Default
@@ -68,9 +68,12 @@ const MainLayer = (get: Atom.AtomContext) =>
     AwsLive,
     ReadLayer,
     ReviewLayer,
-    WorktreeLayer,
+    // WorktreeService's git spawns need the inherited environment, so it is provided to
+    // that layer as well as merged for the atoms that resolve it directly.
+    WorktreeLayer.pipe(Layer.provide(tuiHostEnvironmentLayer(get))),
     tuiApplicationScopeLayer(get),
-    tuiTerminalSessionLayer(get)
+    tuiTerminalSessionLayer(get),
+    tuiHostEnvironmentLayer(get)
   )
 
 // Merge BunServices into output for child process actions.

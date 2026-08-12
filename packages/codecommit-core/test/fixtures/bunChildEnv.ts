@@ -24,7 +24,7 @@ const program = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   yield* spawner.exitCode(
     ChildProcess.make("bun", ["-e", "process.stdout.write(JSON.stringify(process.env))"], {
-      env: ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }),
+      env: ChildEnv.profileScopedEnv(process.env, { AWS_PROFILE: "target-profile" }),
       extendEnv: true,
       stdout: "inherit"
     })

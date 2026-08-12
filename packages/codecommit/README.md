@@ -22,7 +22,8 @@ CLI and TUI for AWS CodeCommit pull requests.
   credential helper per command for the selected profile; no global Git helper
   setup is required.
 - [Granted](https://granted.dev) with the `assume` executable configured for
-  opening a selected pull request in the matching AWS account console
+  opening a selected pull request, or a selected changed file, in the matching
+  AWS account console
 - A locally authenticated `codex` executable for optional Relay actions
 - Docker for optional web-mode review sandboxes. Sandbox IDE ports are
   loopback-only and require the per-sandbox password shown by the web UI.
@@ -148,8 +149,32 @@ line number. Deleted files cannot be opened from the exact-head checkout unless
 a separate verified base artifact is explicitly materialized.
 Editor targets are
 canonicalized and must remain regular files inside the verified detached
-worktree; deleted files and paths or symlinks that escape it are rejected. Text
-changes render side by side by default, with the base revision on the left and
+worktree; deleted files and paths or symlinks that escape it are rejected.
+
+Uppercase `C` opens the selected file in the AWS CodeCommit console. The link
+always names an exact commit, so the page cannot drift to a newer head: a
+surviving file opens on the reviewed source commit, and a deleted file opens on
+the destination commit, the only revision in the review where it still exists.
+Unlike the editor shortcuts this needs no local checkout, because it reads the
+provider directly. The console hostname is selected from the region's AWS
+partition, so China and GovCloud accounts open their own console domain; regions
+in the isolated partitions have no known console host and the action reports them
+as unsupported rather than opening a link that cannot resolve. The link is copied to the clipboard when a clipboard tool
+(`pbcopy` or `xclip`) exists, and is then handed to
+Granted's `assume`, which exchanges the pull request's profile for a federated
+console session; the TUI yields the terminal for the duration so an expired SSO
+prompt is visible and answerable. While a child holds the terminal, Ctrl-C ends
+that child rather than the TUI: the session's own interrupt teardown is bracketed
+for the handover and `assume` runs in the terminal's foreground process group, so
+abandoning a stuck sign-in returns to the same PR workspace with findings and
+decisions intact. `SIGTERM` is not bracketed, so ending the process from another
+shell still works. Neovim is unaffected, because it holds the terminal in raw mode
+where Ctrl-C is a keypress rather than a signal. If `assume` is not installed, the TUI says so
+in a dialog with the install location and shows the link — there is no fallback,
+because an unauthenticated console link only reaches a
+sign-in page.
+
+Text changes render side by side by default, with the base revision on the left and
 head revision on the right. Both panes keep aligned line numbers and synchronized
 scrolling.
 

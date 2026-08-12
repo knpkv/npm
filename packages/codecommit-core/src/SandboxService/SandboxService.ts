@@ -212,6 +212,7 @@ const makeSandboxService = Effect.gen(function*() {
         yield* ownerScope.fork(
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
+            const host = yield* ChildEnv.HostEnvironment
             const log = (detail: string) => progress(id, detail)
 
             yield* log("Sandbox config validated")
@@ -245,7 +246,7 @@ const makeSandboxService = Effect.gen(function*() {
                   // `git` and the `aws` credential helper both resolve from PATH, so the
                   // profile overrides must extend the inherited environment. Ambient AWS
                   // credentials would outrank them, so profileScopedEnv drops those.
-                  env: ChildEnv.profileScopedEnv({
+                  env: ChildEnv.profileScopedEnv(host.variables, {
                     AWS_PROFILE: params.profile,
                     AWS_DEFAULT_REGION: params.region,
                     AWS_REGION: params.region

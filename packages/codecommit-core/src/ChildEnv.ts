@@ -43,19 +43,25 @@
  *   same paths, so clearing them would point the child at a different file and
  *   break legitimate custom config locations.
  *
- * KNOWN LIMITATION — Windows casing. Clearing works by mapping each name to
- * `undefined` in an object merged over the inherited environment, which matches
- * keys exactly. Windows environment names are case-insensitive, so a host
- * exporting `Aws_Access_Key_Id` keeps that entry alongside the `AWS_ACCESS_KEY_ID`
- * tombstone and the AWS CLI can still read it. Closing this means filtering the
- * inherited keys case-insensitively, which requires enumerating the parent
- * environment; no Effect service exposes that here, and `globalThis.process` is
- * not available to this code. The two `assume` call sites are POSIX-only in
- * practice — their clipboard step has only `pbcopy` and `xclip` — so the exposed
- * path is the SandboxService clone on a Windows host. Tracked rather than
- * silently accepted; the exact-case behaviour these tests cover is correct on
- * POSIX.
+ * CASE INSENSITIVITY. Clearing works by mapping each name to `undefined` in an
+ * object merged over the inherited environment, and that merge matches keys
+ * exactly. Windows environment names are case-insensitive, so a host exporting
+ * `Aws_Access_Key_Id` would keep that entry alive beside the `AWS_ACCESS_KEY_ID`
+ * tombstone and the AWS CLI could still read it. `profileScopedEnv` therefore
+ * takes the inherited environment and tombstones the spellings actually present
+ * as well as the canonical names, which closes the gap without taking `PATH` and
+ * every other inherited variable into this module's hands: the spawn stays
+ * `extendEnv: true`.
+ *
+ * The folding is unconditional, on every platform. On POSIX a lowercase
+ * `aws_access_key_id` is a genuinely distinct variable that the AWS chain never
+ * reads, so dropping it is broader than strictly required — deliberately, because
+ * detecting a case-insensitive host would mean reading the platform from this
+ * module, and a variable differing only in case carries the same intent. Nothing
+ * we spawn (`git`, `aws`, `assume`, `docker`) reads the lowercase spellings.
  */
+import { Context, Layer } from "effect"
+
 const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
@@ -69,26 +75,60 @@ const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_DEFAULT_REGION"
 ]
 
+/** Whether an inherited name denotes an overriding AWS variable under any casing. */
+const isOverridingAwsVariable = (name: string): boolean => {
+  // `toUpperCase`, not `toLocaleUpperCase`: these names are ASCII and a Turkish
+  // locale would fold `AWS_..._ID` differently, reintroducing the gap it closes.
+  const canonical = name.toUpperCase()
+  return OVERRIDING_AWS_VARIABLES.some((candidate) => candidate === canonical)
+}
+
 /**
  * Builds a child environment where `overrides` are the only AWS credential and
  * region inputs, dropping any ambient values that would outrank them.
+ *
+ * `inherited` is the environment the child will extend. It is read only to find
+ * which spellings of the overriding names are actually present, so a
+ * case-insensitive host cannot keep `Aws_Access_Key_Id` alive beside the
+ * canonical tombstone. Pass the environment the spawn will really inherit —
+ * `HostEnvironment.variables` at a runtime call site.
  *
  * Must be paired with `extendEnv: true`; on its own it does not carry `PATH`.
  *
  * @example
  * ```ts
+ * const host = yield* ChildEnv.HostEnvironment
  * ChildProcess.make("git", args, {
- *   env: ChildEnv.profileScopedEnv({ AWS_PROFILE: profile }),
+ *   env: ChildEnv.profileScopedEnv(host.variables, { AWS_PROFILE: profile }),
  *   extendEnv: true
  * })
  * ```
  */
 export const profileScopedEnv = (
+  inherited: Record<string, string | undefined>,
   overrides: Record<string, string | undefined>
 ): Record<string, string | undefined> => {
   const cleared: Record<string, string | undefined> = {}
   for (const name of OVERRIDING_AWS_VARIABLES) {
     cleared[name] = undefined
   }
+  for (const name of Object.keys(inherited)) {
+    if (isOverridingAwsVariable(name)) cleared[name] = undefined
+  }
   return { ...cleared, ...overrides }
 }
+
+/**
+ * The environment a spawned child will inherit.
+ *
+ * A service rather than a direct read because only the executable boundary may
+ * touch the host process, while the spawns that need it sit deep in the runtime.
+ */
+export class HostEnvironment extends Context.Service<HostEnvironment, {
+  readonly variables: Record<string, string | undefined>
+}>()("@knpkv/codecommit-core/ChildEnv/HostEnvironment") {}
+
+/** Binds the inherited environment read at the executable boundary. */
+export const layerHostEnvironment = (
+  variables: Record<string, string | undefined>
+): Layer.Layer<HostEnvironment> => Layer.succeed(HostEnvironment, HostEnvironment.of({ variables }))
