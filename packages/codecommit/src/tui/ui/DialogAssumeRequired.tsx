@@ -14,10 +14,7 @@ import { Dialog } from "./Dialog.js"
  * copy is best-effort: a host without `pbcopy` or `xclip` reports that
  * separately and still reaches this dialog.
  */
-export function DialogAssumeRequired({ link, profile }: {
-  readonly link: string
-  readonly profile: string
-}) {
+export function DialogAssumeRequired({ link, profile }: { readonly link: string; readonly profile: string }) {
   const { theme } = useTheme()
   const dialog = useDialog()
 

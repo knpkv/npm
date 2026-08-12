@@ -362,7 +362,6 @@ type ActionStatus =
     } & ReviewSkillSnapshot)
   | { readonly _tag: "failed"; readonly action: PendingAction; readonly diagnostic: ActionDiagnostic }
 
-
 type ConversationStatus =
   | { readonly _tag: "idle" }
   | {
@@ -1306,13 +1305,15 @@ export function DetailsView() {
   })
   // Two affordances, because only Neovim is blocked by a handover: showing `v` as
   // unavailable while it still works would misreport what the key does.
-  const neovimReady = workspace !== null &&
+  const neovimReady =
+    workspace !== null &&
     localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending, handoverBusy)
-  const vscodeReady = workspace !== null &&
+  const vscodeReady =
+    workspace !== null &&
     localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending, false)
   // The console reads the provider directly, so it needs an addressable file but no local checkout.
-  const consoleReady = workspace !== null &&
-    consoleTargetReady(consoleTarget, actionCancelable || providerDriftPending, handoverBusy)
+  const consoleReady =
+    workspace !== null && consoleTargetReady(consoleTarget, actionCancelable || providerDriftPending, handoverBusy)
   const reviewCardExpanded = action._tag === "reviewed"
 
   useEffect(() => {
@@ -2033,15 +2034,17 @@ export function DetailsView() {
                 )}
                 {consoleStatus._tag === "failed" && (
                   <text
-                    fg={consoleStatus.diagnostic.consoleLaunchReason === "assume-interrupted"
-                      ? theme.textWarning
-                      : theme.textError}
+                    fg={
+                      consoleStatus.diagnostic.consoleLaunchReason === "assume-interrupted"
+                        ? theme.textWarning
+                        : theme.textError
+                    }
                   >
                     {terminalSafeText(
                       consoleStatus.diagnostic.consoleLaunchReason === "assume-interrupted"
-                        // An unfinished sign-in is not a fault, but the signal is not always
-                        // the user's Ctrl-C either, so it warns rather than reading as normal.
-                        ? consoleStatus.diagnostic.message
+                        ? // An unfinished sign-in is not a fault, but the signal is not always
+                          // the user's Ctrl-C either, so it warns rather than reading as normal.
+                          consoleStatus.diagnostic.message
                         : `${consoleStatus.diagnostic.operation}: ${consoleStatus.diagnostic.message}`
                     )}
                   </text>
