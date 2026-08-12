@@ -1162,6 +1162,10 @@ describe("PR detail workspace", () => {
 
     expect(detailsKeyIntent({ ...base, dialogOpen: true, keyName: "escape" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, keyName: "escape" })).toBe("back")
+    // Leaving the workspace would not stop an in-flight launch, so it would suspend the
+    // renderer and take the terminal from the pull-request list instead.
+    expect(detailsKeyIntent({ ...base, consoleOpening: true, keyName: "escape" })).toBe("cancel-action")
+    expect(detailsKeyIntent({ ...base, consoleOpening: false, keyName: "escape" })).toBe("back")
     expect(detailsKeyIntent({ ...base, findingPostRunning: true, keyName: "escape" })).toBe("consume")
     expect(detailsKeyIntent({ ...base, keyName: "j" })).toBe("next-file")
     expect(detailsKeyIntent({ ...base, keyName: "down" })).toBe("scroll-content-down")

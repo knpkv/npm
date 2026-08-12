@@ -745,6 +745,7 @@ export type DetailsKeyIntent =
 export const detailsKeyIntent = (input: {
   readonly actionCancelable: boolean
   readonly actionReady: boolean
+  readonly consoleOpening?: boolean
   readonly conversationRunning?: boolean
   readonly dialogOpen: boolean
   readonly exitShortcut?: boolean
@@ -771,7 +772,13 @@ export const detailsKeyIntent = (input: {
   ) {
     return "consume"
   }
-  if (input.keyName === "escape") return input.actionCancelable ? "cancel-action" : "back"
+  // An in-flight console launch is cancelable too: leaving the workspace would not stop
+  // it, so it would suspend the renderer and take the terminal from the pull-request
+  // list instead. It is deliberately not folded into `actionCancelable`, which also
+  // gates polling, merge dialogs and a dozen keys this launch has no claim over.
+  if (input.keyName === "escape") {
+    return input.actionCancelable || input.consoleOpening === true ? "cancel-action" : "back"
+  }
   if (
     input.workspaceRefreshing === true &&
     (consoleKey ||

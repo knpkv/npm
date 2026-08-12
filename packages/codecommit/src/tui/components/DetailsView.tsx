@@ -1694,6 +1694,7 @@ export function DetailsView() {
     const intent = detailsKeyIntent({
       actionCancelable,
       actionReady: action._tag === "ready" && workspace !== null,
+      consoleOpening: consoleStatusRef.current._tag === "opening",
       conversationRunning: agentRunning,
       dialogOpen: dialog.current !== null,
       exitShortcut: key.name === "c" && key.ctrl === true,
@@ -1711,7 +1712,12 @@ export function DetailsView() {
     key.stopPropagation()
     if (intent === "back") setView("prs")
     else if (intent === "cancel-action") {
-      if (mergeStatus._tag === "ready") {
+      if (consoleStatusRef.current._tag === "opening") {
+        // Interrupting before the handover suspends the renderer; once `assume` owns the
+        // terminal this key never reaches the TUI anyway.
+        openConsole(Atom.Interrupt)
+        updateConsoleStatus({ _tag: "idle" })
+      } else if (mergeStatus._tag === "ready") {
         updateMergeStatus({ _tag: "idle" })
       } else if (verificationRunning) {
         verifyFindingAction(Atom.Interrupt)
