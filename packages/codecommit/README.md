@@ -156,7 +156,10 @@ always names an exact commit, so the page cannot drift to a newer head: a
 surviving file opens on the reviewed source commit, and a deleted file opens on
 the destination commit, the only revision in the review where it still exists.
 Unlike the editor shortcuts this needs no local checkout, because it reads the
-provider directly. The link is copied to the clipboard when a clipboard tool
+provider directly. The console hostname is selected from the region's AWS
+partition, so China and GovCloud accounts open their own console domain; regions
+in the isolated partitions have no known console host and the action reports them
+as unsupported rather than opening a link that cannot resolve. The link is copied to the clipboard when a clipboard tool
 (`pbcopy` or `xclip`) exists, and is then handed to
 Granted's `assume`, which exchanges the pull request's profile for a federated
 console session; the TUI yields the terminal for the duration so an expired SSO

@@ -12,7 +12,10 @@ The link always names an exact commit, so the opened page cannot drift to a
 newer head: a surviving file resolves to the reviewed source commit, and a
 deleted file resolves to the destination commit, the only revision in the review
 where the console can still render it. Unlike the editor shortcuts the action
-reads the provider directly, so it needs no local checkout.
+reads the provider directly, so it needs no local checkout. The console hostname
+comes from the region's AWS partition, so China and GovCloud accounts reach their
+own console domain, and an isolated-partition region is reported as unsupported
+instead of being sent to a commercial URL that cannot resolve.
 
 The link is copied to the clipboard when a clipboard tool exists and is then
 handed to Granted's `assume`, which

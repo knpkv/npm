@@ -101,7 +101,7 @@ import {
   worktreeCheckoutLocalDiff,
   workspaceIdentityMatches
 } from "../details-model.js"
-import { codecommitFileConsoleUrl } from "../browser-command.js"
+import { codecommitConsoleHost, codecommitFileConsoleUrl } from "../browser-command.js"
 import type { FileDiffOutcome } from "../file-diff.js"
 import type { LocalEditor } from "../editor-launch.js"
 import { ambiguousMergeGuardsAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
@@ -1312,8 +1312,11 @@ export function DetailsView() {
     workspace !== null &&
     localEditorReady(workspace.localDiff, headEditorPath, actionCancelable || providerDriftPending, false)
   // The console reads the provider directly, so it needs an addressable file but no local checkout.
+  // A region whose partition has no known console host cannot offer the action at all.
   const consoleReady =
-    workspace !== null && consoleTargetReady(consoleTarget, actionCancelable || providerDriftPending, handoverBusy)
+    workspace !== null &&
+    codecommitConsoleHost(workspace.identity.region) !== null &&
+    consoleTargetReady(consoleTarget, actionCancelable || providerDriftPending, handoverBusy)
   const reviewCardExpanded = action._tag === "reviewed"
 
   useEffect(() => {
@@ -1476,6 +1479,18 @@ export function DetailsView() {
       region: workspace.identity.region,
       repositoryName: workspace.identity.repositoryName
     })
+    if (link === null) {
+      // Better to report the partition as unsupported than to hand `assume` a
+      // commercial-console URL that cannot resolve for this account.
+      updateConsoleStatus({
+        _tag: "failed",
+        diagnostic: {
+          operation: "open-codecommit",
+          message: `No known console host for region ${workspace.identity.region}`
+        }
+      })
+      return
+    }
     nextActionRequestSequence += 1
     const requestId = `${workspace.identity.profile}:${workspace.identity.region}:${workspace.identity.repositoryName}:${workspace.identity.pullRequestId}:${consoleTarget.commitId}:console:${nextActionRequestSequence}`
     updateConsoleStatus({
