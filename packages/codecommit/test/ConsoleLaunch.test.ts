@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { CacheService, ChildEnv } from "@knpkv/codecommit-core"
-import { Effect, Sink, Stream } from "effect"
+import { Effect, Exit, Sink, Stream } from "effect"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -145,6 +145,36 @@ describe("console launch", () => {
         )
       )
       expect(error.reason).toBe("assume-missing")
+    }).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(TuiTerminalSession, terminalRecording(events)),
+      Effect.provideService(ChildEnv.HostEnvironment, { variables: { PATH: "/usr/bin" } })
+    )
+  })
+
+  it.effect("does not hand the terminal to assume when the clipboard step is interrupted", () => {
+    const events: Array<string> = []
+    const spawned: Array<string> = []
+    const spawner = ChildProcessSpawner.make((command) => {
+      spawned.push(ChildProcess.isStandardCommand(command) ? command.command : "unknown")
+      return Effect.succeed(handleWithExit(0, () => undefined))
+    })
+
+    return Effect.gen(function*() {
+      // Cancelling the action, or shutting the application scope down, must abandon the
+      // launch: discarding the interrupt here would take over the terminal after the
+      // fact and hold exit open until the child finished.
+      const exit = yield* Effect.exit(
+        openConsoleAfterClipboard(Effect.interrupt, {
+          link: "https://console",
+          profile: "dev-admin",
+          requestId: "console-interrupted-copy"
+        })
+      )
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(spawned).toEqual([])
+      expect(events).toEqual([])
     }).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.provideService(TuiTerminalSession, terminalRecording(events)),

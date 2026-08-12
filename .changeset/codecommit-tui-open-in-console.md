@@ -1,7 +1,7 @@
 ---
 "@knpkv/codecommit": minor
 "@knpkv/codecommit-core": minor
-"@knpkv/codecommit-web": patch
+"@knpkv/codecommit-web": minor
 ---
 
 Add an "Open in CodeCommit" action to the TUI Changes tab, next to the Neovim
@@ -40,6 +40,11 @@ survive beside the `AWS_ACCESS_KEY_ID` tombstone and outrank the requested profi
 The spawn stays `extendEnv: true`, so `PATH` and every other inherited variable are
 untouched. `ChildEnv.HostEnvironment` is the service that supplies the inherited
 environment at a runtime call site.
+
+`@knpkv/codecommit-web` takes a minor bump rather than a patch: it re-exports
+`makeServer`, `makeCodeCommitServer` and `CodeCommitServerLive`, and their emitted
+declarations now carry the `ChildEnv.HostEnvironment` requirement, so a downstream
+layer composition that satisfied them before will no longer compile without it.
 
 All five profile-scoped spawns now supply it — both `assume` paths, the sandbox
 clone, and the exact-head Git commands — with the layer bound at each executable

@@ -101,11 +101,18 @@ export const openConsoleAfterClipboard = <E, R>(
   ConsoleLaunchError,
   R | ChildEnv.HostEnvironment | ChildProcessSpawner.ChildProcessSpawner | TuiTerminalSession
 > =>
-  // `ignoreCause`, not `ignore`: the latter discards only the typed error channel, so a
-  // defect in the clipboard path — including inside `copyToClipboard`'s own catch
-  // handler — would still short-circuit and produce exactly the unclassifiable failure
-  // this exists to prevent.
-  Effect.ignoreCause(copy).pipe(Effect.andThen(openAssumeConsole(input)))
+  // Failures and defects are discarded — `ignore` alone would not cover a defect in the
+  // clipboard path, including inside `copyToClipboard`'s own catch handler, and that
+  // would short-circuit into exactly the unclassifiable failure this exists to prevent.
+  //
+  // Interruption is deliberately not caught: `ignoreCause` would convert it to success,
+  // so cancelling the action or shutting the application scope down would still let the
+  // continuation hand the terminal to `assume` and hold exit open until the child ends.
+  copy.pipe(
+    Effect.catch(() => Effect.void),
+    Effect.catchDefect(() => Effect.void),
+    Effect.andThen(openAssumeConsole(input))
+  )
 
 /**
  * Runs `assume` for one console destination and waits for it to finish.
