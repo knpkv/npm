@@ -29,6 +29,7 @@ import { OAuthError } from "./OAuthErrors.js"
 import {
   type AccessibleResource,
   AccessibleResourceSchema,
+  TokenErrorSchema,
   type TokenResponse,
   TokenResponseSchema,
   type UserInfo,
@@ -192,8 +193,21 @@ export const refreshToken = (
       const text = yield* response.text.pipe(
         Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
       )
+      // The OAuth `error` code is what distinguishes "this grant is spent" from
+      // "your request was malformed", and callers key credential deletion off
+      // it. A body that is not JSON, or not shaped like an OAuth error, simply
+      // leaves it absent — which callers read as "no verdict", not "rejected".
+      const errorCode = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TokenErrorSchema))(text).pipe(
+        Effect.map((decoded) => decoded.error),
+        Effect.catch(() => Effect.succeed(undefined))
+      )
       return yield* Effect.fail(
-        new OAuthError({ step: "refresh", cause: `HTTP ${response.status}: ${text}` })
+        new OAuthError({
+          step: "refresh",
+          cause: `HTTP ${response.status}: ${text}`,
+          status: response.status,
+          ...(errorCode === undefined ? {} : { errorCode })
+        })
       )
     }
 

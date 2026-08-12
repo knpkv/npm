@@ -61,6 +61,24 @@ export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
   Layer.provide(PlatformLayer)
 )
 
+// This layer is built before any command body runs — `HeadlessLayer` is
+// provided to the whole program — so a stall in `getAccessToken`, which
+// refreshes an expired OAuth token over the network, hangs the process the way
+// bounding the Clockify calls in `timer/status.ts` was meant to prevent.
+//
+// The bound for that lives in `JiraAuth.refreshTokenImpl` (30s), not here: a
+// timeout on this call would be inert, because the rotation is uninterruptible,
+// `Effect.timeout` is a race, and racing an uninterruptible loser means waiting
+// for it anyway.
+//
+// Note what the `Effect.catch` below already costs. This layer is also the TUI's
+// memoized runtime (`tui/atoms/runtime.ts`), built once per session, so any
+// failure — including that 30s deadline — pins an empty credential for the rest
+// of the session and 401s every Jira call until the user restarts. Moving the
+// bound here would not change that; fixing it means making the TUI resolve the
+// credential per request instead of once at layer construction.
+//
+// `getCloudId` needs no bound; it only reads the stored token file.
 export const JiraApiConfigLive = Layer.effect(
   JiraApiConfig,
   Effect.gen(function*() {

@@ -47,6 +47,28 @@ export type OAuthStep = "configure" | "authorize" | "token" | "resources" | "use
 export class OAuthError extends Data.TaggedError("OAuthError")<{
   readonly step: OAuthStep
   readonly cause?: unknown
+  /**
+   * HTTP status, present only when the provider actually answered.
+   *
+   * Absent means the request never produced a response — transport failure,
+   * timeout, interruption — which is *not* evidence about the credential.
+   * Callers deciding whether to discard stored tokens must key off this and
+   * {@link errorCode} rather than off {@link step}, since a refresh that merely
+   * failed to complete may well have been consumed server-side.
+   */
+  readonly status?: number
+  /**
+   * The OAuth 2.0 `error` code from the response body (RFC 6749 §5.2), when the
+   * provider sent a parseable one.
+   *
+   * Status alone is too coarse to act on: `400` covers `invalid_grant` (the
+   * stored token really is spent) as well as `invalid_client`,
+   * `invalid_request` and `unsupported_grant_type`, which say the *request* was
+   * wrong and imply nothing about the token. Absent when the body was missing
+   * or unparseable, in which case callers should assume the credential is still
+   * good rather than discard it on a guess.
+   */
+  readonly errorCode?: string
 }> {
   override get message(): string {
     if (typeof this.cause === "string") {

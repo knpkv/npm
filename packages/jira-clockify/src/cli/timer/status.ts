@@ -9,6 +9,14 @@ import { Command } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { StateWriter } from "../../services/StateWriter.js"
 
+/**
+ * Every Clockify call here is best-effort: on failure the command degrades to
+ * printing local state. Without a bound, though, a stalled request keeps the
+ * process alive forever — and `status` is what the nvim statusline polls on a
+ * timer, so hung processes accumulate rather than being noticed. Bound them.
+ */
+const API_TIMEOUT = "10 seconds"
+
 export const statusCmd = Command.make(
   "status",
   {},
@@ -26,7 +34,13 @@ export const statusCmd = Command.make(
         const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         if (auth) {
           let apiReachable = false
+          // The bound goes innermost: `apiReachable` gates clearing the state
+          // file, so the tap must only be reachable on an answer that actually
+          // won its race. Timing out around the tap would let the flag be set
+          // by a call the timeout then discards, and the `null` result would
+          // read as "API confirmed no timer" — clearing a live timer.
           const running = yield* clockifyClient.getRunningTimer(auth.workspaceId, auth.userId).pipe(
+            Effect.timeout(API_TIMEOUT),
             Effect.tap(() =>
               Effect.sync(() => {
                 apiReachable = true
@@ -74,12 +88,14 @@ export const statusCmd = Command.make(
       const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
       if (auth && state.clockifyEntryId) {
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, state.clockifyEntryId).pipe(
+          Effect.timeout(API_TIMEOUT),
           Effect.catch(() => Effect.succeed(null))
         )
         if (entry) {
           let projectName = "none"
           if (entry.projectId) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
+              Effect.timeout(API_TIMEOUT),
               Effect.catch(() => Effect.succeed([]))
             )
             projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
@@ -90,6 +106,7 @@ export const statusCmd = Command.make(
           // Show tags
           if (entry.tagIds && entry.tagIds.length > 0) {
             const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
+              Effect.timeout(API_TIMEOUT),
               Effect.catch(() => Effect.succeed([]))
             )
             const tagNames = entry.tagIds

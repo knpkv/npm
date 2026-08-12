@@ -278,17 +278,37 @@ const make = Effect.gen(function*() {
       return config
     })
 
+  // Mirrors `@knpkv/jira-cli`'s JiraAuth, deliberately: same shared
+  // `refreshToken`, same rotating-credential hazard. Atlassian consumes the
+  // token we send and returns its replacement, so an interrupt between the
+  // grant and the persist spends the credential with nothing saved and silently
+  // logs the user out. Grant and persist are therefore atomic.
+  //
+  // The deadline sits inside the region because an uninterruptible region with
+  // no bound of its own absorbs SIGINT/SIGTERM entirely — `runMain`'s handlers
+  // only interrupt the main fiber — which would leave a `confluence` command
+  // ignoring Ctrl-C against a stalled token endpoint. A deadline forked inside
+  // the region is still interruptible, so it does bound this.
+  const REFRESH_TIMEOUT = "30 seconds"
+
   const refreshTokenImpl = (
     token: OAuthToken,
     config: OAuthConfig
   ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.gen(function*() {
-      const updated = yield* refreshToken(token, config).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-      yield* saveTokenOp(updated)
-      return updated
-    })
+    Effect.uninterruptible(
+      Effect.gen(function*() {
+        const updated = yield* refreshToken(token, config).pipe(
+          Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+          Effect.timeout(REFRESH_TIMEOUT),
+          Effect.catchTag(
+            "TimeoutError",
+            () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
+          )
+        )
+        yield* saveTokenOp(updated)
+        return updated
+      })
+    )
 
   const revokeTokenImpl = (
     token: OAuthToken,
@@ -460,13 +480,22 @@ const make = Effect.gen(function*() {
         return yield* refreshTokenImpl(token, config)
       }).pipe(
         Effect.catchTag("OAuthError", (error) => {
-          if (error.step === "refresh") {
+          // Same rule as JiraAuth: only Atlassian explicitly saying the grant
+          // itself is spent ends the session. A timeout, a transport error, a
+          // `429` from a burst of concurrent commands, a `400 invalid_client`
+          // from a rotated client secret, or a bare `403` from a proxy are none
+          // of them evidence about the token, and deleting it is unrecoverable.
+          const { errorCode, status } = error
+          const rejected = errorCode === "invalid_grant" && (status === 400 || status === 403)
+          if (error.step === "refresh" && rejected) {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
               return yield* Effect.fail(
                 new OAuthError({
                   step: "refresh",
-                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate."
+                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
+                  status,
+                  errorCode
                 })
               )
             })
