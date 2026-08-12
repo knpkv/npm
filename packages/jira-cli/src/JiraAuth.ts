@@ -263,17 +263,50 @@ const make = Effect.gen(function*() {
       return config
     })
 
+  // Atlassian rotates refresh tokens: the response carries a replacement and
+  // the one we sent is consumed server-side. Interrupting between the
+  // round-trip and `saveTokenOp` therefore destroys the credential — the next
+  // refresh fails and `getAccessToken` below reacts by deleting the token file,
+  // so the user is silently logged out and has to run `jira auth login` again.
+  //
+  // Interruption is routine here, not hypothetical: this runs during layer
+  // construction on every CLI invocation, and jcf's nvim statusline kills the
+  // process on `VimLeave`. So the grant and the persist are atomic.
+  //
+  // The region carries its own deadline rather than relying on a caller's.
+  // `Effect.timeout` is a race, and racing an uninterruptible loser means
+  // waiting for it — an outer bound would go inert and, worse, an
+  // uninterruptible region with no deadline of its own absorbs SIGINT/SIGTERM
+  // entirely (`NodeRuntime.runMain`'s signal handlers only interrupt the main
+  // fiber), leaving a process that ignores Ctrl-C. The deadline forked inside
+  // the region is itself interruptible, so it does bound this.
+  //
+  // Abandoning the round-trip cannot prove the grant did not land: Atlassian
+  // may consume the refresh token and rotate it after we have stopped
+  // listening, and no client-side deadline changes that. So the deadline is
+  // paired with the rule in `getAccessToken` below — a refresh that fails
+  // without a 4xx never deletes the stored token. The credential survives to be
+  // retried, and only a real rejection ends the session.
+  const REFRESH_TIMEOUT = "30 seconds"
+
   const refreshTokenImpl = (
     token: OAuthToken,
     config: OAuthConfig
   ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.gen(function*() {
-      const updated = yield* refreshToken(token, config).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-      yield* saveTokenOp(updated)
-      return updated
-    })
+    Effect.uninterruptible(
+      Effect.gen(function*() {
+        const updated = yield* refreshToken(token, config).pipe(
+          Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+          Effect.timeout(REFRESH_TIMEOUT),
+          Effect.catchTag(
+            "TimeoutError",
+            () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
+          )
+        )
+        yield* saveTokenOp(updated)
+        return updated
+      })
+    )
 
   const revokeTokenImpl = (
     token: OAuthToken,
@@ -461,13 +494,41 @@ const make = Effect.gen(function*() {
         return yield* refreshTokenImpl(token, config)
       }).pipe(
         Effect.catchTag("OAuthError", (error) => {
-          if (error.step === "refresh") {
+          // Discard the stored credential only when Atlassian actually rejected
+          // it. A refresh can fail without saying anything about the token —
+          // transport error, timeout, interruption — and in those cases the
+          // grant may even have been consumed server-side, so the one thing we
+          // must not do is delete the replacement's only trail. Deleting on any
+          // `step === "refresh"` failure turned a flaky network into a silent
+          // logout, which is worse than retrying and is unrecoverable. On a 4xx
+          // the token is genuinely dead and re-login is the only way forward.
+          // Not every failure is a verdict on the token, and not even every
+          // 4xx is. `429` is the one this most needs to survive — several
+          // `jira`/`jcf` processes on an expired token hit the endpoint
+          // together, one wins the rotation and the rest are rate-limited —
+          // while `408`/`425` restate the timeout case and `407` and other
+          // middlebox replies never came from Atlassian at all.
+          //
+          // Status alone is still too coarse. `refreshToken` sends the client
+          // credentials in the body, so a wrong or rotated `clientSecret` comes
+          // back as `400 invalid_client`; deleting the token there destroys a
+          // working credential over a config problem, and the re-login it forces
+          // would fail the same way until `jira auth configure` is run. Only
+          // `invalid_grant` means the stored token itself is spent, and that is
+          // the only thing that ends the session — on a `403` too, since a bare
+          // 403 is just as likely to come from a proxy or WAF as from Atlassian
+          // revoking anything. An unparseable body leaves `errorCode` absent and
+          // the token in place.
+          const { errorCode, status } = error
+          const rejected = errorCode === "invalid_grant" && (status === 400 || status === 403)
+          if (error.step === "refresh" && rejected) {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
               return yield* Effect.fail(
                 new OAuthError({
                   step: "refresh",
-                  cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate."
+                  cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate.",
+                  status
                 })
               )
             })

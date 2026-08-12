@@ -102,6 +102,11 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-version: 24.10.0
+      # @knpkv/jira-clockify ships an nvim plugin whose specs run under
+      # `nvim --headless`. Without the binary those specs skip, and the plugin's
+      # single-flight and cache invariants would have no automated cover.
+      - name: Install neovim for nvim plugin specs
+        run: sudo apt-get update && sudo apt-get install -y neovim
       - run: pnpm build
       - run: pnpm test
 

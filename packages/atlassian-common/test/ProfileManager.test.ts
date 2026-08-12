@@ -1,8 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
+import * as Deferred from "effect/Deferred"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { SystemError } from "effect/PlatformError"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import {
   type AtlassianToolDefinition,
   HomeDirectoryLive,
@@ -13,6 +16,7 @@ import {
   type OAuthToken,
   ProfileNotFoundError,
   refreshActiveProfiles,
+  saveOAuthConfig,
   saveProfileToken,
   useProfileForAllTools
 } from "../src/config/index.js"
@@ -173,6 +177,61 @@ describe("ProfileManager", () => {
         })
       )
     ).rejects.toBeInstanceOf(ProfileNotFoundError)
+  })
+
+  // Atlassian rotates refresh tokens, so the grant consumes the stored one and
+  // the response carries its replacement. If an interrupt can land between the
+  // two, the credential is spent with nothing saved and the profile is silently
+  // logged out — hence the uninterruptible region around grant-and-persist.
+  it("persists the rotated token even when interrupted mid-rotation", async () => {
+    const mock = makeMockFS()
+    const program = Effect.gen(function*() {
+      yield* saveOAuthConfig("tool-a", { clientId: "client-1", clientSecret: "secret-1" })
+      yield* saveProfileToken("tool-a", makeToken(1, "read:me offline_access", Date.now() - 1_000))
+
+      const issued = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const client = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.gen(function*() {
+            yield* Deferred.succeed(issued, undefined)
+            yield* Deferred.await(release)
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(
+                JSON.stringify({
+                  access_token: "fresh-access",
+                  refresh_token: "rotated-refresh",
+                  expires_in: 3600,
+                  scope: "read:me offline_access",
+                  token_type: "Bearer"
+                }),
+                { status: 200, headers: { "content-type": "application/json" } }
+              )
+            )
+          })
+        )
+      )
+
+      const fiber = yield* refreshActiveProfiles([tools[0]!]).pipe(
+        Effect.provide(client),
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(issued)
+      const interrupting = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(interrupting)
+    })
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(Layer.mergeAll(mock.layer, Path.layer, HomeDirectoryLive, ConfigProviderLive))
+      )
+    )
+
+    expect(JSON.stringify(mock.store)).toContain("rotated-refresh")
   })
 
   it("fails expired-token refresh when OAuth config is missing", async () => {
