@@ -9,7 +9,7 @@ import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import { componentManifest } from "../component-manifest.js"
-import { findSourceDrift, renderContract, renderPackageJson } from "./contract.js"
+import { findSourceDrift, packageExportsMatch, renderContract, renderPackageJson } from "./contract.js"
 import { findRegistrySourceFailures } from "./registry/source-validation.js"
 
 class GenerateContractError extends Data.TaggedError("GenerateContractError")<{
@@ -116,12 +116,13 @@ const program = Effect.gen(function*() {
   const packageJson = yield* Schema.decodeUnknownEffect(PackageJson)(packageSource).pipe(
     Effect.mapError(() => new GenerateContractError({ reason: "package.json is not a valid export manifest" }))
   )
-  const expectedPackageSource = renderPackageJson(componentManifest, packageJson)
-  if (mode === "write" && packageSource !== expectedPackageSource) {
+  const exportsMatch = packageExportsMatch(componentManifest, packageJson)
+  if (mode === "write" && !exportsMatch) {
+    const expectedPackageSource = renderPackageJson(componentManifest, packageJson)
     const temporary = `${packagePath}.tmp`
     yield* fs.writeFileString(temporary, expectedPackageSource)
     yield* fs.rename(temporary, packagePath)
-  } else if (mode === "check" && packageSource !== expectedPackageSource) {
+  } else if (mode === "check" && !exportsMatch) {
     failures.push("package.json exports differ from manifest; run pnpm codegen")
   }
 

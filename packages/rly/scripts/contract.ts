@@ -201,6 +201,26 @@ export const renderPackageJson = (
   packageJson: Readonly<Record<string, unknown>>
 ): string => `${JSON.stringify({ ...packageJson, exports: renderPackageExports(manifest) }, null, 2)}\n`
 
+const compareJsonKeys = (left: readonly [string, unknown], right: readonly [string, unknown]): number =>
+  left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0
+
+const normalizeJson = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeJson)
+  if (typeof value !== "object" || value === null) return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(compareJsonKeys)
+      .map(([key, nested]) => [key, normalizeJson(nested)])
+  )
+}
+
+/** Check whether the package manifest matches the generated public contract. */
+export const packageExportsMatch = (
+  manifest: ComponentManifest,
+  packageJson: Readonly<Record<string, unknown>>
+): boolean =>
+  JSON.stringify(normalizeJson(packageJson.exports)) === JSON.stringify(normalizeJson(renderPackageExports(manifest)))
+
 /** Render the visual classifier's exact component path catalog. */
 export const renderVisualCatalog = (manifest: ComponentManifest): string => {
   validateManifest(manifest)
