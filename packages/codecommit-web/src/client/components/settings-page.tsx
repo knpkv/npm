@@ -21,9 +21,8 @@ import {
   UserIcon
 } from "lucide-react"
 import type { ReactNode } from "react"
-import { useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
 import { type SettingsTab, SettingsTabs } from "../atoms/ui.js"
-import { cn } from "../lib/utils.js"
 import { SettingsAbout } from "./settings-about.js"
 import { SettingsAccounts } from "./settings-accounts.js"
 import { SettingsAudit } from "./settings-audit.js"
@@ -33,6 +32,7 @@ import { SettingsPermissions } from "./settings-permissions.js"
 import { SettingsRefresh } from "./settings-refresh.js"
 import { SettingsSandbox } from "./settings-sandbox.js"
 import { SettingsTheme } from "./settings-theme.js"
+import styles from "./settings-page.module.css"
 import { Button } from "./ui/button.js"
 
 const TabIcons: Record<SettingsTab, ReactNode> = {
@@ -67,33 +67,28 @@ export function SettingsPage() {
   const navigate = useNavigate()
 
   return (
-    <div className="flex gap-6">
-      <nav className="w-48 shrink-0">
-        <Button variant="ghost" size="sm" className="mb-4 gap-2" onClick={() => navigate("/")}>
+    <div className={styles.layout}>
+      <nav aria-label="Settings" className={styles.sidebar}>
+        <Button className={styles.backButton} onClick={() => navigate("/")} size="sm" variant="ghost">
           <ArrowLeftIcon className="size-4" />
           Back to PRs
         </Button>
-        <div className="flex flex-col gap-1" role="tablist">
+        <div className={styles.tabList}>
           {SettingsTabs.map((id) => (
-            <button
+            <Link
+              aria-current={activeTab === id ? "page" : undefined}
+              className={styles.tab}
+              data-active={activeTab === id ? "true" : undefined}
               key={id}
-              role="tab"
-              aria-selected={activeTab === id}
-              onClick={() => navigate(`/settings/${id}`, { replace: true })}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left transition-colors",
-                activeTab === id
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
+              to={`/settings/${id}`}
             >
               {TabIcons[id]}
-              {TabLabels[id]}
-            </button>
+              <span>{TabLabels[id]}</span>
+            </Link>
           ))}
         </div>
       </nav>
-      <div className="flex-1 min-w-0">
+      <section aria-label={`${TabLabels[activeTab]} settings`} className={styles.content}>
         {activeTab === "accounts" && <SettingsAccounts />}
         {activeTab === "refresh" && <SettingsRefresh />}
         {activeTab === "sandbox" && <SettingsSandbox />}
@@ -103,7 +98,7 @@ export function SettingsPage() {
         {activeTab === "theme" && <SettingsTheme />}
         {activeTab === "config" && <SettingsConfig />}
         {activeTab === "about" && <SettingsAbout />}
-      </div>
+      </section>
     </div>
   )
 }

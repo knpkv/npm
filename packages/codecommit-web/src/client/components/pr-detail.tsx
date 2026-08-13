@@ -34,25 +34,32 @@ import {
   type HealthScore,
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
+import { ServiceMark, Verdict, type RlyVerdictTone } from "@knpkv/rly/patterns"
+import {
+  Button as RlyButton,
+  Field,
+  StateLabel,
+  StatePanel,
+  Surface,
+  Text,
+  type RlyStateTone
+} from "@knpkv/rly/primitives"
 import { Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
-  ArrowLeftIcon,
   ArrowRightIcon,
   BellIcon,
   BellOffIcon,
   CheckIcon,
   ChevronDownIcon,
   CodeIcon,
-  CopyIcon,
-  ExternalLinkIcon,
   LoaderIcon,
   PlusIcon,
   RefreshCwIcon,
   TrashIcon
 } from "lucide-react"
-import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
@@ -75,28 +82,16 @@ import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
 import { Badge } from "./ui/badge.js"
-import { Button, ButtonGroup } from "./ui/button.js"
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
+import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
 import { Separator } from "./ui/separator.js"
+import styles from "./pr-detail.module.css"
 
-const tierColor = (tier: "green" | "yellow" | "red") =>
-  tier === "green"
-    ? "text-green-600 dark:text-green-400"
-    : tier === "yellow"
-      ? "text-yellow-600 dark:text-yellow-400"
-      : "text-red-600 dark:text-red-400"
+const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
+  tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
 
-const tierBorder = (tier: "green" | "yellow" | "red") =>
-  tier === "green" ? "border-green-500/30" : tier === "yellow" ? "border-yellow-500/30" : "border-red-500/30"
-
-type BadgeVariant = ComponentProps<typeof Badge>["variant"]
-
-const categoryBadgeVariant = (status: CategoryStatus): BadgeVariant =>
-  status === "positive" ? "outline" : status === "neutral" ? "secondary" : "destructive"
-
-const categoryBadgeClass = (status: CategoryStatus) =>
-  status === "positive" ? "border-green-500/30 text-green-600 dark:text-green-400" : ""
+const categoryTone = (status: CategoryStatus): RlyStateTone =>
+  status === "positive" ? "positive" : status === "neutral" ? "neutral" : "critical"
 
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
@@ -127,60 +122,55 @@ function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
   if (!score) return null
   const tier = getScoreTier(score.total)
 
-  return (
-    <Badge variant="outline" className={`${tierBorder(tier)} ${tierColor(tier)} tabular-nums font-semibold`}>
-      {score.total.toFixed(1)}
-    </Badge>
-  )
+  return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
 function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
-  if (!score) return <p className="text-xs text-muted-foreground pt-2">Waiting for comment count...</p>
+  if (!score) {
+    return (
+      <Text tone="secondary" variant="meta">
+        Waiting for comment count…
+      </Text>
+    )
+  }
   const tier = getScoreTier(score.total)
 
   return (
-    <div className="space-y-3 pt-2">
-      <div className="flex items-baseline gap-2">
-        <span className={`text-lg font-bold tabular-nums ${tierColor(tier)}`}>{score.total.toFixed(1)}</span>
-        <span className="text-xs text-muted-foreground">/ 10</span>
-        <div className="ml-2 h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full ${
-              tier === "green" ? "bg-green-500" : tier === "yellow" ? "bg-yellow-500" : "bg-red-500"
-            }`}
-            style={{ width: `${score.total * 10}%` }}
-          />
+    <div className={styles.scoreBreakdown}>
+      <div className={styles.scoreSummary}>
+        <strong data-tone={healthTone(tier)}>{score.total.toFixed(1)}</strong>
+        <span>/ 10</span>
+        <div
+          aria-label={`Health score ${score.total.toFixed(1)} out of 10`}
+          aria-valuemax={10}
+          aria-valuemin={0}
+          aria-valuenow={score.total}
+          className={styles.scoreTrack}
+          role="progressbar"
+        >
+          <div className={styles.scoreFill} data-tone={healthTone(tier)} style={{ width: `${score.total * 10}%` }} />
         </div>
       </div>
-      <div className="space-y-2">
+      <ul className={styles.scoreCategories}>
         {score.categories.map((cat: HealthScoreCategory) => (
-          <div key={cat.label} className="flex items-start gap-3 rounded border px-3 py-2">
-            <span
-              className={`w-8 text-right text-xs font-semibold tabular-nums ${
-                cat.value > 0
-                  ? "text-green-600 dark:text-green-400"
-                  : cat.value < 0
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-muted-foreground"
-              }`}
-            >
+          <li key={cat.label} className={styles.scoreCategory}>
+            <span className={styles.scoreDelta} data-direction={cat.value > 0 ? "up" : cat.value < 0 ? "down" : "flat"}>
               {cat.value > 0 ? `+${cat.value}` : cat.value}
             </span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">{cat.label}</span>
-                <Badge
-                  variant={categoryBadgeVariant(cat.status)}
-                  className={`text-[10px] px-1.5 py-0 ${categoryBadgeClass(cat.status)}`}
-                >
-                  {cat.statusLabel}
-                </Badge>
+            <div className={styles.scoreCategoryCopy}>
+              <div>
+                <Text as="strong" variant="label">
+                  {cat.label}
+                </Text>
+                <StateLabel label={cat.statusLabel} size="compact" tone={categoryTone(cat.status)} />
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">{cat.description}</p>
+              <Text tone="secondary" variant="meta">
+                {cat.description}
+              </Text>
             </div>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   )
 }
@@ -189,14 +179,16 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
   if (thread.root.deleted) return null
 
   return (
-    <div className={depth > 0 ? "ml-4 border-l-2 border-muted pl-3" : ""}>
-      <div className="space-y-1 py-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium">{thread.root.author}</span>
-          <span>·</span>
-          <span>{formatRelativeDate(thread.root.creationDate)}</span>
+    <article className={depth > 0 ? styles.commentReply : styles.comment}>
+      <div className={styles.commentBody}>
+        <div className={styles.commentMeta}>
+          <strong>{thread.root.author}</strong>
+          <span aria-hidden="true">·</span>
+          <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
         </div>
-        <div className="prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto">
+        <div
+          className={`${styles.markdown ?? ""} prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto`}
+        >
           <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
             {thread.root.content}
           </Markdown>
@@ -205,7 +197,7 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
       {thread.replies.map((reply) => (
         <CommentThread key={reply.root.id} thread={reply} depth={depth + 1} />
       ))}
-    </div>
+    </article>
   )
 }
 
@@ -219,38 +211,51 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
 
   return AsyncResult.builder(commentsResult)
     .onInitialOrWaiting(() => (
-      <div className="pt-2">
-        <p className="text-xs text-muted-foreground">Loading comments...</p>
-      </div>
+      <StatePanel
+        announce="polite"
+        description="Reading the current CodeCommit conversation."
+        title="Loading comments"
+        tone="progress"
+      />
     ))
     .onError(() => (
-      <div className="pt-2">
-        <p className="text-xs text-destructive">Failed to load comments</p>
-      </div>
+      <StatePanel
+        announce="polite"
+        description="Refresh the pull request to try reading the conversation again."
+        title="Comments unavailable"
+        tone="critical"
+      />
     ))
     .onDefect(() => (
-      <div className="pt-2">
-        <p className="text-xs text-destructive">Failed to load comments</p>
-      </div>
+      <StatePanel
+        announce="polite"
+        description="Refresh the pull request to try reading the conversation again."
+        title="Comments unavailable"
+        tone="critical"
+      />
     ))
     .onSuccess((comments) => {
       const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
 
       return (
-        <div className="pt-2">
-          {comments.length === 0 && <p className="text-xs text-muted-foreground">No comments</p>}
+        <div className={styles.comments}>
+          {comments.length === 0 && (
+            <Text tone="secondary" variant="meta">
+              No comments
+            </Text>
+          )}
           {totalCount > 0 && (
-            <div className="space-y-1">
+            <div className={styles.commentLocations}>
               {[...comments]
                 .sort((a, b) => earliestDate(b) - earliestDate(a))
                 .map((loc, i) => (
-                  <div key={loc.filePath ?? `loc-${i}`}>
-                    {loc.filePath && <p className="font-mono text-xs text-muted-foreground">{loc.filePath}</p>}
+                  <section className={styles.commentLocation} key={loc.filePath ?? `loc-${i}`}>
+                    {loc.filePath && <code className={styles.commentPath}>{loc.filePath}</code>}
                     {loc.comments.map((thread) => (
                       <CommentThread key={thread.root.id} thread={thread} depth={0} />
                     ))}
                     {i < comments.length - 1 && <Separator className="my-2" />}
-                  </div>
+                  </section>
                 ))}
             </div>
           )}
@@ -310,20 +315,20 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     <>
       {timeToMerge != null && (
         <>
-          <span className="text-muted-foreground">Time to Merge</span>
-          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToMerge)}</span>
+          <dt>Time to merge</dt>
+          <dd>{DateUtils.formatDuration(timeToMerge)}</dd>
         </>
       )}
       {timeToFirstReview != null && (
         <>
-          <span className="text-muted-foreground">Time to First Review</span>
-          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToFirstReview)}</span>
+          <dt>Time to first review</dt>
+          <dd>{DateUtils.formatDuration(timeToFirstReview)}</dd>
         </>
       )}
       {timeToAddressFeedback != null && (
         <>
-          <span className="text-muted-foreground">Time to Address Feedback</span>
-          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToAddressFeedback)}</span>
+          <dt>Time to address feedback</dt>
+          <dd>{DateUtils.formatDuration(timeToAddressFeedback)}</dd>
         </>
       )}
     </>
@@ -341,17 +346,14 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-lg border bg-card">
-      <button
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium hover:bg-accent/50"
-        onClick={() => setOpen(!open)}
-      >
-        <ChevronDownIcon className={`size-4 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
-        {title}
-        {count !== undefined && <span className="text-xs text-muted-foreground">({count})</span>}
+    <Surface as="section" className={styles.disclosure} padding="none" shape="grouped">
+      <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
+        <ChevronDownIcon aria-hidden="true" className={styles.disclosureIcon} data-open={open ? "true" : "false"} />
+        <span>{title}</span>
+        {count !== undefined && <small>{count}</small>}
       </button>
-      {open && <div className="border-t px-4 pb-3">{children}</div>}
-    </div>
+      {open && <div className={styles.disclosureContent}>{children}</div>}
+    </Surface>
   )
 }
 
@@ -447,103 +449,123 @@ function ApproversCard({
   const isSatisfied = approvalRules.length > 0 && approvalRules.every((r) => r.satisfied)
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-sm">{title}</CardTitle>
+    <Surface as="section" className={styles.approverCard} padding="default" shape="grouped" tone="secondary">
+      <header className={styles.approverHeading}>
+        <div className={styles.approverTitle}>
+          <Text as="h3" variant="card-title">
+            {title}
+          </Text>
           {required &&
             approvalRules.length > 0 &&
             (isSatisfied ? (
-              <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-                Satisfied
-              </Badge>
+              <StateLabel label="Satisfied" size="compact" tone="positive" />
             ) : (
-              <Badge variant="secondary">Pending</Badge>
+              <StateLabel label="Pending" size="compact" tone="caution" />
             ))}
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={() => setShowPicker(!showPicker)}>
+        <Button
+          aria-expanded={showPicker}
+          aria-label={showPicker ? `Close ${title.toLocaleLowerCase()} editor` : `Add ${title.toLocaleLowerCase()}`}
+          className={styles.iconAction}
+          onClick={() => setShowPicker(!showPicker)}
+          size="icon-sm"
+          variant="ghost"
+        >
           <PlusIcon className="size-4" />
         </Button>
-      </CardHeader>
-      <CardContent className="space-y-2">
+      </header>
+      <div className={styles.approverBody}>
         {showPicker && (
-          <div className="flex flex-col gap-2 rounded-md border p-2 bg-muted/30">
+          <div className={styles.approverPicker}>
             {addable.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className={styles.approverSuggestions}>
                 {addable.map(([name]) => (
                   <Button
+                    className={styles.suggestionChoice}
                     key={name}
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-xs gap-1"
                     onClick={() => setManualArn(name)}
+                    size="sm"
+                    variant="outline"
                   >
                     {name}
                   </Button>
                 ))}
               </div>
             )}
-            <div className="flex gap-1">
-              <input
-                placeholder={prefix ? `${prefix}USERNAME` : "username"}
-                className="flex-1 rounded-md border bg-background px-2 py-1 text-xs font-mono"
-                value={manualArn}
-                onChange={(e) => setManualArn(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && manualArn.trim()) {
-                    handleAdd(manualArn.trim())
-                    setManualArn("")
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                className="h-7 text-xs"
+            <div className={styles.approverPickerActions}>
+              <Field
+                className={styles.approverField}
+                description="Enter a known user or the complete CodeCommit approver identity."
+                label="Approver"
+                size="compact"
+              >
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    className={`${controlProps.className} ${styles.approverInput ?? ""}`}
+                    onChange={(event) => setManualArn(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && manualArn.trim()) {
+                        handleAdd(manualArn.trim())
+                        setManualArn("")
+                      }
+                    }}
+                    placeholder={prefix ? `${prefix}USERNAME` : "username"}
+                    value={manualArn}
+                  />
+                )}
+              </Field>
+              <RlyButton
                 disabled={!manualArn.trim() || !prefix}
                 onClick={() => {
                   handleAdd(manualArn.trim())
                   setManualArn("")
                 }}
+                size="compact"
+                variant="primary"
               >
                 Add
-              </Button>
+              </RlyButton>
             </div>
           </div>
         )}
         {!showPicker && addable.length > 0 && (
-          <div className="flex flex-wrap gap-1 items-center">
-            <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Suggested</span>
+          <div className={styles.suggestedApprovers}>
+            <Text tone="tertiary" variant="meta">
+              Suggested
+            </Text>
             {addable.slice(0, 5).map(([name, arn]) => (
-              <button
-                key={name}
-                className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:border-primary/50 hover:text-foreground transition-colors"
-                onClick={() => handleAdd(arn)}
-              >
-                <PlusIcon className="size-2.5" />
+              <button className={styles.suggestedApprover} key={name} onClick={() => handleAdd(arn)} type="button">
+                <PlusIcon aria-hidden="true" />
                 {name}
               </button>
             ))}
           </div>
         )}
         {(allPoolMembers.length > 0 || pendingAdd) && (
-          <div className="flex flex-wrap gap-1">
+          <div className={styles.approverMembers}>
             {allPoolMembers.map((member) => {
               const hasApproved = approvedBy.includes(member)
               const isManaged = managedMembers.includes(member)
               const isRemoving = member === pendingRemove
               return (
                 <Badge
-                  key={member}
-                  variant={member === currentUser ? "default" : hasApproved ? "outline" : "secondary"}
-                  className={`text-xs gap-1 ${
+                  className={`${styles.approverMember ?? ""} ${
                     hasApproved ? "border-green-500/30 text-green-600 dark:text-green-400" : ""
                   } ${isRemoving ? "opacity-50" : ""}`}
+                  key={member}
+                  variant={member === currentUser ? "default" : hasApproved ? "outline" : "secondary"}
                 >
                   {isRemoving && <LoaderIcon className="size-3 animate-spin" />}
                   {!isRemoving && hasApproved && <CheckIcon className="size-3" />}
                   {member}
                   {isManaged && !isRemoving && (
-                    <button className="ml-0.5 hover:text-destructive" onClick={() => handleRemove(member)}>
+                    <button
+                      aria-label={`Remove ${member} from ${title.toLocaleLowerCase()}`}
+                      className={styles.removeApprover}
+                      onClick={() => handleRemove(member)}
+                      type="button"
+                    >
                       <TrashIcon className="size-3" />
                     </button>
                   )}
@@ -551,17 +573,63 @@ function ApproversCard({
               )
             })}
             {pendingAdd && !allPoolMembers.includes(pendingAdd) && (
-              <Badge variant="secondary" className="text-xs gap-1 opacity-70">
+              <Badge className={`${styles.approverMember ?? ""} opacity-70`} variant="secondary">
                 <LoaderIcon className="size-3 animate-spin" />
                 {pendingAdd}
               </Badge>
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Surface>
   )
 }
+
+interface PullRequestDecisionPresentation {
+  readonly reason: string
+  readonly tone: RlyVerdictTone
+  readonly verdict: string
+}
+
+const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
+  switch (pr.status) {
+    case "MERGED":
+      return {
+        reason: `CodeCommit reports this pull request merged into ${pr.destinationBranch}.`,
+        tone: "positive",
+        verdict: "Merged."
+      }
+    case "CLOSED":
+      return {
+        reason: "CodeCommit reports this pull request closed without a merge.",
+        tone: "neutral",
+        verdict: "Closed."
+      }
+    case "OPEN":
+      if (!pr.isMergeable) {
+        return {
+          reason: `Resolve the conflict between ${pr.sourceBranch} and ${pr.destinationBranch} before merging.`,
+          tone: "critical",
+          verdict: "Resolve conflicts."
+        }
+      }
+      if (!pr.isApproved) {
+        return {
+          reason: "The branch is mergeable, but its provider approval is still pending.",
+          tone: "caution",
+          verdict: "Review pending."
+        }
+      }
+      return {
+        reason: "CodeCommit reports a clean merge and the provider approval is satisfied.",
+        tone: "positive",
+        verdict: "Ready to merge."
+      }
+  }
+}
+
+const pullRequestStatusTone = (status: Domain.PullRequest["status"]): RlyStateTone =>
+  status === "MERGED" ? "positive" : status === "CLOSED" ? "neutral" : "progress"
 
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
@@ -768,244 +836,301 @@ export function PRDetail() {
 
   if (!pr) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
-        <LoaderIcon className="size-6 animate-spin opacity-40" />
-        <p className="text-sm">Loading pull request...</p>
-      </div>
+      <section className={styles.loadingState}>
+        <StatePanel
+          announce="polite"
+          description="Reading the current provider facts and approval state from CodeCommit."
+          title="Loading pull request"
+          tone="progress"
+        />
+      </section>
     )
   }
 
-  const isOpen = pr.status === "OPEN"
-
-  const mergeBadge = isOpen ? (
-    !pr.isMergeable ? (
-      <Badge variant="destructive">Conflict</Badge>
-    ) : (
-      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-        Mergeable
-      </Badge>
-    )
-  ) : null
-
-  const approvalBadge = isOpen ? (
-    pr.isApproved ? (
-      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-        Approved
-      </Badge>
-    ) : (
-      <Badge variant="secondary">Pending</Badge>
-    )
-  ) : null
+  const decision = pullRequestDecision(pr)
+  const scope = extractScope(pr.title)
+  const statusLabel = pr.status === "OPEN" ? "Open" : pr.status === "MERGED" ? "Merged" : "Closed"
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-          <ArrowLeftIcon className="size-4" />
+    <article className={styles.page}>
+      <nav aria-label="Pull request navigation" className={styles.backNavigation}>
+        <RlyButton leadingIcon="arrow-left" onClick={() => navigate("/")} size="compact" variant="quiet">
           Back
-        </Button>
-        <ButtonGroup className="ml-auto">
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleSubscriptionToggle}>
-            {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
-            {isSubscribed ? "Unsubscribe" : "Subscribe"}
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleSandbox}>
-            <CodeIcon className="size-3.5" />
-            {existingSandbox ? "Open Sandbox" : "Sandbox"}
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy}>
-            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-            {copied ? "Copied" : "Copy Link"}
-          </Button>
-          <Button variant="default" size="sm" className="h-7 text-xs" onClick={handleOpen}>
-            <ExternalLinkIcon className="size-3.5" />
-            Open in Console
-          </Button>
-        </ButtonGroup>
-      </div>
+        </RlyButton>
+      </nav>
 
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{pr.title}</h1>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          {mergeBadge}
-          {approvalBadge}
-          <Badge variant="outline">{pr.status}</Badge>
-          <ScoreBadge score={score} />
-          <Link
-            to={`/?f=author:${encodeURIComponent(pr.author)}`}
-            className="text-sm text-muted-foreground hover:underline"
-          >
+      <header className={styles.hero}>
+        <div className={styles.eyebrow}>
+          <ServiceMark service="codecommit" size="compact" />
+          <Text tone="secondary" variant="label">
+            Pull request {pr.id}
+          </Text>
+        </div>
+        <Text as="h1" className={styles.title} variant="page-title">
+          {pr.title}
+        </Text>
+        <div className={styles.heroMeta}>
+          <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
             {pr.author}
           </Link>
-          <span className="text-sm text-muted-foreground">·</span>
-          <span className="text-sm text-muted-foreground">{DateUtils.formatDate(pr.creationDate)}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>
           {pr.fetchedAt && (
             <>
-              <span className="text-sm text-muted-foreground">·</span>
-              <span className="text-xs text-muted-foreground">
-                {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}
-              </span>
+              <span aria-hidden="true">·</span>
+              <span>{DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}</span>
             </>
           )}
         </div>
-      </div>
+      </header>
 
-      <Separator />
-
-      <Card>
-        <CardContent className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 py-4 text-sm">
-          <span className="text-muted-foreground">Account</span>
-          <Link
-            to={`/?f=account:${encodeURIComponent(pr.account.profile)}`}
-            className="font-mono text-xs hover:underline"
-          >
-            {pr.account.profile}
-          </Link>
-
-          <span className="text-muted-foreground">Repository</span>
-          <Link to={`/?f=repo:${encodeURIComponent(pr.repositoryName)}`} className="font-mono text-xs hover:underline">
-            {pr.repositoryName}
-          </Link>
-
-          <span className="text-muted-foreground">Branch</span>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="font-mono text-xs">
-              {pr.sourceBranch}
-            </Badge>
-            <ArrowRightIcon className="size-3 text-muted-foreground" />
-            <Badge variant="outline" className="font-mono text-xs">
-              {pr.destinationBranch}
-            </Badge>
+      <section aria-label="Pull request decision and actions" className={styles.decisionWorkspace}>
+        <Verdict className={styles.verdict} reason={decision.reason} tone={decision.tone} verdict={decision.verdict} />
+        <aside className={styles.actionRail}>
+          <div className={styles.actionHeading}>
+            <Text tone="secondary" variant="label">
+              Actions
+            </Text>
+            <StateLabel label={statusLabel} size="compact" tone={pullRequestStatusTone(pr.status)} />
           </div>
+          <div className={styles.actionGroup}>
+            <Button
+              className={styles.actionButton}
+              disabled={isRefreshing}
+              onClick={handleRefresh}
+              size="sm"
+              variant="outline"
+            >
+              <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Button className={styles.actionButton} onClick={handleSubscriptionToggle} size="sm" variant="outline">
+              {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </Button>
+            <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
+              <CodeIcon className="size-3.5" />
+              {existingSandbox ? "Open Sandbox" : "Sandbox"}
+            </Button>
+            <RlyButton
+              className={styles.actionButton}
+              leadingIcon={copied ? "check" : "link"}
+              onClick={handleCopy}
+              size="compact"
+              variant="secondary"
+            >
+              {copied ? "Copied" : "Copy Link"}
+            </RlyButton>
+            <RlyButton
+              className={styles.actionButton}
+              leadingIcon="external-link"
+              onClick={handleOpen}
+              size="compact"
+              variant="primary"
+            >
+              Open in Console
+            </RlyButton>
+          </div>
+          <Text tone="tertiary" variant="meta">
+            Enter or O opens CodeCommit · . opens the sandbox · Esc returns to the list
+          </Text>
+        </aside>
+      </section>
 
-          <span className="text-muted-foreground">Author</span>
-          <Link to={`/?f=author:${encodeURIComponent(pr.author)}`} className="text-xs hover:underline">
-            {pr.author}
-          </Link>
+      <Surface as="section" className={styles.revisionCard} padding="spacious" shape="grouped" tone="secondary">
+        <header className={styles.revisionHeading}>
+          <div>
+            <Text tone="secondary" variant="label">
+              Current revision
+            </Text>
+            <Text as="h2" variant="section-title">
+              {pr.repositoryName}
+            </Text>
+          </div>
+          <ScoreBadge score={score} />
+        </header>
 
-          {extractScope(pr.title) && (
+        <div aria-label={`${pr.sourceBranch} into ${pr.destinationBranch}`} className={styles.branchPair}>
+          <div>
+            <Text tone="secondary" variant="meta">
+              Source
+            </Text>
+            <code>{pr.sourceBranch}</code>
+          </div>
+          <ArrowRightIcon aria-hidden="true" />
+          <div>
+            <Text tone="secondary" variant="meta">
+              Destination
+            </Text>
+            <code>{pr.destinationBranch}</code>
+          </div>
+        </div>
+
+        <dl className={styles.facts}>
+          <dt>Account</dt>
+          <dd>
+            <Link className={styles.codeLink} to={`/?f=account:${encodeURIComponent(pr.account.profile)}`}>
+              {pr.account.profile}
+            </Link>
+          </dd>
+
+          <dt>Repository</dt>
+          <dd>
+            <Link className={styles.codeLink} to={`/?f=repo:${encodeURIComponent(pr.repositoryName)}`}>
+              {pr.repositoryName}
+            </Link>
+          </dd>
+
+          <dt>Author</dt>
+          <dd>
+            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
+              {pr.author}
+            </Link>
+          </dd>
+
+          {scope && (
             <>
-              <span className="text-muted-foreground">Scope</span>
-              <Link to={`/?f=scope:${encodeURIComponent(extractScope(pr.title)!)}`} className="text-xs hover:underline">
-                {extractScope(pr.title)}
-              </Link>
+              <dt>Scope</dt>
+              <dd>
+                <Link className={styles.textLink} to={`/?f=scope:${encodeURIComponent(scope)}`}>
+                  {scope}
+                </Link>
+              </dd>
             </>
           )}
 
-          <span className="text-muted-foreground">Status</span>
-          <div className="flex items-center gap-2">
+          <dt>Status</dt>
+          <dd className={styles.factStates}>
             {pr.status === "MERGED" ? (
-              <Link to="/?f=status:merged" className="hover:underline">
-                <Badge variant="outline" className="border-purple-500/30 text-purple-600 dark:text-purple-400">
-                  Merged
-                </Badge>
+              <Link className={styles.stateLink} to="/?f=status:merged">
+                <StateLabel label="Merged" size="compact" tone="positive" />
               </Link>
             ) : pr.status === "CLOSED" ? (
-              <Link to="/?f=status:closed" className="hover:underline">
-                <Badge variant="outline" className="border-red-500/30 text-red-600 dark:text-red-400">
-                  Closed
-                </Badge>
+              <Link className={styles.stateLink} to="/?f=status:closed">
+                <StateLabel label="Closed" size="compact" tone="neutral" />
               </Link>
             ) : (
               <>
-                <Link to={`/?f=status:${pr.isApproved ? "approved" : "pending"}`} className="hover:underline">
-                  {pr.isApproved ? (
-                    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-                      Approved
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary">Pending</Badge>
-                  )}
+                <Link className={styles.stateLink} to={`/?f=status:${pr.isApproved ? "approved" : "pending"}`}>
+                  <StateLabel
+                    label={pr.isApproved ? "Approved" : "Pending approval"}
+                    size="compact"
+                    tone={pr.isApproved ? "positive" : "caution"}
+                  />
                 </Link>
-                <Link to={`/?f=status:${pr.isMergeable ? "mergeable" : "conflicts"}`} className="hover:underline">
-                  {pr.isMergeable ? (
-                    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-                      Mergeable
-                    </Badge>
-                  ) : (
-                    <Badge variant="destructive">Conflict</Badge>
-                  )}
+                <Link className={styles.stateLink} to={`/?f=status:${pr.isMergeable ? "mergeable" : "conflicts"}`}>
+                  <StateLabel
+                    label={pr.isMergeable ? "Mergeable" : "Conflict"}
+                    size="compact"
+                    tone={pr.isMergeable ? "positive" : "critical"}
+                  />
                 </Link>
               </>
             )}
-          </div>
+          </dd>
 
-          <span className="text-muted-foreground">ID</span>
-          <span className="font-mono text-xs">{pr.id}</span>
+          <dt>Pull request ID</dt>
+          <dd>
+            <code>{pr.id}</code>
+          </dd>
+
+          <dt>Last activity</dt>
+          <dd>
+            <time dateTime={pr.lastModifiedDate.toISOString()}>{DateUtils.formatDate(pr.lastModifiedDate)}</time>
+          </dd>
 
           <LifecycleInfo pr={pr} />
-        </CardContent>
-      </Card>
+        </dl>
+      </Surface>
 
-      {[
-        { title: "Required Approvers", ruleName: REQUIRED_RULE_NAME, required: true },
-        { title: "Optional Approvers", ruleName: OPTIONAL_RULE_NAME, required: false }
-      ].map((card) => (
-        <ApproversCard
-          key={card.ruleName}
-          title={card.title}
-          ruleName={card.ruleName}
-          required={card.required}
-          approvalRules={pr.approvalRules}
-          approvedBy={pr.approvedBy}
-          knownUserArns={knownUserArns}
-          repoAccountId={currentAcct}
-          currentUser={state.currentUser}
-          permissionPrompt={!!state.permissionPrompt}
-          onSetApprovers={(arns) => {
-            const existing = pr.approvalRules.find((r) => r.ruleName === card.ruleName && !r.fromTemplate)
-            if (existing) {
-              updateRule({
-                payload: {
-                  pullRequestId: pr.id,
-                  approvalRuleName: existing.ruleName,
-                  requiredApprovals: card.required ? (arns.length > 0 ? arns.length : 0) : 0,
-                  poolMembers: arns.length > 0 ? arns : ["*"],
-                  account: pr.account
+      <div className={styles.reviewWorkspace}>
+        <section aria-label="Pull request narrative and comments" className={styles.contentColumn}>
+          {pr.description && (
+            <Surface as="section" className={styles.contentSection} padding="spacious" shape="grouped">
+              <header className={styles.sectionHeading}>
+                <Text as="h2" variant="section-title">
+                  Description
+                </Text>
+                <Text tone="secondary" variant="meta">
+                  What the author says this revision changes
+                </Text>
+              </header>
+              <div className={`${styles.description ?? ""} prose prose-sm dark:prose-invert max-w-none`}>
+                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                  {pr.description}
+                </Markdown>
+              </div>
+            </Surface>
+          )}
+
+          <CollapsibleSection title="Comments" {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}>
+            <CommentsSection key={pr.id} pr={pr} />
+          </CollapsibleSection>
+        </section>
+
+        <aside className={styles.evidenceColumn}>
+          <section className={styles.approvalSection}>
+            <header className={styles.sectionHeading}>
+              <Text as="h2" variant="section-title">
+                Decision evidence
+              </Text>
+              <Text tone="secondary" variant="meta">
+                Provider approval rules for this pull request
+              </Text>
+            </header>
+            {[
+              { title: "Required Approvers", ruleName: REQUIRED_RULE_NAME, required: true },
+              { title: "Optional Approvers", ruleName: OPTIONAL_RULE_NAME, required: false }
+            ].map((card) => (
+              <ApproversCard
+                approvalRules={pr.approvalRules}
+                approvedBy={pr.approvedBy}
+                currentUser={state.currentUser}
+                key={card.ruleName}
+                knownUserArns={knownUserArns}
+                onRefresh={() =>
+                  refreshSingle({ params: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })
                 }
-              })
-            } else if (arns.length > 0) {
-              createRule({
-                payload: {
-                  pullRequestId: pr.id,
-                  approvalRuleName: card.ruleName,
-                  requiredApprovals: card.required ? arns.length : 0,
-                  poolMembers: arns,
-                  account: pr.account
-                }
-              })
-            }
-          }}
-          onRefresh={() => refreshSingle({ params: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
-        />
-      ))}
+                onSetApprovers={(arns) => {
+                  const existing = pr.approvalRules.find(
+                    (rule) => rule.ruleName === card.ruleName && !rule.fromTemplate
+                  )
+                  if (existing) {
+                    updateRule({
+                      payload: {
+                        account: pr.account,
+                        approvalRuleName: existing.ruleName,
+                        poolMembers: arns.length > 0 ? arns : ["*"],
+                        pullRequestId: pr.id,
+                        requiredApprovals: card.required ? (arns.length > 0 ? arns.length : 0) : 0
+                      }
+                    })
+                  } else if (arns.length > 0) {
+                    createRule({
+                      payload: {
+                        account: pr.account,
+                        approvalRuleName: card.ruleName,
+                        poolMembers: arns,
+                        pullRequestId: pr.id,
+                        requiredApprovals: card.required ? arns.length : 0
+                      }
+                    })
+                  }
+                }}
+                permissionPrompt={!!state.permissionPrompt}
+                repoAccountId={currentAcct}
+                required={card.required}
+                ruleName={card.ruleName}
+                title={card.title}
+              />
+            ))}
+          </section>
 
-      <CollapsibleSection title="Health Score Breakdown">
-        <ScoreBreakdown score={score} />
-      </CollapsibleSection>
-
-      {pr.description && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Description</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                {pr.description}
-              </Markdown>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <CollapsibleSection title="Comments" {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}>
-        <CommentsSection key={pr.id} pr={pr} />
-      </CollapsibleSection>
+          <CollapsibleSection title="Health Score Breakdown">
+            <ScoreBreakdown score={score} />
+          </CollapsibleSection>
+        </aside>
+      </div>
 
       <Dialog open={granted.visible} onOpenChange={granted.cancel}>
         <DialogContent>
@@ -1066,6 +1191,6 @@ export function PRDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </article>
   )
 }

@@ -1,22 +1,23 @@
 /**
- * Single PR row — status badge, health score, review indicator.
+ * One decision-queue row.
  *
- * Renders a clickable row with status badge (Merged/Closed/Conflict/
- * Approved/Pending), review badge (EyeIcon when {@link needsMyReview}
- * returns true), health score with color tiers (green/yellow/red),
- * author, date, comment count, repository name, and PR title.
+ * The complete row remains one keyboard-focusable link while state, review
+ * ownership, health, repository, revision, author, and activity facts stay
+ * visible without relying on color alone.
  *
  * @module
  */
-import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
+import { ServiceMark } from "@knpkv/rly/patterns"
+import { StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
 import { Option } from "effect"
-import { EyeIcon, MessageSquareIcon } from "lucide-react"
+import { ArrowRightIcon, MessageSquareIcon } from "lucide-react"
 import { useMemo } from "react"
 import { Link } from "react-router"
-import { Badge } from "./ui/badge.js"
+import { pullRequestRowDecision, pullRequestRowTimeLabel, pullRequestRowTimestamp } from "./pr-row-presentation.js"
+import styles from "./review-queue.module.css"
 
 interface PRRowProps {
   readonly pr: PullRequest
@@ -25,20 +26,28 @@ interface PRRowProps {
   readonly currentUser?: string | undefined
 }
 
-const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-  conflict: { label: "conflict", dot: "bg-red-500", badge: "border-red-500/30 text-red-500" },
-  approved: { label: "approved", dot: "bg-green-500", badge: "border-green-500/30 text-green-500" },
-  pending: { label: "pending", dot: "bg-yellow-500", badge: "border-yellow-500/30 text-yellow-500" },
-  merged: { label: "merged", dot: "bg-purple-500", badge: "border-purple-500/30 text-purple-500" },
-  closed: { label: "closed", dot: "bg-red-500", badge: "border-red-500/30 text-red-500" }
+interface StatusPresentation {
+  readonly label: string
+  readonly tone: RlyStateTone
 }
 
-function getStatusKey(pr: PullRequest): string {
-  if (pr.status === "MERGED") return "merged"
-  if (pr.status === "CLOSED") return "closed"
-  if (!pr.isMergeable) return "conflict"
-  if (pr.isApproved) return "approved"
-  return "pending"
+const statusPresentation = (pr: PullRequest): StatusPresentation => {
+  if (pr.status === "MERGED") return { label: "Merged", tone: "progress" }
+  if (pr.status === "CLOSED") return { label: "Closed", tone: "neutral" }
+  if (!pr.isMergeable) return { label: "Conflict", tone: "critical" }
+  if (pr.isApproved) return { label: "Approved", tone: "positive" }
+  return { label: "Pending", tone: "caution" }
+}
+
+const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
+  switch (tier) {
+    case "green":
+      return styles.scorePositive ?? ""
+    case "yellow":
+      return styles.scoreCaution ?? ""
+    default:
+      return styles.scoreCritical ?? ""
+  }
 }
 
 export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
@@ -47,69 +56,85 @@ export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
     () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
     [pr]
   )
-  const tier = score ? getScoreTier(score.total) : undefined
-  const scoreColor =
-    tier === "green"
-      ? "text-green-600 dark:text-green-400"
-      : tier === "yellow"
-        ? "text-yellow-600 dark:text-yellow-400"
-        : "text-red-600 dark:text-red-400"
-
-  const statusKey = getStatusKey(pr)
-  const cfg = STATUS_CONFIG[statusKey]!
+  const status = statusPresentation(pr)
+  const decision = pullRequestRowDecision(pr)
+  const description = pr.description?.split("\n").slice(0, 2).join(" ")
 
   return (
-    <Link
-      to={to}
-      className="group flex cursor-pointer flex-col gap-2.5 px-5 py-5 transition-colors hover:bg-accent/50 no-underline text-inherit"
-    >
-      {/* Row 1: status + score ... author · date · comments */}
-      <div className="flex items-center gap-2.5">
-        <Badge variant="outline" className={`gap-1.5 ${cfg.badge}`}>
-          <span className={`size-1.5 rounded-full ${cfg.dot}`} />
-          {cfg.label}
-        </Badge>
-        {reviewRequested && (
-          <Badge variant="outline" className="border-yellow-500/30 text-yellow-500 gap-1">
-            <EyeIcon className="size-3" />
-            Review
-          </Badge>
-        )}
-        {score && (
-          <span className={`font-mono text-base font-semibold tabular-nums ${scoreColor}`}>
-            {score.total.toFixed(1)}
+    <Link className={styles.prRow} to={to}>
+      <div className={styles.prMain}>
+        <div className={styles.prKicker}>
+          <ServiceMark service="codecommit" size="compact" />
+          <Text className={styles.prNumber} tone="inherit" variant="code">
+            PR #{pr.id}
+          </Text>
+          <StateLabel label={status.label} size="compact" tone={status.tone} />
+          {reviewRequested ? <StateLabel label="Needs your review" size="compact" tone="caution" /> : null}
+        </div>
+        <Text as="h3" className={styles.prTitle} variant="card-title">
+          {pr.title}
+        </Text>
+        {description ? (
+          <Text className={styles.prDescription} tone="secondary" variant="meta">
+            {description}
+          </Text>
+        ) : null}
+        <div className={styles.prByline}>
+          <Text tone="secondary" variant="meta">
+            {pr.author}
+          </Text>
+          <span aria-hidden="true" className={styles.metaSeparator}>
+            ·
           </span>
-        )}
-        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-          {pr.author}
-          <span className="opacity-40">·</span>
-          {showUpdated
-            ? DateUtils.formatRelativeTime(pr.lastModifiedDate, new Date())
-            : DateUtils.formatDate(pr.creationDate)}
-          {pr.commentCount !== undefined && pr.commentCount > 0 && (
-            <>
-              <span className="opacity-40">·</span>
-              <MessageSquareIcon className="size-3" />
+          <Text
+            as="time"
+            dateTime={pullRequestRowTimestamp(pr, showUpdated === true).toISOString()}
+            tone="tertiary"
+            variant="meta"
+          >
+            {pullRequestRowTimeLabel(pr, showUpdated === true, new Date())}
+          </Text>
+          {pr.commentCount !== undefined && pr.commentCount > 0 ? (
+            <span aria-label={`${pr.commentCount} comments`} className={styles.commentCount}>
+              <MessageSquareIcon aria-hidden="true" />
               {pr.commentCount}
-            </>
-          )}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <dl className={styles.prFacts}>
+        <div className={styles.prFact}>
+          <dt>Repository</dt>
+          <dd>{pr.repositoryName}</dd>
+        </div>
+        <div className={styles.prFact}>
+          <dt>Revision</dt>
+          <dd title={`${pr.sourceBranch} to ${pr.destinationBranch}`}>
+            {pr.sourceBranch} → {pr.destinationBranch}
+          </dd>
+        </div>
+      </dl>
+
+      <div className={styles.prDecision}>
+        {score ? (
+          <div className={styles.health}>
+            <Text tone="tertiary" variant="meta">
+              Health
+            </Text>
+            <span className={`${styles.healthScore ?? ""} ${scoreClassName(getScoreTier(score.total))}`}>
+              {score.total.toFixed(1)}
+            </span>
+          </div>
+        ) : null}
+        <Text className={styles.approvalCount} tone="tertiary" variant="meta">
+          {decision.summary}
+        </Text>
+        <span className={styles.openReview}>
+          {decision.actionLabel}
+          <ArrowRightIcon aria-hidden="true" />
         </span>
       </div>
-
-      {/* Row 2: repo pill */}
-      <div>
-        <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">
-          {pr.repositoryName}
-        </Badge>
-      </div>
-
-      {/* Row 3: title */}
-      <span className="text-[15px] font-medium leading-snug">{pr.title}</span>
-
-      {/* Row 4: description */}
-      {pr.description && (
-        <p className="line-clamp-1 text-sm text-muted-foreground">{pr.description.split("\n").slice(0, 2).join(" ")}</p>
-      )}
     </Link>
   )
 }

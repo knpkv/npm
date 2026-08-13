@@ -1,28 +1,35 @@
 /**
- * PR list — filtered, sorted by lastModifiedDate.
+ * Pull-request decision queue.
  *
- * Applies multi-axis filters (status axis-based grouping, date range,
- * text search, review filter via {@link needsMyReview}), then renders
- * a flat list sorted by lastModifiedDate desc. Shows SSO login prompt
- * when no PRs are available.
+ * Owns the complete home-page composition while preserving the URL-backed
+ * filter contract: summary facets, text and structured filters, review mode,
+ * date bounds, grouping, loading, empty, and SSO-recovery states all operate
+ * on the same pull-request collection.
  *
  * @module
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
-import { LoaderIcon, LogInIcon } from "lucide-react"
-import { useMemo } from "react"
+import { ServiceMark } from "@knpkv/rly/patterns"
+import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { LogInIcon } from "lucide-react"
+import { useCallback, useMemo } from "react"
+import { useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import type { FilterEntry } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
 import { extractScope } from "../utils/extractScope.js"
+import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
-import { Badge } from "./ui/badge.js"
-import { Button } from "./ui/button.js"
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
+import { RecentActivity } from "./recent-activity.js"
+import { resolveQueueFacet, type QueueFacet } from "./review-queue-state.js"
+import styles from "./review-queue.module.css"
+import { SearchBar } from "./search-bar.js"
 
 type PullRequest = Domain.PullRequest
+
+const OPEN_SUB_STATUSES: ReadonlySet<string> = new Set(["approved", "pending", "mergeable", "conflicts"])
 
 const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
   switch (entry.key) {
@@ -35,21 +42,21 @@ const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
     case "repo":
       return pr.repositoryName === entry.value
     case "approver":
-      return pr.approvedBy.some((n) => n === entry.value)
+      return pr.approvedBy.some((name) => name === entry.value)
     case "commenter":
-      return pr.commentedBy.some((n) => n === entry.value)
+      return pr.commentedBy.some((name) => name === entry.value)
     case "size": {
-      const fc = pr.filesChanged
-      if (fc == null) return false
+      const filesChanged = pr.filesChanged
+      if (filesChanged == null) return false
       switch (entry.value) {
         case "small":
-          return fc < 5
+          return filesChanged < 5
         case "medium":
-          return fc >= 5 && fc <= 15
+          return filesChanged >= 5 && filesChanged <= 15
         case "large":
-          return fc >= 16 && fc <= 30
+          return filesChanged >= 16 && filesChanged <= 30
         case "xlarge":
-          return fc > 30
+          return filesChanged > 30
         default:
           return true
       }
@@ -78,191 +85,327 @@ const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
   }
 }
 
+const statusAxis: Readonly<Record<string, string>> = {
+  open: "lifecycle",
+  merged: "lifecycle",
+  closed: "lifecycle",
+  approved: "approval",
+  pending: "approval",
+  mergeable: "merge",
+  conflicts: "merge"
+}
+
+const groupFilters = (filters: ReadonlyArray<FilterEntry>): ReadonlyMap<string, ReadonlyArray<FilterEntry>> => {
+  const groups = new Map<string, Array<FilterEntry>>()
+  for (const filter of filters) {
+    const groupKey = filter.key === "status" ? `status:${statusAxis[filter.value] ?? filter.value}` : filter.key
+    const group = groups.get(groupKey)
+    if (group) group.push(filter)
+    else groups.set(groupKey, [filter])
+  }
+  return groups
+}
+
+const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open" | "pending"): void => {
+  const retained = params.getAll("f").filter((raw) => !raw.startsWith("status:") && raw !== "")
+  params.delete("f")
+  for (const raw of retained) params.append("f", raw)
+  params.append("f", `status:${status}`)
+}
+
 export function PRList() {
   const appState = useAtomValue(appStateAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const { state: filterState, toggleFilter } = useFilterParams()
+  const [, setSearchParams] = useSearchParams()
 
-  const isLoading = appState.status === "loading"
   const prs = appState.pullRequests
+  const isLoading = appState.status === "loading"
+
+  const summary = useMemo(() => {
+    let review = 0
+    let pending = 0
+    let approved = 0
+    let open = 0
+    for (const pr of prs) {
+      if (pr.status !== "OPEN") continue
+      open += 1
+      if (pr.isApproved) approved += 1
+      else pending += 1
+      if (needsMyReview(pr, appState.currentUser)) review += 1
+    }
+    return { approved, open, pending, review }
+  }, [appState.currentUser, prs])
 
   const sorted = useMemo(() => {
     if (prs.length === 0) return []
 
     const { filters, from, q, review, to } = filterState
-
-    // Text search
     const filterLower = q.toLowerCase()
-    const filterByText = (pr: PullRequest) => {
-      if (!q) return true
-      return (
-        pr.repositoryName.toLowerCase().includes(filterLower) ||
-        pr.title.toLowerCase().includes(filterLower) ||
-        pr.author.toLowerCase().includes(filterLower) ||
-        pr.sourceBranch.toLowerCase().includes(filterLower) ||
-        (pr.description?.toLowerCase().includes(filterLower) ?? false)
-      )
-    }
-
-    // Group filters by key, then AND across keys, OR within same key.
-    const STATUS_AXIS: Record<string, string> = {
-      open: "lifecycle",
-      merged: "lifecycle",
-      closed: "lifecycle",
-      approved: "approval",
-      pending: "approval",
-      mergeable: "merge",
-      conflicts: "merge"
-    }
-    const byGroup = new Map<string, Array<FilterEntry>>()
-    for (const f of filters) {
-      const groupKey = f.key === "status" ? `status:${STATUS_AXIS[f.value] ?? f.value}` : f.key
-      const arr = byGroup.get(groupKey)
-      if (arr) arr.push(f)
-      else byGroup.set(groupKey, [f])
-    }
-
-    // When open sub-statuses are active but no lifecycle filter, require OPEN
-    const hasOpenSubStatus = filters.some(
-      (f) => f.key === "status" && ["approved", "pending", "mergeable", "conflicts"].includes(f.value)
+    const byGroup = groupFilters(filters)
+    const hasOpenSubStatus = filters.some((filter) => filter.key === "status" && OPEN_SUB_STATUSES.has(filter.value))
+    const hasLifecycle = filters.some(
+      (filter) => filter.key === "status" && ["open", "merged", "closed"].includes(filter.value)
     )
-    const hasLifecycle = filters.some((f) => f.key === "status" && ["open", "merged", "closed"].includes(f.value))
     const requireOpen = hasOpenSubStatus && !hasLifecycle
-
-    const filterByEntries = (pr: PullRequest) => {
-      if (requireOpen && pr.status !== "OPEN") return false
-      return [...byGroup.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
-    }
-
-    // Date filter
     const fromMs = from ? new Date(from).getTime() : undefined
     const toMs = to ? new Date(to).getTime() : undefined
-    const statusFilter = filters.find((f) => f.key === "status")
-    const filterByDate = (pr: PullRequest) => {
-      if (!fromMs || !toMs) return true
-      const ts =
-        statusFilter?.value === "merged" || statusFilter?.value === "closed"
-          ? pr.lastModifiedDate.getTime()
-          : pr.creationDate.getTime()
-      return ts >= fromMs && ts < toMs
-    }
-
-    const filterByReview = (pr: PullRequest) => !review || needsMyReview(pr, appState.currentUser)
+    const statusFilter = filters.find((filter) => filter.key === "status")
 
     return prs
-      .filter((pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr) && filterByReview(pr))
-      .sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
-  }, [prs, filterState, appState.currentUser])
+      .filter((pr) => {
+        if (
+          q &&
+          !pr.repositoryName.toLowerCase().includes(filterLower) &&
+          !pr.title.toLowerCase().includes(filterLower) &&
+          !pr.author.toLowerCase().includes(filterLower) &&
+          !pr.sourceBranch.toLowerCase().includes(filterLower) &&
+          !(pr.description?.toLowerCase().includes(filterLower) ?? false)
+        ) {
+          return false
+        }
+        if (requireOpen && pr.status !== "OPEN") return false
+        if (![...byGroup.values()].every((group) => group.some((filter) => matchesFilter(pr, filter)))) {
+          return false
+        }
+        if (fromMs && toMs) {
+          const timestamp =
+            statusFilter?.value === "merged" || statusFilter?.value === "closed"
+              ? pr.lastModifiedDate.getTime()
+              : pr.creationDate.getTime()
+          if (timestamp < fromMs || timestamp >= toMs) return false
+        }
+        return !review || needsMyReview(pr, appState.currentUser)
+      })
+      .sort((left, right) => right.lastModifiedDate.getTime() - left.lastModifiedDate.getTime())
+  }, [appState.currentUser, filterState, prs])
 
-  const prHref = (pr: PullRequest) => {
+  const activeFacet = resolveQueueFacet(filterState)
+
+  const applyFacet = useCallback(
+    (facet: QueueFacet) => {
+      setSearchParams(
+        (previous) => {
+          previous.delete("groupBy")
+          previous.delete("mine")
+          previous.delete("mineScope")
+          previous.delete("review")
+          previous.set("sortBy", "updated")
+
+          if (appState.currentUser) {
+            const retained = previous
+              .getAll("f")
+              .filter((raw) => raw !== `author:${appState.currentUser}` && raw !== "")
+            previous.delete("f")
+            for (const raw of retained) previous.append("f", raw)
+          }
+
+          replaceStatusFacet(previous, facet === "review" ? "open" : facet)
+          if (facet === "review") previous.set("review", "1")
+          return previous
+        },
+        { preventScrollReset: true, replace: true }
+      )
+    },
+    [appState.currentUser, setSearchParams]
+  )
+
+  const prHref = (pr: PullRequest): string => {
     const accountKey = pr.account.awsAccountId ?? pr.account.profile
     return `/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`
   }
 
-  if (sorted.length === 0) {
-    if (isLoading) {
+  const profiles = useMemo(
+    () => [...new Set(appState.accounts.filter((account) => account.enabled).map((account) => account.profile))],
+    [appState.accounts]
+  )
+  const needsLogin = prs.length === 0 && profiles.length > 0
+  const accountCount = new Set(sorted.map((pr) => pr.account.profile)).size
+  const activity = appState.currentUser ? (appState.notifications?.items ?? []) : []
+
+  const listContent = (() => {
+    if (sorted.length === 0 && isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
-          <LoaderIcon className="size-8 animate-spin opacity-40" />
-          <p className="text-sm font-medium">Loading pull requests...</p>
-          {prs.length > 0 && <p className="text-xs opacity-50">{prs.length} PRs fetched (filter hides all)</p>}
+        <StatePanel
+          announce="polite"
+          className={styles.queueState}
+          description={
+            prs.length > 0
+              ? `${prs.length} pull requests are available; the current view hides them while refresh continues.`
+              : "Reading configured CodeCommit accounts and preparing the decision queue."
+          }
+          title="Loading pull requests"
+          tone="progress"
+        />
+      )
+    }
+
+    if (sorted.length === 0) {
+      const filtered = prs.length > 0
+      return (
+        <div className={styles.emptyStack}>
+          <StatePanel
+            className={styles.queueState}
+            description={
+              filtered
+                ? `${prs.length} pull requests are cached, but none match the current search and filters.`
+                : needsLogin
+                  ? "A configured AWS session may have expired. Sign in to load its pull requests."
+                  : "No pull requests are available from the configured accounts yet."
+            }
+            title={filtered ? "No pull requests match this view" : "The queue is empty"}
+          />
+          {filtered ? (
+            <div className={styles.emptyActions}>
+              <Button onClick={() => toggleFilter("status", "merged")} size="compact">
+                Show merged
+              </Button>
+              <Button onClick={() => toggleFilter("status", "closed")} size="compact">
+                Show closed
+              </Button>
+            </div>
+          ) : null}
+          {needsLogin ? (
+            <Surface className={styles.ssoPanel} padding="compact" shape="grouped">
+              <Text as="h3" variant="card-title">
+                Restore AWS sessions
+              </Text>
+              <Text tone="secondary" variant="meta">
+                Sign in with each profile that should contribute to this queue.
+              </Text>
+              <div className={styles.ssoActions}>
+                {profiles.map((profile) => (
+                  <Button
+                    className={styles.ssoButton}
+                    key={profile}
+                    leadingIcon="user"
+                    onClick={() => ssoLogin({ payload: { profile } })}
+                    size="compact"
+                  >
+                    {profile}
+                  </Button>
+                ))}
+              </div>
+              <LogInIcon aria-hidden="true" className={styles.ssoWatermark} />
+            </Surface>
+          ) : null}
         </div>
       )
     }
 
-    const profiles = [...new Set(appState.accounts.filter((a) => a.enabled).map((a) => a.profile))]
-    const needsLogin = prs.length === 0 && profiles.length > 0
+    if (filterState.groupBy !== "account") {
+      return (
+        <Surface className={styles.queueSurface} padding="none" shape="grouped">
+          {sorted.map((pr) => (
+            <PRRow
+              currentUser={appState.currentUser}
+              key={`${pr.account.profile}:${pr.id}`}
+              pr={pr}
+              showUpdated
+              to={prHref(pr)}
+            />
+          ))}
+        </Surface>
+      )
+    }
+
+    const byAccount = new Map<string, Array<PullRequest>>()
+    for (const pr of sorted) {
+      const accountId = pr.account?.profile ?? "unknown"
+      const group = byAccount.get(accountId)
+      if (group) group.push(pr)
+      else byAccount.set(accountId, [pr])
+    }
 
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
-        <svg className="size-16 opacity-30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="8" y="12" width="48" height="40" rx="4" stroke="currentColor" strokeWidth="2" />
-          <path d="M8 24h48" stroke="currentColor" strokeWidth="2" />
-          <circle cx="16" cy="18" r="2" fill="currentColor" />
-          <circle cx="22" cy="18" r="2" fill="currentColor" />
-          <circle cx="28" cy="18" r="2" fill="currentColor" />
-          <path d="M24 36h16M28 42h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-        <p className="text-sm">No open pull requests</p>
-        {prs.length > 0 && (
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-xs opacity-50">{prs.length} PRs in cache (all merged or closed)</p>
-            <div className="flex gap-1">
-              <Button variant="outline" size="sm" onClick={() => toggleFilter("status", "merged")}>
-                Show merged
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => toggleFilter("status", "closed")}>
-                Show closed
-              </Button>
+      <div className={styles.accountGroups}>
+        {[...byAccount.entries()].map(([accountId, accountPrs], accountIndex) => (
+          <section aria-labelledby={`account-group-${accountIndex}`} className={styles.accountGroup} key={accountId}>
+            <div className={styles.accountHeading}>
+              <Text as="h3" id={`account-group-${accountIndex}`} variant="label">
+                {accountId}
+              </Text>
+              <Text tone="tertiary" variant="meta">
+                {accountPrs.length} {accountPrs.length === 1 ? "pull request" : "pull requests"}
+              </Text>
             </div>
-          </div>
-        )}
-        {needsLogin && (
-          <Card className="mt-4 w-full max-w-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">SSO Login</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground mb-1">Session may have expired. Log in to fetch PRs.</p>
-              {profiles.map((profile) => (
-                <Button
-                  key={profile}
-                  variant="outline"
-                  size="sm"
-                  className="justify-start gap-2"
-                  onClick={() => ssoLogin({ payload: { profile } })}
-                >
-                  <LogInIcon className="size-3.5" />
-                  {profile}
-                </Button>
+            <Surface className={styles.queueSurface} padding="none" shape="grouped">
+              {accountPrs.map((pr) => (
+                <PRRow
+                  currentUser={appState.currentUser}
+                  key={`${pr.account.profile}:${pr.id}`}
+                  pr={pr}
+                  to={prHref(pr)}
+                />
               ))}
-            </CardContent>
-          </Card>
-        )}
-      </div>
-    )
-  }
-
-  const isGrouped = filterState.groupBy === "account"
-
-  // Flat sorted list (default / Hot)
-  if (!isGrouped) {
-    return (
-      <div className="flex flex-col gap-2">
-        {sorted.map((pr) => (
-          <div key={pr.id} className="rounded-lg border bg-card">
-            <PRRow pr={pr} to={prHref(pr)} showUpdated currentUser={appState.currentUser} />
-          </div>
+            </Surface>
+          </section>
         ))}
       </div>
     )
-  }
+  })()
 
-  // Grouped by account
-  const byAccount = new Map<string, Array<PullRequest>>()
-  for (const pr of sorted) {
-    const accountId = pr.account?.profile ?? "unknown"
-    if (!byAccount.has(accountId)) byAccount.set(accountId, [])
-    byAccount.get(accountId)!.push(pr)
-  }
+  const facets: ReadonlyArray<{ readonly count: number; readonly id: QueueFacet; readonly label: string }> = [
+    { count: summary.review, id: "review", label: "Needs your review" },
+    { count: summary.pending, id: "pending", label: "Waiting on others" },
+    { count: summary.approved, id: "approved", label: "Approved" },
+    { count: summary.open, id: "open", label: "All open" }
+  ]
 
   return (
-    <div className="space-y-8">
-      {[...byAccount.entries()].map(([accountId, accountPrs]) => (
-        <section key={accountId}>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{accountId}</span>
-            <Badge variant="secondary">{accountPrs.length}</Badge>
-          </div>
-          <div className="flex flex-col gap-2">
-            {accountPrs.map((pr) => (
-              <div key={pr.id} className="rounded-lg border bg-card">
-                <PRRow pr={pr} to={prHref(pr)} currentUser={appState.currentUser} />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className={styles.page}>
+      <header className={styles.hero}>
+        <div className={styles.eyebrow}>
+          <ServiceMark service="codecommit" size="compact" />
+          <Text tone="secondary" variant="meta">
+            Review queue
+          </Text>
+        </div>
+        <Text as="h1" className={styles.title} variant="page-title">
+          What needs a decision.
+        </Text>
+        <Text className={styles.lede} tone="secondary" variant="body-large">
+          Open pull requests, ordered around your review work rather than repository noise.
+        </Text>
+      </header>
+
+      <div aria-label="Pull request facets" className={styles.facets} role="group">
+        {facets.map((facet) => (
+          <button
+            aria-pressed={activeFacet === facet.id}
+            className={styles.facet}
+            key={facet.id}
+            onClick={() => applyFacet(facet.id)}
+            type="button"
+          >
+            <span className={styles.facetLabel}>{facet.label}</span>
+            <span aria-label={`${facet.count} pull requests`} className={styles.facetCount}>
+              {facet.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <section aria-labelledby="review-queue-heading" className={styles.queueSection}>
+        <div className={styles.sectionHeading}>
+          <Text as="h2" id="review-queue-heading" variant="section-title">
+            Review queue
+          </Text>
+          <Text aria-live="polite" tone="tertiary" variant="meta">
+            {sorted.length} {sorted.length === 1 ? "result" : "results"}
+            {accountCount > 0 ? ` · ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
+          </Text>
+        </div>
+
+        <div className={styles.controls}>
+          <SearchBar />
+          <FilterSidebar />
+        </div>
+
+        {listContent}
+      </section>
+
+      {activity.length > 0 ? <RecentActivity notifications={activity} /> : null}
     </div>
   )
 }
