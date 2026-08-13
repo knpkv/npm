@@ -1,7 +1,7 @@
 {
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.17.0",
+  "packageManager": "pnpm@11.21.0",
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "precommit": "tsx packages/control-center/scripts/run-precommit.ts",
@@ -11,10 +11,10 @@
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
     "build": "tsc -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
     "audit": "pnpm audit --prod && pnpm audit --dev",
-    "test": "vitest && pnpm test:pack",
+    "test": "vitest --configLoader native && pnpm test:pack",
     "test:pack": "pnpm --recursive --filter \"./packages/**/*\" --if-present run test:pack",
     "test:browser": "pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:browser",
-    "coverage": "vitest --coverage",
+    "coverage": "vitest --configLoader native --coverage",
     "check": "pnpm build && pnpm --recursive --filter \"./packages/**/*\" run check",
     "lint": "pnpm lint:config && pnpm lint:security-doc-examples && pnpm lint:live-aws && pnpm lint:eslint && pnpm lint:ast && pnpm lint:rly-colors && pnpm lint:rly-css-tokens",
     "lint:config": "node scripts/check-eslint-config.mjs && node scripts/check-ast-grep-scopes.mjs && node scripts/check-effect-tsconfig-coverage.mjs && node scripts/check-changeset-coverage.mjs && node scripts/check-workflow-action-pins.mjs && node scripts/check-workflow-secret-boundaries.mjs",

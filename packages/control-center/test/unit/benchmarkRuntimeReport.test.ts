@@ -26,7 +26,7 @@ import {
 const machine = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
   architecture: "x64",
   logicalCpuCount: 4,
-  nodeVersion: "v24.0.0",
+  nodeVersion: "v26.0.0",
   platform: "linux",
   storageClass: "local-ssd",
   totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024
@@ -114,12 +114,12 @@ describe("control center runtime benchmark report", () => {
       expect(report.timingIsAcceptanceAssertion).toBe(true)
     }))
 
-  it("qualifies only the documented Node 24, CPU, memory, platform, and architecture baseline", () => {
+  it("qualifies only the documented Node 26, CPU, memory, platform, and architecture baseline", () => {
     expect(controlCenterBenchmarkMachineIsTimingEligible(machine)).toBe(true)
     const ineligibleMachines = [
       { ...machine, architecture: "riscv64" },
       { ...machine, logicalCpuCount: 3 },
-      { ...machine, nodeVersion: "v23.11.0" },
+      { ...machine, nodeVersion: "v25.11.0" },
       { ...machine, platform: "darwin" },
       { ...machine, storageClass: "unverified" },
       { ...machine, totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024 - 1 }
@@ -132,14 +132,14 @@ describe("control center runtime benchmark report", () => {
   it("rejects malformed Node version evidence before timing eligibility is evaluated", () => {
     for (
       const nodeVersion of [
-        "v24beta",
-        "x24.invalid",
-        "v24.1",
-        "v024.1.0",
-        "v24.0.0-..",
-        "v24.0.0-a..b",
-        "v24.0.0-01",
-        "v24.0.0+build..1"
+        "v26beta",
+        "x26.invalid",
+        "v26.1",
+        "v026.1.0",
+        "v26.0.0-..",
+        "v26.0.0-a..b",
+        "v26.0.0-01",
+        "v26.0.0+build..1"
       ]
     ) {
       expect(
@@ -153,7 +153,7 @@ describe("control center runtime benchmark report", () => {
     }
     const supportedPrerelease = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
       ...machine,
-      nodeVersion: "v24.10.0-rc.1"
+      nodeVersion: "v26.7.0-rc.1"
     })
     expect(controlCenterBenchmarkMachineIsTimingEligible(supportedPrerelease)).toBe(true)
   })

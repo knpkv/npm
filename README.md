@@ -49,8 +49,8 @@ npm/
 
 ### Prerequisites
 
-- Node.js 24+
-- pnpm 9+
+- Node.js 26+
+- pnpm 11.21.0
 - (Optional) Nix with direnv for reproducible dev environment
 
 ### Installation

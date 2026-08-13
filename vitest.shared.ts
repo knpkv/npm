@@ -8,9 +8,6 @@ const config: ViteUserConfig = {
       "@knpkv/jira-api-client": new URL("./packages/jira-api-client/src/index.ts", import.meta.url).pathname
     }
   },
-  esbuild: {
-    target: "es2020"
-  },
   optimizeDeps: {
     exclude: ["bun:sqlite"]
   },

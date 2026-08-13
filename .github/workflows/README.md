@@ -22,7 +22,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures consistent formatting across codebase
 - **Command**: `pnpm format`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Lint
 
@@ -30,7 +30,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures code style consistency
 - **Command**: `pnpm lint`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Audit
 
@@ -38,21 +38,38 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Fails the workflow when audited dependencies include advisories
 - **Command**: `pnpm run audit`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Types
 
 - Validates TypeScript compilation
 - **Command**: `pnpm check`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Test
 
 - Runs test suite
+- Pins Bun 1.3.14 so the shipped CodeCommit runtime and Bun-hosted child-process
+  boundary tests run instead of reporting a platform skip
 - **Command**: `pnpm test`
 - **Timeout**: 15 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
+
+#### Edge runtimes
+
+- Runs on the Ubuntu 26.04 public-preview image as an explicit forward-compatibility canary
+- Pins and verifies Node.js 26.7.0 and Bun 1.3.14
+- Builds the CodeCommit package and its complete workspace dependency graph from a clean checkout
+- Exercises the focused CodeCommit CLI and Node/Bun child-environment boundaries
+- Uses Vite's native configuration loader now, ahead of its planned default
+- **Commands**:
+  - `pnpm --filter @knpkv/codecommit... build`
+  - `pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts`
+- **Timeout**: 10 minutes
+- **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
 
 #### Browser
 
@@ -78,7 +95,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   - `pnpm --filter @knpkv/control-center benchmark:contracts`
   - `pnpm --filter @knpkv/control-center benchmark:validate-runtime`
 - **Timeout**: 15 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -113,9 +130,9 @@ Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 - Publishes to the temporary registry for testing
 - **Commands**:
   - `pnpm build` - Build all packages from trusted `main`
-  - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
+  - `sfw pnpm dlx pkg-pr-new@0.0.87 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -311,13 +328,13 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm my-custom-command
 ```
 
 ## Node Version
 
-- **Node.js**: 24.10.0
+- **Node.js**: 26.7.0
 
 This can be updated in the workflow file as needed.
 

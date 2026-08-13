@@ -17,6 +17,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 
 ## Prerequisites
 
+- Bun for the `codecommit` executable; CI pins and exercises Bun 1.3.14.
 - AWS SSO configured (`~/.aws/config`)
 - Git and the AWS CLI. Exact-head checkout configures the AWS CodeCommit HTTPS
   credential helper per command for the selected profile; no global Git helper

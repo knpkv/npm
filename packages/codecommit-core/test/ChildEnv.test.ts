@@ -14,9 +14,9 @@
  *
  * Mechanism 2 is runtime-specific, and this CLI ships on both Node and Bun — the
  * TUI's `assume` path runs under Bun. The clearing cases therefore run against
- * each available runtime. Bun is not installed in CI, so its case reports as
- * skipped there rather than passing vacuously; that skip is visible in the
- * runner output instead of being hidden inside a conditional assertion.
+ * each available runtime. CI pins Bun explicitly so this case is required there;
+ * a local host without Bun reports a visible platform skip instead of passing
+ * vacuously.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"

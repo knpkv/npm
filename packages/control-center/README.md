@@ -6,7 +6,7 @@ This package is under active development, and its public API remains subject to 
 
 ## Development
 
-Node.js 24 or newer and the repository-pinned pnpm version are required.
+Node.js 26 or newer and the repository-pinned pnpm version are required.
 
 ```sh
 pnpm --filter @knpkv/control-center dev
@@ -391,7 +391,7 @@ pruned, contradictory, or incorrect cardinality, ordering, resource-lifecycle,
 and timing evidence.
 
 Absolute timing is an acceptance assertion only on Linux x64 or arm64 with Node
-24 or newer, at least four logical CPUs, at least 8 GiB RAM, and an explicit
+26 or newer, at least four logical CPUs, at least 8 GiB RAM, and an explicit
 `CONTROL_CENTER_BENCHMARK_STORAGE_CLASS=local-ssd` declaration. On that class,
 the warmed authenticated portfolio HTTP p95 must be at most 2,000 ms. Other
 machines still execute every fixture, correctness, bound, SSE-ordering, and

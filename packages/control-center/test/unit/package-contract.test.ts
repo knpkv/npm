@@ -35,7 +35,7 @@ const validManifest = {
     "react-router": "8.3.0",
     "remark-gfm": "^4.0.1"
   },
-  engines: { node: ">=24" },
+  engines: { node: ">=26" },
   exports: {
     ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
     "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },
@@ -52,6 +52,12 @@ const validManifest = {
 describe("package contract", () => {
   it("accepts the reviewed T01 manifest surface", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
+  })
+
+  it("rejects a Node.js engine older than the supported baseline", () => {
+    expect(inspectPackageContract({ ...validManifest, engines: { node: ">=24" } })).toEqual([
+      "Node 26 or newer must be required"
+    ])
   })
 
   it.effect("keeps the checked-in manifest compatible with release versioning", () =>

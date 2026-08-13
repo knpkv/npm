@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm format
 
   lint:
@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm lint
 
   audit:
@@ -66,7 +66,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm run audit
 
   types:
@@ -82,7 +82,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm build
       - run: pnpm check
 
@@ -101,7 +101,12 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
+          bun-version: 1.3.14
+      - name: Verify runtime pins
+        run: |
+          test "$(node --version)" = "v26.7.0"
+          test "$(bun --version)" = "1.3.14"
       # @knpkv/jira-clockify ships an nvim plugin whose specs run under
       # `nvim --headless`. Without the binary those specs skip, and the plugin's
       # single-flight and cache invariants would have no automated cover.
@@ -109,6 +114,30 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y neovim
       - run: pnpm build
       - run: pnpm test
+
+  edge-runtimes:
+    name: Edge runtimes
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install edge runtimes and dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+          bun-version: 1.3.14
+      - name: Verify runtime pins
+        run: |
+          test "$(node --version)" = "v26.7.0"
+          test "$(bun --version)" = "1.3.14"
+      - name: Build CodeCommit runtime graph
+        run: pnpm --filter @knpkv/codecommit... build
+      - name: Test Node/Bun runtime boundaries on Ubuntu 26.04
+        run: pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts
 
   browser:
     name: Browser
@@ -127,7 +156,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - name: Install bounded Chromium runtime
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Test browser applications and catalogs
