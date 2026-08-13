@@ -54,6 +54,12 @@ describe("package contract", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
   })
 
+  it("rejects a Node.js engine older than the supported baseline", () => {
+    expect(inspectPackageContract({ ...validManifest, engines: { node: ">=24" } })).toEqual([
+      "Node 26 or newer must be required"
+    ])
+  })
+
   it.effect("keeps the checked-in manifest compatible with release versioning", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem

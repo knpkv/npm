@@ -50,7 +50,7 @@ npm/
 ### Prerequisites
 
 - Node.js 26+
-- pnpm 9+
+- pnpm 11.21.0
 - (Optional) Nix with direnv for reproducible dev environment
 
 ### Installation

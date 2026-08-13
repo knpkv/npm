@@ -64,7 +64,7 @@
         shellHook = ''
           # Security-sensitive path tests require the shell-provided temp root
           # to use its physical spelling (for example /private/tmp on macOS).
-          export TMPDIR="$(${pkgs.coreutils}/bin/realpath -- "$TMPDIR")"
+          export TMPDIR="$(${pkgs.coreutils}/bin/realpath -- "''${TMPDIR:-/tmp}")"
         '';
       };
     });
