@@ -44,7 +44,7 @@ describe("codecommit CLI", () => {
   it.skipIf(!bunAvailable)("prints help without an Undici teardown crash", async () => {
     const result = await runCodecommit(["--help"])
 
-    expect(result.code).toBe(0)
+    expect(result.code, result.stderr).toBe(0)
     expect(result.stdout).toContain("USAGE")
     expect(result.stdout).toContain("codecommit <subcommand> [flags]")
     expect(result.stdout).not.toContain("dispatcher.destroy")

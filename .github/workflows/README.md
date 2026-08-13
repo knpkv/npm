@@ -61,9 +61,12 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 - Runs on the Ubuntu 26.04 public-preview image as an explicit forward-compatibility canary
 - Pins and verifies Node.js 26.7.0 and Bun 1.3.14
+- Builds the CodeCommit package and its complete workspace dependency graph from a clean checkout
 - Exercises the focused CodeCommit CLI and Node/Bun child-environment boundaries
 - Uses Vite's native configuration loader now, ahead of its planned default
-- **Command**: `pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts`
+- **Commands**:
+  - `pnpm --filter @knpkv/codecommit... build`
+  - `pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts`
 - **Timeout**: 10 minutes
 - **Node Version**: 26.7.0
 - **Bun Version**: 1.3.14
