@@ -415,7 +415,7 @@
 
 .prRow:hover .prTitle {
   text-decoration: underline;
-  text-decoration-color: var(--rly-color-service-codecommit);
+  text-decoration-color: var(--rly-color-text-link);
   text-underline-offset: 0.28rem;
 }
 

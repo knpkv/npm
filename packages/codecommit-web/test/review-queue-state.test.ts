@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 
-import { resolveQueueFacet, resolveQueueMode } from "../src/client/components/review-queue-state.js"
+import {
+  isWithinQueueDateBounds,
+  resolveQueueFacet,
+  resolveQueueMode
+} from "../src/client/components/review-queue-state.js"
 
 describe("resolveQueueMode", () => {
   it("shows Review when an old URL contains both review and hot flags", () => {
@@ -72,5 +76,19 @@ describe("resolveQueueFacet", () => {
         review: false
       })
     ).toBeUndefined()
+  })
+})
+
+describe("isWithinQueueDateBounds", () => {
+  it("applies one-sided bounds independently", () => {
+    const timestamp = Date.UTC(2026, 0, 15)
+    expect(isWithinQueueDateBounds(timestamp, Date.UTC(2026, 0, 1), undefined)).toBe(true)
+    expect(isWithinQueueDateBounds(timestamp, Date.UTC(2026, 1, 1), undefined)).toBe(false)
+    expect(isWithinQueueDateBounds(timestamp, undefined, Date.UTC(2026, 1, 1))).toBe(true)
+    expect(isWithinQueueDateBounds(timestamp, undefined, Date.UTC(2026, 0, 1))).toBe(false)
+  })
+
+  it("ignores malformed URL bounds", () => {
+    expect(isWithinQueueDateBounds(Date.UTC(2026, 0, 15), Number.NaN, Number.NaN)).toBe(true)
   })
 })

@@ -360,6 +360,12 @@ function CollapsibleSection({
 const REQUIRED_RULE_NAME = "Required approvers"
 const OPTIONAL_RULE_NAME = "Optional approvers"
 
+export const normalizeApproverIdentity = (input: string, repoAccountId: string): string | undefined => {
+  const trimmed = input.trim()
+  if (!trimmed || !repoAccountId) return undefined
+  return trimmed.startsWith("CodeCommitApprovers:") ? trimmed : `CodeCommitApprovers:${repoAccountId}:${trimmed}`
+}
+
 interface ApproversCardProps {
   readonly title: string
   readonly ruleName: string
@@ -430,8 +436,8 @@ function ApproversCard({
   const prefix = repoAccountId ? `CodeCommitApprovers:${repoAccountId}:` : ""
 
   const handleAdd = (input: string) => {
-    // If user typed just a username, prepend the CodeCommitApprovers prefix
-    const value = input.startsWith("CodeCommitApprovers:") ? input : `${prefix}${input}`
+    const value = normalizeApproverIdentity(input, repoAccountId)
+    if (!value) return
     const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(value)
     optimistic.add(nameMatch ? nameMatch[1]! : input)
     onSetApprovers([...managedArns, value])
@@ -529,7 +535,7 @@ function ApproversCard({
             </div>
           </div>
         )}
-        {!showPicker && addable.length > 0 && (
+        {!showPicker && prefix && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
             <Text tone="tertiary" variant="meta">
               Suggested

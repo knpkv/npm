@@ -276,7 +276,10 @@ When writing Effect code:
 - In `packages/*/src/client/**/*.css`, use Rly service-color tokens only for
   provider-owned provenance (such as a CodeCommit revision rail or provider
   mark), never for arbitrary user-authored links or content. Use generic
-  action/text tokens for those links. Generated and vendor styles are excluded.
+  action/text tokens for those links. A `.prRow:hover .prTitle` rule using a
+  service token is invalid because the title is user-authored; a revision-rail
+  rule using that provider's service token remains valid. Generated and vendor
+  styles are excluded, and ambiguous selector provenance requires judgment.
 - The sole raw Node filesystem exception is
   `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
   it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory

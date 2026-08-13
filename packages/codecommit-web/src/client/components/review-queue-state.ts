@@ -49,3 +49,14 @@ export const resolveQueueFacet = ({ filters, review }: QueueFacetState): QueueFa
   }
   return undefined
 }
+
+/** Apply each valid date bound independently and ignore malformed URL dates. */
+export const isWithinQueueDateBounds = (
+  timestamp: number,
+  fromMs: number | undefined,
+  toMs: number | undefined
+): boolean => {
+  if (typeof fromMs === "number" && Number.isFinite(fromMs) && timestamp < fromMs) return false
+  if (typeof toMs === "number" && Number.isFinite(toMs) && timestamp >= toMs) return false
+  return true
+}

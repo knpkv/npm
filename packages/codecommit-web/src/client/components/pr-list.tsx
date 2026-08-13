@@ -23,7 +23,7 @@ import { extractScope } from "../utils/extractScope.js"
 import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
 import { RecentActivity } from "./recent-activity.js"
-import { resolveQueueFacet, type QueueFacet } from "./review-queue-state.js"
+import { isWithinQueueDateBounds, resolveQueueFacet, type QueueFacet } from "./review-queue-state.js"
 import styles from "./review-queue.module.css"
 import { SearchBar } from "./search-bar.js"
 
@@ -168,12 +168,12 @@ export function PRList() {
         if (![...byGroup.values()].every((group) => group.some((filter) => matchesFilter(pr, filter)))) {
           return false
         }
-        if (fromMs && toMs) {
+        if (Number.isFinite(fromMs) || Number.isFinite(toMs)) {
           const timestamp =
             statusFilter?.value === "merged" || statusFilter?.value === "closed"
               ? pr.lastModifiedDate.getTime()
               : pr.creationDate.getTime()
-          if (timestamp < fromMs || timestamp >= toMs) return false
+          if (!isWithinQueueDateBounds(timestamp, fromMs, toMs)) return false
         }
         return !review || needsMyReview(pr, appState.currentUser)
       })
