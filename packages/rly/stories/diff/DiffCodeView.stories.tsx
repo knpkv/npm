@@ -383,6 +383,7 @@ export const AnnotationStatePreservation: Story = {
     const expander = item.shadowRoot.querySelector<HTMLElement>("[data-expand-down], [data-expand-up]")
     if (expander === null) throw new Error("Expected a context expander in the long diff")
     expander.click()
+    await waitFor(() => expect(expander.isConnected).toBe(false))
     const expandedLineCount = item.shadowRoot.querySelectorAll("[data-line]").length
     view.scrollTop = Math.min(80, Math.max(0, view.scrollHeight - view.clientHeight))
     const scrollTop = view.scrollTop
