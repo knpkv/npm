@@ -19,7 +19,7 @@
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
-    "test:browser": "pnpm build && playwright test --config playwright.config.ts",
+    "test:browser": "pnpm --filter @knpkv/rly build && pnpm build && playwright test --config playwright.config.ts",
     "lint": "eslint \"{src,test,e2e}/**/*.{ts,tsx}\" playwright.config.ts",
     "docgen": "docgen"
   },
