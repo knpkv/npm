@@ -4,18 +4,8 @@ import { useMemo } from "react"
 import { useSearchParams } from "react-router"
 import type { FilterKey } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
+import { filterLabels } from "./review-queue-state.js"
 import styles from "./review-queue.module.css"
-
-const filterLabels: Readonly<Record<FilterKey, string>> = {
-  account: "Account",
-  author: "Author",
-  approver: "Approver",
-  commenter: "Commenter",
-  scope: "Scope",
-  repo: "Repository",
-  status: "Status",
-  size: "Size"
-}
 
 export function SearchBar() {
   const { clearAll, setFilterText, state, toggleFilter } = useFilterParams()

@@ -1,10 +1,32 @@
 import { describe, expect, it } from "@effect/vitest"
+import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { Schema } from "effect"
 
 import {
   isWithinQueueDateBounds,
+  matchesQueueFilter,
+  queueFilterOptions,
   resolveQueueFacet,
   resolveQueueMode
 } from "../src/client/components/review-queue-state.js"
+
+const pullRequest = Schema.decodeSync(PullRequest)({
+  id: "42",
+  title: "feat(queue): align account filtering",
+  author: "andrey",
+  repositoryName: "codecommit-web",
+  creationDate: new Date("2026-08-01T00:00:00Z"),
+  lastModifiedDate: new Date("2026-08-02T00:00:00Z"),
+  link: "https://example.invalid/pull-request/42",
+  account: { profile: "production", region: "eu-west-1" },
+  status: "OPEN",
+  sourceBranch: "feature/queue",
+  destinationBranch: "main",
+  isMergeable: true,
+  isApproved: false,
+  approvedBy: [],
+  commentedBy: []
+})
 
 describe("resolveQueueMode", () => {
   it("shows Review when an old URL contains both review and hot flags", () => {
@@ -90,5 +112,18 @@ describe("isWithinQueueDateBounds", () => {
 
   it("ignores malformed URL bounds", () => {
     expect(isWithinQueueDateBounds(Date.UTC(2026, 0, 15), Number.NaN, Number.NaN)).toBe(true)
+  })
+})
+
+describe("shared queue filter contract", () => {
+  it("matches every account option that it exposes", () => {
+    const options = queueFilterOptions([pullRequest]).account
+    expect(options).toEqual(["production"])
+    expect(options.every((value) => matchesQueueFilter(pullRequest, { key: "account", value }))).toBe(true)
+  })
+
+  it("does not invent an unknown account outside the decoded domain", () => {
+    expect(queueFilterOptions([pullRequest]).account).not.toContain("unknown")
+    expect(matchesQueueFilter(pullRequest, { key: "account", value: "unknown" })).toBe(false)
   })
 })

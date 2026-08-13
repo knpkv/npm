@@ -8,32 +8,25 @@
  * @module
  */
 import { useAtomValue } from "@effect/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Button, Text } from "@knpkv/rly/primitives"
 import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
 import { appStateAtom } from "../atoms/app.js"
-import type { FilterEntry, FilterKey } from "../atoms/ui.js"
+import type { FilterKey } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
-import { extractScope } from "../utils/extractScope.js"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command.js"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.js"
 import styles from "./review-queue.module.css"
-import { resolveQueueMode, type QueueMode } from "./review-queue-state.js"
-
-type PullRequest = Domain.PullRequest
-
-const filterLabels: Readonly<Record<FilterKey, string>> = {
-  account: "Account",
-  author: "Author",
-  approver: "Approver",
-  commenter: "Commenter",
-  scope: "Scope",
-  repo: "Repository",
-  status: "Status",
-  size: "Size"
-}
+import {
+  filterLabels,
+  groupQueueFilters,
+  matchesQueueFilter,
+  openSubStatuses,
+  queueFilterOptions,
+  resolveQueueMode,
+  type QueueMode
+} from "./review-queue-state.js"
 
 const visibleKeys: ReadonlyArray<FilterKey> = [
   "status",
@@ -45,102 +38,6 @@ const visibleKeys: ReadonlyArray<FilterKey> = [
   "commenter",
   "size"
 ]
-
-const openSubStatuses: ReadonlyArray<string> = ["approved", "pending", "mergeable", "conflicts"]
-
-const statusAxis: Readonly<Record<string, string>> = {
-  open: "lifecycle",
-  merged: "lifecycle",
-  closed: "lifecycle",
-  approved: "approval",
-  pending: "approval",
-  mergeable: "merge",
-  conflicts: "merge"
-}
-
-const extractOptionsFromPRs = (prs: ReadonlyArray<PullRequest>) => {
-  const authors = new Set<string>()
-  const accounts = new Set<string>()
-  const scopes = new Set<string>()
-  const repositories = new Set<string>()
-  const commenters = new Set<string>()
-  const approvers = new Set<string>()
-
-  for (const pr of prs) {
-    authors.add(pr.author)
-    accounts.add(pr.account?.profile ?? "unknown")
-    repositories.add(pr.repositoryName)
-    const scope = extractScope(pr.title)
-    if (scope) scopes.add(scope)
-    for (const name of pr.commentedBy) if (name) commenters.add(name)
-    for (const name of pr.approvedBy) if (name) approvers.add(name)
-  }
-
-  return {
-    account: [...accounts].sort(),
-    author: [...authors].sort(),
-    approver: [...approvers].sort(),
-    commenter: [...commenters].sort(),
-    scope: [...scopes].sort(),
-    repo: [...repositories].sort(),
-    status: ["open", "approved", "pending", "mergeable", "conflicts", "merged", "closed"],
-    size: ["small", "medium", "large", "xlarge"]
-  } satisfies Readonly<Record<FilterKey, ReadonlyArray<string>>>
-}
-
-const matchesPR = (pr: PullRequest, entry: FilterEntry): boolean => {
-  switch (entry.key) {
-    case "account":
-      return (pr.account?.profile ?? "unknown") === entry.value
-    case "author":
-      return pr.author === entry.value
-    case "scope":
-      return extractScope(pr.title) === entry.value
-    case "repo":
-      return pr.repositoryName === entry.value
-    case "approver":
-      return pr.approvedBy.some((name) => name === entry.value)
-    case "commenter":
-      return pr.commentedBy.some((name) => name === entry.value)
-    case "size": {
-      const filesChanged = pr.filesChanged
-      if (filesChanged == null) return false
-      switch (entry.value) {
-        case "small":
-          return filesChanged < 5
-        case "medium":
-          return filesChanged >= 5 && filesChanged <= 15
-        case "large":
-          return filesChanged >= 16 && filesChanged <= 30
-        case "xlarge":
-          return filesChanged > 30
-        default:
-          return true
-      }
-    }
-    case "status":
-      switch (entry.value) {
-        case "approved":
-          return pr.status === "OPEN" && pr.isApproved
-        case "pending":
-          return pr.status === "OPEN" && !pr.isApproved
-        case "mergeable":
-          return pr.status === "OPEN" && pr.isMergeable
-        case "conflicts":
-          return pr.status === "OPEN" && !pr.isMergeable
-        case "merged":
-          return pr.status === "MERGED"
-        case "closed":
-          return pr.status === "CLOSED"
-        case "open":
-          return pr.status === "OPEN"
-        default:
-          return true
-      }
-    default:
-      return true
-  }
-}
 
 type OptionGroups = Readonly<Record<string, ReadonlyArray<string>>>
 
@@ -275,7 +172,7 @@ export function FilterSidebar() {
               return previous
             }
 
-            const subStatuses = openSubStatuses.map((status) => `status:${status}`)
+            const subStatuses = [...openSubStatuses].map((status) => `status:${status}`)
             const lifecycle = new Set(["status:merged", "status:closed"])
             const allPresent = subStatuses.every((status) => existing.includes(status))
             previous.delete("f")
@@ -289,7 +186,7 @@ export function FilterSidebar() {
           },
           { preventScrollReset: true, replace: true }
         )
-      } else if (key === "status" && openSubStatuses.includes(value) && selectedMap.get("status")?.includes("open")) {
+      } else if (key === "status" && openSubStatuses.has(value) && selectedMap.get("status")?.includes("open")) {
         setSearchParams(
           (previous) => {
             let existing = previous.getAll("f")
@@ -317,13 +214,7 @@ export function FilterSidebar() {
   )
 
   const cascadedOptions = useMemo(() => {
-    const byGroup = new Map<string, Array<FilterEntry>>()
-    for (const filter of state.filters) {
-      const groupKey = filter.key === "status" ? `status:${statusAxis[filter.value] ?? filter.value}` : filter.key
-      const group = byGroup.get(groupKey)
-      if (group) group.push(filter)
-      else byGroup.set(groupKey, [filter])
-    }
+    const byGroup = groupQueueFilters(state.filters)
 
     const result: Record<FilterKey, ReadonlyArray<string>> = {
       account: [],
@@ -342,8 +233,8 @@ export function FilterSidebar() {
       const subset =
         otherGroups.length === 0
           ? prs
-          : prs.filter((pr) => otherGroups.every(([, group]) => group.some((filter) => matchesPR(pr, filter))))
-      result[key] = extractOptionsFromPRs(subset)[key]
+          : prs.filter((pr) => otherGroups.every(([, group]) => group.some((filter) => matchesQueueFilter(pr, filter))))
+      result[key] = queueFilterOptions(subset)[key]
     }
     return result
   }, [prs, state.filters])

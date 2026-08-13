@@ -17,94 +17,22 @@ import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
-import type { FilterEntry } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
-import { extractScope } from "../utils/extractScope.js"
 import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
 import { RecentActivity } from "./recent-activity.js"
-import { isWithinQueueDateBounds, resolveQueueFacet, type QueueFacet } from "./review-queue-state.js"
+import {
+  groupQueueFilters,
+  isWithinQueueDateBounds,
+  matchesQueueFilter,
+  openSubStatuses,
+  resolveQueueFacet,
+  type QueueFacet
+} from "./review-queue-state.js"
 import styles from "./review-queue.module.css"
 import { SearchBar } from "./search-bar.js"
 
 type PullRequest = Domain.PullRequest
-
-const OPEN_SUB_STATUSES: ReadonlySet<string> = new Set(["approved", "pending", "mergeable", "conflicts"])
-
-const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
-  switch (entry.key) {
-    case "account":
-      return pr.account?.profile === entry.value
-    case "author":
-      return pr.author === entry.value
-    case "scope":
-      return extractScope(pr.title) === entry.value
-    case "repo":
-      return pr.repositoryName === entry.value
-    case "approver":
-      return pr.approvedBy.some((name) => name === entry.value)
-    case "commenter":
-      return pr.commentedBy.some((name) => name === entry.value)
-    case "size": {
-      const filesChanged = pr.filesChanged
-      if (filesChanged == null) return false
-      switch (entry.value) {
-        case "small":
-          return filesChanged < 5
-        case "medium":
-          return filesChanged >= 5 && filesChanged <= 15
-        case "large":
-          return filesChanged >= 16 && filesChanged <= 30
-        case "xlarge":
-          return filesChanged > 30
-        default:
-          return true
-      }
-    }
-    case "status":
-      switch (entry.value) {
-        case "approved":
-          return pr.status === "OPEN" && pr.isApproved
-        case "pending":
-          return pr.status === "OPEN" && !pr.isApproved
-        case "mergeable":
-          return pr.status === "OPEN" && pr.isMergeable
-        case "conflicts":
-          return pr.status === "OPEN" && !pr.isMergeable
-        case "merged":
-          return pr.status === "MERGED"
-        case "closed":
-          return pr.status === "CLOSED"
-        case "open":
-          return pr.status === "OPEN"
-        default:
-          return true
-      }
-    default:
-      return true
-  }
-}
-
-const statusAxis: Readonly<Record<string, string>> = {
-  open: "lifecycle",
-  merged: "lifecycle",
-  closed: "lifecycle",
-  approved: "approval",
-  pending: "approval",
-  mergeable: "merge",
-  conflicts: "merge"
-}
-
-const groupFilters = (filters: ReadonlyArray<FilterEntry>): ReadonlyMap<string, ReadonlyArray<FilterEntry>> => {
-  const groups = new Map<string, Array<FilterEntry>>()
-  for (const filter of filters) {
-    const groupKey = filter.key === "status" ? `status:${statusAxis[filter.value] ?? filter.value}` : filter.key
-    const group = groups.get(groupKey)
-    if (group) group.push(filter)
-    else groups.set(groupKey, [filter])
-  }
-  return groups
-}
 
 const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open" | "pending"): void => {
   const retained = params.getAll("f").filter((raw) => !raw.startsWith("status:") && raw !== "")
@@ -142,8 +70,8 @@ export function PRList() {
 
     const { filters, from, q, review, to } = filterState
     const filterLower = q.toLowerCase()
-    const byGroup = groupFilters(filters)
-    const hasOpenSubStatus = filters.some((filter) => filter.key === "status" && OPEN_SUB_STATUSES.has(filter.value))
+    const byGroup = groupQueueFilters(filters)
+    const hasOpenSubStatus = filters.some((filter) => filter.key === "status" && openSubStatuses.has(filter.value))
     const hasLifecycle = filters.some(
       (filter) => filter.key === "status" && ["open", "merged", "closed"].includes(filter.value)
     )
@@ -165,7 +93,7 @@ export function PRList() {
           return false
         }
         if (requireOpen && pr.status !== "OPEN") return false
-        if (![...byGroup.values()].every((group) => group.some((filter) => matchesFilter(pr, filter)))) {
+        if (![...byGroup.values()].every((group) => group.some((filter) => matchesQueueFilter(pr, filter)))) {
           return false
         }
         if (Number.isFinite(fromMs) || Number.isFinite(toMs)) {
