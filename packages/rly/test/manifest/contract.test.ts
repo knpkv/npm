@@ -9,6 +9,7 @@ import {
 import {
   componentStyleSources,
   findSourceDrift,
+  packageExportsMatch,
   renderContract,
   renderPackageJson,
   renderVisualCatalog,
@@ -340,6 +341,27 @@ describe("component manifest contract", () => {
         "./styles.css": "./dist/styles.css"
       }
     })
+  })
+
+  it("accepts publisher rewrites outside the manifest-owned exports", () => {
+    const generated: unknown = JSON.parse(renderPackageJson(componentManifest, { name: "@knpkv/rly" }))
+    if (!isRecord(generated)) throw new Error("Generated rly package manifest is missing")
+
+    const publisherSource = JSON.stringify({
+      ...generated,
+      dependencies: { react: "https://pkg.pr.new/react@preview" },
+      version: "0.0.0-preview-deadbeef"
+    })
+    const publisherManifest: unknown = JSON.parse(publisherSource)
+    if (!isRecord(publisherManifest)) throw new Error("Publisher package manifest is missing")
+
+    expect(publisherSource.endsWith("\n")).toBe(false)
+    expect(packageExportsMatch(componentManifest, publisherManifest)).toBe(true)
+
+    if (!isRecord(generated.exports)) throw new Error("Generated rly exports are missing")
+    const reorderedExports = Object.fromEntries(Object.entries(generated.exports).reverse())
+    expect(packageExportsMatch(componentManifest, { ...generated, exports: reorderedExports })).toBe(true)
+    expect(packageExportsMatch(componentManifest, { ...generated, exports: { ".": "stale" } })).toBe(false)
   })
 
   it("projects exact repository paths for the fail-safe visual classifier", () => {
