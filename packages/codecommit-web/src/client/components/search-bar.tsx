@@ -1,78 +1,93 @@
-import { SearchIcon, XIcon } from "lucide-react"
+import { Icon } from "@knpkv/rly/foundations"
+import { Text } from "@knpkv/rly/primitives"
 import { useMemo } from "react"
+import { useSearchParams } from "react-router"
 import type { FilterKey } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
-import { Badge } from "./ui/badge.js"
-
-const FILTER_LABELS: Record<FilterKey, string> = {
-  account: "Account",
-  author: "Author",
-  approver: "Approver",
-  commenter: "Commenter",
-  scope: "Scope",
-  repo: "Repo",
-  status: "Status",
-  size: "Size"
-}
+import { filterLabels } from "./review-queue-state.js"
+import styles from "./review-queue.module.css"
 
 export function SearchBar() {
   const { clearAll, setFilterText, state, toggleFilter } = useFilterParams()
+  const [, setSearchParams] = useSearchParams()
 
   const selectedMap = useMemo(() => {
     const map = new Map<FilterKey, Array<string>>()
-    for (const f of state.filters) {
-      const arr = map.get(f.key)
-      if (arr) arr.push(f.value)
-      else map.set(f.key, [f.value])
+    for (const filter of state.filters) {
+      const selected = map.get(filter.key)
+      if (selected) selected.push(filter.value)
+      else map.set(filter.key, [filter.value])
     }
     return map
   }, [state.filters])
 
-  const hasDateRange = !!state.from || !!state.to
-  const hasAny = state.filters.length > 0 || state.review || state.q || hasDateRange
-  const hasChips = state.filters.length > 0
+  const hasDateRange = Boolean(state.from || state.to)
+  const hasAny = state.filters.length > 0 || state.review || state.q.length > 0 || hasDateRange
+  const hasChips = state.filters.length > 0 || hasDateRange
+
+  const clearDateRange = (): void => {
+    setSearchParams(
+      (previous) => {
+        previous.delete("from")
+        previous.delete("to")
+        return previous
+      },
+      { preventScrollReset: true, replace: true }
+    )
+  }
 
   return (
-    <div className="flex items-center gap-1.5 rounded-lg border bg-background px-3 min-h-[44px] focus-within:ring-1 focus-within:ring-ring flex-wrap py-1.5">
-      <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+    <div className={styles.searchBar}>
+      <label className={styles.searchInputWrap}>
+        <Text className={styles.visuallyHidden} variant="meta">
+          Search pull requests
+        </Text>
+        <Icon className={styles.searchIcon ?? ""} decorative name="search" size="small" />
+        <input
+          className={styles.searchInput}
+          onChange={(event) => setFilterText(event.target.value)}
+          placeholder={hasChips ? "Refine by title, author, or branch" : "Search title, author, or branch"}
+          type="search"
+          value={state.q}
+        />
+      </label>
 
-      {[...selectedMap.entries()].map(([key, values]) =>
-        values.map((value) => (
-          <Badge
-            key={`${key}:${value}`}
-            variant="secondary"
-            className="cursor-pointer gap-1 pl-2 pr-0.5 h-5 text-[10px] shrink-0"
-            onClick={() => toggleFilter(key, value)}
-          >
-            {FILTER_LABELS[key]}: {value}
-            <XIcon className="size-2.5" />
-          </Badge>
-        ))
-      )}
+      {hasChips ? (
+        <div aria-label="Active filters" className={styles.activeFilters}>
+          {[...selectedMap.entries()].flatMap(([key, values]) =>
+            values.map((value) => (
+              <button
+                aria-label={`Remove ${filterLabels[key]} filter ${value}`}
+                className={styles.filterChip}
+                key={`${key}:${value}`}
+                onClick={() => toggleFilter(key, value)}
+                type="button"
+              >
+                <span>{filterLabels[key]}:</span> {value}
+                <Icon decorative name="close" size="small" />
+              </button>
+            ))
+          )}
+          {hasDateRange ? (
+            <button
+              aria-label="Remove date range filter"
+              className={styles.filterChip}
+              onClick={clearDateRange}
+              type="button"
+            >
+              <span>Date:</span> {state.from ?? "Any"} → {state.to ?? "Any"}
+              <Icon decorative name="close" size="small" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
-      {hasDateRange && (
-        <Badge variant="outline" className="cursor-pointer gap-1 pl-2 pr-0.5 h-5 text-[10px] shrink-0">
-          {state.from} → {state.to}
-          <XIcon className="size-2.5" />
-        </Badge>
-      )}
-
-      <input
-        placeholder={hasChips || hasDateRange ? "Refine..." : "Search commits..."}
-        className="flex-1 min-w-[80px] bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        value={state.q}
-        onChange={(e) => setFilterText(e.target.value)}
-      />
-
-      {hasAny && (
-        <button
-          type="button"
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-          onClick={clearAll}
-        >
-          <XIcon className="size-3.5" />
+      {hasAny ? (
+        <button aria-label="Clear search and filters" className={styles.clearSearch} onClick={clearAll} type="button">
+          Clear all
+          <Icon decorative name="close" size="small" />
         </button>
-      )}
+      ) : null}
     </div>
   )
 }

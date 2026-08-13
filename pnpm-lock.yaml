@@ -399,6 +399,9 @@ importers:
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
+      '@knpkv/rly':
+        specifier: workspace:^
+        version: link:../rly
       '@tailwindcss/typography':
         specifier: ^0.5.20
         version: 0.5.20(tailwindcss@4.3.2)
@@ -460,6 +463,9 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
+      '@playwright/test':
+        specifier: 1.61.1
+        version: 1.61.1
       '@types/react':
         specifier: ^19.2.17
         version: 19.2.17

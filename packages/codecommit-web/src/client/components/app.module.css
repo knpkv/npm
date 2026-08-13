@@ -1,0 +1,35 @@
+.root {
+  display: flex;
+  min-block-size: 100dvh;
+  flex-direction: column;
+  background: var(--rly-color-canvas);
+  color: var(--rly-color-text-1);
+}
+
+.fullWidthRoot {
+  block-size: 100dvh;
+  overflow: hidden;
+}
+
+.main {
+  inline-size: min(calc(100% - 2.5rem), 80rem);
+  flex: 1 1 auto;
+  margin-inline: auto;
+  padding-block: clamp(3rem, 7vw, 5.5rem);
+}
+
+.fullWidthMain {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+@media (max-width: 40rem) {
+  .main {
+    inline-size: min(calc(100% - 1.5rem), 80rem);
+    padding-block: 2.25rem 3.5rem;
+  }
+}

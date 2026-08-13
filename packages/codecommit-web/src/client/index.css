@@ -35,48 +35,26 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --radius: var(--rly-radius-field);
+  --background: var(--rly-color-canvas);
+  --foreground: var(--rly-color-text-1);
+  --card: var(--rly-color-surface-1);
+  --card-foreground: var(--rly-color-text-1);
+  --popover: var(--rly-color-surface-1);
+  --popover-foreground: var(--rly-color-text-1);
+  --primary: var(--rly-color-action-background);
+  --primary-foreground: var(--rly-color-action-foreground);
+  --secondary: var(--rly-color-surface-2);
+  --secondary-foreground: var(--rly-color-text-1);
+  --muted: var(--rly-color-surface-2);
+  --muted-foreground: var(--rly-color-text-2);
+  --accent: var(--rly-color-surface-3);
+  --accent-foreground: var(--rly-color-text-1);
+  --destructive: var(--rly-color-blocked-ink);
+  --destructive-foreground: var(--rly-color-action-foreground);
+  --border: var(--rly-color-border-1);
+  --input: var(--rly-color-border-2);
+  --ring: var(--rly-color-focus);
 }
 
 @layer base {
@@ -85,6 +63,12 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    min-block-size: 100dvh;
+    margin: 0;
+  }
+  #root,
+  [data-rly-root] {
+    min-block-size: 100dvh;
   }
 }
 
@@ -113,4 +97,11 @@
 .rolling-line {
   animation: rolling-slide-in 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: opacity 400ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rolling-line {
+    animation: none;
+    transition: none;
+  }
 }
