@@ -37,7 +37,7 @@ jobs:
           node-version: 24.10.0
           registry-url: https://registry.npmjs.org
       - name: Create Release Pull Request or Publish
-        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        uses: changesets/action@198f833dd7d863100ea6e28967bc9a9fdefadb0a # v2.1.0
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}
           # Version packages based on changeset files
