@@ -84,7 +84,7 @@ export interface PrReviewSourceLocation {
 }
 
 /** Stable source failures that retain neither paths nor provider diagnostics. */
-export class PrReviewSourceError extends Schema.TaggedErrorClass<PrReviewSourceError>()(
+export class PrReviewSourceError extends Schema.TaggedError<PrReviewSourceError>()(
   "PrReviewSourceError",
   {
     reason: Schema.Literals([

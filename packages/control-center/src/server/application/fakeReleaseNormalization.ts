@@ -62,7 +62,7 @@ export const FakeReleaseAttributes = Schema.Struct({
 }).annotate({ identifier: "FakeReleaseAttributes" })
 
 /** Bounded failure raised before a fake release page can advance its checkpoint. */
-export class FakeReleaseNormalizationError extends Schema.TaggedErrorClass<FakeReleaseNormalizationError>()(
+export class FakeReleaseNormalizationError extends Schema.TaggedError<FakeReleaseNormalizationError>()(
   "FakeReleaseNormalizationError",
   {
     diagnosticCode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))

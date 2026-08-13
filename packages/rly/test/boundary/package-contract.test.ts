@@ -19,11 +19,11 @@ describe("package contract", () => {
     if (!isRecord(manifest)) return
 
     expect(manifest.dependencies).toEqual({
-      "@fontsource-variable/geist": "5.2.9",
-      "@fontsource-variable/geist-mono": "5.2.8",
-      "@pierre/diffs": "1.2.12",
-      "lucide-react": "1.24.0",
-      "radix-ui": "1.6.2"
+      "@fontsource-variable/geist": "5.3.0",
+      "@fontsource-variable/geist-mono": "5.3.0",
+      "@pierre/diffs": "1.3.5",
+      "lucide-react": "1.31.0",
+      "radix-ui": "1.6.7"
     })
     expect(manifest.name).toBe("@knpkv/rly")
   })

@@ -47,7 +47,7 @@ const positiveScheduleDelayConfigurationKeys = new Set([
   "OTEL_BSP_SCHEDULE_DELAY"
 ])
 
-class ObservabilityConfigurationError extends Schema.TaggedErrorClass<ObservabilityConfigurationError>()(
+class ObservabilityConfigurationError extends Schema.TaggedError<ObservabilityConfigurationError>()(
   "ObservabilityConfigurationError",
   {
     reason: Schema.Literals(["invalid-endpoint", "unsupported-protocol"]),

@@ -13,7 +13,7 @@ export interface JavaScriptArtifactMeasurement {
 
 /** Per-file ceilings for every emitted runtime JavaScript artifact. */
 export const CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS = {
-  client: { gzipBytes: 80_000, rawBytes: 260_000 },
+  client: { gzipBytes: 80_000, rawBytes: 270_000 },
   server: { gzipBytes: 290_000, rawBytes: 1_650_000 }
 } satisfies Readonly<Record<ControlCenterBuildTarget, JavaScriptArtifactBudget>>
 

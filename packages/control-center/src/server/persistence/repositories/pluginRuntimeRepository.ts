@@ -216,7 +216,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     const descriptorText = row?.descriptorJson
     const descriptorDigest = row?.descriptorDigest
     const descriptor = typeof descriptorText === "string"
-      ? Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorText)
+      ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(descriptorText)
       : null
     const canonical = descriptor !== null && Result.isSuccess(descriptor)
       ? Schema.decodeUnknownResult(NegotiatedPluginDescriptorV1)(descriptor.success)
@@ -1136,14 +1136,14 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       const payloadText = row.payloadJson
       const payloadDigest = row.payloadDigest
       const payload = typeof payloadText === "string"
-        ? Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(payloadText)
+        ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(payloadText)
         : null
       const normalized = payload !== null && Result.isSuccess(payload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(payload.success)
         : null
       const latestEventText = row.latestEventJson
       const latestEventPayload = typeof latestEventText === "string"
-        ? Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(latestEventText)
+        ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(latestEventText)
         : null
       const latestEvent = latestEventPayload !== null && Result.isSuccess(latestEventPayload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(latestEventPayload.success)
@@ -1393,7 +1393,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       const decoded = Schema.decodeUnknownResult(PluginEvidenceRecord)(row)
       const payloadText = row.payloadJson
       const payload = typeof payloadText === "string"
-        ? Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(payloadText)
+        ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(payloadText)
         : null
       const normalized = payload !== null && Result.isSuccess(payload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(payload.success)

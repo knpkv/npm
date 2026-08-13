@@ -28,7 +28,7 @@ import {
 } from "./governedActionDigests.js"
 
 /** Fail-closed reasons why a structurally valid action cannot dispatch. */
-export class GovernedActionAuthorityRejected extends Schema.TaggedErrorClass<GovernedActionAuthorityRejected>()(
+export class GovernedActionAuthorityRejected extends Schema.TaggedError<GovernedActionAuthorityRejected>()(
   "GovernedActionAuthorityRejected",
   {
     mismatches: Schema.Array(GovernedActionAuthorityMismatch).check(

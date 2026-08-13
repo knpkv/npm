@@ -15,7 +15,7 @@ import { mapPersistenceOperation } from "./internal.js"
 const RECORD_KIND = "authorized-share"
 
 /** Raised when authorized-share persistence input fails boundary decoding. */
-export class AuthorizedShareInputError extends Schema.TaggedErrorClass<AuthorizedShareInputError>()(
+export class AuthorizedShareInputError extends Schema.TaggedError<AuthorizedShareInputError>()(
   "AuthorizedShareInputError",
   { operation: Schema.Literals(["create", "get", "revoke"]) }
 ) {}

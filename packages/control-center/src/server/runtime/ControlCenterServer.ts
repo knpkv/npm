@@ -205,7 +205,7 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
 }
 
 /** Invalid production review composition rejected before a worker can claim durable work. */
-export class PrReviewWorkerConfigurationError extends Schema.TaggedErrorClass<
+export class PrReviewWorkerConfigurationError extends Schema.TaggedError<
   PrReviewWorkerConfigurationError
 >()("PrReviewWorkerConfigurationError", {
   diagnosticCode: Schema.Literal("review-provider-required")

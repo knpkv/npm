@@ -6,7 +6,7 @@ import * as Scope from "effect/Scope"
 import { createServer } from "node:net"
 
 /** The live fixture could not acquire an ephemeral loopback port. */
-export class LiveIntegrationPortError extends Schema.TaggedErrorClass<LiveIntegrationPortError>()(
+export class LiveIntegrationPortError extends Schema.TaggedError<LiveIntegrationPortError>()(
   "LiveIntegrationPortError",
   {
     reason: Schema.Literal("ephemeral-port-unavailable")

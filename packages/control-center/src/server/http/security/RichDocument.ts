@@ -306,7 +306,7 @@ export const RichDocumentV1: Schema.Codec<RichDocumentV1, RichDocumentV1Encoded>
 const RichDocumentJson = Schema.fromJsonString(RichDocumentV1)
 
 /** Canonical rich content failed schema or resource-limit validation. */
-export class RichDocumentError extends Schema.TaggedErrorClass<RichDocumentError>()("RichDocumentError", {
+export class RichDocumentError extends Schema.TaggedError<RichDocumentError>()("RichDocumentError", {
   reason: Schema.Literals(["invalid-document", "bounds-exceeded", "encoded-size-exceeded"])
 }) {}
 

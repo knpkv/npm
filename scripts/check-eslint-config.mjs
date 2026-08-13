@@ -43,6 +43,26 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
   }
 }
 
+await assertRuleDiagnostics({
+  code: `
+    import * as TypeScript from "typescript"
+    TypeScript.createSourceFile("fixture.ts", "export {}", TypeScript.ScriptTarget.Latest)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/scripts/typescript-compatibility-valid.ts",
+  ruleId: "import-x/namespace"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect"
+    Effect.notARealExport
+  `,
+  expected: 1,
+  filePath: "packages/control-center/scripts/namespace-invalid.ts",
+  ruleId: "import-x/namespace"
+})
+
 const detachedMjsResults = await eslint.lintFiles([
   "scripts/**/*.mjs",
   "packages/*/src/**/*.mjs",

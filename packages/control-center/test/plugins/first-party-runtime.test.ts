@@ -724,8 +724,7 @@ describe("first-party plugin runtime", () => {
           }
         }
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients)),
-        Effect.provide(dependencies)
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients).pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -808,8 +807,9 @@ describe("first-party plugin runtime", () => {
         assert.isTrue(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -995,8 +995,9 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(yield* Ref.get(readCalls), 2)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -1223,8 +1224,11 @@ describe("first-party plugin runtime", () => {
             record
           }
         }).pipe(
-          Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient)),
-          Effect.provide(dependencies)
+          Effect.provide(
+            makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient).pipe(
+              Layer.provideMerge(dependencies)
+            )
+          )
         )
       })
 
@@ -1620,8 +1624,11 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(yield* Ref.get(artifactCalls), 1)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient).pipe(
+            Layer.provideMerge(dependencies)
+          )
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -1717,8 +1724,11 @@ describe("first-party plugin runtime", () => {
         assert.isFalse(hasPluginCapability(connection.descriptor, "pipeline.logs", 1))
         assert.strictEqual(yield* Ref.get(identityCalls), 1)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, historicalClient)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, historicalClient).pipe(
+            Layer.provideMerge(dependencies)
+          )
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -2005,8 +2015,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -2260,8 +2269,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 1)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies),
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies))),
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
@@ -2382,8 +2390,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -2487,8 +2494,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -2599,14 +2605,13 @@ describe("first-party plugin runtime", () => {
       const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
       const dependencies = Layer.mergeAll(
         persistence,
-        foundation,
         governedActions,
         deliveryGraph,
         runtimeAuthority,
         DomainEventWakeups.layer,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
-      ).pipe(Layer.provideMerge(database))
+      ).pipe(Layer.provideMerge(foundation))
 
       yield* Effect.gen(function*() {
         const persistenceService = yield* Persistence
@@ -2934,8 +2939,7 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(governedRecord.head.state, "succeeded")
         assert.strictEqual(yield* Ref.get(providerMutations), 1)
       }).pipe(
-        Effect.provide(registry),
-        Effect.provide(dependencies)
+        Effect.provide(registry.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -3191,8 +3195,7 @@ describe("first-party plugin runtime", () => {
                     actionId: GOVERNED_ACTION
                   })
                 }).pipe(
-                  Effect.provide(engineLayer),
-                  Effect.provide(store)
+                  Effect.provide(engineLayer.pipe(Layer.provideMerge(store)))
                 )
                 : scenario === "rate-limit-exhausted"
                 ? yield* Effect.gen(function*() {
@@ -3272,8 +3275,9 @@ describe("first-party plugin runtime", () => {
                   : 1
               )
             }).pipe(
-              Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-              Effect.provide(dependencies)
+              Effect.provide(
+                makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+              )
             )
           }),
         { discard: true }
@@ -3582,8 +3586,9 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(yield* Ref.get(entryReads), readsAfterCorrection)
         assert.strictEqual(yield* Ref.get(mutations), 2)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -3810,8 +3815,9 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(yield* Ref.get(entryReads), 2)
         assert.strictEqual(yield* Ref.get(mutations), 0)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -4010,8 +4016,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.strictEqual(requests.length, 2)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

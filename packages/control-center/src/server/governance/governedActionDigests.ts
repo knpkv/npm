@@ -41,7 +41,7 @@ import {
 import type { PluginPayloadJson } from "../../domain/plugins/bounds.js"
 
 /** Bounded failure while encoding or hashing governed-action authority. */
-export class GovernedActionDigestError extends Schema.TaggedErrorClass<GovernedActionDigestError>()(
+export class GovernedActionDigestError extends Schema.TaggedError<GovernedActionDigestError>()(
   "GovernedActionDigestError",
   {
     operation: Schema.Literals(["encode", "encode-utf8", "digest"])
@@ -49,7 +49,7 @@ export class GovernedActionDigestError extends Schema.TaggedErrorClass<GovernedA
 ) {}
 
 /** Exact immutable action binding that failed canonical verification. */
-export class GovernedActionBindingMismatch extends Schema.TaggedErrorClass<GovernedActionBindingMismatch>()(
+export class GovernedActionBindingMismatch extends Schema.TaggedError<GovernedActionBindingMismatch>()(
   "GovernedActionBindingMismatch",
   {
     reason: Schema.Literals([

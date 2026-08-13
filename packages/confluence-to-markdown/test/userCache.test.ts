@@ -119,30 +119,22 @@ describe("UserCache", () => {
     )
   })
 
-  it.effect("does not cache an interrupted lookup", () => {
+  it.effect("clears successful entries", () => {
     const calls = Ref.makeUnsafe(0)
-    const started = Deferred.makeUnsafe<void>()
-    const releaseFirstLookup = Deferred.makeUnsafe<void>()
 
     return Effect.gen(function*() {
       const cache = yield* UserCache
-      const first = yield* Effect.forkChild(cache.get("account-1"))
-      yield* Deferred.await(started)
-      yield* Fiber.interrupt(first)
-
+      const initial = yield* cache.get("account-1")
+      yield* cache.clear()
       const loaded = yield* cache.get("account-1")
+      expect(initial.accountId).toBe("account-1")
       expect(loaded.accountId).toBe("account-1")
       expect(yield* Ref.get(calls)).toBe(2)
     }).pipe(
       Effect.provide(UserCacheLayerWith((accountId) =>
-        Effect.gen(function*() {
-          const attempt = yield* Ref.updateAndGet(calls, (count) => count + 1)
-          if (attempt === 1) {
-            yield* Deferred.succeed(started, undefined)
-            yield* Deferred.await(releaseFirstLookup)
-          }
-          return user(accountId)
-        })
+        Ref.updateAndGet(calls, (count) => count + 1).pipe(
+          Effect.as(user(accountId))
+        )
       ))
     )
   })

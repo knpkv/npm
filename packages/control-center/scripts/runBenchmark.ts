@@ -8,7 +8,7 @@ import { ControlCenterBenchmarkReport, runControlCenterBenchmark } from "./bench
 import { collectControlCenterBenchmarkMachine } from "./benchmarkRuntimeReport.js"
 
 /** Failure to collect or encode benchmark command metadata. */
-class BenchmarkCommandError extends Schema.TaggedErrorClass<BenchmarkCommandError>()("BenchmarkCommandError", {
+class BenchmarkCommandError extends Schema.TaggedError<BenchmarkCommandError>()("BenchmarkCommandError", {
   reason: Schema.String
 }) {}
 

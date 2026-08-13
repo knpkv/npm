@@ -229,7 +229,7 @@ export interface PrReviewSandboxSessionOptions {
 }
 
 /** Stable redacted session failures; host paths, commands, output, and credentials are omitted. */
-export class PrReviewSandboxSessionError extends Schema.TaggedErrorClass<PrReviewSandboxSessionError>()(
+export class PrReviewSandboxSessionError extends Schema.TaggedError<PrReviewSandboxSessionError>()(
   "PrReviewSandboxSessionError",
   {
     reason: Schema.Literals([

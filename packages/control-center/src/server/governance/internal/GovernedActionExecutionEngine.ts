@@ -23,20 +23,20 @@ import {
 } from "./GovernedActionExecutionStore.js"
 
 /** Invalid untrusted action identity at the private worker boundary. */
-export class GovernedActionExecutionInputError extends Schema.TaggedErrorClass<GovernedActionExecutionInputError>()(
+export class GovernedActionExecutionInputError extends Schema.TaggedError<GovernedActionExecutionInputError>()(
   "GovernedActionExecutionInputError",
   {}
 ) {}
 
 /** The durable provider-call window closed before a confirmed result was received. */
-class GovernedActionDispatchDeadlineExceeded extends Schema.TaggedErrorClass<GovernedActionDispatchDeadlineExceeded>()(
+class GovernedActionDispatchDeadlineExceeded extends Schema.TaggedError<GovernedActionDispatchDeadlineExceeded>()(
   "GovernedActionDispatchDeadlineExceeded",
   {}
 ) {}
 
 /** The recovery claim expired before the provider reconciliation completed. */
 class GovernedActionReconciliationDeadlineExceeded
-  extends Schema.TaggedErrorClass<GovernedActionReconciliationDeadlineExceeded>()(
+  extends Schema.TaggedError<GovernedActionReconciliationDeadlineExceeded>()(
     "GovernedActionReconciliationDeadlineExceeded",
     {}
   )

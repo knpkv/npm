@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
-import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { createServer } from "node:net"
 
@@ -19,6 +19,11 @@ interface RegularFileSnapshot {
   readonly metadata: Omit<FileSystemType.File.Info, "atime">
   readonly name: string
 }
+
+class EphemeralPortFixtureError extends Schema.TaggedError<EphemeralPortFixtureError>()(
+  "EphemeralPortFixtureError",
+  { message: Schema.String }
+) {}
 
 const stableFileMetadata = (info: FileSystemType.File.Info): Omit<FileSystemType.File.Info, "atime"> => ({
   // Reading the comparison bytes necessarily advances atime on strict-atime filesystems.
@@ -253,7 +258,7 @@ const acquireEphemeralPort = Effect.tryPromise({
         probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
       })
     }),
-  catch: (cause) => new Error("could not reserve an ephemeral test port", { cause })
+  catch: () => new EphemeralPortFixtureError({ message: "could not reserve an ephemeral test port" })
 })
 
 describe("offline backup commands", () => {

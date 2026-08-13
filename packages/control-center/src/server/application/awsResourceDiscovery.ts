@@ -29,7 +29,7 @@ interface ResourceCollection {
   readonly truncated: boolean
 }
 
-class AwsResourcePaginationFailure extends Schema.TaggedErrorClass<AwsResourcePaginationFailure>()(
+class AwsResourcePaginationFailure extends Schema.TaggedError<AwsResourcePaginationFailure>()(
   "AwsResourcePaginationFailure",
   {}
 ) {}

@@ -48,7 +48,7 @@ import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
 
 /** Invalid provider/resource combination rejected before persistence. */
-export class ProviderAccountInputError extends Schema.TaggedErrorClass<ProviderAccountInputError>()(
+export class ProviderAccountInputError extends Schema.TaggedError<ProviderAccountInputError>()(
   "ProviderAccountInputError",
   {
     operation: Schema.Literals(["follow-resource"]),

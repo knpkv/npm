@@ -31,7 +31,7 @@ import {
 const Operation = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
 /** Secret-free failure emitted by the live Confluence transport boundary. @internal */
-export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<ConfluencePageClientFailure>()(
+export class ConfluencePageClientFailure extends Schema.TaggedError<ConfluencePageClientFailure>()(
   "ConfluencePageClientFailure",
   {
     operation: Operation,

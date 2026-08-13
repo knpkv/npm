@@ -94,7 +94,7 @@ const PipelineEntityAttributes = Schema.Struct({
 type PipelineEntityAttributes = typeof PipelineEntityAttributes.Type
 
 /** Redacted failure raised while correlating one bounded execution page. */
-export class PipelineExecutionProjectionError extends Schema.TaggedErrorClass<PipelineExecutionProjectionError>()(
+export class PipelineExecutionProjectionError extends Schema.TaggedError<PipelineExecutionProjectionError>()(
   "PipelineExecutionProjectionError",
   {
     diagnosticCode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),

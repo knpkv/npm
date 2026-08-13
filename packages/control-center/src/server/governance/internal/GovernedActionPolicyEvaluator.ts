@@ -92,12 +92,12 @@ export interface GovernedActionPolicyDefinition {
 }
 
 /** The proposal's policy identity is absent from or differs from the current server catalog. */
-export class GovernedActionPolicyBindingUnavailable extends Schema.TaggedErrorClass<
+export class GovernedActionPolicyBindingUnavailable extends Schema.TaggedError<
   GovernedActionPolicyBindingUnavailable
 >()("GovernedActionPolicyBindingUnavailable", {}) {}
 
 /** The server-owned policy catalog contains ambiguous current policy families. */
-export class GovernedActionPolicyCatalogInvalid extends Schema.TaggedErrorClass<
+export class GovernedActionPolicyCatalogInvalid extends Schema.TaggedError<
   GovernedActionPolicyCatalogInvalid
 >()("GovernedActionPolicyCatalogInvalid", {}) {}
 

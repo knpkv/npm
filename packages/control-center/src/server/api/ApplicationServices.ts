@@ -119,31 +119,31 @@ import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { SessionSummary } from "../auth/models.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
-export class ApplicationResourceNotFound extends Schema.TaggedErrorClass<ApplicationResourceNotFound>()(
+export class ApplicationResourceNotFound extends Schema.TaggedError<ApplicationResourceNotFound>()(
   "ApplicationResourceNotFound",
   {}
 ) {}
 
 /** A bounded application operation cannot currently be served. */
-export class ApplicationServiceUnavailable extends Schema.TaggedErrorClass<ApplicationServiceUnavailable>()(
+export class ApplicationServiceUnavailable extends Schema.TaggedError<ApplicationServiceUnavailable>()(
   "ApplicationServiceUnavailable",
   { retryAt: Schema.NullOr(UtcTimestamp) }
 ) {}
 
 /** A provider-specific read budget was exhausted. */
-export class ApplicationRateLimited extends Schema.TaggedErrorClass<ApplicationRateLimited>()(
+export class ApplicationRateLimited extends Schema.TaggedError<ApplicationRateLimited>()(
   "ApplicationRateLimited",
   { retryAt: Schema.NullOr(UtcTimestamp) }
 ) {}
 
 /** Durable state changed since the caller read its compare-and-swap revision. */
-export class ApplicationConflict extends Schema.TaggedErrorClass<ApplicationConflict>()(
+export class ApplicationConflict extends Schema.TaggedError<ApplicationConflict>()(
   "ApplicationConflict",
   {}
 ) {}
 
 /** An application-level mutation failed validation after transport decoding. */
-export class ApplicationInvalidRequest extends Schema.TaggedErrorClass<ApplicationInvalidRequest>()(
+export class ApplicationInvalidRequest extends Schema.TaggedError<ApplicationInvalidRequest>()(
   "ApplicationInvalidRequest",
   {}
 ) {}
@@ -347,7 +347,7 @@ export class CompleteDiffReads extends Context.Service<CompleteDiffReads, {
 
 /** Fully authorized artifact bytes with provider storage coordinates removed. */
 export interface CodePipelineArtifactRead {
-  readonly body: Stream.Stream<Uint8Array>
+  readonly body: Uint8Array
   readonly contentLength: number
   readonly filename: string
   readonly offset: number

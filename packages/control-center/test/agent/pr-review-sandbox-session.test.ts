@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Logger, Ref, Result, Sink, Stream, Tracer } from "effect"
+import { DateTime, Effect, Layer, Logger, Ref, Result, Schema, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -22,6 +22,11 @@ const ATTEMPT_ID = "0123456789ab"
 const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const SOURCE_ROOT = "/private/review-source"
+
+class SandboxFixtureError extends Schema.TaggedError<SandboxFixtureError>()(
+  "SandboxFixtureError",
+  { message: Schema.String }
+) {}
 const compactUuid = (identifier: string): string => identifier.replaceAll("-", "")
 const WORKSPACE_SANDBOX_PREFIX = `cc-pr-review-${compactUuid(WORKSPACE_ID)}-`
 const SANDBOX_NAME = `${WORKSPACE_SANDBOX_PREFIX}${compactUuid(JOB_ID).slice(-4)}-${ATTEMPT_ID}`
@@ -629,7 +634,7 @@ describe("PrReviewSandboxSessions", () => {
         session.runCommand("emit-recoverable").pipe(
           Effect.filterOrFail(
             ({ stdout }) => stdout.artifact !== null,
-            () => new Error("expected retained output")
+            () => new SandboxFixtureError({ message: "expected retained output" })
           ),
           Effect.asVoid
         ))

@@ -432,7 +432,7 @@ export type WorkspaceRefreshReason =
   | "merge-outcome-unknown"
 
 /** Typed action failure whose immutable workspace must be reloaded before another attempt. */
-export class WorkspaceRefreshActionError extends Schema.TaggedErrorClass<WorkspaceRefreshActionError>()(
+export class WorkspaceRefreshActionError extends Schema.TaggedError<WorkspaceRefreshActionError>()(
   "WorkspaceRefreshActionError",
   {
     operation: Schema.String,

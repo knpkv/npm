@@ -204,8 +204,8 @@ regeneration and patch-review instructions.
   - `pnpm changeset:publish` - Build and publish packages to npm
 - **Timeout**: 30 minutes
 - **Required Secrets**:
-  - `NPM_TOKEN` - npm authentication token for publishing
-  - `GITHUB_TOKEN` - GitHub token for creating releases and PRs
+  - `TOKEN_NPM` - npm authentication token passed to the configured npm registry
+  - `TOKEN_GITHUB` - GitHub token passed to Changesets for releases and PRs
 
 **Release Process**:
 

@@ -581,8 +581,7 @@ const runExecutor = <Success, Failure>(
       )
     )
   }).pipe(
-    Effect.provide(fake.layer),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(fake.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Effect.scoped,
     Effect.map((result) => ({ fake, result }))
   )
@@ -772,10 +771,10 @@ describe("PR review task executor", () => {
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
           Layer.provide(nativeSessionLayer),
-          Layer.provide(historyLayer)
+          Layer.provide(historyLayer),
+          Layer.provideMerge(NodeServices.layer)
         )
       ),
-      Effect.provide(NodeServices.layer),
       Effect.scoped
     )
   })
@@ -868,10 +867,10 @@ describe("PR review task executor", () => {
                 page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
               })
             )
-          )
+          ),
+          Layer.provideMerge(NodeServices.layer)
         )
       ),
-      Effect.provide(NodeServices.layer),
       Effect.scoped
     )
   })
@@ -961,10 +960,10 @@ describe("PR review task executor", () => {
                 page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
               })
             )
-          )
+          ),
+          Layer.provideMerge(NodeServices.layer)
         )
       ),
-      Effect.provide(NodeServices.layer),
       Effect.scoped
     )
   })

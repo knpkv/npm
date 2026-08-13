@@ -183,7 +183,7 @@ export const withAwsContext = <A, E>(
     const provided = Effect.provide(
       effect,
       Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials),
+        DistilledCredentials.fromCredentials(credentials, account.region),
         Layer.succeed(HttpClient.HttpClient, httpClient),
         Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(AwsClientConfig, config)

@@ -29,7 +29,7 @@ export class CurrentRequestContext extends Context.Service<
 >()("@knpkv/control-center/server/api/CurrentRequestContext") {}
 
 /** Correlation ID generation failed before a request context could be established. */
-export class RequestContextUnavailable extends Schema.TaggedErrorClass<RequestContextUnavailable>()(
+export class RequestContextUnavailable extends Schema.TaggedError<RequestContextUnavailable>()(
   "RequestContextUnavailable",
   {}
 ) {}

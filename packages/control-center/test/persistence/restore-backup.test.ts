@@ -10,6 +10,7 @@ import {
   ReproducibleContentUnavailableError,
   restoreBackup
 } from "../../src/server/persistence/index.js"
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { descriptorIt } from "../fixtures/descriptorPublication.js"
 import {
@@ -22,47 +23,47 @@ import { fixtureTimestamps, fixtureWorkspaceIds } from "./fixtures.js"
 
 const encoder = new TextEncoder()
 
-const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: file.writeAll
-})
+const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: file.writeAll
+  })
 
-const withStat = (file: FileSystem.File, stat: FileSystem.File["stat"]): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: file.writeAll
-})
+const withStat = (file: FileSystem.File, stat: FileSystem.File["stat"]): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: file.writeAll
+  })
 
 const withWriteAll = (
   file: FileSystem.File,
   writeAll: FileSystem.File["writeAll"]
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll
+  })
 
 describe("restore backup", () => {
   it.effect("publishes a fresh relative-symlink claim without exposing its physical paths", () =>

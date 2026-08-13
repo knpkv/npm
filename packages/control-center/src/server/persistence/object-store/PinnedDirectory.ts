@@ -1,6 +1,7 @@
 import type { FileSystem, Path } from "effect"
 import { Effect, Option, Result } from "effect"
 
+import { nodeFileDescriptor } from "../NodeFileDescriptor.js"
 import { BlobContainmentError, blobStoreIoError } from "./BlobStoreError.js"
 
 /** Descriptor-backed directory alias used for containment-safe publication. */
@@ -10,7 +11,7 @@ export interface PinnedDirectory {
   readonly assertIdentity: Effect.Effect<void, BlobContainmentError>
 }
 
-const descriptorAliases = (path: Path.Path, descriptor: FileSystem.File.Descriptor) => [
+const descriptorAliases = (path: Path.Path, descriptor: number) => [
   path.join("/proc/self/fd", String(descriptor)),
   path.join("/dev/fd", String(descriptor))
 ]
@@ -31,7 +32,7 @@ const sameDescriptorAlias = (alias: FileSystem.File.Info, opened: FileSystem.Fil
 export const resolveDescriptorAlias = Effect.fn("BlobStore.resolveDescriptorAlias")(function*(
   fs: FileSystem.FileSystem,
   path: Path.Path,
-  descriptor: FileSystem.File.Descriptor,
+  descriptor: number,
   openedInfo: FileSystem.File.Info,
   expectedPath: string,
   operation: string
@@ -72,7 +73,14 @@ export const pinDirectory = Effect.fn("BlobStore.pinDirectory")(function*(
   const openedInfo = yield* handle.stat.pipe(
     Effect.mapError((cause) => blobStoreIoError("inspect pinned object directory", cause))
   )
-  const alias = yield* resolveDescriptorAlias(fs, path, handle.fd, openedInfo, directory, "publish blob")
+  const descriptor = nodeFileDescriptor(handle)
+  if (descriptor === undefined) {
+    return yield* new BlobContainmentError({
+      operation: "publish blob",
+      message: "platform file handle does not expose a descriptor"
+    })
+  }
+  const alias = yield* resolveDescriptorAlias(fs, path, descriptor, openedInfo, directory, "publish blob")
   const traversedAlias = yield* fs.stat(`${alias}${path.sep}.`).pipe(Effect.result)
   if (Result.isFailure(traversedAlias) || !sameIdentity(openedInfo, traversedAlias.success)) {
     return yield* new BlobContainmentError({

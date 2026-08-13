@@ -68,7 +68,7 @@ export const GovernedActionRecoveryTokenDigest = encodedDigest("GovernedActionRe
 export type GovernedActionRecoveryTokenDigest = typeof GovernedActionRecoveryTokenDigest.Type
 
 /** Closed cryptographic failure while issuing or hashing an execution capability. */
-export class GovernedActionExecutionTokenError extends Schema.TaggedErrorClass<GovernedActionExecutionTokenError>()(
+export class GovernedActionExecutionTokenError extends Schema.TaggedError<GovernedActionExecutionTokenError>()(
   "GovernedActionExecutionTokenError",
   { operation: Schema.Literals(["digest", "issue"]) }
 ) {}

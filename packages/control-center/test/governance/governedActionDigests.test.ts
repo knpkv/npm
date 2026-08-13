@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as FastCheck from "fast-check"
 
 import {
   GovernedActionAttemptV1,
@@ -190,7 +191,7 @@ describe("governed action canonical digests", () => {
 
   it.prop(
     "is invariant to arbitrary top-level object insertion order",
-    [Schema.toArbitrary(Schema.Record(Schema.String, Schema.Json))],
+    [Schema.toArbitrary(Schema.Record(Schema.String, Schema.Json))(FastCheck)],
     ([record]) => {
       const reversed = Schema.decodeUnknownSync(Schema.Json)(Object.fromEntries(Object.entries(record).reverse()))
       return canonicalizeGovernedActionJson(record) === canonicalizeGovernedActionJson(reversed)

@@ -261,7 +261,7 @@ export type GovernedActionCommitResult =
   | { readonly _tag: "replayed"; readonly transition: GovernedActionTransitionV1 }
 
 /** Caller material is invalid or conflicts with immutable governed-action identity. */
-export class GovernedActionInputError extends Schema.TaggedErrorClass<GovernedActionInputError>()(
+export class GovernedActionInputError extends Schema.TaggedError<GovernedActionInputError>()(
   "GovernedActionInputError",
   {
     operation: Schema.Literals(["commit", "read"]),

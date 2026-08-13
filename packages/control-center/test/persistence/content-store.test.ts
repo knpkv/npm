@@ -12,6 +12,7 @@ import {
   RecordNotFoundError,
   ReproducibleContentUnavailableError
 } from "../../src/server/persistence/index.js"
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { BlobNotFoundError, BlobUnexpectedEofError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -27,18 +28,18 @@ const VERIFIED_LATER = fixtureTimestamps.verifiedLater
 const withReadAllocProbe = (
   file: FileSystem.File,
   beforeRead: Effect.Effect<void, PlatformError.PlatformError>
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  stat: file.stat,
-  seek: (offset, from) => file.seek(offset, from),
-  sync: file.sync,
-  read: (buffer) => file.read(buffer),
-  readAlloc: (size) => beforeRead.pipe(Effect.andThen(file.readAlloc(size))),
-  truncate: (length) => file.truncate(length),
-  write: (buffer) => file.write(buffer),
-  writeAll: (buffer) => file.writeAll(buffer)
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    stat: file.stat,
+    seek: (offset, from) => file.seek(offset, from),
+    sync: file.sync,
+    read: (buffer) => file.read(buffer),
+    readAlloc: (size) => beforeRead.pipe(Effect.andThen(file.readAlloc(size))),
+    truncate: (length) => file.truncate(length),
+    write: (buffer) => file.write(buffer),
+    writeAll: (buffer) => file.writeAll(buffer)
+  })
 
 const assertRefetchFailure = (
   failure: { readonly _tag: string },

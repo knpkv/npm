@@ -466,13 +466,10 @@ const AppRuntimeLayer = Layer.mergeAll(
   ChildEnv.layerHostEnvironment(process.env)
 )
 
-const needsAppRuntime = (args: ReadonlyArray<string>): boolean => args[0] !== "skills"
-
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  const runCli = needsAppRuntime(args) ? cli(args).pipe(Effect.provide(AppRuntimeLayer)) : cli(args)
-  return yield* runCli
+  return yield* cli(args).pipe(Effect.provide(AppRuntimeLayer))
 })
 
 // The TUI keeps long-lived resources open through its atom runtime (SQLite

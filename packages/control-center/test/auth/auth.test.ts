@@ -468,9 +468,11 @@ describe("Auth", () => {
           revokeExistingOwnerSessions: false
         })
       }).pipe(
-        Effect.provide(terminalRecoveryLayer(config)),
-        Effect.provide(confirmedLayer),
-        Effect.provide(mismatchedFileSystem),
+        Effect.provide(
+          terminalRecoveryLayer(config).pipe(
+            Layer.provideMerge(Layer.mergeAll(confirmedLayer, mismatchedFileSystem))
+          )
+        ),
         Effect.result,
         Effect.scoped
       )

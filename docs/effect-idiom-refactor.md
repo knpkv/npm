@@ -1,19 +1,18 @@
 # Effect Idiomaticity Refactor
 
 This refactor aligns the workspace with the Effect v4 APIs and lifecycle
-semantics used by the pinned `4.0.0-beta.98` release.
+semantics used by the pinned `4.0.0-beta.107` release.
 
 ## Source of truth
 
-- The workspace dependencies are `4.0.0-beta.98`.
-- `repos/effect` is currently one release behind at beta.97, so it remains useful
+- The workspace dependencies are `4.0.0-beta.107`.
+- `repos/effect` is currently at beta.98, so it remains useful
   for local navigation but is not sufficient for availability checks in this
   refactor.
 - API availability was verified against the exact
-  `effect@4.0.0-beta.98` upstream tag, not only a moving checkout.
-- The public Effect checkout is currently beta.102. Its `HEAD` may inform
-  forward-looking style, but this refactor must not depend on APIs absent from
-  beta.98.
+  `effect@4.0.0-beta.107` upstream tag, not only a moving checkout.
+- A moving upstream checkout may inform forward-looking style, but this
+  workspace must not depend on APIs absent from beta.107.
 
 ## Refactor guidance
 

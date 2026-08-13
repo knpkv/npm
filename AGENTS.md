@@ -233,7 +233,7 @@ When writing Effect code:
 - Bind services before calling methods inside generators:
   `const service = yield* SomeService`.
 - In `HttpApiBuilder.group`, acquire stable application services in the group callback before registering handlers so the resulting layer closes its requirements. Resolve only genuinely request-scoped services, such as `CurrentSession`, inside the per-request handler.
-- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
+- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedError`) and
   keep failures in the typed error channel.
 - In `packages/control-center/src/server/governance/internal/execution-store`, durable provider
   outcome decoding, canonical verification, replay-integrity checking, transition construction,

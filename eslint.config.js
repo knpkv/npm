@@ -40,6 +40,12 @@ export default tseslint.config(
     },
 
     settings: {
+      // TypeScript 7 has no JavaScript API. Microsoft's official `typescript`
+      // compatibility alias re-exports TypeScript 6 via `export =`, which
+      // import-x cannot expand when checking namespace members.
+      "import-x/ignore": [
+        "[/\\\\]@typescript[/\\\\]typescript6[/\\\\]lib[/\\\\]typescript\\.d\\.ts$"
+      ],
       "import-x/resolver": {
         name: "tsResolver",
         resolver: tsResolver,

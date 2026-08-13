@@ -211,7 +211,6 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
         {...(onSelectedLinesChange === undefined ? {} : { onSelectedLinesChange })}
         options={{
           collapsedContextThreshold: contextLines,
-          controlledSelection: selectedLines !== undefined,
           diffIndicators: "bars",
           diffStyle: mode === "split" ? "split" : "unified",
           disableVirtualizationBuffers: virtualization === "strict",

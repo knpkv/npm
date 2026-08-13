@@ -82,13 +82,13 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
   }
-  if (manifest.dependencies["@distilled.cloud/aws"] !== "0.29.1") {
+  if (manifest.dependencies["@distilled.cloud/aws"] !== "1.0.0-rc.4") {
     violations.push("@distilled.cloud/aws must remain on the reviewed CodePipeline client version")
   }
-  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1085.0") {
+  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1108.0") {
     violations.push("AWS CodePipeline client must remain on the reviewed runtime version")
   }
-  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1085.0") {
+  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1108.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")
   }
   const workspaceDependencies: ReadonlyArray<
@@ -120,19 +120,19 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.dependencies["@knpkv/control-center-sql"] !== "workspace:^") {
     violations.push("@knpkv/control-center-sql must use workspace:^")
   }
-  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.98") {
+  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.107") {
     violations.push("@effect/sql-libsql must align with the pinned Effect beta")
   }
-  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-beta.98") {
+  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-beta.107") {
     violations.push("@effect/ai-openai-compat must align with the pinned Effect beta")
   }
-  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.98") {
+  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.107") {
     violations.push("@effect/platform-node must align with the pinned Effect beta")
   }
-  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.98") {
+  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.107") {
     violations.push("@effect/platform-browser must align with the pinned Effect beta")
   }
-  if (manifest.dependencies.effect !== "4.0.0-beta.98") {
+  if (manifest.dependencies.effect !== "4.0.0-beta.107") {
     violations.push("effect must align with the pinned Effect beta")
   }
 

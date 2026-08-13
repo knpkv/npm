@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, it } from "@effect/vitest"
-import { Config, Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { Config, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -27,6 +27,11 @@ const gitEnvironment = (path: string): Readonly<Record<string, string>> => ({
   LC_ALL: "C",
   PATH: path
 })
+
+class NetworkProbeFixtureError extends Schema.TaggedError<NetworkProbeFixtureError>()(
+  "NetworkProbeFixtureError",
+  { message: Schema.String }
+) {}
 
 const runProcess = (
   command: string,
@@ -86,10 +91,7 @@ const startNetworkProbe = Effect.tryPromise({
       server.once("error", reject)
       server.listen(0, "0.0.0.0", () => resolve(server))
     }),
-  catch: (cause) =>
-    new Error("Could not start the sandbox network probe", {
-      cause
-    })
+  catch: () => new NetworkProbeFixtureError({ message: "Could not start the sandbox network probe" })
 })
 
 const releaseNetworkProbe = (server: Server): Effect.Effect<void> => Effect.sync(() => server.close())
@@ -102,7 +104,11 @@ const acquireNetworkProbe = (
     const server = yield* Effect.acquireRelease(startNetworkProbe, release)
     const address = addressOf(server)
     if (address === null || typeof address === "string") {
-      return yield* Effect.fail(new Error("Network probe did not expose an internet port"))
+      return yield* Effect.fail(
+        new NetworkProbeFixtureError({
+          message: "Network probe did not expose an internet port"
+        })
+      )
     }
     return { port: address.port, server }
   })
@@ -287,13 +293,16 @@ it.effect("runs the review session through the installed sbx runtime", () =>
             return { credentials, diff, file, network, revision, structured, write }
           }))
       }).pipe(
-        Effect.provide(prReviewSandboxSessionsLayer({
-          executable: "sbx",
-          maximumCommandDurationMillis: 30_000,
-          maximumSessionDurationMillis: 120_000
-        })),
-        Effect.provide(reviewCommandArtifactTestLayer()),
-        Effect.provide(sourceLayer)
+        Effect.provide(
+          prReviewSandboxSessionsLayer({
+            executable: "sbx",
+            maximumCommandDurationMillis: 30_000,
+            maximumSessionDurationMillis: 120_000
+          }).pipe(
+            Layer.provideMerge(reviewCommandArtifactTestLayer()),
+            Layer.provideMerge(sourceLayer)
+          )
+        )
       )
 
       assert.strictEqual(observed.revision.exitCode, 0)

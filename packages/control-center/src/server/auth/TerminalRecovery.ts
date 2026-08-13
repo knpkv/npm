@@ -20,6 +20,7 @@ import {
 import { Actor } from "../../domain/actors.js"
 import { WorkspaceId } from "../../domain/identifiers.js"
 import { databaseLayer } from "../persistence/Database.js"
+import { nodeFileDescriptor } from "../persistence/NodeFileDescriptor.js"
 import { decodePersistenceConfig } from "../persistence/PersistenceConfig.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthRepository } from "./AuthRepository.js"
@@ -46,7 +47,7 @@ const sameIdentity = (left: FileSystemType.File.Info, right: FileSystemType.File
 
 const descriptorAliases = (
   path: PathType.Path,
-  descriptor: FileSystemType.File.Descriptor
+  descriptor: number
 ): ReadonlyArray<string> => [
   path.join("/proc/self/fd", String(descriptor)),
   path.join("/dev/fd", String(descriptor))
@@ -67,7 +68,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
     sameIdentity(initialDirectoryInfo, info)
 
   const resolveDirectoryAlias = Effect.fn("TerminalRecovery.resolveDirectoryAlias")(function*(
-    descriptor: FileSystemType.File.Descriptor
+    descriptor: number
   ) {
     for (const alias of descriptorAliases(path, descriptor)) {
       const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
@@ -92,7 +93,11 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           if (!verifyDirectoryInfo(directoryInfo)) {
             return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-not-private" })
           }
-          const alias = yield* resolveDirectoryAlias(directory.fd)
+          const descriptor = nodeFileDescriptor(directory)
+          if (descriptor === undefined) {
+            return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-unavailable" })
+          }
+          const alias = yield* resolveDirectoryAlias(descriptor)
           const assertIdentity = Effect.gen(function*() {
             const current = yield* directory.stat.pipe(Effect.result)
             const aliasInfo = yield* fileSystem.stat(alias).pipe(Effect.result)

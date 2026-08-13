@@ -13,7 +13,7 @@ import { Database } from "../Database.js"
 import { mapPersistenceOperation } from "./internal.js"
 
 /** Raised when Timeline export audit persistence input is invalid. */
-export class TimelineExportAuditInputError extends Schema.TaggedErrorClass<TimelineExportAuditInputError>()(
+export class TimelineExportAuditInputError extends Schema.TaggedError<TimelineExportAuditInputError>()(
   "TimelineExportAuditInputError",
   {}
 ) {}

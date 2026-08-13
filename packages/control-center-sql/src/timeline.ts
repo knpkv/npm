@@ -1,4 +1,4 @@
-import { Casing, Column, Function as SqlFunction, Query } from "effect-qb"
+import { Casing, Column, Function as SqlFunction, Query, Type } from "effect-qb"
 import * as Sqlite from "effect-qb/sqlite"
 
 import type { RenderedSql } from "./types.js"
@@ -32,7 +32,7 @@ export interface RenderedTimelineQuery extends RenderedSql {
 
 const table = Casing.make({ tables: "snake_case", columns: "snake_case" }).table
 const renderer = Sqlite.Renderer.make().pipe(Casing.withCasing("snake_case"))
-const nullText = Query.cast(null, Query.type.text())
+const nullText = Query.cast(null, Type.text())
 const timelineDetailSources: ReadonlyArray<"audit" | "sync" | "relationship" | "domain"> = [
   "audit",
   "sync",

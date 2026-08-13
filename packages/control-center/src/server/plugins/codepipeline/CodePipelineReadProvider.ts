@@ -224,26 +224,24 @@ export interface PutPipelineApprovalProviderRequest extends GetPipelineProviderR
 }
 
 /** A provider object requested by the adapter does not exist. @internal */
-export class CodePipelineProviderNotFoundFailure extends Schema.TaggedErrorClass<CodePipelineProviderNotFoundFailure>()(
+export class CodePipelineProviderNotFoundFailure extends Schema.TaggedError<CodePipelineProviderNotFoundFailure>()(
   "CodePipelineProviderNotFoundFailure",
   { operation: Schema.String }
 ) {}
 
 /** Credential acquisition timed out before a mutation could reach AWS. @internal */
-export class CodePipelinePreDispatchTimeoutFailure
-  extends Schema.TaggedErrorClass<CodePipelinePreDispatchTimeoutFailure>()(
-    "CodePipelinePreDispatchTimeoutFailure",
-    { operation: Schema.String }
-  )
-{}
+export class CodePipelinePreDispatchTimeoutFailure extends Schema.TaggedError<CodePipelinePreDispatchTimeoutFailure>()(
+  "CodePipelinePreDispatchTimeoutFailure",
+  { operation: Schema.String }
+) {}
 
 /** Identity verification failed before a mutation could reach AWS. @internal */
-export class CodePipelinePreDispatchFailure extends Schema.TaggedErrorClass<CodePipelinePreDispatchFailure>()(
+export class CodePipelinePreDispatchFailure extends Schema.TaggedError<CodePipelinePreDispatchFailure>()(
   "CodePipelinePreDispatchFailure",
   { operation: Schema.String, diagnosticCode: Schema.String }
 ) {}
 
-class CodePipelineSdkFailure extends Schema.TaggedErrorClass<CodePipelineSdkFailure>()(
+class CodePipelineSdkFailure extends Schema.TaggedError<CodePipelineSdkFailure>()(
   "CodePipelineSdkFailure",
   { cause: Schema.Defect() }
 ) {}
@@ -480,7 +478,7 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
   return yield* effect.pipe(
     Effect.provide(
       Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials),
+        DistilledCredentials.fromCredentials(credentials, account.region),
         Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(HttpClient.HttpClient, httpClient)
       )
@@ -540,7 +538,7 @@ export const callPinnedCodePipelineMutationProvider = Effect.fn(
     })
   )
   const runtimeLayer = Layer.mergeAll(
-    DistilledCredentials.fromCredentials(credentials),
+    DistilledCredentials.fromCredentials(credentials, account.region),
     Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
     Layer.succeed(HttpClient.HttpClient, httpClient)
   )

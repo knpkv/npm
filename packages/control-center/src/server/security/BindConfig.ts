@@ -54,7 +54,7 @@ const BindConfigInput = Schema.Struct({
 })
 
 /** A decoded bind configuration is invalid or would expose an ambiguous endpoint. */
-export class BindConfigError extends Schema.TaggedErrorClass<BindConfigError>()("BindConfigError", {
+export class BindConfigError extends Schema.TaggedError<BindConfigError>()("BindConfigError", {
   reason: Schema.Literals([
     "invalid-input",
     "invalid-origin",

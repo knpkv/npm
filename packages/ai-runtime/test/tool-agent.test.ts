@@ -66,7 +66,7 @@ const response = (
   ...parts: ReadonlyArray<Response.PartEncoded>
 ): ReadonlyArray<Response.PartEncoded> => [...parts, finish()]
 
-class InspectionFailure extends Schema.TaggedErrorClass<InspectionFailure>()(
+class InspectionFailure extends Schema.TaggedError<InspectionFailure>()(
   "InspectionFailure",
   { message: Schema.String }
 ) {}
@@ -652,11 +652,11 @@ describe("runToolAgent", () => {
       expect(
         fake.requests[1]?.prompt.content.some(
           (message) =>
-            message.role === "tool" &&
-            message.content.some(
+            Array.isArray(message.content) && message.content.some(
               (part) =>
                 part.type === "tool-result" &&
                 part.id === "provider-call" &&
+                part.providerExecuted &&
                 Schema.is(Schema.Struct({ content: Schema.String }))(part.result) &&
                 part.result.content === "provider result"
             )
@@ -722,7 +722,7 @@ describe("runToolAgent", () => {
         artifactSink
       }).pipe(Stream.runCollect)
       const replayedResult = fake.requests[1]?.prompt.content
-        .filter((message) => message.role === "tool")
+        .filter((message) => Array.isArray(message.content))
         .flatMap((message) => message.content)
         .find((part) => part.type === "tool-result" && part.id === "provider-large")
 

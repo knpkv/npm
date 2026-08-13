@@ -161,7 +161,7 @@ const EvidenceData = Schema.Struct({
   value: Schema.optionalKey(EvidenceValue)
 })
 /** Redacted failure raised before a normalized page can become a canonical projection. */
-export class NormalizedPluginPageMaterializationError extends Schema.TaggedErrorClass<
+export class NormalizedPluginPageMaterializationError extends Schema.TaggedError<
   NormalizedPluginPageMaterializationError
 >()("NormalizedPluginPageMaterializationError", {
   diagnosticCode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),

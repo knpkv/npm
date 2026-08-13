@@ -69,7 +69,7 @@ export interface AuthenticatedMutationAuthorization {
 }
 
 /** A request failed the same-origin/session transport policy. */
-export class RequestSecurityError extends Schema.TaggedErrorClass<RequestSecurityError>()("RequestSecurityError", {
+export class RequestSecurityError extends Schema.TaggedError<RequestSecurityError>()("RequestSecurityError", {
   reason: Schema.Literals([
     "invalid-request",
     "host-rejected",

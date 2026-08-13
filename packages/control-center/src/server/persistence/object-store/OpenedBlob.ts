@@ -1,6 +1,7 @@
 import type { Path } from "effect"
 import { Effect, FileSystem, Option, Result, Stream } from "effect"
 
+import { nodeFileDescriptor } from "../NodeFileDescriptor.js"
 import type { BlobDigest } from "./BlobDigest.js"
 import { BlobContainmentError, BlobNotFoundError, blobStoreIoError, BlobUnexpectedEofError } from "./BlobStoreError.js"
 import type { BlobStoreError } from "./BlobStoreError.js"
@@ -60,7 +61,14 @@ export const makeOpenedBlobReader = (
     const openedInfo = yield* file.stat.pipe(
       Effect.mapError((cause) => blobStoreIoError(operation, cause))
     )
-    yield* resolveDescriptorAlias(fs, path, file.fd, openedInfo, reference.filePath, operation)
+    const descriptor = nodeFileDescriptor(file)
+    if (descriptor === undefined) {
+      return yield* new BlobContainmentError({
+        operation,
+        message: "platform file handle does not expose a descriptor"
+      })
+    }
+    yield* resolveDescriptorAlias(fs, path, descriptor, openedInfo, reference.filePath, operation)
 
     if (openedInfo.type !== "File" || (openedInfo.mode & 0o077) !== 0) {
       return yield* new BlobContainmentError({

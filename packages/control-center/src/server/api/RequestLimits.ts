@@ -59,13 +59,13 @@ export class RequestLimitPolicy extends Context.Service<
 }
 
 /** A request exceeded its bounded execution time. */
-export class RequestTimeLimitExceeded extends Schema.TaggedErrorClass<RequestTimeLimitExceeded>()(
+export class RequestTimeLimitExceeded extends Schema.TaggedError<RequestTimeLimitExceeded>()(
   "RequestTimeLimitExceeded",
   {}
 ) {}
 
 /** A request exhausted its profile-specific token bucket. */
-export class RequestRateLimitExceeded extends Schema.TaggedErrorClass<RequestRateLimitExceeded>()(
+export class RequestRateLimitExceeded extends Schema.TaggedError<RequestRateLimitExceeded>()(
   "RequestRateLimitExceeded",
   {
     limit: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -74,13 +74,13 @@ export class RequestRateLimitExceeded extends Schema.TaggedErrorClass<RequestRat
 ) {}
 
 /** The configured rate-limit store could not evaluate a request. */
-export class RequestRateLimitUnavailable extends Schema.TaggedErrorClass<RequestRateLimitUnavailable>()(
+export class RequestRateLimitUnavailable extends Schema.TaggedError<RequestRateLimitUnavailable>()(
   "RequestRateLimitUnavailable",
   {}
 ) {}
 
 /** A declared request body is larger than the API permits. */
-export class RequestBodyLimitExceeded extends Schema.TaggedErrorClass<RequestBodyLimitExceeded>()(
+export class RequestBodyLimitExceeded extends Schema.TaggedError<RequestBodyLimitExceeded>()(
   "RequestBodyLimitExceeded",
   {
     maximumBytes: Schema.Int.check(Schema.isGreaterThan(0))

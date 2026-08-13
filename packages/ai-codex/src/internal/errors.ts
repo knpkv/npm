@@ -3,7 +3,7 @@ import * as AiError from "effect/unstable/ai/AiError"
 
 const MAX_DIAGNOSTIC_CHARACTERS = 2_048
 
-export class CodexTransportError extends Schema.TaggedErrorClass<CodexTransportError>()(
+export class CodexTransportError extends Schema.TaggedError<CodexTransportError>()(
   "CodexTransportError",
   {
     cause: Schema.Defect(),
