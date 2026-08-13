@@ -32,7 +32,7 @@
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
     "check": "tsc --noEmit && pnpm check:contract",
-    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && TSP_COMPILER_TS_PATH=$(node ../../scripts/typescript-compiler-path.mjs) ../../node_modules/.bin/tspc -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
+    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && ../../node_modules/.bin/tsc6 -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run"
