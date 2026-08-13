@@ -51,7 +51,7 @@ The journey pairs through the public origin, reaches an authenticated workspace 
 Report version 2 adds:
 
 - a named two-second warmed portfolio p95 budget;
-- deterministic eligibility facts (Linux x64/arm64, Node 24+, at least four
+- deterministic eligibility facts (Linux x64/arm64, Node 26+, at least four
   logical CPUs, 8 GiB memory, and an explicit local-SSD declaration);
 - `timingAcceptance` with `eligible`, `passed`, and a stable reason;
 - a schema refinement that rejects eligible reports whose p95 exceeds the budget or whose acceptance flags contradict the measurement.
@@ -68,6 +68,6 @@ The Control Center build already repairs only missing manifest-declared workspac
 - `test`: route-owned interaction audit; an unreachable action, missing painted focus indicator, forced-color-hidden action, or reduced-motion-dependent outcome fails while an explicit read-only no-action presentation remains valid.
 - `test`: axe WCAG tag fixture; a visible `Delete` label whose accessible name says only `Remove` fails, while an accessible name containing `Delete` passes.
 - `test`: report-schema contradiction and eligible over-budget fixtures; a nearby ineligible over-budget report remains valid but explicitly informational.
-- `test`: strict Node version evidence; malformed `v24beta` is rejected while `v24.10.0` and its supported prerelease form remain eligible.
+- `test`: strict Node version evidence; malformed `v26beta` is rejected while `v26.7.0` and its supported prerelease form remain eligible.
 - `test`: package-script/build-phase contract; unconditional recursive dependency build is invalid, manifest-based repair plus distribution validation remains valid.
 - `test`: HTTPS proxy journey; spoofed forwarded headers outside the trusted path remain covered by the existing request-security suite, while the trusted path must emit HSTS, secure CSP, and the full production response-header contract without exposing embedded session material.

@@ -187,7 +187,7 @@ const validateProbeWorkflow = (workflow) => {
         name: "Install dependencies",
         uses: "./.github/actions/setup",
         with: {
-          "node-version": "24.10.0"
+          "node-version": "26.7.0"
         }
       },
       {

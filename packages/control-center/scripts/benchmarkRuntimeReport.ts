@@ -40,7 +40,7 @@ export const CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS = 2_000
 /** Minimum hardware facts for comparing absolute browser-runtime timing. */
 export const CONTROL_CENTER_TIMING_ELIGIBILITY = Object.freeze({
   logicalCpuCount: 4,
-  nodeMajorVersion: 24,
+  nodeMajorVersion: 26,
   totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024
 })
 

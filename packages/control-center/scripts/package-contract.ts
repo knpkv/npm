@@ -48,7 +48,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
   if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
-  if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
+  if (manifest.engines.node !== ">=26") violations.push("Node 26 or newer must be required")
 
   const runtimeKeys = [
     "@aws-sdk/client-codepipeline",

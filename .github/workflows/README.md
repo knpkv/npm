@@ -22,7 +22,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures consistent formatting across codebase
 - **Command**: `pnpm format`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Lint
 
@@ -30,7 +30,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures code style consistency
 - **Command**: `pnpm lint`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Audit
 
@@ -38,21 +38,21 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Fails the workflow when audited dependencies include advisories
 - **Command**: `pnpm run audit`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Types
 
 - Validates TypeScript compilation
 - **Command**: `pnpm check`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Test
 
 - Runs test suite
 - **Command**: `pnpm test`
 - **Timeout**: 15 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Browser
 
@@ -78,7 +78,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   - `pnpm --filter @knpkv/control-center benchmark:contracts`
   - `pnpm --filter @knpkv/control-center benchmark:validate-runtime`
 - **Timeout**: 15 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -115,7 +115,7 @@ Publishing additionally requires a trusted non-PR `refs/heads/main` run.
   - `pnpm build` - Build all packages from trusted `main`
   - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -311,13 +311,13 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm my-custom-command
 ```
 
 ## Node Version
 
-- **Node.js**: 24.10.0
+- **Node.js**: 26.7.0
 
 This can be updated in the workflow file as needed.
 

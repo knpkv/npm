@@ -35,7 +35,7 @@ const validManifest = {
     "react-router": "8.3.0",
     "remark-gfm": "^4.0.1"
   },
-  engines: { node: ">=24" },
+  engines: { node: ">=26" },
   exports: {
     ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
     "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },

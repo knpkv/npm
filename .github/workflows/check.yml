@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm format
 
   lint:
@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm lint
 
   audit:
@@ -66,7 +66,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm run audit
 
   types:
@@ -82,7 +82,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm build
       - run: pnpm check
 
@@ -101,7 +101,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       # @knpkv/jira-clockify ships an nvim plugin whose specs run under
       # `nvim --headless`. Without the binary those specs skip, and the plugin's
       # single-flight and cache invariants would have no automated cover.
@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - name: Install bounded Chromium runtime
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Test browser applications and catalogs

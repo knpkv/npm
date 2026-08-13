@@ -27,7 +27,7 @@ import {
 const machine = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
   architecture: "x64",
   logicalCpuCount: 4,
-  nodeVersion: "v24.0.0",
+  nodeVersion: "v26.0.0",
   platform: "linux",
   storageClass: "unverified",
   totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024

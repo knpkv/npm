@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: "24.10.0"
+          node-version: "26.7.0"
 
       - name: Build packages
         run: pnpm --filter @knpkv/agent-skills --filter @knpkv/atlassian-common --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
@@ -57,7 +57,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: "24.10.0"
+          node-version: "26.7.0"
 
       - name: Run integration tests
         env:

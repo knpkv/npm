@@ -9,6 +9,9 @@ const canonicalTemporaryDirectory = temporaryDirectory.startsWith("/var/folders/
 
 export default defineConfig({
   test: {
+    // Node 26 enables process-global Web Storage by default. Browser tests must
+    // use jsdom's origin-scoped storage instead of Node's file-backed globals.
+    execArgv: ["--no-experimental-webstorage"],
     env: {
       // macOS exposes its temporary directory through the /var compatibility
       // symlink. Persistence tests deliberately require canonical roots.

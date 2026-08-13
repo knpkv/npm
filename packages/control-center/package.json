@@ -41,7 +41,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "benchmark": "pnpm benchmark:contracts && pnpm benchmark:runtime",

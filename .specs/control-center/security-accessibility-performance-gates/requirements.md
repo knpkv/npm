@@ -40,4 +40,4 @@
 ## Compatibility
 
 1. No public API, storage schema, migration sequence, provider authority, or workspace authorization behavior changes.
-2. The implementation remains compatible with the repository's Node 24 baseline and Chromium browser gate.
+2. The implementation remains compatible with the repository's Node 26 baseline and Chromium browser gate.

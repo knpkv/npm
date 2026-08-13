@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
           registry-url: https://registry.npmjs.org
       - name: Create Release Pull Request or Publish
         uses: changesets/action@198f833dd7d863100ea6e28967bc9a9fdefadb0a # v2.1.0
