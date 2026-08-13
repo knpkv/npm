@@ -1,11 +1,11 @@
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
-import path from "path"
+import path from "node:path"
 import { defineConfig } from "vite"
 import { productionPrototypeBoundary } from "./src/tooling/production-prototype-boundary.js"
 import { authenticatedDevProxyConfig } from "./src/tooling/authenticated-dev-proxy.js"
 
-const clientRoot = path.resolve(__dirname, "src/client")
+const clientRoot = path.resolve(import.meta.dirname, "src/client")
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), productionPrototypeBoundary(clientRoot)],
@@ -25,8 +25,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src/client"),
-      "@knpkv/codecommit-core": path.resolve(__dirname, "../codecommit-core/src")
+      "@": path.resolve(import.meta.dirname, "src/client"),
+      "@knpkv/codecommit-core": path.resolve(import.meta.dirname, "../codecommit-core/src")
     }
   },
   server: {

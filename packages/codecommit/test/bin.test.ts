@@ -38,10 +38,10 @@ const hasBun = (): Promise<boolean> =>
     })
   })
 
-describe("codecommit CLI", () => {
-  it("prints help without an Undici teardown crash", async () => {
-    if (!(await hasBun())) return
+const bunAvailable = await hasBun()
 
+describe("codecommit CLI", () => {
+  it.skipIf(!bunAvailable)("prints help without an Undici teardown crash", async () => {
     const result = await runCodecommit(["--help"])
 
     expect(result.code).toBe(0)

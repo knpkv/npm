@@ -50,9 +50,23 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 #### Test
 
 - Runs test suite
+- Pins Bun 1.3.14 so the shipped CodeCommit runtime and Bun-hosted child-process
+  boundary tests run instead of reporting a platform skip
 - **Command**: `pnpm test`
 - **Timeout**: 15 minutes
 - **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
+
+#### Edge runtimes
+
+- Runs on the Ubuntu 26.04 public-preview image as an explicit forward-compatibility canary
+- Pins and verifies Node.js 26.7.0 and Bun 1.3.14
+- Exercises the focused CodeCommit CLI and Node/Bun child-environment boundaries
+- Uses Vite's native configuration loader now, ahead of its planned default
+- **Command**: `pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts`
+- **Timeout**: 10 minutes
+- **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
 
 #### Browser
 
@@ -113,7 +127,7 @@ Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 - Publishes to the temporary registry for testing
 - **Commands**:
   - `pnpm build` - Build all packages from trusted `main`
-  - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
+  - `sfw pnpm dlx pkg-pr-new@0.0.87 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
 - **Node Version**: 26.7.0
 
