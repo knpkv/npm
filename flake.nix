@@ -26,12 +26,17 @@
   in {
     formatter = forAllSystems (pkgs: pkgs.alejandra);
     checks = forAllSystems (pkgs: let
-      inherit (nodeToolchain pkgs) corepack nodejs pnpm;
+      inherit (nodeToolchain pkgs) corepack nodejs pnpm pnpx;
       inherit (pkgs) awscli2 jq openssl ripgrep;
     in {
       node-pnpm-toolchain = pkgs.runCommand "node-pnpm-toolchain" {} ''
         test "$(${nodejs}/bin/node --eval 'process.stdout.write(process.versions.node.split(".")[0])')" = 26
+        test -f ${corepack}/dist/pnpm.js
+        test -f ${corepack}/dist/pnpx.js
         grep --fixed-strings '${nodejs}/bin/node ${corepack}/dist/pnpm.js' ${pnpm}/bin/pnpm
+        grep --fixed-strings '${nodejs}/bin/node ${corepack}/dist/pnpx.js' ${pnpx}/bin/pnpx
+        ${nodejs}/bin/node --check ${corepack}/dist/pnpm.js
+        ${nodejs}/bin/node --check ${corepack}/dist/pnpx.js
         ${awscli2}/bin/aws --version
         ${jq}/bin/jq --version
         ${ripgrep}/bin/rg --version
