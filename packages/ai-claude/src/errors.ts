@@ -3,7 +3,7 @@ import { AiError } from "effect/unstable/ai"
 
 const MODULE = "ClaudeCliLanguageModel"
 
-export class ClaudeTransportError extends Schema.TaggedErrorClass<ClaudeTransportError>()(
+export class ClaudeTransportError extends Schema.TaggedError<ClaudeTransportError>()(
   "ClaudeTransportError",
   {
     cause: Schema.Defect(),

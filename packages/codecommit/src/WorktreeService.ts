@@ -15,7 +15,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import * as GitEnvironment from "./GitEnvironment.js"
 
-export class WorktreeError extends Schema.TaggedErrorClass<WorktreeError>()(
+export class WorktreeError extends Schema.TaggedError<WorktreeError>()(
   "WorktreeError",
   {
     operation: Schema.String,

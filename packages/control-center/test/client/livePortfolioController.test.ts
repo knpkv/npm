@@ -88,7 +88,7 @@ const lastingStream = (events: ReadonlyArray<ControlCenterLiveEvent>): Stream.St
   Stream.fromIterable(events).pipe(Stream.concat(Stream.never))
 
 describe("live portfolio controller", () => {
-  it("keeps the initial connection pending until the stream proves catch-up", () =>
+  it.effect("keeps the initial connection pending until the stream proves catch-up", () =>
     Effect.gen(function*() {
       const streamOpened = yield* Deferred.make<void>()
       const states: Array<PortfolioSnapshotLoadState> = []
@@ -115,7 +115,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("converges through authoritative refresh while deduplicating queued invalidations", () =>
+  it.effect("converges through authoritative refresh while deduplicating queued invalidations", () =>
     Effect.gen(function*() {
       const refreshedSnapshot = makePortfolioSnapshot("current", 13)
       const snapshots = [makePortfolioSnapshot("current", 10), refreshedSnapshot]
@@ -143,7 +143,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("allows a resumed stream to begin with heartbeat or durable invalidation", () =>
+  it.effect("allows a resumed stream to begin with heartbeat or durable invalidation", () =>
     Effect.gen(function*() {
       const refreshedSnapshot = makePortfolioSnapshot("current", 11)
       const snapshots = [makePortfolioSnapshot("current", 10), refreshedSnapshot]
@@ -170,7 +170,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("returns a stale reconnect to Live when an equal heartbeat proves catch-up", () =>
+  it.effect("returns a stale reconnect to Live when an equal heartbeat proves catch-up", () =>
     Effect.gen(function*() {
       const states: Array<PortfolioSnapshotLoadState> = []
       let openings = 0
@@ -202,7 +202,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("preserves the snapshot offline and reconnects immediately when the browser returns", () =>
+  it.effect("preserves the snapshot offline and reconnects immediately when the browser returns", () =>
     Effect.gen(function*() {
       const returnOnline = yield* Deferred.make<void>()
       const streamOpened = yield* Deferred.make<void>()
@@ -241,7 +241,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("refreshes authoritatively when a heartbeat is ahead of the applied snapshot", () =>
+  it.effect("refreshes authoritatively when a heartbeat is ahead of the applied snapshot", () =>
     Effect.gen(function*() {
       const refreshedSnapshot = makePortfolioSnapshot("current", 12)
       const snapshots = [makePortfolioSnapshot("current", 10), refreshedSnapshot]
@@ -272,7 +272,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("retains the reset head and reconnects when a replacement arrives below its floor", () =>
+  it.effect("retains the reset head and reconnects when a replacement arrives below its floor", () =>
     Effect.gen(function*() {
       const states: Array<PortfolioSnapshotLoadState> = []
       let openings = 0
@@ -317,7 +317,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("rejects a reset for another resume cursor without regressing the applied snapshot", () =>
+  it.effect("rejects a reset for another resume cursor without regressing the applied snapshot", () =>
     Effect.gen(function*() {
       const openedAfter: Array<EventCursor> = []
       const states: Array<PortfolioSnapshotLoadState> = []
@@ -360,7 +360,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("accepts a reset correlated with the cursor advanced by a replayed invalidation", () =>
+  it.effect("accepts a reset correlated with the cursor advanced by a replayed invalidation", () =>
     Effect.gen(function*() {
       const refreshedSnapshot = makePortfolioSnapshot("current", 11)
       const snapshots = [makePortfolioSnapshot("current", 10), refreshedSnapshot]
@@ -395,7 +395,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("allows only reason-consistent reset cursor ordering", () =>
+  it.effect("allows only reason-consistent reset cursor ordering", () =>
     Effect.gen(function*() {
       const acceptedStates: Array<PortfolioSnapshotLoadState> = []
       const acceptedTransport: PortfolioLiveTransport = {
@@ -449,7 +449,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(rejected)
     }))
 
-  it("accepts only replay-budget resets whose requested cursor does not exceed the head", () =>
+  it.effect("accepts only replay-budget resets whose requested cursor does not exceed the head", () =>
     Effect.gen(function*() {
       const acceptedStates: Array<PortfolioSnapshotLoadState> = []
       const acceptedTransport: PortfolioLiveTransport = {
@@ -495,7 +495,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(rejected)
     }))
 
-  it("rejects reset metadata whose pruned cursor is beyond the advertised head", () =>
+  it.effect("rejects reset metadata whose pruned cursor is beyond the advertised head", () =>
     Effect.gen(function*() {
       let openings = 0
       const states: Array<PortfolioSnapshotLoadState> = []
@@ -525,7 +525,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("reconnects from the last applied snapshot cursor and closes every stream", () =>
+  it.effect("reconnects from the last applied snapshot cursor and closes every stream", () =>
     Effect.gen(function*() {
       const openedAfter: Array<EventCursor> = []
       let activeStreams = 0
@@ -567,7 +567,7 @@ describe("live portfolio controller", () => {
       assert.strictEqual(closedStreams, 2)
     }))
 
-  it("resets reconnect backoff after acquiring a stream", () =>
+  it.effect("resets reconnect backoff after acquiring a stream", () =>
     Effect.gen(function*() {
       let openings = 0
       const reconnectAttempts: Array<number> = []
@@ -605,7 +605,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("keeps increasing backoff across consecutive stream acquisition failures", () =>
+  it.effect("keeps increasing backoff across consecutive stream acquisition failures", () =>
     Effect.gen(function*() {
       let openings = 0
       const reconnectAttempts: Array<number> = []
@@ -635,7 +635,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("keeps increasing backoff when acquired streams fail before a valid event", () =>
+  it.effect("keeps increasing backoff when acquired streams fail before a valid event", () =>
     Effect.gen(function*() {
       let openings = 0
       const reconnectAttempts: Array<number> = []
@@ -666,7 +666,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("keeps one reconnect span across repeated transient failures", () =>
+  it.effect("keeps one reconnect span across repeated transient failures", () =>
     Effect.gen(function*() {
       let activeReconnectSpans = 0
       let maximumActiveReconnectSpans = 0
@@ -718,7 +718,7 @@ describe("live portfolio controller", () => {
       assert.strictEqual(activeReconnectSpans, 0)
     }))
 
-  it("does not advance the resume cursor when a snapshot event id mismatches its data", () =>
+  it.effect("does not advance the resume cursor when a snapshot event id mismatches its data", () =>
     Effect.gen(function*() {
       const openedAfter: Array<EventCursor> = []
       const mismatched = { ...snapshotEvent(12), id: makePortfolioSnapshot("current", 11).eventCursor }
@@ -745,7 +745,7 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("invalidates exactly the session whose live stream is unauthorized", () =>
+  it.effect("invalidates exactly the session whose live stream is unauthorized", () =>
     Effect.gen(function*() {
       const invalidatedSessions: Array<string> = []
       const states: Array<PortfolioSnapshotLoadState> = []
@@ -779,7 +779,7 @@ describe("live portfolio controller", () => {
     assert.strictEqual(portfolioReconnectDelayMillis(99, 0.5), 22_500)
   })
 
-  it("waits a positive delay before retrying an always-failing transport with zero random", () =>
+  it.effect("waits a positive delay before retrying an always-failing transport with zero random", () =>
     Effect.gen(function*() {
       let openings = 0
       const transport: PortfolioLiveTransport = {

@@ -35,14 +35,15 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-version: 24.10.0
+          registry-url: https://registry.npmjs.org
       - name: Create Release Pull Request or Publish
-        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
         with:
+          github-token: ${{ secrets.TOKEN_GITHUB }}
           # Version packages based on changeset files
-          version: pnpm changeset:version
+          version-script: pnpm changeset:version
           # Build and publish packages to npm registry
-          publish: pnpm changeset:publish
+          publish-script: pnpm changeset:publish
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
-          NPM_TOKEN: ${{ secrets.TOKEN_NPM }}
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0

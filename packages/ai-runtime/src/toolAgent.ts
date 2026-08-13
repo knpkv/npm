@@ -106,7 +106,7 @@ export type ToolAgentEvent<Output> =
   }
 
 /** The tool-agent configuration is not executable as supplied. */
-export class ToolAgentConfigurationError extends Schema.TaggedErrorClass<ToolAgentConfigurationError>()(
+export class ToolAgentConfigurationError extends Schema.TaggedError<ToolAgentConfigurationError>()(
   "ToolAgentConfigurationError",
   {
     reason: Schema.Literals([
@@ -122,7 +122,7 @@ export class ToolAgentConfigurationError extends Schema.TaggedErrorClass<ToolAge
 ) {}
 
 /** The model failed to repair a malformed tool call or final response. */
-export class ToolAgentInvalidResponseError extends Schema.TaggedErrorClass<ToolAgentInvalidResponseError>()(
+export class ToolAgentInvalidResponseError extends Schema.TaggedError<ToolAgentInvalidResponseError>()(
   "ToolAgentInvalidResponseError",
   {
     stage: Schema.Literals(["tool-call", "final-output"]),
@@ -131,7 +131,7 @@ export class ToolAgentInvalidResponseError extends Schema.TaggedErrorClass<ToolA
 ) {}
 
 /** A tool completed without one encodable final result. */
-export class ToolAgentToolProtocolError extends Schema.TaggedErrorClass<ToolAgentToolProtocolError>()(
+export class ToolAgentToolProtocolError extends Schema.TaggedError<ToolAgentToolProtocolError>()(
   "ToolAgentToolProtocolError",
   {
     toolName: Schema.String,
@@ -140,7 +140,7 @@ export class ToolAgentToolProtocolError extends Schema.TaggedErrorClass<ToolAgen
 ) {}
 
 /** A large result could not be retained, so it cannot safely reach the model. */
-export class ToolAgentArtifactRequiredError extends Schema.TaggedErrorClass<ToolAgentArtifactRequiredError>()(
+export class ToolAgentArtifactRequiredError extends Schema.TaggedError<ToolAgentArtifactRequiredError>()(
   "ToolAgentArtifactRequiredError",
   {
     byteLength: Schema.Int,
@@ -149,7 +149,7 @@ export class ToolAgentArtifactRequiredError extends Schema.TaggedErrorClass<Tool
 ) {}
 
 /** The run exhausted its visible wall-clock budget. */
-export class ToolAgentTimeoutError extends Schema.TaggedErrorClass<ToolAgentTimeoutError>()(
+export class ToolAgentTimeoutError extends Schema.TaggedError<ToolAgentTimeoutError>()(
   "ToolAgentTimeoutError",
   {
     budgetMillis: Schema.Number
@@ -484,6 +484,7 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
       id: call.id,
       isFailure: finalResult.isFailure,
       name: call.name,
+      providerExecuted: false,
       result: material.modelValue
     })
   }

@@ -3,7 +3,6 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Stream from "effect/Stream"
 
 import {
   ApplicationConflict,
@@ -86,7 +85,7 @@ export const makeCodePipelineReads = (
       Effect.mapError(() => unavailable())
     )
     return {
-      body: Stream.succeed(bytes),
+      body: bytes,
       contentLength: bytes.byteLength,
       filename: range.filename,
       offset: input.request.offset,

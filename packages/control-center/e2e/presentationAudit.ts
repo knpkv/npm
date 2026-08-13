@@ -214,9 +214,8 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
   const unfocused = await primaryAction.evaluate((element): FocusVisualSnapshot => {
     const hasPaintContext = (
-      candidate: SVGElement | HTMLElement
-    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
-      "parentElement" in candidate && "ownerDocument" in candidate
+      candidate: typeof element
+    ): candidate is typeof element & PaintContextElement => "parentElement" in candidate && "ownerDocument" in candidate
     if (window.getComputedStyle === undefined || !hasPaintContext(element)) {
       throw new Error("primary action has no computed-style paint context")
     }
@@ -276,9 +275,8 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
   await expect(primaryAction).toBeFocused()
   const focused = await primaryAction.evaluate((element): FocusedVisualSnapshot => {
     const hasPaintContext = (
-      candidate: SVGElement | HTMLElement
-    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
-      "parentElement" in candidate && "ownerDocument" in candidate
+      candidate: typeof element
+    ): candidate is typeof element & PaintContextElement => "parentElement" in candidate && "ownerDocument" in candidate
     if (
       window.getComputedStyle === undefined ||
       !hasPaintContext(element) ||
@@ -614,8 +612,8 @@ const expectViewportIntersection = async (locator: Locator, label: string): Prom
 const scrollDocumentVerticallyTo = async (locator: Locator): Promise<void> => {
   await locator.evaluate((element) => {
     const isViewportContextElement = (
-      candidate: SVGElement | HTMLElement
-    ): candidate is (SVGElement | HTMLElement) & ViewportContextElement =>
+      candidate: typeof element
+    ): candidate is typeof element & ViewportContextElement =>
       "getBoundingClientRect" in candidate &&
       typeof candidate.getBoundingClientRect === "function" &&
       "ownerDocument" in candidate

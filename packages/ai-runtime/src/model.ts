@@ -119,7 +119,7 @@ export const attachAgentRuntimeMetadata = (
     : event
 
 /** A provider failed without exposing credentials or provider-native state. */
-export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderError>()(
+export class AgentProviderError extends Schema.TaggedError<AgentProviderError>()(
   "AgentProviderError",
   {
     providerId: AgentProviderId,
@@ -130,7 +130,7 @@ export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderErr
 ) {}
 
 /** The adapter violated the shared event-stream contract. */
-export class AgentRuntimeProtocolError extends Schema.TaggedErrorClass<AgentRuntimeProtocolError>()(
+export class AgentRuntimeProtocolError extends Schema.TaggedError<AgentRuntimeProtocolError>()(
   "AgentRuntimeProtocolError",
   {
     reason: Schema.Literals([
@@ -145,7 +145,7 @@ export class AgentRuntimeProtocolError extends Schema.TaggedErrorClass<AgentRunt
 ) {}
 
 /** A continuation was captured for a different immutable release context. */
-export class AgentContextMismatchError extends Schema.TaggedErrorClass<AgentContextMismatchError>()(
+export class AgentContextMismatchError extends Schema.TaggedError<AgentContextMismatchError>()(
   "AgentContextMismatchError",
   {}
 ) {}

@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as FastCheck from "fast-check"
 
 import {
   GovernedActionState,
@@ -147,7 +148,10 @@ describe("governed action state machine", () => {
 
   it.prop(
     "only returns a decoded state or a fail-closed null",
-    [Schema.toArbitrary(GovernedActionState), Schema.toArbitrary(GovernedActionTransitionCommand)],
+    [
+      Schema.toArbitrary(GovernedActionState)(FastCheck),
+      Schema.toArbitrary(GovernedActionTransitionCommand)(FastCheck)
+    ],
     ([state, command]) => {
       const nextState = reduceGovernedActionState(state, command)
       return nextState === null || Schema.is(GovernedActionState)(nextState)

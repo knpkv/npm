@@ -140,8 +140,8 @@ interface ConfiguredProvider {
 interface GeneratedText {
   readonly text: string
   readonly usage: {
-    readonly inputTokens: { readonly total: number | undefined }
-    readonly outputTokens: { readonly total: number | undefined }
+    readonly inputTokens: { readonly total?: number | undefined }
+    readonly outputTokens: { readonly total?: number | undefined }
   }
 }
 

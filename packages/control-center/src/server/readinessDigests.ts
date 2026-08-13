@@ -15,7 +15,7 @@ import {
 } from "../domain/readiness/index.js"
 
 /** Bounded server failure while producing a canonical readiness digest. */
-export class ReadinessDigestError extends Schema.TaggedErrorClass<ReadinessDigestError>()("ReadinessDigestError", {
+export class ReadinessDigestError extends Schema.TaggedError<ReadinessDigestError>()("ReadinessDigestError", {
   operation: Schema.Literals(["encode", "encode-utf8", "digest"])
 }) {}
 

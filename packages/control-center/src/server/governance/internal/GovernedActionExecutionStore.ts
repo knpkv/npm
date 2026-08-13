@@ -31,7 +31,7 @@ export const GovernedActionExecutionReference = Schema.Struct({
 export type GovernedActionExecutionReference = typeof GovernedActionExecutionReference.Type
 
 /** Closed failure from the atomic authority/start and durable outcome boundary. */
-export class GovernedActionExecutionStoreError extends Schema.TaggedErrorClass<GovernedActionExecutionStoreError>()(
+export class GovernedActionExecutionStoreError extends Schema.TaggedError<GovernedActionExecutionStoreError>()(
   "GovernedActionExecutionStoreError",
   {
     operation: Schema.Literals([

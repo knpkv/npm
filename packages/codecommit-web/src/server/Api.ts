@@ -31,17 +31,17 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 
 // API error returned to clients for AWS failures
-export class ApiError extends Schema.TaggedErrorClass<ApiError>()("ApiError", {
+export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
   message: Schema.String
 }) {}
 
-export class UnauthorizedApiError extends Schema.TaggedErrorClass<UnauthorizedApiError>()(
+export class UnauthorizedApiError extends Schema.TaggedError<UnauthorizedApiError>()(
   "UnauthorizedApiError",
   { message: Schema.String },
   { httpApiStatus: 401 }
 ) {}
 
-export class ForbiddenApiError extends Schema.TaggedErrorClass<ForbiddenApiError>()(
+export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
   "ForbiddenApiError",
   { message: Schema.String },
   { httpApiStatus: 403 }

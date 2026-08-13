@@ -34,11 +34,11 @@ describe("CodeCommitReadProvider compatibility", () => {
       })
       const retryAfterDelay = yield* firstDelay({
         [retryableKey]: {},
-        retryAfterSeconds: 2
+        retryAfter: Duration.seconds(2)
       })
 
-      assert.isAtLeast(transientDelay, 100)
-      assert.isBelow(transientDelay, 150)
+      assert.isAtLeast(transientDelay, 250)
+      assert.isBelow(transientDelay, 300)
       assert.isAtLeast(throttlingDelay, 500)
       assert.isBelow(throttlingDelay, 550)
       assert.isAtLeast(retryAfterDelay, 2_000)

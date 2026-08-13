@@ -102,7 +102,7 @@ const providerDiagnosticCode = <E>(
 }
 
 /** Provider-independent failure exposed to the live test runner. */
-export class LiveAwsProbeFailure extends Schema.TaggedErrorClass<LiveAwsProbeFailure>()(
+export class LiveAwsProbeFailure extends Schema.TaggedError<LiveAwsProbeFailure>()(
   "LiveAwsProbeFailure",
   {
     diagnosticCode: Schema.Literal("live-aws-provider-probe-failed"),

@@ -261,6 +261,11 @@ const makeFakeConnectionMap = Effect.gen(function*() {
   } satisfies PluginConnectionMapV1
 })
 
+class EphemeralPortFixtureError extends Schema.TaggedError<EphemeralPortFixtureError>()(
+  "EphemeralPortFixtureError",
+  { message: Schema.String }
+) {}
+
 const acquireEphemeralPort = Effect.tryPromise({
   try: () =>
     new Promise<number>((resolve, reject) => {
@@ -276,7 +281,7 @@ const acquireEphemeralPort = Effect.tryPromise({
         probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
       })
     }),
-  catch: (cause) => new Error("could not reserve an ephemeral test port", { cause })
+  catch: () => new EphemeralPortFixtureError({ message: "could not reserve an ephemeral test port" })
 })
 
 const makeStaticFixture = Effect.gen(function*() {
@@ -1041,8 +1046,7 @@ describe("Control Center closed runtime", () => {
           Effect.provideService(PluginConnectionMap, pluginConnections)
         )
       }).pipe(
-        Effect.provide(seedPersistence),
-        Effect.provide(DomainEventWakeups.layer),
+        Effect.provide(seedPersistence.pipe(Layer.provideMerge(DomainEventWakeups.layer))),
         Effect.scoped
       )
       const runtime = yield* Layer.build(makeControlCenterServer({

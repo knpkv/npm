@@ -43,7 +43,7 @@ const MAXIMUM_PROPOSAL_PAGE_SIZE = 128
 const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
 
 /** Raised when a relationship-repair persistence command fails boundary decoding. */
-export class RelationshipRepairProposalInputError extends Schema.TaggedErrorClass<
+export class RelationshipRepairProposalInputError extends Schema.TaggedError<
   RelationshipRepairProposalInputError
 >()("RelationshipRepairProposalInputError", {
   operation: Schema.Literals([

@@ -101,12 +101,12 @@ const verificationLine = (complete: string, degraded: string, verification: Back
     ? complete
     : `${degraded} ${verification.reproducibleBlobGaps.length} reproducible cache gaps.`
 
-class ControlCenterCliUsageError extends Schema.TaggedErrorClass<ControlCenterCliUsageError>()(
+class ControlCenterCliUsageError extends Schema.TaggedError<ControlCenterCliUsageError>()(
   "ControlCenterCliUsageError",
   { command: Schema.String }
 ) {}
 
-class ControlCenterCliConfigurationError extends Schema.TaggedErrorClass<
+class ControlCenterCliConfigurationError extends Schema.TaggedError<
   ControlCenterCliConfigurationError
 >()("ControlCenterCliConfigurationError", {
   reason: Schema.Literal("pr-review-provider-unavailable")

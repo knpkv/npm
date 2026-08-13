@@ -53,7 +53,7 @@ import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 
 /** Closed failure from the authenticated Clockify action product boundary. */
-export class ClockifyActionSubmissionError extends Schema.TaggedErrorClass<ClockifyActionSubmissionError>()(
+export class ClockifyActionSubmissionError extends Schema.TaggedError<ClockifyActionSubmissionError>()(
   "ClockifyActionSubmissionError",
   { reason: Schema.Literals(["conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}

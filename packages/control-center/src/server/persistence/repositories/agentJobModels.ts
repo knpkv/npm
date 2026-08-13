@@ -627,7 +627,7 @@ export interface AgentThreadEventPage {
 }
 
 /** Stable typed failure for invalid job state, lease, or bounded output. */
-export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputError>()(
+export class AgentJobInputError extends Schema.TaggedError<AgentJobInputError>()(
   "AgentJobInputError",
   {
     workspaceId: WorkspaceId,

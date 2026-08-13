@@ -25,7 +25,7 @@ type NodeServerServices =
   | NodeServices.NodeServices
 
 /** Direct TLS configuration could not be turned into an HTTPS server. */
-export class DirectTlsServerError extends Schema.TaggedErrorClass<DirectTlsServerError>()(
+export class DirectTlsServerError extends Schema.TaggedError<DirectTlsServerError>()(
   "DirectTlsServerError",
   {
     reason: Schema.Literals(["material-missing", "material-invalid"])

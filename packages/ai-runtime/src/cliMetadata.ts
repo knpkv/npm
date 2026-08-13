@@ -73,7 +73,7 @@ export const AgentRuntimeMetadata = Schema.Union([
 export type AgentRuntimeMetadata = typeof AgentRuntimeMetadata.Type
 
 /** Redacted local CLI discovery failure. */
-export class AgentRuntimeMetadataError extends Schema.TaggedErrorClass<AgentRuntimeMetadataError>()(
+export class AgentRuntimeMetadataError extends Schema.TaggedError<AgentRuntimeMetadataError>()(
   "AgentRuntimeMetadataError",
   {
     implementation: RuntimeImplementation,

@@ -69,14 +69,14 @@ export const CurrentPluginRuntimeAuthority = Schema.Struct({
 export type CurrentPluginRuntimeAuthority = typeof CurrentPluginRuntimeAuthority.Type
 
 /** The requested runtime generation is absent or no longer matches its persisted sources. */
-export class PluginRuntimeAuthorityUnavailable extends Schema.TaggedErrorClass<PluginRuntimeAuthorityUnavailable>()(
+export class PluginRuntimeAuthorityUnavailable extends Schema.TaggedError<PluginRuntimeAuthorityUnavailable>()(
   "PluginRuntimeAuthorityUnavailable",
   {}
 ) {}
 
 /** A publication lost a source or generation compare-and-swap race. */
 export class PluginRuntimeAuthorityPublicationConflict
-  extends Schema.TaggedErrorClass<PluginRuntimeAuthorityPublicationConflict>()(
+  extends Schema.TaggedError<PluginRuntimeAuthorityPublicationConflict>()(
     "PluginRuntimeAuthorityPublicationConflict",
     {
       reason: Schema.Literals([

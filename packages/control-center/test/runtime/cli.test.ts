@@ -21,6 +21,7 @@ import {
 } from "../../src/server/cliConfiguration.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 
 const DATA_ROOT_MARKER_V1_CONTENT = "@knpkv/control-center:data-root:v1\n"
 const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
@@ -69,39 +70,39 @@ const snapshotDatabaseFiles = Effect.fn("ControlCenterCliTest.snapshotDatabaseFi
   return snapshots
 })
 
-const withForeignOwner = (file: FileSystemType.File): FileSystemType.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat.pipe(
-    Effect.map((info) => ({
-      ...info,
-      uid: Option.map(info.uid, (uid) => uid + 1)
-    }))
-  ),
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: file.writeAll
-})
+const withForeignOwner = (file: FileSystemType.File): FileSystemType.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat.pipe(
+      Effect.map((info) => ({
+        ...info,
+        uid: Option.map(info.uid, (uid) => uid + 1)
+      }))
+    ),
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: file.writeAll
+  })
 
 const withWriteAll = (
   file: FileSystemType.File,
   writeAll: FileSystemType.File["writeAll"]
-): FileSystemType.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll
-})
+): FileSystemType.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll
+  })
 
 describe("Control Center CLI", () => {
   it("rejects short or overlong review budgets and defaults blank optional values", () => {

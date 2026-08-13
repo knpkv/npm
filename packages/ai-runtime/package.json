@@ -32,20 +32,20 @@
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
     "check": "tsc --noEmit && pnpm check:contract",
-    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && tsc -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
+    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && TSP_COMPILER_TS_PATH=$(node ../../scripts/typescript-compiler-path.mjs) ../../node_modules/.bin/tspc -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-beta.107"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.98",
-    "effect": "4.0.0-beta.98",
+    "@effect/vitest": "4.0.0-beta.107",
+    "effect": "4.0.0-beta.107",
     "rimraf": "^6.1.3",
-    "typescript": "~6.0.3",
-    "vitest": "^4.1.10"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   },
   "keywords": [
     "effect",

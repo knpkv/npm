@@ -2151,7 +2151,7 @@ describe("Control Center API handlers", () => {
       logs: () => Effect.die("not used"),
       artifact: ({ request }) =>
         Effect.succeed({
-          body: Stream.make(new Uint8Array(request.offset >= 9 ? [] : [1, 2, 3])),
+          body: new Uint8Array(request.offset >= 9 ? [] : [1, 2, 3]),
           contentLength: request.offset >= 9 ? 0 : 3,
           filename: "BuildOutput.zip",
           offset: request.offset,
@@ -2167,7 +2167,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -3942,7 +3943,8 @@ describe("Control Center API handlers", () => {
         Context.add(PluginAdministration, plugins),
         Context.add(LiveEvents, trackedLiveEvents)
       )
-      const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+      const webHandlerLayer = controlCenterApiLayer.pipe(
+        Layer.provideMerge(HttpServer.layerServices),
         Layer.provide(
           Layer.mergeAll(
             Layer.succeed(Auth, authentication),
@@ -4027,7 +4029,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -4137,7 +4140,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, streamAuthentication),
@@ -4239,7 +4243,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -4394,7 +4399,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),

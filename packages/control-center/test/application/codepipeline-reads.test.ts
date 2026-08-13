@@ -142,14 +142,12 @@ describe("CodePipelineReads", () => {
           length: 3
         })
       })
-      const chunks = yield* Stream.runCollect(artifact.body)
-
       assert.strictEqual(artifact.contentLength, 3)
       assert.strictEqual(artifact.filename, "BuildOutput.zip")
       assert.strictEqual(artifact.offset, 3)
       assert.strictEqual(artifact.totalBytes, 9)
       assert.deepStrictEqual(yield* Ref.get(providerRanges), [{ length: 3, offset: 3 }])
-      assert.deepStrictEqual(Array.from(chunks[0] ?? []), [1, 2, 3])
+      assert.deepStrictEqual(Array.from(artifact.body), [1, 2, 3])
       assert.deepStrictEqual(
         Object.keys(artifact).sort(),
         ["body", "contentLength", "filename", "offset", "totalBytes"]

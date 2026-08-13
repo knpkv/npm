@@ -25,8 +25,8 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },
   "dependencies": {
-    "@effect/atom-react": "4.0.0-beta.98",
-    "@effect/platform-node": "4.0.0-beta.98",
+    "@effect/atom-react": "4.0.0-beta.107",
+    "@effect/platform-node": "4.0.0-beta.107",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
@@ -34,14 +34,14 @@
     "@knpkv/jira-cli": "workspace:^",
     "@opentui/core": "0.5.1",
     "@opentui/react": "0.5.1",
-    "effect": "4.0.0-beta.98",
-    "react": "^19.2.7"
+    "effect": "4.0.0-beta.107",
+    "react": "^19.2.8"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.98",
+    "@effect/vitest": "4.0.0-beta.107",
     "@types/node": "latest",
-    "@types/react": "^19.2.17",
-    "tsx": "^4.23.0",
-    "vitest": "^4.1.10"
+    "@types/react": "^19.2.18",
+    "tsx": "^4.23.12",
+    "vitest": "catalog:"
   }
 }

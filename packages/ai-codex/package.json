@@ -38,16 +38,16 @@
     "test:smoke:real": "AI_CODEX_REAL_SMOKE=1 vitest run --config vitest.smoke.config.ts"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-beta.107"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.98",
-    "@effect/vitest": "4.0.0-beta.98",
-    "@types/node": "^26.1.1",
-    "effect": "4.0.0-beta.98",
+    "@effect/platform-node": "4.0.0-beta.107",
+    "@effect/vitest": "4.0.0-beta.107",
+    "@types/node": "^26.2.0",
+    "effect": "4.0.0-beta.107",
     "rimraf": "^6.1.3",
-    "typescript": "~6.0.3",
-    "vitest": "^4.1.10"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   },
   "keywords": [
     "effect",

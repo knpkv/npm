@@ -181,6 +181,7 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
 - **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. This includes additive fields in exported interfaces and schemas, even when their producer or decoder is implemented privately. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
+- **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 ### Agent Management
@@ -233,7 +234,7 @@ When writing Effect code:
 - Bind services before calling methods inside generators:
   `const service = yield* SomeService`.
 - In `HttpApiBuilder.group`, acquire stable application services in the group callback before registering handlers so the resulting layer closes its requirements. Resolve only genuinely request-scoped services, such as `CurrentSession`, inside the per-request handler.
-- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
+- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedError`) and
   keep failures in the typed error channel.
 - In `packages/control-center/src/server/governance/internal/execution-store`, durable provider
   outcome decoding, canonical verification, replay-integrity checking, transition construction,

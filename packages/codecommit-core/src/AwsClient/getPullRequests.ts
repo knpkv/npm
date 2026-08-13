@@ -377,7 +377,7 @@ export const getPullRequests = (
     )
 
     return stream.pipe(
-      Stream.provide(DistilledCredentials.fromCredentials(credentials)),
+      Stream.provide(DistilledCredentials.fromCredentials(credentials, account.region)),
       Stream.provideService(HttpClient.HttpClient, httpClient),
       Stream.provideService(DistilledRegion.Region, Effect.succeed(account.region)),
       Stream.timeout(config.streamTimeout)

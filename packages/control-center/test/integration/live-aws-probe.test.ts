@@ -55,7 +55,7 @@ const REQUIRED_VARIABLES: ReadonlyArray<string> = [
   "CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"
 ]
 
-class LiveAwsProbeConfigurationError extends Schema.TaggedErrorClass<
+class LiveAwsProbeConfigurationError extends Schema.TaggedError<
   LiveAwsProbeConfigurationError
 >()("LiveAwsProbeConfigurationError", {
   diagnosticCode: Schema.Literal("live-aws-probe-configuration-incomplete"),

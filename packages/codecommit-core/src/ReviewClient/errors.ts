@@ -11,7 +11,7 @@ import type {
 const OperationName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
 /** The authorized immutable pull-request revision is no longer current or actionable. */
-export class CodeCommitReviewConflictError extends Schema.TaggedErrorClass<CodeCommitReviewConflictError>()(
+export class CodeCommitReviewConflictError extends Schema.TaggedError<CodeCommitReviewConflictError>()(
   "CodeCommitReviewConflictError",
   {
     operation: OperationName,

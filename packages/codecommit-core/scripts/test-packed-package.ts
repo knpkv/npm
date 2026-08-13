@@ -11,7 +11,7 @@ import { PackedPackageError, runCheckedCommand } from "./checked-command.js"
 const PackageJson = Schema.fromJsonString(Schema.Struct({
   name: Schema.String,
   version: Schema.String,
-  dependencies: Schema.Struct({ "@distilled.cloud/aws": Schema.Literal("0.29.1") })
+  dependencies: Schema.Struct({ "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4") })
 }))
 
 const runtimeDependencies: ReadonlyArray<string> = [

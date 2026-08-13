@@ -180,7 +180,7 @@ When writing or refactoring Effect code:
   beta API.
 - Prefer `Context.Service` class syntax plus explicit `Layer.effect` or
   `Layer.succeed` layers.
-- Accept both `Data.TaggedError` and `Schema.TaggedErrorClass`; use schema-backed
+- Accept both `Data.TaggedError` and `Schema.TaggedError`; use schema-backed
   errors when runtime encoding, API responses, or transport boundaries matter.
 - Preserve unknown failure details in tagged error `cause` fields. When code
   must inspect an unknown failure, use `Predicate.isError`,

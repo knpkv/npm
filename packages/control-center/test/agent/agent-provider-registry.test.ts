@@ -225,8 +225,11 @@ describe("agent provider registry", () => {
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("native Codex selection must not call HTTP"))
       ),
-      Effect.provide(versionProcessLayer([], { output: `${CLI_VERSION_OUTPUT}\n` })),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        versionProcessLayer([], { output: `${CLI_VERSION_OUTPUT}\n` }).pipe(
+          Layer.provideMerge(NodeServices.layer)
+        )
+      ),
       Effect.scoped
     ))
 
@@ -277,8 +280,11 @@ describe("agent provider registry", () => {
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("native Claude selection must not call HTTP"))
       ),
-      Effect.provide(versionProcessLayer(processCalls, { output: "2.1.195 (Claude Code)\n" })),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        versionProcessLayer(processCalls, { output: "2.1.195 (Claude Code)\n" }).pipe(
+          Layer.provideMerge(NodeServices.layer)
+        )
+      ),
       Effect.scoped
     )
   })
@@ -491,9 +497,8 @@ describe("agent provider registry", () => {
       Effect.provide(
         versionProcessLayer(processCalls, {
           outputs: [`${CLI_VERSION_OUTPUT}\n`, "codex-cli 1.2.4\n"]
-        })
+        }).pipe(Layer.provideMerge(NodeServices.layer))
       ),
-      Effect.provide(NodeServices.layer),
       Effect.scoped
     )
   })
@@ -568,8 +573,9 @@ describe("agent provider registry", () => {
             HttpClient.HttpClient,
             HttpClient.make(() => Effect.die("CLI metadata selection must not call HTTP"))
           ),
-          Effect.provide(versionProcessLayer([], options)),
-          Effect.provide(NodeServices.layer),
+          Effect.provide(
+            versionProcessLayer([], options).pipe(Layer.provideMerge(NodeServices.layer))
+          ),
           Effect.scoped
         )
 

@@ -10,7 +10,7 @@ import { Schema } from "effect"
  *
  * @category Errors
  */
-export class CacheError extends Schema.TaggedErrorClass<CacheError>()(
+export class CacheError extends Schema.TaggedError<CacheError>()(
   "CacheError",
   {
     operation: Schema.String,

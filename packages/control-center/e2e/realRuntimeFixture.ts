@@ -69,6 +69,11 @@ const SYNCHRONIZATION_INPUT = {
 
 const TRUSTED_PROXY_TEST_CLIENT_HEADER = "x-control-center-test-proxy-client"
 
+class EphemeralPortFixtureError extends Schema.TaggedError<EphemeralPortFixtureError>()(
+  "EphemeralPortFixtureError",
+  { message: Schema.String }
+) {}
+
 const trustedProxyForwardedClient = (selector: string | ReadonlyArray<string> | undefined): string => {
   if (selector === "rate-limit-a") return "192.168.1.26"
   if (selector === "rate-limit-b") return "192.168.1.27"
@@ -90,7 +95,10 @@ const acquireEphemeralPort = Effect.tryPromise({
         probe.close((error) => (error === undefined ? resolve(address.port) : reject(error)))
       })
     }),
-  catch: (cause) => new Error("could not reserve an ephemeral browser-test port", { cause })
+  catch: () =>
+    new EphemeralPortFixtureError({
+      message: "could not reserve an ephemeral browser-test port"
+    })
 })
 
 interface AllocatedFixture {
@@ -139,7 +147,7 @@ const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
     )
   }).pipe(Effect.provide(NodeServices.layer))
 
-class TrustedHttpsProxyFixtureError extends Schema.TaggedErrorClass<TrustedHttpsProxyFixtureError>()(
+class TrustedHttpsProxyFixtureError extends Schema.TaggedError<TrustedHttpsProxyFixtureError>()(
   "TrustedHttpsProxyFixtureError",
   { reason: Schema.String }
 ) {}
@@ -329,8 +337,9 @@ const seedFixture = (allocated: AllocatedFixture) =>
       fixtureTime
     )
   }).pipe(
-    Effect.provide(persistenceLayer(allocated.persistenceConfig)),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(
+      persistenceLayer(allocated.persistenceConfig).pipe(Layer.provideMerge(NodeServices.layer))
+    ),
     Effect.scoped
   )
 

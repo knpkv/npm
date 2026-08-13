@@ -295,7 +295,7 @@ const validateStoredAtlassianAuthentication = Effect.fn(
 })
 
 const decodeNegotiatedDescriptor = (descriptorJson: string) => {
-  const json = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorJson)
+  const json = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(descriptorJson)
   return Result.isSuccess(json)
     ? Schema.decodeUnknownResult(NegotiatedPluginDescriptorV1)(json.success)
     : json

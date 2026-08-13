@@ -13,13 +13,13 @@ import type * as Scope from "effect/Scope"
 export type ServerLifecyclePhase = "accepting" | "draining"
 
 /** New work reached the process after graceful drain had begun. */
-export class ServerDraining extends Schema.TaggedErrorClass<ServerDraining>()(
+export class ServerDraining extends Schema.TaggedError<ServerDraining>()(
   "ServerDraining",
   {}
 ) {}
 
 /** Two live subsystems attempted to own the same drain hook identity. */
-export class ServerDrainHookConflict extends Schema.TaggedErrorClass<ServerDrainHookConflict>()(
+export class ServerDrainHookConflict extends Schema.TaggedError<ServerDrainHookConflict>()(
   "ServerDrainHookConflict",
   { hookId: Schema.String }
 ) {}

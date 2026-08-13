@@ -77,7 +77,7 @@ const REQUIRED_VARIABLES: ReadonlyArray<string> = [
 ]
 
 /** Secret-safe failure emitted before a live fixture allocates local resources. */
-export class LiveConnectionConfigurationError extends Schema.TaggedErrorClass<
+export class LiveConnectionConfigurationError extends Schema.TaggedError<
   LiveConnectionConfigurationError
 >()("LiveConnectionConfigurationError", {
   diagnosticCode: Schema.Literal("live-integration-configuration-incomplete"),

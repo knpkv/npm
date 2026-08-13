@@ -15,7 +15,7 @@ export class OwnerSessionSecrets extends Context.Service<
   OwnerSessionSecretsShape
 >()("@knpkv/codecommit-web/OwnerSessionSecrets") {}
 
-export class UnsafeServerHostnameError extends Schema.TaggedErrorClass<UnsafeServerHostnameError>()(
+export class UnsafeServerHostnameError extends Schema.TaggedError<UnsafeServerHostnameError>()(
   "UnsafeServerHostnameError",
   { hostname: Schema.String, message: Schema.String }
 ) {}

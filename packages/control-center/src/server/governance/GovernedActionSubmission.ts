@@ -8,7 +8,7 @@ import type { GovernedActionPolicyBinding } from "../../domain/governedAction/in
 import type { GovernedActionId, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 
 /** Private execution is disabled or cannot advance the requested durable identity. */
-export class GovernedActionSubmissionUnavailable extends Schema.TaggedErrorClass<GovernedActionSubmissionUnavailable>()(
+export class GovernedActionSubmissionUnavailable extends Schema.TaggedError<GovernedActionSubmissionUnavailable>()(
   "GovernedActionSubmissionUnavailable",
   {}
 ) {}

@@ -27,7 +27,7 @@ type EvidenceReference = typeof GovernedActionEvidenceReference.Type
 type CurrentClaimRow = typeof CurrentClaimRow.Type
 
 /** A persisted evidence set no longer grants the same current dispatch authority. */
-export class GovernedActionCurrentEvidenceRejected extends Schema.TaggedErrorClass<
+export class GovernedActionCurrentEvidenceRejected extends Schema.TaggedError<
   GovernedActionCurrentEvidenceRejected
 >()("GovernedActionCurrentEvidenceRejected", {
   reason: Schema.Literals([

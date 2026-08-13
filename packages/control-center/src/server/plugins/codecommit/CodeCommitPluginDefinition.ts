@@ -1549,7 +1549,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const dispatchAuthorizedAction = Effect.fn("CodeCommitPlugin.dispatchAuthorizedAction")(function*(
     request: AuthorizedPluginActionV1
-  ) {
+  ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
     const reconciliationKey = locatorForAction(action)
     const result = yield* reviewClient.execute(action).pipe(Effect.result)

@@ -26,7 +26,7 @@ export interface ReleaseSynchronizationStartupOptions {
 }
 
 /** Bounded startup configuration mismatch that must be fixed before listening. */
-export class ReleaseSynchronizationStartupConfigurationError extends Schema.TaggedErrorClass<
+export class ReleaseSynchronizationStartupConfigurationError extends Schema.TaggedError<
   ReleaseSynchronizationStartupConfigurationError
 >()("ReleaseSynchronizationStartupConfigurationError", {
   diagnosticCode: Schema.Literals([

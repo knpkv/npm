@@ -25,7 +25,7 @@ import { assumeConsoleArgs } from "./browser-command.js"
 export const ConsoleLaunchReason = Schema.Literals(["assume-missing", "assume-failed", "assume-interrupted"])
 export type ConsoleLaunchReason = typeof ConsoleLaunchReason.Type
 
-export class ConsoleLaunchError extends Schema.TaggedErrorClass<ConsoleLaunchError>()(
+export class ConsoleLaunchError extends Schema.TaggedError<ConsoleLaunchError>()(
   "ConsoleLaunchError",
   {
     operation: Schema.String,

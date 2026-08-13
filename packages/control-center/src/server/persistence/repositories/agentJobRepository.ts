@@ -676,7 +676,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         "agent-thread-event-integrity-invalid"
       )
     }
-    const parsed = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(row.payloadJson)
+    const parsed = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(row.payloadJson)
     if (Result.isFailure(parsed)) {
       return yield* persistedRecordError(
         workspaceId,
@@ -816,7 +816,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-review-budget-event-integrity-invalid"
         )
       }
-      const parsed = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(row.success.payloadJson)
+      const parsed = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(row.success.payloadJson)
       if (Result.isFailure(parsed)) {
         return yield* persistedRecordError(
           workspaceId,

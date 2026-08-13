@@ -16,6 +16,8 @@ import { parse } from "yaml"
 
 const releaseTypes = new Set(["major", "minor", "patch"])
 const publicManifestFields = ["bin", "browser", "exports", "files", "main", "module", "types", "typesVersions"]
+const runtimeDependencyFields = ["dependencies", "optionalDependencies", "peerDependencies"]
+const releaseManifestFields = [...publicManifestFields, ...runtimeDependencyFields]
 
 class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") {
   get message() {
@@ -48,17 +50,17 @@ const parseChangesetFrontmatter = (content, changesetPath) => {
   return packages
 }
 
-const selectedManifestFields = (manifest) =>
-  Object.fromEntries(publicManifestFields.map((field) => [field, manifest?.[field]]))
+const selectedReleaseManifestFields = (manifest) =>
+  Object.fromEntries(releaseManifestFields.map((field) => [field, manifest?.[field]]))
 
-const manifestsDifferPublicly = (current, previous) =>
-  JSON.stringify(selectedManifestFields(current)) !== JSON.stringify(selectedManifestFields(previous))
+const manifestsDifferForRelease = (current, previous) =>
+  JSON.stringify(selectedReleaseManifestFields(current)) !== JSON.stringify(selectedReleaseManifestFields(previous))
 
 const releaseBearingPackages = (paths, records) =>
   records.filter(
-    ({ changedPublicManifest, directory, publishable }) =>
+    ({ changedReleaseManifest, directory, publishable }) =>
       publishable &&
-      (changedPublicManifest || [...paths].some((changedPath) => changedPath.startsWith(`${directory}/src/`)))
+      (changedReleaseManifest || [...paths].some((changedPath) => changedPath.startsWith(`${directory}/src/`)))
   )
 
 const validateCoverage = ({ changedChangesetNames, paths, records }) =>
@@ -70,13 +72,13 @@ const validateCoverage = ({ changedChangesetNames, paths, records }) =>
 const runSelfTest = () => {
   const records = [
     {
-      changedPublicManifest: false,
+      changedReleaseManifest: false,
       directory: "packages/public",
       name: "@fixture/public",
       publishable: true
     },
     {
-      changedPublicManifest: false,
+      changedReleaseManifest: false,
       directory: "packages/private",
       name: "@fixture/private",
       publishable: false
@@ -128,9 +130,23 @@ const runSelfTest = () => {
     validateCoverage({
       changedChangesetNames: new Set(["@fixture/public"]),
       paths: new Set(["packages/public/package.json"]),
-      records: [{ ...records[0], changedPublicManifest: true }]
+      records: [{ ...records[0], changedReleaseManifest: true }]
     }),
     []
+  )
+  assert.equal(
+    manifestsDifferForRelease(
+      { dependencies: { effect: "4.0.0-beta.107" } },
+      { dependencies: { effect: "4.0.0-beta.98" } }
+    ),
+    true
+  )
+  assert.equal(
+    manifestsDifferForRelease(
+      { devDependencies: { effect: "4.0.0-beta.107" } },
+      { devDependencies: { effect: "4.0.0-beta.98" } }
+    ),
+    false
   )
   assert.deepEqual(
     [...parseChangesetFrontmatter('---\n"@fixture/public": patch\n---\n\nSummary.\n', ".changeset/valid.md")],
@@ -294,7 +310,7 @@ const loadPackageRecords = Effect.fn("ChangesetCoverage.loadPackageRecords")(
         ? yield* valueAtRevision(git, mergeBase, manifestRelativePath)
         : current
       records.push({
-        changedPublicManifest: paths.has(manifestRelativePath) && manifestsDifferPublicly(current, previous),
+        changedReleaseManifest: paths.has(manifestRelativePath) && manifestsDifferForRelease(current, previous),
         directory: `packages/${entry}`,
         name: current.name ?? `packages/${entry}`,
         publishable: current.private !== true

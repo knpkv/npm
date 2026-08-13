@@ -4,6 +4,9 @@ inputs:
   node-version:
     description: The version of Node.js to install
     required: false
+  registry-url:
+    description: Optional npm registry URL used to configure publishing authentication
+    required: false
   deno-version:
     description: The version of Deno to install
     required: false
@@ -30,12 +33,13 @@ runs:
         chmod +x "${binary_path}"
         echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm
-      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
     - name: Install node
-      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       if: ${{ inputs.node-version != '' }}
       with:
         node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
     - name: Install deno
       uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2
       if: ${{ inputs.deno-version != '' }}

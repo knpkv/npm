@@ -43,7 +43,7 @@ const ReviewThreadHistoryPage = Schema.Struct({
 const ReviewThreadHistoryPageJson = Schema.fromJsonString(ReviewThreadHistoryPage)
 
 /** Stable model-visible failure without persistence or host details. */
-export class PrReviewThreadHistoryError extends Schema.TaggedErrorClass<PrReviewThreadHistoryError>()(
+export class PrReviewThreadHistoryError extends Schema.TaggedError<PrReviewThreadHistoryError>()(
   "PrReviewThreadHistoryError",
   {
     reason: Schema.Literal("history-unavailable")

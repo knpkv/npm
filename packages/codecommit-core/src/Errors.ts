@@ -31,7 +31,7 @@ import { AwsProfileName, AwsRegion, SandboxId } from "./Domain.js"
  *
  * @category Errors
  */
-export class AwsCredentialError extends Schema.TaggedErrorClass<AwsCredentialError>()(
+export class AwsCredentialError extends Schema.TaggedError<AwsCredentialError>()(
   "AwsCredentialError",
   {
     profile: AwsProfileName,
@@ -45,7 +45,7 @@ export class AwsCredentialError extends Schema.TaggedErrorClass<AwsCredentialErr
  *
  * @category Errors
  */
-export class AwsThrottleError extends Schema.TaggedErrorClass<AwsThrottleError>()(
+export class AwsThrottleError extends Schema.TaggedError<AwsThrottleError>()(
   "AwsThrottleError",
   {
     operation: Schema.String,
@@ -59,7 +59,7 @@ export class AwsThrottleError extends Schema.TaggedErrorClass<AwsThrottleError>(
  *
  * @category Errors
  */
-export class AwsApiError extends Schema.TaggedErrorClass<AwsApiError>()(
+export class AwsApiError extends Schema.TaggedError<AwsApiError>()(
   "AwsApiError",
   {
     operation: Schema.String,
@@ -74,7 +74,7 @@ export class AwsApiError extends Schema.TaggedErrorClass<AwsApiError>()(
  *
  * @category Errors
  */
-export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()(
+export class ConfigError extends Schema.TaggedError<ConfigError>()(
   "ConfigError",
   {
     message: Schema.String,
@@ -87,7 +87,7 @@ export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()(
  *
  * @category Errors
  */
-export class ConfigParseError extends Schema.TaggedErrorClass<ConfigParseError>()(
+export class ConfigParseError extends Schema.TaggedError<ConfigParseError>()(
   "ConfigParseError",
   {
     path: Schema.String,
@@ -100,7 +100,7 @@ export class ConfigParseError extends Schema.TaggedErrorClass<ConfigParseError>(
  *
  * @category Errors
  */
-export class ProfileDetectionError extends Schema.TaggedErrorClass<ProfileDetectionError>()(
+export class ProfileDetectionError extends Schema.TaggedError<ProfileDetectionError>()(
   "ProfileDetectionError",
   {
     message: Schema.String,
@@ -113,7 +113,7 @@ export class ProfileDetectionError extends Schema.TaggedErrorClass<ProfileDetect
  *
  * @category Errors
  */
-export class RefreshError extends Schema.TaggedErrorClass<RefreshError>()(
+export class RefreshError extends Schema.TaggedError<RefreshError>()(
   "RefreshError",
   {
     failedAccounts: Schema.Array(Schema.String),
@@ -126,7 +126,7 @@ export class RefreshError extends Schema.TaggedErrorClass<RefreshError>()(
  *
  * @category Errors
  */
-export class DockerError extends Schema.TaggedErrorClass<DockerError>()(
+export class DockerError extends Schema.TaggedError<DockerError>()(
   "DockerError",
   {
     operation: Schema.String,
@@ -139,7 +139,7 @@ export class DockerError extends Schema.TaggedErrorClass<DockerError>()(
  *
  * @category Errors
  */
-export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
+export class SandboxError extends Schema.TaggedError<SandboxError>()(
   "SandboxError",
   {
     sandboxId: Schema.optional(SandboxId),
@@ -153,7 +153,7 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
  *
  * @category Errors
  */
-export class SandboxConfigurationError extends Schema.TaggedErrorClass<SandboxConfigurationError>()(
+export class SandboxConfigurationError extends Schema.TaggedError<SandboxConfigurationError>()(
   "SandboxConfigurationError",
   {
     message: Schema.String
@@ -165,7 +165,7 @@ export class SandboxConfigurationError extends Schema.TaggedErrorClass<SandboxCo
  *
  * @category Errors
  */
-export class PermissionDeniedError extends Schema.TaggedErrorClass<PermissionDeniedError>()(
+export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>()(
   "PermissionDeniedError",
   {
     operation: Schema.String,

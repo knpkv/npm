@@ -23,7 +23,7 @@ import type { SessionSummary } from "../auth/models.js"
 
 /** Closed failure returned by the governed publication adapter. */
 export class ReviewSuggestionPublicationGatewayError
-  extends Schema.TaggedErrorClass<ReviewSuggestionPublicationGatewayError>()(
+  extends Schema.TaggedError<ReviewSuggestionPublicationGatewayError>()(
     "ReviewSuggestionPublicationGatewayError",
     {
       reason: Schema.Literals([

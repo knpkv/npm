@@ -11,7 +11,7 @@ const LiveIntegrationRequestOperation = Schema.Literals(["authenticated-api", "c
 type LiveIntegrationRequestOperation = typeof LiveIntegrationRequestOperation.Type
 
 /** A credential-bearing live request failed without retaining its raw request. */
-export class LiveIntegrationRequestError extends Schema.TaggedErrorClass<LiveIntegrationRequestError>()(
+export class LiveIntegrationRequestError extends Schema.TaggedError<LiveIntegrationRequestError>()(
   "LiveIntegrationRequestError",
   {
     operation: LiveIntegrationRequestOperation

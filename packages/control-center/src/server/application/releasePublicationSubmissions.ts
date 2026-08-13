@@ -65,7 +65,7 @@ import {
 } from "./releasePublicationMetadata.js"
 import { hydrateReleaseRunbookContent } from "./releaseRunbookHydration.js"
 
-export class ReleasePublicationSubmissionError extends Schema.TaggedErrorClass<ReleasePublicationSubmissionError>()(
+export class ReleasePublicationSubmissionError extends Schema.TaggedError<ReleasePublicationSubmissionError>()(
   "ReleasePublicationSubmissionError",
   { reason: Schema.Literals(["unauthorized", "conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}

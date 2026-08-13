@@ -73,7 +73,7 @@ export const ReadinessHistoryLimit = Schema.Int.check(Schema.isBetween({ minimum
 export type ReadinessHistoryLimit = typeof ReadinessHistoryLimit.Type
 
 /** Bounded caller or integrity failure at the readiness repository boundary. */
-export class ReadinessInputError extends Schema.TaggedErrorClass<ReadinessInputError>()("ReadinessInputError", {
+export class ReadinessInputError extends Schema.TaggedError<ReadinessInputError>()("ReadinessInputError", {
   operation: Schema.Literals([
     "register-rule",
     "commit-environment",

@@ -4,6 +4,7 @@ import type { Scope } from "effect"
 import { Crypto, Deferred, Effect, Fiber, FileSystem, Path, PlatformError, Ref, Result, Schema, Stream } from "effect"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 import { BlobDigest } from "../../src/server/persistence/object-store/BlobDigest.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
@@ -29,50 +30,50 @@ const CONCURRENT_DIGEST = Schema.decodeSync(BlobDigest)(
 const withSyncProbe = (
   file: FileSystem.File,
   onSync: Effect.Effect<void>
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  stat: file.stat,
-  seek: (offset, from) => file.seek(offset, from),
-  sync: onSync.pipe(Effect.andThen(file.sync)),
-  read: (buffer) => file.read(buffer),
-  readAlloc: (size) => file.readAlloc(size),
-  truncate: (length) => file.truncate(length),
-  write: (buffer) => file.write(buffer),
-  writeAll: (buffer) => file.writeAll(buffer)
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    stat: file.stat,
+    seek: (offset, from) => file.seek(offset, from),
+    sync: onSync.pipe(Effect.andThen(file.sync)),
+    read: (buffer) => file.read(buffer),
+    readAlloc: (size) => file.readAlloc(size),
+    truncate: (length) => file.truncate(length),
+    write: (buffer) => file.write(buffer),
+    writeAll: (buffer) => file.writeAll(buffer)
+  })
 
 const withReadAllocProbe = (
   file: FileSystem.File,
   beforeRead: Effect.Effect<void, PlatformError.PlatformError>
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  stat: file.stat,
-  seek: (offset, from) => file.seek(offset, from),
-  sync: file.sync,
-  read: (buffer) => file.read(buffer),
-  readAlloc: (size) => beforeRead.pipe(Effect.andThen(file.readAlloc(size))),
-  truncate: (length) => file.truncate(length),
-  write: (buffer) => file.write(buffer),
-  writeAll: (buffer) => file.writeAll(buffer)
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    stat: file.stat,
+    seek: (offset, from) => file.seek(offset, from),
+    sync: file.sync,
+    read: (buffer) => file.read(buffer),
+    readAlloc: (size) => beforeRead.pipe(Effect.andThen(file.readAlloc(size))),
+    truncate: (length) => file.truncate(length),
+    write: (buffer) => file.write(buffer),
+    writeAll: (buffer) => file.writeAll(buffer)
+  })
 
 const withWriteAllProbe = (
   file: FileSystem.File,
   beforeWriteAll: Effect.Effect<void, PlatformError.PlatformError>
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  stat: file.stat,
-  seek: (offset, from) => file.seek(offset, from),
-  sync: file.sync,
-  read: (buffer) => file.read(buffer),
-  readAlloc: (size) => file.readAlloc(size),
-  truncate: (length) => file.truncate(length),
-  write: (buffer) => file.write(buffer),
-  writeAll: (buffer) => beforeWriteAll.pipe(Effect.andThen(file.writeAll(buffer)))
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    stat: file.stat,
+    seek: (offset, from) => file.seek(offset, from),
+    sync: file.sync,
+    read: (buffer) => file.read(buffer),
+    readAlloc: (size) => file.readAlloc(size),
+    truncate: (length) => file.truncate(length),
+    write: (buffer) => file.write(buffer),
+    writeAll: (buffer) => beforeWriteAll.pipe(Effect.andThen(file.writeAll(buffer)))
+  })
 
 const withBlobStore = <A, E>(
   use: (
