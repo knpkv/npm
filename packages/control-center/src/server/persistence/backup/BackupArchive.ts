@@ -39,6 +39,57 @@ const sameOwner = (left: FileSystem.File.Info, right: FileSystem.File.Info): boo
 
 const offlineInvariant = (reason: string) => ({ _tag: "BackupInvariant", reason })
 
+const OFFLINE_SNAPSHOT_CAPTURE_ATTEMPTS = 3
+
+const copyOfflineSidecars = Effect.fn("BackupArchive.copyOfflineSidecars")(function*(
+  fileSystem: FileSystem.FileSystem,
+  sourceRootInfo: FileSystem.File.Info,
+  databaseFile: string,
+  snapshotDatabase: string
+) {
+  for (const suffix of ["-wal", "-journal"]) {
+    const sourceSidecar = `${databaseFile}${suffix}`
+    const sidecarExists = yield* fileSystem.exists(sourceSidecar).pipe(
+      Effect.mapError((cause) => new BackupStorageError({ cause, operation: "inspect-offline-sidecar" }))
+    )
+    if (!sidecarExists) continue
+
+    const canonicalSidecar = yield* fileSystem.realPath(sourceSidecar).pipe(Effect.result)
+    if (Result.isFailure(canonicalSidecar)) {
+      if (canonicalSidecar.failure.reason._tag === "NotFound") return false
+      return yield* new BackupStorageError({
+        cause: canonicalSidecar.failure,
+        operation: "inspect-offline-sidecar"
+      })
+    }
+    const sidecarInfo = yield* fileSystem.stat(sourceSidecar).pipe(Effect.result)
+    if (Result.isFailure(sidecarInfo)) {
+      if (sidecarInfo.failure.reason._tag === "NotFound") return false
+      return yield* new BackupStorageError({
+        cause: sidecarInfo.failure,
+        operation: "inspect-offline-sidecar"
+      })
+    }
+    if (
+      canonicalSidecar.success !== sourceSidecar ||
+      sidecarInfo.success.type !== "File" ||
+      !sameOwner(sourceRootInfo, sidecarInfo.success)
+    ) {
+      return yield* new BackupStorageError({
+        cause: offlineInvariant("sidecar-not-canonical-regular-owned-file"),
+        operation: "inspect-offline-sidecar"
+      })
+    }
+
+    const copied = yield* fileSystem.copyFile(sourceSidecar, `${snapshotDatabase}${suffix}`).pipe(Effect.result)
+    if (Result.isFailure(copied)) {
+      if (copied.failure.reason._tag === "NotFound") return false
+      return yield* new BackupStorageError({ cause: copied.failure, operation: "copy-offline-sidecar" })
+    }
+  }
+  return true
+})
+
 /** Input for a caller-requested backup of the live database. */
 export interface CreateVerifiedBackupInput {
   readonly destination: string
@@ -149,36 +200,22 @@ export const createOfflineVerifiedBackup = Effect.fn("BackupArchive.createOfflin
       }).pipe(
         Effect.mapError((cause) => new BackupStorageError({ cause, operation: "create-offline-snapshot" }))
       )
-      const snapshotDatabase = path.join(snapshotRoot, "control-center.db")
-      yield* fileSystem.copyFile(databaseFile, snapshotDatabase).pipe(
-        Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-offline-database" }))
-      )
-
-      for (const suffix of ["-wal", "-journal"]) {
-        const sourceSidecar = `${databaseFile}${suffix}`
-        const sidecarExists = yield* fileSystem.exists(sourceSidecar).pipe(
-          Effect.mapError((cause) => new BackupStorageError({ cause, operation: "inspect-offline-sidecar" }))
+      let snapshotDatabase: string | undefined
+      for (let attempt = 0; attempt < OFFLINE_SNAPSHOT_CAPTURE_ATTEMPTS; attempt += 1) {
+        const candidate = path.join(snapshotRoot, `control-center-${attempt}.db`)
+        yield* fileSystem.copyFile(databaseFile, candidate).pipe(
+          Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-offline-database" }))
         )
-        if (!sidecarExists) continue
-        const canonicalSidecar = yield* fileSystem.realPath(sourceSidecar).pipe(
-          Effect.mapError((cause) => new BackupStorageError({ cause, operation: "inspect-offline-sidecar" }))
-        )
-        const sidecarInfo = yield* fileSystem.stat(sourceSidecar).pipe(
-          Effect.mapError((cause) => new BackupStorageError({ cause, operation: "inspect-offline-sidecar" }))
-        )
-        if (
-          canonicalSidecar !== sourceSidecar ||
-          sidecarInfo.type !== "File" ||
-          !sameOwner(sourceRootInfo, sidecarInfo)
-        ) {
-          return yield* new BackupStorageError({
-            cause: offlineInvariant("sidecar-not-canonical-regular-owned-file"),
-            operation: "inspect-offline-sidecar"
-          })
+        if (yield* copyOfflineSidecars(fileSystem, sourceRootInfo, databaseFile, candidate)) {
+          snapshotDatabase = candidate
+          break
         }
-        yield* fileSystem.copyFile(sourceSidecar, `${snapshotDatabase}${suffix}`).pipe(
-          Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-offline-sidecar" }))
-        )
+      }
+      if (snapshotDatabase === undefined) {
+        return yield* new BackupStorageError({
+          cause: offlineInvariant("sidecar-kept-changing-during-snapshot"),
+          operation: "copy-offline-sidecar"
+        })
       }
 
       const clientConfig: LocalLibsqlConfig = {

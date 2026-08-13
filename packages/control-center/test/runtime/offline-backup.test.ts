@@ -338,6 +338,79 @@ describe("offline backup commands", () => {
       assert.strictEqual(restored.verification._tag, "Complete")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("restarts a snapshot when a closing SQLite sidecar disappears after discovery", () =>
+    Effect.gen(function*() {
+      const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-sidecar-race-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* resolvePreparedControlCenterDataRoot(configured)
+      const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+      const closingSidecar = `${databaseFile}-journal`
+      yield* fileSystem.remove(closingSidecar, { force: true })
+
+      let databaseCopies = 0
+      let reportClosingSidecar = true
+      const closingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        copyFile: (sourceFile, destinationFile) => {
+          if (sourceFile === databaseFile) databaseCopies += 1
+          return fileSystem.copyFile(sourceFile, destinationFile)
+        },
+        exists: (target) =>
+          target === closingSidecar && reportClosingSidecar
+            ? Effect.sync(() => {
+              reportClosingSidecar = false
+              return true
+            })
+            : fileSystem.exists(target)
+      })
+
+      const published = yield* createOfflineVerifiedBackup({
+        destination: path.join(parent, "archive"),
+        persistenceConfig: source.persistenceConfig
+      }).pipe(Effect.provideService(FileSystem.FileSystem, closingFileSystem))
+
+      assert.strictEqual(published.verification._tag, "Complete")
+      assert.strictEqual(databaseCopies, 2)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("fails closed when an offline sidecar keeps changing during snapshot capture", () =>
+    Effect.gen(function*() {
+      const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-sidecar-churn-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* resolvePreparedControlCenterDataRoot(configured)
+      const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+      const changingSidecar = `${databaseFile}-journal`
+      const archiveRoot = path.join(parent, "archive")
+      yield* fileSystem.remove(changingSidecar, { force: true })
+
+      let databaseCopies = 0
+      const changingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        copyFile: (sourceFile, destinationFile) => {
+          if (sourceFile === databaseFile) databaseCopies += 1
+          return fileSystem.copyFile(sourceFile, destinationFile)
+        },
+        exists: (target) => (target === changingSidecar ? Effect.succeed(true) : fileSystem.exists(target))
+      })
+
+      const published = yield* createOfflineVerifiedBackup({
+        destination: archiveRoot,
+        persistenceConfig: source.persistenceConfig
+      }).pipe(Effect.provideService(FileSystem.FileSystem, changingFileSystem), Effect.result)
+
+      assert.isTrue(Result.isFailure(published))
+      if (Result.isFailure(published)) {
+        assert.strictEqual(published.failure._tag, "BackupStorageError")
+        if (published.failure._tag === "BackupStorageError") {
+          assert.strictEqual(published.failure.operation, "copy-offline-sidecar")
+        }
+      }
+      assert.strictEqual(databaseCopies, 3)
+      assert.isFalse(yield* fileSystem.exists(archiveRoot))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("backs up a crash-recovery database without touching the stopped source", () =>
     Effect.gen(function*() {
       const { configured, configuredRoot, parent, prepared } = yield* makePreparedRoot(
