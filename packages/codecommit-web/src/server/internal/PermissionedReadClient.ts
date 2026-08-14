@@ -127,7 +127,7 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
   const nested = (request: { readonly account: ReadClient.CodeCommitReadAccount }) => request.account
 
   const listPullRequestIdsPage = gated(
-    "getPullRequests",
+    "listPullRequests",
     (request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestIdsPage"]>[0]) =>
       `List pull requests in ${request.repositoryName}`,
     nested,
@@ -145,8 +145,7 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
       const page = yield* listPullRequestIdsPage(request)
       const pullRequests = yield* Effect.forEach(
         page.pullRequestIds,
-        (pullRequestId) => getPullRequest({ account: request.account, pullRequestId }),
-        { concurrency: ReadClient.PULL_REQUEST_HYDRATION_CONCURRENCY }
+        (pullRequestId) => getPullRequest({ account: request.account, pullRequestId })
       )
       return new ReadClient.CodeCommitPullRequestPage({ pullRequests, nextToken: page.nextToken })
     })

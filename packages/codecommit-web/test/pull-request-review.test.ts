@@ -241,6 +241,38 @@ describe("CodeCommit web review boundary", () => {
       expect(oversized).toMatchObject({ state: "oversized", before: null, after: "after\n" })
     }))
 
+  it.effect("preserves UTF-8 BOM bytes as exact text evidence", () =>
+    Effect.gen(function*() {
+      const encoder = new TextEncoder()
+      const bomText = new Uint8Array([0xef, 0xbb, 0xbf, ...encoder.encode("same\n")])
+      const changedClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: blobId === changedFile.before?.blobId ? encoder.encode("same\n") : bomText
+            })
+          )
+      }
+      const changed = yield* loadPullRequestDiffContent(changedClient, pullRequest, expectedRevision, 0)
+      expect(changed).toMatchObject({ state: "text", before: "same\n", after: "\uFEFFsame\n" })
+      expect(
+        yield* collectRelayPatch(changedClient, {
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          pullRequest,
+          revision
+        }, [changedFile])
+      ).toContain("+\uFEFFsame")
+
+      const unchangedClient: ReadClient.CodeCommitReadClientService = {
+        ...changedClient,
+        getBlob: ({ blobId }) => Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: bomText }))
+      }
+      const unchanged = yield* loadPullRequestDiffContent(unchangedClient, pullRequest, expectedRevision, 0)
+      expect(unchanged).toMatchObject({ state: "text", before: "\uFEFFsame\n", after: "\uFEFFsame\n" })
+    }))
+
   it("isolates delimiter-shaped repository text in a collision-free Relay prompt", () => {
     const prompt = makeRelayReviewPrompt(
       {
@@ -514,6 +546,48 @@ describe("CodeCommit web review boundary", () => {
         pullRequest,
         revision
       }, [addedFile]).pipe(Effect.flip)
+      expect(failure.operation).toBe("relay-diff")
+      expect(failure.message).toContain("786432-byte Relay review limit")
+    }))
+
+  it.effect("counts separators in the Relay patch byte budget", () =>
+    Effect.gen(function*() {
+      const files = ["first.txt", "later.txt"].map((path, index) =>
+        new ReadClient.CodeCommitChangedFile({
+          before: null,
+          after: new ReadClient.CodeCommitBlobMetadata({
+            blobId: ReadClient.CodeCommitBlobId.make(String(index + 1).repeat(40)),
+            mode: "100644",
+            path
+          }),
+          status: "added"
+        })
+      )
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array() }))
+      }
+      const scope = {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }
+      const encoder = new TextEncoder()
+      const maximumBytes = 786_432
+      const overhead = encoder.encode(yield* collectRelayPatch(client, scope, [files[0]!], () => "")).byteLength
+      const rendererBytes = (maximumBytes - overhead * files.length) / files.length
+      expect(Number.isInteger(rendererBytes)).toBe(true)
+
+      const valid = yield* collectRelayPatch(client, scope, files, () => "x".repeat(rendererBytes - 1))
+      expect(encoder.encode(valid).byteLength).toBe(maximumBytes - 1)
+
+      const failure = yield* collectRelayPatch(
+        client,
+        scope,
+        files,
+        () => "x".repeat(rendererBytes)
+      ).pipe(Effect.flip)
       expect(failure.operation).toBe("relay-diff")
       expect(failure.message).toContain("786432-byte Relay review limit")
     }))

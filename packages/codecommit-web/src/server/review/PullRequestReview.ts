@@ -22,7 +22,8 @@ const MAXIMUM_RELAY_PATCH_BYTES = 786_432
 const MAXIMUM_RELAY_PROMPT_BYTES = 1_048_576
 const MAXIMUM_RELAY_DIFF_INPUT_LINES = 5_000
 const MAXIMUM_RELAY_DIFF_LINE_PAIRS = 4_000_000
-const textDecoder = new TextDecoder("utf-8", { fatal: true })
+const RELAY_PATCH_SEPARATOR = "\n"
+const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 const textEncoder = new TextEncoder()
 
 export class PullRequestReviewError extends Schema.TaggedError<PullRequestReviewError>()(
@@ -511,7 +512,8 @@ export const collectRelayPatchEvidence = Effect.fn("PullRequestReview.collectRel
       chunk = binaryPatch(file)
       anchors.push(relayFileAnchors(file, null))
     }
-    bytes += textEncoder.encode(chunk).byteLength
+    const separatorBytes = chunks.length === 0 ? 0 : textEncoder.encode(RELAY_PATCH_SEPARATOR).byteLength
+    bytes += separatorBytes + textEncoder.encode(chunk).byteLength
     if (bytes > MAXIMUM_RELAY_PATCH_BYTES) {
       return yield* reviewError(
         "relay-diff",
@@ -520,7 +522,7 @@ export const collectRelayPatchEvidence = Effect.fn("PullRequestReview.collectRel
     }
     chunks.push(chunk)
   }
-  return { patch: chunks.join("\n"), anchors }
+  return { patch: chunks.join(RELAY_PATCH_SEPARATOR), anchors }
 })
 
 /** Build one bounded exact patch from Schema-decoded provider blobs. */

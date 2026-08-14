@@ -87,6 +87,23 @@ const exactReviewIdentity = (
   diff: Pick<PullRequestDiffResponse, "baseCommit" | "headCommit" | "revisionId">
 ): string => `${accountId}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
+export const fileIndexForFinding = (
+  files: PullRequestDiffResponse["files"],
+  finding: RelayReviewFinding
+): number | undefined => {
+  const location = finding.location
+  if (location.scope === "general") return undefined
+  const file = files.find((candidate) => {
+    if (location.scope === "file") {
+      return candidate.path === location.filePath || candidate.previousPath === location.filePath
+    }
+    return location.side === "after"
+      ? candidate.status !== "deleted" && candidate.path === location.filePath
+      : candidate.status !== "added" && (candidate.previousPath ?? candidate.path) === location.filePath
+  })
+  return file?.index
+}
+
 const toRlyFile = (file: PullRequestDiffResponse["files"][number], content: RlyDiffFileContent): RlyDiffFile =>
   file.status === "renamed" && file.previousPath !== null
     ? {
@@ -437,12 +454,8 @@ const ReadyReviewWorkspace = ({
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
       setSelectedFindingId(finding.id)
-      const location = finding.location
-      if (location.scope === "general") return
-      const file = diff.files.find(
-        (candidate) => candidate.path === location.filePath || candidate.previousPath === location.filePath
-      )
-      if (file !== undefined) setSelectedFileIndex(file.index)
+      const fileIndex = fileIndexForFinding(diff.files, finding)
+      if (fileIndex !== undefined) setSelectedFileIndex(fileIndex)
     },
     [diff.files]
   )

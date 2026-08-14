@@ -100,6 +100,11 @@ const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
 const categoryTone = (status: CategoryStatus): RlyStateTone =>
   status === "positive" ? "positive" : status === "neutral" ? "neutral" : "critical"
 
+export const refreshFailureDescription = (cause: unknown): string => {
+  const message = Predicate.isError(cause) ? cause.message.trim() : ""
+  return message.length > 0 ? message : "Try the refresh again."
+}
+
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
   return tagName === "INPUT" || tagName === "TEXTAREA"
@@ -742,7 +747,7 @@ export function PRDetail() {
       (cause: unknown) => {
         setIsRefreshing(false)
         toast.error("Unable to refresh pull request", {
-          description: Predicate.isError(cause) ? cause.message : "Try the refresh again."
+          description: refreshFailureDescription(cause)
         })
       }
     )

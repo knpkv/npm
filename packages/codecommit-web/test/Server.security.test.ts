@@ -4,7 +4,7 @@ import { PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import { Duration, Effect, Redacted, Ref, Result, Stream } from "effect"
+import { Deferred, Duration, Effect, Fiber, Redacted, Ref, Result, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
@@ -38,10 +38,10 @@ const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
 const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
 
 const makePermissionService = (
-  state: PermissionState,
+  state: PermissionState | ((operation: string) => PermissionState),
   updates?: Ref.Ref<ReadonlyArray<readonly [string, PermissionState]>>
 ): PermissionService["Service"] => ({
-  check: () => Effect.succeed(state),
+  check: (operation) => Effect.succeed(typeof state === "function" ? state(operation) : state),
   getAll: () => Effect.succeed({}),
   getAuditRetention: () => Effect.succeed(30),
   isAuditEnabled: () => Effect.succeed(true),
@@ -508,7 +508,12 @@ describe("CodeCommit web security boundary", () => {
             )
         }
         const client = yield* makePermissionedReadClient(inner).pipe(
-          Effect.provideService(PermissionService, makePermissionService("allow")),
+          Effect.provideService(
+            PermissionService,
+            makePermissionService((operation) =>
+              operation === "listPullRequests" ? "always_allow" : operation === "getPullRequests" ? "deny" : "allow"
+            )
+          ),
           Effect.provideService(
             PermissionGate,
             PermissionGate.of({
@@ -521,12 +526,89 @@ describe("CodeCommit web security boundary", () => {
         const page = yield* client.listPullRequestsPage(request)
         expect(page.pullRequests.map(({ pullRequestId }) => pullRequestId)).toEqual(pullRequestIds)
         expect(yield* Ref.get(calls)).toEqual({ list: 1, detail: pullRequestIds.length })
-        expect(yield* Ref.get(gateCalls)).toBe(1 + pullRequestIds.length)
+        expect(yield* Ref.get(gateCalls)).toBe(pullRequestIds.length)
         expect((yield* Ref.get(auditEntries)).map(({ operation }) => operation)).toEqual([
-          "getPullRequests",
+          "listPullRequests",
           ...pullRequestIds.map(() => "getPullRequest")
         ])
       }
+    }))
+
+  it.effect("serializes hydrated PR permission prompts", () =>
+    Effect.gen(function*() {
+      const request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestsPage"]>[0] = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        status: "OPEN",
+        nextToken: null
+      }
+      const pullRequestIds = [Domain.PullRequestId.make("1"), Domain.PullRequestId.make("2")]
+      const promptStarted = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+      const promptRelease = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+      const promptCount = yield* Ref.make(0)
+      const detailCalls = yield* Ref.make(0)
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const inner: ReadClient.CodeCommitReadClientService = {
+        ...makeObservedReadClient(yield* Ref.make({ blob: 0, differences: 0 })),
+        listPullRequestIdsPage: () =>
+          Effect.succeed(new ReadClient.CodeCommitPullRequestIdsPage({ pullRequestIds, nextToken: null })),
+        listPullRequestsPage: () => Effect.die("permissioned client must hydrate gated detail calls"),
+        getPullRequest: ({ pullRequestId }) =>
+          Ref.update(detailCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitPullRequestRevision({
+                pullRequestId,
+                revisionId: `revision-${pullRequestId}`,
+                repositoryName: request.repositoryName,
+                title: `PR ${pullRequestId}`,
+                authorArn: null,
+                status: "OPEN",
+                sourceReference: `refs/heads/feature-${pullRequestId}`,
+                destinationReference: "refs/heads/main",
+                sourceCommit: ReadClient.CodeCommitCommitId.make(`head-${pullRequestId}`),
+                destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+                mergeBase: null,
+                creationDate: new Date(0),
+                lastActivityDate: new Date(1)
+              })
+            )
+          )
+      }
+      const client = yield* makePermissionedReadClient(inner).pipe(
+        Effect.provideService(
+          PermissionService,
+          makePermissionService((operation) => operation === "listPullRequests" ? "always_allow" : "allow")
+        ),
+        Effect.provideService(
+          PermissionGate,
+          PermissionGate.of({
+            request: () =>
+              Ref.getAndUpdate(promptCount, (count) => count + 1).pipe(
+                Effect.flatMap((index) =>
+                  Deferred.succeed(promptStarted[index]!, undefined).pipe(
+                    Effect.andThen(Deferred.await(promptRelease[index]!)),
+                    Effect.andThen(Effect.succeed("allow_once"))
+                  )
+                )
+              )
+          })
+        ),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+
+      const fiber = yield* client.listPullRequestsPage(request).pipe(Effect.forkChild)
+      yield* Deferred.await(promptStarted[0]!)
+      expect(yield* Ref.get(promptCount)).toBe(1)
+      expect(yield* Ref.get(detailCalls)).toBe(0)
+
+      yield* Deferred.succeed(promptRelease[0]!, undefined)
+      yield* Deferred.await(promptStarted[1]!)
+      expect(yield* Ref.get(promptCount)).toBe(2)
+      expect(yield* Ref.get(detailCalls)).toBe(1)
+
+      yield* Deferred.succeed(promptRelease[1]!, undefined)
+      expect((yield* Fiber.join(fiber)).pullRequests.map(({ pullRequestId }) => pullRequestId)).toEqual(pullRequestIds)
+      expect(yield* Ref.get(detailCalls)).toBe(2)
     }))
 
   it("never emits the persisted sandbox password in list or SSE projections", () => {
