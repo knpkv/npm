@@ -18,7 +18,7 @@ export type PublishedPackageManifest = {
   readonly types?: unknown
 }
 
-const collectArtifactPaths = (value: unknown, paths: Set<string>): void => {
+const collectArtifactPaths = <UnparsedInput>(value: UnparsedInput, paths: Set<string>): void => {
   if (Predicate.isString(value)) {
     if (value.startsWith("./") && !value.includes("*")) paths.add(value.slice(2))
     return

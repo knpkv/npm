@@ -10,8 +10,8 @@ interface AxeViolation {
 }
 
 interface AxeRunner {
-  readonly run: (
-    root: unknown,
+  readonly run: <UnparsedInput>(
+    root: UnparsedInput,
     options: {
       readonly rules: Readonly<Record<string, { readonly enabled: boolean }>>
       readonly runOnly: { readonly type: "tag"; readonly values: ReadonlyArray<string> }
@@ -70,7 +70,7 @@ interface FocusComputedStyle extends FocusStyleSnapshot {
 }
 
 interface FocusBrowserGlobal {
-  readonly getComputedStyle?: (element: unknown) => FocusComputedStyle
+  readonly getComputedStyle?: <UnparsedInput>(element: UnparsedInput) => FocusComputedStyle
 }
 
 interface PaintProbe {
@@ -127,7 +127,7 @@ interface ViewportIntersectionEntry {
 
 interface ViewportIntersectionObserver {
   readonly disconnect: () => void
-  readonly observe: (target: unknown) => void
+  readonly observe: <UnparsedInput>(target: UnparsedInput) => void
 }
 
 declare const document: { readonly activeElement: unknown }
@@ -281,9 +281,7 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
       window.getComputedStyle === undefined ||
       !hasPaintContext(element) ||
       !("getBoundingClientRect" in element) ||
-      typeof element.getBoundingClientRect !== "function" ||
-      !("matches" in element) ||
-      typeof element.matches !== "function"
+      !("matches" in element)
     ) {
       throw new Error("primary action cannot provide a focused visual snapshot")
     }
@@ -421,9 +419,12 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
   const snapshot = await locator.evaluate((element) => {
     const getComputedStyle = window.getComputedStyle
     if (getComputedStyle === undefined) throw new Error("forced-color target has no computed-style view")
-    const hasForcedColorPaintContext = (candidate: unknown): candidate is ForcedColorPaintElement =>
-      typeof candidate === "object" &&
-      candidate !== null &&
+    const isReference = <UnparsedInput>(candidate: UnparsedInput): candidate is UnparsedInput & object =>
+      candidate !== null && candidate !== undefined && Object(candidate) === candidate
+    const hasForcedColorPaintContext = <UnparsedInput>(
+      candidate: UnparsedInput
+    ): candidate is UnparsedInput & ForcedColorPaintElement =>
+      isReference(candidate) &&
       "childNodes" in candidate &&
       "getAttribute" in candidate &&
       "getBoundingClientRect" in candidate &&
@@ -567,9 +568,12 @@ const expectEffectiveOpacity = async (locator: Locator, label: string): Promise<
   const hasEffectiveOpacity = await locator.evaluate((element) => {
     const getComputedStyle = window.getComputedStyle
     if (getComputedStyle === undefined) throw new Error("opacity target has no computed-style view")
-    const hasPaintContext = (candidate: unknown): candidate is PaintContextElement =>
-      typeof candidate === "object" &&
-      candidate !== null &&
+    const isReference = <UnparsedInput>(candidate: UnparsedInput): candidate is UnparsedInput & object =>
+      candidate !== null && candidate !== undefined && Object(candidate) === candidate
+    const hasPaintContext = <UnparsedInput>(
+      candidate: UnparsedInput
+    ): candidate is UnparsedInput & PaintContextElement =>
+      isReference(candidate) &&
       "ownerDocument" in candidate &&
       "parentElement" in candidate
     if (!hasPaintContext(element)) throw new Error("opacity target has no paint context")
@@ -615,7 +619,6 @@ const scrollDocumentVerticallyTo = async (locator: Locator): Promise<void> => {
       candidate: typeof element
     ): candidate is typeof element & ViewportContextElement =>
       "getBoundingClientRect" in candidate &&
-      typeof candidate.getBoundingClientRect === "function" &&
       "ownerDocument" in candidate
     if (!isViewportContextElement(element)) throw new Error("viewport target has no measurable document context")
     const view = element.ownerDocument.defaultView

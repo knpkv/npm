@@ -8,7 +8,7 @@ import {
   securityHeaders
 } from "../../../src/server/http/security/index.js"
 
-const metadata = (overrides: Readonly<Record<string, unknown>> = {}) => ({
+const metadata = (overrides: Readonly<Record<string, Schema.Json>> = {}) => ({
   method: "POST",
   contentEncoding: null,
   contentLength: "12",

@@ -2,6 +2,7 @@ import type { ComponentPropsWithRef, ReactElement } from "react"
 import { Icon, type RlyIconName } from "../foundations/Icon.js"
 import { classNames, cssClass, defineVariants } from "../internal/component.js"
 import styles from "./Button.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 export const RLY_BUTTON_VARIANTS = defineVariants({
@@ -63,8 +64,8 @@ export const Button = ({
   ...props
 }: ButtonProps): ReactElement => {
   if (
-    (typeof children !== "number" && typeof children !== "string") ||
-    (typeof children === "string" && children.trim().length === 0)
+    (!Predicate.isNumber(children) && !Predicate.isString(children)) ||
+    (Predicate.isString(children) && children.trim().length === 0)
   ) {
     throw new Error("Button children must contain visible content")
   }

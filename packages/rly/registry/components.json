@@ -414,7 +414,7 @@
         },
         {
           "kind": "type",
-          "name": "RlyAvatarShape"
+          "name": "RlyAvatarForm"
         },
         {
           "kind": "type",
@@ -435,7 +435,7 @@
       "name": "Avatar",
       "props": {
         "defaults": {
-          "shape": "circle",
+          "form": "circle",
           "size": "default"
         },
         "types": [
@@ -457,15 +457,15 @@
       "variants": [
         {
           "defaultValue": "circle",
-          "description": "Controls the shape presentation axis of Avatar.",
-          "name": "shape",
+          "description": "Controls the form presentation axis of Avatar.",
+          "name": "form",
           "values": [
             {
-              "description": "Use circle for the shape presentation.",
+              "description": "Use circle for the form presentation.",
               "name": "circle"
             },
             {
-              "description": "Use rounded-square for the shape presentation.",
+              "description": "Use rounded-square for the form presentation.",
               "name": "rounded-square"
             }
           ]
@@ -4054,11 +4054,11 @@
         },
         {
           "kind": "type",
-          "name": "RlySurfacePadding"
+          "name": "RlySurfaceForm"
         },
         {
           "kind": "type",
-          "name": "RlySurfaceShape"
+          "name": "RlySurfacePadding"
         },
         {
           "kind": "type",
@@ -4087,8 +4087,8 @@
       "name": "Surface",
       "props": {
         "defaults": {
+          "form": "card",
           "padding": "default",
-          "shape": "card",
           "tone": "primary"
         },
         "types": [
@@ -4111,6 +4111,21 @@
       "status": "stable",
       "variants": [
         {
+          "defaultValue": "card",
+          "description": "Controls the form presentation axis of Surface.",
+          "name": "form",
+          "values": [
+            {
+              "description": "Use card for the form presentation.",
+              "name": "card"
+            },
+            {
+              "description": "Use grouped for the form presentation.",
+              "name": "grouped"
+            }
+          ]
+        },
+        {
           "defaultValue": "default",
           "description": "Controls the padding presentation axis of Surface.",
           "name": "padding",
@@ -4130,21 +4145,6 @@
             {
               "description": "Use spacious for the padding presentation.",
               "name": "spacious"
-            }
-          ]
-        },
-        {
-          "defaultValue": "card",
-          "description": "Controls the shape presentation axis of Surface.",
-          "name": "shape",
-          "values": [
-            {
-              "description": "Use card for the shape presentation.",
-              "name": "card"
-            },
-            {
-              "description": "Use grouped for the shape presentation.",
-              "name": "grouped"
             }
           ]
         },

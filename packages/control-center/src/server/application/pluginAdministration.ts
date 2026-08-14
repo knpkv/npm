@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 
+import * as Predicate from "effect/Predicate"
 import type {
   CreatePluginConnectionBatchResult,
   CreatePluginConnectionRequest,
@@ -1038,7 +1039,7 @@ const storeSetupValues = Effect.fn("PluginAdministration.storeSetupValues")(func
     const field = catalog.metadata.configurationFields.find((candidate) => candidate.key === value.key)
     if (field === undefined) return yield* new ApplicationInvalidRequest()
     if (value._tag === "secret" || field.scope === "credential") {
-      if (typeof value.value !== "string") return yield* new ApplicationInvalidRequest()
+      if (!Predicate.isString(value.value)) return yield* new ApplicationInvalidRequest()
       const ref = yield* secrets.create(secretEncoder.encode(value.value)).pipe(
         Effect.mapError(() => unavailable())
       )
@@ -1627,9 +1628,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         .map(({ name, region }) => ({ profile: name, region: region ?? null }))
         .sort((left, right) => left.profile.localeCompare(right.profile))
     }),
-    ...(Option.isNone(awsResourceDiscovery)
-      ? {}
-      : { discoverAwsResources: awsResourceDiscovery.value.discover }),
+    ...(!(Option.isNone(awsResourceDiscovery)) && { discoverAwsResources: awsResourceDiscovery.value.discover }),
     discoverAtlassianProfiles: Effect.fn("PluginAdministration.discoverAtlassianProfiles")(function*() {
       const profiles = yield* discoverAtlassianProfiles().pipe(
         Effect.provide([
@@ -1642,32 +1641,30 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       if (profiles.length > MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES) return yield* unavailable()
       return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
-    ...(atlassianOAuthGrants === undefined
-      ? {}
-      : {
-        startAtlassianOAuthGrant: ({ configuration, providers, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers, configuration),
-        exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
-        completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
-          cloudId,
-          grantId,
-          sessionId,
-          workspaceId
-        }) {
-          return yield* Effect.uninterruptible(Effect.gen(function*() {
-            const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
-            yield* invalidateAtlassianOAuthProfileRuntimes(
-              persistence,
-              secrets,
-              pluginConnections,
-              workspaceId,
-              profile.profileId
-            )
-            return profile
-          }))
-        })
-      }),
+    ...(!(atlassianOAuthGrants === undefined) && {
+      startAtlassianOAuthGrant: ({ configuration, providers, sessionId, workspaceId }) =>
+        atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers, configuration),
+      exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
+        atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
+      completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
+        cloudId,
+        grantId,
+        sessionId,
+        workspaceId
+      }) {
+        return yield* Effect.uninterruptible(Effect.gen(function*() {
+          const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+          yield* invalidateAtlassianOAuthProfileRuntimes(
+            persistence,
+            secrets,
+            pluginConnections,
+            workspaceId,
+            profile.profileId
+          )
+          return profile
+        }))
+      })
+    }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(
         persistence,
@@ -1746,12 +1743,10 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       }
       return tested.test
     }),
-    ...(manualSynchronization === null
-      ? {}
-      : {
-        synchronization: manualSynchronization.state,
-        synchronizeConnection: manualSynchronization.synchronize
-      }),
+    ...(!(manualSynchronization === null) && {
+      synchronization: manualSynchronization.state,
+      synchronizeConnection: manualSynchronization.synchronize
+    }),
     administration: ({ pluginConnectionId, workspaceId }) =>
       connectionAdministration(
         persistence,

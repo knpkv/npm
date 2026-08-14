@@ -29,7 +29,7 @@ const serveStaticAsset = Effect.gen(function*() {
       "content-length": String(asset.bytes.byteLength),
       "content-type": asset.mimeType,
       "x-content-type-options": "nosniff",
-      ...(asset.kind === "spa" ? { vary: "accept" } : {})
+      ...((asset.kind === "spa") && { vary: "accept" })
     }
   })
 })

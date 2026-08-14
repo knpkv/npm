@@ -3,6 +3,7 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
@@ -105,7 +106,7 @@ const sanitizedConfigProvider = (
       Effect.map((node) => {
         if (
           path.length !== 1 ||
-          typeof path[0] !== "string" ||
+          !Predicate.isString(path[0]) ||
           !optionalIntegerConfigurationKeys.has(path[0]) ||
           node === undefined
         ) {

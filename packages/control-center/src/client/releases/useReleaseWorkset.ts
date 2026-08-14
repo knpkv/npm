@@ -172,7 +172,7 @@ export const useReleaseWorkset = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: ReleaseWorksetTransport = browserReleaseWorksetTransport
-): { readonly retry: () => void; readonly state: ReleaseWorksetState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<ReleaseWorksetState>({ _tag: "idle" })
   const environmentScopeKey = environmentIds.join(":")

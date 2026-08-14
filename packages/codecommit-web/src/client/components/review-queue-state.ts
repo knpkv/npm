@@ -1,4 +1,5 @@
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Predicate from "effect/Predicate"
 import type { FilterEntry, FilterKey } from "../atoms/ui.js"
 import { extractScope } from "../utils/extractScope.js"
 
@@ -27,7 +28,9 @@ export const resolveQueueMode = (state: QueueModeState, currentUser: string | un
 export const openSubStatuses: ReadonlySet<string> = new Set(["approved", "pending", "mergeable", "conflicts"])
 const recognizedStatuses: ReadonlySet<string> = new Set(["open", "merged", "closed", ...openSubStatuses])
 
-export const statusAxis: Readonly<Record<string, string>> = {
+interface StatusAxisLookup extends Readonly<Record<string, string>> {}
+
+export const statusAxis: StatusAxisLookup = {
   open: "lifecycle",
   merged: "lifecycle",
   closed: "lifecycle",
@@ -37,7 +40,7 @@ export const statusAxis: Readonly<Record<string, string>> = {
   conflicts: "merge"
 }
 
-export const filterLabels: Readonly<Record<FilterKey, string>> = {
+export const filterLabels = {
   account: "Account",
   author: "Author",
   approver: "Approver",
@@ -46,7 +49,7 @@ export const filterLabels: Readonly<Record<FilterKey, string>> = {
   repo: "Repository",
   status: "Status",
   size: "Size"
-}
+} satisfies Readonly<Record<FilterKey, string>>
 
 export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): boolean => {
   switch (entry.key) {
@@ -117,7 +120,7 @@ export const groupQueueFilters = (
 
 export const queueFilterOptions = (
   prs: ReadonlyArray<Domain.PullRequest>
-): Readonly<Record<FilterKey, ReadonlyArray<string>>> => {
+) => {
   const authors = new Set<string>()
   const accounts = new Set<string>()
   const scopes = new Set<string>()
@@ -178,7 +181,7 @@ export const isWithinQueueDateBounds = (
   fromMs: number | undefined,
   toMs: number | undefined
 ): boolean => {
-  if (typeof fromMs === "number" && Number.isFinite(fromMs) && timestamp < fromMs) return false
-  if (typeof toMs === "number" && Number.isFinite(toMs) && timestamp >= toMs) return false
+  if (Predicate.isNumber(fromMs) && Number.isFinite(fromMs) && timestamp < fromMs) return false
+  if (Predicate.isNumber(toMs) && Number.isFinite(toMs) && timestamp >= toMs) return false
   return true
 }

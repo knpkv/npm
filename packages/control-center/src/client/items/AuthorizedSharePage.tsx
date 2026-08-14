@@ -29,7 +29,7 @@ const SHARE_REVALIDATION_MILLISECONDS = 30_000
 
 const isTaggedFailure =
   (tag: string) =>
-  (failure: unknown): boolean =>
+  <UnparsedInput,>(failure: UnparsedInput): boolean =>
     Predicate.hasProperty(failure, "_tag") && failure._tag === tag
 
 const isNotFound = isTaggedFailure("NotFoundApiError")

@@ -33,7 +33,7 @@ const componentExample = (component: ComponentRecord): string => {
 const registryComponent = (
   component: ComponentRecord,
   metadata: RegistryMetadata
-): Readonly<Record<string, unknown>> => ({
+) => ({
   accessibility: {
     automatedChecks: true,
     requirements: [...metadata.accessibility],
@@ -75,7 +75,7 @@ const registryComponent = (
   variants: [...component.variants]
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((variant) => ({
-      ...(variant.defaultValue === undefined ? {} : { defaultValue: variant.defaultValue }),
+      ...(!(variant.defaultValue === undefined) && { defaultValue: variant.defaultValue }),
       description: variantDescription(component, variant.name),
       name: variant.name,
       values: [...variant.values]

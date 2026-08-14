@@ -124,7 +124,7 @@ export const BrowserSessionsPanel = ({
   }
 
   return (
-    <Surface as="section" className={styles.panel} padding="default" shape="grouped">
+    <Surface as="section" className={styles.panel} padding="default" form="grouped">
       <div className={styles.heading}>
         <div>
           <Text as="h2" variant="section-title">

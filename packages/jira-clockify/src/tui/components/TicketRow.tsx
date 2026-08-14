@@ -51,7 +51,7 @@ export function TicketRow({ selected, ticket }: TicketRowProps) {
     height: 1,
     flexDirection: "row",
     paddingLeft: 1,
-    ...(bg ? { backgroundColor: bg } : {})
+    ...(bg && { backgroundColor: bg })
   } satisfies BoxStyle
 
   return (

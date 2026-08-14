@@ -166,7 +166,7 @@ export function JiraEntityView({
               body,
               id: `local-${customComments.length + 1}`,
               name: "Alex Kim",
-              ...(replyTarget ? { parentId: replyTarget.id } : {}),
+              ...(replyTarget && { parentId: replyTarget.id }),
               time: "Just now"
             }
             appendHistory(

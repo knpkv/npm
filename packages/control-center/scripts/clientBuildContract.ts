@@ -71,7 +71,7 @@ const initialJavaScriptClosure = (manifest: ClientBuildManifest): InitialJavaScr
 }
 
 /** Decode untrusted Vite manifest JSON before applying distribution checks. */
-export const decodeClientBuildManifest = (value: unknown): ClientBuildManifest | undefined => {
+export const decodeClientBuildManifest = <UnparsedInput>(value: UnparsedInput): ClientBuildManifest | undefined => {
   const decoded = Schema.decodeUnknownResult(ClientBuildManifestSchema)(value)
   return Result.isSuccess(decoded) ? decoded.success : undefined
 }

@@ -21,20 +21,20 @@ import type { ReleaseLifecycle } from "../../domain/release.js"
 
 const READINESS_STAGES: ReadonlyArray<string> = ["Build", "Verify", "Production"]
 
-const lifecyclePresentation: Readonly<
-  Record<ReleaseLifecycle, { readonly label: string; readonly tone: RlyStateTone }>
-> = {
+const lifecyclePresentation = {
   assembling: { label: "Assembling", tone: "progress" },
   candidate: { label: "Candidate", tone: "neutral" },
   deploying: { label: "Deploying", tone: "progress" },
   released: { label: "Released", tone: "positive" },
   cancelled: { label: "Cancelled", tone: "caution" }
-}
+} satisfies Readonly<
+  Record<ReleaseLifecycle, { readonly label: string; readonly tone: RlyStateTone }>
+>
 
-const releaseRoleLabels: Readonly<Record<PortfolioReleaseRole, string>> = {
+const releaseRoleLabels = {
   "release-owner": "Release owner",
   "release-approver": "Release approver"
-}
+} satisfies Readonly<Record<PortfolioReleaseRole, string>>
 
 interface SourceHealthPresentation {
   readonly label: string
@@ -286,16 +286,16 @@ const readinessStages = (stages: ReadinessStages): ReadonlyArray<RlyStage> => [
   )
 ]
 
-const verdictPresentation: Readonly<
-  Record<ReadinessVerdict, { readonly label: string; readonly tone: RlyStateTone }>
-> = {
+const verdictPresentation = {
   blocked: { label: "Can't ship", tone: "critical" },
   ready: { label: "Can ship", tone: "positive" },
   deploying: { label: "Deploying", tone: "progress" },
   building: { label: "Building", tone: "progress" },
   shipped: { label: "Shipped", tone: "positive" },
   held: { label: "Needs links", tone: "caution" }
-}
+} satisfies Readonly<
+  Record<ReadinessVerdict, { readonly label: string; readonly tone: RlyStateTone }>
+>
 
 const findingReason = (finding: ReadinessFinding): string => {
   switch (finding.code) {
@@ -419,15 +419,14 @@ const releasePresentation = (
     readinessReason,
     release: {
       algorithm: release.relay.algorithm,
-      ...(approver === undefined ? {} : { approver }),
+      ...(!(approver === undefined) && { approver }),
       codename: release.relay.codename,
       facts,
       freshness: source.freshness,
-      ...(source.freshnessDateTime === null || source.freshnessTime === null
-        ? {}
-        : { freshnessDateTime: source.freshnessDateTime, freshnessTime: source.freshnessTime }),
+      ...(!(source.freshnessDateTime === null || source.freshnessTime === null) &&
+        { freshnessDateTime: source.freshnessDateTime, freshnessTime: source.freshnessTime }),
       id: release.releaseId,
-      ...(owner === undefined ? {} : { owner }),
+      ...(!(owner === undefined) && { owner }),
       reason: readinessReason,
       state: readiness?.verdict ?? "unknown",
       symbolIndices: release.relay.symbolIndices,

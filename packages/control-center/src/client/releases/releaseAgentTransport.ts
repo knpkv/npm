@@ -29,12 +29,12 @@ export const submitBrowserReleasePublication = (input: {
           title: input.title,
           markdown: input.markdown,
           parentId: null,
-          ...(input.publicationActionId === undefined ? {} : {
+          ...(!(input.publicationActionId === undefined) && {
             publicationActionId: input.publicationActionId
           }),
-          ...(input.templateEntityId === undefined ? {} : { templateEntityId: input.templateEntityId }),
-          ...(input.targetEntityId === undefined ? {} : { targetEntityId: input.targetEntityId }),
-          ...(input.targetRevision === undefined ? {} : { targetRevision: input.targetRevision })
+          ...(!(input.templateEntityId === undefined) && { templateEntityId: input.templateEntityId }),
+          ...(!(input.targetEntityId === undefined) && { targetEntityId: input.targetEntityId }),
+          ...(!(input.targetRevision === undefined) && { targetRevision: input.targetRevision })
         }
       })
     }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -51,7 +51,7 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
     params: { releaseId: input.releaseId },
     payload: {
       history: input.history,
-      ...(input.originPath === undefined ? {} : { originPath: input.originPath }),
+      ...(!(input.originPath === undefined) && { originPath: input.originPath }),
       prompt: input.prompt,
       provider: input.provider
     }

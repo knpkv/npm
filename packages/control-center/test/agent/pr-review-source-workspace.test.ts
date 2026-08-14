@@ -33,7 +33,7 @@ const inactiveLeaseGuard = Layer.succeed(
   PrReviewWorkspaceLeaseGuard.of({ isActive: () => Effect.succeed(false) })
 )
 
-const gitEnvironment: Readonly<Record<string, string>> = {
+const gitEnvironment = {
   GIT_AUTHOR_EMAIL: "review-fixture@example.invalid",
   GIT_AUTHOR_NAME: "Review Fixture",
   GIT_COMMITTER_EMAIL: "review-fixture@example.invalid",
@@ -44,7 +44,7 @@ const gitEnvironment: Readonly<Record<string, string>> = {
   LANG: "C",
   LC_ALL: "C",
   PATH: "/usr/bin:/bin"
-}
+} satisfies Readonly<Record<string, string>>
 
 const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   string,

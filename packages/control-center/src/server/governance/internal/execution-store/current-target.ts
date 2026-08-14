@@ -56,8 +56,8 @@ const exactlyOne = <Value extends object>(
     : Effect.fail(invalidTarget(workspaceId, entityId, `current-target-${kind}-ambiguous`))
 }
 
-const decodeCurrentEntity = (
-  rows: unknown,
+const decodeCurrentEntity = <UnparsedInput>(
+  rows: UnparsedInput,
   workspaceId: WorkspaceId,
   entityId: EntityId
 ): Effect.Effect<ReadonlyArray<CurrentEntityRow>, PersistedRecordError> =>
@@ -65,8 +65,8 @@ const decodeCurrentEntity = (
     Effect.mapError(() => invalidTarget(workspaceId, entityId, "current-target-entity-invalid"))
   )
 
-const decodeCurrentProjection = (
-  rows: unknown,
+const decodeCurrentProjection = <UnparsedInput>(
+  rows: UnparsedInput,
   workspaceId: WorkspaceId,
   entityId: EntityId
 ) =>

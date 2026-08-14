@@ -338,10 +338,13 @@ const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
   tags.some(
     (tag) =>
       Predicate.isTagged(cause, tag) ||
-      (Predicate.hasProperty(cause, "name") && typeof cause.name === "string" && cause.name === tag)
+      (Predicate.hasProperty(cause, "name") && Predicate.isString(cause.name) && cause.name === tag)
   )
 
-const deterministicMutationRejectionTags: Readonly<Record<string, ReadonlyArray<string>>> = {
+interface MutationRejectionTags {
+  readonly [operation: string]: ReadonlyArray<string>
+}
+const deterministicMutationRejectionTags: MutationRejectionTags = {
   "codepipeline-start-execution": ["ValidationException"],
   "codepipeline-stop-execution": ["PipelineExecutionNotStoppableException", "ValidationException"],
   "codepipeline-put-approval": ["ValidationException"]
@@ -624,9 +627,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             credentials: {
               accessKeyId: credentials.accessKeyId,
               secretAccessKey: credentials.secretAccessKey,
-              ...(credentials.sessionToken === undefined
-                ? {}
-                : { sessionToken: credentials.sessionToken })
+              ...(!(credentials.sessionToken === undefined) && { sessionToken: credentials.sessionToken })
             },
             region: request.account.region
           })
@@ -672,7 +673,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             codepipeline.listPipelineExecutions({
               pipelineName: request.pipelineName,
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -683,7 +684,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             request.account,
             codepipeline.listPipelines({
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -707,7 +708,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
               pipelineName: request.pipelineName,
               filter: { pipelineExecutionId: request.pipelineExecutionId },
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -723,7 +724,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
               limit: request.limit,
               startFromHead: true,
               unmask: false,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),

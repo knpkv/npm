@@ -25,6 +25,7 @@ import {
   useParentModalReady
 } from "../internal/modal.js"
 import styles from "./Sheet.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
@@ -146,7 +147,7 @@ const SheetLayer = ({
 }
 
 const requireVisibleAction = (value: number | string, component: string): number | string => {
-  if (typeof value === "string") requireText(value, `${component} children`)
+  if (Predicate.isString(value)) requireText(value, `${component} children`)
   return value
 }
 
@@ -233,7 +234,7 @@ const SheetContent = ({
   const setContentRef = useCallback(
     (node: HTMLDivElement | null): void => {
       contentRef.current = node
-      if (typeof ref === "function") ref(node)
+      if (Predicate.isFunction(ref)) ref(node)
       else if (ref !== null && ref !== undefined) ref.current = node
     },
     [ref]

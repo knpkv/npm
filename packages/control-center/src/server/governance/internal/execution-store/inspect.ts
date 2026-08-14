@@ -31,7 +31,7 @@ const inactive = (record: GovernedActionRecord): GovernedActionExecutionPlan => 
 const earliest = (left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp =>
   DateTime.Order(left, right) <= 0 ? left : right
 
-const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+const storeFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "inspect", reason: "not-found" })

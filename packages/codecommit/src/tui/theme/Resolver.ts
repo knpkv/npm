@@ -1,4 +1,5 @@
 import { parseColor, RGBA } from "@opentui/core"
+import * as Predicate from "effect/Predicate"
 import type { Theme } from "./default.js"
 import { isThemeJson, rgbaToHex, type TuiThemeJson } from "./resolver-utils.js"
 
@@ -19,7 +20,7 @@ function resolveTuiTheme(json: TuiThemeJson, mode: "dark" | "light"): Theme {
   const defs = json.defs ?? {}
 
   function resolveColor(c: ColorValue): RGBA {
-    if (typeof c === "string") {
+    if (Predicate.isString(c)) {
       if (c === "transparent" || c === "none") return RGBA.fromInts(0, 0, 0, 0)
       if (c.startsWith("#")) return parseColor(c)
       if (defs[c] != null) return resolveColor(defs[c])

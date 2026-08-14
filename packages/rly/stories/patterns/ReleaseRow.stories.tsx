@@ -10,9 +10,7 @@ import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
 const catalogStyle: CSSProperties = { ...pageStyle, gap: "var(--rly-space-16)", paddingInline: 0 }
 const headingStyle: CSSProperties = { ...stackStyle, paddingInline: "var(--rly-space-24)" }
 
-const stateDetails: Readonly<
-  Record<RlyReleaseState, Pick<RlyReleasePresentation, "freshness" | "reason" | "tone" | "verdict">>
-> = {
+const stateDetails = {
   blocked: {
     freshness: "unavailable",
     reason: "Production evidence is unavailable and the required approval has not been recorded.",
@@ -55,7 +53,7 @@ const stateDetails: Readonly<
     tone: "neutral",
     verdict: "Readiness not evaluated"
   }
-}
+} satisfies Readonly<Record<RlyReleaseState, Pick<RlyReleasePresentation, "freshness" | "reason" | "tone" | "verdict">>>
 
 const releaseFor = (state: RlyReleaseState): RlyReleasePresentation => ({
   algorithm: "rly-relay-v1",
@@ -70,7 +68,7 @@ const releaseFor = (state: RlyReleaseState): RlyReleasePresentation => ({
   freshnessDateTime: "2026-07-13T09:42:00Z",
   freshnessTime: "09:42 UTC",
   id: `release-${state}`,
-  ...(state === "unknown" ? {} : { owner: { id: `owner-${state}`, name: "Mara Bell", role: "Release owner" } }),
+  ...(!(state === "unknown") && { owner: { id: `owner-${state}`, name: "Mara Bell", role: "Release owner" } }),
   reason: stateDetails[state].reason,
   state,
   symbolIndices: [2, 7, 13],

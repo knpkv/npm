@@ -72,10 +72,10 @@ const malformed = (operation: string) =>
     diagnosticCode: "provider-response-schema-invalid"
   })
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(operation))

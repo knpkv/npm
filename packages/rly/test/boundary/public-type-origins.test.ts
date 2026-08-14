@@ -2,7 +2,7 @@ import * as TypeScript from "typescript"
 import { describe, expect, it } from "vitest"
 import { findForbiddenPublicTypeOrigins } from "../../scripts/packed/public-type-origins.js"
 
-const virtualProgram = (): { readonly entry: string; readonly program: TypeScript.Program } => {
+const virtualProgram = () => {
   const entry = "/workspace/index.d.ts"
   const files = new Map([
     [

@@ -183,12 +183,12 @@ const optionalDirectoryOverrides = (options: {
   readonly claudeDir: Option.Option<string>
   readonly codexDir: Option.Option<string>
 }): Pick<InstallOptions, "claudeDir" | "codexDir"> => {
-  const overrides: { claudeDir?: string; codexDir?: string } = {}
   const claudeDir = optionValue(options.claudeDir)
   const codexDir = optionValue(options.codexDir)
-  if (claudeDir !== undefined) overrides.claudeDir = claudeDir
-  if (codexDir !== undefined) overrides.codexDir = codexDir
-  return overrides
+  return {
+    ...((claudeDir !== undefined) && { claudeDir }),
+    ...((codexDir !== undefined) && { codexDir })
+  }
 }
 
 export const makeInstallCommand = (options: {

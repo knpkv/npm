@@ -96,10 +96,10 @@ interface PinnedRoot {
   readonly assertIdentity: Effect.Effect<void, SecretProtectionError>
 }
 
-const decodeInput = <S extends Schema.ConstraintDecoder<unknown>>(
+const decodeInput = <S extends Schema.ConstraintDecoder<unknown>, UnparsedInput>(
   operation: string,
   schema: S,
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<S["Type"], SecretStoreInputError> => {
   const result = Schema.decodeUnknownResult(schema)(input)
   return Result.isSuccess(result)
@@ -318,7 +318,7 @@ export const makeSecretStore: (
 
   yield* verifyProcessOwnsRoot()
 
-  const decodeRef = (operation: string, input: unknown) => decodeInput(operation, SecretRef, input)
+  const decodeRef = <UnparsedInput>(operation: string, input: UnparsedInput) => decodeInput(operation, SecretRef, input)
 
   const checkedValue = Effect.fn("SecretStore.checkedValue")(function*(value: Uint8Array) {
     if (!Predicate.isUint8Array(value)) {

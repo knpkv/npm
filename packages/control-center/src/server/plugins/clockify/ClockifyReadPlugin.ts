@@ -225,11 +225,11 @@ type ClockifySyncEvent = (typeof PluginSyncPageV1.Type)["events"][number]
 const malformed = (operation: string, diagnosticCode: string) =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   diagnosticCode: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(() => malformed(operation, diagnosticCode)))
 
@@ -349,8 +349,8 @@ const readWorkspaceContext = Effect.fn("ClockifyReadPlugin.readWorkspaceContext"
   return { user, workspace }
 })
 
-const decodeScopedWorkspaceUsers = Effect.fn("ClockifyReadPlugin.decodeScopedWorkspaceUsers")(function*(
-  rawUsers: unknown,
+const decodeScopedWorkspaceUsers = Effect.fn("ClockifyReadPlugin.decodeScopedWorkspaceUsers")(function*<UnparsedInput>(
+  rawUsers: UnparsedInput,
   configuredUserIds: ReadonlyArray<string>
 ) {
   const directory = yield* decodeProvider(
@@ -506,7 +506,10 @@ const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   return { _tag: "found", event }
 })
 
-const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): ClockifyReadPluginRuntime => {
+const makeRuntime = <UnparsedInput>(
+  provider: ClockifyReadProvider,
+  configuration: UnparsedInput
+): ClockifyReadPluginRuntime => {
   const definition = definePluginV1({
     rawDescriptor: clockifyReadPluginDescriptor,
     configurationSchema: ClockifyReadPluginConfiguration,
@@ -606,8 +609,8 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
 }
 
 /** Build a production Clockify runtime from the configured shared API client. */
-export const makeClockifyReadPluginRuntime = (
-  configuration: unknown
+export const makeClockifyReadPluginRuntime = <UnparsedInput>(
+  configuration: UnparsedInput
 ): Effect.Effect<ClockifyReadPluginRuntime, never, ClockifyApiClient> =>
   Effect.map(ClockifyApiClient, (client) => makeRuntime(makeClockifyReadProvider(client), configuration))
 

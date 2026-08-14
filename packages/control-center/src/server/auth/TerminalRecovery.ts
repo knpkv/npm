@@ -157,8 +157,8 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
   })
 
   return {
-    issueOwnerRecovery: Effect.fn("TerminalRecovery.issueOwnerRecovery")(function*(
-      unknownRequest: unknown
+    issueOwnerRecovery: Effect.fn("TerminalRecovery.issueOwnerRecovery")(function*<UnparsedInput>(
+      unknownRequest: UnparsedInput
     ) {
       const request = yield* Schema.decodeUnknownEffect(RecoveryRequest)(unknownRequest).pipe(
         Effect.mapError(() => new TerminalRecoveryRefusedError({ reason: "invalid-input" }))
@@ -221,8 +221,8 @@ export class TerminalRecovery extends Context.Service<
 >()("@knpkv/control-center/server/auth/TerminalRecovery") {}
 
 /** Build terminal recovery from the exact canonical parent of the configured local database. */
-export const terminalRecoveryLayer = (
-  persistenceConfigInput: unknown
+export const terminalRecoveryLayer = <UnparsedInput>(
+  persistenceConfigInput: UnparsedInput
 ): Layer.Layer<
   TerminalRecovery,
   Layer.Error<ReturnType<typeof databaseLayer>> | TerminalRecoveryRefusedError,

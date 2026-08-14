@@ -50,11 +50,11 @@ const REVIEW_PROFILE_COMPONENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 const ENCODED_REVIEW_PROFILE_COMPONENT_PREFIX = "encoded-"
 const MAXIMUM_REVIEW_PROFILE_LABEL_LENGTH = 200
 type FixedProviderId = "claude" | "codex" | "openai-compatible"
-const PROVIDER_DISPLAY_NAMES: Readonly<Record<FixedProviderId, string>> = {
+const PROVIDER_DISPLAY_NAMES = {
   claude: "Claude",
   codex: "Codex",
   "openai-compatible": "OpenAI-compatible"
-}
+} satisfies Readonly<Record<FixedProviderId, string>>
 /** Persisted provider selection presented to the server-owned registry. */
 export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
@@ -214,17 +214,15 @@ const availableCatalogEntry = Effect.fn("AgentRuntimeRegistry.availableCatalogEn
     models: [model],
     capabilities,
     health: "available",
-    ...(reviewBudgetMillis === undefined || reviewIdentity === undefined
-      ? {}
-      : {
-        reviewProfile: {
-          profileId: reviewIdentity.profileId,
-          label: reviewIdentity.label,
-          budgetMillis: reviewBudgetMillis,
-          networkAccess,
-          sandbox: "sbx"
-        }
-      })
+    ...(!(reviewBudgetMillis === undefined || reviewIdentity === undefined) && {
+      reviewProfile: {
+        profileId: reviewIdentity.profileId,
+        label: reviewIdentity.label,
+        budgetMillis: reviewBudgetMillis,
+        networkAccess,
+        sandbox: "sbx"
+      }
+    })
   } satisfies AgentProviderCatalogEntry
 })
 
@@ -255,7 +253,7 @@ const timeoutFailure = (providerId: AgentProviderId): AgentProviderError =>
 const isAgentProviderError = Schema.is(AgentProviderError)
 const isRuntimeMetadataError = Schema.is(AgentRuntimeMetadataError)
 
-const metadataFailure = (providerId: AgentProviderId, failure: unknown): AgentProviderError =>
+const metadataFailure = <UnparsedInput>(providerId: AgentProviderId, failure: UnparsedInput): AgentProviderError =>
   isRuntimeMetadataError(failure) && failure.reason === "unavailable"
     ? new AgentProviderError({
       providerId,
@@ -374,10 +372,10 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
       return {
         model,
         runtime,
-        ...(runtimeMetadata === undefined ? {} : { runtimeMetadata }),
-        ...(provider.languageModel === undefined ? {} : { languageModel: provider.languageModel }),
-        ...(provider.reviewExecution === undefined ? {} : { reviewExecution: provider.reviewExecution }),
-        ...(provider.reviewExecutable === undefined ? {} : { reviewExecutable: provider.reviewExecutable }),
+        ...(!(runtimeMetadata === undefined) && { runtimeMetadata }),
+        ...(!(provider.languageModel === undefined) && { languageModel: provider.languageModel }),
+        ...(!(provider.reviewExecution === undefined) && { reviewExecution: provider.reviewExecution }),
+        ...(!(provider.reviewExecutable === undefined) && { reviewExecutable: provider.reviewExecutable }),
         filesystemAccess: provider.providerId === OPENAI_COMPATIBLE_PROVIDER_ID ? "none" : "configured-workspace"
       }
     })
@@ -409,12 +407,10 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
         options.prReviewEnabled === true ? prReviewBudgetMillis : undefined,
         "provider-enabled"
       ),
-      ...(options.prReviewEnabled === true
-        ? {
-          reviewExecution: "native-codex",
-          reviewExecutable: options.prReviewCodexExecutable ?? "codex"
-        }
-        : {}),
+      ...((options.prReviewEnabled === true) && {
+        reviewExecution: "native-codex",
+        reviewExecutable: options.prReviewCodexExecutable ?? "codex"
+      }),
       runtimeMetadata: readLocalCliRuntimeMetadata({
         cwd: codexConfigured.cwd,
         executable: codexConfigured.executable ?? "codex",
@@ -431,8 +427,8 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
               codexModel({
                 cwd: codexConfigured.cwd,
                 access,
-                ...(codexConfigured.executable === undefined ? {} : { executable: codexConfigured.executable }),
-                ...(model === CODEX_DEFAULT_MODEL ? {} : { model })
+                ...(!(codexConfigured.executable === undefined) && { executable: codexConfigured.executable }),
+                ...(!(model === CODEX_DEFAULT_MODEL) && { model })
               })
             ),
             Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -459,12 +455,10 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
         options.prReviewEnabled === true ? prReviewBudgetMillis : undefined,
         "provider-enabled"
       ),
-      ...(options.prReviewEnabled === true
-        ? {
-          reviewExecution: "native-claude",
-          reviewExecutable: options.prReviewClaudeExecutable ?? "claude"
-        }
-        : {}),
+      ...((options.prReviewEnabled === true) && {
+        reviewExecution: "native-claude",
+        reviewExecutable: options.prReviewClaudeExecutable ?? "claude"
+      }),
       runtimeMetadata: readLocalCliRuntimeMetadata({
         cwd: claudeConfigured.cwd,
         executable: claudeConfigured.executable ?? "claude",
@@ -481,8 +475,8 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
               claudeModel({
                 cwd: claudeConfigured.cwd,
                 access,
-                ...(claudeConfigured.executable === undefined ? {} : { executable: claudeConfigured.executable }),
-                ...(model === CLAUDE_DEFAULT_MODEL ? {} : { model })
+                ...(!(claudeConfigured.executable === undefined) && { executable: claudeConfigured.executable }),
+                ...(!(model === CLAUDE_DEFAULT_MODEL) && { model })
               })
             ),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
@@ -504,7 +498,7 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
       Effect.provide(
         OpenAiClient.layer({
           apiUrl: openAiConfigured.apiUrl,
-          ...(openAiConfigured.apiKey === undefined ? {} : { apiKey: openAiConfigured.apiKey })
+          ...(!(openAiConfigured.apiKey === undefined) && { apiKey: openAiConfigured.apiKey })
         })
       ),
       Effect.provideService(HttpClient.HttpClient, httpClient)
@@ -525,9 +519,7 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(op
         options.prReviewEnabled === true ? prReviewBudgetMillis : undefined
       ),
       languageModel: openAiLanguageModel,
-      ...(options.prReviewEnabled === true
-        ? { reviewExecution: "effect-ai" }
-        : {}),
+      ...((options.prReviewEnabled === true) && { reviewExecution: "effect-ai" }),
       runtimeMetadata: Effect.succeed(
         AgentRuntimeMetadata.make({
           _tag: "remote-api",

@@ -137,7 +137,7 @@ function PRItemRow({
       borderColor={parseColor(bg ? theme.primary : theme.border)}
       style={{
         width: "100%",
-        ...(bg ? { backgroundColor: bg } : {}),
+        ...(bg && { backgroundColor: bg }),
         paddingLeft: 1,
         paddingTop: 0,
         paddingBottom: 0,

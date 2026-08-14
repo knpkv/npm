@@ -38,6 +38,7 @@ import {
 } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import type { SqlRow } from "../../src/server/persistence/repositories/sqlRow.js"
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
@@ -64,7 +65,8 @@ const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
 const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:06:00.000Z")
 const T5 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:00.000Z")
-const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const jsonBytes = <UnparsedInput>(value: UnparsedInput): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -766,7 +768,7 @@ const setup = Effect.gen(function*() {
 const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
   pluginConnectionId: PluginConnectionId,
   providerId: "clockify" | "codecommit" | "codepipeline" | "confluence",
-  pluginDescriptor: unknown = descriptorFor(providerId)
+  pluginDescriptor: Schema.Json = descriptorFor(providerId)
 ) {
   const persistence = yield* Persistence
   yield* persistence.pluginConnections.create(WORKSPACE_ID, {
@@ -5462,7 +5464,7 @@ describe("normalized plugin page materialization", () => {
       const remainingItems = yield* items()
       assert.strictEqual(remainingItems.totalCount, 1)
 
-      const beforeReplay = yield* database.sql<Record<string, unknown>>`SELECT
+      const beforeReplay = yield* database.sql<SqlRow>`SELECT
         (SELECT COUNT(*) FROM entities) AS entities,
         (SELECT COUNT(*) FROM entity_projection_revisions) AS projections,
         (SELECT COUNT(*) FROM persons) AS people,
@@ -5489,7 +5491,7 @@ describe("normalized plugin page materialization", () => {
         relationshipCount: 0,
         skippedEntityCount: 0
       })
-      const afterReplay = yield* database.sql<Record<string, unknown>>`SELECT
+      const afterReplay = yield* database.sql<SqlRow>`SELECT
         (SELECT COUNT(*) FROM entities) AS entities,
         (SELECT COUNT(*) FROM entity_projection_revisions) AS projections,
         (SELECT COUNT(*) FROM persons) AS people,

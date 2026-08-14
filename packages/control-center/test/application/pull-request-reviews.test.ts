@@ -10,6 +10,7 @@ import {
 import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream, Tracer } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
+import * as Predicate from "effect/Predicate"
 import {
   AgentModelId,
   DurableAgentProviderId,
@@ -78,7 +79,7 @@ import {
   ReviewSuggestionPublicationGatewayError
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
-import { Database, databaseLayer, type DatabaseShape } from "../../src/server/persistence/Database.js"
+import { Database, type DatabaseContract, databaseLayer } from "../../src/server/persistence/Database.js"
 import { RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import {
   Persistence,
@@ -718,7 +719,7 @@ const withRealService = <Success, Failure>(
   use: (
     service: PullRequestReviews["Service"],
     persistence: Persistence["Service"],
-    database: DatabaseShape
+    database: DatabaseContract
   ) => Effect.Effect<Success, Failure>,
   selectedInspection = graphInspection
 ) =>
@@ -996,7 +997,7 @@ describe("pull request reviews", () => {
         const persisted = yield* Ref.get(enqueueInput)
         assert.isNotNull(persisted)
         if (
-          typeof persisted === "object" &&
+          Predicate.isObjectOrArray(persisted) &&
           persisted !== null &&
           "task" in persisted
         ) {
@@ -1152,7 +1153,7 @@ describe("pull request reviews", () => {
           assert.strictEqual(accepted._tag, "pending")
           const persisted = yield* Ref.get(enqueueInput)
           assert.isNotNull(persisted)
-          if (typeof persisted !== "object" || persisted === null || !("task" in persisted)) {
+          if (!Predicate.isObjectOrArray(persisted) || persisted === null || !("task" in persisted)) {
             return yield* Effect.die("native Claude review enqueue input was not captured")
           }
           assert.deepStrictEqual(persisted.task, {
@@ -2190,7 +2191,7 @@ describe("pull request reviews", () => {
             name: span.name,
             status: span.status
           })),
-          (_key, value) => typeof value === "bigint" ? value.toString() : value
+          (_key, value) => Predicate.isBigInt(value) ? value.toString() : value
         )
         assert.notInclude(telemetry, "yield* mutate()")
         assert.notInclude(telemetry, "Authorize before mutating.")
@@ -2350,7 +2351,7 @@ describe("pull request reviews", () => {
               model: MODEL,
               profile: "read-only",
               reviewProfileId: REVIEW_PROFILE.profileId,
-              ...(prompt === undefined ? {} : { prompt })
+              ...(!(prompt === undefined) && { prompt })
             }
           })
         const active = yield* Effect.all([enqueue(), enqueue()], {

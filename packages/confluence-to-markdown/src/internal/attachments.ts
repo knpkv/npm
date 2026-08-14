@@ -8,18 +8,20 @@ import {
   renderAttachmentMarkdown,
   replaceAttachmentPlaceholder
 } from "@knpkv/atlassian-common/attachments"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import type { AttachmentReference } from "../Schemas.js"
 import { sanitizeConfluenceMediaAlt } from "./mediaAlt.js"
 
 interface AdfNode {
   readonly type?: string
-  readonly attrs?: Record<string, unknown>
+  readonly attrs?: Record<string, Schema.Json>
   readonly content?: ReadonlyArray<AdfNode>
-  readonly [key: string]: unknown
+  readonly [key: string]: Schema.Json
 }
 
-const isAdfNode = (value: unknown): value is AdfNode =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isAdfNode = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & AdfNode =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
 export interface MediaAttachmentResolution {
   readonly adfJson: string
@@ -69,7 +71,7 @@ export const renderConfluenceAttachmentReference = (
         id: mediaId,
         type: "file",
         collection,
-        ...(mediaAlt ? { alt: mediaAlt } : {})
+        ...(mediaAlt && { alt: mediaAlt })
       }
     }]
   }
@@ -110,9 +112,9 @@ const resolveNode = (
   unresolvedMediaIds: Array<string>
 ): AdfNode => {
   const attrs = node.attrs ?? {}
-  const id = typeof attrs["id"] === "string" ? attrs["id"] : null
+  const id = Predicate.isString(attrs["id"]) ? attrs["id"] : null
   const attachment = node.type === "media" && id ? attachments.get(id) : undefined
-  if (node.type === "media" && id && !attachment && typeof attrs["url"] !== "string") {
+  if (node.type === "media" && id && !attachment && !Predicate.isString(attrs["url"])) {
     unresolvedMediaIds.push(id)
   }
   const nextAttrs = attachment
@@ -120,14 +122,12 @@ const resolveNode = (
       ...attrs,
       url: attachment.url,
       filename: attachment.filename,
-      ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {})
+      ...((attachment.mediaType) && { mediaType: attachment.mediaType })
     }
     : attrs
   return {
     ...node,
-    ...(Object.keys(nextAttrs).length > 0 ? { attrs: nextAttrs } : {}),
-    ...(node.content
-      ? { content: node.content.map((child) => resolveNode(child, attachments, unresolvedMediaIds)) }
-      : {})
+    ...((Object.keys(nextAttrs).length > 0) && { attrs: nextAttrs }),
+    ...((node.content) && { content: node.content.map((child) => resolveNode(child, attachments, unresolvedMediaIds)) })
   }
 }

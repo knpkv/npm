@@ -151,7 +151,7 @@ describe("RelayReview", () => {
       title: "Issue",
       verification: "Static patch review only."
     }
-    const decode = (publicationTarget: string, location: unknown) =>
+    const decode = <UnparsedInput>(publicationTarget: string, location: UnparsedInput) =>
       parseRelayReviewResult(
         JSON.stringify({ findings: [{ ...finding, location, publicationTarget }], verdict: "One" })
       )

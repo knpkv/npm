@@ -173,11 +173,11 @@ const makeSandboxRepo = Effect.gen(function*() {
   return service
 })
 
-export interface SandboxRepoShape extends Success<typeof makeSandboxRepo> {}
+export interface SandboxRepoContract extends Success<typeof makeSandboxRepo> {}
 
 export class SandboxRepo extends Context.Service<
   SandboxRepo,
-  SandboxRepoShape
+  SandboxRepoContract
 >()("SandboxRepo") {
   static readonly Default = Layer.effect(SandboxRepo, makeSandboxRepo).pipe(
     Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))

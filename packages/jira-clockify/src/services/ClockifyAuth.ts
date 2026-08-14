@@ -11,7 +11,7 @@
  *
  * @module
  */
-import type { ClockifyApiConfigShape } from "@knpkv/clockify-api-client"
+import type { ClockifyApiConfigContract } from "@knpkv/clockify-api-client"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -35,13 +35,13 @@ const StoredAuth = Schema.Struct({
 })
 interface StoredAuth extends Schema.Schema.Type<typeof StoredAuth> {}
 
-export interface ClockifyAuthShape {
-  readonly getConfig: Effect.Effect<ClockifyApiConfigShape, ClockifyAuthMissingError>
+export interface ClockifyAuthContract {
+  readonly getConfig: Effect.Effect<ClockifyApiConfigContract, ClockifyAuthMissingError>
   readonly save: (auth: StoredAuth) => Effect.Effect<void>
   readonly isConfigured: Effect.Effect<boolean>
 }
 
-export class ClockifyAuth extends Context.Service<ClockifyAuth, ClockifyAuthShape>()("jcf/ClockifyAuth") {}
+export class ClockifyAuth extends Context.Service<ClockifyAuth, ClockifyAuthContract>()("jcf/ClockifyAuth") {}
 
 const AUTH_DIR = ".jcf"
 const AUTH_FILE = "clockify.json"

@@ -13,7 +13,7 @@ import {
   ReadinessRuleId,
   ReadinessRuleVersion
 } from "./model.js"
-import { compareReadinessText, readinessDefinitionsShapeIsV1, readinessPolicyShapeIsV1 } from "./policy.js"
+import { compareReadinessText, readinessDefinitionsContractIsV1, readinessPolicyContractIsV1 } from "./policy.js"
 
 const unique = <Value>(values: ReadonlyArray<Value>): boolean => new Set(values).size === values.length
 
@@ -33,7 +33,7 @@ const readinessFactsAreValid = (input: {
     input.observations.every((observation) =>
       definitionsById.get(observation.factId)?.kind === observation.state._tag
     ) &&
-    readinessPolicyShapeIsV1(input.definitions, input.observations) &&
+    readinessPolicyContractIsV1(input.definitions, input.observations) &&
     input.observations.reduce((total, observation) => total + observation.evidence.length, 0) <=
       MAX_READINESS_EVIDENCE_REFERENCES
 }
@@ -93,7 +93,7 @@ export const ReadinessRuleMaterial = Schema.Struct({
   Schema.makeFilter(({ definitions }) => unique(definitions.map(({ factId }) => factId)), {
     expected: "readiness rule fact identities to be unique"
   }),
-  Schema.makeFilter(({ definitions }) => readinessDefinitionsShapeIsV1(definitions), {
+  Schema.makeFilter(({ definitions }) => readinessDefinitionsContractIsV1(definitions), {
     expected: "readiness rule material to contain the complete V1 policy shape"
   })
 )

@@ -31,15 +31,13 @@ const relationshipAt = (index: number): RlyRelationship => {
     reference: `JIRA-${100 + index}`,
     service: "jira",
     href: `/jira/${100 + index}`,
-    ...(index === 0
-      ? {
-          person: {
-            id: "avery",
-            name: "Avery Diaz",
-            role: "Requirement owner"
-          }
-        }
-      : {})
+    ...(index === 0 && {
+      person: {
+        id: "avery",
+        name: "Avery Diaz",
+        role: "Requirement owner"
+      }
+    })
   }
   const target: RlyRelationshipEndpoint =
     index === 5

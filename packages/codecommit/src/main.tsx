@@ -6,6 +6,7 @@ import { App } from "./tui/App.js"
 import { makeTuiApplicationRegistry, TuiTerminalSession } from "./tui/atoms/applicationScope.js"
 import { cleanup } from "./tui/atoms/app.js"
 import { type InterruptSignals, suppressInterruptTeardown } from "./tui/terminal-handover.js"
+import * as Predicate from "effect/Predicate"
 
 const escape = "\u001b"
 
@@ -20,7 +21,7 @@ type SignalListener = (signal: string) => void
 const hostInterruptSignals: InterruptSignals<SignalListener> = {
   ignore: () => {},
   listeners: () =>
-    process.listeners("SIGINT").filter((listener): listener is SignalListener => typeof listener === "function"),
+    process.listeners("SIGINT").filter((listener): listener is SignalListener => Predicate.isFunction(listener)),
   off: (listener) => {
     process.off("SIGINT", listener)
   },

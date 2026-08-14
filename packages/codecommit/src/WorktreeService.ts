@@ -55,7 +55,7 @@ export const reviewRevisionSpecifiers = (request: WorktreeRequest): ReadonlyArra
   advertisedBranchReference(request.sourceReference)
 ]
 
-export interface WorktreeServiceShape {
+export interface WorktreeServiceContract {
   readonly preflight: (request: WorktreeRequest) => Effect.Effect<WorktreePlan, WorktreeError>
   readonly checkout: (plan: WorktreePlan) => Effect.Effect<WorktreeResult, WorktreeError>
 }
@@ -153,7 +153,7 @@ export const makeCodeCommitGitCommand = (
       "credential.UseHttpPath=true",
       ...args
     ], {
-      ...(cwd === undefined ? {} : { cwd }),
+      ...(!(cwd === undefined) && { cwd }),
       env: environment ?? gitEnvironment(inherited, request),
       extendEnv: true,
       stdin: "ignore",
@@ -163,7 +163,7 @@ export const makeCodeCommitGitCommand = (
   )
 }
 const commandFailure = (operation: string, message: string, cause?: unknown) =>
-  new WorktreeError({ operation, message, ...(cause === undefined ? {} : { cause }) })
+  new WorktreeError({ operation, message, ...(!(cause === undefined) && { cause }) })
 
 const runChecked = Effect.fn("WorktreeService.runChecked")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -802,10 +802,10 @@ export const makeWorktreeService = (
       return yield* withRepositoryLock(plan, checkoutUnlocked(plan, paths))
     })
 
-    return { checkout, preflight } satisfies WorktreeServiceShape
+    return { checkout, preflight } satisfies WorktreeServiceContract
   })
 
-export class WorktreeService extends Context.Service<WorktreeService, WorktreeServiceShape>()(
+export class WorktreeService extends Context.Service<WorktreeService, WorktreeServiceContract>()(
   "@knpkv/codecommit/WorktreeService"
 ) {
   static readonly live = Layer.effect(WorktreeService, makeWorktreeService())

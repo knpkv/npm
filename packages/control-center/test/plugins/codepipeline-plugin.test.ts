@@ -189,7 +189,7 @@ const actionOutput = (
       }
     }
   }],
-  ...(nextToken === undefined ? {} : { nextToken })
+  ...(!(nextToken === undefined) && { nextToken })
 })
 
 const baseProvider = (
@@ -202,7 +202,7 @@ const baseProvider = (
       pipelineExecutionSummaries: [
         executionSummary(request.nextToken === null ? "execution-1842" : "execution-1843", "Succeeded")
       ],
-      ...(request.nextToken === null ? { nextToken: "execution-page-2" } : {})
+      ...((request.nextToken === null) && { nextToken: "execution-page-2" })
     }),
   listPipelinesPage: () => Effect.succeed({ pipelines: [] }),
   getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "Succeeded")),
@@ -240,7 +240,7 @@ const baseProvider = (
 const runWithProvider = <Value, Error>(
   provider: CodePipelineReadProviderService,
   effect: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
-  adapterConfiguration: unknown = configuration
+  adapterConfiguration: Schema.Json = configuration
 ) =>
   effect.pipe(
     Effect.provide(
@@ -705,7 +705,7 @@ describe("CodePipelinePlugin", () => {
               pipelineExecutionSummaries: [
                 executionSummary(request.nextToken === null ? "execution-1842" : "execution-1843", "Succeeded")
               ],
-              ...(request.nextToken === null ? { nextToken: "execution-page-2" } : {})
+              ...((request.nextToken === null) && { nextToken: "execution-page-2" })
             })
           ),
         listActionExecutionsPage: (request) =>
@@ -1753,13 +1753,11 @@ describe("CodePipelinePlugin", () => {
                             ...action.actionTypeId,
                             provider: providerName
                           },
-                          ...(providerName === "S3"
-                            ? {
-                              configuration: {
-                                AllowOverrideForS3ObjectKey: allowS3ObjectKeyOverride ? "true" : "false"
-                              }
+                          ...((providerName === "S3") && {
+                            configuration: {
+                              AllowOverrideForS3ObjectKey: allowS3ObjectKeyOverride ? "true" : "false"
                             }
-                            : {})
+                          })
                         }))
                       }
                   )
@@ -1894,7 +1892,7 @@ describe("CodePipelinePlugin", () => {
                     revisionType: "COMMIT_ID",
                     revisionValue: "commit-abc"
                   }],
-                  ...(variables === undefined ? {} : { variables })
+                  ...(!(variables === undefined) && { variables })
                 },
                 evidenceIds: []
               })

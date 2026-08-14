@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import { componentManifest } from "../../component-manifest.js"
 import packageSource from "../../package.json?raw"
@@ -8,8 +10,9 @@ const sourceModules = import.meta.glob<string>("../../src/**/*.{ts,tsx}", {
   query: "?raw"
 })
 
-const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
-  typeof value === "object" && value !== null
+const isRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> => Predicate.isObjectOrArray(value) && value !== null
 
 describe("package contract", () => {
   it("keeps runtime dependencies on the exact approved implementation set", () => {

@@ -249,7 +249,7 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
     )
   })
 
-  const run = Effect.fn("GovernedActionExecutionEngine.run")(function*(input: unknown) {
+  const run = Effect.fn("GovernedActionExecutionEngine.run")(function*<UnparsedInput>(input: UnparsedInput) {
     const reference: GovernedActionExecutionReferenceType = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionExecutionReference)
     )(input).pipe(Effect.mapError(() => new GovernedActionExecutionInputError()))

@@ -60,11 +60,11 @@ const makeCommentRepo = Effect.gen(function*() {
   return repo
 })
 
-export interface CommentRepoShape extends Success<typeof makeCommentRepo> {}
+export interface CommentRepoContract extends Success<typeof makeCommentRepo> {}
 
 export class CommentRepo extends Context.Service<
   CommentRepo,
-  CommentRepoShape
+  CommentRepoContract
 >()("CommentRepo") {
   static readonly Default = Layer.effect(CommentRepo, makeCommentRepo).pipe(
     Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))

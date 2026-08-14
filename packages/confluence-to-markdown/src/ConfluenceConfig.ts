@@ -161,7 +161,7 @@ export const layer = (
       return ConfluenceConfig.of({
         rootPageId: config.rootPageId,
         baseUrl: config.baseUrl,
-        ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
+        ...((config.spaceKey !== undefined) && { spaceKey: config.spaceKey }),
         docsPath: config.docsPath,
         excludePatterns: config.excludePatterns,
         saveSource: config.saveSource,
@@ -183,7 +183,7 @@ export const layerFromValues = (
     ConfluenceConfig.of({
       rootPageId: config.rootPageId,
       baseUrl: config.baseUrl,
-      ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
+      ...((config.spaceKey !== undefined) && { spaceKey: config.spaceKey }),
       docsPath: config.docsPath,
       excludePatterns: config.excludePatterns,
       saveSource: config.saveSource,

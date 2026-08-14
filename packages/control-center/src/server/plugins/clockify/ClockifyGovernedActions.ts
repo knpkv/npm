@@ -33,7 +33,6 @@ import {
   PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
-import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import type { ClockifyReadPluginConfiguration } from "./ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "./ClockifyReadProvider.js"
 import {
@@ -164,10 +163,10 @@ const withTimeout = <Value>(
     orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
   })
 
-const output = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const output = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(`clockify-action-${operation}`, "clockify-action-output-invalid"))
@@ -283,9 +282,7 @@ const succeededReceipt = (
 ): PluginTerminalProviderReceiptV1 => ({
   status: "succeeded",
   providerOperationId: operationId(payload, digest),
-  ...(payload._tag === RECORD_APPROVAL
-    ? { observationBasis: AUTHORIZATION_OBSERVATION }
-    : {}),
+  ...((payload._tag === RECORD_APPROVAL) && { observationBasis: AUTHORIZATION_OBSERVATION }),
   safeSummary: payload._tag === CORRECT_ASSOCIATION
     ? `Corrected Clockify entry ${payload.entryId} association to ${payload.jiraIssueKey}`
     : `Recorded Control Center ${payload.decision} decision for Clockify entry ${payload.entryId}`,
@@ -359,13 +356,7 @@ interface GovernedActionsInput {
 /** Build the governed Clockify proposal and sealed executor surfaces. @internal */
 export const makeClockifyGovernedActions = (
   input: GovernedActionsInput
-): {
-  readonly actionActorIdentity: Effect.Effect<typeof PluginActionActorIdentityV1.Type, PluginFailure>
-  readonly proposeAction: (
-    request: ProposePluginActionRequestV1
-  ) => Effect.Effect<typeof PluginActionProposalV1.Type, PluginFailure>
-  readonly executor: AuthorizedPluginExecutorV1
-} => {
+) => {
   const actionActorIdentity = Effect.gen(function*() {
     const current = yield* withTimeout(
       "clockify-action-current-user",
@@ -595,14 +586,12 @@ export const makeClockifyGovernedActions = (
             billable: payload.billable,
             customFields: payload.customFields,
             description: payload.correctedDescription,
-            ...(payload.end === null ? {} : { end: payload.end }),
-            ...(payload.projectId === null ? {} : { projectId: payload.projectId }),
+            ...(!(payload.end === null) && { end: payload.end }),
+            ...(!(payload.projectId === null) && { projectId: payload.projectId }),
             start: payload.start,
             tagIds: [...payload.tagIds],
-            ...(payload.taskId === null ? {} : { taskId: payload.taskId }),
-            ...(payload.entryType === "REGULAR" || payload.entryType === "BREAK"
-              ? { type: payload.entryType }
-              : {})
+            ...(!(payload.taskId === null) && { taskId: payload.taskId }),
+            ...((payload.entryType === "REGULAR" || payload.entryType === "BREAK") && { type: payload.entryType })
           }
         )
       )

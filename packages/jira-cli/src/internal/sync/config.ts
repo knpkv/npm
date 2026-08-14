@@ -28,7 +28,8 @@ export const parseWorkspaceConfig = (
     return config
   })
 
-export const serializeWorkspaceConfig = (config: WorkspaceConfig): string => yaml.dump(config, { lineWidth: 100 })
+export const serializeWorkspaceConfig = (config: WorkspaceConfig): string =>
+  yaml.dump(Schema.encodeSync(WorkspaceConfigSchema)(config), { lineWidth: 100 })
 
 export const makeDefaultWorkspaceConfig = (siteUrl: string): WorkspaceConfig => ({
   version: 1,

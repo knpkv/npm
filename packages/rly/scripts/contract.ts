@@ -1,4 +1,5 @@
 import * as Data from "effect/Data"
+import * as Schema from "effect/Schema"
 import type { AssetEntry, ComponentManifest, ComponentRecord, EntryId, ModuleEntry } from "../component-manifest.js"
 import { renderRegistryContract } from "./registry/registry-contract.js"
 import { renderTokenContract } from "./tokens/token-contract.js"
@@ -198,28 +199,34 @@ export const renderPackageExports = (manifest: ComponentManifest): Readonly<Reco
 /** Render package.json with its public exports replaced by the generated contract. */
 export const renderPackageJson = (
   manifest: ComponentManifest,
-  packageJson: Readonly<Record<string, unknown>>
+  packageJson: Readonly<Record<string, Schema.Json>>
 ): string => `${JSON.stringify({ ...packageJson, exports: renderPackageExports(manifest) }, null, 2)}\n`
 
-const compareJsonKeys = (left: readonly [string, unknown], right: readonly [string, unknown]): number =>
+const compareJsonKeys = (left: readonly [string, Schema.Json], right: readonly [string, Schema.Json]): number =>
   left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0
 
-const normalizeJson = (value: unknown): unknown => {
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const isJsonObject = Schema.is(JsonObject)
+
+const normalizeJson = (value: Schema.Json): Schema.Json => {
   if (Array.isArray(value)) return value.map(normalizeJson)
-  if (typeof value !== "object" || value === null) return value
+  if (!isJsonObject(value)) return value
   return Object.fromEntries(
     Object.entries(value)
       .sort(compareJsonKeys)
-      .map(([key, nested]) => [key, normalizeJson(nested)])
+      .map(([key, nested]): readonly [string, Schema.Json] => [key, normalizeJson(nested)])
   )
 }
 
 /** Check whether the package manifest matches the generated public contract. */
 export const packageExportsMatch = (
   manifest: ComponentManifest,
-  packageJson: Readonly<Record<string, unknown>>
-): boolean =>
-  JSON.stringify(normalizeJson(packageJson.exports)) === JSON.stringify(normalizeJson(renderPackageExports(manifest)))
+  packageJson: Readonly<Record<string, Schema.Json>>
+): boolean => {
+  const actualExports = packageJson.exports
+  return actualExports !== undefined &&
+    JSON.stringify(normalizeJson(actualExports)) === JSON.stringify(normalizeJson(renderPackageExports(manifest)))
+}
 
 /** Render the visual classifier's exact component path catalog. */
 export const renderVisualCatalog = (manifest: ComponentManifest): string => {
@@ -277,7 +284,7 @@ const renderBarrel = (
 export const findSourceDrift = (
   manifest: ComponentManifest,
   files: ReadonlyArray<string>
-): { readonly missing: ReadonlyArray<string>; readonly unexpected: ReadonlyArray<string> } => {
+) => {
   validateManifest(manifest)
   const normalizedFiles = new Set(files)
   const expected = new Set<string>([

@@ -110,11 +110,11 @@ const makePRService = Effect.gen(function*() {
   }
 })
 
-export interface PRServiceShape extends Success<typeof makePRService> {}
+export interface PRServiceContract extends Success<typeof makePRService> {}
 
 export class PRService extends Context.Service<
   PRService,
-  PRServiceShape
+  PRServiceContract
 >()("@knpkv/codecommit-core/PRService") {
   static readonly Default = Layer.effect(PRService, makePRService)
 }

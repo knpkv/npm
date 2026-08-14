@@ -312,7 +312,7 @@ describe("WorktreeService", () => {
         environment: Readonly<Record<string, string | undefined>> = GitEnvironment.isolated()
       ) {
         return yield* spawner.string(ChildProcess.make("git", args, {
-          ...(cwd === undefined ? {} : { cwd }),
+          ...(!(cwd === undefined) && { cwd }),
           env: environment,
           extendEnv: true,
           stderr: "pipe",

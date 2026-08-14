@@ -8,7 +8,7 @@
  *   like `extractDisplayName` and `extractNameArray`.
  * - **Rendered fields**: Requests include `expand: "renderedFields"` to get HTML-rendered
  *   descriptions and comments, falling back to plain text.
- * - **Pagination guard**: {@link IssueServiceShape.searchAll} iterates pages using
+ * - **Pagination guard**: {@link IssueServiceContract.searchAll} iterates pages using
  *   `nextPageToken` with a MAX_PAGES (1000) safety limit.
  *
  * **Common tasks**
@@ -24,6 +24,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { JiraApiError } from "./JiraCliError.js"
 
 /**
@@ -114,19 +115,22 @@ interface SearchJqlResponse {
   readonly nextPageToken?: string
 }
 
-const recordOrEmpty = (value: unknown): Readonly<Record<PropertyKey, unknown>> =>
-  Predicate.isReadonlyObject(value) ? value : {}
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const isJsonObject = Schema.is(JsonObject)
 
-const recordArray = (value: unknown): ReadonlyArray<Readonly<Record<PropertyKey, unknown>>> =>
-  Array.isArray(value) ? value.filter(Predicate.isReadonlyObject) : []
+const recordOrEmpty = <UnparsedInput>(value: UnparsedInput): Readonly<Record<string, Schema.Json>> =>
+  isJsonObject(value) ? value : {}
 
-const parseSearchJqlResponse = (value: unknown): SearchJqlResponse => {
+const recordArray = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<Readonly<Record<string, Schema.Json>>> =>
+  Array.isArray(value) ? value.filter(isJsonObject) : []
+
+const parseSearchJqlResponse = <UnparsedInput>(value: UnparsedInput): SearchJqlResponse => {
   const record = recordOrEmpty(value)
-  const nextPageToken = typeof record.nextPageToken === "string" ? record.nextPageToken : undefined
+  const nextPageToken = Predicate.isString(record.nextPageToken) ? record.nextPageToken : undefined
   return {
     issues: Array.isArray(record.issues) ? record.issues : [],
-    isLast: typeof record.isLast === "boolean" ? record.isLast : nextPageToken === undefined,
-    ...(nextPageToken !== undefined ? { nextPageToken } : {})
+    isLast: Predicate.isBoolean(record.isLast) ? record.isLast : nextPageToken === undefined,
+    ...((nextPageToken !== undefined) && { nextPageToken })
   }
 }
 
@@ -276,8 +280,8 @@ export const buildEditIssuePayload = (
   return {
     _tag: "Payload",
     payload: {
-      ...(hasFields ? { fields } : {}),
-      ...(hasUpdate ? { update } : {})
+      ...(hasFields && { fields }),
+      ...(hasUpdate && { update })
     }
   }
 }
@@ -287,7 +291,7 @@ export const buildEditIssuePayload = (
  *
  * @category Services
  */
-export interface IssueServiceShape {
+export interface IssueServiceContract {
   /** Get a single issue by key */
   readonly getByKey: (key: string) => Effect.Effect<Issue, JiraApiError>
   /** Search issues by JQL query */
@@ -323,7 +327,7 @@ export interface IssueServiceShape {
  */
 export class IssueService extends Context.Service<
   IssueService,
-  IssueServiceShape
+  IssueServiceContract
 >()("@knpkv/jira-cli/IssueService") {}
 
 const FIELDS = [
@@ -346,12 +350,12 @@ const FIELDS = [
 /**
  * Extract string from a field that may be an object with displayName/name.
  */
-const extractDisplayName = (field: unknown): string | null => {
+const extractDisplayName = <UnparsedInput>(field: UnparsedInput): string | null => {
   if (field === null || field === undefined) return null
-  if (typeof field === "string") return field
+  if (Predicate.isString(field)) return field
   if (Predicate.isReadonlyObject(field)) {
-    if (typeof field.displayName === "string") return field.displayName
-    if (typeof field.name === "string") return field.name
+    if (Predicate.isString(field.displayName)) return field.displayName
+    if (Predicate.isString(field.name)) return field.name
   }
   return null
 }
@@ -359,13 +363,13 @@ const extractDisplayName = (field: unknown): string | null => {
 /**
  * Extract array of strings from a field that may be array of objects with name.
  */
-const extractNameArray = (field: unknown): ReadonlyArray<string> => {
+const extractNameArray = <UnparsedInput>(field: UnparsedInput): ReadonlyArray<string> => {
   if (!Array.isArray(field)) return []
   return field
     .map((item) => {
-      if (typeof item === "string") return item
+      if (Predicate.isString(item)) return item
       if (Predicate.isReadonlyObject(item)) {
-        if (typeof item.name === "string") return item.name
+        if (Predicate.isString(item.name)) return item.name
       }
       return null
     })
@@ -375,7 +379,7 @@ const extractNameArray = (field: unknown): ReadonlyArray<string> => {
 /**
  * Parse date from unknown value, returning epoch date if invalid.
  */
-const parseDate = (val: unknown): Date => {
+const parseDate = <UnparsedInput>(val: UnparsedInput): Date => {
   const str = String(val ?? "")
   if (!str) return new Date(0)
   const date = new Date(str)
@@ -385,7 +389,7 @@ const parseDate = (val: unknown): Date => {
 /**
  * Map IssueBean from API to our Issue type.
  */
-const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string): Issue => {
+const mapIssue = (bean: Readonly<Record<string, Schema.Json>>, baseUrl: string): Issue => {
   const fields = recordOrEmpty(bean.fields)
   const renderedFields = recordOrEmpty(bean.renderedFields)
   const key = String(bean["key"] ?? "")
@@ -397,7 +401,7 @@ const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string)
     ? recordArray(attachmentField).map((att) => {
       const mediaType = normalizeAttachmentMediaType(
         undefined,
-        typeof att["mimeType"] === "string" ? att["mimeType"] : null
+        Predicate.isString(att["mimeType"]) ? att["mimeType"] : null
       )
       return {
         id: String(att["id"] ?? ""),
@@ -416,7 +420,7 @@ const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string)
   const renderedComments = recordArray(recordOrEmpty(renderedFields.comment).comments)
 
   // Build map of rendered comments by ID for accurate matching
-  const renderedMap = new Map<string, Record<string, unknown>>()
+  const renderedMap = new Map<string, Record<string, Schema.Json>>()
   for (const r of renderedComments) {
     const rId = String(r["id"] ?? "")
     if (rId) renderedMap.set(rId, r)
@@ -430,14 +434,14 @@ const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string)
     return {
       id: commentId,
       author: extractDisplayName(author) ?? "Unknown",
-      body: typeof renderedBody === "string" ? renderedBody : String(c["body"] ?? ""),
+      body: Predicate.isString(renderedBody) ? renderedBody : String(c["body"] ?? ""),
       created: parseDate(c["created"]),
       updated: parseDate(c["updated"])
     }
   })
 
   // Use rendered description (HTML) if available
-  const description = typeof renderedFields["description"] === "string"
+  const description = Predicate.isString(renderedFields["description"])
     ? renderedFields["description"]
     : String(fields["description"] ?? "")
 
@@ -462,7 +466,8 @@ const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string)
   }
 }
 
-const mapIssueUnknown = (bean: unknown, baseUrl: string): Issue => mapIssue(recordOrEmpty(bean), baseUrl)
+const mapIssueUnknown = <UnparsedInput>(bean: UnparsedInput, baseUrl: string): Issue =>
+  mapIssue(recordOrEmpty(bean), baseUrl)
 
 const make = Effect.gen(function*() {
   const client = yield* JiraApiClient
@@ -488,7 +493,7 @@ const make = Effect.gen(function*() {
       params: {
         jql,
         maxResults,
-        ...(nextPageToken ? { nextPageToken } : {}),
+        ...(nextPageToken && { nextPageToken }),
         fields: FIELDS,
         expand: "renderedFields"
       }

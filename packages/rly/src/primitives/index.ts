@@ -2,7 +2,7 @@
 "use client"
 
 export { Avatar, RLY_AVATAR_DEFAULT_VARIANTS, RLY_AVATAR_VARIANTS } from "./Avatar.js"
-export type { AvatarProps, RlyAvatarShape, RlyAvatarSize } from "./Avatar.js"
+export type { AvatarProps, RlyAvatarForm, RlyAvatarSize } from "./Avatar.js"
 export { Button, RLY_BUTTON_DEFAULT_VARIANTS, RLY_BUTTON_VARIANTS } from "./Button.js"
 export type { ButtonProps, RlyButtonSize, RlyButtonVariant } from "./Button.js"
 export { Dialog, RLY_DIALOG_DEFAULT_VARIANTS, RLY_DIALOG_VARIANTS } from "./Dialog.js"
@@ -38,7 +38,7 @@ export type { RlyStateLabelSize, RlyStateTone, StateLabelProps } from "./StateLa
 export { RLY_STATE_PANEL_DEFAULT_VARIANTS, RLY_STATE_PANEL_VARIANTS, StatePanel } from "./StatePanel.js"
 export type { RlyStatePanelAnnouncement, RlyStatePanelTone, StatePanelProps } from "./StatePanel.js"
 export { RLY_SURFACE_DEFAULT_VARIANTS, RLY_SURFACE_VARIANTS, Surface } from "./Surface.js"
-export type { RlySurfaceElement, RlySurfacePadding, RlySurfaceShape, RlySurfaceTone, SurfaceProps } from "./Surface.js"
+export type { RlySurfaceElement, RlySurfaceForm, RlySurfacePadding, RlySurfaceTone, SurfaceProps } from "./Surface.js"
 export { RLY_TABS_DEFAULT_VARIANTS, RLY_TABS_VARIANTS, Tabs } from "./Tabs.js"
 export type { RlyTabItem, RlyTabsDirection, RlyTabsSize, TabsProps } from "./Tabs.js"
 export { RLY_TEXT_DEFAULT_VARIANTS, RLY_TEXT_VARIANTS, Text } from "./Text.js"

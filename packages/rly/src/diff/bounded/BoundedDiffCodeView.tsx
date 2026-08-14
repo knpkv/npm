@@ -80,12 +80,12 @@ const parseItem = (item: RlyDiffCodeItem): FileDiffMetadata | undefined => {
   if (item.before.contents === item.after.contents) return undefined
   return parseDiffFromFile(
     {
-      ...(item.before.cacheKey === undefined ? {} : { cacheKey: item.before.cacheKey }),
+      ...(!(item.before.cacheKey === undefined) && { cacheKey: item.before.cacheKey }),
       contents: item.before.contents,
       name: item.before.name
     },
     {
-      ...(item.after.cacheKey === undefined ? {} : { cacheKey: item.after.cacheKey }),
+      ...(!(item.after.cacheKey === undefined) && { cacheKey: item.after.cacheKey }),
       contents: item.after.contents,
       name: item.after.name
     },
@@ -109,22 +109,18 @@ const contextSplitRows = (diff: FileDiffMetadata, content: ContextContent): Read
 
 const changeSplitRows = (diff: FileDiffMetadata, content: ChangeContent): ReadonlyArray<SplitRow> =>
   Array.from({ length: Math.max(content.deletions, content.additions) }, (_, offset) => ({
-    ...(offset < content.additions
-      ? {
-          addition: {
-            content: contentAt(diff.additionLines, content.additionLineIndex + offset),
-            number: content.additionLineIndex + offset + 1
-          }
-        }
-      : {}),
-    ...(offset < content.deletions
-      ? {
-          deletion: {
-            content: contentAt(diff.deletionLines, content.deletionLineIndex + offset),
-            number: content.deletionLineIndex + offset + 1
-          }
-        }
-      : {}),
+    ...(offset < content.additions && {
+      addition: {
+        content: contentAt(diff.additionLines, content.additionLineIndex + offset),
+        number: content.additionLineIndex + offset + 1
+      }
+    }),
+    ...(offset < content.deletions && {
+      deletion: {
+        content: contentAt(diff.deletionLines, content.deletionLineIndex + offset),
+        number: content.deletionLineIndex + offset + 1
+      }
+    }),
     kind: "change"
   }))
 

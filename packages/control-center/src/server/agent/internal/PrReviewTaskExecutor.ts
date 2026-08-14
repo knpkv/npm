@@ -29,6 +29,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
 
+import * as Predicate from "effect/Predicate"
 import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewCompletion,
@@ -100,7 +101,7 @@ const targetedExecution = (
 ): Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }> => ({
   _tag: "targeted",
   edit,
-  ...(runtimeMetadata === undefined ? {} : { runtimeMetadata })
+  ...(!(runtimeMetadata === undefined) && { runtimeMetadata })
 })
 
 const { location: _nativeNoteLocation, ...nativeNoteDraftFields } = PrReviewNoteDraft.fields
@@ -125,15 +126,18 @@ const NativeModelTargetedSuggestion = Schema.Struct({
   })
 })
 
-const isJsonSchemaObject = (
-  value: unknown
-): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value)
+interface JsonSchemaObject {
+  readonly [key: string]: Schema.Json
+}
 
-const flattenJsonSchemaAllOf = (value: unknown): unknown => {
+const isJsonSchemaObject = (value: Schema.Json): value is JsonSchemaObject =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
+
+const flattenJsonSchemaAllOf = (value: Schema.Json): Schema.Json => {
   if (Array.isArray(value)) return value.map(flattenJsonSchemaAllOf)
   if (!isJsonSchemaObject(value)) return value
 
-  const flattened: Record<string, unknown> = {}
+  const flattened: Record<string, Schema.Json> = {}
   for (const [key, child] of Object.entries(value)) {
     if (key !== "allOf" && key !== "uniqueItems") {
       flattened[key] = flattenJsonSchemaAllOf(child)
@@ -164,11 +168,13 @@ const nativeOutputSchema = (
   Effect.try({
     try: () => {
       const document = Schema.toJsonSchemaDocument(NativeModelReviewReport)
-      return JSON.stringify(flattenJsonSchemaAllOf({
-        $defs: document.definitions,
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        ...document.schema
-      }))
+      return JSON.stringify(flattenJsonSchemaAllOf(
+        Schema.decodeUnknownSync(Schema.Json)({
+          $defs: document.definitions,
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          ...document.schema
+        })
+      ))
     },
     catch: () =>
       providerFailure(
@@ -185,11 +191,13 @@ const nativeTargetedOutputSchema = (
   Effect.try({
     try: () => {
       const document = Schema.toJsonSchemaDocument(NativeModelTargetedSuggestion)
-      return JSON.stringify(flattenJsonSchemaAllOf({
-        $defs: document.definitions,
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        ...document.schema
-      }))
+      return JSON.stringify(flattenJsonSchemaAllOf(
+        Schema.decodeUnknownSync(Schema.Json)({
+          $defs: document.definitions,
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          ...document.schema
+        })
+      ))
     },
     catch: () =>
       providerFailure(
@@ -236,8 +244,8 @@ const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNat
     completion: nativeReport.completion,
     suggestions: nativeReport.suggestions.map(({ prevention, replacement, ...suggestion }) => ({
       ...suggestion,
-      ...(prevention === null ? {} : { prevention }),
-      ...(replacement === null ? {} : { replacement })
+      ...(!(prevention === null) && { prevention }),
+      ...(!(replacement === null) && { replacement })
     })),
     notes: nativeReport.notes
   })
@@ -1022,11 +1030,9 @@ const makeExecutor = Effect.gen(function*() {
         baseRevision: subject.baseRevision,
         headRevision: subject.headRevision,
         providerId: String(claim.providerId),
-        ...(selected.model === null ? {} : { model: String(selected.model) }),
+        ...(!(selected.model === null) && { model: String(selected.model) }),
         reviewExecution: selected.reviewExecution,
-        ...(claim.sessionRef?.startsWith("sbx:")
-          ? { recoverySandboxName: claim.sessionRef.slice("sbx:".length) }
-          : {})
+        ...((claim.sessionRef?.startsWith("sbx:")) && { recoverySandboxName: claim.sessionRef.slice("sbx:".length) })
       },
       (session) =>
         Effect.gen(function*() {
@@ -1088,7 +1094,7 @@ const makeExecutor = Effect.gen(function*() {
               JSON.stringify({
                 operatorRequest: claim.prompt,
                 subject,
-                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
+                ...(!(encodedTarget === undefined) && { target: encodedTarget }),
                 threadContext
               }),
               "</review-context-json>"
@@ -1098,9 +1104,8 @@ const makeExecutor = Effect.gen(function*() {
               prompt: nativePrompt,
               outputSchema,
               maximumDurationMillis,
-              ...(String(selected.model) === "configured-default" || String(selected.model) === "default"
-                ? {}
-                : { model: String(selected.model) })
+              ...(!(String(selected.model) === "configured-default" || String(selected.model) === "default") &&
+                { model: String(selected.model) })
             })
             if (reviewed.exitCode !== 0) {
               return yield* providerFailure(
@@ -1131,8 +1136,8 @@ const makeExecutor = Effect.gen(function*() {
                   const { prevention, replacement, ...edit } = result.edit
                   return validateTargetedEdit(claim.providerId, session, {
                     ...edit,
-                    ...(prevention === null ? {} : { prevention }),
-                    ...(replacement === null ? {} : { replacement })
+                    ...(!(prevention === null) && { prevention }),
+                    ...(!(replacement === null) && { replacement })
                   }).pipe(Effect.map((edit) => targetedExecution(edit, selected.runtimeMetadata)))
                 })
               )
@@ -1164,7 +1169,7 @@ const makeExecutor = Effect.gen(function*() {
               context: {
                 operatorRequest: request.prompt,
                 subject,
-                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
+                ...(!(encodedTarget === undefined) && { target: encodedTarget }),
                 threadContext,
                 sandbox: "sbx",
                 networkAccess: "blocked"

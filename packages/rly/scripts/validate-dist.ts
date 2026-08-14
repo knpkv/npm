@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { componentManifest } from "../component-manifest.js"
 import { componentStyleSources, entryOutputStem, renderPackageExports } from "./contract.js"
@@ -160,7 +161,7 @@ const program = Effect.gen(function*() {
   )
   const exports = renderPackageExports(componentManifest)
   const root = exports["."]
-  if (root === undefined || typeof root === "string") failures.push("root module export is missing")
+  if (root === undefined || Predicate.isString(root)) failures.push("root module export is missing")
   else {
     if (packageJson.main !== root.import) failures.push("main does not match root import")
     if (packageJson.types !== root.types) failures.push("types does not match root types")

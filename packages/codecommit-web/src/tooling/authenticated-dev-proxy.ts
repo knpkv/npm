@@ -5,7 +5,7 @@ export const authenticatedDevPublicOrigin = "http://localhost:5173"
 export const authenticatedDevPublicOriginEnvironment = `CODECOMMIT_WEB_PUBLIC_ORIGIN=${authenticatedDevPublicOrigin}`
 
 interface OriginHeaderRequest {
-  readonly setHeader: (name: string, value: string) => unknown
+  readonly setHeader: (name: string, value: string) => void
 }
 
 export const setAuthenticatedDevProxyOrigin = (request: OriginHeaderRequest): void => {

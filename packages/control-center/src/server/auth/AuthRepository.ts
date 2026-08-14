@@ -120,7 +120,7 @@ type CredentialLookup<Value> =
 
 const missingCredential = <Value>(): CredentialLookup<Value> => ({ _tag: "missing" })
 
-const malformedCredential = <Value>(row: unknown): CredentialLookup<Value> => ({
+const malformedCredential = <Value, UnparsedInput = unknown>(row: UnparsedInput): CredentialLookup<Value> => ({
   _tag: "malformed",
   row
 })
@@ -172,8 +172,8 @@ const makeAuthRepository = Effect.gen(function*() {
   const quarantineRow = makePersistedRowQuarantine(cryptoService, quarantine)
   const sql = database.sql
 
-  const quarantineSession = Effect.fn("AuthRepository.quarantineSession")(function*(
-    rawRow: unknown,
+  const quarantineSession = Effect.fn("AuthRepository.quarantineSession")(function*<UnparsedInput>(
+    rawRow: UnparsedInput,
     fallbackWorkspaceId: WorkspaceId | null,
     observedAt: typeof UtcTimestamp.Type
   ) {
@@ -196,8 +196,8 @@ const makeAuthRepository = Effect.gen(function*() {
     })
   })
 
-  const quarantinePairingCode = Effect.fn("AuthRepository.quarantinePairingCode")(function*(
-    rawRow: unknown,
+  const quarantinePairingCode = Effect.fn("AuthRepository.quarantinePairingCode")(function*<UnparsedInput>(
+    rawRow: UnparsedInput,
     fallbackWorkspaceId: WorkspaceId | null,
     observedAt: typeof UtcTimestamp.Type
   ) {

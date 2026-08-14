@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
+import * as Predicate from "effect/Predicate"
 import type { SubmitReleasePublicationRequest, SubmitReleasePublicationResponse } from "../../api/agent.js"
 import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
 import { confluenceTaskSummary } from "../../domain/confluenceTasks.js"
@@ -472,12 +473,8 @@ const makeService = Effect.gen(function*() {
     )
     const connectionSelection = selectReleasePublicationConnection({
       enabledConnectionIds: enabledFallbackConnections.map(({ pluginConnectionId }) => pluginConnectionId),
-      ...(publicationReceiptConnectionId === undefined
-        ? {}
-        : { publicationReceiptConnectionId }),
-      ...(releaseSource === undefined
-        ? {}
-        : { releaseSourceConnectionId: releaseSource.pluginConnectionId })
+      ...(!(publicationReceiptConnectionId === undefined) && { publicationReceiptConnectionId }),
+      ...(!(releaseSource === undefined) && { releaseSourceConnectionId: releaseSource.pluginConnectionId })
     })
     if (connectionSelection._tag === "ambiguous") return yield* failure("conflict")
     if (connectionSelection._tag === "missing") return yield* failure("unavailable")
@@ -507,7 +504,9 @@ const makeService = Effect.gen(function*() {
     const destination = configuration.value.values.find(({ key }) =>
       input.request.provider === "jira" ? key === "projectId" : key === "spaceId"
     )
-    if (destination === undefined || destination._tag === "secret-reference" || typeof destination.value !== "string") {
+    if (
+      destination === undefined || destination._tag === "secret-reference" || !Predicate.isString(destination.value)
+    ) {
       return yield* failure("conflict")
     }
     const providerRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
@@ -651,9 +650,8 @@ const makeService = Effect.gen(function*() {
       releasePublication: {
         releaseId: input.releaseId,
         predecessorPublicationActionId,
-        ...(input.request.templateEntityId === undefined
-          ? {}
-          : { templateSourceEntityId: input.request.templateEntityId }),
+        ...(!(input.request.templateEntityId === undefined) &&
+          { templateSourceEntityId: input.request.templateEntityId }),
         sourceRevisionDigest,
         sourceRevisionCount: release.release.sourceRevisions.length
       }

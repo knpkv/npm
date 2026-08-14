@@ -18,7 +18,7 @@ describe("Avatar", () => {
     expect(avatar?.getAttribute("aria-label")).toBe("Draft reviewer")
     expect(avatar?.textContent).toBe("DR")
     expect(avatar?.className).toContain(RLY_AVATAR_VARIANTS.size.default.className)
-    expect(RLY_AVATAR_DEFAULT_VARIANTS).toEqual({ shape: "circle", size: "default" })
+    expect(RLY_AVATAR_DEFAULT_VARIANTS).toEqual({ form: "circle", size: "default" })
   })
 
   it("can be explicitly decorative", () => {

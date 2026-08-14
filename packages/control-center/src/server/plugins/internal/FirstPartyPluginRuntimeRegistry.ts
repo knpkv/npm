@@ -10,7 +10,7 @@ import {
   AtlaskitTransformersLayer,
   MarkdownConverterLayer
 } from "@knpkv/confluence-to-markdown"
-import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig, type JiraApiConfigContract } from "@knpkv/jira-api-client"
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -231,7 +231,7 @@ const decodeDescriptor = (
     runtime.descriptorJson
   ).pipe(Effect.mapError(() => configurationFailure("plugin-runtime-descriptor-invalid")))
 
-const expectedDescriptor = (providerId: ProviderId): unknown => {
+const expectedDescriptor = (providerId: ProviderId) => {
   switch (providerId) {
     case "codecommit":
       return codeCommitPluginDefinition.rawDescriptor
@@ -870,7 +870,7 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
     } satisfies {
       readonly credentialGeneration: string
       readonly releasePublicationEnabled: boolean
-      readonly auth: JiraApiConfigShape["auth"]
+      readonly auth: JiraApiConfigContract["auth"]
       readonly verifiedUser: {
         readonly accountId: string
         readonly displayName: string
@@ -893,7 +893,7 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   } satisfies {
     readonly credentialGeneration: string
     readonly releasePublicationEnabled: boolean
-    readonly auth: JiraApiConfigShape["auth"]
+    readonly auth: JiraApiConfigContract["auth"]
     readonly verifiedUser: {
       readonly accountId: string
       readonly displayName: string
@@ -1050,7 +1050,7 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     siteId: yield* textValue(loaded.configuration, "siteId"),
     spaceId: yield* textValue(loaded.configuration, "spaceId"),
     probePageId: yield* textValue(loaded.configuration, "probePageId"),
-    ...(authMode.value === "oauth" ? { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") } : {})
+    ...((authMode.value === "oauth") && { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") })
   }
   const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(
     storedConfigurationInput
@@ -1066,15 +1066,13 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   )
   const configurationWithCachedIdentity = {
     ...storedConfigurationInput,
-    ...(authentication.verifiedUser === null
-      ? {}
-      : {
-        oauthVerifiedUser: {
-          ...authentication.verifiedUser,
-          displayName: boundedConfluenceUserName(authentication.verifiedUser.displayName),
-          publicName: boundedConfluenceUserName(authentication.verifiedUser.publicName)
-        }
-      })
+    ...(!(authentication.verifiedUser === null) && {
+      oauthVerifiedUser: {
+        ...authentication.verifiedUser,
+        displayName: boundedConfluenceUserName(authentication.verifiedUser.displayName),
+        publicName: boundedConfluenceUserName(authentication.verifiedUser.publicName)
+      }
+    })
   }
   const configurationInput = Option.isSome(
       Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)

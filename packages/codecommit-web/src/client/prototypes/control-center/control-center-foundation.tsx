@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react"
 import { EntityCollaborators } from "./control-center-collaborators.js"
 import { jiraEntityTabs, JiraEntityView } from "./control-center-jira-view.js"
 import type { AgentCodeReview, JiraIssueState } from "./control-center-state.js"
+import * as Predicate from "effect/Predicate"
 
 export function Brand({ compact = false }: { readonly compact?: boolean }) {
   return (
@@ -72,19 +73,19 @@ interface FocusTarget {
 }
 
 const hasFocus = (candidate: Element | null): candidate is Element & FocusTarget =>
-  candidate != null && "focus" in candidate && typeof candidate.focus === "function"
+  candidate != null && "focus" in candidate && Predicate.isFunction(candidate.focus)
 
 const activeElement = (): FocusTarget | null => (hasFocus(document.activeElement) ? document.activeElement : null)
 
 export function ServiceIcon({ service }: { readonly service: Service }) {
   const icons = { clockify: Clock3, code: GitBranch, confluence: MessageSquareText, jira: ListTodo, pipeline: Network }
-  const labels: Record<Service, string> = {
+  const labels = {
     clockify: "Clockify",
     code: "AWS CodeCommit",
     confluence: "Confluence",
     jira: "Jira",
     pipeline: "AWS CodePipeline"
-  }
+  } satisfies Record<Service, string>
   const Icon = icons[service]
   return (
     <span className={`cc-service-icon ${service}`} aria-hidden="true" title={labels[service]}>

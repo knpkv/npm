@@ -29,7 +29,7 @@ const LatestRecoveryClaimRow = Schema.Struct({
   expiredAt: Schema.NullOr(UtcTimestamp)
 })
 
-const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+const storeFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "inspect", reason: "not-found" })

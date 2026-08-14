@@ -38,7 +38,7 @@ export const appendPortfolioInvalidation = Effect.fn(
     causationId: null,
     correlationId: null,
     metadata: {
-      ...(input.releaseId === null ? {} : { releaseId: input.releaseId }),
+      ...(!(input.releaseId === null) && { releaseId: input.releaseId }),
       pluginConnectionId: input.pluginConnectionId
     },
     payload: { reason: input.reason }

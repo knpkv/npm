@@ -80,7 +80,7 @@ const BuildGraphSchema = Schema.Struct({
 })
 
 /** Decode an emitted graph without trusting build output JSON. */
-export const decodeBuildGraph = (value: unknown): ControlCenterBuildGraph | undefined => {
+export const decodeBuildGraph = <UnparsedInput>(value: UnparsedInput): ControlCenterBuildGraph | undefined => {
   const decoded = Schema.decodeUnknownResult(BuildGraphSchema)(value)
   return Result.isSuccess(decoded) ? decoded.success : undefined
 }

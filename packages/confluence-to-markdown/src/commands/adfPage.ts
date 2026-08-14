@@ -15,6 +15,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { AdfSchemaValidator } from "../AdfSchemaValidator.js"
 import { PageId } from "../Brand.js"
@@ -109,7 +110,7 @@ const optionValue = (option: Option.Option<string>): string | undefined =>
 export const applyAdfTemplate = (
   raw: string,
   values: ReadonlyMap<string, string>
-): { readonly rendered: string; readonly unresolved: ReadonlyArray<string> } => {
+) => {
   const escape = (value: string): string => JSON.stringify(value).slice(1, -1)
   // Collect the slots from the *template*, before substitution. Scanning the
   // rendered text instead cannot tell a slot the author wrote from brace-brace
@@ -177,7 +178,7 @@ const readAdfFile = (path: string, values: ReadonlyMap<string, string>) =>
 const parseAdf = (raw: string, source: string, direction: "incoming" | "outgoing") =>
   Effect.gen(function*() {
     const parsed = yield* Effect.try({
-      try: (): unknown => JSON.parse(raw),
+      try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(raw),
       catch: () => new ConfigError({ message: `${source} is not valid JSON.` })
     })
     const validator = yield* AdfSchemaValidator
@@ -252,13 +253,13 @@ const putAdf = (
       status: "current",
       version: {
         number: current.version + 1,
-        ...(options.message === undefined ? {} : { message: options.message })
+        ...(!(options.message === undefined) && { message: options.message })
       },
       body: { representation: "atlas_doc_format", value: adfValue }
     })
   })
 
-const reportStructuralDrift = (before: unknown, after: unknown) =>
+const reportStructuralDrift = <UnparsedInput, UnparsedInput2>(before: UnparsedInput, after: UnparsedInput2) =>
   Effect.gen(function*() {
     const deltas = structuralCensusDelta(before, after)
     if (deltas.length === 0) return
@@ -320,7 +321,7 @@ export const makePagePutCommand = (options: AdfPageCommandOptions = {}) => {
         const updated = yield* putAdf(PageId(input.pageId), JSON.stringify(doc), {
           title: optionValue(title),
           message: optionValue(message),
-          ...(expected === undefined ? {} : { expectedVersion: expected })
+          ...(!(expected === undefined) && { expectedVersion: expected })
         }).pipe(Effect.provide(clientLayer))
 
         yield* Console.log(`Updated ${updated.title} -> version ${updated.version.number}`)
@@ -549,7 +550,7 @@ export const makePageCreateCommand = (options: AdfPageCommandOptions = {}) => {
           const page = yield* client.createPage({
             spaceId: space,
             title,
-            ...(parentId === undefined ? {} : { parentId }),
+            ...(!(parentId === undefined) && { parentId }),
             body: { representation: "atlas_doc_format", value: JSON.stringify(doc) }
           })
           // Same follow-up `SyncEngine.pushFile` makes after every create: an

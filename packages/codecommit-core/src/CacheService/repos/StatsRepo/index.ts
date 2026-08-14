@@ -40,11 +40,11 @@ const makeStatsRepo = Effect.gen(function*() {
   return service
 })
 
-export interface StatsRepoShape extends Success<typeof makeStatsRepo> {}
+export interface StatsRepoContract extends Success<typeof makeStatsRepo> {}
 
 export class StatsRepo extends Context.Service<
   StatsRepo,
-  StatsRepoShape
+  StatsRepoContract
 >()("StatsRepo") {
   static readonly Default = Layer.effect(StatsRepo, makeStatsRepo).pipe(
     Layer.provide(DatabaseLive)

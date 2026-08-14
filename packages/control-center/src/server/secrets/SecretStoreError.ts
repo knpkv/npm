@@ -36,7 +36,7 @@ export class SecretStoreIoError extends Schema.TaggedError<SecretStoreIoError>()
 ) {}
 
 /** Redacts platform details, paths, and values at the storage boundary. */
-export const secretStoreIoError = (operation: string, _cause: unknown): SecretStoreIoError =>
+export const secretStoreIoError = <UnparsedInput>(operation: string, _cause: UnparsedInput): SecretStoreIoError =>
   new SecretStoreIoError({ operation, message: "platform secret-storage operation failed" })
 
 /** Typed, structurally redacted failures exposed by the secret-store boundary. */

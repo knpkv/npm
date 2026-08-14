@@ -120,11 +120,11 @@ export const ReleaseThread: Story = {
     await expect(canvasElement.querySelector("[data-rly-agent-thread-context] + ol")).not.toBeNull()
     await expect(canvasElement.querySelectorAll("[data-rly-agent-thread-message]")).toHaveLength(3)
     await expect(
-      canvasElement.querySelector("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-shape='circle']")
+      canvasElement.querySelector("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-form='circle']")
     ).not.toBeNull()
     await expect(
       canvasElement.querySelector(
-        "[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-shape='rounded-square']"
+        "[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-form='rounded-square']"
       )
     ).not.toBeNull()
     const append = canvas.getByRole("button", { name: "Append agent update" })

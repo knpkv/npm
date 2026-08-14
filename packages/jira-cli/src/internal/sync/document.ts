@@ -5,6 +5,7 @@
  */
 import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
 import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import matter from "gray-matter"
 import * as yaml from "js-yaml"
 import { SyncValidationError } from "../../JiraCliError.js"
@@ -17,19 +18,19 @@ import type {
   UserFieldValue
 } from "./types.js"
 
-const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
-  Array.isArray(value) && value.every((item) => typeof item === "string")
+const isStringArray = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((item) => Predicate.isString(item))
 
-const isFrontMatterCustomFields = (
-  value: unknown
-): value is IssueDocumentFrontMatter["customFields"] => Predicate.isReadonlyObject(value)
+const isFrontMatterCustomFields = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & IssueDocumentFrontMatter["customFields"] => Predicate.isReadonlyObject(value)
 
 const yamlEngine = {
   parse: (str: string): object => {
     const value = yaml.load(str)
     return Predicate.isReadonlyObject(value) ? value : {}
   },
-  stringify: (data: object): string => yaml.dump(data)
+  stringify: <Data extends object>(data: Data): string => yaml.dump(data)
 }
 
 export const DESCRIPTION_SECTION = "Description"
@@ -88,17 +89,17 @@ const section = (name: string, content: string): string => {
   return normalized.length > 0 ? `## ${name}\n\n${normalized}\n` : `## ${name}\n`
 }
 
-const parseFrontMatter = (path: string, data: Record<string, unknown>): IssueDocumentFrontMatter => {
+const parseFrontMatter = (path: string, data: Record<string, Schema.Json>): IssueDocumentFrontMatter => {
   const requiredString = (key: string): string => {
     const value = data[key]
-    if (typeof value === "string") return value
+    if (Predicate.isString(value)) return value
     return fail(path, `Missing or invalid front matter field "${key}"`)
   }
 
   const nullableString = (key: string): string | null => {
     const value = data[key]
     if (value === null || value === undefined) return null
-    if (typeof value === "string") return value
+    if (Predicate.isString(value)) return value
     return fail(path, `Invalid front matter field "${key}"`)
   }
 
@@ -108,7 +109,7 @@ const parseFrontMatter = (path: string, data: Record<string, unknown>): IssueDoc
     const record = Predicate.isReadonlyObject(value) ? value : fail(path, `Invalid user field "${key}"`)
     const accountId = record["accountId"]
     const displayName = record["displayName"]
-    if (typeof accountId === "string" && typeof displayName === "string") {
+    if (Predicate.isString(accountId) && Predicate.isString(displayName)) {
       return {
         accountId,
         displayName
@@ -244,13 +245,13 @@ const parseAttachmentMetadata = (
     const parsed = JSON.parse(raw)
     if (!Predicate.isReadonlyObject(parsed)) return {}
     return {
-      id: typeof parsed["jiraAttachmentId"] === "string"
+      id: Predicate.isString(parsed["jiraAttachmentId"])
         ? parsed["jiraAttachmentId"]
-        : typeof parsed["id"] === "string"
+        : Predicate.isString(parsed["id"])
         ? parsed["id"]
         : "",
-      mediaType: typeof parsed["mediaType"] === "string" ? parsed["mediaType"] : null,
-      size: typeof parsed["size"] === "number" ? parsed["size"] : null
+      mediaType: Predicate.isString(parsed["mediaType"]) ? parsed["mediaType"] : null,
+      size: Predicate.isNumber(parsed["size"]) ? parsed["size"] : null
     }
   } catch {
     return {}

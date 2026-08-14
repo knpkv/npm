@@ -20,7 +20,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return
@@ -31,7 +31,7 @@ const acquireEphemeralPort = Effect.tryPromise({
   catch: () => new LiveIntegrationPortError({ reason: "ephemeral-port-unavailable" })
 })
 
-const isAddressInUseFailure = (failure: unknown): boolean => {
+const isAddressInUseFailure = <UnparsedInput>(failure: UnparsedInput): boolean => {
   if (Predicate.hasProperty(failure, "code") && failure.code === "EADDRINUSE") return true
   return Predicate.hasProperty(failure, "cause") && isAddressInUseFailure(failure.cause)
 }

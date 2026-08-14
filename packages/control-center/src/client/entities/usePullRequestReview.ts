@@ -32,10 +32,11 @@ const generatedClientTransport = pullRequestReviewBrowser.then(
   ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
 )
 
-const isRateLimitedReviewFailure = (failure: unknown): failure is RateLimitedApiError =>
-  Predicate.isTagged(failure, "RateLimitedApiError")
+const isRateLimitedReviewFailure = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & RateLimitedApiError => Predicate.isTagged(failure, "RateLimitedApiError")
 
-const waitBeforeAutomaticReviewRetry = (failure?: unknown): Effect.Effect<void> => {
+const waitBeforeAutomaticReviewRetry = <UnparsedInput>(failure?: UnparsedInput): Effect.Effect<void> => {
   if (!isRateLimitedReviewFailure(failure)) return Effect.sleep(Duration.seconds(1))
   const retryAt = failure.retryAt
   if (retryAt === null) return Effect.sleep(Duration.seconds(2))
@@ -178,7 +179,7 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
         providerId: provider.providerId,
         model,
         reviewProfile: provider.reviewProfile,
-        ...(provider.displayName === undefined ? {} : { displayName: provider.displayName })
+        ...(!(provider.displayName === undefined) && { displayName: provider.displayName })
       })
     }
   }
@@ -217,7 +218,7 @@ export const observePullRequestReviewHistoryLoad = (
     update: (state: PullRequestReviewControllerState) => PullRequestReviewControllerState
   ) => void
 ): void => {
-  task.catch((failure: unknown) => {
+  task.catch(<UnparsedInput>(failure: UnparsedInput) => {
     if (
       signal.aborted ||
       latestScope.current === null ||
@@ -274,22 +275,7 @@ export const usePullRequestReview = (
   canEnqueue: boolean,
   onSessionExpired: (sessionKey: string) => void,
   transport: PullRequestReviewTransport = browserPullRequestReviewTransport
-): {
-  readonly cancel: () => void
-  readonly cancelPublication: () => void
-  readonly extendBudget: () => void
-  readonly loadEarlier: () => void
-  readonly previewPublication: (selection: ReviewSuggestionPublicationTarget) => void
-  readonly publication: PullRequestReviewPublicationState
-  readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
-  readonly targetSuggestion: (target: ReviewSuggestionTarget) => void
-  readonly retry: () => void
-  readonly start: (
-    prompt?: DurableAgentPrompt,
-    providerId?: ReviewProviderSelection["providerId"]
-  ) => void
-  readonly state: PullRequestReviewControllerState
-} => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<PullRequestReviewControllerState>({ _tag: "idle" })
   const [publication, setPublication] = useState<PullRequestReviewPublicationState>({ _tag: "idle" })
@@ -321,7 +307,7 @@ export const usePullRequestReview = (
     const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
     const previousThread = latestThread.current ?? undefined
     const abort = new AbortController()
-    const scheduleAutomaticRetry = (message: string, failure?: unknown): boolean => {
+    const scheduleAutomaticRetry = <UnparsedInput>(message: string, failure?: UnparsedInput): boolean => {
       if (
         automaticRetryScope.current !== null &&
         sameReviewScope(automaticRetryScope.current, scope)
@@ -332,7 +318,7 @@ export const usePullRequestReview = (
         () => {
           if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
         },
-        (_retryFailure: unknown) => {
+        <UnparsedInput>(_retryFailure: UnparsedInput) => {
           if (!abort.signal.aborted) setState({ _tag: "failed", ...scope })
         }
       )
@@ -415,7 +401,7 @@ export const usePullRequestReview = (
       () => {
         if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
       },
-      (_failure: unknown) => {
+      <UnparsedInput>(_failure: UnparsedInput) => {
         if (!abort.signal.aborted) {
           setState({
             _tag: "failed",

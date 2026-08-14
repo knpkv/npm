@@ -24,15 +24,15 @@ export interface AdfNodeLike {
   readonly attrs?: unknown
 }
 
-export const isAdfNode = (value: unknown): value is AdfNodeLike =>
-  Predicate.isObject(value) && "type" in value && typeof value["type"] === "string"
+export const isAdfNode = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & AdfNodeLike =>
+  Predicate.isObject(value) && "type" in value && Predicate.isString(value["type"])
 
 const childrenOf = (node: AdfNodeLike): ReadonlyArray<unknown> => Array.isArray(node.content) ? node.content : []
 
 /**
  * Visit every node in document order, root first.
  */
-export const walkAdf = (root: unknown, visit: (node: AdfNodeLike) => void): void => {
+export const walkAdf = <UnparsedInput>(root: UnparsedInput, visit: (node: AdfNodeLike) => void): void => {
   if (!isAdfNode(root)) return
   visit(root)
   for (const child of childrenOf(root)) walkAdf(child, visit)
@@ -45,7 +45,7 @@ export const walkAdf = (root: unknown, visit: (node: AdfNodeLike) => void): void
  * only in prose must have identical censuses. A drift in `blockCard` or
  * `expand` counts is how silent round-trip duplication announces itself.
  */
-export const adfNodeCensus = (root: unknown): Record<string, number> => {
+export const adfNodeCensus = <UnparsedInput>(root: UnparsedInput) => {
   const census: Record<string, number> = {}
   walkAdf(root, (node) => {
     census[node.type] = (census[node.type] ?? 0) + 1
@@ -86,7 +86,10 @@ export const STRUCTURAL_NODE_TYPES: ReadonlySet<string> = new Set([
 /**
  * Report structural node types whose counts differ between two documents.
  */
-export const structuralCensusDelta = (before: unknown, after: unknown): ReadonlyArray<CensusDelta> => {
+export const structuralCensusDelta = <UnparsedInput, UnparsedInput2>(
+  before: UnparsedInput,
+  after: UnparsedInput2
+): ReadonlyArray<CensusDelta> => {
   const a = adfNodeCensus(before)
   const b = adfNodeCensus(after)
   const deltas: Array<CensusDelta> = []
@@ -106,10 +109,10 @@ export const structuralCensusDelta = (before: unknown, after: unknown): Readonly
 const cardUrl = (node: AdfNodeLike): string | undefined => {
   if (!Predicate.isObject(node.attrs)) return undefined
   const url = node.attrs["url"]
-  if (typeof url === "string" && url.length > 0) return url
+  if (Predicate.isString(url) && url.length > 0) return url
   const data = node.attrs["data"]
   const dataUrl = Predicate.isObject(data) ? data["url"] : undefined
-  return typeof dataUrl === "string" && dataUrl.length > 0 ? dataUrl : undefined
+  return Predicate.isString(dataUrl) && dataUrl.length > 0 ? dataUrl : undefined
 }
 
 /**
@@ -161,9 +164,9 @@ export const isRoundTripUnsafeNode = (node: AdfNodeLike, inTable = false): boole
 /**
  * List the distinct round-trip-unsafe node types present in a document.
  */
-export const roundTripUnsafeNodeTypes = (root: unknown): ReadonlyArray<string> => {
+export const roundTripUnsafeNodeTypes = <UnparsedInput>(root: UnparsedInput): ReadonlyArray<string> => {
   const found = new Set<string>()
-  const visit = (value: unknown, inTable: boolean): void => {
+  const visit = <UnparsedInput>(value: UnparsedInput, inTable: boolean): void => {
     if (!isAdfNode(value)) return
     if (isRoundTripUnsafeNode(value, inTable)) found.add(value.type)
     const nested = inTable || value.type === "table"
@@ -173,7 +176,12 @@ export const roundTripUnsafeNodeTypes = (root: unknown): ReadonlyArray<string> =
   return [...found].sort()
 }
 
-const mapNode = (node: unknown, f: (node: AdfNodeLike) => AdfNodeLike | null): unknown => {
+type MappedAdfNode<Input> = Input | AdfNodeLike | null
+
+const mapNode = <UnparsedInput>(
+  node: UnparsedInput,
+  f: (node: AdfNodeLike) => AdfNodeLike | null
+): MappedAdfNode<UnparsedInput> => {
   if (!isAdfNode(node)) return node
   const mapped = f(node)
   if (mapped === null) return null
@@ -197,10 +205,14 @@ export interface TextReplacement {
  * rather than guessed at, because silently rewriting across a boundary would
  * lose the mark.
  */
-export const replaceAdfText = (root: unknown, search: string, replacement: string): TextReplacement => {
+export const replaceAdfText = <UnparsedInput>(
+  root: UnparsedInput,
+  search: string,
+  replacement: string
+): TextReplacement => {
   let replacements = 0
   const doc = mapNode(root, (node) => {
-    if (node.type !== "text" || typeof node.text !== "string" || !node.text.includes(search)) return node
+    if (node.type !== "text" || !Predicate.isString(node.text) || !node.text.includes(search)) return node
     replacements += node.text.split(search).length - 1
     return { ...node, text: node.text.replaceAll(search, replacement) }
   })
@@ -232,7 +244,7 @@ export interface NodeDeletion {
 /**
  * Delete nodes matching a selector. Without an index every occurrence goes.
  */
-export const deleteAdfNodes = (root: unknown, selector: NodeSelector): NodeDeletion => {
+export const deleteAdfNodes = <UnparsedInput>(root: UnparsedInput, selector: NodeSelector): NodeDeletion => {
   let seen = 0
   let deleted = 0
   const doc = mapNode(root, (node) => {

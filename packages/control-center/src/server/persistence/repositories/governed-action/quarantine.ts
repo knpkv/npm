@@ -21,12 +21,12 @@ interface GovernedActionQuarantineDiagnostic {
 }
 
 /** Internal carrier retaining an untrusted row only until quarantine runs after rollback. */
-export class MalformedGovernedActionRecord {
+export class MalformedGovernedActionRecord<Row = unknown> {
   readonly _tag = "MalformedGovernedActionRecord"
   readonly error: PersistedRecordError
-  readonly row: unknown
+  readonly row: Row
 
-  constructor(error: PersistedRecordError, row: unknown) {
+  constructor(error: PersistedRecordError, row: Row) {
     this.error = error
     this.row = row
   }
@@ -34,7 +34,8 @@ export class MalformedGovernedActionRecord {
 
 /** Attach an ephemeral raw row to a bounded persisted-record failure. */
 export const captureMalformedGovernedActionRow =
-  (row: unknown) => <Success, Failure, Requirements>(effect: Effect.Effect<Success, Failure, Requirements>) =>
+  <UnparsedInput>(row: UnparsedInput) =>
+  <Success, Failure, Requirements>(effect: Effect.Effect<Success, Failure, Requirements>) =>
     Effect.catchIf(
       effect,
       (failure): failure is Failure & PersistedRecordError => Predicate.isTagged("PersistedRecordError")(failure),

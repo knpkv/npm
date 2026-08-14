@@ -4,16 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { SandboxesPage } from "../src/client/components/sandboxes-page.js"
-
-const atomMocks = vi.hoisted(() => ({
-  useAtomSet: vi.fn(),
-  useAtomValue: vi.fn()
-}))
-const routerMocks = vi.hoisted(() => ({ navigate: vi.fn() }))
-
-vi.mock("@effect/atom-react", () => atomMocks)
-vi.mock("react-router", () => ({ useNavigate: () => routerMocks.navigate }))
+import { SandboxesPageView } from "../src/client/components/sandboxes-page.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -25,10 +16,10 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
-const renderPage = async () => {
+const renderPage = async (props: Parameters<typeof SandboxesPageView>[0]) => {
   const host = document.createElement("div")
   root = createRoot(host)
-  await act(async () => root?.render(createElement(SandboxesPage)))
+  await act(async () => root?.render(createElement(SandboxesPageView, props)))
   return host
 }
 
@@ -40,8 +31,8 @@ describe("SandboxesPage", () => {
     const stop = vi.fn()
     const restart = vi.fn()
     const remove = vi.fn()
-    atomMocks.useAtomSet.mockReturnValueOnce(stop).mockReturnValueOnce(restart).mockReturnValueOnce(remove)
-    atomMocks.useAtomValue.mockReturnValue({
+    const navigate = vi.fn()
+    const state = {
       accounts: [],
       pullRequests: [],
       sandboxes: [
@@ -77,9 +68,15 @@ describe("SandboxesPage", () => {
         }
       ],
       status: "idle"
-    })
+    } satisfies Parameters<typeof SandboxesPageView>[0]["state"]
 
-    const host = await renderPage()
+    const host = await renderPage({
+      state,
+      stopSandbox: stop,
+      restartSandbox: restart,
+      deleteSandbox: remove,
+      navigate
+    })
     expect(host.textContent).toContain("1 running")
     expect(host.textContent).toContain("payments-api")
     expect(host.textContent).toContain("identity-service")
@@ -94,17 +91,23 @@ describe("SandboxesPage", () => {
       "button[aria-label=\"Open payments-api sandbox for pull request 42\"]"
     )
     await act(async () => openButton?.click())
-    expect(routerMocks.navigate).toHaveBeenCalledWith("/sandbox/sandbox-running")
+    expect(navigate).toHaveBeenCalledWith("/sandbox/sandbox-running")
   })
 
   it("returns an empty inventory to the pull-request queue", async () => {
-    atomMocks.useAtomSet.mockReturnValue(vi.fn())
-    atomMocks.useAtomValue.mockReturnValue({ accounts: [], pullRequests: [], sandboxes: [], status: "idle" })
+    const navigate = vi.fn()
+    const action = vi.fn()
 
-    const host = await renderPage()
+    const host = await renderPage({
+      state: { accounts: [], pullRequests: [], sandboxes: [], status: "idle" },
+      stopSandbox: action,
+      restartSandbox: action,
+      deleteSandbox: action,
+      navigate
+    })
     expect(host.textContent).toContain("No sandboxes yet")
 
     await act(async () => buttonNamed(host, "Open pull requests")?.click())
-    expect(routerMocks.navigate).toHaveBeenCalledWith("/")
+    expect(navigate).toHaveBeenCalledWith("/")
   })
 })

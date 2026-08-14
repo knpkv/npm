@@ -1,71 +1,53 @@
 // @vitest-environment happy-dom
 
-import { act, createRef } from "react"
+import { act, createRef, useImperativeHandle, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type * as PierreReact from "@pierre/diffs/react"
-import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
+import type { CodeViewHandle, CodeViewItem } from "@pierre/diffs/react"
+import {
+  type AnnotationMetadata,
+  createDiffCodeView,
+  type DiffCodeRendererAdapterProps
+} from "../../src/diff/DiffCodeView.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle } from "../../src/diff/types.js"
 import { createDiffWorkerFactory, DiffWorkerProvider } from "../../src/diff/worker-pool.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
-interface RendererItemSnapshot {
-  readonly annotations?: ReadonlyArray<{
-    readonly metadata: { readonly annotation: RlyDiffCodeAnnotation }
-  }>
-  readonly fileDiff?: unknown
-  readonly id: string
-  readonly version?: number
+const rendererMounts: Array<ReadonlyArray<CodeViewItem<AnnotationMetadata>>> = []
+const rendererUpdates: Array<CodeViewItem<AnnotationMetadata>> = []
+let emitWorkerFailure: (() => void) | undefined
+
+const CodeViewProbe = ({ rendererProps }: DiffCodeRendererAdapterProps) => {
+  const initialItems = rendererProps.initialItems ?? []
+  const [mountedItems] = useState(() => {
+    rendererMounts.push(initialItems)
+    return initialItems
+  })
+  useImperativeHandle(rendererProps.ref, (): CodeViewHandle<AnnotationMetadata> => ({
+    addItems: () => undefined,
+    clearSelectedLines: () => undefined,
+    getEditor: () => undefined,
+    getInstance: () => undefined,
+    getItem: () => undefined,
+    getSelectedLines: () => null,
+    removeItem: () => false,
+    scrollTo: () => undefined,
+    setSelectedLines: () => undefined,
+    updateItem: (item) => {
+      rendererUpdates.push(item)
+      return true
+    },
+    updateItemId: () => false
+  }))
+  return <output data-renderer-items={JSON.stringify(mountedItems)} />
 }
 
-const rendererMounts = vi.hoisted((): Array<ReadonlyArray<RendererItemSnapshot>> => [])
-const rendererUpdates = vi.hoisted((): Array<RendererItemSnapshot> => [])
-const workerStats = vi.hoisted(
-  (): {
-    emit: ((stats: { readonly workersFailed: boolean }) => void) | undefined
-  } => ({ emit: undefined })
-)
-
-vi.mock("@pierre/diffs/react", async (importOriginal) => {
-  const actual = await importOriginal<typeof PierreReact>()
-  const React = await import("react")
-  return {
-    ...actual,
-    CodeView: React.forwardRef(function CodeViewProbe(
-      { initialItems }: { readonly initialItems: ReadonlyArray<RendererItemSnapshot> },
-      ref
-    ) {
-      const [mountedItems] = React.useState(() => {
-        rendererMounts.push(initialItems)
-        return initialItems
-      })
-      React.useImperativeHandle(ref, () => ({
-        addItems: () => undefined,
-        cleanUp: () => undefined,
-        getItem: () => undefined,
-        scrollTo: () => undefined,
-        setOptions: () => undefined,
-        updateItem: (item: RendererItemSnapshot) => {
-          rendererUpdates.push(item)
-          return true
-        }
-      }))
-      return <output data-renderer-items={JSON.stringify(mountedItems)} />
-    })
-  }
-})
-
-vi.mock("@pierre/diffs/worker", () => ({
-  WorkerPoolManager: class {
-    subscribeToStatChanges(callback: (stats: { readonly workersFailed: boolean }) => void): () => void {
-      workerStats.emit = callback
-      return () => undefined
-    }
-
-    terminate(): void {}
-  }
-}))
+const ProbeDiffCodeView = createDiffCodeView(CodeViewProbe)
+const observeWorkerFailure = (onFailure: () => void) => {
+  emitWorkerFailure = onFailure
+  return () => undefined
+}
 
 class FakeWorker extends EventTarget {
   onerror = null
@@ -86,7 +68,7 @@ afterEach(() => {
   document.body.replaceChildren()
   rendererMounts.length = 0
   rendererUpdates.length = 0
-  workerStats.emit = undefined
+  emitWorkerFailure = undefined
   vi.unstubAllGlobals()
 })
 
@@ -110,8 +92,8 @@ describe("DiffCodeView worker failover", () => {
     })
     const auditAnnotation = annotation("audit-finding", "audit", "Audit finding")
     const renderView = (releaseAnnotation: RlyDiffCodeAnnotation) => (
-      <DiffWorkerProvider workerFactory={workerFactory}>
-        <DiffCodeView annotations={[releaseAnnotation, auditAnnotation]} initialItems={[initialItem, auditItem]} />
+      <DiffWorkerProvider observeWorkerFailure={observeWorkerFailure} workerFactory={workerFactory}>
+        <ProbeDiffCodeView annotations={[releaseAnnotation, auditAnnotation]} initialItems={[initialItem, auditItem]} />
       </DiffWorkerProvider>
     )
 
@@ -137,8 +119,8 @@ describe("DiffCodeView worker failover", () => {
     vi.stubGlobal("Worker", FakeWorker)
     const workerFactory = createDiffWorkerFactory({ workerUrl: "/diff-worker.js" })
     const renderView = (message: string) => (
-      <DiffWorkerProvider workerFactory={workerFactory}>
-        <DiffCodeView
+      <DiffWorkerProvider observeWorkerFailure={observeWorkerFailure} workerFactory={workerFactory}>
+        <ProbeDiffCodeView
           ref={rendererRef}
           annotations={[
             {
@@ -168,8 +150,8 @@ describe("DiffCodeView worker failover", () => {
       root.render(renderView("Current finding"))
     })
 
-    if (workerStats.emit === undefined) throw new Error("Worker stat subscription was not installed")
-    await act(async () => workerStats.emit?.({ workersFailed: true }))
+    if (emitWorkerFailure === undefined) throw new Error("Worker failure observer was not installed")
+    await act(async () => emitWorkerFailure?.())
 
     expect(rendererMounts.length).toBeGreaterThanOrEqual(2)
     const fallbackMount = rendererMounts[rendererMounts.length - 1]

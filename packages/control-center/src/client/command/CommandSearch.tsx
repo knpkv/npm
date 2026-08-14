@@ -32,6 +32,7 @@ import {
   useCommandReleases
 } from "./useCommandReleases.js"
 import styles from "./CommandSearch.module.css"
+import * as Predicate from "effect/Predicate"
 
 const MINIMUM_QUERY_LENGTH = 2
 const RESULT_LIMIT = 6
@@ -50,7 +51,7 @@ const kindLabel = (kind: WorkspaceItemPresentation["kind"]): string =>
 const isEditingTarget = (target: EventTarget | null): boolean => {
   if (target === null) return false
   if ("isContentEditable" in target && target.isContentEditable === true) return true
-  if (!("nodeName" in target) || typeof target.nodeName !== "string") return false
+  if (!("nodeName" in target) || !Predicate.isString(target.nodeName)) return false
   return target.nodeName === "INPUT" || target.nodeName === "SELECT" || target.nodeName === "TEXTAREA"
 }
 
@@ -135,9 +136,10 @@ const CommandSearchSurface = ({
     browserSession.invalidateSession,
     transport
   )
-  const itemsReady = items.state._tag === "ready" && !items.state.refreshing
   const results =
-    releasesReady && itemsReady ? commandSearchResults(releaseState.releases, items.state.items, deferredQuery) : []
+    releasesReady && items.state._tag === "ready" && !items.state.refreshing
+      ? commandSearchResults(releaseState.releases, items.state.items, deferredQuery)
+      : []
   const showListbox = results.length > 0
 
   const changeOpen = (nextOpen: boolean): void => {

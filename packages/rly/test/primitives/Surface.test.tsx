@@ -21,9 +21,9 @@ describe("Surface", () => {
     const surface = render(<Surface>Summary</Surface>)
     expect(surface?.tagName).toBe("DIV")
     expect(surface?.className).toContain(RLY_SURFACE_VARIANTS.tone.primary.className)
-    expect(surface?.className).toContain(RLY_SURFACE_VARIANTS.shape.card.className)
+    expect(surface?.className).toContain(RLY_SURFACE_VARIANTS.form.card.className)
     expect(surface?.className).toContain(RLY_SURFACE_VARIANTS.padding.default.className)
-    expect(RLY_SURFACE_DEFAULT_VARIANTS).toEqual({ padding: "default", shape: "card", tone: "primary" })
+    expect(RLY_SURFACE_DEFAULT_VARIANTS).toEqual({ padding: "default", form: "card", tone: "primary" })
   })
 
   it("allows callers to own sectioning semantics", () => {

@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Glob from "glob"
 import { parse } from "yaml"
+import * as Predicate from "effect/Predicate"
 
 const secretReference = /\bsecrets(?:\.([A-Z0-9_]+)|\s*\[([^\]]+)\])/giu
 const staticIndexedProperty = /\[\s*(['"])([A-Z_][A-Z0-9_-]*)\1\s*\]/giu
@@ -52,9 +53,9 @@ const actionsExpressionSpansIn = (source) => {
 }
 const actionsExpressionsIn = (source) => actionsExpressionSpansIn(source).map(({ expression }) => expression)
 const stringsIn = (value) => {
-  if (typeof value === "string") return [value]
+  if (Predicate.isString(value)) return [value]
   if (Array.isArray(value)) return value.flatMap(stringsIn)
-  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringsIn)
+  if (value !== null && Predicate.isObjectOrArray(value)) return Object.values(value).flatMap(stringsIn)
   return []
 }
 const referencedSecretNames = (value) =>
@@ -76,26 +77,26 @@ const referencesGithubToken = (value) =>
   )
 const referencesPullRequestCredentials = (value) => referencesSecrets(value) || referencesGithubToken(value)
 const grantsOidcAuthority = (permissions) => {
-  if (typeof permissions === "string") return permissions.toLowerCase() === "write-all"
-  if (permissions === null || typeof permissions !== "object") return false
+  if (Predicate.isString(permissions)) return permissions.toLowerCase() === "write-all"
+  if (permissions === null || !Predicate.isObjectOrArray(permissions)) return false
   return Object.entries(permissions).some(
     ([name, access]) =>
-      name.toLowerCase() === "id-token" && typeof access === "string" && access.toLowerCase() === "write"
+      name.toLowerCase() === "id-token" && Predicate.isString(access) && access.toLowerCase() === "write"
   )
 }
 const grantsTokenWriteAuthority = (permissions) => {
-  if (typeof permissions === "string") return permissions.toLowerCase() === "write-all"
-  if (permissions === null || typeof permissions !== "object") return false
-  return Object.values(permissions).some((access) => typeof access === "string" && access.toLowerCase() === "write")
+  if (Predicate.isString(permissions)) return permissions.toLowerCase() === "write-all"
+  if (permissions === null || !Predicate.isObjectOrArray(permissions)) return false
+  return Object.values(permissions).some((access) => Predicate.isString(access) && access.toLowerCase() === "write")
 }
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
 const referencesExpression = (value, expression) =>
-  typeof value === "string" &&
+  Predicate.isString(value) &&
   new RegExp(`\\b${escapeRegex(expression)}\\b`, "u").test(normalizeStaticIndexedProperties(value))
 const usesAction = (value, action) =>
-  typeof value === "string" && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
+  Predicate.isString(value) && value.slice(0, value.lastIndexOf("@")).toLowerCase() === action
 const actionInput = (step, name) => {
-  if (step?.with === null || typeof step?.with !== "object" || Array.isArray(step.with)) return undefined
+  if (step?.with === null || !Predicate.isObjectOrArray(step?.with) || Array.isArray(step.with)) return undefined
   const entry = Object.entries(step.with).find(([inputName]) => inputName.toLowerCase() === name)
   return entry?.[1]
 }
@@ -282,7 +283,7 @@ const shellGitCommands = (source) => {
   return commands
 }
 const shellChecksOutPullRequestRevision = (step, trigger) => {
-  if (typeof step?.run !== "string") return false
+  if (!Predicate.isString(step?.run)) return false
   return shellGitCommands(step.run).some(({ name, operands }) => {
     if (name !== "checkout" && name !== "switch" && name !== "reset") return false
     if (name === "reset" && !operands.includes("--hard")) return false
@@ -297,19 +298,19 @@ const executesPullRequestRevision = (job, trigger) => {
   const checkoutIndex = steps.findIndex((step) => stepChecksOutPullRequestRevision(step, trigger))
   if (checkoutIndex === -1) return false
   if (shellChecksOutPullRequestRevision(steps[checkoutIndex], trigger)) return true
-  return steps.slice(checkoutIndex + 1).some((step) => typeof step?.run === "string" || typeof step?.uses === "string")
+  return steps.slice(checkoutIndex + 1).some((step) => Predicate.isString(step?.run) || Predicate.isString(step?.uses))
 }
 const checksOutPullRequestRevision = (job, trigger) =>
   Array.isArray(job?.steps) && job.steps.some((step) => stepChecksOutPullRequestRevision(step, trigger))
 const workflowTriggers = (document) => document?.on ?? document?.true ?? {}
 const hasTrigger = (triggers, name) =>
-  typeof triggers === "string"
+  Predicate.isString(triggers)
     ? triggers === name
     : Array.isArray(triggers)
       ? triggers.includes(name)
-      : triggers !== null && typeof triggers === "object" && Object.hasOwn(triggers, name)
+      : triggers !== null && Predicate.isObjectOrArray(triggers) && Object.hasOwn(triggers, name)
 const pinsMain = (condition) => {
-  if (typeof condition !== "string") return false
+  if (!Predicate.isString(condition)) return false
   const normalized = normalizeStaticIndexedProperties(condition)
     .trim()
     .replace(/^\$\{\{\s*/u, "")
@@ -321,7 +322,7 @@ const pinsMain = (condition) => {
 }
 
 const localReusableWorkflowPath = (uses) => {
-  if (typeof uses !== "string" || !uses.startsWith("./") || uses.includes("${{")) return undefined
+  if (!Predicate.isString(uses) || !uses.startsWith("./") || uses.includes("${{")) return undefined
   const path = uses.slice(2)
   return path.startsWith(".github/workflows/") && /\.ya?ml$/u.test(path) ? path : undefined
 }
@@ -371,7 +372,7 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
             )
           }
         }
-      } else if (typeof job.uses === "string" && (credentialAuthority || oidcAuthority)) {
+      } else if (Predicate.isString(job.uses) && (credentialAuthority || oidcAuthority)) {
         diagnostics.push(`${jobLocation} calls an uninspectable reusable workflow with credential or OIDC authority`)
       }
 
@@ -383,7 +384,7 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
         if (!pinsMain(job.if)) {
           diagnostics.push(`${jobLocation} must pin credentialed manual runs to refs/heads/main`)
         }
-        if (typeof job.environment !== "string" || job.environment.length === 0) {
+        if (!Predicate.isString(job.environment) || job.environment.length === 0) {
           diagnostics.push(`${jobLocation} must use a protected GitHub environment for long-lived credentials`)
         }
       }

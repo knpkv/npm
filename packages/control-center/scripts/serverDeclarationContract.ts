@@ -150,11 +150,7 @@ const resolvesToNamedType = (
   return resolvesToNamedType(declaration.type, expectedName, declarations, new Set(visited).add(typeName))
 }
 
-const exportedFunctionSignatureTypes = (source: string, functionName: string): {
-  readonly declarations: ReadonlyMap<string, NamedTypeDeclaration>
-  readonly parameter: ts.TypeNode | undefined
-  readonly success: ts.TypeNode | undefined
-} => {
+const exportedFunctionSignatureTypes = (source: string, functionName: string) => {
   const sourceFile = ts.createSourceFile(
     "BackupArchive.d.ts",
     source,

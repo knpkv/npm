@@ -237,5 +237,6 @@ describe("Confluence attachment helpers", () => {
     expect(isConfluenceWriteRetryError(serverError)).toBe(false)
     expect(isConfluenceWriteRetryError(rateLimitApiError)).toBe(true)
     expect(isConfluenceWriteRetryError(rateLimitError)).toBe(true)
+    expect(rateLimitError.retryAfter).toBe(30)
   })
 })

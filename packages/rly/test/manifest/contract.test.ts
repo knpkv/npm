@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import * as TypeScript from "typescript"
 import { describe, expect, it } from "vitest"
 import {
@@ -21,8 +23,9 @@ const manifestWithEntries = (entries: ReadonlyArray<ModuleEntry>): ComponentMani
   entries
 })
 
-const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
-  typeof value === "object" && value !== null
+const isRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> => Predicate.isObjectOrArray(value) && value !== null
 
 const designExportInventory = (source: string): ReadonlyArray<string> => {
   const inventory = source
@@ -52,7 +55,7 @@ if (approvedDesignSource === undefined) throw new Error("Approved Control Center
 const exportInventoryDrift = (
   approved: ReadonlyArray<string>,
   generated: ReadonlyArray<string>
-): { readonly missing: ReadonlyArray<string>; readonly unexpected: ReadonlyArray<string> } => ({
+) => ({
   missing: generated.filter((entry) => !approved.includes(entry)),
   unexpected: approved.filter((entry) => !generated.includes(entry))
 })

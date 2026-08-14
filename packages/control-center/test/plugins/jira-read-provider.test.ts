@@ -20,8 +20,8 @@ import {
   mapJiraReadProviderFailure
 } from "../../src/server/plugins/jira/JiraReadProvider.js"
 
-const jiraClientLayerFromResponse = (
-  responseBody: (request: HttpClientRequest.HttpClientRequest) => unknown,
+const jiraClientLayerFromResponse = <ResponseBody>(
+  responseBody: (request: HttpClientRequest.HttpClientRequest) => ResponseBody,
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) =>
   JiraApiClient.layer.pipe(
@@ -50,8 +50,8 @@ const jiraClientLayerFromResponse = (
     ))
   )
 
-const jiraClientLayer = (
-  body: unknown,
+const jiraClientLayer = <UnparsedInput>(
+  body: UnparsedInput,
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) => jiraClientLayerFromResponse(() => body, requests)
 

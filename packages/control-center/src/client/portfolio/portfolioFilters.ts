@@ -9,12 +9,12 @@ export interface PortfolioFilterOption {
   readonly label: string
 }
 
-const FILTER_LABELS: Readonly<Record<PortfolioFilter, string>> = {
+const FILTER_LABELS = {
   all: "All",
   attention: "Need attention",
   deploying: "Deploying",
   shipped: "Shipped"
-}
+} satisfies Readonly<Record<PortfolioFilter, string>>
 
 const FILTER_IDS: ReadonlyArray<PortfolioFilter> = ["all", "attention", "deploying", "shipped"]
 

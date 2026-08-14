@@ -12,7 +12,7 @@ export interface PluginDefinitionV1 {
 }
 
 /** Construct the opaque identity inside server-only plugin composition. @internal */
-export const makePluginDefinitionV1 = (rawDescriptor: unknown): PluginDefinitionV1 => ({
+export const makePluginDefinitionV1 = <UnparsedInput>(rawDescriptor: UnparsedInput): PluginDefinitionV1 => ({
   [PluginDefinitionTypeId]: PluginDefinitionTypeId,
   rawDescriptor
 })

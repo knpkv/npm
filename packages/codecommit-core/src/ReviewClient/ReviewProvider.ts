@@ -102,6 +102,60 @@ const mergeOperation = (strategy: Extract<CodeCommitReviewAction, { readonly _ta
   }
 }
 
+/** Raw merge calls injected into the authorization sequence for faithful tests and alternate runtimes. */
+export interface CodeCommitMergeOperations<Requirements = never> {
+  readonly getRepository: (repositoryName: string) => Effect.Effect<unknown, unknown, Requirements>
+  readonly getCallerIdentity: () => Effect.Effect<unknown, unknown, Requirements>
+  readonly mergeFastForward: (
+    request: ReturnType<typeof makeMergePullRequestRequest>
+  ) => Effect.Effect<unknown, unknown, Requirements>
+  readonly mergeSquash: (
+    request: ReturnType<typeof makeMergePullRequestRequest>
+  ) => Effect.Effect<unknown, unknown, Requirements>
+  readonly mergeThreeWay: (
+    request: ReturnType<typeof makeMergePullRequestRequest>
+  ) => Effect.Effect<unknown, unknown, Requirements>
+}
+
+const liveCodeCommitMergeOperations: CodeCommitMergeOperations<
+  DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
+> = {
+  getRepository: (repositoryName) => codecommit.getRepository({ repositoryName }),
+  getCallerIdentity: () => sts.getCallerIdentity({}),
+  mergeFastForward: codecommit.mergePullRequestByFastForward,
+  mergeSquash: codecommit.mergePullRequestBySquash,
+  mergeThreeWay: codecommit.mergePullRequestByThreeWay
+}
+
+/** Run preflight identity checks, authorization, and exactly one strategy-specific merge dispatch. */
+export const authorizeAndMerge = <E, Requirements>(
+  action: Extract<CodeCommitReviewAction, { readonly _tag: "merge" }>,
+  authorize: (evidence: CodeCommitMergeAuthorizationEvidence) => Effect.Effect<void, E>,
+  operations: CodeCommitMergeOperations<Requirements>
+) => {
+  const operation = mergeOperation(action.strategy)
+  const request = makeMergePullRequestRequest(action)
+  const mapMergeError = mapRawProviderError(operation, action.target)
+
+  return Effect.gen(function*() {
+    const repositoryIdentity = yield* operations.getRepository(action.target.repositoryName).pipe(
+      Effect.mapError(mapRawProviderError("getRepository", action.target))
+    )
+    const callerIdentity = yield* operations.getCallerIdentity().pipe(
+      Effect.mapError(mapRawProviderError("getCallerIdentity", action.target))
+    )
+    yield* authorize({ callerIdentity, repositoryIdentity })
+    switch (action.strategy) {
+      case "fast-forward":
+        return yield* operations.mergeFastForward(request).pipe(Effect.mapError(mapMergeError))
+      case "squash":
+        return yield* operations.mergeSquash(request).pipe(Effect.mapError(mapMergeError))
+      case "three-way":
+        return yield* operations.mergeThreeWay(request).pipe(Effect.mapError(mapMergeError))
+    }
+  })
+}
+
 /**
  * Verify caller and repository ownership, then dispatch under one credential snapshot.
  * The authorization callback owns Schema decoding while this provider owns runtime atomicity.
@@ -111,33 +165,10 @@ const callAuthorizedMerge = <E>(
   authorize: (evidence: CodeCommitMergeAuthorizationEvidence) => Effect.Effect<void, E>
 ) => {
   const operation = mergeOperation(action.strategy)
-  const request = makeMergePullRequestRequest(action)
-  const mapMergeError = mapRawProviderError(operation, action.target)
-  const merge = (() => {
-    switch (action.strategy) {
-      case "fast-forward":
-        return codecommit.mergePullRequestByFastForward(request)
-      case "squash":
-        return codecommit.mergePullRequestBySquash(request)
-      case "three-way":
-        return codecommit.mergePullRequestByThreeWay(request)
-    }
-  })()
-
   return withAwsContext(
     operation,
     action.target.account,
-    Effect.gen(function*() {
-      const repositoryIdentity = yield* codecommit.getRepository({
-        repositoryName: action.target.repositoryName
-      }).pipe(Effect.mapError(mapRawProviderError("getRepository", action.target)))
-      // STS is intentionally last: authorization immediately precedes the destructive call.
-      const callerIdentity = yield* sts.getCallerIdentity({}).pipe(
-        Effect.mapError(mapRawProviderError("getCallerIdentity", action.target))
-      )
-      yield* authorize({ callerIdentity, repositoryIdentity })
-      return yield* merge.pipe(Effect.mapError(mapMergeError))
-    }),
+    authorizeAndMerge(action, authorize, liveCodeCommitMergeOperations),
     { retry: false, timeout: "none" }
   )
 }
@@ -155,9 +186,7 @@ export const makePostCommentForPullRequestRequest = (
   afterCommitId: action.target.sourceCommit,
   content: action.content,
   clientRequestToken: action.clientRequestToken,
-  ...(action._tag === "comment" && action.location !== undefined
-    ? { location: action.location }
-    : {})
+  ...((action._tag === "comment" && action.location !== undefined) && { location: action.location })
 })
 
 /** Map an update action to the exact CodeCommit comment mutation request. */
@@ -251,7 +280,7 @@ export const CodeCommitReviewProviderLive = Layer.effect(
             beforeCommitId: target.destinationCommit,
             afterCommitId: target.sourceCommit,
             maxResults: 100,
-            ...(nextToken === null ? {} : { nextToken })
+            ...(!(nextToken === null) && { nextToken })
           })
         ))
     } satisfies CodeCommitReviewProviderService

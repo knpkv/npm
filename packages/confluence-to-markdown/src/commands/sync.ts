@@ -32,7 +32,7 @@ export const pullCommand = Command.make(
       const result = yield* engine.pull({
         force,
         replayHistory,
-        ...(replayHistory ? { onProgress } : {})
+        ...(replayHistory && { onProgress })
       })
       if (replayHistory) {
         yield* writeStdout("\r" + " ".repeat(80) + "\r")

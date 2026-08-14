@@ -8,7 +8,7 @@ import {
   type RlyDiffInventory
 } from "@knpkv/rly/diff/workbench"
 import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BotIcon, CheckCircle2Icon, FileSearchIcon, ShieldCheckIcon, TestTube2Icon } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -78,8 +78,12 @@ const locationLabel = (finding: RelayReviewFinding): string => {
   }
 }
 
-const failureMessage = (failure: unknown, fallback: string): string =>
-  Predicate.hasProperty(failure, "message") && typeof failure.message === "string" ? failure.message : fallback
+const FailureWithMessage = Schema.Struct({ message: Schema.String })
+const isFailureWithMessage = Schema.is(FailureWithMessage)
+
+function failureMessage<Failure>(failure: Failure, fallback: string): string {
+  return isFailureWithMessage(failure) ? failure.message : fallback
+}
 
 const exactReviewIdentity = (
   accountId: string,
@@ -461,7 +465,7 @@ const ReadyReviewWorkspace = ({
   )
 
   return (
-    <Surface as="section" className={styles.workspace} padding="none" shape="grouped">
+    <Surface as="section" className={styles.workspace} padding="none" form="grouped">
       <header className={styles.workspaceHeader}>
         <div>
           <Text tone="secondary" variant="label">

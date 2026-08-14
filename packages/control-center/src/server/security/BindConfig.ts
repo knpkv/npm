@@ -134,7 +134,7 @@ const isIpAddress = (address: string): boolean => {
 const unique = <Value extends string>(values: ReadonlyArray<Value>): Array<Value> => Array.from(new Set(values))
 
 /** Decode loopback-first bind configuration and reject ambiguous LAN exposure. */
-export const decodeBindConfig = Effect.fn("BindConfig.decode")(function*(input: unknown) {
+export const decodeBindConfig = Effect.fn("BindConfig.decode")(function*<UnparsedInput>(input: UnparsedInput) {
   const decoded = yield* Schema.decodeUnknownEffect(BindConfigInput)(input).pipe(
     Effect.mapError(() => new BindConfigError({ reason: "invalid-input" }))
   )

@@ -453,7 +453,7 @@ export const PrReviewCompletion = Schema.Union([
 export type PrReviewCompletion = typeof PrReviewCompletion.Type
 
 const hasMaximumReportBytes = Schema.makeFilter(
-  (value: unknown) => {
+  <UnparsedInput>(value: UnparsedInput) => {
     const serialized = JSON.stringify(value)
     if (serialized === undefined) return false
     const maximumLifecycleProjection = serialized.replace(
@@ -537,7 +537,7 @@ export const reconcilePrReviewReports = (
       transition,
       previousState: prior?.state ?? null,
       currentState: suggestion.state,
-      ...(prior?.dismissalReason === undefined ? {} : { previousDismissalReason: prior.dismissalReason }),
+      ...(!(prior?.dismissalReason === undefined) && { previousDismissalReason: prior.dismissalReason }),
       previousHead: prior === undefined ? null : previous.subject.headRevision,
       currentHead: current.subject.headRevision
     })

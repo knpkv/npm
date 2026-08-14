@@ -5,6 +5,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Encoding from "effect/Encoding"
 
+import * as Predicate from "effect/Predicate"
 import { SessionSummary } from "../../src/api/session.js"
 import { WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
 import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
@@ -24,6 +25,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { PersistenceOperationError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { RecordRevision } from "../../src/server/persistence/repositories/models.js"
+import type { SqlRow } from "../../src/server/persistence/repositories/sqlRow.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
 const workspaceId = Schema.decodeSync(WorkspaceId)(
@@ -82,7 +84,7 @@ const utf8Encoder = new TextEncoder()
 
 const digestRawRow = Effect.fn(
   "WorkspaceSettingsRepositoryTest.digestRawRow"
-)(function*(row: unknown) {
+)(function*<UnparsedInput>(row: UnparsedInput) {
   const serialized = yield* Effect.sync(() => JSON.stringify(row))
   const cryptoService = yield* Crypto.Crypto
   return Encoding.encodeHex(
@@ -676,7 +678,7 @@ describe("WorkspaceSettingsRepository", () => {
           revision: number
         ) =>
           table === "workspace_settings"
-            ? sql<Record<string, unknown>>`SELECT
+            ? sql<SqlRow>`SELECT
                 workspace_id AS workspaceId,
                 schema_version AS schemaVersion,
                 revision,
@@ -689,7 +691,7 @@ describe("WorkspaceSettingsRepository", () => {
               FROM workspace_settings
               WHERE workspace_id = ${workspaceId}
                 AND revision = ${revision}`
-            : sql<Record<string, unknown>>`SELECT
+            : sql<SqlRow>`SELECT
                 workspace_id AS workspaceId,
                 schema_version AS schemaVersion,
                 revision,
@@ -819,7 +821,7 @@ describe("WorkspaceSettingsRepository", () => {
             ...persistence.deliveryGraph,
             read: (selectedWorkspaceId, input) => {
               if (
-                typeof input === "object" &&
+                Predicate.isObjectOrArray(input) &&
                 input !== null &&
                 "_tag" in input &&
                 input._tag === "workspaceEntityProjections"

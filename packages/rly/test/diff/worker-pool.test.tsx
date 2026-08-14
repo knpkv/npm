@@ -10,45 +10,30 @@ import {
   useDiffWorkerState
 } from "../../src/diff/worker-pool.js"
 
-const terminatePool = vi.fn()
-const constructPool = vi.fn()
-const unsubscribeFromStats = vi.fn()
 const terminateWorker = vi.fn()
-let emitStats: ((stats: { readonly workersFailed: boolean }) => void) | undefined
+const unsubscribeFromStats = vi.fn()
+const observeWorkerFailure = vi.fn()
+let emitFailure: (() => void) | undefined
 let emitFailureSynchronously = false
-
-vi.mock("@pierre/diffs/worker", () => ({
-  WorkerPoolManager: class {
-    constructor() {
-      constructPool()
-    }
-
-    subscribeToStatChanges(callback: (stats: { readonly workersFailed: boolean }) => void): () => void {
-      emitStats = callback
-      if (emitFailureSynchronously) callback({ workersFailed: true })
-      return unsubscribeFromStats
-    }
-
-    terminate(): void {
-      terminatePool()
-    }
-  }
-}))
 
 class FakeWorker extends EventTarget {
   static latestUrl: string | URL | undefined
+  static instances: Array<FakeWorker> = []
 
   onerror = null
   onmessage = null
   onmessageerror = null
+  terminated = false
 
   constructor(url: string | URL) {
     super()
     FakeWorker.latestUrl = url
+    FakeWorker.instances.push(this)
   }
 
   postMessage(): void {}
   terminate(): void {
+    this.terminated = true
     terminateWorker()
   }
 }
@@ -60,13 +45,18 @@ const WorkerStateProbe = (): ReactElement => {
 
 afterEach(() => {
   document.body.replaceChildren()
-  terminatePool.mockClear()
-  constructPool.mockClear()
-  unsubscribeFromStats.mockClear()
   terminateWorker.mockClear()
-  emitStats = undefined
+  unsubscribeFromStats.mockClear()
+  observeWorkerFailure.mockReset()
+  observeWorkerFailure.mockImplementation((onFailure) => {
+    emitFailure = onFailure
+    if (emitFailureSynchronously) onFailure()
+    return unsubscribeFromStats
+  })
+  emitFailure = undefined
   emitFailureSynchronously = false
   FakeWorker.latestUrl = undefined
+  FakeWorker.instances = []
   vi.unstubAllGlobals()
 })
 
@@ -98,32 +88,30 @@ describe("diff worker boundary", () => {
     const factory = createDiffWorkerFactory({ workerUrl: "/diff-worker.js" })
     await act(async () =>
       root.render(
-        <DiffWorkerProvider workerFactory={factory}>
+        <DiffWorkerProvider observeWorkerFailure={observeWorkerFailure} workerFactory={factory}>
           <WorkerStateProbe />
         </DiffWorkerProvider>
       )
     )
     expect(host.querySelector("[data-worker-state='worker']")).not.toBeNull()
-    if (emitStats === undefined) throw new Error("Worker stat subscription was not installed")
-    await act(async () => emitStats?.({ workersFailed: true }))
+    if (emitFailure === undefined) throw new Error("Worker failure observer was not installed")
+    await act(async () => emitFailure?.())
     expect(host.querySelector("[data-worker-state='fallback']")).not.toBeNull()
-    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
-    expect(terminatePool).toHaveBeenCalledOnce()
+    expect(FakeWorker.instances.every(({ terminated }) => terminated)).toBe(true)
     await act(async () => root.unmount())
-    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
-    expect(terminatePool).toHaveBeenCalledOnce()
+    expect(FakeWorker.instances.every(({ terminated }) => terminated)).toBe(true)
   })
 
-  it("does not re-expose a terminated manager after a synchronous worker failure", async () => {
-    vi.stubGlobal("Worker", FakeWorker)
-    emitFailureSynchronously = true
+  it("does not expose a manager after synchronous worker construction fails", async () => {
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
+    vi.stubGlobal("Worker", FakeWorker)
+    emitFailureSynchronously = true
     const factory = createDiffWorkerFactory({ workerUrl: "/diff-worker.js" })
     await act(async () =>
       root.render(
-        <DiffWorkerProvider workerFactory={factory}>
+        <DiffWorkerProvider observeWorkerFailure={observeWorkerFailure} workerFactory={factory}>
           <WorkerStateProbe />
         </DiffWorkerProvider>
       )
@@ -131,10 +119,7 @@ describe("diff worker boundary", () => {
 
     expect(host.querySelector("[data-worker-state='fallback']")).not.toBeNull()
     expect(unsubscribeFromStats).toHaveBeenCalledOnce()
-    expect(terminatePool).toHaveBeenCalledOnce()
     await act(async () => root.unmount())
-    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
-    expect(terminatePool).toHaveBeenCalledOnce()
   })
 
   it("balances every StrictMode probe and manager with deterministic cleanup", async () => {
@@ -146,16 +131,15 @@ describe("diff worker boundary", () => {
     await act(async () =>
       root.render(
         <StrictMode>
-          <DiffWorkerProvider workerFactory={factory}>
+          <DiffWorkerProvider observeWorkerFailure={observeWorkerFailure} workerFactory={factory}>
             <WorkerStateProbe />
           </DiffWorkerProvider>
         </StrictMode>
       )
     )
     await act(async () => root.unmount())
-    expect(constructPool.mock.calls.length).toBeGreaterThan(0)
-    expect(terminatePool).toHaveBeenCalledTimes(constructPool.mock.calls.length)
-    expect(terminateWorker).toHaveBeenCalledTimes(constructPool.mock.calls.length)
-    expect(unsubscribeFromStats).toHaveBeenCalledTimes(constructPool.mock.calls.length)
+    expect(FakeWorker.instances.length).toBeGreaterThan(0)
+    expect(FakeWorker.instances.every(({ terminated }) => terminated)).toBe(true)
+    expect(unsubscribeFromStats).toHaveBeenCalledTimes(observeWorkerFailure.mock.calls.length)
   })
 })

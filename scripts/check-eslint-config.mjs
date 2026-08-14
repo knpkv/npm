@@ -1,6 +1,59 @@
 import { ESLint } from "eslint"
 import { fileURLToPath, URL } from "node:url"
+import packageJson from "../package.json" with { type: "json" }
 import fixture from "./fixtures/eslint/invalid-component.mjs"
+
+const invokesScript = (scripts, sourceName, targetName, visited = new Set()) => {
+  if (sourceName === targetName) return true
+  if (visited.has(sourceName)) return false
+
+  const source = scripts[sourceName]
+  if (source === undefined) return false
+
+  const nextVisited = new Set(visited)
+  nextVisited.add(sourceName)
+
+  return source
+    .split(/\s*(?:&&|;)\s*/u)
+    .map((command) => command.trim().split(/\s+/u))
+    .some((tokens) => {
+      const [executable, maybeRun, maybeName] = tokens
+      if (executable !== "pnpm") return false
+      const invokedName = maybeRun === "run" ? maybeName : maybeRun
+      return invokedName !== undefined && invokesScript(scripts, invokedName, targetName, nextVisited)
+    })
+}
+
+const assertOxlintComposition = (scripts, expected, fixtureName) => {
+  const actual = invokesScript(scripts, "lint", "lint:oxlint")
+  if (actual !== expected) {
+    throw new Error(`Oxlint composition fixture ${fixtureName} produced ${actual} instead of ${expected}`)
+  }
+}
+
+assertOxlintComposition(
+  {
+    lint: "pnpm lint:eslint",
+    "lint:oxlint": "oxlint --config oxlint.config.ts ."
+  },
+  false,
+  "standalone-invalid"
+)
+assertOxlintComposition(
+  {
+    lint: "pnpm lint:eslint && pnpm lint:oxlint",
+    "lint:oxlint": "oxlint --config oxlint.config.ts ."
+  },
+  true,
+  "composed-valid"
+)
+
+if (!invokesScript(packageJson.scripts, "lint", "lint:oxlint")) {
+  throw new Error("The root lint script must invoke lint:oxlint")
+}
+if (packageJson.scripts["lint:oxlint"] !== "oxlint --config oxlint.config.ts .") {
+  throw new Error("lint:oxlint must run the required root Oxlint configuration without a debt baseline")
+}
 
 const eslint = new ESLint({
   errorOnUnmatchedPattern: false,
@@ -88,6 +141,58 @@ await assertRuleDiagnostics({
   expected: 1,
   filePath: "packages/control-center/e2e/eslint-playwright-clock-invalid.spec.ts",
   ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Predicate from "effect/Predicate"
+    Predicate.isUndefined(Notification)
+    Predicate.isUndefined(window)
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-web/src/client/eslint-optional-host-global-invalid.ts",
+  ruleId: "local-rules/no-unsafe-optional-host-global-read"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Predicate from "effect/Predicate"
+    const optionalWindow = () => {
+      try {
+        return Predicate.isUndefined(window) ? undefined : window
+      } catch {
+        return undefined
+      }
+    }
+    const window = optionalWindow()
+    Predicate.isUndefined(window)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-web/src/client/eslint-optional-host-global-valid.ts",
+  ruleId: "local-rules/no-unsafe-optional-host-global-read"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Predicate from "effect/Predicate"
+    locator.evaluate((element) => Predicate.isString(element.textContent))
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-capture-invalid.spec.ts",
+  ruleId: "local-rules/no-playwright-evaluate-closure-captures"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const expected = "ready"
+    locator.evaluate((element, serializedExpected) => {
+      const actual = element.textContent
+      return "textContent" in element && actual === serializedExpected
+    }, expected)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/e2e/eslint-playwright-capture-valid.spec.ts",
+  ruleId: "local-rules/no-playwright-evaluate-closure-captures"
 })
 
 await assertRuleDiagnostics({

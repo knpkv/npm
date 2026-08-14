@@ -504,7 +504,7 @@ export const componentManifest = {
         { kind: "value", name: "RLY_AVATAR_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_AVATAR_VARIANTS" },
         { kind: "type", name: "AvatarProps" },
-        { kind: "type", name: "RlyAvatarShape" },
+        { kind: "type", name: "RlyAvatarForm" },
         { kind: "type", name: "RlyAvatarSize" }
       ],
       name: "Avatar",
@@ -515,7 +515,7 @@ export const componentManifest = {
       styles: ["src/primitives/Avatar.module.css"],
       variants: [
         { defaultValue: "default", name: "size", values: ["small", "default", "large", "hero"] },
-        { defaultValue: "circle", name: "shape", values: ["circle", "rounded-square"] }
+        { defaultValue: "circle", name: "form", values: ["circle", "rounded-square"] }
       ],
       visual: {
         story: "stories/primitives/Avatar.stories.tsx",
@@ -787,7 +787,7 @@ export const componentManifest = {
         { kind: "value", name: "RLY_SURFACE_VARIANTS" },
         { kind: "type", name: "RlySurfaceElement" },
         { kind: "type", name: "RlySurfacePadding" },
-        { kind: "type", name: "RlySurfaceShape" },
+        { kind: "type", name: "RlySurfaceForm" },
         { kind: "type", name: "RlySurfaceTone" },
         { kind: "type", name: "SurfaceProps" }
       ],
@@ -799,7 +799,7 @@ export const componentManifest = {
       styles: ["src/primitives/Surface.module.css"],
       variants: [
         { defaultValue: "primary", name: "tone", values: ["primary", "secondary", "tertiary"] },
-        { defaultValue: "card", name: "shape", values: ["card", "grouped"] },
+        { defaultValue: "card", name: "form", values: ["card", "grouped"] },
         { defaultValue: "default", name: "padding", values: ["none", "compact", "default", "spacious"] }
       ],
       visual: {

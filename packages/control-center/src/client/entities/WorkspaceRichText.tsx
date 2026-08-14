@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import * as Predicate from "effect/Predicate"
 
 const safeExternalUrl = (value: string): string => {
   try {
@@ -27,7 +28,7 @@ interface MarkdownNode {
 const preserveLiteralUrls =
   () =>
   (tree: MarkdownNode, file: { readonly value: unknown }): void => {
-    if (typeof file.value !== "string") return
+    if (!Predicate.isString(file.value)) return
     const source = file.value
     const visit = (node: MarkdownNode): void => {
       const children = node.children

@@ -118,8 +118,8 @@ export const diffApprovalPools = (
 
   const notifications: Array<NewNotification> = []
   const optional = {
-    ...(prTitle != null ? { title: prTitle } : {}),
-    ...(profile != null ? { profile } : {})
+    ...((prTitle != null) && { title: prTitle }),
+    ...((profile != null) && { profile })
   }
 
   if (!wasInPool && nowInPool) {

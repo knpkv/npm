@@ -89,12 +89,12 @@ export interface PluginContractHarness {
  * every decoded page's events and `checkpointAfterPage` commit in one transaction;
  * a failed page leaves the previously accepted checkpoint unchanged and is replayable.
  */
-export const PLUGIN_CHECKPOINT_ATOMICITY_CONTRACT: {
-  readonly transactionUnit: "decoded-page-events-and-checkpoint"
-  readonly failureBehavior: "retain-previous-checkpoint-and-replay-page"
-} = {
+export const PLUGIN_CHECKPOINT_ATOMICITY_CONTRACT = {
   transactionUnit: "decoded-page-events-and-checkpoint",
   failureBehavior: "retain-previous-checkpoint-and-replay-page"
+} satisfies {
+  readonly transactionUnit: "decoded-page-events-and-checkpoint"
+  readonly failureBehavior: "retain-previous-checkpoint-and-replay-page"
 }
 
 const WORKSPACE_A = Schema.decodeUnknownSync(WorkspaceId)("01912345-6789-7abc-8def-0123456789ab")

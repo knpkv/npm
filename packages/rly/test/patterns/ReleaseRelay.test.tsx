@@ -140,32 +140,28 @@ describe("ReleaseRelay", () => {
   })
 
   it("rejects malformed, out-of-range, and duplicate runtime indices", () => {
-    const fractional: [number, number, number] = [0, 1, 2]
+    const fractional: RlyReleaseRelaySymbolIndices = [0, 1, 2]
     Reflect.set(fractional, 1, 1.5)
-    expect(() =>
-      Reflect.apply(ReleaseRelay, undefined, [
-        { algorithm: "relay/v1", codename: "Fractional", symbolIndices: fractional }
-      ])
-    ).toThrow("integers from 0 through 15")
+    expect(() => ReleaseRelay({ algorithm: "relay/v1", codename: "Fractional", symbolIndices: fractional })).toThrow(
+      "integers from 0 through 15"
+    )
 
-    const outOfRange: [number, number, number] = [0, 1, 2]
+    const outOfRange: RlyReleaseRelaySymbolIndices = [0, 1, 2]
     Reflect.set(outOfRange, 2, 16)
-    expect(() =>
-      Reflect.apply(ReleaseRelay, undefined, [{ algorithm: "relay/v1", codename: "Range", symbolIndices: outOfRange }])
-    ).toThrow("integers from 0 through 15")
+    expect(() => ReleaseRelay({ algorithm: "relay/v1", codename: "Range", symbolIndices: outOfRange })).toThrow(
+      "integers from 0 through 15"
+    )
 
-    const duplicate: [number, number, number] = [0, 1, 2]
+    const duplicate: RlyReleaseRelaySymbolIndices = [0, 1, 2]
     Reflect.set(duplicate, 2, 1)
-    expect(() =>
-      Reflect.apply(ReleaseRelay, undefined, [
-        { algorithm: "relay/v1", codename: "Duplicate", symbolIndices: duplicate }
-      ])
-    ).toThrow("must be distinct")
+    expect(() => ReleaseRelay({ algorithm: "relay/v1", codename: "Duplicate", symbolIndices: duplicate })).toThrow(
+      "must be distinct"
+    )
 
-    const tooShort: [number, number, number] = [0, 1, 2]
+    const tooShort: RlyReleaseRelaySymbolIndices = [0, 1, 2]
     Array.prototype.pop.call(tooShort)
-    expect(() =>
-      Reflect.apply(ReleaseRelay, undefined, [{ algorithm: "relay/v1", codename: "Short", symbolIndices: tooShort }])
-    ).toThrow("exactly three indices")
+    expect(() => ReleaseRelay({ algorithm: "relay/v1", codename: "Short", symbolIndices: tooShort })).toThrow(
+      "exactly three indices"
+    )
   })
 })

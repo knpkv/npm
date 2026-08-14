@@ -1,5 +1,14 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
-import { Button, Field, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import {
+  Button,
+  Field,
+  type RlyStateTone,
+  Skeleton,
+  StateLabel,
+  StatePanel,
+  Surface,
+  Text
+} from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import { type ReactElement, useEffect, useRef, useState } from "react"
 
@@ -76,10 +85,15 @@ const ActorIdentity = ({
     </div>
   )
 
+interface RepairStatusPresentation {
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
 const statusPresentation = (
   proposal: RelationshipRepairProposal,
   application: RelationshipRepairApplication | undefined
-): { readonly label: string; readonly tone: "caution" | "critical" | "positive" } => {
+): RepairStatusPresentation => {
   if (application !== undefined) return { label: `Applied · r${application.appliedRevision}`, tone: "positive" }
   switch (proposal.status) {
     case "pending":

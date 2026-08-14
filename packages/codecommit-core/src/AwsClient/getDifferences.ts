@@ -26,7 +26,7 @@ const paginate = (
       repositoryName: params.repositoryName,
       beforeCommitSpecifier: params.beforeCommitSpecifier,
       afterCommitSpecifier: params.afterCommitSpecifier,
-      ...(nextToken ? { NextToken: nextToken } : {})
+      ...(nextToken && { NextToken: nextToken })
     }),
     (resp) => {
       const diffs = resp.differences ?? []

@@ -28,9 +28,11 @@ import { type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js
 import { ensureConfigDir, getAuthPath, getOAuthConfigPath, writeSecureFile } from "./ConfigPaths.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
 
-const parseJsonOrNull = (content: string): unknown | null => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parseJsonOrNull = (content: string): Schema.Json | null => {
   try {
-    return JSON.parse(content)
+    return decodeJson(content)
   } catch {
     return null
   }

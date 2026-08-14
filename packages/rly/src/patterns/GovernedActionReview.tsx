@@ -27,9 +27,7 @@ export type GovernedActionReviewProps = Omit<ComponentPropsWithRef<"section">, "
   readonly state: RlyGovernedActionState
 }
 
-const statePresentation: Readonly<
-  Record<RlyGovernedActionState, { readonly label: string; readonly tone: RlyStateTone }>
-> = {
+const statePresentation = {
   pending: { label: "Awaiting human decision", tone: "caution" },
   rejected: { label: "Rejected by human reviewer", tone: "critical" },
   authorized: { label: "Authorized by human reviewer", tone: "positive" },
@@ -37,7 +35,7 @@ const statePresentation: Readonly<
   succeeded: { label: "Authorized action succeeded", tone: "positive" },
   failed: { label: "Authorized action failed", tone: "critical" },
   cancelled: { label: "Authorized action cancelled", tone: "neutral" }
-}
+} satisfies Readonly<Record<RlyGovernedActionState, { readonly label: string; readonly tone: RlyStateTone }>>
 
 /** Render a human decision gate without executing the proposed provider action. */
 export const GovernedActionReview = ({

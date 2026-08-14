@@ -5,10 +5,10 @@ import * as Redacted from "effect/Redacted"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "../src/index.js"
+import { JiraApiClient, JiraApiConfig, type JiraApiConfigContract } from "../src/index.js"
 
 const clientLayer = (
-  config: JiraApiConfigShape,
+  config: JiraApiConfigContract,
   response: { readonly status: number; readonly body?: unknown },
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) =>
@@ -31,7 +31,7 @@ const clientLayer = (
     ))
   )
 
-const basicConfig: JiraApiConfigShape = {
+const basicConfig: JiraApiConfigContract = {
   baseUrl: "https://jira.test",
   auth: {
     type: "basic",

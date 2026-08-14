@@ -91,7 +91,7 @@ const validReportInput = () => ({
   version: CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION
 })
 
-const decodeResult = (input: unknown) =>
+const decodeResult = <UnparsedInput>(input: UnparsedInput) =>
   decodeControlCenterRuntimeBenchmarkReportJson(JSON.stringify(input)).pipe(Effect.result)
 
 describe("control center runtime benchmark report", () => {

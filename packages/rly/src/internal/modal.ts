@@ -9,6 +9,7 @@ import {
   useRef,
   useState
 } from "react"
+import * as Predicate from "./predicates.js"
 
 interface InertRecord {
   count: number
@@ -44,7 +45,7 @@ export const useModalEntryMotion = (open: boolean, requested: ModalEntryMotion):
 
 /** Narrows DOM elements through the HTML-only inert contract without relying on a realm-specific constructor. */
 export const isHTMLElement = (element: Element | null): element is HTMLElement =>
-  element !== null && "inert" in element && typeof element.inert === "boolean"
+  element !== null && "inert" in element && Predicate.isBoolean(element.inert)
 
 /** Stages nested default-open or controlled overlays until their parent content is mounted. */
 export const ModalNestingBoundary = ({ children }: ModalNestingBoundaryProps): ReactElement => {

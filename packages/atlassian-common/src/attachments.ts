@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 /**
  * Shared attachment reference helpers for Atlassian Markdown surfaces.
  *
@@ -73,7 +74,7 @@ export const replaceAttachmentPlaceholder = (
   let replacements = 0
   const replaced = content.replace(placeholder, (match, label: string) => {
     replacements++
-    return typeof renderedAttachment === "string"
+    return Predicate.isString(renderedAttachment)
       ? renderedAttachment
       : renderedAttachment({ isImage: match.startsWith("!"), label })
   })

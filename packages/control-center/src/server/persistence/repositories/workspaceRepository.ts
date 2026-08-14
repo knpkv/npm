@@ -22,6 +22,7 @@ import {
 import { RecordRevision, WorkspaceName, WorkspaceRecord } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const CreateWorkspaceRequest = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -44,7 +45,7 @@ const makeWorkspaceRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const findRows = ({ workspaceId }: { readonly workspaceId: WorkspaceId }) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       display_name AS displayName,
       revision,

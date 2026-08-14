@@ -3,10 +3,12 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { parse } from "yaml"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Record<string, Schema.Json> =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
 const buildCommands = (source: string): ReadonlyArray<string> => {
   const workflow: unknown = parse(source)
@@ -15,8 +17,8 @@ const buildCommands = (source: string): ReadonlyArray<string> => {
   return Object.values(workflow.jobs).flatMap((job) => {
     if (!isRecord(job) || !Array.isArray(job.steps)) return []
     return job.steps.flatMap((step) => {
-      if (!isRecord(step) || typeof step.name !== "string" || !step.name.startsWith("Build ")) return []
-      return typeof step.run === "string" ? [step.run] : []
+      if (!isRecord(step) || !Predicate.isString(step.name) || !step.name.startsWith("Build ")) return []
+      return Predicate.isString(step.run) ? [step.run] : []
     })
   })
 }

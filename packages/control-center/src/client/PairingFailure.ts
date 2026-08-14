@@ -7,13 +7,13 @@ const CREDENTIAL_FAILURE_TAGS = new Set([
   "UnauthorizedApiError"
 ])
 
-const failureTag = (failure: unknown): string | undefined => {
+const failureTag = <UnparsedInput>(failure: UnparsedInput): string | undefined => {
   if (!Predicate.hasProperty(failure, "_tag")) return undefined
-  return typeof failure._tag === "string" ? failure._tag : undefined
+  return Predicate.isString(failure._tag) ? failure._tag : undefined
 }
 
 /** Convert pairing failures into honest, actionable browser copy. */
-export const pairingFailureMessage = (failure: unknown): string => {
+export const pairingFailureMessage = <UnparsedInput>(failure: UnparsedInput): string => {
   const tag = failureTag(failure)
   if (tag !== undefined && CREDENTIAL_FAILURE_TAGS.has(tag)) {
     return "That code is invalid, expired, or already used."

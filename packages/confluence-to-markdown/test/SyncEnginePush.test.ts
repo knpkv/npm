@@ -272,7 +272,7 @@ const runPush = (params: {
       const engine = yield* SyncEngine
       return yield* engine.push({
         dryRun: params.dryRun ?? false,
-        ...(params.force === undefined ? {} : { force: params.force })
+        ...(!(params.force === undefined) && { force: params.force })
       })
     }).pipe(
       Effect.provide(TestLayer({

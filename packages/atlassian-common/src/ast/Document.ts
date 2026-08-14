@@ -14,6 +14,7 @@
  *
  * @module
  */
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { BlockNode, type BlockNode as BlockNodeType, RawSource, SchemaVersion } from "./BlockNode.js"
 import { MacroNode, type MacroNode as MacroNodeType } from "./MacroNode.js"
@@ -86,7 +87,7 @@ export const makeDocument = (
 ): Document => ({
   version: 1,
   children,
-  ...(rawSource !== undefined ? { rawSource } : {})
+  ...((rawSource !== undefined) && { rawSource })
 })
 
 /**
@@ -94,8 +95,8 @@ export const makeDocument = (
  *
  * @category Guards
  */
-export const isDocument = (value: unknown): value is Document =>
-  typeof value === "object" &&
+export const isDocument = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Document =>
+  Predicate.isObjectOrArray(value) &&
   value !== null &&
   "children" in value &&
-  Array.isArray(Reflect.get(value, "children"))
+  Array.isArray(value.children)

@@ -140,7 +140,7 @@ export const CodeCommitReadProviderLive = Layer.effect(
               repositoryName: request.repositoryName,
               pullRequestStatus: request.status,
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -170,7 +170,7 @@ export const CodeCommitReadProviderLive = Layer.effect(
               beforeCommitSpecifier: request.beforeCommitSpecifier,
               afterCommitSpecifier: request.afterCommitSpecifier,
               MaxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { NextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { NextToken: request.nextToken })
             })
           )
         ),
@@ -182,7 +182,7 @@ export const CodeCommitReadProviderLive = Layer.effect(
             codecommit.listRepositories({
               sortBy: "repositoryName",
               order: "ascending",
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         )

@@ -9,6 +9,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
 import * as TypeScript from "typescript"
+import * as Predicate from "effect/Predicate"
 
 const effectPluginName = "@effect/language-service"
 const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
@@ -28,7 +29,7 @@ const declaresEffect = (manifest) =>
   )
 
 const checkCoversRootTsconfig = (checkScript) => {
-  if (typeof checkScript !== "string") return false
+  if (!Predicate.isString(checkScript)) return false
   for (const segment of checkScript.split(/&&|\|\||;/u)) {
     const executable = segment.match(/(?:^|\s)(?:tsc|tspc|tsgo)(?:\s|$)/u)
     if (executable === null) continue

@@ -24,7 +24,7 @@ test("keeps dialog focus, isolation, dismissal, and restoration deterministic", 
   expect(
     await page
       .locator("[data-dialog-background]")
-      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : false))
+      .evaluate((element) => ("inert" in element ? element.inert === true : false))
   ).toBe(true)
   await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
 
@@ -34,7 +34,7 @@ test("keeps dialog focus, isolation, dismissal, and restoration deterministic", 
   expect(
     await page
       .locator("[data-dialog-background]")
-      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : true))
+      .evaluate((element) => ("inert" in element ? element.inert === true : true))
   ).toBe(false)
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked")
 
@@ -63,9 +63,7 @@ test("keeps only the top layer interactive across dialog and sheet nesting", asy
 
   const layers = page.locator("[data-rly-modal-layer]")
   const inertStates = async (): Promise<ReadonlyArray<boolean>> =>
-    layers.evaluateAll((elements) =>
-      elements.map((element) => "inert" in element && typeof element.inert === "boolean" ? element.inert : true)
-    )
+    layers.evaluateAll((elements) => elements.map((element) => "inert" in element ? element.inert === true : true))
 
   expect(await inertStates()).toEqual([true, true, false])
   const topClose = page.getByRole("button", { name: "Close top sheet" })
@@ -88,7 +86,7 @@ test("keeps only the top layer interactive across dialog and sheet nesting", asy
   expect(
     await page
       .locator("[data-nested-overlay-background]")
-      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : true))
+      .evaluate((element) => ("inert" in element ? element.inert === true : true))
   ).toBe(false)
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked")
 })
@@ -104,7 +102,7 @@ test("keeps sheet focus, isolation, and compact full-screen geometry determinist
   expect(
     await page
       .locator("[data-sheet-background]")
-      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : false))
+      .evaluate((element) => ("inert" in element ? element.inert === true : false))
   ).toBe(true)
   await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
 
@@ -122,7 +120,7 @@ test("keeps sheet focus, isolation, and compact full-screen geometry determinist
   expect(
     await page
       .locator("[data-sheet-background]")
-      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : true))
+      .evaluate((element) => ("inert" in element ? element.inert === true : true))
   ).toBe(false)
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked")
 })

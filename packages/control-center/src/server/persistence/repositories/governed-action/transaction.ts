@@ -20,7 +20,9 @@ import type { MalformedGovernedActionRecord } from "./quarantine.js"
 import { governedActionQuarantineDiagnostic } from "./quarantine.js"
 import { makeGovernedActionRead } from "./read.js"
 
-const isMalformedGovernedActionRecord = (failure: unknown): failure is MalformedGovernedActionRecord =>
+const isMalformedGovernedActionRecord = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & MalformedGovernedActionRecord =>
   Predicate.isTagged("MalformedGovernedActionRecord")(failure) &&
   Predicate.hasProperty(failure, "error") &&
   Predicate.isTagged("PersistedRecordError")(failure.error) &&

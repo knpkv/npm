@@ -24,7 +24,7 @@ import {
 describe("governed action reconciliation outcomes", () => {
   const cases: ReadonlyArray<{
     readonly expectedState: GovernedActionState
-    readonly makeInput: (observedAt: string) => unknown
+    readonly makeInput: (observedAt: string) => typeof PluginActionReconciliationResultV1.Encoded
     readonly name: string
   }> = [
     {

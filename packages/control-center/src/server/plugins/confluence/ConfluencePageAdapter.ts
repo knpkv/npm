@@ -41,13 +41,12 @@ import {
   PluginTimeoutFailure
 } from "../failures.js"
 import type { PluginConnectionV1 } from "../PluginConnection.js"
-import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import { decodeConfluenceNextCursor } from "./ConfluenceCursor.js"
 import { makeConfluenceGovernedActions } from "./ConfluenceGovernedActions.js"
 import {
   ConfluencePageClient,
-  type ConfluencePageClientFailure,
-  type ConfluencePageClientShape
+  type ConfluencePageClientContract,
+  type ConfluencePageClientFailure
 } from "./ConfluencePageClient.js"
 import {
   ConfluencePageAttributesV1,
@@ -152,7 +151,7 @@ export type ConfluencePageAdapterConfiguration = typeof ConfluencePageAdapterCon
 
 /** @internal */
 export interface MakeConfluencePageAdapterInput {
-  readonly client: ConfluencePageClientShape
+  readonly client: ConfluencePageClientContract
   readonly configuration: ConfluencePageAdapterConfiguration
   readonly converter: MarkdownConverter["Service"]
   readonly cryptoService: Crypto.Crypto
@@ -162,20 +161,20 @@ export interface MakeConfluencePageAdapterInput {
 const malformed = (operation: string, diagnosticCode: string): PluginMalformedResponseFailure =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   diagnosticCode: string,
   schema: S,
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(() => malformed(operation, diagnosticCode))
   )
 
-const decodeScopedPage = Effect.fn("ConfluencePage.decodeScopedPage")(function*(
+const decodeScopedPage = Effect.fn("ConfluencePage.decodeScopedPage")(function*<UnparsedInput>(
   operation: string,
   invalidDiagnosticCode: string,
-  rawPage: unknown,
+  rawPage: UnparsedInput,
   expectedPageId: string,
   expectedSpaceId: string
 ) {
@@ -426,11 +425,12 @@ const checkpointBeforePage = (
     : `${RESTART_CURSOR_PREFIX}${cursor}`
 }
 
-const jsonByteLength = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const jsonByteLength = <UnparsedInput>(value: UnparsedInput): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength
 
-const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(function*(
+const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(function*<UnparsedInput>(
   cryptoService: Crypto.Crypto,
-  value: unknown
+  value: UnparsedInput
 ) {
   const serialized = JSON.stringify(value)
   const bytes = yield* Effect.fromResult(
@@ -445,7 +445,7 @@ const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(functi
 })
 
 const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ) {
   const versions: Array<RawConfluenceVersion> = []
@@ -491,7 +491,7 @@ const chunksOf = <Value>(values: ReadonlyArray<Value>, size: number): ReadonlyAr
 }
 
 const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   accountIds: ReadonlyArray<string>
 ) {
   const users = new Map<string, RawConfluenceUser>()
@@ -557,7 +557,7 @@ const contributorsFromUsers = (
 }
 
 const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   page: typeof RawConfluencePage.Type,
   versions: ReadonlyArray<RawConfluenceVersion>
 ) {
@@ -679,7 +679,7 @@ const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput
 }
 
 const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ): Effect.fn.Return<WatcherInventory, PluginFailure> {
   const accountIds = new Set<string>()
@@ -732,7 +732,7 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
 })
 
 const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventory")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ): Effect.fn.Return<AttachmentInventory, PluginFailure> {
   const attachments: Array<AttachmentInventory["attachments"][number]> = []
@@ -1211,24 +1211,19 @@ const currentUserDisplayName = (displayName: string | null | undefined, publicNa
 /** Construct the page-read adapter against an authenticated, scoped client. @internal */
 export const makeConfluencePageAdapter = (
   input: MakeConfluencePageAdapterInput
-): {
-  readonly connection: PluginConnectionV1
-  readonly executor: AuthorizedPluginExecutorV1
-} => {
+) => {
   const governedActions = makeConfluenceGovernedActions({
     client: input.client,
     converter: input.converter,
     cryptoService: input.cryptoService,
     siteId: input.configuration.siteId,
     spaceId: input.configuration.spaceId,
-    ...(input.configuration.oauthVerifiedUser === undefined
-      ? {}
-      : {
-        cachedUser: {
-          accountId: input.configuration.oauthVerifiedUser.accountId,
-          displayName: input.configuration.oauthVerifiedUser.displayName
-        }
-      })
+    ...(!(input.configuration.oauthVerifiedUser === undefined) && {
+      cachedUser: {
+        accountId: input.configuration.oauthVerifiedUser.accountId,
+        displayName: input.configuration.oauthVerifiedUser.displayName
+      }
+    })
   })
   const connection: PluginConnectionV1 = {
     descriptor: input.descriptor,
@@ -1306,15 +1301,7 @@ export const makeConfluencePageAdapter = (
           return syncCursorFromCheckpoint(request.checkpoint).pipe(
             Effect.map((checkpointState) => {
               if (checkpointState.cursor !== null) seenCursors.add(checkpointState.cursor)
-              const initialState: {
-                readonly checkpointGeneration: number
-                readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
-                readonly cursor: string | null
-                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
-                readonly inventoryDigest: string | null
-                readonly pageNumber: number
-                readonly usesGenerationCheckpoint: boolean
-              } = {
+              const initialState = {
                 checkpointGeneration: checkpointState.checkpointGeneration,
                 previousBoundedPrefix: checkpointState.boundedPrefix,
                 cursor: checkpointState.cursor,
@@ -1322,6 +1309,14 @@ export const makeConfluencePageAdapter = (
                 inventoryDigest: checkpointState.inventoryDigest,
                 pageNumber: 1,
                 usesGenerationCheckpoint: checkpointState.usesGenerationCheckpoint
+              } satisfies {
+                readonly checkpointGeneration: number
+                readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly cursor: string | null
+                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly inventoryDigest: string | null
+                readonly pageNumber: number
+                readonly usesGenerationCheckpoint: boolean
               }
               return Stream.paginate(
                 initialState,

@@ -68,8 +68,8 @@ class PortfolioStreamProtocolError extends Data.TaggedError("PortfolioStreamProt
 
 class PortfolioStreamClosedError extends Data.TaggedError("PortfolioStreamClosedError") {}
 
-const classifyFailure = (failure: unknown): PortfolioLoadFailure => {
-  if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") return "unavailable"
+const classifyFailure = <UnparsedInput>(failure: UnparsedInput): PortfolioLoadFailure => {
+  if (!Predicate.hasProperty(failure, "_tag") || !Predicate.isString(failure._tag)) return "unavailable"
   if (failure._tag === "UnauthorizedApiError") return "session-expired"
   if (failure._tag === "ForbiddenApiError") return "blocked"
   return "unavailable"

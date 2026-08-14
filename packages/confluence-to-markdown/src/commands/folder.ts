@@ -336,7 +336,7 @@ export const folderCreateCommand = Command.make(
         return yield* client.createFolder({
           spaceId: space,
           title,
-          ...(parentId === undefined ? {} : { parentId })
+          ...(!(parentId === undefined) && { parentId })
         })
       }).pipe(Effect.provide(makeClientLayer({ baseUrl: resolvedBaseUrl, auth })))
 

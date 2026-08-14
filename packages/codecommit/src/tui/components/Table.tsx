@@ -88,14 +88,14 @@ export function Table<T>({
                   width: "100%",
                   paddingTop: 0,
                   paddingBottom: 0,
-                  ...(selected ? { backgroundColor: theme.selectedBackground } : {})
+                  ...(selected && { backgroundColor: theme.selectedBackground })
                 }}
               >
                 {columns.map((col, j) => (
                   <box
                     key={j}
                     style={{
-                      ...(col.width === "auto" ? {} : { width: col.width }),
+                      ...(!(col.width === "auto") && { width: col.width }),
                       flexGrow: col.width === "auto" || !col.width ? 1 : 0,
                       paddingRight: 1
                     }}

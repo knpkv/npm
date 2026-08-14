@@ -163,6 +163,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/*/src/client/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-unsafe-optional-host-global-read": "error"
+    }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx,mjs}", "packages/*/scripts/**/*.{ts,tsx,mjs}"],
     rules: {
       "local-rules/no-unowned-detached-fiber": "error"
@@ -249,6 +255,12 @@ export default tseslint.config(
     files: ["packages/control-center/e2e/**/*.spec.ts"],
     rules: {
       "local-rules/require-playwright-clock-before-navigation": "error"
+    }
+  },
+  {
+    files: ["packages/*/{e2e,visual}/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-playwright-evaluate-closure-captures": "error"
     }
   },
   {

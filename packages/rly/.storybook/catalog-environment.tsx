@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 
 /** Toolbar values normalized before a catalog story is rendered. */
 export interface CatalogEnvironmentValues {
@@ -9,10 +11,13 @@ export interface CatalogEnvironmentValues {
   readonly theme: string
 }
 
-const globalString = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback)
+interface CatalogGlobals extends Readonly<Record<string, Schema.Json | undefined>> {}
+
+const globalString = <UnparsedInput,>(value: UnparsedInput, fallback: string): string =>
+  Predicate.isString(value) ? value : fallback
 
 /** Resolve Storybook globals without trusting values supplied through the URL. */
-export const resolveCatalogEnvironment = (globals: Readonly<Record<string, unknown>>): CatalogEnvironmentValues => ({
+export const resolveCatalogEnvironment = (globals: CatalogGlobals): CatalogEnvironmentValues => ({
   density: globalString(globals.density, "comfortable"),
   forcedColors: globalString(globals.forcedColors, "auto"),
   locale: globalString(globals.locale, "en"),

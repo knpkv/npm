@@ -42,8 +42,8 @@ export const Skeleton = ({
   if (!decorative && label === undefined) throw new Error("Skeleton label must contain visible text")
   const accessibleLabel = decorative || label === undefined ? undefined : requireText(label, "Skeleton label")
   const dimensions: CSSProperties = {
-    ...(height === undefined ? {} : { blockSize: height }),
-    ...(width === undefined ? {} : { inlineSize: width })
+    ...(!(height === undefined) && { blockSize: height }),
+    ...(!(width === undefined) && { inlineSize: width })
   }
 
   return (

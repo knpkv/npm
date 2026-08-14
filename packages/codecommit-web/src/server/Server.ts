@@ -51,7 +51,7 @@ import {
   OwnerSessionBootstrapRouter,
   ownerSessionOrigin,
   OwnerSessionSecrets,
-  type OwnerSessionSecretsShape,
+  type OwnerSessionSecretsContract,
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
   requireLoopbackOrigin
@@ -62,7 +62,7 @@ export {
   makeOwnerSessionSecrets,
   ownerSessionOrigin,
   OwnerSessionSecrets,
-  type OwnerSessionSecretsShape,
+  type OwnerSessionSecretsContract,
   ownerSessionUrl,
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
@@ -70,7 +70,9 @@ export {
 } from "./internal/OwnerSessionSecurity.js"
 
 // MIME types for common files
-const mimeTypes: Record<string, string> = {
+interface MimeTypeLookup extends Readonly<Record<string, string>> {}
+
+const mimeTypes: MimeTypeLookup = {
   ".html": "text/html",
   ".js": "application/javascript",
   ".css": "text/css",
@@ -327,7 +329,7 @@ export interface CodeCommitServerOptions {
   readonly hostname?: string
   readonly port: number
   readonly ready?: Deferred.Deferred<void>
-  readonly security: OwnerSessionSecretsShape
+  readonly security: OwnerSessionSecretsContract
 }
 
 export const makeServer = (options: CodeCommitServerOptions) => {
@@ -358,7 +360,8 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   )
 }
 
-export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsShape) => makeServer({ port, security })
+export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsContract) =>
+  makeServer({ port, security })
 
 export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
 const PublicOrigin = Config.option(Config.string("CODECOMMIT_WEB_PUBLIC_ORIGIN"))

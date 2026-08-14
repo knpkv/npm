@@ -54,11 +54,11 @@ describe("AgentThread", () => {
     } satisfies RlyAgentThreadMessage
     const thread = render(<AgentThread {...commonProps} messages={[message(2), message(1), systemMessage]} />)
     expect(
-      thread?.querySelector("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-shape='circle']")
+      thread?.querySelector("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-form='circle']")
     ).not.toBeNull()
     expect(
       thread?.querySelector(
-        "[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-shape='rounded-square']"
+        "[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-form='rounded-square']"
       )
     ).not.toBeNull()
     expect(thread?.querySelector("[data-rly-agent-thread-actor='system']")?.textContent).toContain("System event")

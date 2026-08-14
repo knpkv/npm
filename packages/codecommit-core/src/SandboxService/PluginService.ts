@@ -60,11 +60,11 @@ const makePluginService = Effect.gen(function*() {
   return service
 })
 
-export interface PluginServiceShape extends Success<typeof makePluginService> {}
+export interface PluginServiceContract extends Success<typeof makePluginService> {}
 
 export class PluginService extends Context.Service<
   PluginService,
-  PluginServiceShape
+  PluginServiceContract
 >()("PluginService") {
   static readonly Default = Layer.effect(PluginService, makePluginService)
 }

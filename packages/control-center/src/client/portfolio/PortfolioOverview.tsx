@@ -1,5 +1,5 @@
 import { ReleaseRow, ServiceMark, StageRail, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
-import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
+import { Button, type RlyStateTone, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import { Link, Navigate, useLocation, useViewTransitionState } from "react-router"
 
@@ -58,10 +58,16 @@ interface ReleaseDossierProps {
   readonly transitionNames?: RlyReleaseTransitionNames
 }
 
+interface ConnectionPresentation {
+  readonly detail: string
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
 const connectionPresentation = (
   connection: PortfolioConnectionState,
   isSnapshotStale: boolean
-): { readonly detail: string; readonly label: string; readonly tone: "caution" | "positive" | "progress" } => {
+): ConnectionPresentation => {
   switch (connection._tag) {
     case "connecting":
       return { detail: "Connecting to live updates.", label: "Connecting", tone: "progress" }

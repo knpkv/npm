@@ -89,6 +89,8 @@ export interface AgentPageProps {
   readonly providerCatalogPending?: boolean
   /** Workspace page catalog used only by the connected route's Confluence template picker. */
   readonly loadConfluenceTemplates?: ConfluenceTemplateLoader
+  /** Governed publication transport; injectable for deterministic route tests. */
+  readonly submitPublication?: typeof submitBrowserReleasePublication
 }
 
 interface AgentPageContext {
@@ -108,7 +110,9 @@ const DEFAULT_CONTEXT: AgentPageContext = {
   path: "/"
 }
 
-const contexts: Readonly<Record<string, AgentPageContext>> = {
+interface AgentContextLookup extends Readonly<Record<string, AgentPageContext>> {}
+
+const contexts: AgentContextLookup = {
   "/": DEFAULT_CONTEXT,
   "/pair": {
     description: "The private browser-pairing flow. Credentials never become part of the agent context.",
@@ -241,12 +245,12 @@ const timestamp = (): Pick<LocalThreadMessage, "dateTime" | "time"> => {
   }
 }
 
-const failureTag = (failure: unknown): string | null => {
-  if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") return null
+const failureTag = <UnparsedInput,>(failure: UnparsedInput): string | null => {
+  if (!Predicate.hasProperty(failure, "_tag") || !Predicate.isString(failure._tag)) return null
   return failure._tag
 }
 
-const classifyTurnFailure = (failure: unknown): TurnFailure => {
+const classifyTurnFailure = <UnparsedInput,>(failure: UnparsedInput): TurnFailure => {
   switch (failureTag(failure)) {
     case "UnauthorizedApiError":
       return "session-expired"
@@ -416,16 +420,14 @@ const presentMessages = (messages: ReadonlyArray<LocalThreadMessage>): ReadonlyA
     dateTime: message.dateTime,
     id: message.id,
     time: message.time,
-    ...(message.context === undefined
-      ? {}
-      : {
-          evidence: (
-            <span>
-              Answered from {message.context.serviceName} {message.context.version} · {message.context.relayCodename} ·
-              snapshot {message.context.eventCursor}
-            </span>
-          )
-        })
+    ...(!(message.context === undefined) && {
+      evidence: (
+        <span>
+          Answered from {message.context.serviceName} {message.context.version} · {message.context.relayCodename} ·
+          snapshot {message.context.eventCursor}
+        </span>
+      )
+    })
   }))
 
 const nextThreadSequence = (messages: ReadonlyArray<LocalThreadMessage>): number =>
@@ -543,6 +545,7 @@ const ReleaseAgentRoom = ({
   providerCatalogPending,
   release,
   runTurn,
+  submitPublication,
   workspaceId
 }: {
   readonly release: PortfolioReleasePresentation
@@ -551,6 +554,7 @@ const ReleaseAgentRoom = ({
   readonly confluencePage: ConfluencePageDraftContext
   readonly loadConfluenceTemplates?: ConfluenceTemplateLoader
   readonly providerCatalogPending: boolean
+  readonly submitPublication: typeof submitBrowserReleasePublication
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
   const location = useLocation()
@@ -733,23 +737,22 @@ const ReleaseAgentRoom = ({
         publicationProvider +
         " release artifact."
     )
-    submitBrowserReleasePublication({
+    submitPublication({
       releaseId: release.id,
       provider: publicationProvider,
       title: publicationTitle.trim(),
       markdown: publicationMarkdown.trim(),
-      ...(updatingConfluence && exactPage === null && pageAwareness?.publicationActionId !== undefined
-        ? { publicationActionId: pageAwareness.publicationActionId }
-        : {}),
-      ...(publicationProvider === "confluence" && exactPage !== null
-        ? {
-            targetEntityId: exactPage.entityId,
-            targetRevision: Revision.make(exactPage.revision)
-          }
-        : {}),
-      ...(publicationProvider === "confluence" && exactPage === null && selectedTemplate !== null
-        ? { templateEntityId: selectedTemplate.entityId }
-        : {})
+      ...(updatingConfluence &&
+        exactPage === null &&
+        pageAwareness?.publicationActionId !== undefined && { publicationActionId: pageAwareness.publicationActionId }),
+      ...(publicationProvider === "confluence" &&
+        exactPage !== null && {
+          targetEntityId: exactPage.entityId,
+          targetRevision: Revision.make(exactPage.revision)
+        }),
+      ...(publicationProvider === "confluence" &&
+        exactPage === null &&
+        selectedTemplate !== null && { templateEntityId: selectedTemplate.entityId })
     })
       .then(
         (result) =>
@@ -934,7 +937,7 @@ const ReleaseAgentRoom = ({
         className={`${styles.people} ${styles.publication}`}
         padding="spacious"
         ref={publicationRef}
-        shape="grouped"
+        form="grouped"
       >
         <Text as="h2" id="relay-publication" variant="section-title">
           {exactPage === null ? "Publish a release artifact" : "Edit this Confluence page"}
@@ -1199,7 +1202,7 @@ const LegacyAgentPage = (): ReactElement => {
           Open Relay from a release to start an exact, release-owned thread.
         </Text>
       </header>
-      <Surface as="section" className={styles.legacyContext} padding="spacious" shape="grouped" tone="secondary">
+      <Surface as="section" className={styles.legacyContext} padding="spacious" form="grouped" tone="secondary">
         <Text tone="secondary" variant="label">
           Current context
         </Text>
@@ -1213,7 +1216,7 @@ const LegacyAgentPage = (): ReactElement => {
           </Link>
         )}
       </Surface>
-      <Surface as="section" className={styles.legacyContext} padding="spacious" shape="grouped">
+      <Surface as="section" className={styles.legacyContext} padding="spacious" form="grouped">
         <Text tone="secondary" variant="label">
           Choose a release
         </Text>
@@ -1291,7 +1294,7 @@ const ContextualAgentPage = ({ originPath }: { readonly originPath: string }): R
               Relay will keep the exact page context below and answer inside the release you choose.
             </Text>
           </header>
-          <Surface as="section" className={styles.legacyContext} padding="spacious" shape="grouped" tone="secondary">
+          <Surface as="section" className={styles.legacyContext} padding="spacious" form="grouped" tone="secondary">
             <Text tone="secondary" variant="label">
               Calling page
             </Text>
@@ -1339,7 +1342,8 @@ export const AgentPage = ({
   availableProviders,
   loadConfluenceTemplates,
   providerCatalogPending = false,
-  runTurn
+  runTurn,
+  submitPublication = submitBrowserReleasePublication
 }: AgentPageProps): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext | null>()
   const params = useParams()
@@ -1386,6 +1390,7 @@ export const AgentPage = ({
       providerCatalogPending={providerCatalogPending}
       release={release}
       runTurn={runTurn}
+      submitPublication={submitPublication}
       workspaceId={workspaceId}
     />
   )

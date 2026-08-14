@@ -273,7 +273,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return

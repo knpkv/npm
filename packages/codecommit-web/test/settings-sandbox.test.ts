@@ -5,14 +5,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { SettingsSandbox } from "../src/client/components/settings-sandbox.js"
-
-const atomMocks = vi.hoisted(() => ({
-  useAtomSet: vi.fn(),
-  useAtomValue: vi.fn()
-}))
-
-vi.mock("@effect/atom-react", () => atomMocks)
+import { SettingsSandboxView } from "../src/client/components/settings-sandbox.js"
 
 const digestImage = "codercom/code-server@sha256:b88ed46a6ace76a0294a17a24f39aa88032ed0a3692c3d8ab5433b47ab57ccbf"
 const alternateDigestImage = `codercom/code-server@sha256:${"a".repeat(64)}`
@@ -49,12 +42,15 @@ const changeInput = (input: HTMLInputElement, value: string) =>
 
 describe("SettingsSandbox", () => {
   it("keeps rejected settings dirty and only shows Saved after persistence succeeds", async () => {
-    const saveConfig = vi.fn<() => Promise<unknown>>()
-    atomMocks.useAtomValue.mockReturnValue(AsyncResult.success(config))
-    atomMocks.useAtomSet.mockReturnValue(saveConfig)
+    const saveConfig = vi.fn<Parameters<typeof SettingsSandboxView>[0]["saveConfig"]>()
     const host = document.createElement("div")
     root = createRoot(host)
-    await act(async () => root?.render(createElement(SettingsSandbox)))
+    await act(async () =>
+      root?.render(createElement(SettingsSandboxView, {
+        config: AsyncResult.success(config),
+        saveConfig
+      }))
+    )
 
     const imageInput = host.querySelector<HTMLInputElement>("input[placeholder=\"codercom/code-server@sha256:…\"]")
     const saveButton = host.querySelector<HTMLButtonElement>("button")
@@ -75,7 +71,7 @@ describe("SettingsSandbox", () => {
     expect(saveButton.textContent).toContain("Save")
 
     await changeInput(imageInput, alternateDigestImage)
-    saveConfig.mockResolvedValueOnce(undefined)
+    saveConfig.mockResolvedValueOnce("saved")
     await act(async () => {
       saveButton.click()
       await Promise.resolve()

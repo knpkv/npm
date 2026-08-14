@@ -4,7 +4,7 @@
  * @internal
  */
 
-export type FieldShape =
+export type FieldContract =
   | "text"
   | "multilineText"
   | "number"
@@ -15,7 +15,7 @@ export type FieldShape =
   | "user"
   | "cascadingSelect"
 
-export const FIELD_SHAPES: ReadonlyArray<FieldShape> = [
+export const FIELD_CONTRACTS: ReadonlyArray<FieldContract> = [
   "text",
   "multilineText",
   "number",
@@ -30,7 +30,7 @@ export const FIELD_SHAPES: ReadonlyArray<FieldShape> = [
 export interface RequestedCustomField {
   readonly displayName: string
   readonly fieldId?: string | undefined
-  readonly shape: FieldShape
+  readonly form: FieldContract
   readonly ordered?: boolean | undefined
 }
 
@@ -83,7 +83,7 @@ export type SyncFieldValue =
 export interface BaselineCustomField {
   readonly fieldId: string
   readonly displayName: string
-  readonly shape: FieldShape
+  readonly form: FieldContract
   readonly value: SyncFieldValue
 }
 

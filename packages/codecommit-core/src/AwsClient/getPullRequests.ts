@@ -75,7 +75,7 @@ const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const EpochFallback = new Date(0)
 
-const emptyApprovers = (): { readonly names: Array<string>; readonly arns: Array<string> } => ({
+const emptyApprovers = () => ({
   names: [],
   arns: []
 })
@@ -135,9 +135,8 @@ export const buildApprovalRules = (
           ruleName: rule.approvalRuleName ?? "",
           satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
           ...parsed,
-          ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
-            ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
-            : {})
+          ...((rule.originApprovalRuleTemplate?.approvalRuleTemplateName) &&
+            { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName })
         }))
       )
   )
@@ -297,7 +296,7 @@ const RawToPullRequest = RawPullRequest.pipe(
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodePullRequest = (raw: unknown) => Schema.decodeUnknownEffect(RawToPullRequest)(raw)
+const decodePullRequest = <UnparsedInput>(raw: UnparsedInput) => Schema.decodeUnknownEffect(RawToPullRequest)(raw)
 
 // ---------------------------------------------------------------------------
 // Stream builders

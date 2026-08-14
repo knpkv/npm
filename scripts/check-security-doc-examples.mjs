@@ -153,10 +153,10 @@ const inspectTokenExample = (code, location) => {
       }
     }
     const fields = new Set()
-    let exactCanonicalShape = argument.properties.length === REQUIRED_TOKEN_FIELDS.size
+    let exactCanonicalContract = argument.properties.length === REQUIRED_TOKEN_FIELDS.size
     for (const property of argument.properties) {
       if (!TypeScript.isPropertyAssignment(property)) {
-        exactCanonicalShape = false
+        exactCanonicalContract = false
         continue
       }
       const field = propertyName(property.name)
@@ -169,20 +169,20 @@ const inspectTokenExample = (code, location) => {
         property.initializer.expression.text !== "request" ||
         property.initializer.name.text !== field
       ) {
-        exactCanonicalShape = false
+        exactCanonicalContract = false
         continue
       }
       fields.add(field)
     }
-    exactCanonicalShape = exactCanonicalShape && fields.size === REQUIRED_TOKEN_FIELDS.size
+    exactCanonicalContract = exactCanonicalContract && fields.size === REQUIRED_TOKEN_FIELDS.size
     return {
-      diagnostics: exactCanonicalShape
+      diagnostics: exactCanonicalContract
         ? []
         : [
             `${location}: clientRequestToken digest must contain exactly authorizationId, idempotencyKey, and payloadDigest from their matching request fields`
           ],
       found: true,
-      supported: exactCanonicalShape
+      supported: exactCanonicalContract
     }
   }
 

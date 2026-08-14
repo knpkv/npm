@@ -29,7 +29,7 @@ customFields:
       expect(result.customFields[1]).toMatchObject({
         displayName: "Reviewer",
         fieldId: "customfield_12345",
-        shape: "user"
+        form: "user"
       })
     })
 
@@ -117,7 +117,7 @@ customFields: []
           "Security & Compliance Impact": {
             fieldId: "customfield_10001",
             displayName: "Security & Compliance Impact",
-            shape: "singleSelect",
+            form: "singleSelect",
             value: { id: "10423", value: "Low" }
           }
         }

@@ -4,6 +4,7 @@ import { Layer, Sink, Stream } from "effect"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { rename as nodeRename, symlink as nodeSymlink } from "node:fs/promises"
@@ -387,7 +388,7 @@ describe("sandbox security boundary", () => {
       expect(processArguments).not.toContain("EDITOR_THEME=dark")
       const stdin = command.options.stdin
       expect(stdin).toBeTypeOf("object")
-      if (stdin === null || typeof stdin !== "object" || typeof stdin.stream === "string") return
+      if (stdin === null || !Predicate.isObjectOrArray(stdin) || Predicate.isString(stdin.stream)) return
       const chunks = yield* Stream.runCollect(stdin.stream)
       const bytes = Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))
       const environment = new TextDecoder().decode(bytes)

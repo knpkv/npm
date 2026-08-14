@@ -555,7 +555,7 @@ export const postRelayFindingAtom = runtimeAtom.fn((input: PostRelayFindingInput
           },
           content: relayFindingCommentContent(input.finding),
           clientRequestToken,
-          ...(location === undefined ? {} : { location })
+          ...(!(location === undefined) && { location })
         })
         .pipe(
           Effect.map((receipt) => ({

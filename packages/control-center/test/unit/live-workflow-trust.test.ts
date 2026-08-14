@@ -3,6 +3,8 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { parse } from "yaml"
 
 const trustedRefExpression = "github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'"
@@ -10,31 +12,31 @@ const protectedEnvironment = "control-center-live-integration"
 const idTokenPermission = "write"
 const trustedOidcSubject = "repo:knpkv/npm:environment:control-center-live-integration"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Record<string, Schema.Json> =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
-const parseRecord = (source: string, label: string): Record<string, unknown> => {
+const parseRecord = (source: string, label: string): Record<string, Schema.Json> => {
   const parsed = parse(source)
 
   if (!isRecord(parsed)) throw new Error(`${label} should parse to a mapping`)
   return parsed
 }
 
-const fieldRecord = (source: Record<string, unknown>, key: string, label: string): Record<string, unknown> => {
+const fieldRecord = (source: Record<string, Schema.Json>, key: string, label: string): Record<string, Schema.Json> => {
   const value = source[key]
 
   if (!isRecord(value)) throw new Error(`${label}.${key} should be a mapping`)
   return value
 }
 
-const fieldArray = (source: Record<string, unknown>, key: string, label: string): Array<unknown> => {
+const fieldArray = (source: Record<string, Schema.Json>, key: string, label: string): Array<unknown> => {
   const value = source[key]
 
   if (!Array.isArray(value)) throw new Error(`${label}.${key} should be an array`)
   return value
 }
 
-const liveIntegrationTrustStatementArray = (template: Record<string, unknown>) => {
+const liveIntegrationTrustStatementArray = (template: Record<string, Schema.Json>) => {
   const resources = fieldRecord(template, "Resources", "live AWS template")
   const role = fieldRecord(resources, "LiveIntegrationRole", "live AWS template.Resources")
   const properties = fieldRecord(role, "Properties", "LiveIntegrationRole")
@@ -43,19 +45,19 @@ const liveIntegrationTrustStatementArray = (template: Record<string, unknown>) =
   return fieldArray(assumeRolePolicy, "Statement", "AssumeRolePolicyDocument")
 }
 
-const liveIntegrationTrustStatements = (template: Record<string, unknown>) =>
+const liveIntegrationTrustStatements = (template: Record<string, Schema.Json>) =>
   liveIntegrationTrustStatementArray(template).map((statement, index) => {
     if (!isRecord(statement)) throw new Error(`LiveIntegrationRole trust statement ${index} should be a mapping`)
     return statement
   })
 
-const hasWebIdentityAction = (statement: Record<string, unknown>) => {
+const hasWebIdentityAction = (statement: Record<string, Schema.Json>) => {
   if (statement.Action === "sts:AssumeRoleWithWebIdentity") return true
   if (Array.isArray(statement.Action)) return statement.Action.includes("sts:AssumeRoleWithWebIdentity")
   return false
 }
 
-const assertConstrainedOidcTrust = (template: Record<string, unknown>) => {
+const assertConstrainedOidcTrust = (template: Record<string, Schema.Json>) => {
   const statements = liveIntegrationTrustStatements(template).filter(hasWebIdentityAction)
 
   expect(statements).toHaveLength(1)

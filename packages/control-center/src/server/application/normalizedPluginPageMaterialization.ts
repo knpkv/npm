@@ -5,6 +5,7 @@ import * as Encoding from "effect/Encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import * as Predicate from "effect/Predicate"
 import { derivePersonInitials, Person, RoleAssignment } from "../../domain/actors.js"
 import {
   DeliveryEntityDetails,
@@ -190,12 +191,12 @@ const optionalBounded = (value: string | null | undefined, maximum: number): str
 }
 
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
-  typeof value === "string" ? value : (value?.name ?? null)
+  Predicate.isString(value) ? value : (value?.name ?? null)
 
 const decodedOptionalEntityTimestamp = Effect.fn(
   "NormalizedPluginPageMaterialization.decodeOptionalEntityTimestamp"
-)(function*(
-  value: unknown,
+)(function*<UnparsedInput>(
+  value: UnparsedInput,
   eventId: string,
   diagnosticCode: string
 ): Effect.fn.Return<UtcTimestamp | null, NormalizedPluginPageMaterializationError> {
@@ -292,11 +293,11 @@ const decodedConfluencePageAttributes = Effect.fn(
       resolved: contributor.resolved,
       roles: contributor.roles
     })),
-    ...(attachments === undefined ? {} : { attachments }),
-    ...(attributes.attachmentInventory === undefined ? {} : {
+    ...(!(attachments === undefined) && { attachments }),
+    ...(!(attributes.attachmentInventory === undefined) && {
       attachmentInventory: attributes.attachmentInventory
     }),
-    ...(attributes.watcherInventory === undefined ? {} : { watcherInventory: attributes.watcherInventory })
+    ...(!(attributes.watcherInventory === undefined) && { watcherInventory: attributes.watcherInventory })
   }
 })
 
@@ -430,13 +431,13 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             512
           ),
           status: namedText(attributes.status)?.toLowerCase() === "superseded" ? "superseded" : "current",
-          ...(attributes.linkedIssueKeys === undefined ? {} : {
+          ...(!(attributes.linkedIssueKeys === undefined) && {
             linkedIssueKeys: attributes.linkedIssueKeys
               .map((key) => key.trim())
               .filter((key, index, keys) => key.length > 0 && key.length <= 100 && keys.indexOf(key) === index)
               .slice(0, 100)
           }),
-          ...(attributes.linkedReleaseVersions === undefined ? {} : {
+          ...(!(attributes.linkedReleaseVersions === undefined) && {
             linkedReleaseVersions: attributes.linkedReleaseVersions
               .map((version) => version.trim())
               .filter(
@@ -520,11 +521,11 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             : attributes.interval?.state === "running"
             ? "pending"
             : "not-required",
-          ...(typeof attributes.locked === "boolean" ? { locked: attributes.locked } : {}),
+          ...((Predicate.isBoolean(attributes.locked)) && { locked: attributes.locked }),
           description: optionalBounded(attributes.description, 4_000),
           projectId,
-          ...(userId === null ? {} : { userId }),
-          ...(startedAt === null ? {} : { startedAt }),
+          ...(!(userId === null) && { userId }),
+          ...(!(startedAt === null) && { startedAt }),
           endedAt
         }
       }
@@ -743,10 +744,7 @@ const mergedPageContributors = (
   current: PageDetails["contributors"],
   incoming: PageDetails["contributors"],
   incomingWatchersComplete: boolean
-): {
-  readonly contributors: PageDetails["contributors"]
-  readonly watcherCoverageTruncated: boolean
-} => {
+) => {
   if (current === undefined && incoming === undefined) {
     return { contributors: undefined, watcherCoverageTruncated: false }
   }
@@ -822,10 +820,7 @@ const mergeCompletePageVersions = (
   incoming: PageDetails["versions"],
   versionHistory: PageDetails["versionHistory"],
   currentRevision: PageDetails["revision"]
-): {
-  readonly versions: PageDetails["versions"]
-  readonly versionHistory: PageDetails["versionHistory"]
-} => {
+) => {
   if (current === undefined || incoming === undefined) return { versions: incoming, versionHistory }
   const currentVersionNumber = pageRevisionNumber(currentRevision)
   if (currentVersionNumber === null || incoming.some(({ number }) => number === currentVersionNumber)) {
@@ -886,11 +881,11 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
   const merged: PageDetails = {
     ...current,
     ...incoming,
-    ...(contributorMerge.contributors === undefined ? {} : { contributors: contributorMerge.contributors }),
-    ...(attachments === undefined ? {} : { attachments }),
-    ...(versionMerge.versions === undefined ? {} : { versions: versionMerge.versions }),
-    ...(versionMerge.versionHistory === undefined ? {} : { versionHistory: versionMerge.versionHistory }),
-    ...(watcherInventory === undefined ? {} : { watcherInventory })
+    ...(!(contributorMerge.contributors === undefined) && { contributors: contributorMerge.contributors }),
+    ...(!(attachments === undefined) && { attachments }),
+    ...(!(versionMerge.versions === undefined) && { versions: versionMerge.versions }),
+    ...(!(versionMerge.versionHistory === undefined) && { versionHistory: versionMerge.versionHistory }),
+    ...(!(watcherInventory === undefined) && { watcherInventory })
   }
   return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
 }

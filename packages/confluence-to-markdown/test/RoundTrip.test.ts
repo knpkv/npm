@@ -11,6 +11,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../src/AtlaskitTransformers.js"
 import { externalizeAdfMetadata, hydrateAdfMetadata } from "../src/internal/adfMetadata.js"
@@ -28,10 +30,10 @@ const roundTrip = (source: string) =>
     return yield* converter.adfToMarkdown(adf)
   })
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Record<string, Schema.Json> =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
-const contentOf = (value: unknown): ReadonlyArray<unknown> => {
+const contentOf = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<unknown> => {
   if (!isRecord(value) || !Array.isArray(value["content"])) {
     throw new Error("Expected ADF node with content array")
   }
@@ -40,10 +42,10 @@ const contentOf = (value: unknown): ReadonlyArray<unknown> => {
 
 const parsedContent = (json: string): ReadonlyArray<unknown> => contentOf(JSON.parse(json))
 
-const nodeType = (value: unknown): string | null => {
+const nodeType = <UnparsedInput>(value: UnparsedInput): string | null => {
   if (!isRecord(value)) return null
   const type = value["type"]
-  return typeof type === "string" ? type : null
+  return Predicate.isString(type) ? type : null
 }
 
 describe("MarkdownConverter round-trip", () => {

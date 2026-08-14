@@ -536,7 +536,7 @@ describe("public API schemas", () => {
   })
 
   it("requires non-empty text and explicit HTTP(S) provider URLs", () => {
-    const requestWith = (value: unknown) => ({ expectedRevision: 0, values: [value] })
+    const requestWith = <UnparsedInput>(value: UnparsedInput) => ({ expectedRevision: 0, values: [value] })
     assert.isTrue(
       Result.isSuccess(
         Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(

@@ -200,8 +200,8 @@ export const start = Command.make(
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
         yield* cfg.set({
-          ...(projectId ? { defaultProjectId: projectId, defaultProjectName: projectName } : {}),
-          ...(billableVal !== undefined ? { defaultBillable: billableVal } : {})
+          ...(projectId && { defaultProjectId: projectId, defaultProjectName: projectName }),
+          ...((billableVal !== undefined) && { defaultBillable: billableVal })
         })
         yield* Console.log("Defaults saved to ~/.jcf/config.json")
       }

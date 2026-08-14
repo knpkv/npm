@@ -8,7 +8,7 @@
  *   a Jira worklog through the Schema-validated Jira client.
  * - **Auto-resolution**: Project ID, billable flag, and tags are resolved from config defaults,
  *   Clockify project name matching, and Jira issue type/labels.
- * - **External detection**: {@link TimerServiceShape.detectRunning} polls Clockify for a
+ * - **External detection**: {@link TimerServiceContract.detectRunning} polls Clockify for a
  *   running timer not started by jcf and syncs local state.
  *
  * **Gotchas**
@@ -107,12 +107,12 @@ const emptyState: TimerState = {
   startedViaJcf: false
 }
 
-const formatJiraFailure = (error: unknown): string => {
+const formatJiraFailure = <UnparsedInput>(error: UnparsedInput): string => {
   if (!Predicate.isReadonlyObject(error)) return String(error)
   const response = Predicate.isReadonlyObject(error.response) ? error.response : undefined
-  const status = typeof response?.status === "number" ? `HTTP ${response.status}` : "Jira request failed"
+  const status = Predicate.isNumber(response?.status) ? `HTTP ${response.status}` : "Jira request failed"
   if (!("cause" in error)) return status
-  const detail = typeof error.cause === "string" ? error.cause : JSON.stringify(error.cause)
+  const detail = Predicate.isString(error.cause) ? error.cause : JSON.stringify(error.cause)
   return detail.length === 0 ? status : `${status}: ${detail}`
 }
 
@@ -155,7 +155,7 @@ export interface LogManualResult {
   readonly billable: boolean | null
 }
 
-export interface TimerServiceShape {
+export interface TimerServiceContract {
   readonly state: SubscriptionRef.SubscriptionRef<TimerState>
   readonly start: (ticket: JiraTicket, options?: StartOptions) => Effect.Effect<void, TimerError>
   readonly stop: (options?: StopOptions) => Effect.Effect<StopResult, TimerError>
@@ -173,7 +173,7 @@ export interface TimerServiceShape {
   readonly detectRunning: Effect.Effect<void, TimerError>
 }
 
-export class TimerService extends Context.Service<TimerService, TimerServiceShape>()("jcf/TimerService") {}
+export class TimerService extends Context.Service<TimerService, TimerServiceContract>()("jcf/TimerService") {}
 
 export const layer = Layer.effect(
   TimerService,
@@ -282,15 +282,13 @@ export const layer = Layer.effect(
           payload: {
             started,
             timeSpentSeconds: timeSpent,
-            ...(comment ?
-              {
-                comment: {
-                  type: "doc",
-                  version: 1,
-                  content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }]
-                }
-              } :
-              {})
+            ...(comment && {
+              comment: {
+                type: "doc",
+                version: 1,
+                content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }]
+              }
+            })
           }
         }).pipe(
           Effect.as<JiraWorklogOutcome>({ _tag: "Posted" }),
@@ -341,9 +339,9 @@ export const layer = Layer.effect(
         const entry = yield* clockify.createTimeEntry(auth.workspaceId, {
           description: `[${ticket.key}] ${ticket.summary}`,
           start: now.toISOString(),
-          ...(projectId ? { projectId } : {}),
-          ...(billable !== null ? { billable } : {}),
-          ...(tagIds.length > 0 ? { tagIds } : {})
+          ...(projectId && { projectId }),
+          ...((billable !== null) && { billable }),
+          ...((tagIds.length > 0) && { tagIds })
         }).pipe(
           Effect.mapError((e) => new TimerError({ message: `Failed to start timer: ${e.message}`, cause: e }))
         )
@@ -424,10 +422,10 @@ export const layer = Layer.effect(
           yield* clockify.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
             start: current.startedAt.toISOString(),
             end: now.toISOString(),
-            ...(description !== undefined ? { description } : {}),
-            ...(projectId ? { projectId } : {}),
-            ...(billable !== null ? { billable } : {}),
-            ...(tagIds.length > 0 ? { tagIds: [...tagIds] } : {})
+            ...((description !== undefined) && { description }),
+            ...(projectId && { projectId }),
+            ...((billable !== null) && { billable }),
+            ...((tagIds.length > 0) && { tagIds: [...tagIds] })
           }).pipe(
             Effect.mapError((e) => new TimerError({ message: `Failed to stop timer: ${e.message}`, cause: e }))
           )
@@ -498,9 +496,9 @@ export const layer = Layer.effect(
           description: `[${ticket.key}] ${ticket.summary}`,
           start: options.start.toISOString(),
           end: end.toISOString(),
-          ...(projectId ? { projectId } : {}),
-          ...(billable !== null ? { billable } : {}),
-          ...(tagIds.length > 0 ? { tagIds } : {})
+          ...(projectId && { projectId }),
+          ...((billable !== null) && { billable }),
+          ...((tagIds.length > 0) && { tagIds })
         }).pipe(
           Effect.tap(() =>
             Effect.sync(() => {

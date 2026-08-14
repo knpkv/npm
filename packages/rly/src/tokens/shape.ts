@@ -1,8 +1,8 @@
 import type { LengthTokenSource } from "./model.js"
 
-const defineShape = <const Tokens extends ReadonlyArray<LengthTokenSource>>(tokens: Tokens): Tokens => tokens
+const defineContract = <const Tokens extends ReadonlyArray<LengthTokenSource>>(tokens: Tokens): Tokens => tokens
 
-export const radiusTokenSource = defineShape([
+export const radiusTokenSource = defineContract([
   { name: "tag", value: "6px" },
   { name: "field", value: "10px" },
   { name: "control", value: "14px" },

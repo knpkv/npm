@@ -1,15 +1,18 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import { TestClock } from "effect/testing"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { PageId } from "../src/Brand.js"
 import { ConfluenceClient, layerWithHttpClient } from "../src/ConfluenceClient.js"
 
-const clientLayer = (
-  body: unknown,
-  requests: Array<HttpClientRequest.HttpClientRequest>
+const clientLayer = <UnparsedInput>(
+  body: UnparsedInput,
+  requests: Array<HttpClientRequest.HttpClientRequest>,
+  responseStatus = 200
 ) =>
   layerWithHttpClient({
     baseUrl: "https://example.atlassian.net",
@@ -23,7 +26,7 @@ const clientLayer = (
           return HttpClientResponse.fromWeb(
             request,
             new Response(JSON.stringify(body), {
-              status: 200,
+              status: responseStatus,
               headers: { "content-type": "application/json" }
             })
           )
@@ -288,6 +291,29 @@ describe("ConfluenceClient API boundary", () => {
       expect(requests).toHaveLength(1)
     }).pipe(
       Effect.provide(clientLayer({ id: "123", title: "Malformed", position: "first" }, requests))
+    )
+  })
+
+  it.effect("preserves a rate-limit error after retries when Retry-After is absent", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluenceClient
+      const resultFiber = yield* client.getPage(PageId("123")).pipe(
+        Effect.result,
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* TestClock.adjust("8 seconds")
+      const result = yield* Fiber.join(resultFiber)
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("RateLimitError")
+        expect(result.failure.retryAfter).toBeUndefined()
+      }
+      expect(requests).toHaveLength(4)
+    }).pipe(
+      Effect.provide(clientLayer({ message: "rate limited" }, requests, 429))
     )
   })
 })

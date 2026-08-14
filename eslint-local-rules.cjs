@@ -1,11 +1,12 @@
+const Predicate = require("effect/Predicate")
 const path = require("node:path")
 
 const staticPropertyName = (node) => {
   if (node.type === "Identifier") return node.name
-  if (node.type === "Literal" && typeof node.value === "string") return node.value
+  if (node.type === "Literal" && Predicate.isString(node.value)) return node.value
   if (node.type === "TemplateLiteral" && node.expressions.length === 0 && node.quasis.length === 1) {
     const cooked = node.quasis[0].value.cooked
-    return typeof cooked === "string" ? cooked : undefined
+    return Predicate.isString(cooked) ? cooked : undefined
   }
   return undefined
 }
@@ -350,7 +351,7 @@ const AGENT_COMMAND_SEAMS = new Map([
 const commandSeamFor = (context) => AGENT_COMMAND_SEAMS.get(path.normalize(context.physicalFilename))
 
 const staticImportExpressionSource = (source) => {
-  if (source.type === "Literal" && typeof source.value === "string") return source.value
+  if (source.type === "Literal" && Predicate.isString(source.value)) return source.value
   if (source.type === "TemplateLiteral" && source.expressions.length === 0) {
     return source.quasis[0]?.value.cooked
   }
@@ -504,7 +505,7 @@ const CHILD_PROCESS_ALIAS_ROUNDS = 4
  * is what decides.
  */
 const staticComputedKeyName = (key) => {
-  if (key.type === "Literal" && typeof key.value === "string") return key.value
+  if (key.type === "Literal" && Predicate.isString(key.value)) return key.value
   if (key.type === "TemplateLiteral" && key.expressions.length === 0) {
     return key.quasis[0]?.value.cooked
   }
@@ -875,7 +876,7 @@ const failureTagTarget = (expression) => {
 }
 
 const stringLiteralValue = (expression) =>
-  expression.type === "Literal" && typeof expression.value === "string" ? expression.value : undefined
+  expression.type === "Literal" && Predicate.isString(expression.value) ? expression.value : undefined
 
 const failureTagComparison = (context, expression) => {
   if (expression.type !== "BinaryExpression" || expression.operator !== "===") return undefined
@@ -991,8 +992,8 @@ const containsAssertion = (context, node) => {
   return keys.some((key) => {
     const child = node[key]
     return Array.isArray(child)
-      ? child.some((entry) => entry !== null && typeof entry === "object" && containsAssertion(context, entry))
-      : child !== null && typeof child === "object" && containsAssertion(context, child)
+      ? child.some((entry) => entry !== null && Predicate.isObjectOrArray(entry) && containsAssertion(context, entry))
+      : child !== null && Predicate.isObjectOrArray(child) && containsAssertion(context, child)
   })
 }
 
@@ -1181,8 +1182,8 @@ const containsAbruptCleanupExit = (context, root) => {
     return keys.some((key) => {
       const child = node[key]
       return Array.isArray(child)
-        ? child.some((entry) => entry !== null && typeof entry === "object" && visit(entry))
-        : child !== null && typeof child === "object" && visit(child)
+        ? child.some((entry) => entry !== null && Predicate.isObjectOrArray(entry) && visit(entry))
+        : child !== null && Predicate.isObjectOrArray(child) && visit(child)
     })
   }
   return visit(root)
@@ -1211,8 +1212,8 @@ const containsEffectSleep = (context, root) => {
     return keys.some((key) => {
       const child = node[key]
       return Array.isArray(child)
-        ? child.some((entry) => entry !== null && typeof entry === "object" && visit(entry))
-        : child !== null && typeof child === "object" && visit(child)
+        ? child.some((entry) => entry !== null && Predicate.isObjectOrArray(entry) && visit(entry))
+        : child !== null && Predicate.isObjectOrArray(child) && visit(child)
     })
   }
   return visit(root)
@@ -1700,7 +1701,7 @@ module.exports = {
           return expression.quasis.some((quasi) => quasi.value.raw.includes(":"))
         }
         if (expression.type === "Literal") {
-          return typeof expression.value === "string" && expression.value.includes(":")
+          return Predicate.isString(expression.value) && expression.value.includes(":")
         }
         if (expression.type === "BinaryExpression" && expression.operator === "+") {
           return (
@@ -2784,6 +2785,139 @@ module.exports = {
       }
     }
   },
+  "no-unsafe-optional-host-global-read": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require optional browser globals to be read inside an exception guard",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unsafeRead:
+          "{{name}} is an optional host global; evaluating it as a predicate argument can throw before the predicate runs. Read it inside a try block and branch on the returned local value."
+      }
+    },
+    create(context) {
+      const optionalHostGlobals = new Set(["Notification", "window"])
+      const optionalityPredicates = new Set(["isNotUndefined", "isNullOrUndefined", "isUndefined"])
+      const isUnshadowedHostGlobal = (identifier) => {
+        const variable = resolvedVariable(context, identifier)
+        return optionalHostGlobals.has(identifier.name) && (variable === undefined || variable.defs.length === 0)
+      }
+      const isInsideTryBlock = (node) => {
+        let current = node
+        while (current.parent !== undefined && current.parent !== null) {
+          if (current.parent.type === "TryStatement" && current.parent.block === current) return true
+          current = current.parent
+        }
+        return false
+      }
+      const predicateMethod = (callee) => {
+        if (callee.type === "Identifier") {
+          const definition = importedBinding(context, callee)
+          return definition?.node.type === "ImportSpecifier" &&
+            importSource(definition) === "effect/Predicate" &&
+            optionalityPredicates.has(staticPropertyName(definition.node.imported))
+            ? staticPropertyName(definition.node.imported)
+            : undefined
+        }
+        if (
+          callee.type !== "MemberExpression" ||
+          callee.object.type !== "Identifier" ||
+          !optionalityPredicates.has(staticPropertyName(callee.property))
+        ) {
+          return undefined
+        }
+        return isNamespaceImportFrom(context, callee.object, ["effect/Predicate"]) ||
+          isNamedImportFrom(context, callee.object, ["effect"], ["Predicate"])
+          ? staticPropertyName(callee.property)
+          : undefined
+      }
+
+      return {
+        CallExpression(node) {
+          if (predicateMethod(node.callee) === undefined || isInsideTryBlock(node)) return
+          for (const argument of node.arguments) {
+            if (argument.type !== "Identifier" || !isUnshadowedHostGlobal(argument)) continue
+            context.report({ data: { name: argument.name }, messageId: "unsafeRead", node: argument })
+          }
+        }
+      }
+    }
+  },
+  "no-playwright-evaluate-closure-captures": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "disallow Node-realm lexical captures in Playwright browser callbacks",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        capturedBinding:
+          "Playwright serializes this callback into the browser realm, where captured binding {{name}} is unavailable. Use browser globals, callback locals, or an explicitly serialized argument."
+      }
+    },
+    create(context) {
+      const evaluateMethods = new Set(["$eval", "$$eval", "evaluate", "evaluateAll", "evaluateHandle"])
+      const callbackArgument = (node) => {
+        if (
+          node.callee.type !== "MemberExpression" ||
+          !evaluateMethods.has(staticPropertyName(node.callee.property)) ||
+          node.arguments.length === 0 ||
+          node.arguments[0].type === "SpreadElement"
+        ) {
+          return undefined
+        }
+        return node.arguments[0]
+      }
+      const isInlineFunction = (node) => node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression"
+      const bindingIsDeclaredInside = (variable, callback) =>
+        variable.identifiers.some(
+          (identifier) =>
+            (identifier.range?.[0] ?? -1) >= (callback.range?.[0] ?? 0) &&
+            (identifier.range?.[1] ?? Number.POSITIVE_INFINITY) <= (callback.range?.[1] ?? 0)
+        )
+      const isAmbientBrowserBinding = (variable) =>
+        variable.defs.length > 0 && variable.defs.every((definition) => definition.parent?.declare === true)
+
+      return {
+        CallExpression(node) {
+          const callback = callbackArgument(node)
+          if (callback === undefined || callback.type === "Literal" || callback.type === "TemplateLiteral") return
+          if (!isInlineFunction(callback)) return
+          const callbackScope =
+            context.sourceCode.scopeManager.acquire(callback, true) ?? context.sourceCode.scopeManager.acquire(callback)
+          if (callbackScope === null) return
+          const reported = new Set()
+          for (const reference of callbackScope.through) {
+            if (isPureTypeReference(reference)) continue
+            const variable = resolvedVariable(context, reference.identifier)
+            if (
+              variable === undefined ||
+              variable.defs.length === 0 ||
+              variable.scope.type === "global" ||
+              context.sourceCode.scopeManager.globalScope?.set.get(reference.identifier.name) === variable ||
+              isAmbientBrowserBinding(variable) ||
+              bindingIsDeclaredInside(variable, callback) ||
+              reported.has(variable)
+            ) {
+              continue
+            }
+            reported.add(variable)
+            context.report({
+              data: { name: reference.identifier.name },
+              messageId: "capturedBinding",
+              node: reference.identifier
+            })
+          }
+        }
+      }
+    }
+  },
   "no-echoing-secret-assertions": {
     meta: {
       type: "problem",
@@ -2835,7 +2969,7 @@ module.exports = {
       }
       const immutableConstNumber = (expression, visitedVariables = new Set()) => {
         const node = unwrapTypeExpression(expression)
-        if (node.type === "Literal" && typeof node.value === "number") return node.value
+        if (node.type === "Literal" && Predicate.isNumber(node.value)) return node.value
         if (node.type === "UnaryExpression" && (node.operator === "+" || node.operator === "-")) {
           const argument = immutableConstNumber(node.argument, visitedVariables)
           return argument === undefined ? undefined : node.operator === "-" ? -argument : argument
@@ -2879,7 +3013,7 @@ module.exports = {
         if (property.type === "Identifier") return immutableConstString(property)
         if (
           property.type === "Literal" &&
-          typeof property.value === "number" &&
+          Predicate.isNumber(property.value) &&
           Number.isSafeInteger(property.value) &&
           property.value >= 0
         ) {
@@ -3860,10 +3994,10 @@ module.exports = {
           const propertyName = property.computed
             ? key.type === "Identifier"
               ? immutableConstString(key)
-              : key.type === "Literal" && typeof key.value === "number" && Number.isFinite(key.value)
+              : key.type === "Literal" && Predicate.isNumber(key.value) && Number.isFinite(key.value)
                 ? String(key.value)
                 : staticPropertyName(key)
-            : key.type === "Literal" && typeof key.value === "number" && Number.isFinite(key.value)
+            : key.type === "Literal" && Predicate.isNumber(key.value) && Number.isFinite(key.value)
               ? String(key.value)
               : staticPropertyName(key)
           if (propertyName === undefined) entries.unknown.push(property.value)
@@ -5123,7 +5257,7 @@ module.exports = {
       const isProvablyStringExpression = (expression, visitedVariables = new Set()) => {
         const node = unwrapTypeExpression(expression)
         if (
-          (node.type === "Literal" && typeof node.value === "string") ||
+          (node.type === "Literal" && Predicate.isString(node.value)) ||
           node.type === "TemplateLiteral" ||
           isRawCredentialApiKey(node) ||
           isCredentialEmail(node) ||
@@ -5309,10 +5443,10 @@ module.exports = {
           const propertyName = property.computed
             ? key.type === "Identifier"
               ? immutableConstString(key)
-              : key.type === "Literal" && typeof key.value === "number" && Number.isFinite(key.value)
+              : key.type === "Literal" && Predicate.isNumber(key.value) && Number.isFinite(key.value)
                 ? String(key.value)
                 : staticPropertyName(key)
-            : key.type === "Literal" && typeof key.value === "number" && Number.isFinite(key.value)
+            : key.type === "Literal" && Predicate.isNumber(key.value) && Number.isFinite(key.value)
               ? String(key.value)
               : staticPropertyName(key)
           if (propertyName === undefined) return { returns: [] }
@@ -6026,7 +6160,7 @@ module.exports = {
       ])
       const staticMemberName = (node) =>
         node.computed
-          ? node.property.type === "Literal" && typeof node.property.value === "string"
+          ? node.property.type === "Literal" && Predicate.isString(node.property.value)
             ? node.property.value
             : undefined
           : node.property.type === "Identifier"
@@ -6062,7 +6196,7 @@ module.exports = {
             staticMemberName(node.callee) !== "make" ||
             node.arguments.length === 0 ||
             node.arguments[0].type !== "Literal" ||
-            typeof node.arguments[0].value !== "string" ||
+            !Predicate.isString(node.arguments[0].value) ||
             canonicalUuid7.test(node.arguments[0].value)
           ) {
             return
@@ -6073,7 +6207,7 @@ module.exports = {
             !isValueImport(definition) ||
             identifier === undefined ||
             !uuid7Identifiers.has(identifier) ||
-            typeof source !== "string" ||
+            !Predicate.isString(source) ||
             !source.endsWith("/domain/identifiers.js")
           ) {
             return

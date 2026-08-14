@@ -545,7 +545,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               workspaceId: session.workspaceId,
               sessionId: session.sessionId,
               providers: payload.providers,
-              ...(payload.configuration === undefined ? {} : { configuration: payload.configuration })
+              ...(!(payload.configuration === undefined) && { configuration: payload.configuration })
             }).pipe(Effect.catchTags({
               ApplicationConflict: mapApplicationConflict,
               ApplicationServiceUnavailable: mapApplicationUnavailable
@@ -1248,7 +1248,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               }
               return yield* agent.runTurn({
                 history: payload.history,
-                ...(payload.originPath === undefined ? {} : { originPath: payload.originPath }),
+                ...(!(payload.originPath === undefined) && { originPath: payload.originPath }),
                 prompt: payload.prompt,
                 provider: payload.provider,
                 releaseId: params.releaseId,
@@ -1541,8 +1541,8 @@ export const agentHandlersLayer = HttpApiBuilder.group(
                 jobId: params.jobId,
                 suggestionId: params.suggestionId,
                 revisionId: query.revisionId,
-                ...(query.operation === undefined ? {} : { operation: query.operation }),
-                ...(query.commentId === undefined ? {} : { commentId: query.commentId }),
+                ...(!(query.operation === undefined) && { operation: query.operation }),
+                ...(!(query.commentId === undefined) && { commentId: query.commentId }),
                 publishingOperator: session.actor.personId
               }).pipe(Effect.catchTags({
                 ApplicationInvalidRequest: mapApplicationInvalidRequest,
@@ -1743,7 +1743,7 @@ export const codePipelineHandlersLayer = HttpApiBuilder.group(
                     "cache-control": "private, no-store",
                     "content-disposition": `attachment; filename="${artifact.filename}"`,
                     "content-length": String(artifact.contentLength),
-                    ...(partial || rangeUnsatisfied ? { "content-range": contentRange } : {}),
+                    ...((partial || rangeUnsatisfied) && { "content-range": contentRange }),
                     "content-type": "application/octet-stream",
                     "x-content-type-options": "nosniff"
                   }

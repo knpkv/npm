@@ -112,7 +112,7 @@ const CONFIGURATION_HOME_VARIABLES = new Set([
 const featureInventoryEnvironment = (
   environment: Readonly<Record<string, string>>,
   configHome: string
-): Readonly<Record<string, string>> => ({
+) => ({
   ...Object.fromEntries(Object.entries(environment).filter(([name]) => !CONFIGURATION_HOME_VARIABLES.has(name))),
   CODEX_HOME: configHome
 })

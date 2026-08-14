@@ -44,14 +44,14 @@ import * as Schema from "effect/Schema"
 
 export interface AdfNode {
   readonly type: string
-  readonly attrs?: Record<string, unknown>
+  readonly attrs?: Record<string, Schema.Json>
   readonly content?: ReadonlyArray<AdfNode>
   readonly text?: string
   readonly marks?: ReadonlyArray<AdfNode>
 }
 
-const isAdfNode = (value: unknown): value is AdfNode =>
-  Predicate.isReadonlyObject(value) && typeof value.type === "string"
+const isAdfNode = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & AdfNode =>
+  Predicate.isReadonlyObject(value) && Predicate.isString(value.type)
 
 const STATUS_RE = /<span class="adf-status"\s+data-color="([^"]+)">([^<]*)<\/span>/g
 const INLINE_NODE_RE = /<!--\s*adf:(date|emoji)(?:\s+node=([\s\S]*?))?\s*-->/g
@@ -121,10 +121,10 @@ const toBase64 = (s: string): string => {
 }
 
 // JSON string → free-form attrs record; rejects null/arrays/primitives.
-const AttrsBlob = Schema.Record(Schema.String, Schema.Unknown)
+const AttrsBlob = Schema.Record(Schema.String, Schema.Json)
 const decodeAttrsBlob = Schema.decodeUnknownOption(AttrsBlob)
 
-const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null => {
+const decodeAttrs = (b64: string | undefined): Record<string, Schema.Json> | null => {
   if (!b64) return null
   try {
     const raw = b64.trim()
@@ -141,22 +141,22 @@ const buildExtensionAttrs = (
   key: string | undefined,
   type: string | undefined,
   attrsB64: string | undefined
-): Record<string, unknown> => {
+) => {
   const decoded = decodeAttrs(attrsB64)
   if (decoded) return decoded
-  const attrs: Record<string, unknown> = {}
+  const attrs: Record<string, Schema.Json> = {}
   if (key) attrs.extensionKey = key
   if (type) attrs.extensionType = type
   return attrs
 }
 
-const buildPanelAttrs = (type: string | undefined, attrsB64: string | undefined): Record<string, unknown> => {
+const buildPanelAttrs = (type: string | undefined, attrsB64: string | undefined): Record<string, Schema.Json> => {
   const decoded = decodeAttrs(attrsB64)
   if (decoded) return decoded
   return type ? { panelType: type } : {}
 }
 
-const buildInlineCardAttrs = (attrsB64: string | undefined): Record<string, unknown> => decodeAttrs(attrsB64) ?? {}
+const buildInlineCardAttrs = (attrsB64: string | undefined): Record<string, Schema.Json> => decodeAttrs(attrsB64) ?? {}
 
 const decodeMarks = (b64: string | undefined): ReadonlyArray<AdfNode> => {
   if (!b64) return []
@@ -180,14 +180,16 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
   }
 }
 
-const parsePlaceholderJson = (json: string): unknown => {
+const decodePlaceholderJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parsePlaceholderJson = (json: string): Schema.Json => {
   try {
-    return JSON.parse(json)
+    return decodePlaceholderJson(json)
   } catch {
     // @atlaskit's markdown parser may insert markdown escapes into placeholder
     // text before we restore it. Square brackets are common inside code-block
     // JSON samples and `\[` / `\]` are invalid JSON escapes.
-    return JSON.parse(json.replace(/\\(["[\]])/g, "$1"))
+    return decodePlaceholderJson(json.replace(/\\(["[\]])/g, "$1"))
   }
 }
 
@@ -275,7 +277,7 @@ const tryParseMentionTextNode = (n: AdfNode): AdfNode | null => {
   const link = n.marks.find((m) => m.type === "link")
   if (!link) return null
   const href = link.attrs?.["href"]
-  if (typeof href !== "string" || !href.startsWith(MENTION_SCHEME)) return null
+  if (!Predicate.isString(href) || !href.startsWith(MENTION_SCHEME)) return null
   let id: string
   try {
     id = decodeURIComponent(href.slice(MENTION_SCHEME.length))
@@ -288,7 +290,7 @@ const tryParseMentionTextNode = (n: AdfNode): AdfNode | null => {
 
 interface BlockExtensionMarker {
   readonly kind: "extension" | "bodiedExtension"
-  readonly attrs: Record<string, unknown>
+  readonly attrs: Record<string, Schema.Json>
 }
 
 /**
@@ -346,12 +348,10 @@ const parseTocParagraph = (node: AdfNode): AdfNode | null => {
   if (minLevel) macroParams.minLevel = { value: minLevel }
   if (maxLevel) macroParams.maxLevel = { value: maxLevel }
 
-  const attrs: Record<string, unknown> = {
+  const attrs = {
     extensionKey: "toc",
-    extensionType: CONFLUENCE_CORE_MACRO_TYPE
-  }
-  if (Object.keys(macroParams).length > 0) {
-    attrs.parameters = { macroParams }
+    extensionType: CONFLUENCE_CORE_MACRO_TYPE,
+    ...((Object.keys(macroParams).length > 0) && { parameters: { macroParams } })
   }
 
   return { type: "extension", attrs }
@@ -359,10 +359,10 @@ const parseTocParagraph = (node: AdfNode): AdfNode | null => {
 
 const isBodiedExtensionEnd = (node: AdfNode): boolean => {
   const child = soleTextChild(node)
-  return child !== null && typeof child.text === "string" && BODIED_EXTENSION_END_RE.test(child.text)
+  return child !== null && Predicate.isString(child.text) && BODIED_EXTENSION_END_RE.test(child.text)
 }
 
-const parsePanelParagraph = (node: AdfNode): Record<string, unknown> | null => {
+const parsePanelParagraph = (node: AdfNode): Record<string, Schema.Json> | null => {
   const child = soleTextChild(node)
   if (!child || !child.text) return null
   const match = PANEL_RE.exec(child.text)
@@ -373,7 +373,7 @@ const parsePanelParagraph = (node: AdfNode): Record<string, unknown> | null => {
 
 const isPanelEnd = (node: AdfNode): boolean => {
   const child = soleTextChild(node)
-  return child !== null && typeof child.text === "string" && PANEL_END_RE.test(child.text)
+  return child !== null && Predicate.isString(child.text) && PANEL_END_RE.test(child.text)
 }
 
 const parseEncodedBlockNodeParagraph = (node: AdfNode): { readonly type: string; readonly node: AdfNode } | null => {
@@ -398,13 +398,13 @@ const parseEncodedBlockNodeParagraph = (node: AdfNode): { readonly type: string;
  */
 const isEncodedBlockNodeOpen = (node: AdfNode): boolean => {
   const child = soleTextChild(node)
-  if (child === null || typeof child.text !== "string") return false
+  if (child === null || !Predicate.isString(child.text)) return false
   return ENCODED_BLOCK_NODE_RE.test(child.text)
 }
 
 const encodedBlockNodeEndType = (node: AdfNode): string | null => {
   const child = soleTextChild(node)
-  if (child === null || typeof child.text !== "string") return null
+  if (child === null || !Predicate.isString(child.text)) return null
   const match = ENCODED_BLOCK_NODE_END_RE.exec(child.text)
   return match?.[1] ?? null
 }
@@ -462,7 +462,7 @@ const parseParagraphMarksParagraph = (node: AdfNode): ReadonlyArray<AdfNode> | n
 
 const isParagraphMarksEnd = (node: AdfNode): boolean => {
   const child = soleTextChild(node)
-  return child !== null && typeof child.text === "string" && PARAGRAPH_MARKS_END_RE.test(child.text)
+  return child !== null && Predicate.isString(child.text) && PARAGRAPH_MARKS_END_RE.test(child.text)
 }
 
 /**
@@ -563,9 +563,9 @@ const groupPanels = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> =
 const isTableRow = (node: AdfNode): boolean => node.type === "tableRow"
 const isTableCell = (node: AdfNode): boolean => node.type === "tableCell" || node.type === "tableHeader"
 
-const attrNumber = (attrs: Record<string, unknown> | undefined, key: string): number | null => {
+const attrNumber = (attrs: Record<string, Schema.Json> | undefined, key: string): number | null => {
   const value = attrs?.[key]
-  return typeof value === "number" ? value : null
+  return Predicate.isNumber(value) ? value : null
 }
 
 // A merged cell spans more than one grid column/row, so the flat GFM grid the
@@ -610,7 +610,7 @@ const markRoundTrips = (mark: AdfNode, text: string): boolean => {
   switch (mark.type) {
     case "link": {
       const href = mark.attrs?.["href"]
-      return typeof href === "string" && !LOSSY_HREF_RE.test(href) && !href.startsWith(MENTION_SCHEME)
+      return Predicate.isString(href) && !LOSSY_HREF_RE.test(href) && !href.startsWith(MENTION_SCHEME)
     }
     case "underline":
     case "subsup":
@@ -657,18 +657,18 @@ const inlineRoundTrips = (node: AdfNode): boolean => {
     case "status": {
       // STATUS_RE's body can't cross a literal `<`.
       const text = node.attrs?.["text"]
-      return typeof text !== "string" || !text.includes("<")
+      return !Predicate.isString(text) || !text.includes("<")
     }
     case "mention": {
       const id = node.attrs?.["id"]
       const text = node.attrs?.["text"]
-      return typeof id === "string" && id.length > 0 && typeof text === "string" && text.startsWith("@")
+      return Predicate.isString(id) && id.length > 0 && Predicate.isString(text) && text.startsWith("@")
     }
     case "inlineCard": {
       const attrs = node.attrs ?? {}
       const data = attrs["data"]
       const url = attrs["url"] ?? (Predicate.isReadonlyObject(data) ? data["url"] : undefined)
-      return typeof url === "string" && url.length > 0 && !breaksCommentPlaceholder(node)
+      return Predicate.isString(url) && url.length > 0 && !breaksCommentPlaceholder(node)
     }
     case "date":
     case "emoji":
@@ -767,7 +767,7 @@ const graftInlineNodes = (
     // sidecar's link mark (title, …) over to the reparsed node so relabeling
     // a link doesn't strip the attrs the Markdown can't express.
     const gfmHref = (node.marks ?? []).find((mark) => mark.type === "link")?.attrs?.["href"]
-    if (node.type === "text" && typeof gfmHref === "string") {
+    if (node.type === "text" && Predicate.isString(gfmHref)) {
       const candidates = pool.filter((candidate) =>
         candidate.type === "text" &&
         (candidate.marks ?? []).some((mark) => mark.type === "link" && mark.attrs?.["href"] === gfmHref)
@@ -815,8 +815,8 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
     ? [{
       ...gfmPara,
       content: graftInlineNodes(gfmPara.content ?? [], sidecarPara.content ?? []),
-      ...(sidecarPara.attrs !== undefined ? { attrs: sidecarPara.attrs } : {}),
-      ...(sidecarPara.marks !== undefined ? { marks: sidecarPara.marks } : {})
+      ...((sidecarPara.attrs !== undefined) && { attrs: sidecarPara.attrs }),
+      ...((sidecarPara.marks !== undefined) && { marks: sidecarPara.marks })
     }]
     : gfmContent
   return sidecarCell.attrs
@@ -838,25 +838,31 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
 // can't express (localId, style, title, …) still fingerprint-matches its GFM
 // round-trip, letting the merge recognise "unchanged" and keep the richer
 // sidecar body instead of adopting the stripped GFM copy.
-const PROJECTED_NODE_ATTRS: Record<string, ReadonlyArray<string>> = {
+interface ProjectedAttributes {
+  readonly [nodeType: string]: ReadonlyArray<string>
+}
+const PROJECTED_NODE_ATTRS: ProjectedAttributes = {
   status: ["color", "text"],
   mention: ["id", "text"]
 }
-const PROJECTED_MARK_ATTRS: Record<string, ReadonlyArray<string>> = {
+const PROJECTED_MARK_ATTRS: ProjectedAttributes = {
   link: ["href"]
 }
 
 const projectAttrs = (
-  attrs: Record<string, unknown>,
+  attrs: Record<string, Schema.Json>,
   keys: ReadonlyArray<string> | undefined
-): Record<string, unknown> => {
+) => {
   if (keys === undefined) return attrs
-  const out: Record<string, unknown> = {}
-  for (const key of keys) if (key in attrs) out[key] = attrs[key]
+  const out: Record<string, Schema.Json> = {}
+  for (const key of keys) {
+    const value = attrs[key]
+    if (value !== undefined) out[key] = value
+  }
   return out
 }
 
-const attrsFingerprint = (attrs: Record<string, unknown>): string =>
+const attrsFingerprint = (attrs: Record<string, Schema.Json>): string =>
   Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`).join(" ")
 
 const markFingerprint = (mark: AdfNode): string => {
@@ -1358,7 +1364,7 @@ const transform = (node: AdfNode): AdfNode => {
 }
 
 /** Walk the document tree and rewrite placeholder text into proper ADF nodes. */
-export const revertPlaceholders = (doc: unknown): AdfNode => {
+export const revertPlaceholders = <UnparsedInput>(doc: UnparsedInput): AdfNode => {
   if (!isAdfNode(doc)) {
     throw new TypeError("ADF document must be an object with a string type")
   }

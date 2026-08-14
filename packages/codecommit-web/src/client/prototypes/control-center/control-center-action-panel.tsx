@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react"
 import { type Service, ServiceIcon } from "./control-center-foundation.js"
 import type { TraceDetail } from "./control-center-model.js"
 import { releasePortfolio } from "./control-center-model.js"
+import * as Predicate from "effect/Predicate"
 
 export type ActionView =
   | "account"
@@ -36,29 +37,29 @@ export type ApprovalState = "approved" | "not-requested" | "recorded" | "request
 
 type SourceTab = "audit" | "overview" | "raw"
 
-const connectionTitles: Record<Service, string> = {
+const connectionTitles = {
   jira: "Jira Cloud",
   confluence: "Confluence",
   code: "AWS CodeCommit",
   pipeline: "AWS CodePipeline",
   clockify: "Clockify"
-}
+} satisfies Record<Service, string>
 
-const connectionEndpoints: Record<Service, string> = {
+const connectionEndpoints = {
   jira: "engineering.atlassian.net",
   confluence: "engineering.atlassian.net/wiki",
   code: "eu-west-1 / payments-api",
   pipeline: "eu-west-1 / payments-production",
   clockify: "Engineering workspace"
-}
+} satisfies Record<Service, string>
 
-const connectionEvidence: Record<Service, string> = {
+const connectionEvidence = {
   jira: "6 release issues · webhooks active",
   confluence: "RUN-61 verified · 4 revisions",
   code: "3 pull requests · signatures verified",
   pipeline: "Run #1842 · logs retained 90 days",
   clockify: "18h 20m · 6 contributors"
-}
+} satisfies Record<Service, string>
 
 const sourceTabs: ReadonlyArray<SourceTab> = ["overview", "raw", "audit"]
 const prCandidates: ReadonlyArray<readonly [string, string, string, string]> = [
@@ -70,7 +71,7 @@ interface FocusTarget {
 }
 
 const hasFocus = (candidate: Element | null): candidate is Element & FocusTarget =>
-  candidate != null && "focus" in candidate && typeof candidate.focus === "function"
+  candidate != null && "focus" in candidate && Predicate.isFunction(candidate.focus)
 
 const activeElement = (): FocusTarget | null => (hasFocus(document.activeElement) ? document.activeElement : null)
 
@@ -133,7 +134,7 @@ export function ActionViewPanel({
   const dialogRef = useRef<HTMLElement>(null)
   const previousFocusRef = useRef<FocusTarget | null>(null)
   const repairRelease = releasePortfolio[repairReleaseIndex] ?? releasePortfolio[0]
-  const titles: Record<ActionView, readonly [string, string]> = {
+  const titles = {
     account: ["Workspace & account", "CONTROL CENTER"],
     agent: [
       agentScope === "portfolio"
@@ -166,7 +167,7 @@ export function ActionViewPanel({
       connectionService ? connectionTitles[connectionService] : selected.title,
       connectionService ? "CONNECTED SERVICE" : "SOURCE RECORD"
     ]
-  }
+  } satisfies Record<ActionView, readonly [string, string]>
   const [title, eyebrow] = titles[view]
   const verifiedLinks = fixesApplied ? 16 : 14
   const traceCoverage = Math.round((verifiedLinks / 16) * 100)

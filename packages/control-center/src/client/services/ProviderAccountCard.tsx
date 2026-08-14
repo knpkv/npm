@@ -219,7 +219,7 @@ export const ProviderAccountCard = ({
   }
 
   return (
-    <Surface as="article" className={styles.accountCard} padding="default" shape="grouped">
+    <Surface as="article" className={styles.accountCard} padding="default" form="grouped">
       <div className={styles.accountHeading}>
         <div className={styles.accountIdentity}>
           <Text as="h2" variant="section-title">

@@ -2,6 +2,7 @@ import { type AriaAttributes, type ComponentPropsWithRef, type ReactElement, use
 import { classNames, cssClass, defineVariants, requireText } from "../internal/component.js"
 import { isRegisteredFieldControl } from "../internal/field-control.js"
 import styles from "./Field.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 const semanticControlKeys: ReadonlyArray<keyof FieldControlProps> = [
@@ -77,12 +78,11 @@ export const Field = ({
   const controlProps: FieldControlProps = required ? { ...commonControlProps, required: true } : commonControlProps
   const control = children(controlProps)
   const controlType = control.type
-  const supportedControl =
-    typeof controlType === "string"
-      ? concreteControlElements.has(controlType)
-      : (typeof controlType === "function" || typeof controlType === "object") &&
-        controlType !== null &&
-        isRegisteredFieldControl(controlType)
+  const supportedControl = Predicate.isString(controlType)
+    ? concreteControlElements.has(controlType)
+    : (Predicate.isFunction(controlType) || Predicate.isObjectOrArray(controlType)) &&
+      controlType !== null &&
+      isRegisteredFieldControl(controlType)
   if (!supportedControl) throw new Error("Field children must render one concrete or rly-owned control")
   for (const key of semanticControlKeys) {
     if (control.props[key] !== controlProps[key]) throw new Error(`Field control must apply ${key}`)

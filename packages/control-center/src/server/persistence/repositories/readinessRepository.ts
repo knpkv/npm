@@ -51,10 +51,10 @@ const makeReadinessRepository = Effect.gen(function*() {
   const queue = yield* makeReadinessQueue
   const rules = yield* makeReadinessRules
 
-  const decodeInput = <Value, Encoded, Requirements>(
+  const decodeInput = <Value, Encoded, Requirements, UnparsedInput>(
     operation: ReadinessInputError["operation"],
     schema: Schema.Codec<Value, Encoded, Requirements>,
-    input: unknown
+    input: UnparsedInput
   ) =>
     Schema.decodeUnknownEffect(Schema.toType(schema))(input).pipe(
       Effect.mapError(() => new ReadinessInputError({ operation, reason: "invalid-request" }))
@@ -76,7 +76,9 @@ const makeReadinessRepository = Effect.gen(function*() {
     return yield* malformed.error
   })
 
-  const isMalformedReadinessRecord = (failure: unknown): failure is MalformedReadinessRecord =>
+  const isMalformedReadinessRecord = <UnparsedInput>(
+    failure: UnparsedInput
+  ): failure is UnparsedInput & MalformedReadinessRecord =>
     Predicate.isTagged("MalformedReadinessRecord")(failure) &&
     Predicate.hasProperty(failure, "error") &&
     Predicate.isTagged("PersistedRecordError")(failure.error) &&
@@ -102,17 +104,19 @@ const makeReadinessRepository = Effect.gen(function*() {
       )
     )
 
-  const registerRule = Effect.fn("ReadinessRepository.registerRule")(function*(input: unknown) {
+  const registerRule = Effect.fn("ReadinessRepository.registerRule")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput("register-rule", RegisterReadinessRuleRequest, input)
     return yield* transactCaptured(rules.register(request))
   })
 
-  const commitEnvironment = Effect.fn("ReadinessRepository.commitEnvironment")(function*(input: unknown) {
-    const request = yield* decodeInput("commit-environment", CommitEnvironmentReadinessAssessmentRequest, input)
-    return yield* transactCaptured(assessments.commitEnvironment(request))
-  })
+  const commitEnvironment = Effect.fn("ReadinessRepository.commitEnvironment")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("commit-environment", CommitEnvironmentReadinessAssessmentRequest, input)
+      return yield* transactCaptured(assessments.commitEnvironment(request))
+    }
+  )
 
-  const commitRelease = Effect.fn("ReadinessRepository.commitRelease")(function*(input: unknown) {
+  const commitRelease = Effect.fn("ReadinessRepository.commitRelease")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput("commit-release", CommitReleaseReadinessAssessmentRequest, input)
     return yield* transactCaptured(assessments.commitRelease(request))
   })
@@ -138,7 +142,7 @@ const makeReadinessRepository = Effect.gen(function*() {
     }
   )
 
-  const readCurrent = Effect.fn("ReadinessRepository.readCurrent")(function*(input: unknown) {
+  const readCurrent = Effect.fn("ReadinessRepository.readCurrent")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput("read-current", ReadCurrentReadinessAssessmentRequest, input)
     const records = yield* transactCaptured(
       Effect.gen(function*() {
@@ -186,50 +190,52 @@ const makeReadinessRepository = Effect.gen(function*() {
     })
   })
 
-  const readCurrentReleases = Effect.fn("ReadinessRepository.readCurrentReleases")(function*(input: unknown) {
-    const request = yield* decodeInput(
-      "read-current-releases",
-      ReadCurrentReleaseReadinessAssessmentsRequest,
-      input
-    )
-    const decoded = yield* transactCaptured(
-      Effect.gen(function*() {
-        const rows = yield* assessments.currentReleaseRows(request)
-        const records = yield* Effect.forEach(
-          rows,
-          (row) => assessments.decodeCurrentReleaseRow(row, request.workspaceId)
-        )
-        yield* verifyCurrentMaterialization({
-          workspaceId: request.workspaceId,
-          rows,
-          records
+  const readCurrentReleases = Effect.fn("ReadinessRepository.readCurrentReleases")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput(
+        "read-current-releases",
+        ReadCurrentReleaseReadinessAssessmentsRequest,
+        input
+      )
+      const decoded = yield* transactCaptured(
+        Effect.gen(function*() {
+          const rows = yield* assessments.currentReleaseRows(request)
+          const records = yield* Effect.forEach(
+            rows,
+            (row) => assessments.decodeCurrentReleaseRow(row, request.workspaceId)
+          )
+          yield* verifyCurrentMaterialization({
+            workspaceId: request.workspaceId,
+            rows,
+            records
+          })
+          return records
         })
-        return records
-      })
-    )
-    const records: Array<CurrentReleaseReadinessAssessmentRecord> = decoded.flatMap((record) =>
-      record.assessment._tag === "release"
-        ? [{ ...record, assessment: record.assessment }]
-        : []
-    )
-    const releaseIds = records.map(({ assessment }) => assessment.candidate.scope.releaseId)
-    const requestedReleaseIds = new Set(request.releaseIds)
-    if (
-      records.length !== decoded.length ||
-      new Set(releaseIds).size !== releaseIds.length ||
-      releaseIds.some((releaseId) => !requestedReleaseIds.has(releaseId))
-    ) {
-      return yield* new PersistedRecordError({
-        workspaceId: request.workspaceId,
-        recordKind: "readiness-release-head",
-        recordKey: "release-batch",
-        diagnosticCode: "readiness-head-assessment-mismatch"
-      })
+      )
+      const records: Array<CurrentReleaseReadinessAssessmentRecord> = decoded.flatMap((record) =>
+        record.assessment._tag === "release"
+          ? [{ ...record, assessment: record.assessment }]
+          : []
+      )
+      const releaseIds = records.map(({ assessment }) => assessment.candidate.scope.releaseId)
+      const requestedReleaseIds = new Set(request.releaseIds)
+      if (
+        records.length !== decoded.length ||
+        new Set(releaseIds).size !== releaseIds.length ||
+        releaseIds.some((releaseId) => !requestedReleaseIds.has(releaseId))
+      ) {
+        return yield* new PersistedRecordError({
+          workspaceId: request.workspaceId,
+          recordKind: "readiness-release-head",
+          recordKey: "release-batch",
+          diagnosticCode: "readiness-head-assessment-mismatch"
+        })
+      }
+      return records satisfies ReadCurrentReleaseReadinessAssessmentsResult
     }
-    return records satisfies ReadCurrentReleaseReadinessAssessmentsResult
-  })
+  )
 
-  const readHistory = Effect.fn("ReadinessRepository.readHistory")(function*(input: unknown) {
+  const readHistory = Effect.fn("ReadinessRepository.readHistory")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput("read-history", ReadReadinessHistoryRequest, input)
     const snapshot = yield* transactCaptured(
       Effect.gen(function*() {
@@ -288,28 +294,34 @@ const makeReadinessRepository = Effect.gen(function*() {
     return { _tag: "release", records, nextBeforeHeadRevision } satisfies ReadReadinessHistoryResult
   })
 
-  const enqueueInvalidation = Effect.fn("ReadinessRepository.enqueueInvalidation")(function*(input: unknown) {
-    const request = yield* decodeInput("enqueue-invalidation", EnqueueReadinessInvalidationRequest, input)
-    return yield* database
-      .transaction(queue.enqueue(request))
-      .pipe(mapPersistenceOperation("readiness.enqueue-invalidation"))
-  })
+  const enqueueInvalidation = Effect.fn("ReadinessRepository.enqueueInvalidation")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("enqueue-invalidation", EnqueueReadinessInvalidationRequest, input)
+      return yield* database
+        .transaction(queue.enqueue(request))
+        .pipe(mapPersistenceOperation("readiness.enqueue-invalidation"))
+    }
+  )
 
-  const enqueueAffected = Effect.fn("ReadinessRepository.enqueueAffected")(function*(input: unknown) {
-    const request = yield* decodeInput("enqueue-affected", EnqueueAffectedReadinessRequest, input)
-    return yield* database
-      .transaction(queue.enqueueAffected(request))
-      .pipe(mapPersistenceOperation("readiness.enqueue-affected"))
-  })
+  const enqueueAffected = Effect.fn("ReadinessRepository.enqueueAffected")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("enqueue-affected", EnqueueAffectedReadinessRequest, input)
+      return yield* database
+        .transaction(queue.enqueueAffected(request))
+        .pipe(mapPersistenceOperation("readiness.enqueue-affected"))
+    }
+  )
 
-  const claimInvalidation = Effect.fn("ReadinessRepository.claimInvalidation")(function*(input: unknown) {
-    const request = yield* decodeInput("claim-invalidation", ClaimReadinessInvalidationRequest, input)
-    return yield* database
-      .transaction(queue.claim(request))
-      .pipe(mapPersistenceOperation("readiness.claim-invalidation"))
-  })
+  const claimInvalidation = Effect.fn("ReadinessRepository.claimInvalidation")(
+    function*<UnparsedInput>(input: UnparsedInput) {
+      const request = yield* decodeInput("claim-invalidation", ClaimReadinessInvalidationRequest, input)
+      return yield* database
+        .transaction(queue.claim(request))
+        .pipe(mapPersistenceOperation("readiness.claim-invalidation"))
+    }
+  )
 
-  const enqueueDue = Effect.fn("ReadinessRepository.enqueueDue")(function*(input: unknown) {
+  const enqueueDue = Effect.fn("ReadinessRepository.enqueueDue")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput("enqueue-due", EnqueueDueReadinessEvaluationsRequest, input)
     return yield* database.transaction(queue.enqueueDue(request)).pipe(mapPersistenceOperation("readiness.enqueue-due"))
   })

@@ -58,6 +58,8 @@ export interface WorkspaceEntityCollaboratorsPresentation {
   readonly reviewers: ReadonlyArray<RlyPerson>
 }
 
+interface CollaboratorCategories extends Record<RlyCollaboratorCategory, Array<RlyPerson>> {}
+
 export interface WorkspaceEntityEvidencePresentation {
   readonly claimCount: number
   readonly freshness: RlyFreshnessState
@@ -216,12 +218,13 @@ const collaboratorsFor = (
     "operators",
     "approvers"
   ]
-  const categories: Record<RlyCollaboratorCategory, Array<RlyPerson>> = {
-    approvers: [],
-    authors: [],
-    operators: [],
-    owners: [],
-    reviewers: []
+  const emptyPeople = (): Array<RlyPerson> => []
+  const categories: CollaboratorCategories = {
+    approvers: emptyPeople(),
+    authors: emptyPeople(),
+    operators: emptyPeople(),
+    owners: emptyPeople(),
+    reviewers: emptyPeople()
   }
   for (const owner of owners) categories[collaboratorCategory(owner.roles)].push(personFor(owner))
   const expandedCategories = categoryOrder.filter((category) => categories[category].length > 0)
@@ -417,7 +420,7 @@ const relationshipsFor = (
       ? ownerById.get(relationship.recordedBy.personId)
       : undefined
     return {
-      ...(actorOwner === undefined ? {} : { actor: personFor(actorOwner) }),
+      ...(!(actorOwner === undefined) && { actor: personFor(actorOwner) }),
       direction: "forward",
       evidence: relationshipEvidence(relationship),
       id: relationship.relationshipId,
@@ -435,9 +438,9 @@ const activityFor = (inspection: WorkspaceEntityInspection): ReadonlyArray<RlyTi
     actorKind: event.actor.kind,
     dateTime: DateTime.formatIso(event.occurredAt),
     detail: titleCase(event.sourceKind),
-    ...(event.href === null ? {} : { href: event.href }),
+    ...(!(event.href === null) && { href: event.href }),
     id: event.eventKey,
-    ...(event.service === null ? {} : { service: event.service }),
+    ...(!(event.service === null) && { service: event.service }),
     time: readableTimestamp(event.occurredAt),
     title: event.title
   }))

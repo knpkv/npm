@@ -191,7 +191,7 @@ export const searchReviewCommandArtifactBytes = (
   return matches
 }
 
-const decodeRows = <Row extends Schema.Top>(schema: Row, rows: unknown) =>
+const decodeRows = <Row extends Schema.Top, UnparsedInput>(schema: Row, rows: UnparsedInput) =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows).pipe(
     Effect.mapError(() => new PersistenceOperationError({ operation: "review-artifact.decode" }))
   )

@@ -11,10 +11,10 @@ const loadBrowserSession = Effect.gen(function* () {
   return yield* client.session.current()
 }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const failedSessionState = (
-  failure: unknown
+const failedSessionState = <UnparsedInput,>(
+  failure: UnparsedInput
 ): Exclude<BrowserSessionState, { readonly _tag: "authenticated" | "checking" }> => {
-  if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") {
+  if (!Predicate.hasProperty(failure, "_tag") || !Predicate.isString(failure._tag)) {
     return { _tag: "unavailable" }
   }
   if (failure._tag === "UnauthorizedApiError") return { _tag: "anonymous" }
@@ -45,7 +45,7 @@ export const BrowserSessionHydrator = ({
           session: result.session
         })
       },
-      (failure: unknown) => {
+      <UnparsedInput,>(failure: UnparsedInput) => {
         if (isCurrent) completeHydration(attempt, failedSessionState(failure))
       }
     )

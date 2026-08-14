@@ -42,6 +42,6 @@ export default defineConfig(({ mode }) => {
         sourcemap: true
       },
     plugins: [react(), controlCenterBuildGraph(packageRoot, isServer ? "server" : "client")],
-    ...(isServer ? { ssr: { external: true } } : {})
+    ...(isServer && { ssr: { external: true } })
   }
 })

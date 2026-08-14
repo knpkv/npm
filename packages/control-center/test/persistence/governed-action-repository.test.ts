@@ -231,9 +231,7 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
     proposalExpiresAt: options?.proposalExpiresAt ?? "2026-07-15T10:10:00.000Z",
     causationId: null,
     correlationId: "action:PAY-42:done",
-    ...(options?.releasePublication === undefined
-      ? {}
-      : { releasePublication: options.releasePublication })
+    ...(!(options?.releasePublication === undefined) && { releasePublication: options.releasePublication })
   }
   const evidenceSetDigest = yield* digestGovernedActionEvidenceSet([evidence])
   const material = decodeEnvelopeMaterial({
@@ -1646,10 +1644,10 @@ describe("governed action writer", () => {
         '2026-07-15T10:02:20.000Z', '2026-07-15T10:02:30.000Z'
       )`
 
-      const insertOutcome = (
+      const insertOutcome = <UnparsedInput>(
         outcomeId: string,
         resultKind: string,
-        outcome: unknown,
+        outcome: UnparsedInput,
         observedAt: string
       ) =>
         sql`INSERT INTO governed_action_provider_outcomes (

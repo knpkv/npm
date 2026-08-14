@@ -21,12 +21,12 @@ const RelationshipDetailRouteState = Schema.Struct({
 })
 
 /** Preserve existing release-origin state while marking an in-app relationship-detail activation. */
-export const makeRelationshipDetailRouteState = (
-  state: unknown,
+export const makeRelationshipDetailRouteState = <UnparsedInput>(
+  state: UnparsedInput,
   objectId: EntityIdType,
   relationshipId: RelationshipIdType
-): unknown => ({
-  ...(Predicate.isObject(state) ? state : {}),
+) => ({
+  ...((Predicate.isObject(state)) && state),
   relationshipDetailOrigin: {
     _tag: "relationship-detail-origin/v1",
     objectId,
@@ -35,8 +35,8 @@ export const makeRelationshipDetailRouteState = (
 })
 
 /** Accept Back navigation only for the exact versioned object/relationship activation. */
-export const matchesRelationshipDetailRouteState = (
-  state: unknown,
+export const matchesRelationshipDetailRouteState = <UnparsedInput>(
+  state: UnparsedInput,
   objectId: EntityIdType,
   relationshipId: RelationshipIdType
 ): boolean => {

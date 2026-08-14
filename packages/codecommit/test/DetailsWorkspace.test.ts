@@ -251,7 +251,7 @@ describe("PR detail workspace", () => {
   })
 
   it("makes the console and Neovim handovers mutually exclusive over the one terminal", () => {
-    const ready: { readonly _tag: "ready" } = { _tag: "ready" }
+    const ready = { _tag: "ready" } satisfies { readonly _tag: "ready" }
     const target: ChangedFileConsoleTarget = {
       commitId: "source-commit",
       path: "src/current.ts",
@@ -2629,8 +2629,14 @@ describe("PR detail workspace", () => {
     expect(fileDiffIdentityMatches(fileB, { ...fileB, beforePath: "src/c.ts" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, destinationCommit: "rotated" })).toBe(false)
     expect(fileDiffIdentityMatches(fileB, { ...fileB, sourceCommit: "rotated" })).toBe(false)
-    const failureA: { readonly _tag: "failure"; readonly identity: typeof fileA } = { _tag: "failure", identity: fileA }
-    const failureB: { readonly _tag: "failure"; readonly identity: typeof fileB } = { _tag: "failure", identity: fileB }
+    const failureA = { _tag: "failure", identity: fileA } satisfies {
+      readonly _tag: "failure"
+      readonly identity: typeof fileA
+    }
+    const failureB = { _tag: "failure", identity: fileB } satisfies {
+      readonly _tag: "failure"
+      readonly identity: typeof fileB
+    }
     expect(currentFileDiffOutcome(failureA, fileB)).toBeNull()
     expect(currentFileDiffOutcome(failureB, fileB)).toBe(failureB)
 
@@ -2642,10 +2648,10 @@ describe("PR detail workspace", () => {
       beforePath: null
     }
     const identicalContentB = { ...identicalContentA, afterPath: "src/identical-b.ts" }
-    const retainedA: { readonly _tag: "success"; readonly identity: typeof identicalContentA } = {
+    const retainedA = {
       _tag: "success",
       identity: identicalContentA
-    }
+    } satisfies { readonly _tag: "success"; readonly identity: typeof identicalContentA }
     expect(currentFileDiffOutcome(retainedA, identicalContentB)).toBeNull()
     expect(currentFileDiffOutcome({ ...retainedA, identity: identicalContentB }, identicalContentB)).not.toBeNull()
   })

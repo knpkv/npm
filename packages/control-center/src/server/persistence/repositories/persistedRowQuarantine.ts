@@ -30,7 +30,7 @@ export const makePersistedRowQuarantine = (
   cryptoService: Crypto.Crypto,
   quarantine: QuarantineRepositoryService
 ) => {
-  const digestRow = Effect.fn("PersistedRowQuarantine.digest")(function*(row: unknown) {
+  const digestRow = Effect.fn("PersistedRowQuarantine.digest")(function*<UnparsedInput>(row: UnparsedInput) {
     const serialized = yield* Effect.try({
       try: () => JSON.stringify(row),
       catch: () => new PersistenceOperationError({ operation: "quarantine.encode-row" })

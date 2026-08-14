@@ -111,9 +111,9 @@ const storeError = (
   reason: GovernedActionExecutionStoreError["reason"]
 ): GovernedActionExecutionStoreError => new GovernedActionExecutionStoreError({ operation, reason })
 
-const mapStoreFailure = (
+const mapStoreFailure = <UnparsedInput>(
   operation: ProviderOutcomeFoldOperation,
-  failure: unknown
+  failure: UnparsedInput
 ): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) return storeError(operation, "not-found")
@@ -200,7 +200,8 @@ export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(funct
     row: typeof ProviderOutcomeRow.Type,
     operation: ProviderOutcomeFoldOperation
   ) {
-    const mapFailure = (failure: unknown): GovernedActionExecutionStoreError => mapStoreFailure(operation, failure)
+    const mapFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError =>
+      mapStoreFailure(operation, failure)
     if (row.sourceKind === "dispatch") {
       const outcome = yield* Schema.decodeUnknownEffect(
         Schema.fromJsonString(DispatchInboxOutcome)

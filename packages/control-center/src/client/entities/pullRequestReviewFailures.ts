@@ -2,7 +2,7 @@ import * as Predicate from "effect/Predicate"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 
 /** Whether a review snapshot read can be retried without operator intervention. */
-export const isRecoverablePullRequestReviewFailure = (failure: unknown): boolean =>
+export const isRecoverablePullRequestReviewFailure = <UnparsedInput>(failure: UnparsedInput): boolean =>
   Predicate.isTagged(failure, "RequestTimedOutApiError") ||
   Predicate.isTagged(failure, "RateLimitedApiError") ||
   Predicate.isTagged(failure, "ServiceUnavailableApiError") ||
@@ -12,5 +12,5 @@ export const isRecoverablePullRequestReviewFailure = (failure: unknown): boolean
   )
 
 /** Whether an authenticated review request proves that the browser session expired. */
-export const isUnauthorizedPullRequestReviewFailure = (failure: unknown): boolean =>
+export const isUnauthorizedPullRequestReviewFailure = <UnparsedInput>(failure: UnparsedInput): boolean =>
   Predicate.isTagged(failure, "UnauthorizedApiError")

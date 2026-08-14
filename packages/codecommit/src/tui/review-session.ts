@@ -159,10 +159,7 @@ export const reconcileRelayReviewSession = (
   previous: RelayReviewResult,
   next: RelayReviewResult,
   dispositions: Readonly<Record<string, FindingDisposition>>
-): {
-  readonly dispositions: Readonly<Record<string, FindingDisposition>>
-  readonly reconciliation: RelayReviewReconciliation
-} => {
+) => {
   const previousById = new Map(previous.findings.map((finding) => [finding.id, finding]))
   const nextById = new Map(next.findings.map((finding) => [finding.id, finding]))
   const added = next.findings.filter((finding) => !previousById.has(finding.id)).map((finding) => finding.id)

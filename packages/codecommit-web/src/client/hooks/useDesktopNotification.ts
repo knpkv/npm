@@ -11,6 +11,7 @@
  * @module
  */
 import { useCallback, useRef } from "react"
+import { readNotificationApi } from "../host-globals.js"
 import { StorageKeys } from "../storage-keys.js"
 
 export function useDesktopNotification(onNavigate?: (path: string) => void) {
@@ -38,15 +39,15 @@ export function useDesktopNotification(onNavigate?: (path: string) => void) {
           firedIdsRef.current = new Set(arr.slice(arr.length - 250))
         }
       }
-      if (typeof Notification === "undefined") return
-      if (Notification.permission !== "granted") return
+      const NotificationApi = readNotificationApi()
+      if (NotificationApi === undefined || NotificationApi.permission !== "granted") return
       try {
         if (localStorage.getItem(StorageKeys.desktopNotifications) !== "true") return
       } catch {
         return
       }
 
-      const notification = new Notification(n.title || "CodeCommit", {
+      const notification = new NotificationApi(n.title || "CodeCommit", {
         body: n.message,
         icon: "/favicon.ico"
       })

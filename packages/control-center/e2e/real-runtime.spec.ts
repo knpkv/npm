@@ -481,12 +481,15 @@ test.describe("repository-managed real runtime", () => {
                 source.addEventListener("portfolio.invalidated", (event) => {
                   const data = "data" in event ? event.data : undefined
                   const lastEventId = "lastEventId" in event ? event.lastEventId : undefined
-                  if (typeof data !== "string" || typeof lastEventId !== "string") {
+                  if (
+                    Object.prototype.toString.call(data) !== "[object String]" ||
+                    Object.prototype.toString.call(lastEventId) !== "[object String]"
+                  ) {
                     source.close()
                     reject(new Error("benchmark SSE event did not expose its encoded data and cursor"))
                     return
                   }
-                  events.push({ data, event: event.type, id: lastEventId })
+                  events.push({ data: String(data), event: event.type, id: String(lastEventId) })
                   if (events.length === count) {
                     source.close()
                     resolve(events)

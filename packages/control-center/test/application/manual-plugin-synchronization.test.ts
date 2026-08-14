@@ -26,8 +26,8 @@ import {
   makeConfluencePageAdapter
 } from "../../src/server/plugins/confluence/ConfluencePageAdapter.js"
 import {
-  ConfluencePageClientFailure,
-  type ConfluencePageClientShape
+  type ConfluencePageClientContract,
+  ConfluencePageClientFailure
 } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { PluginOutageFailure } from "../../src/server/plugins/failures.js"
@@ -135,7 +135,7 @@ const fixtures = [
   readonly entityType: string
   readonly vendorImmutableId: string
   readonly title: string
-  readonly attributes: Readonly<Record<string, unknown>>
+  readonly attributes: Readonly<Record<string, Schema.Json>>
 }>
 
 const descriptor = (providerId: ProviderId) => ({
@@ -200,7 +200,7 @@ const confluenceConverter: MarkdownConverter["Service"] = {
   markdownToAdf: (value) => Effect.succeed(value)
 }
 
-const confluenceClient = (overrides: Partial<ConfluencePageClientShape> = {}): ConfluencePageClientShape => ({
+const confluenceClient = (overrides: Partial<ConfluencePageClientContract> = {}): ConfluencePageClientContract => ({
   getCurrentUser: Effect.succeed({ accountId: "account-author", displayName: "Avery" }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(confluencePage),
@@ -231,7 +231,7 @@ const confluenceClient = (overrides: Partial<ConfluencePageClientShape> = {}): C
 })
 
 const makeConfluenceConnection = Effect.fn("ManualPluginSynchronizationTest.makeConfluenceConnection")(
-  function*(client: ConfluencePageClientShape) {
+  function*(client: ConfluencePageClientContract) {
     const cryptoService = yield* Crypto.Crypto
     const negotiated = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
     return makeConfluencePageAdapter({
@@ -1229,7 +1229,7 @@ describe("manual plugin synchronization", () => {
               fileSize: index,
               version: confluencePage.version
             })),
-            ...(cursor === null ? { _links: { next: `/attachments?cursor=second` } } : {})
+            ...((cursor === null) && { _links: { next: `/attachments?cursor=second` } })
           })
         }
       }))

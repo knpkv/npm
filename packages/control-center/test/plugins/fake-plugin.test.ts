@@ -91,7 +91,7 @@ const authorized = (digest: string) =>
     expiresAt: "2026-07-13T10:05:00.000Z"
   })
 
-const success = (value: unknown): FakePluginResponse => ({ _tag: "success", value })
+const success = <UnparsedInput>(value: UnparsedInput): FakePluginResponse => ({ _tag: "success", value })
 
 const baseScenario = (overrides: Partial<FakePluginScenario> = {}): FakePluginScenario => ({
   descriptor: descriptor(),
@@ -295,7 +295,7 @@ runPluginContractSuite("FakePlugin", {
     return makeFakePluginRuntime(
       baseScenario({
         ...overrides,
-        ...(executionGate === undefined ? {} : { executeAuthorizedActionGate: executionGate })
+        ...(!(executionGate === undefined) && { executeAuthorizedActionGate: executionGate })
       })
     ).pipe(
       Effect.map((runtime) => ({

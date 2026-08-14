@@ -25,10 +25,10 @@ import { format as formatSource } from "prettier"
 
 type ApiVersion = "v1" | "v2"
 
-const SPEC_URLS: Readonly<Record<ApiVersion, string>> = {
+const SPEC_URLS = {
   v1: "https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json",
   v2: "https://dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json"
-}
+} satisfies Readonly<Record<ApiVersion, string>>
 
 class RegenerateError extends Data.TaggedError("RegenerateError")<{
   readonly message: string

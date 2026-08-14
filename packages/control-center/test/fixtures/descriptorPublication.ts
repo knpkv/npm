@@ -6,6 +6,6 @@ import { platform } from "node:os"
  * child traversal. Publication therefore fails closed there until a native
  * `openat`/`linkat`/`renameat` adapter is available. Linux CI runs these tests.
  */
-export const descriptorIt: { readonly effect: typeof it.effect.skip } = {
+export const descriptorIt = {
   effect: platform() === "darwin" ? it.effect.skip : it.effect
-}
+} satisfies { readonly effect: typeof it.effect.skip }

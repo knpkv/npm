@@ -1085,8 +1085,8 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       query
                     }).pipe(Effect.mapError(() => sessionError("artifact-unavailable")))
                   }),
-                ...(runNativeCodexReview === undefined ? {} : { runNativeCodexReview }),
-                ...(runNativeClaudeReview === undefined ? {} : { runNativeClaudeReview }),
+                ...(!(runNativeCodexReview === undefined) && { runNativeCodexReview }),
+                ...(!(runNativeClaudeReview === undefined) && { runNativeClaudeReview }),
                 close
               }
 

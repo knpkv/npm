@@ -107,6 +107,6 @@ const definitiveMergeRejectionTags = new Set([
 /** True only when a raw merge failure does not prove that the provider rejected the mutation. */
 export const isAmbiguousMergeProviderError = (error: AwsApiError): boolean => {
   if (!mergeProviderOperations.has(error.operation)) return false
-  if (!Predicate.hasProperty(error.cause, "_tag") || typeof error.cause._tag !== "string") return true
+  if (!Predicate.hasProperty(error.cause, "_tag") || !Predicate.isString(error.cause._tag)) return true
   return !definitiveMergeRejectionTags.has(error.cause._tag)
 }

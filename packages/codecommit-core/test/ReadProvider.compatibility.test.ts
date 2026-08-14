@@ -18,13 +18,15 @@ const liveReadClient = CodeCommitReadClient.live.pipe(
 describe("CodeCommitReadProvider compatibility", () => {
   it.effect("preserves distilled AWS retry delays with the pinned Effect version", () =>
     Effect.gen(function*() {
-      const firstDelay = Effect.fn("ReadProviderCompatibility.firstDelay")(function*(error: unknown) {
-        const lastError = yield* Ref.make(error)
-        const step = yield* Schedule.toStepWithMetadata(AwsRetry.makeDefault(lastError).schedule)
-        const next = yield* step(error).pipe(Effect.forkChild)
-        yield* TestClock.adjust(Duration.seconds(3))
-        return Duration.toMillis((yield* Fiber.join(next)).duration)
-      })
+      const firstDelay = Effect.fn("ReadProviderCompatibility.firstDelay")(
+        function*<UnparsedInput>(error: UnparsedInput) {
+          const lastError = yield* Ref.make(error)
+          const step = yield* Schedule.toStepWithMetadata(AwsRetry.makeDefault(lastError).schedule)
+          const next = yield* step(error).pipe(Effect.forkChild)
+          yield* TestClock.adjust(Duration.seconds(3))
+          return Duration.toMillis((yield* Fiber.join(next)).duration)
+        }
+      )
 
       const transientDelay = yield* firstDelay({
         [categoriesKey]: { [ServerError]: true }

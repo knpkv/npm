@@ -34,22 +34,22 @@ const makeDeliveryGraphRepository = Effect.gen(function*() {
   const writer = yield* makeDeliveryGraphWriter
   const reader = yield* makeDeliveryGraphReader
 
-  const decodeBatch = Effect.fn("DeliveryGraphRepository.decodeBatch")(function*(input: unknown) {
+  const decodeBatch = Effect.fn("DeliveryGraphRepository.decodeBatch")(function*<UnparsedInput>(input: UnparsedInput) {
     return yield* Schema.decodeUnknownEffect(DeliveryGraphWriteBatch)(input).pipe(
       Effect.mapError(() => new DeliveryGraphInputError({ operation: "write" }))
     )
   })
 
-  const decodeQuery = Effect.fn("DeliveryGraphRepository.decodeQuery")(function*(input: unknown) {
+  const decodeQuery = Effect.fn("DeliveryGraphRepository.decodeQuery")(function*<UnparsedInput>(input: UnparsedInput) {
     return yield* Schema.decodeUnknownEffect(DeliveryGraphQuery)(input).pipe(
       Effect.mapError(() => new DeliveryGraphInputError({ operation: "read" }))
     )
   })
 
   return {
-    write: Effect.fn("DeliveryGraphRepository.write")(function*(
+    write: Effect.fn("DeliveryGraphRepository.write")(function*<UnparsedInput>(
       workspaceId: WorkspaceId,
-      input: unknown
+      input: UnparsedInput
     ) {
       const batch = yield* decodeBatch(input)
       yield* writer.ensureWorkspace(workspaceId, batch)
@@ -57,9 +57,9 @@ const makeDeliveryGraphRepository = Effect.gen(function*() {
         mapPersistenceOperation("delivery-graph.write")
       )
     }),
-    read: Effect.fn("DeliveryGraphRepository.read")(function*(
+    read: Effect.fn("DeliveryGraphRepository.read")(function*<UnparsedInput>(
       workspaceId: WorkspaceId,
-      input: unknown
+      input: UnparsedInput
     ) {
       const query = yield* decodeQuery(input)
       const result = yield* database.transaction(

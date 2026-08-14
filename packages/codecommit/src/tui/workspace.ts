@@ -114,10 +114,7 @@ export const providerDriftObservationTransition = (
     readonly handledObservationKey: string | null
   },
   observation: PullRequestRevisionCheck
-): {
-  readonly drift: PullRequestRevisionCheck | null
-  readonly handledObservationKey: string | null
-} => {
+) => {
   const drift = retainedProviderDriftAfterObservation(identity, revision, current.drift, observation)
   const returnedToBaseline = workspaceIdentityMatches(observation.identity, identity) &&
     providerRevisionMatches(observation.baseline, revision) &&

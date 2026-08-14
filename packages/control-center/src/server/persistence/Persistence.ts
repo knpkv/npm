@@ -4,7 +4,7 @@ import type { Success } from "effect/Effect"
 
 import type { BackupFailure, SchemaWriteBarrierError } from "./backup/index.js"
 import { ContentStore, type ContentStoreService, type ReproduciblePutContentInput } from "./ContentStore.js"
-import { Database, databaseLayer, type DatabaseShape } from "./Database.js"
+import { Database, type DatabaseContract, databaseLayer } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
   type DatabaseInitializationError,
@@ -79,7 +79,6 @@ import {
   type WorkspaceSettingsRepositoryService
 } from "./repositories/index.js"
 import { mapPersistenceOperation } from "./repositories/internal.js"
-
 /** Typed failures that may cross the public persistence operation boundary. */
 export type PersistenceOperationFailure =
   | AgentJobInputError
@@ -138,9 +137,11 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "WorkspaceSettingsNoChangesError"
 ])
 
-const isPersistenceOperationFailure = (error: unknown): error is PersistenceOperationFailure =>
+const isPersistenceOperationFailure = <UnparsedInput>(
+  error: UnparsedInput
+): error is UnparsedInput & PersistenceOperationFailure =>
   Predicate.hasProperty(error, "_tag") &&
-  typeof error._tag === "string" &&
+  Predicate.isString(error._tag) &&
   PUBLIC_OPERATION_ERROR_TAGS.has(error._tag)
 
 const publicOperation = <Value, Failure, Requirements>(
@@ -164,7 +165,7 @@ const publicOperation = <Value, Failure, Requirements>(
 /** Reclaim a bounded durable batch while publication holds the same writer lock. */
 export const sweepDiffContentCacheCleanup = Effect.fn("Persistence.sweepDiffContentCacheCleanup")(
   function*(
-    database: DatabaseShape,
+    database: DatabaseContract,
     content: Pick<ContentStoreService, "removeReproducible">,
     diffContentCache: DiffContentCacheRepositoryService
   ) {
@@ -215,7 +216,7 @@ export const completeDeferredCleanupBestEffort = Effect.fn(
 /** Publish a mapping, persist orphan intent even on failure, then drain one retryable batch. */
 export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDiffContentCache")(
   function*(
-    database: DatabaseShape,
+    database: DatabaseContract,
     content: ContentStoreService,
     diffContentCache: DiffContentCacheRepositoryService,
     ...args: Parameters<DiffContentCacheRepositoryService["put"]>
@@ -252,7 +253,7 @@ export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDif
 export const putContentAndSweepDiffContentCache = Effect.fn(
   "Persistence.putContentAndSweepDiffContentCache"
 )(function*(
-  database: DatabaseShape,
+  database: DatabaseContract,
   content: ContentStoreService,
   diffContentCache: DiffContentCacheRepositoryService,
   key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
@@ -789,8 +790,8 @@ export class Persistence extends Context.Service<Persistence, PersistenceService
 const PersistenceFromServices = Layer.effect(Persistence, makePersistence)
 
 /** Build persistence repositories from a caller-owned shared database service. */
-export const persistenceLayerFromDatabase = (
-  input: unknown
+export const persistenceLayerFromDatabase = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Persistence,
   BlobStoreError | PersistenceConfigError,
@@ -858,8 +859,8 @@ export const persistenceLayerFromDatabase = (
   )
 
 /** Build one shared libSQL client and owner-only blob service from decoded input. */
-export const persistenceLayer = (
-  input: unknown
+export const persistenceLayer = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Persistence,
   PersistenceLayerError,

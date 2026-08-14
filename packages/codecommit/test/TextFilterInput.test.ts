@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  type BoundedMultiSelectionState,
   cycleSettingsFilterMode,
   parseSettingsFilter,
   settingsFilterActionScope,
@@ -69,7 +70,7 @@ describe("text filter input", () => {
   })
 
   it("submits the synchronously toggled review skills when Space and Return share a batch", () => {
-    let state: { cursor: number; selection: ReadonlyArray<string> } = {
+    let state: BoundedMultiSelectionState<string> = {
       cursor: 0,
       selection: ["pr-review", "pr-diff-review"]
     }

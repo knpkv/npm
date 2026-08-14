@@ -5,6 +5,7 @@ import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema, Stream 
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { createServer } from "node:net"
 
+import * as Predicate from "effect/Predicate"
 import {
   decodeControlCenterDataPaths,
   prepareControlCenterDataRoot,
@@ -191,7 +192,7 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
       ...inactiveTelemetryEnvironment,
       ...extraEnvironment,
       CONTROL_CENTER_DATA_ROOT: configuredDataRoot,
-      ...(port === undefined ? {} : { CONTROL_CENTER_PORT: String(port) })
+      ...(!(port === undefined) && { CONTROL_CENTER_PORT: String(port) })
     },
     extendEnv: true
   })
@@ -250,7 +251,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return

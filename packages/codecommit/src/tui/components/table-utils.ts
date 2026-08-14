@@ -28,7 +28,7 @@ export const computeScrollTarget = (
  */
 export const resolveColumnLayout = (
   width: number | `${number}%` | "auto" | undefined
-): { readonly width: number | `${number}%` | 0; readonly flexGrow: 0 | 1 } => ({
+) => ({
   width: width === "auto" || !width ? 0 : width,
   flexGrow: width === "auto" || !width ? 1 : 0
 })

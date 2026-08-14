@@ -4,7 +4,7 @@ import type { AdfNode } from "../src/AdfPlaceholders.js"
 
 const docOf = (content: ReadonlyArray<AdfNode>): AdfNode => ({ type: "doc", content })
 const para = (text: string): AdfNode => ({ type: "paragraph", content: [{ type: "text", text }] })
-const b64 = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64")
+const b64 = <UnparsedInput>(value: UnparsedInput): string => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("revertPlaceholders", () => {
   it("rewrites a status span placeholder into a status node", () => {

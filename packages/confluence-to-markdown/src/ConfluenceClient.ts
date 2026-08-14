@@ -11,6 +11,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
@@ -228,25 +229,30 @@ const MAX_PAGINATION_ITERATIONS = 100
 const VERSIONS_PAGE_SIZE = 50
 const ATLAS_DOC_FORMAT: "atlas_doc_format" = "atlas_doc_format"
 
-const recordOrNull = (value: unknown): Record<PropertyKey, unknown> | null => Predicate.isObject(value) ? value : null
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const isJsonObject = Schema.is(JsonObject)
+const recordOrNull = <UnparsedInput>(value: UnparsedInput): Record<string, Schema.Json> | null =>
+  isJsonObject(value) ? value : null
 
-const stringOrUndefined = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
+const stringOrUndefined = <UnparsedInput>(value: UnparsedInput): string | undefined =>
+  Predicate.isString(value) ? value : undefined
 
-const numberOrUndefined = (value: unknown): number | undefined => typeof value === "number" ? value : undefined
+const numberOrUndefined = <UnparsedInput>(value: UnparsedInput): number | undefined =>
+  Predicate.isNumber(value) ? value : undefined
 
-const isTransientApiError = (error: unknown): boolean => {
+const isTransientApiError = <UnparsedInput>(error: UnparsedInput): boolean => {
   if (Predicate.isTagged(error, "RateLimitError")) return true
   if (!Predicate.isTagged(error, "ApiError")) return false
 
   const status = numberOrUndefined(recordOrNull(error)?.["status"])
-  return typeof status === "number" && (status === 0 || status === 408 || status === 429 || status >= 500)
+  return Predicate.isNumber(status) && (status === 0 || status === 408 || status === 429 || status >= 500)
 }
 
 /** @internal */
 export const isConfluenceReadRetryError = isTransientApiError
 
 /** @internal */
-export const isConfluenceWriteRetryError = (error: unknown): boolean => {
+export const isConfluenceWriteRetryError = <UnparsedInput>(error: UnparsedInput): boolean => {
   if (Predicate.isTagged(error, "RateLimitError")) return true
   if (!Predicate.isTagged(error, "ApiError")) return false
 
@@ -257,34 +263,38 @@ export const isConfluenceWriteRetryError = (error: unknown): boolean => {
 /**
  * Retry schedule for transient Confluence read failures.
  */
-const readRequestRetry: {
-  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
-  readonly times: number
-  readonly while: (error: unknown) => boolean
-} = {
+const readRequestRetry = {
   schedule: Schedule.exponential("1 second"),
   times: 3,
   while: isConfluenceReadRetryError
+} satisfies {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+  readonly while: <UnparsedInput>(error: UnparsedInput) => boolean
 }
 
 /**
  * Retry schedule for Confluence writes. Non-idempotent writes are retried only
  * when Atlassian explicitly rate-limits the request.
  */
-const writeRequestRetry: {
-  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
-  readonly times: number
-  readonly while: (error: unknown) => boolean
-} = {
+const writeRequestRetry = {
   schedule: Schedule.spaced("30 seconds"),
   times: 3,
   while: isConfluenceWriteRetryError
+} satisfies {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+  readonly while: <UnparsedInput>(error: UnparsedInput) => boolean
 }
 
 /**
  * Map API client errors to domain errors.
  */
-const mapApiError = (error: unknown, endpoint: string, pageId?: string): ApiError | RateLimitError => {
+const mapApiError = <UnparsedInput>(
+  error: UnparsedInput,
+  endpoint: string,
+  pageId?: string
+): ApiError | RateLimitError => {
   const record = recordOrNull(error)
   const response = HttpClientError.isHttpClientError(error)
     ? error.response
@@ -303,8 +313,8 @@ const mapApiError = (error: unknown, endpoint: string, pageId?: string): ApiErro
   })
 }
 
-const normalizeConfluenceError = (
-  error: unknown,
+const normalizeConfluenceError = <UnparsedInput>(
+  error: UnparsedInput,
   endpoint: string,
   pageId?: string
 ): ApiError | RateLimitError => {
@@ -315,7 +325,7 @@ const normalizeConfluenceError = (
       status: numberOrUndefined(record["status"]) ?? 0,
       message: stringOrUndefined(record["message"]) ?? String(error),
       endpoint: stringOrUndefined(record["endpoint"]) ?? endpoint,
-      ...(errorPageId !== undefined ? { pageId: errorPageId } : {})
+      ...((errorPageId !== undefined) && { pageId: errorPageId })
     })
   }
   if (record?._tag === "RateLimitError") {
@@ -333,20 +343,20 @@ const mapDecodeError = (cause: unknown, endpoint: string, pageId?: string): ApiE
     ...(pageId !== undefined && { pageId })
   })
 
-const normalizePagePosition = (value: unknown): unknown => {
+const normalizePagePosition = <UnparsedInput>(value: UnparsedInput) => {
   if (!Predicate.isObject(value)) return value
-  const position = typeof value.position === "number"
+  const position = Predicate.isNumber(value.position)
     ? value.position
-    : typeof value.childPosition === "number"
+    : Predicate.isNumber(value.childPosition)
     ? value.childPosition
     : undefined
   return {
     ...Object.fromEntries(Object.entries(value).filter(([key]) => key !== "position" && key !== "childPosition")),
-    ...(position === undefined ? {} : { position })
+    ...(!(position === undefined) && { position })
   }
 }
 
-const normalizeNullPagePositions = (value: unknown): unknown => {
+const normalizeNullPagePositions = <UnparsedInput>(value: UnparsedInput) => {
   if (!Predicate.isObject(value) || !Array.isArray(value.results)) return normalizePagePosition(value)
   return {
     ...value,
@@ -354,8 +364,8 @@ const normalizeNullPagePositions = (value: unknown): unknown => {
   }
 }
 
-const decodePageResponse = (
-  value: unknown,
+const decodePageResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string,
   pageId?: string
 ): Effect.Effect<PageResponse, ApiError> =>
@@ -364,8 +374,8 @@ const decodePageResponse = (
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
   })
 
-const decodeChildrenResponse = (
-  value: unknown,
+const decodeChildrenResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string,
   pageId?: string
 ): Effect.Effect<PageChildrenResponse, ApiError> =>
@@ -384,15 +394,15 @@ const decodeChildrenResponse = (
  * generated schema to accept both; this collapses the two shapes back to one so
  * callers are not handed a field whose type depends on the content type.
  */
-const normalizeFolderCreatedAt = (value: unknown): unknown => {
+const normalizeFolderCreatedAt = <UnparsedInput>(value: UnparsedInput) => {
   if (!Predicate.isObject(value)) return value
   const createdAt = value["createdAt"]
-  if (typeof createdAt !== "number") return value
+  if (!Predicate.isNumber(createdAt)) return value
   return { ...value, createdAt: new Date(createdAt).toISOString() }
 }
 
-const decodeFolderResponse = (
-  value: unknown,
+const decodeFolderResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string
 ): Effect.Effect<FolderResponse, ApiError> =>
   Effect.try({
@@ -400,8 +410,8 @@ const decodeFolderResponse = (
     catch: (cause) => mapDecodeError(cause, endpoint)
   })
 
-const decodeFolderChildrenResponse = (
-  value: unknown,
+const decodeFolderChildrenResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string
 ): Effect.Effect<Schema.Schema.Type<typeof FolderChildrenResponseSchema>, ApiError> =>
   Effect.try({
@@ -409,8 +419,8 @@ const decodeFolderChildrenResponse = (
     catch: (cause) => mapDecodeError(cause, endpoint)
   })
 
-const decodeCqlSearchResponse = (
-  value: unknown,
+const decodeCqlSearchResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string
 ): Effect.Effect<Schema.Schema.Type<typeof CqlSearchResponseSchema>, ApiError> =>
   Effect.try({
@@ -418,8 +428,8 @@ const decodeCqlSearchResponse = (
     catch: (cause) => mapDecodeError(cause, endpoint)
   })
 
-const decodeVersionsResponse = (
-  value: unknown,
+const decodeVersionsResponse = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string,
   pageId?: string
 ) =>
@@ -428,8 +438,8 @@ const decodeVersionsResponse = (
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
   })
 
-const decodeAtlassianUser = (
-  value: unknown,
+const decodeAtlassianUser = <UnparsedInput>(
+  value: UnparsedInput,
   endpoint: string
 ): Effect.Effect<AtlassianUser, ApiError> =>
   Effect.try({
@@ -444,7 +454,7 @@ interface EditorProperty {
   }
 }
 
-const firstEditorProperty = (value: unknown): EditorProperty | undefined => {
+const firstEditorProperty = <UnparsedInput>(value: UnparsedInput): EditorProperty | undefined => {
   const response = recordOrNull(value)
   const results = response?.["results"]
   if (!Array.isArray(results)) return undefined
@@ -525,8 +535,8 @@ const AttachmentResponseSchema = Schema.Struct({
   }))
 })
 
-const decodeAttachment = (
-  raw: unknown,
+const decodeAttachment = <UnparsedInput>(
+  raw: UnparsedInput,
   baseUrl: string,
   endpoint: string,
   pageId?: string
@@ -537,7 +547,7 @@ const decodeAttachment = (
         status: 0,
         message: `Confluence returned an invalid attachment response for ${endpoint}: ${cause}`,
         endpoint,
-        ...(pageId !== undefined ? { pageId } : {})
+        ...((pageId !== undefined) && { pageId })
       })
     ),
     Effect.flatMap((record) => {
@@ -549,7 +559,7 @@ const decodeAttachment = (
             status: 0,
             message: `Confluence returned an attachment without id, filename, or download URL for ${endpoint}`,
             endpoint,
-            ...(pageId !== undefined ? { pageId } : {})
+            ...((pageId !== undefined) && { pageId })
           })
         )
       }
@@ -563,8 +573,8 @@ const decodeAttachment = (
         url: makeConfluenceAttachmentUrl(baseUrl, download, record._links),
         mediaType,
         size,
-        ...(fileId ? { fileId } : {}),
-        ...(collectionName ? { collectionName } : {})
+        ...(fileId && { fileId }),
+        ...(collectionName && { collectionName })
       })
     })
   )
@@ -574,7 +584,7 @@ const decodeAttachment = (
  */
 const make = (
   config: ConfluenceClientConfig
-): Effect.Effect<Context.Service.Shape<typeof ConfluenceClient>, never, HttpClient.HttpClient> =>
+): Effect.Effect<ConfluenceClient["Service"], never, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     // Create underlying API client
     const apiConfigLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -624,7 +634,7 @@ const make = (
           }
 
           const response = yield* apiClient.v2.getChildPages(id, {
-            params: { ...(cursor ? { cursor } : {}) }
+            params: { ...(cursor && { cursor }) }
           }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
             Effect.retry(readRequestRetry),
@@ -651,7 +661,7 @@ const make = (
         payload: {
           spaceId: req.spaceId,
           title: req.title,
-          ...(req.parentId ? { parentId: req.parentId } : {}),
+          ...((req.parentId) && { parentId: req.parentId }),
           body: { representation: req.body.representation, value: req.body.value },
           status: "current"
         }
@@ -669,7 +679,7 @@ const make = (
           title: req.title,
           status: req.status ?? "current",
           body: { representation: req.body.representation, value: req.body.value },
-          version: { number: req.version.number, ...(req.version.message ? { message: req.version.message } : {}) }
+          version: { number: req.version.number, ...((req.version.message) && { message: req.version.message }) }
         }
       }).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
@@ -709,8 +719,8 @@ const make = (
 
           const response = yield* apiClient.v2.getPageVersions(id, {
             params: {
-              ...(options?.includeBody ? { "body-format": ATLAS_DOC_FORMAT } : {}),
-              ...(cursor ? { cursor } : {}),
+              ...((options?.includeBody) && { "body-format": ATLAS_DOC_FORMAT }),
+              ...(cursor && { cursor }),
               limit: VERSIONS_PAGE_SIZE
             }
           }).pipe(
@@ -757,7 +767,7 @@ const make = (
           }
 
           const response = yield* apiClient.v2.getPageAttachments(id, {
-            params: { ...(cursor ? { cursor } : {}), limit: 50 }
+            params: { ...(cursor && { cursor }), limit: 50 }
           }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/attachments`, id)),
             Effect.retry(readRequestRetry),
@@ -805,7 +815,7 @@ const make = (
         const response = yield* apiClient.uploadAttachment(pageId, {
           bytes,
           filename,
-          ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType })
+          ...(!(input.mediaType === undefined) && { mediaType: input.mediaType })
         }).pipe(
           Effect.mapError((e) => mapApiError(e, `/wiki/rest/api/content/${pageId}/child/attachment`, pageId)),
           Effect.retry(writeRequestRetry),
@@ -874,7 +884,7 @@ const make = (
         }).pipe(
           Effect.map(firstEditorProperty),
           Effect.catchIf(
-            (e: unknown) => HttpClientError.isHttpClientError(e) && e.response?.status === 404,
+            <UnparsedInput>(e: UnparsedInput) => HttpClientError.isHttpClientError(e) && e.response?.status === 404,
             () => Effect.succeed(undefined)
           ),
           Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties?key=editor`, pageId))
@@ -928,7 +938,7 @@ const make = (
           }
 
           const response = yield* apiClient.v2.getFolderDirectChildren(id, {
-            params: { ...(cursor ? { cursor } : {}) }
+            params: { ...(cursor && { cursor }) }
           }).pipe(
             Effect.mapError((e) => mapApiError(e, endpoint)),
             Effect.retry(readRequestRetry),
@@ -955,7 +965,7 @@ const make = (
         payload: {
           spaceId: input.spaceId,
           title: input.title,
-          ...(input.parentId ? { parentId: input.parentId } : {})
+          ...((input.parentId) && { parentId: input.parentId })
         }
       }).pipe(
         Effect.mapError((e) => mapApiError(e, "/folders")),
@@ -969,7 +979,7 @@ const make = (
       options?: { readonly limit?: number }
     ): Effect.Effect<CqlSearchResponse, ApiError | RateLimitError> =>
       apiClient.v1.searchByCQL({
-        params: { cql, ...(options?.limit !== undefined ? { limit: options.limit } : {}) }
+        params: { cql, ...((options?.limit !== undefined) && { limit: options.limit }) }
       }).pipe(
         Effect.mapError((e) => mapApiError(e, "/search")),
         Effect.retry(readRequestRetry),
@@ -1036,12 +1046,14 @@ export const layer = (config: ConfluenceClientConfig): Layer.Layer<ConfluenceCli
     Layer.provide(NodeHttpClient.layerFetch)
   )
 
-const extractUploadedAttachment = (response: unknown): unknown | null => {
+const decodeJsonOption = Schema.decodeUnknownOption(Schema.Json)
+
+const extractUploadedAttachment = <UnparsedInput>(response: UnparsedInput): Schema.Json | null => {
   const record = recordOrNull(response)
   if (record === null) return null
   const results = record["results"]
-  if (Array.isArray(results) && results[0] !== undefined) return results[0]
+  if (Array.isArray(results) && results[0] !== undefined) return Option.getOrNull(decodeJsonOption(results[0]))
   const page = record["page"]
-  if (Array.isArray(page) && page[0] !== undefined) return page[0]
+  if (Array.isArray(page) && page[0] !== undefined) return Option.getOrNull(decodeJsonOption(page[0]))
   return null
 }

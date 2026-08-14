@@ -4,6 +4,7 @@
  * @module
  */
 import * as Brand from "effect/Brand"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 /**
@@ -27,7 +28,7 @@ export type PageId = string & Brand.Brand<"PageId">
  * @category Brand
  */
 export const PageId = Brand.make<PageId>((s) =>
-  typeof s === "string" && s.length > 0 || `Invalid page ID: "${s}" (must be non-empty string)`
+  Predicate.isString(s) && s.length > 0 || `Invalid page ID: "${s}" (must be non-empty string)`
 )
 
 /**
@@ -57,7 +58,7 @@ export type SpaceKey = string & Brand.Brand<"SpaceKey">
  * @category Brand
  */
 export const SpaceKey = Brand.make<SpaceKey>((s) =>
-  typeof s === "string" && s.length > 0 && /^[A-Z0-9]+$/.test(s)
+  Predicate.isString(s) && s.length > 0 && /^[A-Z0-9]+$/.test(s)
   || `Invalid space key: "${s}" (must be uppercase alphanumeric)`
 )
 
@@ -84,7 +85,7 @@ export type ContentHash = string & Brand.Brand<"ContentHash">
  * @category Brand
  */
 export const ContentHash = Brand.make<ContentHash>((s) =>
-  typeof s === "string" && /^[a-f0-9]{64}$/.test(s)
+  Predicate.isString(s) && /^[a-f0-9]{64}$/.test(s)
   || `Invalid content hash: "${s}" (must be 64-char hex string)`
 )
 

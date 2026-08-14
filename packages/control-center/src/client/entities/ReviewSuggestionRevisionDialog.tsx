@@ -35,8 +35,8 @@ const editableSuggestion = (suggestion: PrReviewSuggestion): PrReviewSuggestionE
   recommendation: suggestion.recommendation,
   confidence: suggestion.confidence,
   relatedLocations: suggestion.relatedLocations,
-  ...(suggestion.prevention === undefined ? {} : { prevention: suggestion.prevention }),
-  ...(suggestion.replacement === undefined ? {} : { replacement: suggestion.replacement }),
+  ...(!(suggestion.prevention === undefined) && { prevention: suggestion.prevention }),
+  ...(!(suggestion.replacement === undefined) && { replacement: suggestion.replacement }),
   anchor: suggestion.anchor
 })
 
@@ -45,8 +45,8 @@ const advancedJson = (suggestion: PrReviewSuggestionEdit): string =>
     anchor: suggestion.anchor,
     evidence: suggestion.evidence,
     relatedLocations: suggestion.relatedLocations,
-    ...(suggestion.prevention === undefined ? {} : { prevention: suggestion.prevention }),
-    ...(suggestion.replacement === undefined ? {} : { replacement: suggestion.replacement })
+    ...(!(suggestion.prevention === undefined) && { prevention: suggestion.prevention }),
+    ...(!(suggestion.replacement === undefined) && { replacement: suggestion.replacement })
   })
 
 /** Edit or inspect one immutable suggestion revision without leaving the diff. */

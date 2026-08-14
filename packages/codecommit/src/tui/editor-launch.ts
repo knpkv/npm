@@ -23,7 +23,7 @@ export interface OpenEditorResult {
 }
 
 const editorFailure = (operation: string, message: string, cause?: unknown) =>
-  new WorktreeError({ operation, message, ...(cause === undefined ? {} : { cause }) })
+  new WorktreeError({ operation, message, ...(!(cause === undefined) && { cause }) })
 
 const isOutside = (path: Path.Path, root: string, candidate: string): boolean => {
   const relative = path.relative(root, candidate)

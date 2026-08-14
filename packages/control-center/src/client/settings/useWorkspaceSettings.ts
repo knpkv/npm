@@ -207,15 +207,7 @@ export const useWorkspaceSettings = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: WorkspaceSettingsTransport = browserWorkspaceSettingsTransport
-): {
-  readonly discardConflict: () => void
-  readonly edit: (draft: WorkspaceSettingsV1) => void
-  readonly reapplyConflict: () => void
-  readonly retry: () => void
-  readonly retryConflict: () => void
-  readonly save: () => void
-  readonly state: WorkspaceSettingsState
-} => {
+) => {
   const [state, setReactState] = useState<WorkspaceSettingsState>({ _tag: "idle" })
   const stateRef = useRef<WorkspaceSettingsState>(state)
   const [requestRevision, setRequestRevision] = useState(0)

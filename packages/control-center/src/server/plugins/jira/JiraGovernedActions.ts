@@ -179,9 +179,9 @@ const loadActionIssue = Effect.fn("JiraGovernedActions.loadActionIssue")(functio
   return issue
 })
 
-const decodePayload = <A, I>(
+const decodePayload = <A, I, UnparsedInput>(
   schema: Schema.Codec<A, I>,
-  payload: unknown
+  payload: UnparsedInput
 ): Effect.Effect<A, PluginConfigurationFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(payload).pipe(
     Effect.mapError(() =>

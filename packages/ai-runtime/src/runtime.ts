@@ -33,9 +33,9 @@ const isAgentRuntimeProtocolFailure = Schema.is(Schema.Struct({
   _tag: Schema.Literal("AgentRuntimeProtocolError")
 }))
 
-const normalizeAdapterFailure = (
+const normalizeAdapterFailure = <UnparsedInput>(
   providerId: AgentRunRequest["providerId"],
-  failure: unknown
+  failure: UnparsedInput
 ): AgentProviderError =>
   !isAgentRuntimeProtocolFailure(failure) && isAgentProviderError(failure)
     ? new AgentProviderError({

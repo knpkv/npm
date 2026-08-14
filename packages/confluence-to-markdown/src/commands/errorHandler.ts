@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import { writeStderr } from "../internal/stdio.js"
 
-const safeStringify = (value: unknown): string | null => {
+const safeStringify = <UnparsedInput>(value: UnparsedInput): string | null => {
   try {
     return JSON.stringify(value)
   } catch {
@@ -19,16 +19,15 @@ const safeStringify = (value: unknown): string | null => {
   }
 }
 
-const formatUnknownError = (error: unknown): string => {
+const formatUnknownError = <UnparsedInput>(error: UnparsedInput): string => {
   if (Predicate.hasProperty(error, "message")) {
     return String(error.message)
   }
-  if (error !== null && typeof error === "object") {
+  if (error !== null && Predicate.isObjectOrArray(error)) {
     const tag = Predicate.hasProperty(error, "_tag") ? `${String(error._tag)}: ` : ""
-    const props: Record<string, unknown> = {}
-    for (const key of Object.getOwnPropertyNames(error)) {
-      props[key] = Reflect.get(error, key)
-    }
+    const props = Object.fromEntries(
+      Object.entries(Object.getOwnPropertyDescriptors(error)).map(([key, descriptor]) => [key, descriptor.value])
+    )
     return `${tag}${safeStringify(Object.keys(props).length > 0 ? props : error) ?? String(error)}`
   }
   return String(error)

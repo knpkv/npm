@@ -18,7 +18,7 @@ import type * as Redacted from "effect/Redacted"
  *
  * @category Config
  */
-export interface JiraApiConfigShape {
+export interface JiraApiConfigContract {
   readonly baseUrl: string
   readonly auth:
     | { readonly type: "basic"; readonly email: string; readonly apiToken: Redacted.Redacted<string> }
@@ -46,6 +46,6 @@ export interface JiraApiConfigShape {
  *
  * @category Config
  */
-export class JiraApiConfig extends Context.Service<JiraApiConfig, JiraApiConfigShape>()(
+export class JiraApiConfig extends Context.Service<JiraApiConfig, JiraApiConfigContract>()(
   "@knpkv/jira-api-client/JiraApiConfig"
 ) {}

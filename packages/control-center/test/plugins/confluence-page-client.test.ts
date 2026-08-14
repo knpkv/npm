@@ -12,8 +12,8 @@ import {
   confluencePageClientLayer
 } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 
-const pageClientLayer = (
-  body: unknown,
+const pageClientLayer = <UnparsedInput>(
+  body: UnparsedInput,
   requests: Array<HttpClientRequest.HttpClientRequest>,
   status = 200
 ) =>

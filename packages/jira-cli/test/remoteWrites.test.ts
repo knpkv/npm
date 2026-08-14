@@ -3,6 +3,7 @@ import { JiraApiClient, make } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -13,12 +14,14 @@ import { layer as VersionServiceLayer, VersionService } from "../src/VersionServ
 interface RecordedRequest {
   readonly method: string
   readonly url: string
-  readonly body: unknown
+  readonly body: Schema.Json | undefined
 }
 
-const bodyJson = (request: HttpClientRequest.HttpClientRequest): unknown => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const bodyJson = (request: HttpClientRequest.HttpClientRequest): Schema.Json | undefined => {
   if (request.body._tag !== "Uint8Array") return undefined
-  return JSON.parse(new TextDecoder().decode(request.body.body))
+  return decodeJson(new TextDecoder().decode(request.body.body))
 }
 
 const issueFields = {
@@ -56,7 +59,7 @@ const makeRecordingLayer = (respond: (request: HttpClientRequest.HttpClientReque
   return { calls, layer }
 }
 
-const json = (body: unknown, status = 200) =>
+const json = <UnparsedInput>(body: UnparsedInput, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 describe("IssueService.edit", () => {

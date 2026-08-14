@@ -193,8 +193,8 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
           Effect.provide(codexModel({
             access: "read-only",
             cwd: options.cwd,
-            ...(options.codexExecutable === undefined ? {} : { executable: options.codexExecutable }),
-            ...(options.codexModel === undefined ? {} : { model: options.codexModel }),
+            ...(!(options.codexExecutable === undefined) && { executable: options.codexExecutable }),
+            ...(!(options.codexModel === undefined) && { model: options.codexModel }),
             maxOutputBytes: MAXIMUM_MODEL_OUTPUT_BYTES,
             maxStderrBytes: MAXIMUM_MODEL_STDERR_BYTES,
             timeout: "2 minutes"
@@ -206,8 +206,8 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
           Effect.provide(claudeModel({
             access: "read-only",
             cwd: options.cwd,
-            ...(options.claudeExecutable === undefined ? {} : { executable: options.claudeExecutable }),
-            ...(options.claudeModel === undefined ? {} : { model: options.claudeModel }),
+            ...(!(options.claudeExecutable === undefined) && { executable: options.claudeExecutable }),
+            ...(!(options.claudeModel === undefined) && { model: options.claudeModel }),
             maxOutputBytes: MAXIMUM_MODEL_OUTPUT_BYTES,
             maxStderrBytes: MAXIMUM_MODEL_STDERR_BYTES,
             timeout: "2 minutes"

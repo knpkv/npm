@@ -16,6 +16,7 @@ import { PersistedRecordError } from "../errors.js"
 import { mapPersistenceOperation } from "./internal.js"
 import type { ContentBlobDigest } from "./models.js"
 import { ContentBlobDigest as ContentBlobDigestSchema } from "./models.js"
+import type { SqlRow } from "./sqlRow.js"
 
 /** Per-workspace hard cap; each entry represents at most one MiB of reproducible bytes. */
 export const MaximumDiffContentCacheEntriesPerWorkspace = 2_000
@@ -45,7 +46,7 @@ const makeDiffContentCacheRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const get = Effect.fn("DiffContentCacheRepository.get")(function*(key: DiffContentCacheKey) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT content_digest AS digest
+    const rows = yield* sql<SqlRow>`SELECT content_digest AS digest
       FROM diff_content_cache_entries
       WHERE workspace_id = ${key.workspaceId}
         AND plugin_connection_id = ${key.pluginConnectionId}
@@ -143,7 +144,7 @@ const makeDiffContentCacheRepository = Effect.gen(function*() {
     pendingCleanup: Effect.fn("DiffContentCacheRepository.pendingCleanup")(function*(
       maximumCandidates: number = MaximumDiffContentCacheCleanupBatch
     ) {
-      const rows = yield* sql<Record<string, unknown>>`SELECT
+      const rows = yield* sql<SqlRow>`SELECT
           workspace_id AS workspaceId,
           content_digest AS digest
         FROM diff_content_cache_cleanup

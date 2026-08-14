@@ -53,13 +53,13 @@ export function useFilterParams() {
     return {
       filters: parseFilters(searchParams),
       hot: searchParams.get("sortBy") === "updated",
-      ...(searchParams.has("groupBy") ? { groupBy: searchParams.get("groupBy")! } : {}),
+      ...((searchParams.has("groupBy")) && { groupBy: searchParams.get("groupBy")! }),
       mine: searchParams.has("mine"),
       review: searchParams.has("review"),
-      ...(mineScope != null ? { mineScope } : {}),
+      ...((mineScope != null) && { mineScope }),
       q: searchParams.get("q") ?? "",
-      ...(from != null ? { from } : {}),
-      ...(to != null ? { to } : {})
+      ...((from != null) && { from }),
+      ...((to != null) && { to })
     }
   }, [searchParams])
 

@@ -6,7 +6,8 @@ style preferences into noisy CI failures.
 
 ## Commands
 
-- `pnpm lint` runs ESLint and ast-grep.
+- `pnpm lint` runs every required static-analysis gate, including ESLint,
+  Oxlint, and ast-grep.
 - `pnpm check` runs the patched TypeScript compiler with the official Effect
   language-service diagnostics. Effect errors and warnings fail the check;
   message-level suggestions remain visible without changing the exit status.
@@ -15,6 +16,9 @@ style preferences into noisy CI failures.
   `ast-grep/rules/effect` and TypeScript-wide rules in
   `ast-grep/rules/typescript`.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
+- `pnpm lint:oxlint` runs every vendored anti-slop rule at error severity and
+  requires zero diagnostics. There is no debt baseline or update command: any
+  violation fails the same root `pnpm lint` gate as the other required checks.
 - `pnpm skills:check` verifies product-local agent skills are synced from
   `packages/agent-skills/skills`.
 

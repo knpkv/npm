@@ -72,11 +72,11 @@ const makeSubscriptionRepo = Effect.gen(function*() {
   return service
 })
 
-export interface SubscriptionRepoShape extends Success<typeof makeSubscriptionRepo> {}
+export interface SubscriptionRepoContract extends Success<typeof makeSubscriptionRepo> {}
 
 export class SubscriptionRepo extends Context.Service<
   SubscriptionRepo,
-  SubscriptionRepoShape
+  SubscriptionRepoContract
 >()("SubscriptionRepo") {
   static readonly Default = Layer.effect(SubscriptionRepo, makeSubscriptionRepo).pipe(
     Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))

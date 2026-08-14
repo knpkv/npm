@@ -50,11 +50,11 @@ const makeSyncMetadataRepo = Effect.gen(function*() {
   return service
 })
 
-export interface SyncMetadataRepoShape extends Success<typeof makeSyncMetadataRepo> {}
+export interface SyncMetadataRepoContract extends Success<typeof makeSyncMetadataRepo> {}
 
 export class SyncMetadataRepo extends Context.Service<
   SyncMetadataRepo,
-  SyncMetadataRepoShape
+  SyncMetadataRepoContract
 >()("SyncMetadataRepo") {
   static readonly Default = Layer.effect(SyncMetadataRepo, makeSyncMetadataRepo).pipe(
     Layer.provide(DatabaseLive)

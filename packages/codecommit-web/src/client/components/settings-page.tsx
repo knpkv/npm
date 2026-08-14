@@ -35,7 +35,7 @@ import { SettingsTheme } from "./settings-theme.js"
 import styles from "./settings-page.module.css"
 import { Button } from "./ui/button.js"
 
-const TabIcons: Record<SettingsTab, ReactNode> = {
+const TabIcons = {
   accounts: <UserIcon className="size-4" />,
   refresh: <RefreshCwIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
@@ -45,9 +45,9 @@ const TabIcons: Record<SettingsTab, ReactNode> = {
   theme: <PaletteIcon className="size-4" />,
   config: <FileIcon className="size-4" />,
   about: <InfoIcon className="size-4" />
-}
+} satisfies Record<SettingsTab, ReactNode>
 
-const TabLabels: Record<SettingsTab, string> = {
+const TabLabels = {
   accounts: "Accounts",
   refresh: "Refresh",
   sandbox: "Sandbox",
@@ -57,7 +57,7 @@ const TabLabels: Record<SettingsTab, string> = {
   theme: "Theme",
   config: "Config",
   about: "About"
-}
+} satisfies Record<SettingsTab, string>
 
 const isSettingsTab = (v: string | undefined): v is SettingsTab => SettingsTabs.some((tab) => tab === v)
 

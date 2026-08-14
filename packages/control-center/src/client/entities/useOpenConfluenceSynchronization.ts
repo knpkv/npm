@@ -231,7 +231,7 @@ const synchronizeAutomatically = (
         { signal: abort.signal },
         () => synchronizeWithLease()
       )
-  ).catch(async (failure: unknown) => {
+  ).catch(async <UnparsedInput>(failure: UnparsedInput) => {
     const source = group.participants.values().next().value
     if (!abort.signal.aborted && source !== undefined) {
       const failed = {
@@ -265,7 +265,7 @@ const startAutomaticSynchronization = (
     cadence = nextCadence
     void Effect.runPromise(Effect.sleep(OPEN_CONFLUENCE_SYNC_INTERVAL), { signal: nextCadence.signal }).then(
       () => synchronizeAndSchedule(),
-      (_failure: unknown) => {
+      <UnparsedInput>(_failure: UnparsedInput) => {
         if (!nextCadence.signal.aborted) {
           for (const participant of group.participants.values()) participant.setState("failed")
         }
@@ -386,7 +386,7 @@ const waitForCrossTabSynchronization = async (
       ) finish()
       void Effect.runPromise(Effect.sleep(lease.remainingMillis), { signal: lifetime.signal }).then(
         finish,
-        (_failure: unknown) => {
+        <UnparsedInput>(_failure: UnparsedInput) => {
           if (!lifetime.signal.aborted) finish()
         }
       )
@@ -413,11 +413,7 @@ export const useOpenConfluenceSynchronization = ({
   readonly sessionKey: string | null
   readonly synchronizationRevision: number | null
   readonly transport?: OpenConfluenceSynchronizationTransport
-}): {
-  readonly state: OpenConfluenceSynchronizationState
-  readonly synchronizeAfterMutation: () => void
-  readonly synchronizeNow: () => void
-} => {
+}) => {
   const [state, setState] = useState<OpenConfluenceSynchronizationState>("idle")
   const registrationLifetime = useRef<AbortController | null>(null)
   const sessionExpired = useRef(onSessionExpired)

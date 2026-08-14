@@ -61,7 +61,7 @@ export const PairPage = (): ReactElement => {
           Use the one-time code printed by the local Control Center server. It expires after ten minutes.
         </Text>
       </header>
-      <Surface as="section" className={styles.pairCard} padding="spacious" shape="grouped" tone="secondary">
+      <Surface as="section" className={styles.pairCard} padding="spacious" form="grouped" tone="secondary">
         <form className={styles.pairForm} onSubmit={submit}>
           <Field
             description="The code stays in this request and is never placed in a URL."

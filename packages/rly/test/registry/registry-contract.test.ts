@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import { type ComponentManifest, componentManifest } from "../../component-manifest.js"
 import { validateManifest } from "../../scripts/contract.js"
@@ -8,7 +9,7 @@ import {
 } from "../../scripts/registry/registry-contract.js"
 import { validateComponentsRegistry } from "../../scripts/registry/registry-validation.js"
 
-const parseJson = (source: string): unknown => JSON.parse(source)
+const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 describe("agent registry contract", () => {
   it("renders every opted-in component deterministically with explicit tooling metadata", () => {

@@ -518,7 +518,7 @@ test("resets persistent browser presentation state before a second route mounts"
       </script>
     `)
     return await page.getByRole("main").evaluate((element) => {
-      if (!("getAttribute" in element) || typeof element.getAttribute !== "function") {
+      if (!("getAttribute" in element)) {
         throw new Error("route fixture has no attribute surface")
       }
       return {

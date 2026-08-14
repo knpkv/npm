@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 /**
  * Centered popup dialog with a text input field.
  *
@@ -23,9 +24,9 @@ export function PopupInput({
   title
 }: PopupInputProps) {
   function handleSubmit(value: string): void
-  function handleSubmit(_event: object): void
-  function handleSubmit(valueOrEvent: string | object): void {
-    if (typeof valueOrEvent === "string") {
+  function handleSubmit<Event extends object>(_event: Event): void
+  function handleSubmit<Value>(valueOrEvent: Value): void {
+    if (Predicate.isString(valueOrEvent)) {
       onSubmit(valueOrEvent)
     }
   }

@@ -15,7 +15,7 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import {
   type CachedPullRequest,
   PullRequestRepo,
-  type PullRequestRepoShape
+  type PullRequestRepoContract
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
@@ -24,7 +24,7 @@ import { type PRState, prToUpsertInput } from "./internal.js"
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
-  prRepo: PullRequestRepoShape,
+  prRepo: PullRequestRepoContract,
   detail: PullRequestDetail,
   awsAccountId: string,
   id: string

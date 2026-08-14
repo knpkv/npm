@@ -2,13 +2,13 @@ import type { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descript
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { hasPluginCapability } from "./negotiation.js"
 
-const FIRST_PARTY_SYNC_STREAMS: Readonly<Record<ProviderId, string>> = {
+const FIRST_PARTY_SYNC_STREAMS = {
   codecommit: "pull-requests",
   codepipeline: "executions",
   jira: "project-issues",
   clockify: "time-entries",
   confluence: "pages"
-}
+} satisfies Readonly<Record<ProviderId, string>>
 
 /** Resolve the production synchronization stream owned by a first-party provider. */
 export const firstPartySyncStreamKey = (providerId: ProviderId): string => FIRST_PARTY_SYNC_STREAMS[providerId]

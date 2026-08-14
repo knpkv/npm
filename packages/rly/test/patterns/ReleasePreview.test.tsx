@@ -61,10 +61,7 @@ const edgeTransitionNames = {
   version: "ROOT"
 } satisfies RlyReleaseTransitionNames
 
-const changingTransitionNames = (): {
-  readonly names: RlyReleaseTransitionNames
-  readonly reads: () => readonly [number, number, number]
-} => {
+const changingTransitionNames = () => {
   let relayReads = 0
   let verdictReads = 0
   let versionReads = 0

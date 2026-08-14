@@ -57,7 +57,7 @@ export const makeReadinessMaterialization = Effect.gen(function*() {
     new PersistedRecordError({
       workspaceId,
       recordKind: "readiness-assessment",
-      recordKey: Predicate.hasProperty(row, "assessmentId") && typeof row.assessmentId === "string"
+      recordKey: Predicate.hasProperty(row, "assessmentId") && Predicate.isString(row.assessmentId)
         ? row.assessmentId
         : "unknown-materialization",
       diagnosticCode: "readiness-assessment-materialization-mismatch"
@@ -129,9 +129,9 @@ export const makeReadinessMaterialization = Effect.gen(function*() {
     return groupReadinessMaterialization({ evidence, sources, children })
   })
 
-  const verify = Effect.fn("ReadinessMaterialization.verify")(function*(
+  const verify = Effect.fn("ReadinessMaterialization.verify")(function*<UnparsedInput>(
     assessment: ReadinessAssessment,
-    row: unknown,
+    row: UnparsedInput,
     grouped: Effect.Success<ReturnType<typeof load>>
   ) {
     const evidence = grouped.evidence.get(assessment.assessmentId) ?? []

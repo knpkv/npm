@@ -86,7 +86,7 @@ const providerDiagnosticCode = <E>(
     failed === undefined ||
     !Predicate.isTagged(failed.error, "PluginMalformedResponseFailure") ||
     !Predicate.hasProperty(failed.error, "diagnosticCode") ||
-    typeof failed.error.diagnosticCode !== "string"
+    !Predicate.isString(failed.error.diagnosticCode)
   ) {
     return "not-applicable"
   }

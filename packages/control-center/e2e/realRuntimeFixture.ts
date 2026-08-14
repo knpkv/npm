@@ -87,7 +87,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return
@@ -158,7 +158,7 @@ interface TrustedHttpsProxy {
   readonly server: HttpsServer
 }
 
-const shortFailureDescription = (failure: unknown): string =>
+const shortFailureDescription = <UnparsedInput>(failure: UnparsedInput): string =>
   Predicate.isError(failure) && failure.message.length > 0 ? failure.message : String(failure)
 
 const closeHttpsProxy = async (proxy: TrustedHttpsProxy): Promise<void> => {

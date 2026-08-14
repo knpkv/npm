@@ -51,10 +51,10 @@ test("keeps human and agent identity distinct in an isolated release thread", as
   await expect(page.locator("[data-agent-thread-release-thread-play-complete='true']")).toBeAttached()
   await expect(page.locator("[data-rly-agent-thread-message]")).toHaveCount(4)
   await expect(
-    page.locator("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-shape='circle']")
+    page.locator("[data-rly-agent-thread-actor='human'] [data-rly-agent-thread-avatar-form='circle']")
   ).toHaveCount(1)
   await expect(
-    page.locator("[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-shape='rounded-square']")
+    page.locator("[data-rly-agent-thread-actor='agent'] [data-rly-agent-thread-avatar-form='rounded-square']")
   ).toHaveCount(2)
   const append = page.getByRole("button", { name: "Append agent update" })
   await expect(append).toBeFocused()

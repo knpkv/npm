@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Glob from "glob"
 import { parse } from "yaml"
+import * as Predicate from "effect/Predicate"
 
 const fullCommitSha = /^[0-9a-f]{40}$/u
 const dockerDigest = /@sha256:[0-9a-f]{64}$/u
@@ -16,14 +17,14 @@ const collectUses = (value, location, results = [], kind) => {
     value.forEach((entry, index) => collectUses(entry, `${location}[${index}]`, results, kind))
     return results
   }
-  if (value === null || typeof value !== "object") return results
-  if (typeof value.uses === "string") {
+  if (value === null || !Predicate.isObjectOrArray(value)) return results
+  if (Predicate.isString(value.uses)) {
     results.push({ location: `${location}.uses`, uses: value.uses, step: value, kind })
   }
   for (const [key, entry] of Object.entries(value)) {
     const entryLocation = `${location}.${key}`
     if (key === "uses") continue
-    if (key === "jobs" && entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+    if (key === "jobs" && entry !== null && Predicate.isObjectOrArray(entry) && !Array.isArray(entry)) {
       for (const [jobName, job] of Object.entries(entry)) {
         collectUses(job, `${entryLocation}.${jobName}`, results, "job")
       }
@@ -41,7 +42,7 @@ const collectUses = (value, location, results = [], kind) => {
 const normalizedActionInputs = (step) => {
   const inputs = new Map()
   const duplicates = new Set()
-  if (step?.with === null || typeof step?.with !== "object" || Array.isArray(step.with)) {
+  if (step?.with === null || !Predicate.isObjectOrArray(step?.with) || Array.isArray(step.with)) {
     return { inputs, duplicates }
   }
   for (const [name, value] of Object.entries(step.with)) {
@@ -56,7 +57,7 @@ export const validateWorkflowActionPins = (document, location, localActions = ne
   const diagnostics = []
   const visit = (currentDocument, currentLocation, stack) => {
     const dockerImage = currentDocument?.runs?.using === "docker" ? currentDocument.runs.image : undefined
-    if (typeof dockerImage === "string" && dockerImage.startsWith("docker://") && !dockerDigest.test(dockerImage)) {
+    if (Predicate.isString(dockerImage) && dockerImage.startsWith("docker://") && !dockerDigest.test(dockerImage)) {
       diagnostics.push(`${currentLocation}.runs.image: Docker actions must use an immutable sha256 digest`)
     }
     for (const entry of collectUses(currentDocument, currentLocation)) {

@@ -8,13 +8,13 @@ export class TuiApplicationScope extends Context.Service<TuiApplicationScope, Sc
   "@knpkv/codecommit/TuiApplicationScope"
 ) {}
 
-export interface TuiTerminalSessionShape {
+export interface TuiTerminalSessionContract {
   readonly resume: Effect.Effect<void>
   readonly suspend: Effect.Effect<void>
 }
 
 /** Owns the alternate-screen transition required by same-terminal child applications. */
-export class TuiTerminalSession extends Context.Service<TuiTerminalSession, TuiTerminalSessionShape>()(
+export class TuiTerminalSession extends Context.Service<TuiTerminalSession, TuiTerminalSessionContract>()(
   "@knpkv/codecommit/TuiTerminalSession"
 ) {}
 
@@ -23,7 +23,7 @@ export const tuiApplicationScopeAtom = Atom.make<Scope.Scope | undefined>(undefi
   Atom.keepAlive
 )
 
-export const tuiTerminalSessionAtom = Atom.make<TuiTerminalSessionShape | undefined>(undefined).pipe(
+export const tuiTerminalSessionAtom = Atom.make<TuiTerminalSessionContract | undefined>(undefined).pipe(
   Atom.keepAlive
 )
 
@@ -41,7 +41,7 @@ export const tuiHostEnvironmentAtom = Atom.make<Record<string, string | undefine
 /** Creates the atom registry owned by one TUI program invocation. @internal */
 export const makeTuiApplicationRegistry = (
   applicationScope: Scope.Scope,
-  terminalSession: TuiTerminalSessionShape,
+  terminalSession: TuiTerminalSessionContract,
   hostEnvironment: Record<string, string | undefined>
 ) =>
   AtomRegistry.make({

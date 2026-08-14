@@ -41,9 +41,9 @@ const ProviderFailurePayload = Schema.Struct({ error: AgentProviderError })
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
-const decodePayload = <SchemaType, Encoded, Requirements>(
+const decodePayload = <SchemaType, Encoded, Requirements, UnparsedInput>(
   schema: Schema.Codec<SchemaType, Encoded, Requirements, never>,
-  payload: unknown
+  payload: UnparsedInput
 ): Effect.Effect<SchemaType, ApplicationServiceUnavailable, Requirements> =>
   Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(unavailable))
 
@@ -81,9 +81,7 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
       return {
         _tag: "job-started",
         ...common,
-        ...(payload.runtimeMetadata === undefined
-          ? {}
-          : { runtimeMetadata: payload.runtimeMetadata })
+        ...(!(payload.runtimeMetadata === undefined) && { runtimeMetadata: payload.runtimeMetadata })
       }
     }
     case "assistant-output": {

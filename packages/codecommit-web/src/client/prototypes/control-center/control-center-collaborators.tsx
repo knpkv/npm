@@ -12,7 +12,9 @@ export interface Collaborator {
   readonly role: string
 }
 
-export const releaseCollaborators: Readonly<Record<string, ReadonlyArray<Collaborator>>> = {
+interface ReleaseCollaboratorLookup extends Readonly<Record<string, ReadonlyArray<Collaborator>>> {}
+
+export const releaseCollaborators: ReleaseCollaboratorLookup = {
   "payments-api": [
     { avatar: avatarAlex, name: "Alex Kim", role: "Release owner" },
     { avatar: avatarMaya, name: "Maya Chen", role: "Production approver" }
@@ -65,7 +67,9 @@ export function CollaboratorStack({ people }: { readonly people: ReadonlyArray<C
 
 const entityFact = (entity: EntityRecord, label: string) => entity.facts.find(([candidate]) => candidate === label)?.[1]
 
-const avatarByName: Readonly<Record<string, string>> = {
+interface AvatarLookup extends Readonly<Record<string, string>> {}
+
+const avatarByName: AvatarLookup = {
   "Alex K.": avatarAlex,
   "Alex Kim": avatarAlex,
   "Jordan Lee": avatarJordan,

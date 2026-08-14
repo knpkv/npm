@@ -32,6 +32,7 @@ import {
 import { ContentBlobDigest, PersonRecord, RecordRevision, RoleAssignmentRecord } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const PersonRow = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -77,12 +78,12 @@ const avatarJson = Schema.fromJsonString(PersonAvatar)
 const encodeAvatar = Schema.encodeEffect(avatarJson)
 const decodeAvatar = Schema.decodeUnknownResult(avatarJson)
 
-const decodeActor = (row: typeof RoleAssignmentRow.Type): unknown =>
+const decodeActor = (row: typeof RoleAssignmentRow.Type) =>
   row.actorKind === "human"
     ? { _tag: "human", personId: row.personId }
     : { _tag: "agent", agentId: row.agentId }
 
-const decodeScope = (row: typeof RoleAssignmentRow.Type): unknown => {
+const decodeScope = (row: typeof RoleAssignmentRow.Type) => {
   switch (row.scopeKind) {
     case "workspace":
       return { _tag: "workspace", workspaceId: row.workspaceId }
@@ -100,7 +101,7 @@ const decodeScope = (row: typeof RoleAssignmentRow.Type): unknown => {
   }
 }
 
-const decodeLifecycle = (row: typeof RoleAssignmentRow.Type): unknown => {
+const decodeLifecycle = (row: typeof RoleAssignmentRow.Type) => {
   switch (row.lifecycleKind) {
     case "active":
       return { _tag: "active", assignedAt: row.assignedAt }
@@ -185,7 +186,7 @@ const makePeopleRepository = Effect.gen(function*() {
   const findPersonRows = (
     { personId, workspaceId }: { readonly personId: PersonId; readonly workspaceId: WorkspaceId }
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       person_id AS personId,
       display_name AS displayName,
@@ -201,7 +202,7 @@ const makePeopleRepository = Effect.gen(function*() {
   const findIdentityRows = (
     { personId, workspaceId }: { readonly personId: PersonId; readonly workspaceId: WorkspaceId }
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       plugin_connection_id AS pluginConnectionId,
       provider_id AS providerId,
       vendor_person_id AS vendorPersonId
@@ -210,10 +211,10 @@ const makePeopleRepository = Effect.gen(function*() {
       AND person_id = ${personId}
     ORDER BY provider_id, plugin_connection_id, vendor_person_id`
 
-  const quarantineMalformedPerson = Effect.fn("PeopleRepository.quarantineMalformedPerson")(function*(
+  const quarantineMalformedPerson = Effect.fn("PeopleRepository.quarantineMalformedPerson")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     personId: PersonId,
-    row: unknown
+    row: UnparsedInput
   ) {
     const observedAt = yield* DateTime.now
     yield* quarantineRow({
@@ -310,7 +311,7 @@ const makePeopleRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     identity: PersonSourceIdentity
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT person_id AS personId
+    const rows = yield* sql<SqlRow>`SELECT person_id AS personId
       FROM person_identities
       WHERE workspace_id = ${workspaceId}
         AND plugin_connection_id = ${identity.pluginConnectionId}
@@ -432,18 +433,22 @@ const makePeopleRepository = Effect.gen(function*() {
       readonly workspaceId: WorkspaceId
     }
   ) =>
-    sql<Record<string, unknown>>`${assignmentColumns}
+    sql<SqlRow>`${assignmentColumns}
       WHERE workspace_id = ${workspaceId}
         AND assignment_id = ${assignmentId}`
 
   const listAssignmentRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`${assignmentColumns}
+    sql<SqlRow>`${assignmentColumns}
       WHERE workspace_id = ${workspaceId}
       ORDER BY updated_at DESC, assignment_id`
 
   const quarantineMalformedAssignment = Effect.fn(
     "PeopleRepository.quarantineMalformedAssignment"
-  )(function*(workspaceId: WorkspaceId, row: unknown, fallbackKey: RoleAssignmentId | WorkspaceId) {
+  )(function*<UnparsedInput>(
+    workspaceId: WorkspaceId,
+    row: UnparsedInput,
+    fallbackKey: RoleAssignmentId | WorkspaceId
+  ) {
     const identity = Schema.decodeUnknownResult(RoleAssignmentIdentity)(row)
     const observedAt = yield* DateTime.now
     yield* quarantineRow({
@@ -663,7 +668,7 @@ const makePeopleRepository = Effect.gen(function*() {
           yield* updateAssignment({ workspaceId, assignment, revision: expectedRevision, timestamp: updatedAt })
           const changes = yield* readChanges(sql)
           if (changes === 0) {
-            const existing = yield* sql<Record<string, unknown>>`SELECT scope_kind AS scopeKind
+            const existing = yield* sql<SqlRow>`SELECT scope_kind AS scopeKind
               FROM role_assignments
               WHERE workspace_id = ${workspaceId}
                 AND assignment_id = ${assignment.assignmentId}`

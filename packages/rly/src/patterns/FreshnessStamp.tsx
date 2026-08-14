@@ -53,21 +53,21 @@ export type RlyFreshnessState = keyof typeof RLY_FRESHNESS_STAMP_VARIANTS.state
 /** Visual density supported by FreshnessStamp. */
 export type RlyFreshnessStampSize = keyof typeof RLY_FRESHNESS_STAMP_VARIANTS.size
 
-const freshnessWords: Readonly<Record<RlyFreshnessState, string>> = {
+const freshnessWords = {
   current: "Current",
   cached: "Cached",
   stale: "Stale",
   missing: "Missing",
   unavailable: "Unavailable"
-}
+} satisfies Readonly<Record<RlyFreshnessState, string>>
 
-const freshnessIcons: Readonly<Record<RlyFreshnessState, RlyIconName>> = {
+const freshnessIcons = {
   current: "check",
   cached: "clock",
   stale: "clock",
   missing: "minus",
   unavailable: "alert"
-}
+} satisfies Readonly<Record<RlyFreshnessState, RlyIconName>>
 
 type FreshnessTimeProps =
   { readonly dateTime: string; readonly time: string } | { readonly dateTime?: never; readonly time?: never }

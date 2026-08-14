@@ -16,12 +16,12 @@ interface ReadinessQuarantineDiagnostic {
 }
 
 /** Internal carrier that keeps malformed readiness values out of the public error channel. */
-export class MalformedReadinessRecord {
+export class MalformedReadinessRecord<Row = unknown> {
   readonly _tag = "MalformedReadinessRecord"
   readonly error: PersistedRecordError
-  readonly row: unknown
+  readonly row: Row
 
-  constructor(error: PersistedRecordError, row: unknown) {
+  constructor(error: PersistedRecordError, row: Row) {
     this.error = error
     this.row = row
   }
@@ -29,7 +29,8 @@ export class MalformedReadinessRecord {
 
 /** Attach an ephemeral raw row to a bounded readiness decode failure for quarantine after commit. */
 export const captureMalformedReadinessRow =
-  (row: unknown) => <Success, Failure, Requirements>(effect: Effect.Effect<Success, Failure, Requirements>) =>
+  <UnparsedInput>(row: UnparsedInput) =>
+  <Success, Failure, Requirements>(effect: Effect.Effect<Success, Failure, Requirements>) =>
     Effect.catchIf(
       effect,
       (failure): failure is Failure & PersistedRecordError => Predicate.isTagged("PersistedRecordError")(failure),

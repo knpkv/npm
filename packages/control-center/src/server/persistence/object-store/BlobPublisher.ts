@@ -7,12 +7,22 @@ import type { PinnedDirectory } from "./PinnedDirectory.js"
 export const BLOB_FILE_MODE = 0o600
 const TEMPORARY_NAME_ATTEMPTS = 4
 
-const openFailure = <E>(error: E): { readonly _tag: "OpenFailure"; readonly error: E } => ({
+interface OpenFailure<E> {
+  readonly _tag: "OpenFailure"
+  readonly error: E
+}
+
+interface LinkResult<A> {
+  readonly _tag: "LinkResult"
+  readonly linked: A
+}
+
+const openFailure = <E>(error: E): OpenFailure<E> => ({
   _tag: "OpenFailure",
   error
 })
 
-const linkResult = <A>(linked: A): { readonly _tag: "LinkResult"; readonly linked: A } => ({
+const linkResult = <A>(linked: A): LinkResult<A> => ({
   _tag: "LinkResult",
   linked
 })

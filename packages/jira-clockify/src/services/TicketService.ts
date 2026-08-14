@@ -3,12 +3,12 @@
  *
  * **Mental model**
  *
- * - **SubscriptionRef-backed state**: {@link TicketServiceShape.state} is a `SubscriptionRef<TicketState>`
- *   that the TUI subscribes to for live updates. {@link TicketServiceShape.refresh} fetches
+ * - **SubscriptionRef-backed state**: {@link TicketServiceContract.state} is a `SubscriptionRef<TicketState>`
+ *   that the TUI subscribes to for live updates. {@link TicketServiceContract.refresh} fetches
  *   tickets from Jira and updates the ref.
  * - **Field extraction helpers**: `extractNested` and `extractString` safely navigate the
  *   loosely-typed Jira API response without runtime crashes.
- * - **In-memory search**: {@link TicketServiceShape.search} filters the cached ticket list
+ * - **In-memory search**: {@link TicketServiceContract.search} filters the cached ticket list
  *   by key or summary substring.
  *
  * @module
@@ -20,6 +20,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { ConfigService } from "./ConfigService.js"
 
@@ -61,22 +62,26 @@ const emptyState: TicketState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const extractField = (fields: Record<string, unknown> | null | undefined, key: string): unknown => fields?.[key] ?? null
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const isJsonObject = Schema.is(JsonObject)
 
-const extractString = (fields: Record<string, unknown> | null | undefined, key: string): string | null => {
+const extractField = <Field>(fields: Readonly<Record<string, Field>> | null | undefined, key: string): Field | null =>
+  fields?.[key] ?? null
+
+const extractString = (fields: Record<string, Schema.Json> | null | undefined, key: string): string | null => {
   const val = extractField(fields, key)
-  return typeof val === "string" ? val : null
+  return Predicate.isString(val) ? val : null
 }
 
 const extractNested = (
-  fields: Record<string, unknown> | null | undefined,
+  fields: Record<string, Schema.Json> | null | undefined,
   key: string,
   nested: string
 ): string | null => {
   const val = extractField(fields, key)
-  if (Predicate.isObject(val)) {
+  if (isJsonObject(val)) {
     const v = val[nested]
-    return typeof v === "string" ? v : null
+    return Predicate.isString(v) ? v : null
   }
   return null
 }
@@ -86,10 +91,10 @@ const extractNested = (
  * {@link JiraTicket}. Single source of truth for the nested-field extraction —
  * reused by {@link fetchTicketByKey} so the two never drift.
  */
-export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: string): JiraTicket => {
+export const mapIssueToTicket = (issue: Record<string, Schema.Json>, fallbackKey?: string): JiraTicket => {
   const rawFields = issue["fields"]
-  const fields = Predicate.isObject(rawFields) ? rawFields : null
-  const key = typeof issue["key"] === "string" ? issue["key"] : (fallbackKey ?? "?")
+  const fields = isJsonObject(rawFields) ? rawFields : null
+  const key = Predicate.isString(issue["key"]) ? issue["key"] : (fallbackKey ?? "?")
   const rawLabels = fields?.["labels"]
   return {
     key,
@@ -98,7 +103,7 @@ export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: s
     priority: extractNested(fields, "priority", "name"),
     assignee: extractNested(fields, "assignee", "displayName"),
     type: extractNested(fields, "issuetype", "name") ?? "Task",
-    labels: Array.isArray(rawLabels) ? rawLabels.filter((label): label is string => typeof label === "string") : [],
+    labels: Array.isArray(rawLabels) ? rawLabels.filter((label): label is string => Predicate.isString(label)) : [],
     updated: extractString(fields, "updated") ?? new Date().toISOString()
   }
 }
@@ -107,13 +112,13 @@ export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: s
 // Service
 // ---------------------------------------------------------------------------
 
-export interface TicketServiceShape {
+export interface TicketServiceContract {
   readonly state: SubscriptionRef.SubscriptionRef<TicketState>
   readonly refresh: Effect.Effect<void, TicketError>
   readonly search: (text: string) => Effect.Effect<ReadonlyArray<JiraTicket>>
 }
 
-export class TicketService extends Context.Service<TicketService, TicketServiceShape>()("jcf/TicketService") {}
+export class TicketService extends Context.Service<TicketService, TicketServiceContract>()("jcf/TicketService") {}
 
 export const layer = Layer.effect(
   TicketService,
@@ -140,7 +145,7 @@ export const layer = Layer.effect(
       )
 
       const tickets: Array<JiraTicket> = (result.issues ?? [])
-        .filter(Predicate.isObject)
+        .filter(isJsonObject)
         .map((issue) => mapIssueToTicket(issue))
 
       yield* SubscriptionRef.set(ref, {
