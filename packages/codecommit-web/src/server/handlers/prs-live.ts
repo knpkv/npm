@@ -10,13 +10,19 @@
  *
  * @module
  */
-import { AwsClient, CacheService, ChildEnv, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
+import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
+import {
+  loadPullRequestDiff,
+  loadPullRequestDiffContent,
+  runPullRequestRelayReview
+} from "../review/PullRequestReview.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -58,10 +64,26 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
     }]
   })
 
+const selectedPullRequest = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  awsAccountId: string,
+  pullRequestId: Domain.PullRequestId
+): Effect.Effect<Domain.PullRequest, ApiError> => {
+  const pullRequest = pullRequests.find(
+    (candidate) =>
+      candidate.id === pullRequestId &&
+      (candidate.account.awsAccountId === awsAccountId || candidate.account.profile === awsAccountId)
+  )
+  return pullRequest === undefined
+    ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
+    : Effect.succeed(pullRequest)
+}
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
+    const readClient = yield* ReadClient.CodeCommitReadClient
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* BackgroundScope
     // A process-wide environment snapshot is a stable application service, not a
@@ -116,6 +138,34 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.map(encodeCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
+      .handle("diff", ({ params }) =>
+        Effect.gen(function*() {
+          const state = yield* SubscriptionRef.get(prService.state)
+          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          return yield* loadPullRequestDiff(readClient, pullRequest)
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handle("diffContent", ({ params, query }) =>
+        Effect.gen(function*() {
+          const state = yield* SubscriptionRef.get(prService.state)
+          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          return yield* loadPullRequestDiffContent(
+            readClient,
+            pullRequest,
+            query.revisionId,
+            params.fileIndex
+          )
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handle("relayReview", ({ params, payload }) =>
+        Effect.gen(function*() {
+          const state = yield* SubscriptionRef.get(prService.state)
+          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          return yield* runPullRequestRelayReview(
+            readClient,
+            pullRequest,
+            payload.revisionId,
+            payload.kind
+          )
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
           yield* copyToClipboard(payload.link).pipe(

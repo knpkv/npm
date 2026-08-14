@@ -6,6 +6,7 @@ import {
   ConfigService,
   PermissionService,
   PRService,
+  ReadClient,
   SandboxService,
   StatsService
 } from "@knpkv/codecommit-core"
@@ -222,6 +223,12 @@ const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRService
 // AwsClient for handlers that call AWS directly (e.g., createPR)
 const AwsClientLive_ = GatedAwsClientLive
 
+// Immutable diff and Relay reads use the Schema-decoded provider boundary.
+const ReadClientLive = ReadClient.CodeCommitReadClient.live.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+
 // Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
 const SandboxServicesLive = Layer.mergeAll(
@@ -245,9 +252,11 @@ const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
   AwsClientLive_,
+  ReadClientLive,
   SandboxServicesLive,
   StatsServiceLive,
-  PermissionLive
+  PermissionLive,
+  PlatformLive
 )
 
 // Prune old audit log entries on startup

@@ -59,7 +59,7 @@ import {
   RefreshCwIcon,
   TrashIcon
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
@@ -86,6 +86,12 @@ import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
 import { Separator } from "./ui/separator.js"
 import styles from "./pr-detail.module.css"
+
+const PullRequestReviewWorkspace = lazy(() =>
+  import("./pr-review-workspace.js").then((module) => ({
+    default: module.PullRequestReviewWorkspace
+  }))
+)
 
 const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
   tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
@@ -1048,6 +1054,19 @@ export function PRDetail() {
           <LifecycleInfo pr={pr} />
         </dl>
       </Surface>
+
+      <Suspense
+        fallback={
+          <StatePanel
+            announce="polite"
+            description="Preparing the exact-revision review workbench."
+            title="Loading diff tools"
+            tone="progress"
+          />
+        }
+      >
+        <PullRequestReviewWorkspace accountId={accountId ?? pr.account.profile} pullRequest={pr} />
+      </Suspense>
 
       <div className={styles.reviewWorkspace}>
         <section aria-label="Pull request narrative and comments" className={styles.contentColumn}>

@@ -25,7 +25,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - [Granted](https://granted.dev) with the `assume` executable configured for
   opening a selected pull request, or a selected changed file, in the matching
   AWS account console
-- A locally authenticated `codex` executable for optional Relay actions
+- A locally authenticated `codex` executable for optional Relay actions in both TUI and web mode
 - Docker for optional web-mode review sandboxes. Sandbox IDE ports are
   loopback-only and require the per-sandbox password shown by the web UI.
 - `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
@@ -36,9 +36,9 @@ CLI and TUI for AWS CodeCommit pull requests.
   currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
-  - `codecommit:GetDifferences` — exact-revision changed files
-  - `codecommit:GetBlob` — default API diff previews and mandatory exact-line publication validation
-  - `codecommit:GitPull` — explicit exact-head local diffs, detached worktrees, and Relay review
+  - `codecommit:GetDifferences` — exact-revision changed files in TUI and web review workbenches
+  - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, and mandatory exact-line publication validation
+  - `codecommit:GitPull` — explicit exact-head local diffs, detached worktrees, and TUI Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export and idempotent review-comment reconciliation
@@ -275,6 +275,25 @@ persisted or `codecommit.sandbox.id`-labeled container has confirmed shutdown.
 Every `/api/**` route requires the cookie, and mutations additionally require
 the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.
+
+Each pull-request page includes an exact-revision review workbench. It indexes
+the complete CodeCommit changed-file inventory, loads the selected before/after
+content through bounded `GetBlob` reads, and renders split or stacked text with
+the diffs.com-based `@knpkv/rly` adapter. Binary, non-UTF-8, and oversized files
+remain visible in the inventory with an explicit non-renderable state. Provider
+blob IDs and credential selectors remain server-private; the browser receives
+only the authenticated PR revision, numbered file inventory, safe paths, and
+bounded text selected for rendering.
+
+**Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
+revision after the server rechecks its revision ID. Full, security, tests, and
+explanation focuses are available. The server constructs a bounded patch from
+Schema-decoded CodeCommit blobs, marks repository text as untrusted evidence,
+and gives the agent no host tools or repository access. Findings are decoded
+into a bounded local deck and exact line findings appear beside the matching
+diff. Web Relay is advisory and read-only: it does not publish comments,
+approve, merge, or persist a review result, and a changed revision must be
+reloaded before another run.
 
 The development launcher advertises the Vite origin while proxying bootstrap
 and API traffic to the backend with its exact loopback origin. Sandbox iframes
