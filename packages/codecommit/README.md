@@ -280,20 +280,24 @@ Each pull-request page includes an exact-revision review workbench. It indexes
 the complete CodeCommit changed-file inventory, loads the selected before/after
 content through bounded `GetBlob` reads, and renders split or stacked text with
 the diffs.com-based `@knpkv/rly` adapter. Binary, non-UTF-8, and oversized files
-remain visible in the inventory with an explicit non-renderable state. Provider
-blob IDs and credential selectors remain server-private; the browser receives
-only the authenticated PR revision, numbered file inventory, safe paths, and
-bounded text selected for rendering.
+remain visible in the inventory with an explicit non-renderable state. File-mode
+changes are shown even when the text is unchanged. A selected file above the
+5,000-line combined input budget uses a bounded fallback instead of the
+synchronous renderer, and inactive selected-file text is released after ten
+seconds. Provider blob IDs and credential selectors remain server-private; the
+browser receives only the authenticated PR revision, numbered file inventory,
+safe paths and modes, and bounded text selected for rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
 revision after the server rechecks its revision ID. Full, security, tests, and
 explanation focuses are available. The server constructs a bounded patch from
-Schema-decoded CodeCommit blobs, marks repository text as untrusted evidence,
-and gives the agent no host tools or repository access. Findings are decoded
-into a bounded local deck and exact line findings appear beside the matching
-diff. Web Relay is advisory and read-only: it does not publish comments,
-approve, merge, or persist a review result, and a changed revision must be
-reloaded before another run.
+Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
+later files as soon as the cumulative patch byte budget is exceeded. It marks
+repository text as untrusted evidence and gives the agent no host tools or
+repository access. Findings are decoded into a bounded local deck and exact line
+findings appear beside the matching diff. Web Relay is advisory and read-only:
+it does not publish comments, approve, merge, or persist a review result, and a
+changed revision must be reloaded before another run.
 
 The development launcher advertises the Vite origin while proxying bootstrap
 and API traffic to the backend with its exact loopback origin. Sandbox iframes

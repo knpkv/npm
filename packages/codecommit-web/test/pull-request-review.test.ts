@@ -98,7 +98,9 @@ describe("CodeCommit web review boundary", () => {
         index: 0,
         status: "renamed",
         path: "src/index.ts",
-        previousPath: "src/old.ts"
+        previousPath: "src/old.ts",
+        beforeMode: "100644",
+        afterMode: "100644"
       }])
       expect(JSON.stringify(inventory)).not.toContain("c".repeat(40))
       expect(JSON.stringify(inventory)).not.toContain("d".repeat(40))
@@ -243,6 +245,44 @@ describe("CodeCommit web review boundary", () => {
       expect(patch).not.toContain("\"a/src/old.ts\"")
     }))
 
+  it.effect("preserves mode-only changes in the inventory and Relay patch", () =>
+    Effect.gen(function*() {
+      const modeOnly = new ReadClient.CodeCommitChangedFile({
+        before: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("f".repeat(40)),
+          mode: "100644",
+          path: "scripts/retry.ts"
+        }),
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("f".repeat(40)),
+          mode: "100755",
+          path: "scripts/retry.ts"
+        }),
+        status: "modified"
+      })
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode("#!/usr/bin/env bun\n")
+            })
+          ),
+        streamChangedFiles: () => Stream.make(modeOnly)
+      }
+
+      const inventory = yield* loadPullRequestDiff(client, pullRequest)
+      expect(inventory.files[0]).toMatchObject({ beforeMode: "100644", afterMode: "100755" })
+      const patch = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [modeOnly])
+      expect(patch).toContain("old mode 100644")
+      expect(patch).toContain("new mode 100755")
+    }))
+
   it.effect("rejects Relay patches beyond the bounded input limit", () =>
     Effect.gen(function*() {
       const addedFile = new ReadClient.CodeCommitChangedFile({
@@ -271,6 +311,85 @@ describe("CodeCommit web review boundary", () => {
       }, [addedFile]).pipe(Effect.flip)
       expect(failure.operation).toBe("relay-diff")
       expect(failure.message).toContain("786432-byte Relay review limit")
+    }))
+
+  it.effect("stops loading later files once the Relay patch byte budget is exceeded", () =>
+    Effect.gen(function*() {
+      const laterFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("1".repeat(40)),
+          mode: "100644",
+          path: "later.txt"
+        }),
+        status: "added"
+      })
+      const firstFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("2".repeat(40)),
+          mode: "100644",
+          path: "first.txt"
+        }),
+        status: "added"
+      })
+      const reads: Array<string> = []
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) => {
+          reads.push(blobId)
+          return Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode(blobId === firstFile.after?.blobId ? "x".repeat(786_500) : "later")
+            })
+          )
+        }
+      }
+
+      const failure = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [firstFile, laterFile]).pipe(Effect.flip)
+      expect(failure.operation).toBe("relay-diff")
+      expect(reads).toEqual([firstFile.after?.blobId])
+    }))
+
+  it.effect("loads every in-budget Relay file in inventory order", () =>
+    Effect.gen(function*() {
+      const files = ["first.txt", "second.txt"].map((path, index) =>
+        new ReadClient.CodeCommitChangedFile({
+          before: null,
+          after: new ReadClient.CodeCommitBlobMetadata({
+            blobId: ReadClient.CodeCommitBlobId.make(String(index + 3).repeat(40)),
+            mode: "100644",
+            path
+          }),
+          status: "added"
+        })
+      )
+      const reads: Array<string> = []
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) => {
+          reads.push(blobId)
+          return Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode(`${blobId.slice(0, 1)}\n`)
+            })
+          )
+        }
+      }
+
+      const patch = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, files)
+      expect(reads).toEqual(files.map((file) => file.after?.blobId))
+      expect(patch.indexOf("first.txt")).toBeLessThan(patch.indexOf("second.txt"))
     }))
 
   it.effect("fails fast when another Relay review holds the execution permit", () =>

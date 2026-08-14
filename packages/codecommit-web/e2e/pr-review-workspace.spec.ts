@@ -52,7 +52,14 @@ const routeReviewWorkspace = async (page: Page, expectedKind: "explain" | "revie
         revisionId: "revision-1",
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{ index: 0, status: "renamed", path: "src/retry.ts", previousPath: "src/old-retry.ts" }]
+        files: [{
+          index: 0,
+          status: "renamed",
+          path: "src/retry.ts",
+          previousPath: "src/old-retry.ts",
+          beforeMode: "100644",
+          afterMode: "100755"
+        }]
       }),
       contentType: "application/json",
       status: 200
@@ -142,6 +149,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
   await expect(page.getByText("Static patch review only.").first()).toBeVisible()
+  await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
   await expect(page.getByLabel("P3 finding: Before-path evidence")).toBeVisible()
 
@@ -184,7 +192,14 @@ test("reloads the diff only when the streamed pull request revision changes", as
         revisionId: currentRevision,
         baseCommit: "a".repeat(40),
         headCommit: (currentRevision === "revision-1" ? "b" : "c").repeat(40),
-        files: [{ index: 0, status: "modified", path: "src/retry.ts", previousPath: null }]
+        files: [{
+          index: 0,
+          status: "modified",
+          path: "src/retry.ts",
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }]
       }),
       contentType: "application/json",
       status: 200
@@ -247,7 +262,14 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
         revisionId: `revision-${pullRequestId}`,
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{ index: 0, status: "modified", path: "src/retry.ts", previousPath: null }]
+        files: [{
+          index: 0,
+          status: "modified",
+          path: "src/retry.ts",
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }]
       }),
       contentType: "application/json",
       status: 200
@@ -286,4 +308,191 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
   await expect(page.getByText("PR 43")).toBeVisible()
   await expect(page.getByText("Relay review failed")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Run Relay" })).toBeEnabled()
+})
+
+test("shows a mode-only change even when file text is unchanged", async ({ page }) => {
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: [{
+          index: 0,
+          status: "modified",
+          path: "scripts/retry.ts",
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100755"
+        }]
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex: 0,
+        revisionId: "revision-1",
+        state: "text",
+        before: "#!/usr/bin/env bun\n",
+        after: "#!/usr/bin/env bun\n"
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
+  await expect(page.getByText("No textual changes in this file.")).toBeVisible()
+})
+
+test("uses a bounded fallback for newline-dense files", async ({ page }) => {
+  const denseBefore = Array.from({ length: 2_501 }, (_, index) => `before ${index}`).join("\n")
+  const denseAfter = Array.from({ length: 2_501 }, (_, index) => `after ${index}`).join("\n")
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: [{
+          index: 0,
+          status: "modified",
+          path: "src/dense.ts",
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }]
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex: 0,
+        revisionId: "revision-1",
+        state: "text",
+        before: denseBefore,
+        after: denseAfter
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText("Diff too large to render")).toBeVisible()
+  await expect(page.getByText("This file exceeds the 5,000-line browser safety limit.")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(0)
+})
+
+test("evicts inactive file content while retaining same-file rerenders", async ({ page }) => {
+  const contentRequests = new Map<number, number>()
+  await page.clock.install()
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: ["one", "two"].map((name, index) => ({
+          index,
+          status: "modified",
+          path: `src/${name}.ts`,
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }))
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+    const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
+    contentRequests.set(fileIndex, (contentRequests.get(fileIndex) ?? 0) + 1)
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex,
+        revisionId: "revision-1",
+        state: "text",
+        before: `export const value = ${fileIndex}\n`,
+        after: `export const value = ${fileIndex + 1}\n`
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText("export const value = 1")).toBeVisible()
+  await page.getByRole("button", { name: "Stacked" }).click()
+  await expect(page.getByText("export const value = 1")).toBeVisible()
+  expect(contentRequests.get(0)).toBe(1)
+
+  await page.getByRole("button", { name: /File 2 of 2: src\/two\.ts/ }).click()
+  await expect(page.getByText("export const value = 2")).toBeVisible()
+  expect(contentRequests.get(1)).toBe(1)
+  await page.clock.fastForward(11_000)
+  await page.getByRole("button", { name: /File 1 of 2: src\/one\.ts/ }).click()
+  await expect.poll(() => contentRequests.get(0)).toBe(2)
 })

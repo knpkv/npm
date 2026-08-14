@@ -29,6 +29,26 @@ const reviewFocuses: ReadonlyArray<{
   { kind: "explain", label: "Explain", description: "Architecture and merge risks", icon: FileSearchIcon }
 ]
 
+const MAXIMUM_RENDERABLE_DIFF_INPUT_LINES = 5_000
+
+const lineCount = (text: string): number => {
+  if (text.length === 0) return 0
+  let count = 1
+  for (const character of text) {
+    if (character === "\n") count++
+  }
+  return count
+}
+
+const fileModeLabel = (file: PullRequestDiffResponse["files"][number]): string | null => {
+  if (file.beforeMode === null && file.afterMode !== null) return `new file mode ${file.afterMode}`
+  if (file.beforeMode !== null && file.afterMode === null) return `deleted file mode ${file.beforeMode}`
+  if (file.beforeMode !== null && file.afterMode !== null && file.beforeMode !== file.afterMode) {
+    return `mode ${file.beforeMode} → ${file.afterMode}`
+  }
+  return null
+}
+
 const priorityTone = (priority: RelayReviewFinding["priority"]): "critical" | "caution" | "neutral" =>
   priority === "P1" || priority === "P2" ? "critical" : priority === "P3" ? "caution" : "neutral"
 
@@ -113,7 +133,7 @@ const LoadedFileDiff = ({
       ApiClient.query("prs", "diffContent", {
         params: { awsAccountId: accountId, prId: pullRequestId, fileIndex: file.index },
         query: { revisionId },
-        timeToLive: "5 minutes"
+        timeToLive: "10 seconds"
       }),
     [accountId, file.index, pullRequestId, revisionId]
   )
@@ -151,6 +171,16 @@ const LoadedFileDiff = ({
             : "One side exceeds the bounded CodeCommit blob limit and cannot be rendered safely."
         }
         title={content.value.state === "binary" ? "Binary change" : "File too large"}
+        tone="neutral"
+      />
+    )
+  }
+
+  if (lineCount(content.value.before) + lineCount(content.value.after) > MAXIMUM_RENDERABLE_DIFF_INPUT_LINES) {
+    return (
+      <StatePanel
+        description={`This file exceeds the ${MAXIMUM_RENDERABLE_DIFF_INPUT_LINES.toLocaleString()}-line browser safety limit.`}
+        title="Diff too large to render"
         tone="neutral"
       />
     )
@@ -290,6 +320,7 @@ const ReadyReviewWorkspace = ({
   const reviewFailure = failedReview?.identity === reviewIdentity ? failedReview.message : null
   const isReviewing = reviewingIdentity === reviewIdentity
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
+  const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
   const files = diff.files.map(toRlyFile)
   const inventory: RlyDiffInventory = { files, state: "ready" }
 
@@ -400,7 +431,10 @@ const ReadyReviewWorkspace = ({
 
         <section aria-label="Selected file diff" className={styles.diffPane}>
           <header className={styles.diffToolbar}>
-            <code>{selectedFile?.path ?? "No changed file"}</code>
+            <span>
+              <code>{selectedFile?.path ?? "No changed file"}</code>
+              {selectedFileMode === null ? null : <small>{selectedFileMode}</small>}
+            </span>
             <div>
               <button aria-pressed={layout === "split"} onClick={() => setLayout("split")} type="button">
                 Split

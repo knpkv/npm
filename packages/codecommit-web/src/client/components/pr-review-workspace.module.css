@@ -112,13 +112,25 @@
   padding: var(--rly-space-12) var(--rly-space-16);
 }
 
-.diffToolbar > code {
+.diffToolbar > span {
+  display: grid;
+  gap: var(--rly-space-2);
+  min-inline-size: var(--rly-space-0);
+}
+
+.diffToolbar > span > code {
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   min-inline-size: var(--rly-space-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.diffToolbar > span > small {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
 }
 
 .diffToolbar > div {

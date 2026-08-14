@@ -176,7 +176,9 @@ const inventoryFile = (file: ReadClient.CodeCommitChangedFile, index: number) =>
   index,
   status: file.status,
   path: filePath(file),
-  previousPath: file.status === "renamed" ? (file.before?.path ?? null) : null
+  previousPath: file.status === "renamed" ? (file.before?.path ?? null) : null,
+  beforeMode: file.before?.mode ?? null,
+  afterMode: file.after?.mode ?? null
 })
 
 /** Load the complete changed-file inventory without exposing provider blob locators. */
@@ -269,12 +271,22 @@ const patchSidePath = (
 const patchIdentityPath = (file: ReadClient.CodeCommitChangedFile): string =>
   file.after?.path ?? file.before?.path ?? "unknown"
 
+const modePatchLines = (file: ReadClient.CodeCommitChangedFile): ReadonlyArray<string> => {
+  if (file.before === null && file.after !== null) return [`new file mode ${file.after.mode}`]
+  if (file.before !== null && file.after === null) return [`deleted file mode ${file.before.mode}`]
+  if (file.before !== null && file.after !== null && file.before.mode !== file.after.mode) {
+    return [`old mode ${file.before.mode}`, `new mode ${file.after.mode}`]
+  }
+  return []
+}
+
 const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
   const identity = patchIdentityPath(file)
   const before = patchSidePath("a", file.before)
   const after = patchSidePath("b", file.after)
   return [
     `diff --git a/${identity} b/${identity}`,
+    ...modePatchLines(file),
     `Binary files ${before} and ${after} differ`,
     ""
   ].join("\n")
@@ -286,6 +298,7 @@ const textPatch = (file: ReadClient.CodeCommitChangedFile, before: string, after
   const afterPath = patchSidePath("b", file.after)
   return [
     `diff --git a/${identity} b/${identity}`,
+    ...modePatchLines(file),
     createTwoFilesPatch(
       beforePath,
       afterPath,
@@ -304,24 +317,19 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
   scope: ExactReviewScope,
   files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
 ): Effect.fn.Return<string, PullRequestReviewError> {
-  const chunks = yield* Effect.forEach(files, (file) =>
-    loadFileContent(client, scope, file).pipe(
-      Effect.flatMap((content) => {
-        if (content.before.state === "oversized" || content.after.state === "oversized") {
-          return Effect.fail(reviewError(
-            "relay-diff",
-            `The exact content for ${filePath(file)} exceeds the provider review limit`
-          ))
-        }
-        return Effect.succeed(
-          content.before.state === "text" && content.after.state === "text"
-            ? textPatch(file, content.before.text, content.after.text)
-            : binaryPatch(file)
-        )
-      })
-    ), { concurrency: 8 })
   let bytes = 0
-  for (const chunk of chunks) {
+  const chunks: Array<string> = []
+  for (const file of files) {
+    const content = yield* loadFileContent(client, scope, file)
+    if (content.before.state === "oversized" || content.after.state === "oversized") {
+      return yield* reviewError(
+        "relay-diff",
+        `The exact content for ${filePath(file)} exceeds the provider review limit`
+      )
+    }
+    const chunk = content.before.state === "text" && content.after.state === "text"
+      ? textPatch(file, content.before.text, content.after.text)
+      : binaryPatch(file)
     bytes += textEncoder.encode(chunk).byteLength
     if (bytes > MAXIMUM_RELAY_PATCH_BYTES) {
       return yield* reviewError(
@@ -329,6 +337,7 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
         `The exact patch exceeds the ${MAXIMUM_RELAY_PATCH_BYTES}-byte Relay review limit`
       )
     }
+    chunks.push(chunk)
   }
   return chunks.join("\n")
 })

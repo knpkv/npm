@@ -84,7 +84,9 @@ const PullRequestDiffFileResponse = Schema.Struct({
   index: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   status: Schema.Literals(["added", "modified", "deleted", "renamed"]),
   path: Schema.String,
-  previousPath: Schema.NullOr(Schema.String)
+  previousPath: Schema.NullOr(Schema.String),
+  beforeMode: Schema.NullOr(Schema.String),
+  afterMode: Schema.NullOr(Schema.String)
 })
 
 /** Complete changed-file inventory bound to one immutable CodeCommit revision. */
