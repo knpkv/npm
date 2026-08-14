@@ -347,6 +347,47 @@ describe("CodeCommit web review boundary", () => {
       expect(distinctBlobReads).toBe(2)
     }))
 
+  it.effect("distinguishes binary metadata-only changes from changed binary content", () =>
+    Effect.gen(function*() {
+      const sameBlob = ReadClient.CodeCommitBlobId.make("f".repeat(40))
+      const binaryModeOnly = new ReadClient.CodeCommitChangedFile({
+        before: new ReadClient.CodeCommitBlobMetadata({
+          blobId: sameBlob,
+          mode: "100644",
+          path: "bin/tool"
+        }),
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: sameBlob,
+          mode: "100755",
+          path: "bin/tool"
+        }),
+        status: "modified"
+      })
+      const binaryClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new Uint8Array([0])
+            })
+          )
+      }
+      const scope = {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }
+
+      const metadataPatch = yield* collectRelayPatch(binaryClient, scope, [binaryModeOnly])
+      expect(metadataPatch).toContain("old mode 100644")
+      expect(metadataPatch).toContain("new mode 100755")
+      expect(metadataPatch).not.toContain("Binary files")
+
+      const contentPatch = yield* collectRelayPatch(binaryClient, scope, [changedFile])
+      expect(contentPatch).toContain("Binary files a/src/old.ts and b/src/index.ts differ")
+    }))
+
   it.effect("rejects Relay patches beyond the bounded input limit", () =>
     Effect.gen(function*() {
       const addedFile = new ReadClient.CodeCommitChangedFile({

@@ -30,6 +30,7 @@ const reviewFocuses: ReadonlyArray<{
 ]
 
 const MAXIMUM_RENDERABLE_DIFF_INPUT_LINES = 5_000
+const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
 
 const lineCount = (text: string): number => {
   if (text.length === 0) return 0
@@ -180,10 +181,15 @@ const LoadedFileDiff = ({
     )
   }
 
-  if (lineCount(content.value.before) + lineCount(content.value.after) > MAXIMUM_RENDERABLE_DIFF_INPUT_LINES) {
+  const beforeLines = lineCount(content.value.before)
+  const afterLines = lineCount(content.value.after)
+  if (
+    beforeLines + afterLines > MAXIMUM_RENDERABLE_DIFF_INPUT_LINES ||
+    beforeLines * afterLines > MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS
+  ) {
     return (
       <StatePanel
-        description={`This file exceeds the ${MAXIMUM_RENDERABLE_DIFF_INPUT_LINES.toLocaleString()}-line browser safety limit.`}
+        description="This file exceeds the browser diff-complexity safety limit."
         title="Diff too large to render"
         tone="neutral"
       />
@@ -512,12 +518,10 @@ export const PullRequestReviewWorkspace = ({
     () =>
       ApiClient.query("prs", "diff", {
         params: { awsAccountId: accountId, prId: pullRequest.id },
-        serializationKey: `${accountId}:${pullRequest.id}:${(
-          pullRequest.fetchedAt ?? pullRequest.lastModifiedDate
-        ).toISOString()}`,
+        serializationKey: `${accountId}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}`,
         timeToLive: "30 seconds"
       }),
-    [accountId, pullRequest.id, pullRequest.fetchedAt, pullRequest.lastModifiedDate]
+    [accountId, pullRequest.id, pullRequest.lastModifiedDate]
   )
   const diff = useAtomValue(diffAtom)
 

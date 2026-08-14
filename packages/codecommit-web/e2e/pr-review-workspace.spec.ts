@@ -177,7 +177,10 @@ test("reloads the diff only when the streamed pull request revision changes", as
   await page.route("**/api/events/", async (route) => {
     eventCount++
     if (eventCount >= 3) currentRevision = "revision-2"
-    const fetchedAt = currentRevision === "revision-1" ? pullRequest.fetchedAt : "2026-08-12T09:31:00.000Z"
+    const fetchedAt = new Date(Date.parse(pullRequest.fetchedAt) + eventCount * 1_000).toISOString()
+    const lastModifiedDate = currentRevision === "revision-1"
+      ? pullRequest.lastModifiedDate
+      : "2026-08-12T09:31:00.000Z"
     await route.fulfill({
       body: `data: ${
         JSON.stringify({
@@ -185,7 +188,7 @@ test("reloads the diff only when the streamed pull request revision changes", as
           currentUser: "reviewer",
           lastUpdated: fetchedAt,
           pendingReviewCount: 1,
-          pullRequests: [{ ...pullRequest, fetchedAt }],
+          pullRequests: [{ ...pullRequest, fetchedAt, lastModifiedDate }],
           sandboxes: [],
           status: "idle"
         })
@@ -378,8 +381,8 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
 })
 
 test("uses a bounded fallback for newline-dense files", async ({ page }) => {
-  const denseBefore = Array.from({ length: 2_501 }, (_, index) => `before ${index}`).join("\n")
-  const denseAfter = Array.from({ length: 2_501 }, (_, index) => `after ${index}`).join("\n")
+  const denseBefore = Array.from({ length: 2_499 }, (_, index) => `before ${index}`).join("\n")
+  const denseAfter = Array.from({ length: 2_499 }, (_, index) => `after ${index}`).join("\n")
   await page.route("**/api/events/", async (route) => {
     await route.fulfill({
       body: `data: ${
@@ -433,8 +436,73 @@ test("uses a bounded fallback for newline-dense files", async ({ page }) => {
 
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText("Diff too large to render")).toBeVisible()
-  await expect(page.getByText("This file exceeds the 5,000-line browser safety limit.")).toBeVisible()
+  await expect(page.getByText("This file exceeds the browser diff-complexity safety limit.")).toBeVisible()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(0)
+})
+
+test("renders small disjoint and large append-only changes within the complexity budget", async ({ page }) => {
+  const smallBefore = Array.from({ length: 20 }, (_, index) => `before ${index}`).join("\n")
+  const smallAfter = Array.from({ length: 20 }, (_, index) => `after ${index}`).join("\n")
+  const appendOnly = Array.from({ length: 4_000 }, (_, index) => `append ${index}`).join("\n")
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: ["small", "append"].map((name, index) => ({
+          index,
+          status: "modified",
+          path: `src/${name}.ts`,
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }))
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+    const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex,
+        revisionId: "revision-1",
+        state: "text",
+        before: fileIndex === 0 ? smallBefore : "",
+        after: fileIndex === 0 ? smallAfter : appendOnly
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText("after 0")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
+  await page.getByRole("button", { name: /File 2 of 2: src\/append\.ts/ }).click()
+  await expect(page.getByText("append 0")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
+  await expect(page.getByText("Diff too large to render")).toHaveCount(0)
 })
 
 test("evicts inactive file content while retaining same-file rerenders", async ({ page }) => {

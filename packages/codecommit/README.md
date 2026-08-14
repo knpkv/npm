@@ -282,11 +282,12 @@ content through bounded `GetBlob` reads, and renders split or stacked text with
 the diffs.com-based `@knpkv/rly` adapter. Binary, non-UTF-8, and oversized files
 remain visible in the inventory with an explicit non-renderable state. File-mode
 changes are shown even when the text is unchanged. A selected file above the
-5,000-line combined input budget uses a bounded fallback instead of the
-synchronous renderer, and inactive selected-file text is released after ten
-seconds. Provider blob IDs and credential selectors remain server-private; the
-browser receives only the authenticated PR revision, numbered file inventory,
-safe paths and modes, and bounded text selected for rendering.
+5,000-line combined input or 4,000,000-line-pair diff-complexity budget uses a
+bounded fallback instead of the synchronous renderer, and inactive selected-file
+text is released after ten seconds. Provider blob IDs and credential selectors
+remain server-private; the browser receives only the authenticated PR revision,
+numbered file inventory, safe paths and modes, and bounded text selected for
+rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
 revision after the server rechecks its revision ID and immutable base/head

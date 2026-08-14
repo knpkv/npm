@@ -298,14 +298,21 @@ const modePatchLines = (file: ReadClient.CodeCommitChangedFile): ReadonlyArray<s
   return []
 }
 
+const renamePatchLines = (file: ReadClient.CodeCommitChangedFile): ReadonlyArray<string> =>
+  file.before !== null && file.after !== null && file.before.path !== file.after.path
+    ? [`rename from ${file.before.path}`, `rename to ${file.after.path}`]
+    : []
+
 const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
   const identity = patchIdentityPath(file)
   const before = patchSidePath("a", file.before)
   const after = patchSidePath("b", file.after)
+  const contentChanged = file.before === null || file.after === null || file.before.blobId !== file.after.blobId
   return [
     `diff --git a/${identity} b/${identity}`,
     ...modePatchLines(file),
-    `Binary files ${before} and ${after} differ`,
+    ...renamePatchLines(file),
+    ...(contentChanged ? [`Binary files ${before} and ${after} differ`] : []),
     ""
   ].join("\n")
 }
