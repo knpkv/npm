@@ -6,7 +6,9 @@ import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import { Duration, Effect, Redacted, Ref, Result, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
-import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
+import { HttpServerResponse } from "effect/unstable/http"
+import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
+import { makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
   activateOwnerSessionBootstrap,
@@ -111,6 +113,21 @@ describe("CodeCommit web security boundary", () => {
     }
     expect(checked).toBeGreaterThan(0)
   })
+
+  it.effect("prevents caching selected-file source responses without changing their body", () =>
+    Effect.gen(function*() {
+      const content = {
+        fileIndex: 0,
+        revisionId: "revision-1",
+        state: "text",
+        before: "private before\n",
+        after: "private after\n"
+      } satisfies PullRequestDiffContentResponse
+      const response = yield* makeDiffContentResponse(content)
+
+      expect(response.headers["cache-control"]).toBe("no-store")
+      expect(yield* Effect.promise(() => HttpServerResponse.toWeb(response).json())).toEqual(content)
+    }))
 
   it.effect("rejects unauthenticated reads before endpoint execution", () =>
     Effect.gen(function*() {

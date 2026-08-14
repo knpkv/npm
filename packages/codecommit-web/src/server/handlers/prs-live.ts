@@ -15,9 +15,10 @@ import type { PullRequestRepoShape } from "@knpkv/codecommit-core/CacheService/r
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
+import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { ApiError, CodeCommitApi } from "../Api.js"
+import { ApiError, CodeCommitApi, type PullRequestDiffContentResponse } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 import {
   loadPullRequestDiff,
@@ -102,6 +103,12 @@ export const cachedPullRequest = (
     Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId))
   )
 
+/** Keep proprietary source revisions out of browser and intermediary caches. */
+export const makeDiffContentResponse = (content: PullRequestDiffContentResponse) =>
+  HttpServerResponse.json(content, {
+    headers: { "cache-control": "no-store" }
+  }).pipe(Effect.mapError((error) => new ApiError({ message: error.message })))
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
@@ -169,16 +176,17 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
-      .handle("diffContent", ({ params, query }) =>
+      .handleRaw("diffContent", ({ params, query }) =>
         Effect.gen(function*() {
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
-          return yield* loadPullRequestDiffContent(
+          const content = yield* loadPullRequestDiffContent(
             readClient,
             pullRequest,
             query,
             params.fileIndex,
             changedFiles
           )
+          return yield* makeDiffContentResponse(content)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("relayReview", ({ params, payload }) =>
         Effect.gen(function*() {

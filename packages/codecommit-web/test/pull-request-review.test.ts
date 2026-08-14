@@ -288,6 +288,57 @@ describe("CodeCommit web review boundary", () => {
       expect(patch).not.toContain("\"a/src/old.ts\"")
     }))
 
+  it.effect("uses Git-compatible quoting for special paths in text and binary patches", () =>
+    Effect.gen(function*() {
+      const beforePath = "src/old\tline\nquote\"slash\\.ts"
+      const afterPath = "src/new\tline\nquote\"slash\\.ts"
+      const specialPathFile = new ReadClient.CodeCommitChangedFile({
+        before: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("d".repeat(40)),
+          mode: "100644",
+          path: beforePath
+        }),
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: afterPath
+        }),
+        status: "renamed"
+      })
+      const scope = {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }
+      const textClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode(blobId === specialPathFile.before?.blobId ? "before\n" : "after\n")
+            })
+          )
+      }
+      const text = yield* collectRelayPatch(textClient, scope, [specialPathFile])
+      const quotedBeforeIdentity = JSON.stringify(`a/${beforePath}`)
+      const quotedAfterIdentity = JSON.stringify(`b/${afterPath}`)
+
+      expect(text).toContain(`diff --git ${quotedBeforeIdentity} ${quotedAfterIdentity}`)
+      expect(text).toContain(`rename from ${JSON.stringify(beforePath)}`)
+      expect(text).toContain(`rename to ${JSON.stringify(afterPath)}`)
+      expect(text).toContain(`--- ${quotedBeforeIdentity}`)
+      expect(text).toContain(`+++ ${quotedAfterIdentity}`)
+
+      const binaryClient: ReadClient.CodeCommitReadClientService = {
+        ...textClient,
+        getBlob: ({ blobId }) =>
+          Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array([0]) }))
+      }
+      const binary = yield* collectRelayPatch(binaryClient, scope, [specialPathFile])
+      expect(binary).toContain(`Binary files ${quotedBeforeIdentity} and ${quotedAfterIdentity} differ`)
+    }))
+
   it.effect("preserves mode-only changes in the inventory and Relay patch", () =>
     Effect.gen(function*() {
       const modeOnly = new ReadClient.CodeCommitChangedFile({
