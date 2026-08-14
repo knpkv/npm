@@ -14,6 +14,13 @@ interface GateParams {
 }
 
 type AllowedState = "always_allowed" | "allowed"
+const MAXIMUM_CHANGED_FILE_PAGE_REQUESTS = 1_001
+
+interface ChangedFilePaginationState {
+  readonly nextToken: string | null
+  readonly pageRequests: number
+  readonly seenTokens: ReadonlySet<string>
+}
 
 /** Holds the decoded provider client before permission enforcement. */
 export class InnerCodeCommitReadClient extends Context.Service<
@@ -168,13 +175,33 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
       ))
 
   const streamChangedFiles: ReadClient.CodeCommitReadClientService["streamChangedFiles"] = (request) =>
-    Stream.paginate(initialPageToken(), (nextToken) =>
-      getChangedFilesPage({ ...request, nextToken }).pipe(
-        Effect.map((page) => [
+    Stream.paginate<ChangedFilePaginationState, ReadClient.CodeCommitChangedFile, ReadClient.CodeCommitReadError>(
+      { nextToken: null, pageRequests: 0, seenTokens: new Set() },
+      Effect.fn("PermissionedReadClient.changedFilesPage")(function*(state) {
+        if (state.pageRequests >= MAXIMUM_CHANGED_FILE_PAGE_REQUESTS) {
+          return yield* new ReadClient.CodeCommitMalformedResponseError({
+            operation: "GetDifferences",
+            diagnosticCode: "page-request-limit"
+          })
+        }
+        const page = yield* getChangedFilesPage({ ...request, nextToken: state.nextToken })
+        if (page.nextToken === null) return [page.files, Option.none<ChangedFilePaginationState>()]
+        if (state.seenTokens.has(page.nextToken)) {
+          return yield* new ReadClient.CodeCommitMalformedResponseError({
+            operation: "GetDifferences",
+            diagnosticCode: "repeated-page-token"
+          })
+        }
+        return [
           page.files,
-          page.nextToken === null ? Option.none<string | null>() : Option.some<string | null>(page.nextToken)
-        ])
-      ))
+          Option.some<ChangedFilePaginationState>({
+            nextToken: page.nextToken,
+            pageRequests: state.pageRequests + 1,
+            seenTokens: new Set([...state.seenTokens, page.nextToken])
+          })
+        ]
+      })
+    )
 
   return {
     discoverAccount: gated(

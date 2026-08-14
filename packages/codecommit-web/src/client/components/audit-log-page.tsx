@@ -6,6 +6,7 @@
  * @module
  */
 import { useAtom } from "@effect/atom-react"
+import { allOperations } from "@knpkv/codecommit-core/PermissionService/operations.js"
 import { ArrowLeftIcon, DownloadIcon, SearchIcon } from "lucide-react"
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
@@ -22,6 +23,11 @@ const secondaryVariant: BadgeVariant = "secondary"
 const defaultVariant: BadgeVariant = "default"
 const destructiveVariant: BadgeVariant = "destructive"
 const outlineVariant: BadgeVariant = "outline"
+
+export const auditOperationOptions = (): ReadonlyArray<string> => [
+  "all",
+  ...allOperations().map(([operation]) => operation)
+]
 
 interface AuditEntry {
   readonly id: number
@@ -165,15 +171,11 @@ export function AuditLogPage() {
             <SelectValue placeholder="Operation" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All operations</SelectItem>
-            <SelectItem value="getPullRequests">getPullRequests</SelectItem>
-            <SelectItem value="getCallerIdentity">getCallerIdentity</SelectItem>
-            <SelectItem value="createPullRequest">createPullRequest</SelectItem>
-            <SelectItem value="listRepositories">listRepositories</SelectItem>
-            <SelectItem value="listBranches">listBranches</SelectItem>
-            <SelectItem value="getPullRequest">getPullRequest</SelectItem>
-            <SelectItem value="getDifferences">getDifferences</SelectItem>
-            <SelectItem value="getCommentsForPullRequest">getCommentsForPullRequest</SelectItem>
+            {auditOperationOptions().map((operation) => (
+              <SelectItem key={operation} value={operation}>
+                {operation === "all" ? "All operations" : operation}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select

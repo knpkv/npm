@@ -460,6 +460,42 @@ describe("CodeCommit web security boundary", () => {
         { operation: "getDifferences", permissionState: "allowed" },
         { operation: "getDifferences", permissionState: "allowed" }
       ])
+
+      const repeatedCalls = yield* Ref.make(0)
+      const repeatedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const repeatedToken = ReadClient.CodeCommitPageToken.make("repeated-page")
+      const repeatedClient = yield* makePermissionedReadClient({
+        ...inner,
+        getChangedFilesPage: () =>
+          Ref.update(repeatedCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: [],
+                nextToken: repeatedToken,
+                providerPageLimit: 100
+              })
+            )
+          )
+      }).pipe(
+        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(repeatedAudit))
+      )
+
+      const repeatedResult = yield* Effect.result(Stream.runDrain(repeatedClient.streamChangedFiles(differenceRequest)))
+      expect(Result.isFailure(repeatedResult)).toBe(true)
+      if (Result.isFailure(repeatedResult)) {
+        expect(repeatedResult.failure).toMatchObject({
+          _tag: "CodeCommitMalformedResponseError",
+          operation: "GetDifferences",
+          diagnosticCode: "repeated-page-token"
+        })
+      }
+      expect(yield* Ref.get(repeatedCalls)).toBe(2)
+      expect((yield* Ref.get(repeatedAudit)).map(({ operation }) => operation)).toEqual([
+        "getDifferences",
+        "getDifferences"
+      ])
     }))
 
   it.effect("gates and audits the PR list page and every hydrated PR detail call", () =>
