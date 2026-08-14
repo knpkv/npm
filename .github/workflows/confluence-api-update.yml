@@ -45,9 +45,7 @@ jobs:
 
       - name: Build generated client and consumer
         if: steps.check.outputs.updated == 'true'
-        run: |
-          pnpm --filter @knpkv/confluence-api-client build
-          pnpm --filter @knpkv/confluence-to-markdown build
+        run: pnpm --filter @knpkv/confluence-to-markdown... build
 
       - name: Run generated-client and consumer tests
         if: steps.check.outputs.updated == 'true'
