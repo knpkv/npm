@@ -55,9 +55,11 @@ type RefreshSinglePREnv =
   | SubscriptionRepo
   | ConfigService
 
-export type RefreshSinglePRResult = "updated"
+export interface RefreshSinglePRResult {
+  readonly revisionId: string
+  readonly sourceCommit: string
+}
 export type RefreshSinglePRError = AwsClientError | RefreshError
-const refreshSinglePRUpdated: RefreshSinglePRResult = "updated"
 
 /** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
 const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: string) =>
@@ -193,7 +195,10 @@ export const makeRefreshSinglePR = (
     yield* prRepo.upsert(freshUpsert).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [awsAccountId], cause }))
     )
-    return refreshSinglePRUpdated
+    return {
+      revisionId: detail.revisionId,
+      sourceCommit: detail.sourceCommit
+    }
   })
 
   return (

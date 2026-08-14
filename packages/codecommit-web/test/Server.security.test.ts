@@ -546,9 +546,7 @@ describe("CodeCommit web security boundary", () => {
         const client = yield* makePermissionedReadClient(inner).pipe(
           Effect.provideService(
             PermissionService,
-            makePermissionService((operation) =>
-              operation === "listPullRequests" ? "always_allow" : operation === "getPullRequests" ? "deny" : "allow"
-            )
+            makePermissionService((operation) => operation === "listPullRequests" ? "always_allow" : "allow")
           ),
           Effect.provideService(
             PermissionGate,

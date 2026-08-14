@@ -39,6 +39,7 @@ const EpochFallback = new Date(0)
 // Bidirectional Schema: raw AWS GetPullRequest response ↔ PullRequestDetail
 const RawGetPullRequestResponse = Schema.Struct({
   pullRequest: Schema.optional(Schema.Struct({
+    revisionId: Schema.optional(Schema.String),
     title: Schema.optional(Schema.String),
     description: Schema.optional(Schema.String),
     authorArn: Schema.optional(Schema.String),
@@ -47,6 +48,7 @@ const RawGetPullRequestResponse = Schema.Struct({
       repositoryName: Schema.optional(Schema.String),
       sourceReference: Schema.optional(Schema.String),
       destinationReference: Schema.optional(Schema.String),
+      sourceCommit: Schema.optional(Schema.String),
       mergeMetadata: Schema.optional(Schema.Struct({
         isMerged: Schema.optional(Schema.Boolean),
         mergedBy: Schema.optional(Schema.String)
@@ -65,6 +67,8 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
       const isMerged = target?.mergeMetadata?.isMerged === true
       const mergedByArn = target?.mergeMetadata?.mergedBy
       return {
+        revisionId: pr?.revisionId ?? "",
+        sourceCommit: target?.sourceCommit ?? "",
         title: pr?.title ?? "",
         description: pr?.description,
         author: pr?.authorArn ? normalizeAuthor(pr.authorArn) : "unknown",
@@ -80,6 +84,7 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
     }),
     encode: SchemaGetter.transform((detail) => ({
       pullRequest: {
+        revisionId: detail.revisionId,
         title: detail.title,
         description: detail.description,
         authorArn: detail.author,
@@ -87,7 +92,8 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
         pullRequestTargets: [{
           repositoryName: detail.repositoryName,
           sourceReference: detail.sourceBranch,
-          destinationReference: detail.destinationBranch
+          destinationReference: detail.destinationBranch,
+          sourceCommit: detail.sourceCommit
         }],
         creationDate: detail.creationDate,
         lastActivityDate: detail.lastActivityDate

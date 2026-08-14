@@ -395,12 +395,20 @@ describe("CodeCommit web review boundary", () => {
         ...makeReadClient(),
         getBlob: ({ blobId }) => {
           modeOnlyBlobReads += 1
-          return Effect.succeed(
-            new ReadClient.CodeCommitBlobContent({
-              blobId,
-              bytes: new TextEncoder().encode("#!/usr/bin/env bun\n")
+          return blobId === modeOnly.before?.blobId
+            ? Effect.fail(
+              new ReadClient.CodeCommitBlobTooLargeError({
+                operation: "GetBlob",
+                maximumBytes: 1_048_576,
+                actualBytes: 1_048_577,
+                source: "read-client"
+              })
+            )
+            : makeReadClient().getBlob({
+              account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+              repositoryName: pullRequest.repositoryName,
+              blobId
             })
-          )
         },
         streamChangedFiles: () => Stream.make(modeOnly)
       }
@@ -415,7 +423,7 @@ describe("CodeCommit web review boundary", () => {
       expect(patch).toContain("old mode 100644")
       expect(patch).toContain("new mode 100755")
       expect(patch).toContain("diff --git a/scripts/retry.ts b/scripts/retry.ts")
-      expect(modeOnlyBlobReads).toBe(1)
+      expect(modeOnlyBlobReads).toBe(0)
 
       const unchangedProviderMode = new ReadClient.CodeCommitChangedFile({
         before: new ReadClient.CodeCommitBlobMetadata({
@@ -477,6 +485,29 @@ describe("CodeCommit web review boundary", () => {
         revision
       }, [changedFile])
       expect(distinctBlobReads).toBe(2)
+
+      let distinctOversizedReads = 0
+      const distinctOversizedClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: () => {
+          distinctOversizedReads += 1
+          return Effect.fail(
+            new ReadClient.CodeCommitBlobTooLargeError({
+              operation: "GetBlob",
+              maximumBytes: 1_048_576,
+              actualBytes: 1_048_577,
+              source: "read-client"
+            })
+          )
+        }
+      }
+      const oversizedFailure = yield* collectRelayPatch(distinctOversizedClient, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [changedFile]).pipe(Effect.flip)
+      expect(oversizedFailure.message).toContain("provider review limit")
+      expect(distinctOversizedReads).toBeGreaterThan(0)
     }))
 
   it.effect("distinguishes binary metadata-only changes from changed binary content", () =>

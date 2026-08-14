@@ -99,6 +99,13 @@ export const PullRequestDiffResponse = Schema.Struct({
 })
 export type PullRequestDiffResponse = typeof PullRequestDiffResponse.Type
 
+/** Exact provider revision observed by a completed single-PR refresh. */
+export const PullRequestRefreshResponse = Schema.Struct({
+  revisionId: Schema.String,
+  headCommit: Schema.String
+})
+export type PullRequestRefreshResponse = typeof PullRequestRefreshResponse.Type
+
 /** Bounded text for one inventory entry; exceptional content remains explicit. */
 export const PullRequestDiffContentResponse = Schema.Struct({
   fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -225,7 +232,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
-      success: Schema.String,
+      success: PullRequestRefreshResponse,
       error: ApiError
     })
   )

@@ -736,12 +736,31 @@ export function PRDetail() {
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
+  const reviewedRevisionRef = useRef<string | null>(null)
+  const invalidateReview = useCallback(
+    (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
+      const revision = `${accountKey ?? ""}:${prId ?? ""}:${refreshed.revisionId}:${refreshed.headCommit}`
+      const changed = reviewedRevisionRef.current !== revision
+      reviewedRevisionRef.current = revision
+      if (force || changed) {
+        setReviewRefreshGeneration((current) => current + 1)
+      }
+    },
+    [accountKey, prId]
+  )
+  const refreshAfterApprovalMutation = useCallback(() => {
+    if (!accountKey || !prId) return
+    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+      (refreshed) => invalidateReview(refreshed, false),
+      () => {}
+    )
+  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
     if (!accountKey || !prId || isRefreshing) return
     setIsRefreshing(true)
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
-      () => {
-        setReviewRefreshGeneration((current) => current + 1)
+      (refreshed) => {
+        invalidateReview(refreshed, true)
         setIsRefreshing(false)
       },
       (cause: unknown) => {
@@ -751,7 +770,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [accountKey, isRefreshing, prId, refreshSingleWithResult])
+  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
 
   // Copy console URL
   const consoleUrl = pr
@@ -1129,9 +1148,7 @@ export function PRDetail() {
                 currentUser={state.currentUser}
                 key={card.ruleName}
                 knownUserArns={knownUserArns}
-                onRefresh={() =>
-                  refreshSingle({ params: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })
-                }
+                onRefresh={refreshAfterApprovalMutation}
                 onSetApprovers={(arns) => {
                   const existing = pr.approvalRules.find(
                     (rule) => rule.ruleName === card.ruleName && !rule.fromTemplate

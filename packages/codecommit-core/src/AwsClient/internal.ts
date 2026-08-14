@@ -270,6 +270,8 @@ export interface DeleteApprovalRuleParams {
 }
 
 export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequestDetail")({
+  revisionId: Schema.String,
+  sourceCommit: Schema.String,
   title: Schema.String,
   description: Schema.optional(Schema.String),
   author: Schema.String,

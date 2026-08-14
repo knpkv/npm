@@ -4,6 +4,7 @@ const pullRequest = {
   account: {
     awsAccountId: "111111111111",
     profile: "production",
+    repoAccountId: "111111111111",
     region: "eu-west-1"
   },
   approvalRules: [],
@@ -252,7 +253,14 @@ test("reloads after a completed manual refresh without refetching for ordinary S
         currentRevision = "revision-2"
       }
     }
-    await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
+    await route.fulfill({
+      body: JSON.stringify({
+        revisionId: currentRevision,
+        headCommit: (currentRevision === "revision-1" ? "b" : "c").repeat(40)
+      }),
+      contentType: "application/json",
+      status: 200
+    })
   })
 
   await page.goto("/accounts/111111111111/prs/42")
@@ -278,6 +286,96 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
   expect(diffRequestCount).toBe(3)
+})
+
+test("invalidates approver refreshes once per observed head without polling churn", async ({ page }) => {
+  let approvalRequests = 0
+  let diffRequestCount = 0
+  let refreshRequestCount = 0
+  let currentRevision = "revision-1"
+
+  await page.clock.install()
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    diffRequestCount++
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: currentRevision,
+        baseCommit: "a".repeat(40),
+        headCommit: (currentRevision === "revision-1" ? "b" : "c").repeat(40),
+        files: [{
+          index: 0,
+          status: "modified",
+          path: "src/retry.ts",
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }]
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+    const revisionId = new URL(route.request().url()).searchParams.get("revisionId")
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex: 0,
+        revisionId,
+        state: "text",
+        before: "export const retries = 2\n",
+        after: `export const retries = ${revisionId === "revision-1" ? "3" : "4"}\n`
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/approval-rules", async (route) => {
+    approvalRequests++
+    await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
+  })
+  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+    refreshRequestCount++
+    if (approvalRequests > 0) currentRevision = "revision-2"
+    await route.fulfill({
+      body: JSON.stringify({ revisionId: currentRevision, headCommit: "c".repeat(40) }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  expect(diffRequestCount).toBe(1)
+  const initialRefreshRequestCount = refreshRequestCount
+
+  await page.getByRole("button", { name: "andrey" }).first().click()
+  await expect.poll(() => approvalRequests).toBe(1)
+  await page.clock.fastForward(501)
+  await expect.poll(() => refreshRequestCount).toBeGreaterThan(initialRefreshRequestCount)
+  await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
+  expect(diffRequestCount).toBe(2)
+
+  await page.clock.fastForward(10_000)
+  await expect.poll(() => refreshRequestCount).toBeGreaterThan(initialRefreshRequestCount + 1)
+  expect(diffRequestCount).toBe(2)
 })
 
 test("scopes file selection to the exact pull request while preserving same-revision layout state", async ({ page }) => {

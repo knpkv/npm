@@ -496,21 +496,26 @@ export const collectRelayPatchEvidence = Effect.fn("PullRequestReview.collectRel
   const chunks: Array<string> = []
   const anchors: Array<RelayFileAnchors> = []
   for (const file of files) {
-    const content = yield* loadFileContent(client, scope, file)
-    if (content.before.state === "oversized" || content.after.state === "oversized") {
-      return yield* reviewError(
-        "relay-diff",
-        `The exact content for ${filePath(file)} exceeds the provider review limit`
-      )
-    }
     let chunk: string
-    if (content.before.state === "text" && content.after.state === "text") {
-      yield* ensureRelayDiffComplexity(file, content.before.text, content.after.text)
-      chunk = textPatch(file, content.before.text, content.after.text, renderPatch)
-      anchors.push(relayFileAnchors(file, chunk))
-    } else {
+    if (file.before !== null && file.after !== null && file.before.blobId === file.after.blobId) {
       chunk = binaryPatch(file)
       anchors.push(relayFileAnchors(file, null))
+    } else {
+      const content = yield* loadFileContent(client, scope, file)
+      if (content.before.state === "oversized" || content.after.state === "oversized") {
+        return yield* reviewError(
+          "relay-diff",
+          `The exact content for ${filePath(file)} exceeds the provider review limit`
+        )
+      }
+      if (content.before.state === "text" && content.after.state === "text") {
+        yield* ensureRelayDiffComplexity(file, content.before.text, content.after.text)
+        chunk = textPatch(file, content.before.text, content.after.text, renderPatch)
+        anchors.push(relayFileAnchors(file, chunk))
+      } else {
+        chunk = binaryPatch(file)
+        anchors.push(relayFileAnchors(file, null))
+      }
     }
     const separatorBytes = chunks.length === 0 ? 0 : textEncoder.encode(RELAY_PATCH_SEPARATOR).byteLength
     bytes += separatorBytes + textEncoder.encode(chunk).byteLength

@@ -46,10 +46,14 @@ describe("PR handler selection", () => {
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
-      const acknowledged = yield* Deferred.make<string>()
+      const acknowledged = yield* Deferred.make<{ readonly revisionId: string; readonly headCommit: string }>()
+      const refreshedRevision: PRService.RefreshSinglePRResult = {
+        revisionId: "revision-2",
+        sourceCommit: "c".repeat(40)
+      }
       const refresh = Deferred.succeed(started, undefined).pipe(
         Effect.andThen(Deferred.await(release)),
-        Effect.as<PRService.RefreshSinglePRResult>("updated")
+        Effect.as(refreshedRevision)
       )
 
       yield* completeSinglePullRequestRefresh(refresh).pipe(
@@ -60,7 +64,10 @@ describe("PR handler selection", () => {
       expect(yield* Deferred.isDone(acknowledged)).toBe(false)
 
       yield* Deferred.succeed(release, undefined)
-      expect(yield* Deferred.await(acknowledged)).toBe("ok")
+      expect(yield* Deferred.await(acknowledged)).toEqual({
+        revisionId: refreshedRevision.revisionId,
+        headCommit: refreshedRevision.sourceCommit
+      })
     }))
 
   it.effect("does not acknowledge a provider-denied manual refresh", () =>

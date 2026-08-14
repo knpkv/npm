@@ -20,9 +20,10 @@ describe("normalizeApproverIdentity", () => {
 })
 
 describe("pull request review client guardrails", () => {
-  it("falls back when a refresh Error has no usable message", () => {
+  it("falls back when a refresh failure has no usable Error message", () => {
     expect(refreshFailureDescription(new Error("   "))).toBe("Try the refresh again.")
     expect(refreshFailureDescription(new Error("Provider unavailable"))).toBe("Provider unavailable")
+    expect(refreshFailureDescription("Provider unavailable")).toBe("Try the refresh again.")
   })
 
   it("selects line findings using the path on their exact diff side", () => {

@@ -18,7 +18,12 @@ import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } 
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { ApiError, CodeCommitApi, type PullRequestDiffContentResponse } from "../Api.js"
+import {
+  ApiError,
+  CodeCommitApi,
+  type PullRequestDiffContentResponse,
+  type PullRequestRefreshResponse
+} from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 import {
   loadPullRequestDiff,
@@ -109,10 +114,13 @@ export const makeDiffContentResponse = (content: PullRequestDiffContentResponse)
     headers: { "cache-control": "no-store" }
   }).pipe(Effect.mapError((error) => new ApiError({ message: error.message })))
 
-/** A manual refresh is acknowledged only after its durable provider projection completes. */
+/** Complete a durable single-PR refresh and return its immutable provider revision identity. */
 export const completeSinglePullRequestRefresh = <E, R>(
   refresh: Effect.Effect<PRService.RefreshSinglePRResult, E, R>
-): Effect.Effect<string, E, R> => refresh.pipe(Effect.as("ok"))
+): Effect.Effect<PullRequestRefreshResponse, E, R> =>
+  refresh.pipe(
+    Effect.map(({ revisionId, sourceCommit }) => ({ revisionId, headCommit: sourceCommit }))
+  )
 
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {

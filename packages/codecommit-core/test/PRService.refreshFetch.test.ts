@@ -62,6 +62,8 @@ describe("fetchAndUpsertPRs", () => {
     approvalRules: []
   })
   const providerOpenDetail = Schema.decodeSync(PullRequestDetail)({
+    revisionId: "revision-35",
+    sourceCommit: "a".repeat(40),
     title: "Still open at provider",
     author: "author",
     status: "OPEN",
