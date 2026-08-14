@@ -469,6 +469,7 @@ const ReadyReviewWorkspace = ({
               return (
                 <button
                   aria-pressed={kind === focus.kind}
+                  disabled={isReviewing}
                   key={focus.kind}
                   onClick={() => setKind(focus.kind)}
                   title={focus.description}

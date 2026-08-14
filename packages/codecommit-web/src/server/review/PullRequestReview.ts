@@ -2,7 +2,7 @@
 import { streamEvents } from "@knpkv/ai-codex"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
-import { createTwoFilesPatch } from "diff"
+import { createTwoFilesPatch, parsePatch } from "diff"
 import { Cache, Data, Effect, Exit, Option, Predicate, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import type * as Semaphore from "effect/Semaphore"
@@ -73,6 +73,18 @@ interface ExceptionalSide {
 }
 
 type LoadedSide = TextSide | ExceptionalSide
+
+interface RelayFileAnchors {
+  readonly beforePath: string | null
+  readonly afterPath: string | null
+  readonly beforeLines: ReadonlySet<number>
+  readonly afterLines: ReadonlySet<number>
+}
+
+interface RelayPatchEvidence {
+  readonly patch: string
+  readonly anchors: ReadonlyArray<RelayFileAnchors>
+}
 
 const reviewError = (operation: string, message: string, cause?: unknown): PullRequestReviewError =>
   new PullRequestReviewError({ operation, message, ...(cause === undefined ? {} : { cause }) })
@@ -380,6 +392,48 @@ const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
 
 type PatchRenderer = typeof createTwoFilesPatch
 
+const changedLinesFromPatch = (patch: string): {
+  readonly beforeLines: ReadonlySet<number>
+  readonly afterLines: ReadonlySet<number>
+} => {
+  const beforeLines = new Set<number>()
+  const afterLines = new Set<number>()
+  for (const parsed of parsePatch(patch)) {
+    for (const hunk of parsed.hunks) {
+      let beforeLine = hunk.oldStart
+      let afterLine = hunk.newStart
+      for (const line of hunk.lines) {
+        switch (line[0]) {
+          case "-":
+            beforeLines.add(beforeLine)
+            beforeLine += 1
+            break
+          case "+":
+            afterLines.add(afterLine)
+            afterLine += 1
+            break
+          case " ":
+            beforeLine += 1
+            afterLine += 1
+            break
+        }
+      }
+    }
+  }
+  return { beforeLines, afterLines }
+}
+
+const relayFileAnchors = (
+  file: ReadClient.CodeCommitChangedFile,
+  patch: string | null
+): RelayFileAnchors => ({
+  beforePath: file.before?.path ?? null,
+  afterPath: file.after?.path ?? null,
+  ...(patch === null
+    ? { beforeLines: new Set<number>(), afterLines: new Set<number>() }
+    : changedLinesFromPatch(patch))
+})
+
 const textPatch = (
   file: ReadClient.CodeCommitChangedFile,
   before: string,
@@ -430,15 +484,16 @@ const ensureRelayDiffComplexity = (
     : Effect.void
 }
 
-/** Build one bounded exact patch from Schema-decoded provider blobs. */
-export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch")(function*(
+/** Build one bounded exact patch and its changed-line evidence from Schema-decoded provider blobs. */
+export const collectRelayPatchEvidence = Effect.fn("PullRequestReview.collectRelayPatchEvidence")(function*(
   client: ReadClient.CodeCommitReadClientService,
   scope: ExactReviewScope,
   files: ReadonlyArray<ReadClient.CodeCommitChangedFile>,
   renderPatch: PatchRenderer = createTwoFilesPatch
-): Effect.fn.Return<string, PullRequestReviewError> {
+): Effect.fn.Return<RelayPatchEvidence, PullRequestReviewError> {
   let bytes = 0
   const chunks: Array<string> = []
+  const anchors: Array<RelayFileAnchors> = []
   for (const file of files) {
     const content = yield* loadFileContent(client, scope, file)
     if (content.before.state === "oversized" || content.after.state === "oversized") {
@@ -451,8 +506,10 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
     if (content.before.state === "text" && content.after.state === "text") {
       yield* ensureRelayDiffComplexity(file, content.before.text, content.after.text)
       chunk = textPatch(file, content.before.text, content.after.text, renderPatch)
+      anchors.push(relayFileAnchors(file, chunk))
     } else {
       chunk = binaryPatch(file)
+      anchors.push(relayFileAnchors(file, null))
     }
     bytes += textEncoder.encode(chunk).byteLength
     if (bytes > MAXIMUM_RELAY_PATCH_BYTES) {
@@ -463,8 +520,43 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
     }
     chunks.push(chunk)
   }
-  return chunks.join("\n")
+  return { patch: chunks.join("\n"), anchors }
 })
+
+/** Build one bounded exact patch from Schema-decoded provider blobs. */
+export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch")(function*(
+  client: ReadClient.CodeCommitReadClientService,
+  scope: ExactReviewScope,
+  files: ReadonlyArray<ReadClient.CodeCommitChangedFile>,
+  renderPatch: PatchRenderer = createTwoFilesPatch
+): Effect.fn.Return<string, PullRequestReviewError> {
+  return (yield* collectRelayPatchEvidence(client, scope, files, renderPatch)).patch
+})
+
+/** Reject Relay locations that are not exact changed-line or changed-file evidence. */
+export const validateRelayReviewAnchors = (
+  result: RelayReviewResult,
+  evidence: RelayPatchEvidence
+): Effect.Effect<void, PullRequestReviewError> => {
+  for (const finding of result.findings) {
+    const location = finding.location
+    if (location.scope === "general") continue
+    const valid = evidence.anchors.some((anchor) => {
+      if (location.scope === "file") {
+        return anchor.beforePath === location.filePath || anchor.afterPath === location.filePath
+      }
+      return location.side === "before"
+        ? anchor.beforePath === location.filePath && anchor.beforeLines.has(location.line)
+        : anchor.afterPath === location.filePath && anchor.afterLines.has(location.line)
+    })
+    if (!valid) {
+      return Effect.fail(
+        reviewError("relay-review-anchor", `Relay finding ${finding.id} references evidence outside the exact patch`)
+      )
+    }
+  }
+  return Effect.void
+}
 
 /** Run Relay only when the group-level execution slot is immediately available. */
 export const withRelayReviewPermit = <A, E, R>(
@@ -568,8 +660,8 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
     Effect.gen(function*() {
       const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevision)
       const files = yield* loadChangedFiles(client, scope, changedFiles)
-      const patch = yield* collectRelayPatch(client, scope, files)
-      const prompt = makeRelayReviewPrompt(scope, kind, patch)
+      const evidence = yield* collectRelayPatchEvidence(client, scope, files)
+      const prompt = makeRelayReviewPrompt(scope, kind, evidence.patch)
       if (textEncoder.encode(prompt).byteLength > MAXIMUM_RELAY_PROMPT_BYTES) {
         return yield* reviewError("relay-prompt", "The decoded Relay prompt exceeds its bounded input limit")
       }
@@ -596,6 +688,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
           "Relay returned malformed review JSON; no clean verdict was recorded"
         )
       }
+      yield* validateRelayReviewAnchors(result.value, evidence)
       return {
         pullRequestId: scope.revision.pullRequestId,
         revisionId: scope.revision.revisionId,

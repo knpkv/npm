@@ -5,7 +5,7 @@ import { PermissionService } from "@knpkv/codecommit-core/PermissionService/inde
 import { getOperationMeta } from "@knpkv/codecommit-core/PermissionService/operations.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
-import { Clock, Context, Effect, Random, Stream } from "effect"
+import { Clock, Context, Effect, Option, Random, Stream } from "effect"
 
 interface GateParams {
   readonly account: ReadClient.CodeCommitReadAccount
@@ -123,31 +123,42 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
     })
   }
 
-  const gatedStream = <P, A>(
-    operation: string,
-    context: (request: NoInfer<P>) => string,
-    account: (request: NoInfer<P>) => ReadClient.CodeCommitReadAccount,
-    method: (request: P) => Stream.Stream<A, ReadClient.CodeCommitReadError>
-  ) =>
-  (request: P): Stream.Stream<A, ReadClient.CodeCommitReadError> => {
-    const params = { operation, context: context(request), account: account(request) }
-    return Stream.unwrap(
-      Effect.gen(function*() {
-        const permissionState = yield* check(params)
-        const startedAt = yield* Clock.currentTimeMillis
-        return method(request).pipe(
-          Stream.ensuring(
-            Clock.currentTimeMillis.pipe(
-              Effect.flatMap((completedAt) => audit(params, permissionState, completedAt - startedAt))
-            )
-          )
-        )
-      })
-    )
-  }
-
   const self = (account: ReadClient.CodeCommitReadAccount) => account
   const nested = (request: { readonly account: ReadClient.CodeCommitReadAccount }) => request.account
+
+  const listPullRequestsPage = gated(
+    "getPullRequests",
+    (request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestsPage"]>[0]) =>
+      `List pull requests in ${request.repositoryName}`,
+    nested,
+    inner.listPullRequestsPage
+  )
+  const getChangedFilesPage = gated(
+    "getDifferences",
+    (request: Parameters<ReadClient.CodeCommitReadClientService["getChangedFilesPage"]>[0]) =>
+      `Read differences in ${request.repositoryName}`,
+    nested,
+    inner.getChangedFilesPage
+  )
+  const initialPageToken = (): string | null => null
+
+  const streamPullRequests: ReadClient.CodeCommitReadClientService["streamPullRequests"] = (request) =>
+    Stream.paginate(initialPageToken(), (nextToken) =>
+      listPullRequestsPage({ ...request, nextToken }).pipe(
+        Effect.map((page) => [
+          page.pullRequests,
+          page.nextToken === null ? Option.none<string | null>() : Option.some<string | null>(page.nextToken)
+        ])
+      ))
+
+  const streamChangedFiles: ReadClient.CodeCommitReadClientService["streamChangedFiles"] = (request) =>
+    Stream.paginate(initialPageToken(), (nextToken) =>
+      getChangedFilesPage({ ...request, nextToken }).pipe(
+        Effect.map((page) => [
+          page.files,
+          page.nextToken === null ? Option.none<string | null>() : Option.some<string | null>(page.nextToken)
+        ])
+      ))
 
   return {
     discoverAccount: gated(
@@ -168,18 +179,8 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
       nested,
       inner.getBlob
     ),
-    listPullRequestsPage: gated(
-      "getPullRequests",
-      (request) => `List pull requests in ${request.repositoryName}`,
-      nested,
-      inner.listPullRequestsPage
-    ),
-    streamPullRequests: gatedStream(
-      "getPullRequests",
-      (request) => `Stream pull requests in ${request.repositoryName}`,
-      nested,
-      inner.streamPullRequests
-    ),
+    listPullRequestsPage,
+    streamPullRequests,
     getPullRequest: gated(
       "getPullRequest",
       (request) => `Fetch PR #${request.pullRequestId}`,
@@ -192,17 +193,7 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
       nested,
       inner.getRepositoryIdentity
     ),
-    getChangedFilesPage: gated(
-      "getDifferences",
-      (request) => `Read differences in ${request.repositoryName}`,
-      nested,
-      inner.getChangedFilesPage
-    ),
-    streamChangedFiles: gatedStream(
-      "getDifferences",
-      (request) => `Stream differences in ${request.repositoryName}`,
-      nested,
-      inner.streamChangedFiles
-    )
+    getChangedFilesPage,
+    streamChangedFiles
   } satisfies ReadClient.CodeCommitReadClientService
 })

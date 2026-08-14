@@ -43,6 +43,13 @@ const makePermissionGateLive = Effect.gen(function*() {
   // refresh triggers getCallerIdentity + listRepositories at once).
   const pending = yield* Ref.make(new Map<string, PendingEntry>())
 
+  const removePending = (promptId: string): Effect.Effect<void> =>
+    Ref.update(pending, (m) => {
+      const next = new Map(m)
+      next.delete(promptId)
+      return next
+    }).pipe(Effect.andThen(hub.publish(RepoChange.PermissionResolved())))
+
   const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
     Effect.gen(function*() {
       const deferred = yield* Deferred.make<PermissionResponse>()
@@ -51,25 +58,12 @@ const makePermissionGateLive = Effect.gen(function*() {
 
       const response = yield* Deferred.await(deferred).pipe(
         Effect.timeout("30 seconds"),
-        Effect.catchTag("TimeoutError", () => {
-          return Effect.gen(function*() {
-            yield* Ref.update(pending, (m) => {
-              const n = new Map(m)
-              n.delete(prompt.id)
-              return n
-            })
-            yield* hub.publish(RepoChange.PermissionResolved())
-            return yield* Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
-          })
-        })
+        Effect.catchTag(
+          "TimeoutError",
+          () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
+        ),
+        Effect.ensuring(removePending(prompt.id))
       )
-
-      yield* Ref.update(pending, (m) => {
-        const n = new Map(m)
-        n.delete(prompt.id)
-        return n
-      })
-      yield* hub.publish(RepoChange.PermissionResolved())
 
       if (response === "deny") {
         return yield* Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "denied" }))

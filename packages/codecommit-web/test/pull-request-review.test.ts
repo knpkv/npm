@@ -1,14 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Fiber, Option, Semaphore, Stream } from "effect"
+import type { RelayReviewResult } from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
+  collectRelayPatchEvidence,
   loadPullRequestDiff,
   loadPullRequestDiffContent,
   makePullRequestChangedFilesSource,
   makeRelayReviewPrompt,
   parseRelayReviewResult,
+  validateRelayReviewAnchors,
   withRelayReviewPermit
 } from "../src/server/review/PullRequestReview.js"
 
@@ -705,4 +708,54 @@ describe("CodeCommit web review boundary", () => {
     )
     expect(Option.isSome(explanation)).toBe(true)
   })
+
+  it.effect("rejects Relay findings outside exact changed-file and changed-line evidence", () =>
+    Effect.gen(function*() {
+      const evidence = yield* collectRelayPatchEvidence(
+        makeReadClient(),
+        {
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          pullRequest,
+          revision
+        },
+        [changedFile]
+      )
+      const finding = {
+        id: "F1",
+        priority: "P2",
+        title: "Revision can race",
+        summary: "A stale revision may be reviewed.",
+        details: "The exact revision is not checked before content reads.",
+        recommendation: "Preflight the revision ID.",
+        verification: "Static patch review only.",
+        publicationTarget: "line-comment",
+        location: { scope: "line", filePath: "src/index.ts", line: 1, side: "after" }
+      } satisfies RelayReviewResult["findings"][number]
+
+      yield* validateRelayReviewAnchors({ findings: [finding], verdict: "One issue." }, evidence)
+      yield* validateRelayReviewAnchors({
+        findings: [{
+          ...finding,
+          id: "F2",
+          location: { scope: "line", filePath: "src/old.ts", line: 1, side: "before" }
+        }],
+        verdict: "One issue."
+      }, evidence)
+
+      const invalidLocations: ReadonlyArray<RelayReviewResult["findings"][number]["location"]> = [
+        { scope: "file", filePath: "src/missing.ts" },
+        { scope: "line", filePath: "src/index.ts", line: 2, side: "after" }
+      ]
+      for (const invalid of invalidLocations) {
+        const failure = yield* validateRelayReviewAnchors({
+          findings: [{
+            ...finding,
+            location: invalid,
+            publicationTarget: invalid.scope === "line" ? "line-comment" : "pr-comment"
+          }],
+          verdict: "Invalid evidence."
+        }, evidence).pipe(Effect.flip)
+        expect(failure.operation).toBe("relay-review-anchor")
+      }
+    }))
 })

@@ -64,6 +64,7 @@ import Markdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
+import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
@@ -647,6 +648,7 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
+  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
@@ -729,19 +731,22 @@ export function PRDetail() {
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
-  const refreshFetchedAtRef = useRef(pr?.fetchedAt)
-  useEffect(() => {
-    if (isRefreshing && pr?.fetchedAt && pr.fetchedAt !== refreshFetchedAtRef.current) {
-      setIsRefreshing(false)
-      setReviewRefreshGeneration((current) => current + 1)
-    }
-    refreshFetchedAtRef.current = pr?.fetchedAt
-  }, [isRefreshing, pr?.fetchedAt])
   const handleRefresh = useCallback(() => {
     if (!accountKey || !prId || isRefreshing) return
     setIsRefreshing(true)
-    refreshSingle({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } })
-  }, [accountKey, isRefreshing, prId, refreshSingle])
+    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+      () => {
+        setReviewRefreshGeneration((current) => current + 1)
+        setIsRefreshing(false)
+      },
+      (cause: unknown) => {
+        setIsRefreshing(false)
+        toast.error("Unable to refresh pull request", {
+          description: Predicate.isError(cause) ? cause.message : "Try the refresh again."
+        })
+      }
+    )
+  }, [accountKey, isRefreshing, prId, refreshSingleWithResult])
 
   // Copy console URL
   const consoleUrl = pr

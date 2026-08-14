@@ -28,7 +28,11 @@ const pullRequest = {
   title: "feat(payments): make retry handling idempotent"
 }
 
-const routeReviewWorkspace = async (page: Page, expectedKind: "explain" | "review" = "review") => {
+const routeReviewWorkspace = async (
+  page: Page,
+  expectedKind: "explain" | "review" = "review",
+  reviewGate?: Promise<void>
+) => {
   const appState = JSON.stringify({
     accounts: [{ ...pullRequest.account, enabled: true }],
     currentUser: "reviewer",
@@ -84,6 +88,7 @@ const routeReviewWorkspace = async (page: Page, expectedKind: "explain" | "revie
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review", async (route) => {
+    await reviewGate
     expect(route.request().postDataJSON()).toEqual({
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
@@ -148,13 +153,17 @@ test("renders a substantive Relay explanation", async ({ page }) => {
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
+  const reviewGate = Promise.withResolvers<void>()
   await page.setViewportSize({ height: 900, width: 1440 })
-  await routeReviewWorkspace(page)
+  await routeReviewWorkspace(page, "review", reviewGate.promise)
   await page.goto("/accounts/111111111111/prs/42")
 
   await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
   await expect(page.getByText("export const retries = 3")).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByRole("button", { name: "Security" })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Tests" })).toBeDisabled()
+  reviewGate.resolve()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
@@ -174,6 +183,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   let diffRequestCount = 0
   let currentRevision = "revision-1"
   let manualRefreshRequested = false
+  let manualRefreshCount = 0
 
   await page.route("**/api/events/", async (route) => {
     eventCount++
@@ -230,7 +240,14 @@ test("reloads after a completed manual refresh without refetching for ordinary S
     })
   })
   await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
-    if (manualRefreshRequested) currentRevision = "revision-2"
+    if (manualRefreshRequested) {
+      manualRefreshCount++
+      if (manualRefreshCount === 1) {
+        await route.fulfill({ body: "refresh failed", contentType: "text/plain", status: 500 })
+        return
+      }
+      if (manualRefreshCount === 3) currentRevision = "revision-2"
+    }
     await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
   })
 
@@ -238,13 +255,22 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
-  const revisionEvent = eventCount + 1
   manualRefreshRequested = true
-  await page.getByRole("button", { exact: true, name: "Refresh" }).click()
-  await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(revisionEvent)
+  const refreshButton = page.getByRole("button", { exact: true, name: "Refresh" })
+  await refreshButton.click()
+  await expect(page.getByText("Unable to refresh pull request")).toBeVisible()
+  await expect(refreshButton).toBeEnabled()
+  expect(diffRequestCount).toBe(1)
+
+  await refreshButton.click()
+  await expect(refreshButton).toBeEnabled()
+  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  expect(diffRequestCount).toBe(2)
+
+  await refreshButton.click()
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
-  expect(diffRequestCount).toBe(2)
+  expect(diffRequestCount).toBe(3)
 })
 
 test("does not carry a failed Relay run into another pull request", async ({ page }) => {

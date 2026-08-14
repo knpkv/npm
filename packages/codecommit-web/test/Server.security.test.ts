@@ -68,6 +68,16 @@ const readAccount = {
   region: Domain.AwsRegion.make("eu-west-1")
 }
 
+const changedFile = new ReadClient.CodeCommitChangedFile({
+  before: null,
+  after: new ReadClient.CodeCommitBlobMetadata({
+    blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+    mode: "100644",
+    path: "src/index.ts"
+  }),
+  status: "added"
+})
+
 const makeObservedReadClient = (
   calls: Ref.Ref<{ readonly blob: number; readonly differences: number }>
 ): ReadClient.CodeCommitReadClientService => ({
@@ -76,15 +86,21 @@ const makeObservedReadClient = (
     Ref.update(calls, (count) => ({ ...count, blob: count.blob + 1 })).pipe(
       Effect.as(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array() }))
     ),
-  getChangedFilesPage: () => unused(),
+  getChangedFilesPage: () =>
+    Ref.update(calls, (count) => ({ ...count, differences: count.differences + 1 })).pipe(
+      Effect.as(
+        new ReadClient.CodeCommitChangedFilesPage({
+          files: [changedFile],
+          nextToken: null,
+          providerPageLimit: 100
+        })
+      )
+    ),
   getPullRequest: () => unused(),
   getRepositoryIdentity: () => unused(),
   listPullRequestsPage: () => unused(),
   listRepositoriesPage: () => unused(),
-  streamChangedFiles: () =>
-    Stream.fromEffect(
-      Ref.update(calls, (count) => ({ ...count, differences: count.differences + 1 }))
-    ).pipe(Stream.drain),
+  streamChangedFiles: () => Stream.die("permissioned client must build streams from gated pages"),
   streamPullRequests: () => Stream.empty
 })
 
@@ -395,7 +411,7 @@ describe("CodeCommit web security boundary", () => {
       expect((yield* Ref.get(allowedAudit)).map(({ permissionState }) => permissionState)).toEqual(["allowed"])
     }))
 
-  it.effect("audits permitted streams exactly once on cancellation and natural completion", () =>
+  it.effect("gates and audits every paginated differences provider request", () =>
     Effect.gen(function*() {
       const differenceRequest = {
         account: readAccount,
@@ -403,46 +419,45 @@ describe("CodeCommit web security boundary", () => {
         beforeCommitSpecifier: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
         afterCommitSpecifier: ReadClient.CodeCommitCommitId.make("b".repeat(40))
       }
-      const file = new ReadClient.CodeCommitChangedFile({
-        before: null,
-        after: new ReadClient.CodeCommitBlobMetadata({
-          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
-          mode: "100644",
-          path: "src/index.ts"
-        }),
-        status: "added"
-      })
-
-      const cancelledAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
-      const cancelledCalls = yield* Ref.make({ blob: 0, differences: 0 })
-      const cancelledInner: ReadClient.CodeCommitReadClientService = {
-        ...makeObservedReadClient(cancelledCalls),
-        streamChangedFiles: () => Stream.make(file).pipe(Stream.concat(Stream.never))
+      const pageCalls = yield* Ref.make(0)
+      const gateCalls = yield* Ref.make(0)
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const inner: ReadClient.CodeCommitReadClientService = {
+        ...makeObservedReadClient(yield* Ref.make({ blob: 0, differences: 0 })),
+        getChangedFilesPage: ({ nextToken }) =>
+          Ref.update(pageCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: [changedFile],
+                nextToken: nextToken === null ? ReadClient.CodeCommitPageToken.make("page-2") : null,
+                providerPageLimit: 100
+              })
+            )
+          )
       }
-      const cancelled = yield* makePermissionedReadClient(cancelledInner).pipe(
-        Effect.provideService(PermissionService, makePermissionService("always_allow")),
-        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
-        Effect.provideService(AuditLogRepo, makeAuditLog(cancelledAudit))
+      const client = yield* makePermissionedReadClient(inner).pipe(
+        Effect.provideService(PermissionService, makePermissionService("allow")),
+        Effect.provideService(
+          PermissionGate,
+          PermissionGate.of({
+            request: () => Ref.update(gateCalls, (count) => count + 1).pipe(Effect.as("allow_once"))
+          })
+        ),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
       )
-      yield* cancelled.streamChangedFiles(differenceRequest).pipe(Stream.take(1), Stream.runDrain)
-      expect((yield* Ref.get(cancelledAudit)).map(({ permissionState }) => permissionState)).toEqual([
-        "always_allowed"
+
+      expect(Array.from(yield* Stream.runCollect(client.streamChangedFiles(differenceRequest)))).toEqual([
+        changedFile,
+        changedFile
       ])
-
-      const completedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
-      const completedCalls = yield* Ref.make({ blob: 0, differences: 0 })
-      const completedInner: ReadClient.CodeCommitReadClientService = {
-        ...makeObservedReadClient(completedCalls),
-        streamChangedFiles: () => Stream.make(file)
-      }
-      const completed = yield* makePermissionedReadClient(completedInner).pipe(
-        Effect.provideService(PermissionService, makePermissionService("always_allow")),
-        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
-        Effect.provideService(AuditLogRepo, makeAuditLog(completedAudit))
-      )
-      yield* Stream.runDrain(completed.streamChangedFiles(differenceRequest))
-      expect((yield* Ref.get(completedAudit)).map(({ permissionState }) => permissionState)).toEqual([
-        "always_allowed"
+      expect(yield* Ref.get(pageCalls)).toBe(2)
+      expect(yield* Ref.get(gateCalls)).toBe(2)
+      expect((yield* Ref.get(auditEntries)).map(({ operation, permissionState }) => ({
+        operation,
+        permissionState
+      }))).toEqual([
+        { operation: "getDifferences", permissionState: "allowed" },
+        { operation: "getDifferences", permissionState: "allowed" }
       ])
     }))
 
