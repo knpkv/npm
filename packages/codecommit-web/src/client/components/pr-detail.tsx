@@ -728,10 +728,12 @@ export function PRDetail() {
 
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
   const refreshFetchedAtRef = useRef(pr?.fetchedAt)
   useEffect(() => {
     if (isRefreshing && pr?.fetchedAt && pr.fetchedAt !== refreshFetchedAtRef.current) {
       setIsRefreshing(false)
+      setReviewRefreshGeneration((current) => current + 1)
     }
     refreshFetchedAtRef.current = pr?.fetchedAt
   }, [isRefreshing, pr?.fetchedAt])
@@ -1065,7 +1067,11 @@ export function PRDetail() {
           />
         }
       >
-        <PullRequestReviewWorkspace accountId={accountId ?? pr.account.profile} pullRequest={pr} />
+        <PullRequestReviewWorkspace
+          accountId={accountId ?? pr.account.profile}
+          pullRequest={pr}
+          refreshGeneration={reviewRefreshGeneration}
+        />
       </Suspense>
 
       <div className={styles.reviewWorkspace}>

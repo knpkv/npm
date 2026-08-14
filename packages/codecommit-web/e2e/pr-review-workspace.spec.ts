@@ -169,19 +169,15 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
 
-test("reloads the diff only when the streamed pull request revision changes", async ({ page }) => {
+test("reloads after a completed manual refresh without refetching for ordinary SSE churn", async ({ page }) => {
   let eventCount = 0
   let diffRequestCount = 0
   let currentRevision = "revision-1"
-  let advanceRevision = false
+  let manualRefreshRequested = false
 
   await page.route("**/api/events/", async (route) => {
     eventCount++
-    if (advanceRevision) currentRevision = "revision-2"
     const fetchedAt = new Date(Date.parse(pullRequest.fetchedAt) + eventCount * 1_000).toISOString()
-    const lastModifiedDate = currentRevision === "revision-1"
-      ? pullRequest.lastModifiedDate
-      : "2026-08-12T09:31:00.000Z"
     await route.fulfill({
       body: `data: ${
         JSON.stringify({
@@ -189,7 +185,7 @@ test("reloads the diff only when the streamed pull request revision changes", as
           currentUser: "reviewer",
           lastUpdated: fetchedAt,
           pendingReviewCount: 1,
-          pullRequests: [{ ...pullRequest, fetchedAt, lastModifiedDate }],
+          pullRequests: [{ ...pullRequest, fetchedAt }],
           sandboxes: [],
           status: "idle"
         })
@@ -233,13 +229,18 @@ test("reloads the diff only when the streamed pull request revision changes", as
       status: 200
     })
   })
+  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+    if (manualRefreshRequested) currentRevision = "revision-2"
+    await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
+  })
 
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
   const revisionEvent = eventCount + 1
-  advanceRevision = true
+  manualRefreshRequested = true
+  await page.getByRole("button", { exact: true, name: "Refresh" }).click()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(revisionEvent)
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
@@ -513,6 +514,15 @@ test("uses a bounded fallback for newline-dense files", async ({ page }) => {
   await expect(page.getByText("Diff too large to render")).toBeVisible()
   await expect(page.getByText("This file exceeds the browser diff-complexity safety limit.")).toBeVisible()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(0)
+  await expect(page.locator("[data-rly-diff-file-id=\"0\"] button")).toHaveAttribute(
+    "data-rly-diff-content-state",
+    "oversized"
+  )
+  await expect(
+    page.getByRole("button", {
+      name: /File 1 of 1: src\/dense\.ts, modified, oversized: Browser diff complexity safety limit exceeded\./
+    })
+  ).toBeVisible()
 })
 
 test("renders small disjoint and large append-only changes within the complexity budget", async ({ page }) => {

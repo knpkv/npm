@@ -46,6 +46,15 @@ const lineCount = (text: string): number => {
   return count
 }
 
+const exceedsRenderableDiffComplexity = (before: string, after: string): boolean => {
+  const beforeLines = lineCount(before)
+  const afterLines = lineCount(after)
+  return (
+    beforeLines + afterLines > MAXIMUM_RENDERABLE_DIFF_INPUT_LINES ||
+    beforeLines * afterLines > MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS
+  )
+}
+
 const fileModeLabel = (file: PullRequestDiffResponse["files"][number]): string | null => {
   if (file.beforeMode === null && file.afterMode !== null) return `new file mode ${file.afterMode}`
   if (file.beforeMode !== null && file.afterMode === null) return `deleted file mode ${file.beforeMode}`
@@ -154,7 +163,11 @@ const LoadedFileDiff = ({
     ? "error"
     : AsyncResult.isSuccess(content)
       ? content.value.state === "text"
-        ? "ready"
+        ? content.value.before !== null &&
+          content.value.after !== null &&
+          exceedsRenderableDiffComplexity(content.value.before, content.value.after)
+          ? "complexity"
+          : "ready"
         : content.value.state
       : null
 
@@ -173,6 +186,12 @@ const LoadedFileDiff = ({
         onContentStateChange(file.index, {
           state: "oversized",
           reason: "Content exceeds the bounded CodeCommit blob limit."
+        })
+        break
+      case "complexity":
+        onContentStateChange(file.index, {
+          state: "oversized",
+          reason: "Browser diff complexity safety limit exceeded."
         })
         break
       case "error":
@@ -223,12 +242,7 @@ const LoadedFileDiff = ({
     )
   }
 
-  const beforeLines = lineCount(content.value.before)
-  const afterLines = lineCount(content.value.after)
-  if (
-    beforeLines + afterLines > MAXIMUM_RENDERABLE_DIFF_INPUT_LINES ||
-    beforeLines * afterLines > MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS
-  ) {
+  if (exceedsRenderableDiffComplexity(content.value.before, content.value.after)) {
     return (
       <StatePanel
         description="This file exceeds the browser diff-complexity safety limit."
@@ -562,19 +576,21 @@ const ReadyReviewWorkspace = ({
 /** CodeCommit web parity surface for complete diffs and ephemeral Relay reviews. */
 export const PullRequestReviewWorkspace = ({
   accountId,
-  pullRequest
+  pullRequest,
+  refreshGeneration
 }: {
   readonly accountId: string
   readonly pullRequest: Domain.PullRequest
+  readonly refreshGeneration: number
 }): ReactElement => {
   const diffAtom = useMemo(
     () =>
       ApiClient.query("prs", "diff", {
         params: { awsAccountId: accountId, prId: pullRequest.id },
-        serializationKey: `${accountId}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}`,
+        serializationKey: `${accountId}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}:${String(refreshGeneration)}`,
         timeToLive: "30 seconds"
       }),
-    [accountId, pullRequest.id, pullRequest.lastModifiedDate]
+    [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
   )
   const diff = useAtomValue(diffAtom)
 
