@@ -45,9 +45,7 @@ jobs:
 
       - name: Build generated client and consumers
         if: steps.check.outputs.updated == 'true'
-        run: |
-          pnpm --filter @knpkv/clockify-api-client build
-          pnpm --filter @knpkv/jira-clockify build
+        run: pnpm --filter @knpkv/jira-clockify... build
 
       - name: Run generated-client tests
         if: steps.check.outputs.updated == 'true'

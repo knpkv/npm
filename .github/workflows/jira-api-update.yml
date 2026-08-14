@@ -51,10 +51,7 @@ jobs:
 
       - name: Build client and consumers
         if: steps.regenerate.outputs.updated == 'true'
-        run: |
-          pnpm --filter @knpkv/jira-api-client build
-          pnpm --filter @knpkv/jira-cli build
-          pnpm --filter @knpkv/jira-clockify build
+        run: pnpm --filter @knpkv/jira-cli... --filter @knpkv/jira-clockify... build
 
       - name: Run client and consumer tests
         if: steps.regenerate.outputs.updated == 'true'
