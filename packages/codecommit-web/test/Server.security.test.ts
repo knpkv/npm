@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
@@ -34,13 +35,19 @@ const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
 
 const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
 
-const makePermissionService = (state: PermissionState): PermissionService["Service"] => ({
+const makePermissionService = (
+  state: PermissionState,
+  updates?: Ref.Ref<ReadonlyArray<readonly [string, PermissionState]>>
+): PermissionService["Service"] => ({
   check: () => Effect.succeed(state),
   getAll: () => Effect.succeed({}),
   getAuditRetention: () => Effect.succeed(30),
   isAuditEnabled: () => Effect.succeed(true),
   resetAll: () => Effect.void,
-  set: () => Effect.void,
+  set: (operation, nextState) =>
+    updates === undefined
+      ? Effect.void
+      : Ref.update(updates, (current) => [...current, [operation, nextState] as const]),
   setAudit: () => Effect.void
 })
 
@@ -80,11 +87,13 @@ const makeObservedReadClient = (
 const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermissionedReadClient")(function*(
   state: PermissionState,
   calls: Ref.Ref<{ readonly blob: number; readonly differences: number }>,
-  auditEntries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>
+  auditEntries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>,
+  gateRequest: PermissionGate["Service"]["request"] = () => unused(),
+  permissionUpdates?: Ref.Ref<ReadonlyArray<readonly [string, PermissionState]>>
 ) {
   return yield* makePermissionedReadClient(makeObservedReadClient(calls)).pipe(
-    Effect.provideService(PermissionService, makePermissionService(state)),
-    Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+    Effect.provideService(PermissionService, makePermissionService(state, permissionUpdates)),
+    Effect.provideService(PermissionGate, PermissionGate.of({ request: gateRequest })),
     Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
   )
 })
@@ -292,6 +301,56 @@ describe("CodeCommit web security boundary", () => {
         { operation: "getDifferences", permissionState: "always_allowed" },
         { operation: "getBlob", permissionState: "always_allowed" }
       ])
+    }))
+
+  it.effect("preserves prompted denial and timeout outcomes before provider execution", () =>
+    Effect.gen(function*() {
+      const blobRequest = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40))
+      }
+
+      for (
+        const fixture of [
+          { reason: "denied", expectedAudit: "denied", expectedUpdates: [["getBlob", "deny"]] },
+          { reason: "timeout", expectedAudit: "timed_out", expectedUpdates: [] }
+        ] as const
+      ) {
+        const calls = yield* Ref.make({ blob: 0, differences: 0 })
+        const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+        const permissionUpdates = yield* Ref.make<ReadonlyArray<readonly [string, PermissionState]>>([])
+        const client = yield* makeTestPermissionedReadClient(
+          "allow",
+          calls,
+          auditEntries,
+          () => Effect.fail(new PermissionDeniedError({ operation: "getBlob", reason: fixture.reason })),
+          permissionUpdates
+        )
+
+        expect(Result.isFailure(yield* Effect.result(client.getBlob(blobRequest)))).toBe(true)
+        expect(yield* Ref.get(calls)).toEqual({ blob: 0, differences: 0 })
+        expect(yield* Ref.get(permissionUpdates)).toEqual(fixture.expectedUpdates)
+        expect((yield* Ref.get(auditEntries)).map(({ permissionState }) => permissionState)).toEqual([
+          fixture.expectedAudit
+        ])
+      }
+
+      const allowedCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const allowedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const allowedUpdates = yield* Ref.make<ReadonlyArray<readonly [string, PermissionState]>>([])
+      const allowed = yield* makeTestPermissionedReadClient(
+        "allow",
+        allowedCalls,
+        allowedAudit,
+        () => Effect.succeed("allow_once"),
+        allowedUpdates
+      )
+
+      yield* allowed.getBlob(blobRequest)
+      expect(yield* Ref.get(allowedCalls)).toEqual({ blob: 1, differences: 0 })
+      expect(yield* Ref.get(allowedUpdates)).toEqual([])
+      expect((yield* Ref.get(allowedAudit)).map(({ permissionState }) => permissionState)).toEqual(["allowed"])
     }))
 
   it("never emits the persisted sandbox password in list or SSE projections", () => {

@@ -78,7 +78,18 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
         operation: params.operation,
         category: getOperationMeta(params.operation).category,
         context: params.context
-      }).pipe(Effect.mapError(() => deniedError(params, "timeout")))
+      }).pipe(
+        Effect.catchTag("PermissionDeniedError", (error) =>
+          Effect.gen(function*() {
+            if (error.reason === "denied") {
+              yield* permissions.set(params.operation, "deny")
+              yield* audit(params, "denied", null)
+            } else {
+              yield* audit(params, "timed_out", null)
+            }
+            return yield* deniedError(params, error.reason)
+          }))
+      )
       if (response === "always_allow") {
         yield* permissions.set(params.operation, "always_allow")
         return "always_allowed"
