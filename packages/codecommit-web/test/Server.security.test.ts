@@ -44,10 +44,12 @@ const makePermissionService = (
   getAuditRetention: () => Effect.succeed(30),
   isAuditEnabled: () => Effect.succeed(true),
   resetAll: () => Effect.void,
-  set: (operation, nextState) =>
-    updates === undefined
+  set: (operation, nextState) => {
+    const update: readonly [string, PermissionState] = [operation, nextState]
+    return updates === undefined
       ? Effect.void
-      : Ref.update(updates, (current) => [...current, [operation, nextState] as const]),
+      : Ref.update(updates, (current) => [...current, update])
+  },
   setAudit: () => Effect.void
 })
 
@@ -311,12 +313,15 @@ describe("CodeCommit web security boundary", () => {
         blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40))
       }
 
-      for (
-        const fixture of [
-          { reason: "denied", expectedAudit: "denied", expectedUpdates: [["getBlob", "deny"]] },
-          { reason: "timeout", expectedAudit: "timed_out", expectedUpdates: [] }
-        ] as const
-      ) {
+      const failureFixtures: ReadonlyArray<{
+        readonly reason: "denied" | "timeout"
+        readonly expectedAudit: NewAuditLogEntry["permissionState"]
+        readonly expectedUpdates: ReadonlyArray<readonly [string, PermissionState]>
+      }> = [
+        { reason: "denied", expectedAudit: "denied", expectedUpdates: [["getBlob", "deny"]] },
+        { reason: "timeout", expectedAudit: "timed_out", expectedUpdates: [] }
+      ]
+      for (const fixture of failureFixtures) {
         const calls = yield* Ref.make({ blob: 0, differences: 0 })
         const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
         const permissionUpdates = yield* Ref.make<ReadonlyArray<readonly [string, PermissionState]>>([])
