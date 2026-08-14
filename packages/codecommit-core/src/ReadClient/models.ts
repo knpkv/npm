@@ -105,6 +105,14 @@ export class CodeCommitPullRequestRevision extends Schema.Class<CodeCommitPullRe
 }) {}
 
 /** One decoded page of pull requests from a repository. */
+export class CodeCommitPullRequestIdsPage extends Schema.Class<CodeCommitPullRequestIdsPage>(
+  "CodeCommitPullRequestIdsPage"
+)({
+  pullRequestIds: Schema.Array(PullRequestId),
+  nextToken: Schema.NullOr(CodeCommitPageToken)
+}) {}
+
+/** One decoded page of hydrated pull requests from a repository. */
 export class CodeCommitPullRequestPage extends Schema.Class<CodeCommitPullRequestPage>(
   "CodeCommitPullRequestPage"
 )({

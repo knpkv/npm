@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Fiber, Layer, Result } from "effect"
+import { ConfigProvider, Deferred, Effect, Fiber, Layer, Result, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import { EventsHub, RepoChange } from "../src/CacheService/EventsHub.js"
 import { PermissionService } from "../src/PermissionService/index.js"
 import { PermissionGateLiveTag } from "../src/PermissionService/PermissionGateLive.js"
 
@@ -71,6 +72,39 @@ describe("PermissionService", () => {
       yield* Fiber.interrupt(second)
       expect(yield* gate.getFirstPending()).toBeUndefined()
     }).pipe(Effect.provide(PermissionGateLiveTag.Default)))
+
+  it.effect("removes a prompt interrupted while its required event is still publishing", () =>
+    Effect.gen(function*() {
+      const publishing = yield* Deferred.make<void>()
+      const releasePublish = yield* Deferred.make<void>()
+      const events = EventsHub.of({
+        publish: (change) =>
+          change._tag === "PermissionRequired"
+            ? Deferred.succeed(publishing, undefined).pipe(Effect.andThen(Deferred.await(releasePublish)))
+            : Effect.void,
+        batch: (effect) => effect,
+        subscribe: Stream.empty
+      })
+      yield* Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        const request = yield* gate.request({
+          id: "prompt-publishing",
+          operation: "getBlob",
+          category: "read",
+          context: "interrupted publish"
+        }).pipe(Effect.forkChild)
+
+        yield* Deferred.await(publishing)
+        expect((yield* gate.getFirstPending())?.id).toBe("prompt-publishing")
+        yield* Fiber.interrupt(request)
+        expect(yield* gate.getFirstPending()).toBeUndefined()
+
+        yield* events.publish(RepoChange.PermissionResolved())
+      }).pipe(
+        Effect.provide(PermissionGateLiveTag.layer),
+        Effect.provideService(EventsHub, events)
+      )
+    }))
 
   it.effect("drains both concurrent prompts when both receive responses", () =>
     Effect.gen(function*() {

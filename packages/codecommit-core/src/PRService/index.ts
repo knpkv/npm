@@ -25,6 +25,7 @@ import { makeToggleAccount } from "./toggleAccount.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
+export type { RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition

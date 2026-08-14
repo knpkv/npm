@@ -22,6 +22,7 @@ import {
   CodeCommitChangedFile,
   CodeCommitChangedFilesPage,
   CodeCommitPageToken,
+  CodeCommitPullRequestIdsPage,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
   type CodeCommitReadAccount,
@@ -48,7 +49,7 @@ const PROVIDER_PAGE_LIMIT = 100
  * and surfaces ThrottlingException even for small repositories. Kept low so a
  * single sync stays under the limit, trading a little latency for reliability.
  */
-const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
+export const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
 
 const RawCallerIdentity = Schema.Struct({
   Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
@@ -251,6 +252,10 @@ export interface CodeCommitReadClientService {
   readonly listPullRequestsPage: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitPullRequestPage, CodeCommitReadError>
+  /** Decoded provider page before each pull request is hydrated. @internal */
+  readonly listPullRequestIdsPage: (
+    request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
+  ) => Effect.Effect<CodeCommitPullRequestIdsPage, CodeCommitReadError>
   readonly streamPullRequests: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults" | "nextToken">
   ) => Stream.Stream<CodeCommitPullRequestRevision, CodeCommitReadError>
@@ -337,13 +342,23 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         })
       })
 
-      const listPullRequestsPage = Effect.fn("CodeCommitReadClient.listPullRequestsPage")(function*(
+      const listPullRequestIdsPage = Effect.fn("CodeCommitReadClient.listPullRequestIdsPage")(function*(
         request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
       ) {
         const raw = yield* provider.listPullRequestsPage({ ...request, maximumResults: PROVIDER_PAGE_LIMIT }).pipe(
           Effect.mapError(mapProviderError("list-pull-requests"))
         )
         const page = yield* decodeProvider("list-pull-requests", RawPullRequestPage, raw)
+        return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestIdsPage)({
+          pullRequestIds: page.pullRequestIds,
+          nextToken: page.nextToken ?? null
+        }).pipe(Effect.mapError(() => malformed("list-pull-requests")))
+      })
+
+      const listPullRequestsPage = Effect.fn("CodeCommitReadClient.listPullRequestsPage")(function*(
+        request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
+      ) {
+        const page = yield* listPullRequestIdsPage(request)
         const pullRequests = yield* Effect.forEach(
           page.pullRequestIds,
           (pullRequestId) => getPullRequest({ account: request.account, pullRequestId }),
@@ -351,7 +366,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         )
         return new CodeCommitPullRequestPage({
           pullRequests,
-          nextToken: page.nextToken === undefined ? null : CodeCommitPageToken.make(page.nextToken)
+          nextToken: page.nextToken
         })
       })
 
@@ -399,6 +414,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         getChangedFilesPage,
         getPullRequest,
         getRepositoryIdentity,
+        listPullRequestIdsPage,
         listPullRequestsPage,
         listRepositoriesPage,
         streamChangedFiles,

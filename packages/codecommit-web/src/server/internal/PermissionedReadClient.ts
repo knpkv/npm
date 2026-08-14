@@ -4,7 +4,7 @@ import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/Perm
 import { PermissionService } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { getOperationMeta } from "@knpkv/codecommit-core/PermissionService/operations.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import { Clock, Context, Effect, Option, Random, Stream } from "effect"
 
 interface GateParams {
@@ -126,13 +126,30 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
   const self = (account: ReadClient.CodeCommitReadAccount) => account
   const nested = (request: { readonly account: ReadClient.CodeCommitReadAccount }) => request.account
 
-  const listPullRequestsPage = gated(
+  const listPullRequestIdsPage = gated(
     "getPullRequests",
-    (request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestsPage"]>[0]) =>
+    (request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestIdsPage"]>[0]) =>
       `List pull requests in ${request.repositoryName}`,
     nested,
-    inner.listPullRequestsPage
+    inner.listPullRequestIdsPage
   )
+  const getPullRequest = gated(
+    "getPullRequest",
+    (request: Parameters<ReadClient.CodeCommitReadClientService["getPullRequest"]>[0]) =>
+      `Fetch PR #${request.pullRequestId}`,
+    nested,
+    inner.getPullRequest
+  )
+  const listPullRequestsPage: ReadClient.CodeCommitReadClientService["listPullRequestsPage"] = (request) =>
+    Effect.gen(function*() {
+      const page = yield* listPullRequestIdsPage(request)
+      const pullRequests = yield* Effect.forEach(
+        page.pullRequestIds,
+        (pullRequestId) => getPullRequest({ account: request.account, pullRequestId }),
+        { concurrency: ReadClient.PULL_REQUEST_HYDRATION_CONCURRENCY }
+      )
+      return new ReadClient.CodeCommitPullRequestPage({ pullRequests, nextToken: page.nextToken })
+    })
   const getChangedFilesPage = gated(
     "getDifferences",
     (request: Parameters<ReadClient.CodeCommitReadClientService["getChangedFilesPage"]>[0]) =>
@@ -179,14 +196,10 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
       nested,
       inner.getBlob
     ),
+    listPullRequestIdsPage,
     listPullRequestsPage,
     streamPullRequests,
-    getPullRequest: gated(
-      "getPullRequest",
-      (request) => `Fetch PR #${request.pullRequestId}`,
-      nested,
-      inner.getPullRequest
-    ),
+    getPullRequest,
     getRepositoryIdentity: gated(
       "getRepository",
       (request) => `Read repository identity for ${request.repositoryName}`,

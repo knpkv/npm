@@ -91,6 +91,7 @@ const makeReadClient = (
   getChangedFilesPage: () => unused(),
   getPullRequest: () => Effect.succeed(currentRevision),
   getRepositoryIdentity: () => unused(),
+  listPullRequestIdsPage: () => unused(),
   listPullRequestsPage: () => unused(),
   listRepositoriesPage: () => unused(),
   streamChangedFiles: () => Stream.make(changedFile),

@@ -53,16 +53,18 @@ const makePermissionGateLive = Effect.gen(function*() {
   const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
     Effect.gen(function*() {
       const deferred = yield* Deferred.make<PermissionResponse>()
-      yield* Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt }))
-      yield* hub.publish(RepoChange.PermissionRequired())
-
-      const response = yield* Deferred.await(deferred).pipe(
-        Effect.timeout("30 seconds"),
-        Effect.catchTag(
-          "TimeoutError",
-          () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
-        ),
-        Effect.ensuring(removePending(prompt.id))
+      const response = yield* Effect.acquireUseRelease(
+        Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt })),
+        () =>
+          hub.publish(RepoChange.PermissionRequired()).pipe(
+            Effect.andThen(Deferred.await(deferred)),
+            Effect.timeout("30 seconds"),
+            Effect.catchTag(
+              "TimeoutError",
+              () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
+            )
+          ),
+        () => removePending(prompt.id)
       )
 
       if (response === "deny") {
@@ -99,9 +101,12 @@ export class PermissionGateLiveTag extends Context.Service<
   PermissionGateLiveTag,
   PermissionGateLive
 >()("PermissionGateLive") {
+  /** Testable composition seam; production supplies the concrete event hub below. */
+  static readonly layer = Layer.effect(PermissionGateLiveTag, makePermissionGateLive)
+
   // EventsHub needed to publish PermissionRequired/Resolved events
   // that trigger SSE payload rebuilds.
-  static readonly Default = Layer.effect(PermissionGateLiveTag, makePermissionGateLive).pipe(
+  static readonly Default = PermissionGateLiveTag.layer.pipe(
     Layer.provide(EventsHub.Default)
   )
 }

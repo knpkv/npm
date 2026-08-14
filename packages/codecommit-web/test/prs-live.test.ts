@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, PRService } from "@knpkv/codecommit-core"
+import { Domain, Errors, PRService } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Schema } from "effect"
 
 import {
@@ -47,7 +47,10 @@ describe("PR handler selection", () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const acknowledged = yield* Deferred.make<string>()
-      const refresh = Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+      const refresh = Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.as<PRService.RefreshSinglePRResult>("updated")
+      )
 
       yield* completeSinglePullRequestRefresh(refresh).pipe(
         Effect.flatMap((response) => Deferred.succeed(acknowledged, response)),
@@ -58,6 +61,21 @@ describe("PR handler selection", () => {
 
       yield* Deferred.succeed(release, undefined)
       expect(yield* Deferred.await(acknowledged)).toBe("ok")
+    }))
+
+  it.effect("does not acknowledge a provider-denied manual refresh", () =>
+    Effect.gen(function*() {
+      const denial = new Errors.AwsApiError({
+        operation: "getPullRequest",
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1"),
+        cause: { _tag: "AccessDeniedException" }
+      })
+      const failure = yield* completeSinglePullRequestRefresh(
+        Effect.fail<PRService.RefreshSinglePRResult, Errors.AwsApiError>(denial)
+      ).pipe(Effect.flip)
+
+      expect(failure).toBe(denial)
     }))
 
   it.effect("matches the repository account identifier used by browser routes", () =>

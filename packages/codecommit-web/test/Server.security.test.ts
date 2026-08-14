@@ -98,6 +98,7 @@ const makeObservedReadClient = (
     ),
   getPullRequest: () => unused(),
   getRepositoryIdentity: () => unused(),
+  listPullRequestIdsPage: () => unused(),
   listPullRequestsPage: () => unused(),
   listRepositoriesPage: () => unused(),
   streamChangedFiles: () => Stream.die("permissioned client must build streams from gated pages"),
@@ -459,6 +460,73 @@ describe("CodeCommit web security boundary", () => {
         { operation: "getDifferences", permissionState: "allowed" },
         { operation: "getDifferences", permissionState: "allowed" }
       ])
+    }))
+
+  it.effect("gates and audits the PR list page and every hydrated PR detail call", () =>
+    Effect.gen(function*() {
+      const request: Parameters<ReadClient.CodeCommitReadClientService["listPullRequestsPage"]>[0] = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        status: "OPEN",
+        nextToken: null
+      }
+      const pullRequestIdFixtures: ReadonlyArray<ReadonlyArray<Domain.PullRequestId>> = [
+        [Domain.PullRequestId.make("1"), Domain.PullRequestId.make("2")],
+        []
+      ]
+
+      for (const pullRequestIds of pullRequestIdFixtures) {
+        const calls = yield* Ref.make({ list: 0, detail: 0 })
+        const gateCalls = yield* Ref.make(0)
+        const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+        const inner: ReadClient.CodeCommitReadClientService = {
+          ...makeObservedReadClient(yield* Ref.make({ blob: 0, differences: 0 })),
+          listPullRequestIdsPage: () =>
+            Ref.update(calls, (count) => ({ ...count, list: count.list + 1 })).pipe(
+              Effect.as(new ReadClient.CodeCommitPullRequestIdsPage({ pullRequestIds, nextToken: null }))
+            ),
+          listPullRequestsPage: () => Effect.die("permissioned client must hydrate gated detail calls"),
+          getPullRequest: ({ pullRequestId }) =>
+            Ref.update(calls, (count) => ({ ...count, detail: count.detail + 1 })).pipe(
+              Effect.as(
+                new ReadClient.CodeCommitPullRequestRevision({
+                  pullRequestId,
+                  revisionId: `revision-${pullRequestId}`,
+                  repositoryName: request.repositoryName,
+                  title: `PR ${pullRequestId}`,
+                  authorArn: null,
+                  status: "OPEN",
+                  sourceReference: `refs/heads/feature-${pullRequestId}`,
+                  destinationReference: "refs/heads/main",
+                  sourceCommit: ReadClient.CodeCommitCommitId.make(`head-${pullRequestId}`),
+                  destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+                  mergeBase: null,
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(1)
+                })
+              )
+            )
+        }
+        const client = yield* makePermissionedReadClient(inner).pipe(
+          Effect.provideService(PermissionService, makePermissionService("allow")),
+          Effect.provideService(
+            PermissionGate,
+            PermissionGate.of({
+              request: () => Ref.update(gateCalls, (count) => count + 1).pipe(Effect.as("allow_once"))
+            })
+          ),
+          Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+        )
+
+        const page = yield* client.listPullRequestsPage(request)
+        expect(page.pullRequests.map(({ pullRequestId }) => pullRequestId)).toEqual(pullRequestIds)
+        expect(yield* Ref.get(calls)).toEqual({ list: 1, detail: pullRequestIds.length })
+        expect(yield* Ref.get(gateCalls)).toBe(1 + pullRequestIds.length)
+        expect((yield* Ref.get(auditEntries)).map(({ operation }) => operation)).toEqual([
+          "getPullRequests",
+          ...pullRequestIds.map(() => "getPullRequest")
+        ])
+      }
     }))
 
   it("never emits the persisted sandbox password in list or SSE projections", () => {
