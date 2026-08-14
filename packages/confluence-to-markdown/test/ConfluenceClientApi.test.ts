@@ -209,6 +209,31 @@ describe("ConfluenceClient API boundary", () => {
     )
   })
 
+  // A folder holds mixed kinds and the whole page decodes at once, so requiring
+  // `title` lets one untitled embed fail the listing for all of its siblings.
+  it.effect("lists a folder whose children include an untitled embed", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluenceClient
+      const children = yield* client.getFolderChildren("2964717585")
+
+      expect(children).toEqual([
+        { id: "1", title: "Release Notes", type: "page", status: "current" },
+        { id: "2", type: "embed", status: "current" }
+      ])
+    }).pipe(
+      Effect.provide(sequenceClientLayer([
+        {
+          results: [
+            { id: "1", title: "Release Notes", type: "page", status: "current", childPosition: 0 },
+            { id: "2", type: "embed", status: "current", childPosition: 1 }
+          ],
+          _links: {}
+        }
+      ], requests))
+    )
+  })
+
   it.effect("reports the CQL total alongside the returned page of hits", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

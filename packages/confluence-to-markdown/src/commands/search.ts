@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
+import type { CqlSearchHit } from "../Schemas.js"
 import { validateBaseUrl } from "./pageInput.js"
 import { assertSiteMatchesAuth, getAuth } from "./shared.js"
 
@@ -41,6 +42,42 @@ const jsonOption = Options.boolean("json").pipe(
   Options.withDefault(false)
 )
 
+/**
+ * The human-readable lines for one page of CQL hits.
+ *
+ * Pure so the reporting rules can be tested without a client: the command builds
+ * its own layer from `--base-url`, which leaves no seam to inject one.
+ *
+ * The rule that matters is that an empty *page* is not an empty *result set* —
+ * `--limit 0` returns no rows alongside a positive `totalSize`, and answering
+ * "(no results)" there tells the caller the opposite of the truth.
+ *
+ * @category Utilities
+ */
+export const searchOutputLines = (
+  response: { readonly results: ReadonlyArray<CqlSearchHit>; readonly totalSize?: number | undefined }
+): ReadonlyArray<string> => {
+  const hits = response.results
+  const total = response.totalSize
+  if (hits.length === 0) {
+    return [
+      total !== undefined && total > 0
+        ? `${total} match(es), none shown — raise --limit`
+        : "(no results)"
+    ]
+  }
+  const sep = "  "
+  const rows = hits.map((hit) =>
+    [hit.content?.type ?? hit.entityType ?? "-", hit.content?.id ?? "-", hit.title].join(sep)
+  )
+  // One page only, so say when Confluence has more: a truncated list read as
+  // complete sends a caller down the wrong branch.
+  const more = total !== undefined && total > hits.length
+    ? [`showing ${hits.length} of ${total} — raise --limit for more`]
+    : []
+  return [["type", "id", "title"].join(sep), ...rows, ...more]
+}
+
 export const searchCommand = Command.make(
   "search",
   { cql: cqlOption, baseUrl: baseUrlOption, limit: limitOption, json: jsonOption },
@@ -57,29 +94,12 @@ export const searchCommand = Command.make(
         return yield* client.searchByCql(cql, Option.isSome(limit) ? { limit: limit.value } : undefined)
       }).pipe(Effect.provide(makeClientLayer({ baseUrl: resolvedBaseUrl, auth })))
 
-      const hits = response.results
-
       if (json) {
         yield* Console.log(JSON.stringify(response, null, 2))
         return
       }
-      if (hits.length === 0) {
-        yield* Console.log("(no results)")
-        return
-      }
-      const sep = "  "
-      yield* Console.log(["type", "id", "title"].join(sep))
-      for (const hit of hits) {
-        yield* Console.log([
-          hit.content?.type ?? hit.entityType ?? "-",
-          hit.content?.id ?? "-",
-          hit.title
-        ].join(sep))
-      }
-      // One page only, so say when Confluence has more: a truncated list read as
-      // complete sends a caller down the wrong branch.
-      if (response.totalSize !== undefined && response.totalSize > hits.length) {
-        yield* Console.log(`showing ${hits.length} of ${response.totalSize} — raise --limit for more`)
+      for (const line of searchOutputLines(response)) {
+        yield* Console.log(line)
       }
     })
 ).pipe(Command.withDescription("Read-only: search Confluence content with CQL"))

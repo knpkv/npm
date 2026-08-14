@@ -513,7 +513,10 @@ export type FolderResponse = Schema.Schema.Type<typeof FolderResponseSchema>
  */
 export const FolderChildSchema = Schema.Struct({
   id: Schema.String,
-  title: Schema.String,
+  // Optional upstream, and the whole page decodes at once: requiring it would
+  // let one untitled child (an embed, typically) fail the entire listing rather
+  // than degrade a single row.
+  title: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   status: Schema.optional(Schema.String),
   spaceId: Schema.optional(Schema.String)

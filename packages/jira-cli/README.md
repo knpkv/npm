@@ -127,15 +127,15 @@ jira issue edit PROJ-123 --add-fix-version "OOB 100" --add-label release-notes
 jira issue edit PROJ-123 --remove-fix-version "OOB 99" --json
 ```
 
-| Option                 | Description                                                                | Default |
-| ---------------------- | -------------------------------------------------------------------------- | ------- |
-| `--add-fix-version`    | Add a fix version by name, keeping existing ones (repeatable)               | -       |
-| `--remove-fix-version` | Remove a fix version by name (repeatable)                                   | -       |
-| `--fix-version`        | Replace the fix versions with exactly these names (repeatable)              | -       |
-| `--add-label`          | Add a label, keeping existing ones (repeatable)                             | -       |
-| `--remove-label`       | Remove a label (repeatable)                                                 | -       |
-| `--label`              | Replace the labels with exactly these (repeatable)                          | -       |
-| `--json`               | Output as JSON                                                              | `false` |
+| Option                 | Description                                                    | Default |
+| ---------------------- | -------------------------------------------------------------- | ------- |
+| `--add-fix-version`    | Add a fix version by name, keeping existing ones (repeatable)  | -       |
+| `--remove-fix-version` | Remove a fix version by name (repeatable)                      | -       |
+| `--fix-version`        | Replace the fix versions with exactly these names (repeatable) | -       |
+| `--add-label`          | Add a label, keeping existing ones (repeatable)                | -       |
+| `--remove-label`       | Remove a label (repeatable)                                    | -       |
+| `--label`              | Replace the labels with exactly these (repeatable)             | -       |
+| `--json`               | Output as JSON                                                 | `false` |
 
 Both fields are sets, so prefer the incremental flags: the replacing forms
 (`--fix-version`, `--label`) silently drop every value not listed. A replacing
@@ -203,14 +203,14 @@ jira version create --project PROJ --name "OOB 100" \
   --json
 ```
 
-| Option           | Alias | Description                              | Default |
-| ---------------- | ----- | ---------------------------------------- | ------- |
-| `--project`      | `-p`  | Jira project key (e.g. `PROJ`)           | -       |
-| `--name`         |       | Version name (e.g. `"OOB 100"`)          | -       |
-| `--description`  | `-d`  | Version description                      | -       |
-| `--start-date`   |       | Start date, ISO 8601 (`yyyy-mm-dd`)      | -       |
-| `--release-date` |       | Release date, ISO 8601 (`yyyy-mm-dd`)    | -       |
-| `--json`         |       | Output as JSON                           | `false` |
+| Option           | Alias | Description                           | Default |
+| ---------------- | ----- | ------------------------------------- | ------- |
+| `--project`      | `-p`  | Jira project key (e.g. `PROJ`)        | -       |
+| `--name`         |       | Version name (e.g. `"OOB 100"`)       | -       |
+| `--description`  | `-d`  | Version description                   | -       |
+| `--start-date`   |       | Start date, ISO 8601 (`yyyy-mm-dd`)   | -       |
+| `--release-date` |       | Release date, ISO 8601 (`yyyy-mm-dd`) | -       |
+| `--json`         |       | Output as JSON                        | `false` |
 
 The version is created unreleased. Requires the `manage:jira-project` scope.
 

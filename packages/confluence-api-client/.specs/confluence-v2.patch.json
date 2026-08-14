@@ -44,7 +44,10 @@
     "path": "/components/schemas/FolderSingle/properties/createdAt",
     "value": {
       "description": "When the folder was created. The upstream spec declares an ISO-8601 string, but the v2 folder endpoints return epoch milliseconds (verified live against GET /folders/{id}), so both are accepted.",
-      "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "integer", "format": "int64" }]
+      "anyOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "integer", "format": "int64" }
+      ]
     }
   },
   {

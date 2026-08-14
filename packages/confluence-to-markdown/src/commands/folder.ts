@@ -288,7 +288,7 @@ export const folderChildrenCommand = Command.make(
       const sep = "  "
       yield* Console.log(["type", "id", "title"].join(sep))
       for (const child of children) {
-        yield* Console.log([child.type ?? "-", child.id, child.title].join(sep))
+        yield* Console.log([child.type ?? "-", child.id, child.title ?? "-"].join(sep))
       }
     })
 ).pipe(
