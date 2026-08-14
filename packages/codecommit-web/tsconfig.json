@@ -10,6 +10,7 @@
       "@/*": ["./src/client/*"]
     }
   },
+  "references": [{ "path": "../ai-codex/tsconfig.build.json" }],
   "include": ["src"],
   "exclude": ["dist", "node_modules"]
 }

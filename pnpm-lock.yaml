@@ -395,6 +395,9 @@ importers:
       '@formkit/auto-animate':
         specifier: ^0.10.0
         version: 0.10.0
+      '@knpkv/ai-codex':
+        specifier: workspace:^
+        version: link:../ai-codex
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
@@ -416,6 +419,9 @@ importers:
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      diff:
+        specifier: 9.0.0
+        version: 9.0.0
       effect:
         specifier: 4.0.0-beta.107
         version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)

@@ -1,0 +1,336 @@
+.workspace {
+  border: 1px solid var(--rly-color-border-1);
+  box-shadow: none;
+  min-inline-size: var(--rly-space-0);
+  overflow: hidden;
+}
+
+.workspaceHeader,
+.focusActions,
+.focusChoices,
+.diffToolbar,
+.diffToolbar > div,
+.agentPane > header,
+.agentPane > header > span,
+.findingMeta {
+  align-items: center;
+  display: flex;
+}
+
+.workspaceHeader {
+  background: color-mix(in srgb, var(--rly-color-service-codecommit) 7%, var(--rly-color-surface-2));
+  border-block-end: 1px solid var(--rly-color-border-1);
+  gap: var(--rly-space-20);
+  justify-content: space-between;
+  padding: var(--rly-space-20) var(--rly-space-24);
+}
+
+.workspaceHeader > div:first-child {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.focusActions {
+  flex-wrap: wrap;
+  gap: var(--rly-space-12);
+  justify-content: flex-end;
+}
+
+.focusChoices {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  gap: var(--rly-space-2);
+  padding: var(--rly-space-2);
+}
+
+.focusChoices button,
+.diffToolbar button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--rly-radius-control) - var(--rly-space-2));
+  color: var(--rly-color-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  gap: var(--rly-space-4);
+  padding: var(--rly-space-6) var(--rly-space-8);
+}
+
+.focusChoices svg,
+.agentPane svg {
+  block-size: var(--rly-space-16);
+  inline-size: var(--rly-space-16);
+}
+
+.focusChoices button[aria-pressed="true"],
+.diffToolbar button[aria-pressed="true"] {
+  background: var(--rly-color-action-background);
+  color: var(--rly-color-action-foreground);
+}
+
+.focusChoices button:focus-visible,
+.diffToolbar button:focus-visible,
+.findingCard:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
+.reviewFailure {
+  border-block-end: 1px solid var(--rly-color-border-1);
+  padding: var(--rly-space-16) var(--rly-space-24);
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.26fr) minmax(24rem, 1fr) minmax(17rem, 0.38fr);
+  min-block-size: 38rem;
+  min-inline-size: var(--rly-space-0);
+}
+
+.fileTree {
+  border: 0;
+  border-inline-end: 1px solid var(--rly-color-border-1);
+  border-radius: 0;
+  min-inline-size: var(--rly-space-0);
+}
+
+.diffPane {
+  background: var(--rly-color-surface-1);
+  display: grid;
+  grid-template-rows: auto minmax(var(--rly-space-0), 1fr);
+  min-inline-size: var(--rly-space-0);
+}
+
+.diffToolbar {
+  border-block-end: 1px solid var(--rly-color-border-1);
+  gap: var(--rly-space-16);
+  justify-content: space-between;
+  min-inline-size: var(--rly-space-0);
+  padding: var(--rly-space-12) var(--rly-space-16);
+}
+
+.diffToolbar > span {
+  display: grid;
+  gap: var(--rly-space-2);
+  min-inline-size: var(--rly-space-0);
+}
+
+.diffToolbar > span > code {
+  font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+    var(--rly-type-code-font);
+  min-inline-size: var(--rly-space-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffToolbar > span > small {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.diffToolbar > div {
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  flex: none;
+  gap: var(--rly-space-2);
+  padding: var(--rly-space-2);
+}
+
+.diffViewport {
+  min-block-size: 34rem;
+  min-inline-size: var(--rly-space-0);
+  overflow: auto;
+}
+
+.codeView {
+  block-size: 100%;
+  min-block-size: 34rem;
+}
+
+.lineFinding {
+  background: var(--rly-color-held-tint);
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+  color: var(--rly-color-text-1);
+  display: grid;
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  gap: var(--rly-space-4);
+  padding: var(--rly-space-8) var(--rly-space-12);
+}
+
+.lineFinding span {
+  color: var(--rly-color-text-2);
+}
+
+.agentPane {
+  background: var(--rly-color-surface-2);
+  border-inline-start: 1px solid var(--rly-color-border-1);
+  display: grid;
+  grid-template-rows: auto minmax(var(--rly-space-0), 1fr);
+  min-inline-size: var(--rly-space-0);
+}
+
+.agentPane > header {
+  border-block-end: 1px solid var(--rly-color-border-1);
+  justify-content: space-between;
+  padding: var(--rly-space-16);
+}
+
+.agentPane > header > span {
+  gap: var(--rly-space-8);
+}
+
+.agentEmpty {
+  align-content: center;
+  display: grid;
+  gap: var(--rly-space-8);
+  justify-items: start;
+  padding: var(--rly-space-24);
+}
+
+.agentEmpty > svg {
+  block-size: var(--rly-space-32);
+  color: var(--rly-color-text-3);
+  inline-size: var(--rly-space-32);
+}
+
+.findingDeck {
+  min-block-size: var(--rly-space-0);
+  overflow: auto;
+  padding: var(--rly-space-16);
+}
+
+.verdictCopy {
+  border-block-end: 1px solid var(--rly-color-border-1);
+  margin: 0 0 var(--rly-space-16);
+  padding-block-end: var(--rly-space-16);
+}
+
+.findingDeck ol {
+  display: grid;
+  gap: var(--rly-space-12);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.findingCard {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+  display: grid;
+  gap: var(--rly-space-8);
+  inline-size: 100%;
+  padding: var(--rly-space-12);
+  text-align: start;
+  transition:
+    border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+    transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+}
+
+.findingCard:hover,
+.findingCard[aria-pressed="true"] {
+  border-color: var(--rly-color-held-ink);
+  transform: translateY(-1px);
+}
+
+.findingCard > strong {
+  font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+    var(--rly-type-card-title-font);
+}
+
+.findingCard > span:not(.findingMeta),
+.findingCard > small {
+  color: var(--rly-color-text-2);
+}
+
+.findingMeta {
+  gap: var(--rly-space-8);
+  justify-content: space-between;
+  min-inline-size: var(--rly-space-0);
+}
+
+.findingMeta code {
+  color: var(--rly-color-text-3);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceFooter {
+  background: var(--rly-color-surface-3);
+  border-block-start: 1px solid var(--rly-color-border-1);
+  color: var(--rly-color-text-3);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  padding: var(--rly-space-12) var(--rly-space-20);
+}
+
+@media (max-width: 72rem) {
+  .workbench {
+    grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
+  }
+
+  .agentPane {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    border-inline-start: 0;
+    grid-column: 1 / -1;
+    min-block-size: 20rem;
+  }
+}
+
+@media (max-width: 52rem) {
+  .workspaceHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .focusActions {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .focusChoices {
+    flex: 1 1 100%;
+    overflow-x: auto;
+  }
+
+  .workbench {
+    display: block;
+  }
+
+  .fileTree {
+    border-block-end: 1px solid var(--rly-color-border-1);
+    border-inline-end: 0;
+    max-block-size: 20rem;
+    overflow: auto;
+  }
+
+  .diffToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agentPane {
+    min-block-size: 24rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .findingCard {
+    transition: none;
+  }
+
+  .findingCard:hover,
+  .findingCard[aria-pressed="true"] {
+    transform: none;
+  }
+}

@@ -43,6 +43,7 @@ const codeCommitClient = (
   getChangedFilesPage: () => Effect.die("unused"),
   getPullRequest: () => Effect.die("unused"),
   getRepositoryIdentity: () => Effect.die("unused"),
+  listPullRequestIdsPage: () => Effect.die("unused"),
   listPullRequestsPage: () => Effect.die("unused"),
   listRepositoriesPage: () => Effect.succeed(repositoryPage([])),
   streamChangedFiles: () => Stream.die("unused"),

@@ -136,6 +136,7 @@ const baseReadClient = (
         bytes: new Uint8Array()
       })
     ),
+  listPullRequestIdsPage: () => Effect.die("unused"),
   listPullRequestsPage: () =>
     Effect.succeed(new CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
   streamPullRequests: () => Stream.make(pullRequest),

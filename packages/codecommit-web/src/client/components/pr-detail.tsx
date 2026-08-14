@@ -59,11 +59,12 @@ import {
   RefreshCwIcon,
   TrashIcon
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
+import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
@@ -87,11 +88,22 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Separator } from "./ui/separator.js"
 import styles from "./pr-detail.module.css"
 
+const PullRequestReviewWorkspace = lazy(() =>
+  import("./pr-review-workspace.js").then((module) => ({
+    default: module.PullRequestReviewWorkspace
+  }))
+)
+
 const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
   tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
 
 const categoryTone = (status: CategoryStatus): RlyStateTone =>
   status === "positive" ? "positive" : status === "neutral" ? "neutral" : "critical"
+
+export const refreshFailureDescription = (cause: unknown): string => {
+  const message = Predicate.isError(cause) ? cause.message.trim() : ""
+  return message.length > 0 ? message : "Try the refresh again."
+}
 
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
@@ -641,6 +653,7 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
+  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
@@ -722,18 +735,42 @@ export function PRDetail() {
 
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const refreshFetchedAtRef = useRef(pr?.fetchedAt)
-  useEffect(() => {
-    if (isRefreshing && pr?.fetchedAt && pr.fetchedAt !== refreshFetchedAtRef.current) {
-      setIsRefreshing(false)
-    }
-    refreshFetchedAtRef.current = pr?.fetchedAt
-  }, [isRefreshing, pr?.fetchedAt])
+  const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
+  const reviewedRevisionRef = useRef<string | null>(null)
+  const invalidateReview = useCallback(
+    (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
+      const revision = `${accountKey ?? ""}:${prId ?? ""}:${refreshed.revisionId}:${refreshed.headCommit}`
+      const changed = reviewedRevisionRef.current !== revision
+      reviewedRevisionRef.current = revision
+      if (force || changed) {
+        setReviewRefreshGeneration((current) => current + 1)
+      }
+    },
+    [accountKey, prId]
+  )
+  const refreshAfterApprovalMutation = useCallback(() => {
+    if (!accountKey || !prId) return
+    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+      (refreshed) => invalidateReview(refreshed, false),
+      () => {}
+    )
+  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
     if (!accountKey || !prId || isRefreshing) return
     setIsRefreshing(true)
-    refreshSingle({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } })
-  }, [accountKey, isRefreshing, prId, refreshSingle])
+    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+      (refreshed) => {
+        invalidateReview(refreshed, true)
+        setIsRefreshing(false)
+      },
+      (cause: unknown) => {
+        setIsRefreshing(false)
+        toast.error("Unable to refresh pull request", {
+          description: refreshFailureDescription(cause)
+        })
+      }
+    )
+  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
 
   // Copy console URL
   const consoleUrl = pr
@@ -1049,6 +1086,23 @@ export function PRDetail() {
         </dl>
       </Surface>
 
+      <Suspense
+        fallback={
+          <StatePanel
+            announce="polite"
+            description="Preparing the exact-revision review workbench."
+            title="Loading diff tools"
+            tone="progress"
+          />
+        }
+      >
+        <PullRequestReviewWorkspace
+          accountId={accountId ?? pr.account.profile}
+          pullRequest={pr}
+          refreshGeneration={reviewRefreshGeneration}
+        />
+      </Suspense>
+
       <div className={styles.reviewWorkspace}>
         <section aria-label="Pull request narrative and comments" className={styles.contentColumn}>
           {pr.description && (
@@ -1094,9 +1148,7 @@ export function PRDetail() {
                 currentUser={state.currentUser}
                 key={card.ruleName}
                 knownUserArns={knownUserArns}
-                onRefresh={() =>
-                  refreshSingle({ params: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })
-                }
+                onRefresh={refreshAfterApprovalMutation}
                 onSetApprovers={(arns) => {
                   const existing = pr.approvalRules.find(
                     (rule) => rule.ruleName === card.ruleName && !rule.fromTemplate

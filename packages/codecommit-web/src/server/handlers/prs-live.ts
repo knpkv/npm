@@ -10,13 +10,28 @@
  *
  * @module
  */
-import { AwsClient, CacheService, ChildEnv, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
+import type { PullRequestRepoShape } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
+import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
+import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { ApiError, CodeCommitApi } from "../Api.js"
+import {
+  ApiError,
+  CodeCommitApi,
+  type PullRequestDiffContentResponse,
+  type PullRequestRefreshResponse
+} from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
+import {
+  loadPullRequestDiff,
+  loadPullRequestDiffContent,
+  makePullRequestChangedFilesSource,
+  runPullRequestRelayReview,
+  withRelayReviewPermit
+} from "../review/PullRequestReview.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -58,10 +73,63 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
     }]
   })
 
+export const selectedPullRequest = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  awsAccountId: string,
+  pullRequestId: Domain.PullRequestId
+): Effect.Effect<Domain.PullRequest, ApiError> => {
+  const pullRequest = pullRequests.find(
+    (candidate) =>
+      candidate.id === pullRequestId &&
+      (candidate.account.awsAccountId === awsAccountId ||
+        candidate.account.repoAccountId === awsAccountId ||
+        candidate.account.profile === awsAccountId)
+  )
+  return pullRequest === undefined
+    ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
+    : Effect.succeed(pullRequest)
+}
+
+interface PullRequestLookup {
+  readonly findAll: PullRequestRepoShape["findAll"]
+}
+
+/** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
+export const cachedPullRequest = (
+  pullRequestRepo: PullRequestLookup,
+  awsAccountId: string,
+  pullRequestId: Domain.PullRequestId
+): Effect.Effect<Domain.PullRequest, ApiError> =>
+  pullRequestRepo.findAll().pipe(
+    Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+    Effect.mapError(() =>
+      new ApiError({ message: "The selected pull request is not available in the local workspace" })
+    ),
+    Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId))
+  )
+
+/** Keep proprietary source revisions out of browser and intermediary caches. */
+export const makeDiffContentResponse = (content: PullRequestDiffContentResponse) =>
+  HttpServerResponse.json(content, {
+    headers: { "cache-control": "no-store" }
+  }).pipe(Effect.mapError((error) => new ApiError({ message: error.message })))
+
+/** Complete a durable single-PR refresh and return its immutable provider revision identity. */
+export const completeSinglePullRequestRefresh = <E, R>(
+  refresh: Effect.Effect<PRService.RefreshSinglePRResult, E, R>
+): Effect.Effect<PullRequestRefreshResponse, E, R> =>
+  refresh.pipe(
+    Effect.map(({ revisionId, sourceCommit }) => ({ revisionId, headCommit: sourceCommit }))
+  )
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
+    const readClient = yield* ReadClient.CodeCommitReadClient
+    const pullRequestRepo = yield* CacheService.PullRequestRepo
+    const changedFiles = yield* makePullRequestChangedFilesSource(readClient)
+    const relaySemaphore = yield* Semaphore.make(1)
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* BackgroundScope
     // A process-wide environment snapshot is a stable application service, not a
@@ -92,9 +160,10 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ params }) =>
-        prService.refreshSinglePR(params.awsAccountId, params.prId).pipe(
-          Effect.forkIn(ownerScope),
-          Effect.map(() => "ok")
+        completeSinglePullRequestRefresh(prService.refreshSinglePR(params.awsAccountId, params.prId)).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: extractAwsMessage(error) })
+          )
         ))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({
@@ -116,6 +185,37 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.map(encodeCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
+      .handle("diff", ({ params }) =>
+        Effect.gen(function*() {
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handleRaw("diffContent", ({ params, query }) =>
+        Effect.gen(function*() {
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const content = yield* loadPullRequestDiffContent(
+            readClient,
+            pullRequest,
+            query,
+            params.fileIndex,
+            changedFiles
+          )
+          return yield* makeDiffContentResponse(content)
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handle("relayReview", ({ params, payload }) =>
+        Effect.gen(function*() {
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          return yield* withRelayReviewPermit(
+            relaySemaphore,
+            runPullRequestRelayReview(
+              readClient,
+              pullRequest,
+              payload,
+              payload.kind,
+              changedFiles
+            )
+          )
+        }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
           yield* copyToClipboard(payload.link).pipe(

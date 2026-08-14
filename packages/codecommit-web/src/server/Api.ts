@@ -80,6 +80,117 @@ export const CachedPullRequestResponse = Schema.Struct({
   fetchedAt: Schema.String
 })
 
+const PullRequestDiffFileResponse = Schema.Struct({
+  index: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  status: Schema.Literals(["added", "modified", "deleted", "renamed"]),
+  path: Schema.String,
+  previousPath: Schema.NullOr(Schema.String),
+  beforeMode: Schema.NullOr(Schema.String),
+  afterMode: Schema.NullOr(Schema.String)
+})
+
+/** Complete changed-file inventory bound to one immutable CodeCommit revision. */
+export const PullRequestDiffResponse = Schema.Struct({
+  pullRequestId: PullRequestId,
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  files: Schema.Array(PullRequestDiffFileResponse)
+})
+export type PullRequestDiffResponse = typeof PullRequestDiffResponse.Type
+
+/** Exact provider revision observed by a completed single-PR refresh. */
+export const PullRequestRefreshResponse = Schema.Struct({
+  revisionId: Schema.String,
+  headCommit: Schema.String
+})
+export type PullRequestRefreshResponse = typeof PullRequestRefreshResponse.Type
+
+/** Bounded text for one inventory entry; exceptional content remains explicit. */
+export const PullRequestDiffContentResponse = Schema.Struct({
+  fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  revisionId: Schema.String,
+  state: Schema.Literals(["text", "binary", "oversized"]),
+  before: Schema.NullOr(Schema.String),
+  after: Schema.NullOr(Schema.String)
+})
+export type PullRequestDiffContentResponse = typeof PullRequestDiffContentResponse.Type
+
+export const RelayReviewKind = Schema.Literals(["review", "security", "tests", "explain"])
+export type RelayReviewKind = typeof RelayReviewKind.Type
+
+const RelayReviewLocation = Schema.Union([
+  Schema.Struct({ scope: Schema.Literal("general") }),
+  Schema.Struct({
+    scope: Schema.Literal("file"),
+    filePath: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024))
+  }),
+  Schema.Struct({
+    scope: Schema.Literal("line"),
+    filePath: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+    line: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+    side: Schema.Literals(["before", "after"])
+  })
+])
+
+export const RelayReviewFinding = Schema.Struct({
+  id: Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u)),
+  priority: Schema.Literals(["P1", "P2", "P3", "P4"]),
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  details: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_000)),
+  recommendation: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  verification: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
+  publicationTarget: Schema.Literals(["description", "pr-comment", "line-comment"]),
+  location: RelayReviewLocation
+}).check(
+  Schema.makeFilter(
+    (finding) => finding.publicationTarget !== "line-comment" || finding.location.scope === "line",
+    { expected: "line-comment publication target paired with a line location" }
+  )
+)
+export type RelayReviewFinding = typeof RelayReviewFinding.Type
+
+export const RelayReviewResult = Schema.Struct({
+  findings: Schema.Array(RelayReviewFinding).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter((findings) => new Set(findings.map((finding) => finding.id)).size === findings.length, {
+      expected: "unique Relay finding ids"
+    })
+  ),
+  verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
+  explanation: Schema.optional(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(12_000))
+  )
+})
+export type RelayReviewResult = typeof RelayReviewResult.Type
+
+/** Explain-mode results must be explanatory rather than a hidden findings response. */
+export const RelayExplainResult = RelayReviewResult.check(
+  Schema.makeFilter(
+    (result) => result.explanation !== undefined && result.findings.length === 0,
+    { expected: "a nonempty explanation and no findings for Explain mode" }
+  )
+)
+
+/** One ephemeral Relay result bound to the exact diff that was reviewed. */
+export const PullRequestRelayReviewResponse = Schema.Struct({
+  pullRequestId: PullRequestId,
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  kind: RelayReviewKind,
+  result: RelayReviewResult
+}).check(
+  Schema.makeFilter(
+    (response) =>
+      response.kind !== "explain" ||
+      (response.result.explanation !== undefined && response.result.findings.length === 0),
+    { expected: "an Explain response with a nonempty explanation and no findings" }
+  )
+)
+export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
+
 // Notification schema (unified)
 export const NotificationResponse = Schema.Struct({
   id: Schema.Number,
@@ -121,7 +232,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
-      success: Schema.String,
+      success: PullRequestRefreshResponse,
       error: ApiError
     })
   )
@@ -160,6 +271,44 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         region: AwsRegion
       }),
       success: Schema.Array(PRCommentLocationJson),
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("diff", "/:awsAccountId/:prId/diff", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      success: PullRequestDiffResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("diffContent", "/:awsAccountId/:prId/diff/:fileIndex", {
+      params: Schema.Struct({
+        awsAccountId: Schema.String,
+        prId: PullRequestId,
+        fileIndex: Schema.NumberFromString.pipe(
+          Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+        )
+      }),
+      query: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String
+      }),
+      success: PullRequestDiffContentResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("relayReview", "/:awsAccountId/:prId/relay-review", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      payload: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String,
+        kind: RelayReviewKind
+      }),
+      success: PullRequestRelayReviewResponse,
       error: ApiError
     })
   )

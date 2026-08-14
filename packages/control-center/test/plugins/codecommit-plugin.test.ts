@@ -116,6 +116,7 @@ const baseReadClient = (
         bytes: new Uint8Array([1, 2, 3])
       })
     ),
+  listPullRequestIdsPage: () => Effect.die("unused"),
   listPullRequestsPage: () =>
     Effect.succeed(
       new ReadClient.CodeCommitPullRequestPage({

@@ -30,6 +30,7 @@ import {
   type PullRequestId,
   PullRequestStatus
 } from "../Domain.js"
+import { type AwsClientError, RefreshError } from "../Errors.js"
 import { countAllComments, type PRState } from "./internal.js"
 
 interface ResolvedAccount {
@@ -53,6 +54,12 @@ type RefreshSinglePREnv =
   | NotificationRepo
   | SubscriptionRepo
   | ConfigService
+
+export interface RefreshSinglePRResult {
+  readonly revisionId: string
+  readonly sourceCommit: string
+}
+export type RefreshSinglePRError = AwsClientError | RefreshError
 
 /** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
 const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: string) =>
@@ -104,15 +111,13 @@ export const makeRefreshSinglePR = (
       ? resolvedAccount(cachedPR.value.accountProfile, cachedPR.value.accountRegion)
       : yield* resolveAccountFromCache(prRepo, awsAccountId)
 
-    if (!account) return
+    if (!account) return yield* new RefreshError({ failedAccounts: [awsAccountId] })
 
     // Fetch fresh PR details
     const detail = yield* awsClient.getPullRequest({
       account,
       pullRequestId: prId
-    }).pipe(Effect.catch(() => Effect.succeed(undefined)))
-
-    if (!detail) return
+    })
 
     // Fetch fresh comments
     const locs = yield* awsClient.getCommentsForPullRequest({
@@ -187,9 +192,18 @@ export const makeRefreshSinglePR = (
     )
 
     // Always upsert fresh data to cache
-    yield* prRepo.upsert(freshUpsert).pipe(Effect.catch(() => Effect.void))
+    yield* prRepo.upsert(freshUpsert).pipe(
+      Effect.mapError((cause) => new RefreshError({ failedAccounts: [awsAccountId], cause }))
+    )
+    return {
+      revisionId: detail.revisionId,
+      sourceCommit: detail.sourceCommit
+    }
   })
 
-  return (awsAccountId: string, prId: PullRequestId): Effect.Effect<void, never, RefreshSinglePREnv> =>
+  return (
+    awsAccountId: string,
+    prId: PullRequestId
+  ): Effect.Effect<RefreshSinglePRResult, RefreshSinglePRError, RefreshSinglePREnv> =>
     refreshSinglePR(awsAccountId, prId)
 }

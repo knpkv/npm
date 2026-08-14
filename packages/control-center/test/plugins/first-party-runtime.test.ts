@@ -316,6 +316,7 @@ const unusedCodeCommitClients = (() => {
     discoverAccount: () => Effect.die("unused discoverAccount"),
     listRepositoriesPage: () => Effect.die("unused listRepositoriesPage"),
     getBlob: () => Effect.die("unused getBlob"),
+    listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
     listPullRequestsPage: () => Effect.die("unused listPullRequestsPage"),
     streamPullRequests: () => Stream.empty,
     getPullRequest: () => Effect.die("unused getPullRequest"),
@@ -395,6 +396,7 @@ describe("first-party plugin runtime", () => {
             })
           ),
         getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>
           Effect.succeed(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
         streamPullRequests: () => Stream.make(pullRequest),
@@ -2554,6 +2556,7 @@ describe("first-party plugin runtime", () => {
             })
           ),
         getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>
           Effect.succeed(
             new ReadClient.CodeCommitPullRequestPage({
