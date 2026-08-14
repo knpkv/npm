@@ -78,8 +78,9 @@ const JIRA_CLI_SCOPES = [
   "read:jira-work",
   // Edit issues and write worklogs.
   "write:jira-work",
-  // Edit a version (e.g. its description) via `PUT /rest/api/3/version/{id}` and
-  // manage version "Related work" links (`/rest/api/3/version/{id}/relatedwork`).
+  // Create a version (`POST /rest/api/3/version`), edit one (e.g. its
+  // description) via `PUT /rest/api/3/version/{id}`, and manage version
+  // "Related work" links (`/rest/api/3/version/{id}/relatedwork`).
   "manage:jira-project",
   // Resolve account IDs to display names for Driver/Contributors/Approvers.
   "read:jira-user",

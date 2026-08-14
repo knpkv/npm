@@ -12,6 +12,7 @@ export {
   buildAuthUrl,
   type BuildAuthUrlOptions,
   computeCodeChallenge,
+  CONFLUENCE_FOLDER_SCOPES,
   CONFLUENCE_SCOPES,
   generateCodeVerifier,
   JIRA_PROPOSAL_SCOPES,

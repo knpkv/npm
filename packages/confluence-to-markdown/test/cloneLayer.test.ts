@@ -6,22 +6,11 @@ import { CloneLayer } from "../src/commands/layers.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { layerFromValues as ConfluenceConfigLayerFromValues } from "../src/ConfluenceConfig.js"
 import { UserCache } from "../src/internal/userCache.js"
-
-const notCalled = Effect.die("unexpected Confluence client call")
+import { notCalledConfluenceClient } from "./commandHarness.js"
 
 const OperationClient = ConfluenceClient.of({
-  getPage: () => notCalled,
-  getChildren: () => notCalled,
-  getAllChildren: () => notCalled,
-  createPage: () => notCalled,
-  updatePage: () => notCalled,
-  deletePage: () => notCalled,
-  getPageVersions: () => notCalled,
-  getPageAttachments: () => notCalled,
-  uploadAttachmentToPage: () => notCalled,
-  getUser: (accountId) => Effect.succeed({ accountId, displayName: "Operation User" }),
-  getSpaceId: () => notCalled,
-  setEditorVersion: () => notCalled
+  ...notCalledConfluenceClient("clone layer client should not be called"),
+  getUser: (accountId) => Effect.succeed({ accountId, displayName: "Operation User" })
 })
 
 const OperationClientLayer = Layer.succeed(ConfluenceClient, OperationClient)

@@ -11,16 +11,21 @@
  *   though it is not in the public OpenAPI spec).
  * - **Account-id resolution**: account IDs are looked up against
  *   `/rest/api/3/user?accountId={id}` and cached per service instance.
- * - **Mutations**: {@link VersionServiceShape.updateVersion} edits version fields
- *   (e.g. description) and {@link VersionServiceShape.addRelatedWork} /
+ * - **Mutations**: {@link VersionServiceShape.createVersion} opens a new release,
+ *   {@link VersionServiceShape.updateVersion} edits version fields (e.g. description)
+ *   and {@link VersionServiceShape.addRelatedWork} /
  *   {@link VersionServiceShape.listRelatedWork} manage the "Related work" links that
  *   surface as Confluence pages on a release report. Mutations require the
  *   `manage:jira-project` OAuth scope (see `JiraAuth`).
+ * - **Project id resolution**: the create endpoint takes a numeric `projectId`
+ *   (`project` is deprecated), so {@link VersionServiceShape.createVersion} accepts the
+ *   project *key* callers already use elsewhere and resolves it via `/project/{key}`.
  *
  * **Common tasks**
  *
  * - List versions for a project: `service.listProjectVersions("RPS", { released: true })`
  * - Get a single version: `service.getVersion("12345")`
+ * - Open a new release: `service.createVersion({ projectKey: "RPS", name: "OOB 100" })`
  * - Set the description: `service.updateVersion("12345", { description: "..." })`
  * - Attach a Confluence page: `service.addRelatedWork("12345", { title, category, url })`
  *
@@ -133,6 +138,21 @@ export interface UpdateVersionInput {
 }
 
 /**
+ * Fields for a new version. `projectKey` is the key (e.g. `RPS`) — it is resolved
+ * to the numeric `projectId` the create endpoint requires. Dates are ISO 8601
+ * `yyyy-mm-dd`.
+ *
+ * @category Types
+ */
+export interface CreateVersionInput {
+  readonly projectKey: string
+  readonly name: string
+  readonly description?: string
+  readonly startDate?: string
+  readonly releaseDate?: string
+}
+
+/**
  * Filters for listing versions.
  *
  * @category Types
@@ -164,6 +184,11 @@ export interface VersionServiceShape {
     options?: ListVersionsOptions
   ) => Effect.Effect<ReadonlyArray<Version>, JiraApiError>
   readonly getVersion: (id: string) => Effect.Effect<Version, JiraApiError>
+  /**
+   * Create a new (unreleased) version on a project. Needs `manage:jira-project`.
+   * Resolves `projectKey` to the numeric project id the API requires.
+   */
+  readonly createVersion: (input: CreateVersionInput) => Effect.Effect<Version, JiraApiError>
   /** Update editable fields (currently description) on a version. Needs `manage:jira-project`. */
   readonly updateVersion: (id: string, input: UpdateVersionInput) => Effect.Effect<Version, JiraApiError>
   /** List the "Related work" links attached to a version. */
@@ -584,6 +609,53 @@ const make = Effect.gen(function*() {
       Effect.flatMap((raw) => mapVersion(asRaw(raw), []))
     )
 
+  /**
+   * Resolve a project key to its numeric id.
+   *
+   * `POST /version` requires `projectId`; its `project` (key) field is deprecated
+   * and ignored by newer instances, so sending the key straight through creates
+   * nothing and reports a confusing 400. Callers pass the key because that is
+   * what every other command takes.
+   */
+  const resolveProjectId = (projectKey: string): Effect.Effect<number, JiraApiError> =>
+    client.getProject(projectKey, undefined).pipe(
+      Effect.mapError((cause) => new JiraApiError({ message: `Failed to look up project ${projectKey}`, cause })),
+      Effect.flatMap((raw) => {
+        const id = asRaw(raw)["id"]
+        // Jira serialises project ids as strings here even though the version
+        // payload wants a number.
+        const numeric = typeof id === "number" ? id : typeof id === "string" ? Number(id) : Number.NaN
+        return Number.isInteger(numeric)
+          ? Effect.succeed(numeric)
+          : Effect.fail(
+            new JiraApiError({
+              message: `Project ${projectKey} returned no usable numeric id; cannot create a version against it.`
+            })
+          )
+      })
+    )
+
+  const createVersion = (input: CreateVersionInput): Effect.Effect<Version, JiraApiError> =>
+    Effect.gen(function*() {
+      const projectId = yield* resolveProjectId(input.projectKey)
+      const raw = yield* client.createVersion({
+        payload: {
+          name: input.name,
+          projectId,
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+          ...(input.releaseDate !== undefined ? { releaseDate: input.releaseDate } : {})
+        }
+      }).pipe(
+        Effect.mapError((cause) =>
+          new JiraApiError({ message: `Failed to create version "${input.name}" on ${input.projectKey}`, cause })
+        )
+      )
+      // The 201 body carries no `expand`, so map scalars only — same reasoning as
+      // updateVersion.
+      return mapVersionScalar(asRaw(raw))
+    })
+
   const updateVersion = (id: string, input: UpdateVersionInput): Effect.Effect<Version, JiraApiError> =>
     client.updateVersion(id, {
       payload: { ...(input.description !== undefined ? { description: input.description } : {}) }
@@ -626,6 +698,7 @@ const make = Effect.gen(function*() {
   return VersionService.of({
     listProjectVersions,
     getVersion,
+    createVersion,
     updateVersion,
     listRelatedWork,
     addRelatedWork,

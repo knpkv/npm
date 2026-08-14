@@ -22,6 +22,16 @@ describe("getLayerType", () => {
     expect(getLayerType(["page", "attachment", "upload", "123", "./diagram.svg"])).toBe("full")
   })
 
+  // These talk to the site directly, so they must not require a `.confluence/`
+  // workspace: AppLayer reads `<cwd>/.confluence/config.json` while it is being
+  // built, which aborts the command before its handler ever runs.
+  it("routes folder and search to the config-free fetch layer", () => {
+    expect(getLayerType(["folder", "get"])).toBe("fetch")
+    expect(getLayerType(["folder", "children"])).toBe("fetch")
+    expect(getLayerType(["folder", "create"])).toBe("fetch")
+    expect(getLayerType(["search"])).toBe("fetch")
+  })
+
   it("routes removed legacy top-level commands to the full layer", () => {
     expect(getLayerType(["fetch"])).toBe("full")
     expect(getLayerType(["clone"])).toBe("full")
