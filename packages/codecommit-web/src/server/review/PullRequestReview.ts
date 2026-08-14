@@ -40,6 +40,12 @@ interface ExactReviewScope {
   readonly revision: ReadClient.CodeCommitPullRequestRevision
 }
 
+interface ExpectedReviewRevision {
+  readonly revisionId: string
+  readonly baseCommit: string
+  readonly headCommit: string
+}
+
 class ChangedFilesKey extends Data.Class<{
   readonly profile: ReadClient.CodeCommitReadAccount["profile"]
   readonly region: ReadClient.CodeCommitReadAccount["region"]
@@ -87,14 +93,19 @@ const ensureRevisionMatchesPullRequest = (
 const loadExactReviewScope = Effect.fn("PullRequestReview.loadExactReviewScope")(function*(
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
-  expectedRevisionId?: string
+  expectedRevision?: ExpectedReviewRevision
 ) {
   const account = { profile: pullRequest.account.profile, region: pullRequest.account.region }
   const revision = yield* client.getPullRequest({ account, pullRequestId: pullRequest.id }).pipe(
     Effect.mapError((cause) => reviewError("get-pull-request", "Unable to load the exact pull-request revision", cause))
   )
   yield* ensureRevisionMatchesPullRequest(pullRequest, revision)
-  if (expectedRevisionId !== undefined && revision.revisionId !== expectedRevisionId) {
+  if (
+    expectedRevision !== undefined &&
+    (revision.revisionId !== expectedRevision.revisionId ||
+      revision.destinationCommit !== expectedRevision.baseCommit ||
+      revision.sourceCommit !== expectedRevision.headCommit)
+  ) {
     return yield* reviewError(
       "revision-changed",
       "The pull-request revision changed. Reload the diff before continuing."
@@ -232,6 +243,10 @@ const loadFileContent = Effect.fn("PullRequestReview.loadFileContent")(function*
   scope: ExactReviewScope,
   file: ReadClient.CodeCommitChangedFile
 ) {
+  if (file.before !== null && file.after !== null && file.before.blobId === file.after.blobId) {
+    const content = yield* loadSide(client, scope, file.before)
+    return { before: content, after: content }
+  }
   const [before, after] = yield* Effect.all([
     loadSide(client, scope, file.before),
     loadSide(client, scope, file.after)
@@ -243,11 +258,11 @@ const loadFileContent = Effect.fn("PullRequestReview.loadFileContent")(function*
 export const loadPullRequestDiffContent = Effect.fn("PullRequestReview.loadPullRequestDiffContent")(function*(
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
-  expectedRevisionId: string,
+  expectedRevision: ExpectedReviewRevision,
   fileIndex: number,
   changedFiles?: PullRequestChangedFilesSource
 ): Effect.fn.Return<PullRequestDiffContentResponse, PullRequestReviewError> {
-  const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevisionId)
+  const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevision)
   const files = yield* loadChangedFiles(client, scope, changedFiles)
   const file = files[fileIndex]
   if (file === undefined) return yield* reviewError("select-file", "The selected changed file no longer exists")
@@ -472,7 +487,7 @@ export const parseRelayReviewResult = (
 export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullRequestRelayReview")(function*(
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
-  expectedRevisionId: string,
+  expectedRevision: ExpectedReviewRevision,
   kind: RelayReviewKind,
   changedFiles?: PullRequestChangedFilesSource
 ): Effect.fn.Return<
@@ -482,7 +497,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
 > {
   return yield* Effect.scoped(
     Effect.gen(function*() {
-      const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevisionId)
+      const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevision)
       const files = yield* loadChangedFiles(client, scope, changedFiles)
       const patch = yield* collectRelayPatch(client, scope, files)
       const prompt = makeRelayReviewPrompt(scope, kind, patch)

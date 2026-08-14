@@ -113,16 +113,20 @@ const annotationsFor = (
 
 const LoadedFileDiff = ({
   accountId,
+  baseCommit,
   file,
   findings,
+  headCommit,
   layout,
   pullRequestId,
   revisionId,
   wrap
 }: {
   readonly accountId: string
+  readonly baseCommit: string
   readonly file: PullRequestDiffResponse["files"][number]
   readonly findings: ReadonlyArray<RelayReviewFinding>
+  readonly headCommit: string
   readonly layout: "split" | "stacked"
   readonly pullRequestId: Domain.PullRequestId
   readonly revisionId: string
@@ -132,10 +136,10 @@ const LoadedFileDiff = ({
     () =>
       ApiClient.query("prs", "diffContent", {
         params: { awsAccountId: accountId, prId: pullRequestId, fileIndex: file.index },
-        query: { revisionId },
+        query: { revisionId, baseCommit, headCommit },
         timeToLive: "10 seconds"
       }),
-    [accountId, file.index, pullRequestId, revisionId]
+    [accountId, baseCommit, file.index, headCommit, pullRequestId, revisionId]
   )
   const content = useAtomValue(contentAtom)
 
@@ -307,7 +311,7 @@ const ReadyReviewWorkspace = ({
   const [wrap, setWrap] = useState(false)
   const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [])
   const runReview = useAtomSet(reviewAtom, { mode: "promise" })
-  const reviewIdentity = `${accountId}:${pullRequest.id}:${diff.revisionId}`
+  const reviewIdentity = `${accountId}:${pullRequest.id}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
   const currentReviewIdentity = useRef(reviewIdentity)
   currentReviewIdentity.current = reviewIdentity
   const [completedReview, setCompletedReview] = useState<{
@@ -327,7 +331,7 @@ const ReadyReviewWorkspace = ({
   useEffect(() => {
     setSelectedFileIndex(diff.files[0]?.index ?? null)
     setSelectedFindingId(null)
-  }, [diff.revisionId])
+  }, [diff.baseCommit, diff.headCommit, diff.revisionId])
 
   const executeReview = useCallback(async (): Promise<void> => {
     const submittedIdentity = reviewIdentity
@@ -336,7 +340,12 @@ const ReadyReviewWorkspace = ({
     try {
       const result = await runReview({
         params: { awsAccountId: accountId, prId: pullRequest.id },
-        payload: { revisionId: diff.revisionId, kind }
+        payload: {
+          revisionId: diff.revisionId,
+          baseCommit: diff.baseCommit,
+          headCommit: diff.headCommit,
+          kind
+        }
       })
       if (currentReviewIdentity.current === submittedIdentity) {
         setCompletedReview({ identity: submittedIdentity, value: result })
@@ -351,7 +360,7 @@ const ReadyReviewWorkspace = ({
     } finally {
       setReviewingIdentity((current) => (current === submittedIdentity ? null : current))
     }
-  }, [accountId, diff.revisionId, kind, pullRequest.id, reviewIdentity, runReview])
+  }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, kind, pullRequest.id, reviewIdentity, runReview])
 
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
@@ -457,9 +466,11 @@ const ReadyReviewWorkspace = ({
             ) : (
               <LoadedFileDiff
                 accountId={accountId}
+                baseCommit={diff.baseCommit}
                 file={selectedFile}
                 findings={review?.result.findings ?? []}
-                key={`${diff.revisionId}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
+                headCommit={diff.headCommit}
+                key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
                 layout={layout}
                 pullRequestId={pullRequest.id}
                 revisionId={diff.revisionId}

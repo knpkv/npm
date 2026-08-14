@@ -85,7 +85,7 @@ export const selectedPullRequest = (
 }
 
 interface PullRequestLookup {
-  readonly findByAccountAndId: PullRequestRepoShape["findByAccountAndId"]
+  readonly findAll: PullRequestRepoShape["findAll"]
 }
 
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
@@ -94,12 +94,12 @@ export const cachedPullRequest = (
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId
 ): Effect.Effect<Domain.PullRequest, ApiError> =>
-  pullRequestRepo.findByAccountAndId(awsAccountId, pullRequestId).pipe(
-    Effect.map((row) => PRService.decodeCachedPR(row)),
+  pullRequestRepo.findAll().pipe(
+    Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
     Effect.mapError(() =>
       new ApiError({ message: "The selected pull request is not available in the local workspace" })
     ),
-    Effect.flatMap((pullRequest) => selectedPullRequest([pullRequest], awsAccountId, pullRequestId))
+    Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId))
   )
 
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
@@ -175,7 +175,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return yield* loadPullRequestDiffContent(
             readClient,
             pullRequest,
-            query.revisionId,
+            query,
             params.fileIndex,
             changedFiles
           )
@@ -188,7 +188,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             runPullRequestRelayReview(
               readClient,
               pullRequest,
-              payload.revisionId,
+              payload,
               payload.kind,
               changedFiles
             )

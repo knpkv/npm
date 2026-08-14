@@ -66,6 +66,11 @@ const routeReviewWorkspace = async (page: Page, expectedKind: "explain" | "revie
     })
   })
   await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+    expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40)
+    })
     await route.fulfill({
       body: JSON.stringify({
         fileIndex: 0,
@@ -79,7 +84,12 @@ const routeReviewWorkspace = async (page: Page, expectedKind: "explain" | "revie
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review", async (route) => {
-    expect(route.request().postDataJSON()).toEqual({ revisionId: "revision-1", kind: expectedKind })
+    expect(route.request().postDataJSON()).toEqual({
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: expectedKind
+    })
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",

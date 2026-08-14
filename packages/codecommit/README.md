@@ -289,8 +289,8 @@ browser receives only the authenticated PR revision, numbered file inventory,
 safe paths and modes, and bounded text selected for rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
-revision after the server rechecks its revision ID. Full, security, tests, and
-explanation focuses are available. The server constructs a bounded patch from
+revision after the server rechecks its revision ID and immutable base/head
+commits. Full, security, tests, and explanation focuses are available. The server constructs a bounded patch from
 Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
 repository text as untrusted evidence, rejects text pairs above its 5,000-line

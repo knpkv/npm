@@ -52,6 +52,12 @@ const revision = new ReadClient.CodeCommitPullRequestRevision({
   title: pullRequest.title
 })
 
+const expectedRevision = {
+  revisionId: revision.revisionId,
+  baseCommit: revision.destinationCommit,
+  headCommit: revision.sourceCommit
+}
+
 const changedFile = new ReadClient.CodeCommitChangedFile({
   after: new ReadClient.CodeCommitBlobMetadata({
     blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
@@ -108,7 +114,7 @@ describe("CodeCommit web review boundary", () => {
 
   it.effect("loads both sides only while the browser revision remains current", () =>
     Effect.gen(function*() {
-      const content = yield* loadPullRequestDiffContent(makeReadClient(), pullRequest, "revision-1", 0)
+      const content = yield* loadPullRequestDiffContent(makeReadClient(), pullRequest, expectedRevision, 0)
       expect(content).toEqual({
         fileIndex: 0,
         revisionId: "revision-1",
@@ -121,10 +127,45 @@ describe("CodeCommit web review boundary", () => {
       const failure = yield* loadPullRequestDiffContent(
         makeReadClient(changed),
         pullRequest,
-        "revision-1",
+        expectedRevision,
         0
       ).pipe(Effect.flip)
       expect(failure.operation).toBe("revision-changed")
+
+      for (
+        const drifted of [
+          new ReadClient.CodeCommitPullRequestRevision({
+            ...revision,
+            sourceCommit: ReadClient.CodeCommitCommitId.make("c".repeat(40))
+          }),
+          new ReadClient.CodeCommitPullRequestRevision({
+            ...revision,
+            destinationCommit: ReadClient.CodeCommitCommitId.make("d".repeat(40))
+          })
+        ]
+      ) {
+        let changedFileReads = 0
+        let blobReads = 0
+        const driftedClient: ReadClient.CodeCommitReadClientService = {
+          ...makeReadClient(drifted),
+          getBlob: () => {
+            blobReads += 1
+            return unused()
+          },
+          streamChangedFiles: () => {
+            changedFileReads += 1
+            return Stream.make(changedFile)
+          }
+        }
+        const driftFailure = yield* loadPullRequestDiffContent(
+          driftedClient,
+          pullRequest,
+          expectedRevision,
+          0
+        ).pipe(Effect.flip)
+        expect(driftFailure.operation).toBe("revision-changed")
+        expect({ changedFileReads, blobReads }).toEqual({ changedFileReads: 0, blobReads: 0 })
+      }
     }))
 
   it.effect("reuses one exact-revision changed-file inventory across endpoints", () =>
@@ -140,7 +181,7 @@ describe("CodeCommit web review boundary", () => {
       const changedFiles = yield* makePullRequestChangedFilesSource(client)
 
       yield* loadPullRequestDiff(client, pullRequest, changedFiles)
-      yield* loadPullRequestDiffContent(client, pullRequest, "revision-1", 0, changedFiles)
+      yield* loadPullRequestDiffContent(client, pullRequest, expectedRevision, 0, changedFiles)
 
       expect(inventoryReads).toBe(1)
     }))
@@ -170,7 +211,7 @@ describe("CodeCommit web review boundary", () => {
             })
           )
       }
-      const binary = yield* loadPullRequestDiffContent(binaryClient, pullRequest, "revision-1", 0)
+      const binary = yield* loadPullRequestDiffContent(binaryClient, pullRequest, expectedRevision, 0)
       expect(binary).toMatchObject({ state: "binary", before: null, after: "after\n" })
 
       const oversizedClient: ReadClient.CodeCommitReadClientService = {
@@ -192,7 +233,7 @@ describe("CodeCommit web review boundary", () => {
               })
             )
       }
-      const oversized = yield* loadPullRequestDiffContent(oversizedClient, pullRequest, "revision-1", 0)
+      const oversized = yield* loadPullRequestDiffContent(oversizedClient, pullRequest, expectedRevision, 0)
       expect(oversized).toMatchObject({ state: "oversized", before: null, after: "after\n" })
     }))
 
@@ -260,15 +301,18 @@ describe("CodeCommit web review boundary", () => {
         }),
         status: "modified"
       })
+      let modeOnlyBlobReads = 0
       const client: ReadClient.CodeCommitReadClientService = {
         ...makeReadClient(),
-        getBlob: ({ blobId }) =>
-          Effect.succeed(
+        getBlob: ({ blobId }) => {
+          modeOnlyBlobReads += 1
+          return Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
               blobId,
               bytes: new TextEncoder().encode("#!/usr/bin/env bun\n")
             })
-          ),
+          )
+        },
         streamChangedFiles: () => Stream.make(modeOnly)
       }
 
@@ -281,6 +325,26 @@ describe("CodeCommit web review boundary", () => {
       }, [modeOnly])
       expect(patch).toContain("old mode 100644")
       expect(patch).toContain("new mode 100755")
+      expect(modeOnlyBlobReads).toBe(1)
+
+      let distinctBlobReads = 0
+      const distinctClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) => {
+          distinctBlobReads += 1
+          return makeReadClient().getBlob({
+            account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+            repositoryName: pullRequest.repositoryName,
+            blobId
+          })
+        }
+      }
+      yield* collectRelayPatch(distinctClient, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [changedFile])
+      expect(distinctBlobReads).toBe(2)
     }))
 
   it.effect("rejects Relay patches beyond the bounded input limit", () =>

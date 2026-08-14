@@ -283,7 +283,11 @@ export class PrsGroup extends HttpApiGroup.make("prs")
           Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
         )
       }),
-      query: Schema.Struct({ revisionId: Schema.String }),
+      query: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String
+      }),
       success: PullRequestDiffContentResponse,
       error: ApiError
     })
@@ -293,6 +297,8 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
       payload: Schema.Struct({
         revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String,
         kind: RelayReviewKind
       }),
       success: PullRequestRelayReviewResponse,

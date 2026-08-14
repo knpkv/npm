@@ -42,13 +42,15 @@ describe("PR handler selection", () => {
     Effect.gen(function*() {
       const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
       const cache = {
-        findByAccountAndId: () => Effect.succeed(cached)
+        findAll: () => Effect.succeed([cached])
       }
 
       const selected = yield* cachedPullRequest(cache, "111122223333", pullRequest.id)
       expect(selected.id).toBe(pullRequest.id)
+      const selectedByProfile = yield* cachedPullRequest(cache, "production", pullRequest.id)
+      expect(selectedByProfile.id).toBe(pullRequest.id)
 
-      const mismatch = yield* cachedPullRequest(cache, "999900001111", pullRequest.id).pipe(Effect.flip)
+      const mismatch = yield* cachedPullRequest(cache, "unrelated", pullRequest.id).pipe(Effect.flip)
       expect(mismatch.message).toContain("not available")
     }))
 })

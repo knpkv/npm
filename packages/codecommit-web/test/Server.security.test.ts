@@ -303,6 +303,26 @@ describe("CodeCommit web security boundary", () => {
         { operation: "getDifferences", permissionState: "always_allowed" },
         { operation: "getBlob", permissionState: "always_allowed" }
       ])
+
+      const failedCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const failedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const failedInner: ReadClient.CodeCommitReadClientService = {
+        ...makeObservedReadClient(failedCalls),
+        getBlob: () =>
+          Ref.update(failedCalls, (count) => ({ ...count, blob: count.blob + 1 })).pipe(
+            Effect.flatMap(() => Effect.fail(new ReadClient.CodeCommitReadNotFoundError({ operation: "get-blob" })))
+          )
+      }
+      const failed = yield* makePermissionedReadClient(failedInner).pipe(
+        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(failedAudit))
+      )
+      expect(Result.isFailure(yield* Effect.result(failed.getBlob(blobRequest)))).toBe(true)
+      expect(yield* Ref.get(failedCalls)).toEqual({ blob: 1, differences: 0 })
+      expect((yield* Ref.get(failedAudit)).map(({ permissionState }) => permissionState)).toEqual([
+        "always_allowed"
+      ])
     }))
 
   it.effect("preserves prompted denial and timeout outcomes before provider execution", () =>
