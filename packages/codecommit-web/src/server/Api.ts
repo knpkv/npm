@@ -149,7 +149,10 @@ export const RelayReviewResult = Schema.Struct({
       expected: "unique Relay finding ids"
     })
   ),
-  verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
+  verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
+  explanation: Schema.optional(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(12_000))
+  )
 })
 export type RelayReviewResult = typeof RelayReviewResult.Type
 

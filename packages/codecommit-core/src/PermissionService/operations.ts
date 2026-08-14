@@ -32,6 +32,7 @@ const op = (category: "read" | "write", description: string): OperationMeta => (
 const BuiltinOperations: Record<string, OperationMeta> = {
   getCallerIdentity: op("read", "Get current user identity"),
   listRepositories: op("read", "List all repositories"),
+  getRepository: op("read", "Get repository identity"),
   listPullRequests: op("read", "List PR IDs for a repo"),
   getPullRequests: op("read", "Fetch PR details"),
   getPullRequest: op("read", "Single PR detail"),
@@ -41,6 +42,7 @@ const BuiltinOperations: Record<string, OperationMeta> = {
   getCommentsForPullRequest: op("read", "Fetch PR comments"),
   listBranches: op("read", "List branches"),
   getDifferences: op("read", "Diff stats"),
+  getBlob: op("read", "Read immutable file content"),
   createPullRequest: op("write", "Create a pull request"),
   updatePullRequestTitle: op("write", "Edit PR title"),
   updatePullRequestDescription: op("write", "Edit PR description"),

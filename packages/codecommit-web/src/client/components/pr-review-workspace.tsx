@@ -6,7 +6,7 @@ import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primit
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BotIcon, CheckCircle2Icon, FileSearchIcon, ShieldCheckIcon, TestTube2Icon } from "lucide-react"
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
   PullRequestDiffResponse,
@@ -67,7 +67,9 @@ const annotationsFor = (
   file: PullRequestDiffResponse["files"][number]
 ): ReadonlyArray<RlyDiffCodeAnnotation> =>
   findings.flatMap((finding): ReadonlyArray<RlyDiffCodeAnnotation> => {
-    if (finding.location.scope !== "line" || finding.location.filePath !== file.path) return []
+    if (finding.location.scope !== "line") return []
+    const expectedPath = finding.location.side === "before" ? (file.previousPath ?? file.path) : file.path
+    if (finding.location.filePath !== expectedPath) return []
     return [
       {
         id: finding.id,
@@ -199,6 +201,18 @@ const ReviewFindings = ({
       </div>
     )
   }
+  if (review.kind === "explain" && review.result.explanation !== undefined) {
+    return (
+      <div className={styles.agentEmpty}>
+        <FileSearchIcon aria-hidden="true" />
+        <Text as="h3" variant="card-title">
+          Change explanation
+        </Text>
+        <Text>{review.result.explanation}</Text>
+        <Text tone="secondary">{review.result.verdict}</Text>
+      </div>
+    )
+  }
   if (review.result.findings.length === 0) {
     return (
       <div className={styles.agentEmpty}>
@@ -230,7 +244,15 @@ const ReviewFindings = ({
               </span>
               <strong>{finding.title}</strong>
               <span>{finding.summary}</span>
-              <small>{finding.recommendation}</small>
+              <span>
+                <b>Evidence:</b> {finding.details}
+              </span>
+              <small>
+                <b>Recommendation:</b> {finding.recommendation}
+              </small>
+              <small>
+                <b>Verification:</b> {finding.verification}
+              </small>
             </button>
           </li>
         ))}
@@ -253,15 +275,20 @@ const ReadyReviewWorkspace = ({
   const [kind, setKind] = useState<RelayReviewKind>("review")
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
-  const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [accountId, pullRequest.id])
-  const runReview = useAtomSet(reviewAtom)
-  const reviewState = useAtomValue(reviewAtom)
-  const review =
-    AsyncResult.isSuccess(reviewState) && reviewState.value.revisionId === diff.revisionId ? reviewState.value : null
-  const reviewFailure = AsyncResult.isFailure(reviewState)
-    ? failureMessage(reviewState.cause, "Relay could not complete this review.")
-    : null
-  const isReviewing = AsyncResult.isWaiting(reviewState)
+  const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [])
+  const runReview = useAtomSet(reviewAtom, { mode: "promise" })
+  const reviewIdentity = `${accountId}:${pullRequest.id}:${diff.revisionId}`
+  const currentReviewIdentity = useRef(reviewIdentity)
+  currentReviewIdentity.current = reviewIdentity
+  const [completedReview, setCompletedReview] = useState<{
+    readonly identity: string
+    readonly value: PullRequestRelayReviewResponse
+  } | null>(null)
+  const [failedReview, setFailedReview] = useState<{ readonly identity: string; readonly message: string } | null>(null)
+  const [reviewingIdentity, setReviewingIdentity] = useState<string | null>(null)
+  const review = completedReview?.identity === reviewIdentity ? completedReview.value : null
+  const reviewFailure = failedReview?.identity === reviewIdentity ? failedReview.message : null
+  const isReviewing = reviewingIdentity === reviewIdentity
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const files = diff.files.map(toRlyFile)
   const inventory: RlyDiffInventory = { files, state: "ready" }
@@ -270,6 +297,30 @@ const ReadyReviewWorkspace = ({
     setSelectedFileIndex(diff.files[0]?.index ?? null)
     setSelectedFindingId(null)
   }, [diff.revisionId])
+
+  const executeReview = useCallback(async (): Promise<void> => {
+    const submittedIdentity = reviewIdentity
+    setReviewingIdentity(submittedIdentity)
+    setFailedReview(null)
+    try {
+      const result = await runReview({
+        params: { awsAccountId: accountId, prId: pullRequest.id },
+        payload: { revisionId: diff.revisionId, kind }
+      })
+      if (currentReviewIdentity.current === submittedIdentity) {
+        setCompletedReview({ identity: submittedIdentity, value: result })
+      }
+    } catch (cause) {
+      if (currentReviewIdentity.current === submittedIdentity) {
+        setFailedReview({
+          identity: submittedIdentity,
+          message: failureMessage(cause, "Relay could not complete this review.")
+        })
+      }
+    } finally {
+      setReviewingIdentity((current) => (current === submittedIdentity ? null : current))
+    }
+  }, [accountId, diff.revisionId, kind, pullRequest.id, reviewIdentity, runReview])
 
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
@@ -320,12 +371,7 @@ const ReadyReviewWorkspace = ({
           <Button
             disabled={isReviewing || diff.files.length === 0}
             loading={isReviewing}
-            onClick={() =>
-              runReview({
-                params: { awsAccountId: accountId, prId: pullRequest.id },
-                payload: { revisionId: diff.revisionId, kind }
-              })
-            }
+            onClick={() => void executeReview()}
             size="compact"
             variant="primary"
           >
@@ -421,9 +467,12 @@ export const PullRequestReviewWorkspace = ({
     () =>
       ApiClient.query("prs", "diff", {
         params: { awsAccountId: accountId, prId: pullRequest.id },
+        serializationKey: `${accountId}:${pullRequest.id}:${(
+          pullRequest.fetchedAt ?? pullRequest.lastModifiedDate
+        ).toISOString()}`,
         timeToLive: "30 seconds"
       }),
-    [accountId, pullRequest.id, pullRequest.fetchedAt]
+    [accountId, pullRequest.id, pullRequest.fetchedAt, pullRequest.lastModifiedDate]
   )
   const diff = useAtomValue(diffAtom)
 

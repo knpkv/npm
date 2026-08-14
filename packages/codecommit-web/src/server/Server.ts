@@ -56,6 +56,7 @@ import {
   requireLoopbackHostname,
   requireLoopbackOrigin
 } from "./internal/OwnerSessionSecurity.js"
+import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 
 export {
   makeOwnerSessionSecrets,
@@ -223,10 +224,23 @@ const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRService
 // AwsClient for handlers that call AWS directly (e.g., createPR)
 const AwsClientLive_ = GatedAwsClientLive
 
-// Immutable diff and Relay reads use the Schema-decoded provider boundary.
-const ReadClientLive = ReadClient.CodeCommitReadClient.live.pipe(
+// Immutable diff and Relay reads use the Schema-decoded provider boundary
+// wrapped by the same permission and audit policy as the legacy AWS client.
+const InnerReadClientLive = Layer.effect(
+  InnerCodeCommitReadClient,
+  ReadClient.CodeCommitReadClient
+).pipe(
+  Layer.provide(ReadClient.CodeCommitReadClient.live),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(AwsClientConfig.Default)
+)
+const ReadClientLive = Layer.effect(
+  ReadClient.CodeCommitReadClient,
+  Effect.flatMap(InnerCodeCommitReadClient, makePermissionedReadClient)
+).pipe(
+  Layer.provide(InnerReadClientLive),
+  Layer.provide(PermissionLive),
+  Layer.provide(PermissionGateLive_)
 )
 
 // Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed

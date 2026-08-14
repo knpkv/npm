@@ -209,6 +209,22 @@ describe("CodeCommit web review boundary", () => {
     expect(prompt).toContain("You have no host tools")
   })
 
+  it("gives Explain mode an explanation contract without the defects-only constraint", () => {
+    const scope = {
+      account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+      pullRequest,
+      revision
+    }
+    const explain = makeRelayReviewPrompt(scope, "explain", "diff --git a/a b/a")
+    const review = makeRelayReviewPrompt(scope, "review", "diff --git a/a b/a")
+
+    expect(explain).toContain("substantive explanation of the change architecture")
+    expect(explain).toContain("\"explanation\":\"substantive architecture and risk explanation\"")
+    expect(explain).not.toContain("Report only concrete, actionable defects")
+    expect(review).toContain("Report only concrete, actionable defects")
+    expect(review).not.toContain("\"explanation\":\"substantive architecture and risk explanation\"")
+  })
+
   it.effect("builds a readable exact patch for renamed files", () =>
     Effect.gen(function*() {
       const patch = yield* collectRelayPatch(

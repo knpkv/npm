@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Duration, Effect, Redacted, Ref, Result } from "effect"
+import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
+import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
+import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
+import { Duration, Effect, Redacted, Ref, Result, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
@@ -14,6 +18,7 @@ import {
   requireLoopbackHostname,
   requireLoopbackOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
+import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
   function*(active = true): Effect.fn.Return<OwnerSessionSecretsShape> {
@@ -26,6 +31,63 @@ const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
     }
   }
 )
+
+const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
+
+const makePermissionService = (state: PermissionState): PermissionService["Service"] => ({
+  check: () => Effect.succeed(state),
+  getAll: () => Effect.succeed({}),
+  getAuditRetention: () => Effect.succeed(30),
+  isAuditEnabled: () => Effect.succeed(true),
+  resetAll: () => Effect.void,
+  set: () => Effect.void,
+  setAudit: () => Effect.void
+})
+
+const makeAuditLog = (entries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>): AuditLogRepo["Service"] => ({
+  clearAll: () => unused(),
+  exportAll: () => unused(),
+  findAll: () => unused(),
+  log: (entry) => Ref.update(entries, (current) => [...current, entry]),
+  prune: () => unused()
+})
+
+const readAccount = {
+  profile: Domain.AwsProfileName.make("production"),
+  region: Domain.AwsRegion.make("eu-west-1")
+}
+
+const makeObservedReadClient = (
+  calls: Ref.Ref<{ readonly blob: number; readonly differences: number }>
+): ReadClient.CodeCommitReadClientService => ({
+  discoverAccount: () => unused(),
+  getBlob: ({ blobId }) =>
+    Ref.update(calls, (count) => ({ ...count, blob: count.blob + 1 })).pipe(
+      Effect.as(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array() }))
+    ),
+  getChangedFilesPage: () => unused(),
+  getPullRequest: () => unused(),
+  getRepositoryIdentity: () => unused(),
+  listPullRequestsPage: () => unused(),
+  listRepositoriesPage: () => unused(),
+  streamChangedFiles: () =>
+    Stream.fromEffect(
+      Ref.update(calls, (count) => ({ ...count, differences: count.differences + 1 }))
+    ).pipe(Stream.drain),
+  streamPullRequests: () => Stream.empty
+})
+
+const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermissionedReadClient")(function*(
+  state: PermissionState,
+  calls: Ref.Ref<{ readonly blob: number; readonly differences: number }>,
+  auditEntries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>
+) {
+  return yield* makePermissionedReadClient(makeObservedReadClient(calls)).pipe(
+    Effect.provideService(PermissionService, makePermissionService(state)),
+    Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+    Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+  )
+})
 
 describe("CodeCommit web security boundary", () => {
   it("attaches owner authentication to every API endpoint", () => {
@@ -186,6 +248,50 @@ describe("CodeCommit web security boundary", () => {
       expect(yield* requireLoopbackOrigin("http://localhost:5173")).toBe("http://localhost:5173")
       const result = yield* Effect.result(requireLoopbackHostname("0.0.0.0"))
       expect(Result.isFailure(result)).toBe(true)
+    }))
+
+  it.effect("gates and audits decoded differences and blob reads before provider execution", () =>
+    Effect.gen(function*() {
+      const deniedCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const deniedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const denied = yield* makeTestPermissionedReadClient("deny", deniedCalls, deniedAudit)
+      const differenceRequest = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        beforeCommitSpecifier: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+        afterCommitSpecifier: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      }
+      const blobRequest = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40))
+      }
+
+      expect(Result.isFailure(yield* Effect.result(Stream.runDrain(denied.streamChangedFiles(differenceRequest)))))
+        .toBe(true)
+      expect(Result.isFailure(yield* Effect.result(denied.getBlob(blobRequest)))).toBe(true)
+      expect(yield* Ref.get(deniedCalls)).toEqual({ blob: 0, differences: 0 })
+      expect((yield* Ref.get(deniedAudit)).map(({ operation, permissionState }) => ({
+        operation,
+        permissionState
+      }))).toEqual([
+        { operation: "getDifferences", permissionState: "denied" },
+        { operation: "getBlob", permissionState: "denied" }
+      ])
+
+      const allowedCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const allowedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const allowed = yield* makeTestPermissionedReadClient("always_allow", allowedCalls, allowedAudit)
+      yield* Stream.runDrain(allowed.streamChangedFiles(differenceRequest))
+      yield* allowed.getBlob(blobRequest)
+      expect(yield* Ref.get(allowedCalls)).toEqual({ blob: 1, differences: 1 })
+      expect((yield* Ref.get(allowedAudit)).map(({ operation, permissionState }) => ({
+        operation,
+        permissionState
+      }))).toEqual([
+        { operation: "getDifferences", permissionState: "always_allowed" },
+        { operation: "getBlob", permissionState: "always_allowed" }
+      ])
     }))
 
   it("never emits the persisted sandbox password in list or SSE projections", () => {
