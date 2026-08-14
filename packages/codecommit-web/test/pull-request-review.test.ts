@@ -1,13 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { Effect, Option, Stream } from "effect"
+import { Deferred, Effect, Fiber, Option, Semaphore, Stream } from "effect"
 
 import {
   collectRelayPatch,
   loadPullRequestDiff,
   loadPullRequestDiffContent,
+  makePullRequestChangedFilesSource,
   makeRelayReviewPrompt,
-  parseRelayReviewResult
+  parseRelayReviewResult,
+  withRelayReviewPermit
 } from "../src/server/review/PullRequestReview.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -123,6 +125,75 @@ describe("CodeCommit web review boundary", () => {
       expect(failure.operation).toBe("revision-changed")
     }))
 
+  it.effect("reuses one exact-revision changed-file inventory across endpoints", () =>
+    Effect.gen(function*() {
+      let inventoryReads = 0
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        streamChangedFiles: () => {
+          inventoryReads += 1
+          return Stream.make(changedFile)
+        }
+      }
+      const changedFiles = yield* makePullRequestChangedFilesSource(client)
+
+      yield* loadPullRequestDiff(client, pullRequest, changedFiles)
+      yield* loadPullRequestDiffContent(client, pullRequest, "revision-1", 0, changedFiles)
+
+      expect(inventoryReads).toBe(1)
+    }))
+
+  it.effect("rejects changed-file inventories beyond the web review limit", () =>
+    Effect.gen(function*() {
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        streamChangedFiles: () => Stream.fromIterable(Array.from({ length: 1_001 }, () => changedFile))
+      }
+      const failure = yield* loadPullRequestDiff(client, pullRequest).pipe(Effect.flip)
+      expect(failure.operation).toBe("get-differences")
+      expect(failure.message).toContain("1000-file web review limit")
+    }))
+
+  it.effect("maps binary and oversized blobs to explicit content states", () =>
+    Effect.gen(function*() {
+      const binaryClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: blobId === changedFile.before?.blobId
+                ? new Uint8Array([0])
+                : new TextEncoder().encode("after\n")
+            })
+          )
+      }
+      const binary = yield* loadPullRequestDiffContent(binaryClient, pullRequest, "revision-1", 0)
+      expect(binary).toMatchObject({ state: "binary", before: null, after: "after\n" })
+
+      const oversizedClient: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          blobId === changedFile.before?.blobId
+            ? Effect.fail(
+              new ReadClient.CodeCommitBlobTooLargeError({
+                operation: "GetBlob",
+                maximumBytes: 1,
+                actualBytes: 2,
+                source: "read-client"
+              })
+            )
+            : Effect.succeed(
+              new ReadClient.CodeCommitBlobContent({
+                blobId,
+                bytes: new TextEncoder().encode("after\n")
+              })
+            )
+      }
+      const oversized = yield* loadPullRequestDiffContent(oversizedClient, pullRequest, "revision-1", 0)
+      expect(oversized).toMatchObject({ state: "oversized", before: null, after: "after\n" })
+    }))
+
   it("isolates delimiter-shaped repository text in a collision-free Relay prompt", () => {
     const prompt = makeRelayReviewPrompt(
       {
@@ -153,7 +224,55 @@ describe("CodeCommit web review boundary", () => {
       expect(patch).toContain("diff --git a/src/index.ts b/src/index.ts")
       expect(patch).toContain("--- a/src/old.ts")
       expect(patch).toContain("+++ b/src/index.ts")
-      expect(patch).not.toContain("\\\"a/src/old.ts\\\"")
+      expect(patch).not.toContain("\"a/src/old.ts\"")
+    }))
+
+  it.effect("rejects Relay patches beyond the bounded input limit", () =>
+    Effect.gen(function*() {
+      const addedFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("e".repeat(40)),
+          mode: "100644",
+          path: "large.txt"
+        }),
+        status: "added"
+      })
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode("x".repeat(786_500))
+            })
+          )
+      }
+      const failure = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [addedFile]).pipe(Effect.flip)
+      expect(failure.operation).toBe("relay-diff")
+      expect(failure.message).toContain("786432-byte Relay review limit")
+    }))
+
+  it.effect("fails fast when another Relay review holds the execution permit", () =>
+    Effect.gen(function*() {
+      const semaphore = yield* Semaphore.make(1)
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const first = yield* withRelayReviewPermit(
+        semaphore,
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+      ).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+
+      const failure = yield* withRelayReviewPermit(semaphore, Effect.succeed("second")).pipe(Effect.flip)
+      expect(failure.operation).toBe("relay-review-busy")
+
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
     }))
 
   it("accepts strict bounded Relay JSON and rejects duplicate finding identities", () => {
@@ -173,5 +292,16 @@ describe("CodeCommit web review boundary", () => {
 
     const duplicate = parseRelayReviewResult(JSON.stringify({ findings: [finding, finding], verdict: "Two issues." }))
     expect(Option.isNone(duplicate)).toBe(true)
+
+    const fenced = parseRelayReviewResult(
+      `\`\`\`json\n${JSON.stringify({ findings: [finding], verdict: "One issue." })}\n\`\`\``
+    )
+    expect(Option.isSome(fenced)).toBe(true)
+
+    const invalidLineTarget = parseRelayReviewResult(JSON.stringify({
+      findings: [{ ...finding, location: { scope: "file", filePath: "src/index.ts" } }],
+      verdict: "One issue."
+    }))
+    expect(Option.isNone(invalidLineTarget)).toBe(true)
   })
 })

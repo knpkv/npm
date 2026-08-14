@@ -72,6 +72,7 @@ const routeReviewWorkspace = async (page: Page) => {
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ revisionId: "revision-1", kind: "review" })
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",

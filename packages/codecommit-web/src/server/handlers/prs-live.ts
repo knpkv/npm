@@ -13,7 +13,7 @@
 import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -21,7 +21,9 @@ import { BackgroundScope } from "../internal/BackgroundScope.js"
 import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
-  runPullRequestRelayReview
+  makePullRequestChangedFilesSource,
+  runPullRequestRelayReview,
+  withRelayReviewPermit
 } from "../review/PullRequestReview.js"
 
 const copyToClipboard = (text: string) => {
@@ -64,7 +66,7 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
     }]
   })
 
-const selectedPullRequest = (
+export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId
@@ -72,7 +74,9 @@ const selectedPullRequest = (
   const pullRequest = pullRequests.find(
     (candidate) =>
       candidate.id === pullRequestId &&
-      (candidate.account.awsAccountId === awsAccountId || candidate.account.profile === awsAccountId)
+      (candidate.account.awsAccountId === awsAccountId ||
+        candidate.account.repoAccountId === awsAccountId ||
+        candidate.account.profile === awsAccountId)
   )
   return pullRequest === undefined
     ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
@@ -84,6 +88,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
     const readClient = yield* ReadClient.CodeCommitReadClient
+    const changedFiles = yield* makePullRequestChangedFilesSource(readClient)
+    const relaySemaphore = yield* Semaphore.make(1)
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* BackgroundScope
     // A process-wide environment snapshot is a stable application service, not a
@@ -142,7 +148,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         Effect.gen(function*() {
           const state = yield* SubscriptionRef.get(prService.state)
           const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
-          return yield* loadPullRequestDiff(readClient, pullRequest)
+          return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("diffContent", ({ params, query }) =>
         Effect.gen(function*() {
@@ -152,18 +158,23 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             readClient,
             pullRequest,
             query.revisionId,
-            params.fileIndex
+            params.fileIndex,
+            changedFiles
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("relayReview", ({ params, payload }) =>
         Effect.gen(function*() {
           const state = yield* SubscriptionRef.get(prService.state)
           const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
-          return yield* runPullRequestRelayReview(
-            readClient,
-            pullRequest,
-            payload.revisionId,
-            payload.kind
+          return yield* withRelayReviewPermit(
+            relaySemaphore,
+            runPullRequestRelayReview(
+              readClient,
+              pullRequest,
+              payload.revisionId,
+              payload.kind,
+              changedFiles
+            )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("open", ({ payload }) =>

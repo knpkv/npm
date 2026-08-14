@@ -3,8 +3,9 @@ import { streamEvents } from "@knpkv/ai-codex"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import { createTwoFilesPatch } from "diff"
-import { Effect, Option, Predicate, Schema, Stream } from "effect"
+import { Cache, Data, Effect, Exit, Option, Predicate, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as Semaphore from "effect/Semaphore"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import {
@@ -34,6 +35,23 @@ interface ExactReviewScope {
   readonly account: ReadClient.CodeCommitReadAccount
   readonly pullRequest: Domain.PullRequest
   readonly revision: ReadClient.CodeCommitPullRequestRevision
+}
+
+class ChangedFilesKey extends Data.Class<{
+  readonly profile: ReadClient.CodeCommitReadAccount["profile"]
+  readonly region: ReadClient.CodeCommitReadAccount["region"]
+  readonly repositoryName: ReadClient.CodeCommitPullRequestRevision["repositoryName"]
+  readonly revisionId: string
+  readonly beforeCommitSpecifier: ReadClient.CodeCommitPullRequestRevision["destinationCommit"]
+  readonly afterCommitSpecifier: ReadClient.CodeCommitPullRequestRevision["sourceCommit"]
+}> {}
+
+/** Group-lifetime source for exact-revision changed-file inventories. */
+export interface PullRequestChangedFilesSource {
+  readonly get: (
+    account: ReadClient.CodeCommitReadAccount,
+    revision: ReadClient.CodeCommitPullRequestRevision
+  ) => Effect.Effect<ReadonlyArray<ReadClient.CodeCommitChangedFile>, PullRequestReviewError>
 }
 
 interface TextSide {
@@ -82,15 +100,15 @@ const loadExactReviewScope = Effect.fn("PullRequestReview.loadExactReviewScope")
   return { account, pullRequest, revision } satisfies ExactReviewScope
 })
 
-const loadChangedFiles = Effect.fn("PullRequestReview.loadChangedFiles")(function*(
+const loadChangedFilesUncached = Effect.fn("PullRequestReview.loadChangedFilesUncached")(function*(
   client: ReadClient.CodeCommitReadClientService,
-  scope: ExactReviewScope
+  key: ChangedFilesKey
 ) {
   const files = yield* client.streamChangedFiles({
-    account: scope.account,
-    repositoryName: scope.revision.repositoryName,
-    beforeCommitSpecifier: scope.revision.destinationCommit,
-    afterCommitSpecifier: scope.revision.sourceCommit
+    account: { profile: key.profile, region: key.region },
+    repositoryName: key.repositoryName,
+    beforeCommitSpecifier: key.beforeCommitSpecifier,
+    afterCommitSpecifier: key.afterCommitSpecifier
   }).pipe(
     Stream.take(MAXIMUM_DIFF_FILES + 1),
     Stream.runCollect,
@@ -106,6 +124,52 @@ const loadChangedFiles = Effect.fn("PullRequestReview.loadChangedFiles")(functio
   return files
 })
 
+/** Build one bounded cache shared by the PR handler group. */
+export const makePullRequestChangedFilesSource = Effect.fn(
+  "PullRequestReview.makePullRequestChangedFilesSource"
+)(function*(client: ReadClient.CodeCommitReadClientService) {
+  const cache = yield* Cache.makeWith(
+    (key: ChangedFilesKey) => loadChangedFilesUncached(client, key),
+    {
+      capacity: 128,
+      timeToLive: (exit) => Exit.isFailure(exit) ? "0 millis" : "1 minute"
+    }
+  )
+  return {
+    get: (account, revision) =>
+      Cache.get(
+        cache,
+        new ChangedFilesKey({
+          profile: account.profile,
+          region: account.region,
+          repositoryName: revision.repositoryName,
+          revisionId: revision.revisionId,
+          beforeCommitSpecifier: revision.destinationCommit,
+          afterCommitSpecifier: revision.sourceCommit
+        })
+      )
+  } satisfies PullRequestChangedFilesSource
+})
+
+const loadChangedFiles = (
+  client: ReadClient.CodeCommitReadClientService,
+  scope: ExactReviewScope,
+  source?: PullRequestChangedFilesSource
+): Effect.Effect<ReadonlyArray<ReadClient.CodeCommitChangedFile>, PullRequestReviewError> =>
+  source === undefined
+    ? loadChangedFilesUncached(
+      client,
+      new ChangedFilesKey({
+        profile: scope.account.profile,
+        region: scope.account.region,
+        repositoryName: scope.revision.repositoryName,
+        revisionId: scope.revision.revisionId,
+        beforeCommitSpecifier: scope.revision.destinationCommit,
+        afterCommitSpecifier: scope.revision.sourceCommit
+      })
+    )
+    : source.get(scope.account, scope.revision)
+
 const filePath = (file: ReadClient.CodeCommitChangedFile): string => file.after?.path ?? file.before?.path ?? "unknown"
 
 const inventoryFile = (file: ReadClient.CodeCommitChangedFile, index: number) => ({
@@ -118,10 +182,11 @@ const inventoryFile = (file: ReadClient.CodeCommitChangedFile, index: number) =>
 /** Load the complete changed-file inventory without exposing provider blob locators. */
 export const loadPullRequestDiff = Effect.fn("PullRequestReview.loadPullRequestDiff")(function*(
   client: ReadClient.CodeCommitReadClientService,
-  pullRequest: Domain.PullRequest
+  pullRequest: Domain.PullRequest,
+  changedFiles?: PullRequestChangedFilesSource
 ): Effect.fn.Return<PullRequestDiffResponse, PullRequestReviewError> {
   const scope = yield* loadExactReviewScope(client, pullRequest)
-  const files = yield* loadChangedFiles(client, scope)
+  const files = yield* loadChangedFiles(client, scope, changedFiles)
   return {
     pullRequestId: scope.revision.pullRequestId,
     revisionId: scope.revision.revisionId,
@@ -174,10 +239,11 @@ export const loadPullRequestDiffContent = Effect.fn("PullRequestReview.loadPullR
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevisionId: string,
-  fileIndex: number
+  fileIndex: number,
+  changedFiles?: PullRequestChangedFilesSource
 ): Effect.fn.Return<PullRequestDiffContentResponse, PullRequestReviewError> {
   const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevisionId)
-  const files = yield* loadChangedFiles(client, scope)
+  const files = yield* loadChangedFiles(client, scope, changedFiles)
   const file = files[fileIndex]
   if (file === undefined) return yield* reviewError("select-file", "The selected changed file no longer exists")
   const content = yield* loadFileContent(client, scope, file)
@@ -238,22 +304,24 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
   scope: ExactReviewScope,
   files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
 ): Effect.fn.Return<string, PullRequestReviewError> {
-  const chunks = new Array<string>()
+  const chunks = yield* Effect.forEach(files, (file) =>
+    loadFileContent(client, scope, file).pipe(
+      Effect.flatMap((content) => {
+        if (content.before.state === "oversized" || content.after.state === "oversized") {
+          return Effect.fail(reviewError(
+            "relay-diff",
+            `The exact content for ${filePath(file)} exceeds the provider review limit`
+          ))
+        }
+        return Effect.succeed(
+          content.before.state === "text" && content.after.state === "text"
+            ? textPatch(file, content.before.text, content.after.text)
+            : binaryPatch(file)
+        )
+      })
+    ), { concurrency: 8 })
   let bytes = 0
-  for (const file of files) {
-    const content = yield* loadFileContent(client, scope, file)
-    if (content.before.state === "oversized" || content.after.state === "oversized") {
-      return yield* reviewError(
-        "relay-diff",
-        `The exact content for ${filePath(file)} exceeds the provider review limit`
-      )
-    }
-    let chunk: string
-    if (content.before.state === "text" && content.after.state === "text") {
-      chunk = textPatch(file, content.before.text, content.after.text)
-    } else {
-      chunk = binaryPatch(file)
-    }
+  for (const chunk of chunks) {
     bytes += textEncoder.encode(chunk).byteLength
     if (bytes > MAXIMUM_RELAY_PATCH_BYTES) {
       return yield* reviewError(
@@ -261,10 +329,25 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
         `The exact patch exceeds the ${MAXIMUM_RELAY_PATCH_BYTES}-byte Relay review limit`
       )
     }
-    chunks.push(chunk)
   }
   return chunks.join("\n")
 })
+
+/** Run Relay only when the group-level execution slot is immediately available. */
+export const withRelayReviewPermit = <A, E, R>(
+  semaphore: Semaphore.Semaphore,
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A, E | PullRequestReviewError, R> =>
+  semaphore.withPermitsIfAvailable(1)(effect).pipe(
+    Effect.flatMap(Option.match({
+      onNone: () =>
+        Effect.fail(reviewError(
+          "relay-review-busy",
+          "Another Relay review is already running; wait for it to finish before retrying"
+        )),
+      onSome: Effect.succeed
+    }))
+  )
 
 const focusByKind: Record<RelayReviewKind, string> = {
   review: "Find correctness, security, reliability, and maintainability defects. Prioritize actionable findings.",
@@ -327,7 +410,8 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevisionId: string,
-  kind: RelayReviewKind
+  kind: RelayReviewKind,
+  changedFiles?: PullRequestChangedFilesSource
 ): Effect.fn.Return<
   PullRequestRelayReviewResponse,
   PullRequestReviewError,
@@ -336,7 +420,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
   return yield* Effect.scoped(
     Effect.gen(function*() {
       const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevisionId)
-      const files = yield* loadChangedFiles(client, scope)
+      const files = yield* loadChangedFiles(client, scope, changedFiles)
       const patch = yield* collectRelayPatch(client, scope, files)
       const prompt = makeRelayReviewPrompt(scope, kind, patch)
       if (textEncoder.encode(prompt).byteLength > MAXIMUM_RELAY_PROMPT_BYTES) {
