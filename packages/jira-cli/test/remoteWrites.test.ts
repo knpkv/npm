@@ -105,6 +105,32 @@ describe("IssueService.edit", () => {
     )
   })
 
+  /**
+   * Once the PUT lands the edit is committed. Reporting the read-back failure as
+   * a failed edit invites the caller to repeat a change that already happened.
+   */
+  it.effect("reports a failed read-back as committed-but-unverified, not as a failed edit", () => {
+    const { calls, layer } = makeRecordingLayer((request) =>
+      request.method === "PUT"
+        ? new Response(null, { status: 204 })
+        : json({ errorMessages: ["Internal server error"] }, 500)
+    )
+
+    return Effect.gen(function*() {
+      const service = yield* IssueService
+      const error = yield* Effect.flip(service.edit("PROJ-123", { addFixVersions: ["OOB 100"] }))
+
+      expect(error.message).toContain("do not repeat it")
+      expect(error.message).not.toContain("Failed to edit")
+      // The write really did go out — that is why the wording matters.
+      expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1)
+    }).pipe(
+      Effect.provide(IssueServiceLayer),
+      Effect.provide(layer),
+      Effect.provide(Layer.succeed(SiteUrl, "https://example.atlassian.net"))
+    )
+  })
+
   /** A refused combination must never reach the network. */
   it.effect("fails before calling Jira when the flags contradict each other", () => {
     const { calls, layer } = makeRecordingLayer(() => new Response(null, { status: 204 }))

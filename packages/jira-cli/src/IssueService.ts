@@ -558,7 +558,21 @@ const make = Effect.gen(function*() {
         Effect.mapError((cause) => new JiraApiError({ message: `Failed to edit issue ${key}`, cause }))
       )
       // The 204 carries no body, so re-read to report the resulting state.
-      return yield* getByKey(key)
+      //
+      // Past this point the edit is already committed, so a failed read-back must
+      // not be reported as a failed edit: a caller told "edit failed" may redo a
+      // change that already landed. `returnIssue` would close the window, but the
+      // endpoint takes no `fields`, so the returned issue can silently omit what
+      // `getByKey` asks for — quietly wrong data in place of a loud error.
+      return yield* getByKey(key).pipe(
+        Effect.mapError((cause) =>
+          new JiraApiError({
+            message: `Edited issue ${key}, but reading it back failed, so the result below is unverified. ` +
+              `The edit was applied — do not repeat it.`,
+            cause
+          })
+        )
+      )
     })
 
   return IssueService.of({ getByKey, search, searchAll, edit })
