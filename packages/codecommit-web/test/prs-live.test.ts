@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain } from "@knpkv/codecommit-core"
-import { Effect } from "effect"
+import { Domain, PRService } from "@knpkv/codecommit-core"
+import { Effect, Schema } from "effect"
 
-import { selectedPullRequest } from "../src/server/handlers/prs-live.js"
+import { cachedPullRequest, selectedPullRequest } from "../src/server/handlers/prs-live.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -36,5 +36,19 @@ describe("PR handler selection", () => {
 
       const failure = yield* selectedPullRequest([pullRequest], "999900001111", pullRequest.id).pipe(Effect.flip)
       expect(failure.message).toContain("not available")
+    }))
+
+  it.effect("resolves a direct-linked pull request from the durable SSE cache", () =>
+    Effect.gen(function*() {
+      const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
+      const cache = {
+        findByAccountAndId: () => Effect.succeed(cached)
+      }
+
+      const selected = yield* cachedPullRequest(cache, "111122223333", pullRequest.id)
+      expect(selected.id).toBe(pullRequest.id)
+
+      const mismatch = yield* cachedPullRequest(cache, "999900001111", pullRequest.id).pipe(Effect.flip)
+      expect(mismatch.message).toContain("not available")
     }))
 })

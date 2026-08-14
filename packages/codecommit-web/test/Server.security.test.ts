@@ -358,6 +358,57 @@ describe("CodeCommit web security boundary", () => {
       expect((yield* Ref.get(allowedAudit)).map(({ permissionState }) => permissionState)).toEqual(["allowed"])
     }))
 
+  it.effect("audits permitted streams exactly once on cancellation and natural completion", () =>
+    Effect.gen(function*() {
+      const differenceRequest = {
+        account: readAccount,
+        repositoryName: Domain.RepositoryName.make("payments"),
+        beforeCommitSpecifier: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
+        afterCommitSpecifier: ReadClient.CodeCommitCommitId.make("b".repeat(40))
+      }
+      const file = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: "src/index.ts"
+        }),
+        status: "added"
+      })
+
+      const cancelledAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const cancelledCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const cancelledInner: ReadClient.CodeCommitReadClientService = {
+        ...makeObservedReadClient(cancelledCalls),
+        streamChangedFiles: () => Stream.make(file).pipe(Stream.concat(Stream.never))
+      }
+      const cancelled = yield* makePermissionedReadClient(cancelledInner).pipe(
+        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(cancelledAudit))
+      )
+      yield* cancelled.streamChangedFiles(differenceRequest).pipe(Stream.take(1), Stream.runDrain)
+      expect((yield* Ref.get(cancelledAudit)).map(({ permissionState }) => permissionState)).toEqual([
+        "always_allowed"
+      ])
+
+      const completedAudit = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const completedCalls = yield* Ref.make({ blob: 0, differences: 0 })
+      const completedInner: ReadClient.CodeCommitReadClientService = {
+        ...makeObservedReadClient(completedCalls),
+        streamChangedFiles: () => Stream.make(file)
+      }
+      const completed = yield* makePermissionedReadClient(completedInner).pipe(
+        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(completedAudit))
+      )
+      yield* Stream.runDrain(completed.streamChangedFiles(differenceRequest))
+      expect((yield* Ref.get(completedAudit)).map(({ permissionState }) => permissionState)).toEqual([
+        "always_allowed"
+      ])
+    }))
+
   it("never emits the persisted sandbox password in list or SSE projections", () => {
     const encoded = encodeSandbox({
       id: "sbx-1",

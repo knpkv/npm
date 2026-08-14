@@ -133,7 +133,7 @@ export const makePermissionedReadClient = Effect.fn("PermissionedReadClient.make
         const permissionState = yield* check(params)
         const startedAt = yield* Clock.currentTimeMillis
         return method(request).pipe(
-          Stream.onEnd(
+          Stream.ensuring(
             Clock.currentTimeMillis.pipe(
               Effect.flatMap((completedAt) => audit(params, permissionState, completedAt - startedAt))
             )

@@ -12,6 +12,7 @@ import {
   type PullRequestDiffContentResponse,
   type PullRequestDiffResponse,
   type PullRequestRelayReviewResponse,
+  RelayExplainResult,
   type RelayReviewKind,
   RelayReviewResult
 } from "../Api.js"
@@ -19,6 +20,8 @@ import {
 const MAXIMUM_DIFF_FILES = 1_000
 const MAXIMUM_RELAY_PATCH_BYTES = 786_432
 const MAXIMUM_RELAY_PROMPT_BYTES = 1_048_576
+const MAXIMUM_RELAY_DIFF_INPUT_LINES = 5_000
+const MAXIMUM_RELAY_DIFF_LINE_PAIRS = 4_000_000
 const textDecoder = new TextDecoder("utf-8", { fatal: true })
 const textEncoder = new TextEncoder()
 
@@ -292,14 +295,21 @@ const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
   ].join("\n")
 }
 
-const textPatch = (file: ReadClient.CodeCommitChangedFile, before: string, after: string): string => {
+type PatchRenderer = typeof createTwoFilesPatch
+
+const textPatch = (
+  file: ReadClient.CodeCommitChangedFile,
+  before: string,
+  after: string,
+  renderPatch: PatchRenderer
+): string => {
   const identity = patchIdentityPath(file)
   const beforePath = patchSidePath("a", file.before)
   const afterPath = patchSidePath("b", file.after)
   return [
     `diff --git a/${identity} b/${identity}`,
     ...modePatchLines(file),
-    createTwoFilesPatch(
+    renderPatch(
       beforePath,
       afterPath,
       before,
@@ -311,11 +321,37 @@ const textPatch = (file: ReadClient.CodeCommitChangedFile, before: string, after
   ].join("\n")
 }
 
+const lineCount = (text: string): number => {
+  if (text.length === 0) return 0
+  let lines = 1
+  for (const character of text) {
+    if (character === "\n") lines += 1
+  }
+  return lines
+}
+
+const ensureRelayDiffComplexity = (
+  file: ReadClient.CodeCommitChangedFile,
+  before: string,
+  after: string
+): Effect.Effect<void, PullRequestReviewError> => {
+  const beforeLines = lineCount(before)
+  const afterLines = lineCount(after)
+  return beforeLines + afterLines > MAXIMUM_RELAY_DIFF_INPUT_LINES ||
+      beforeLines * afterLines > MAXIMUM_RELAY_DIFF_LINE_PAIRS
+    ? Effect.fail(reviewError(
+      "relay-diff",
+      `The exact text change for ${filePath(file)} exceeds the Relay diff complexity limit`
+    ))
+    : Effect.void
+}
+
 /** Build one bounded exact patch from Schema-decoded provider blobs. */
 export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch")(function*(
   client: ReadClient.CodeCommitReadClientService,
   scope: ExactReviewScope,
-  files: ReadonlyArray<ReadClient.CodeCommitChangedFile>
+  files: ReadonlyArray<ReadClient.CodeCommitChangedFile>,
+  renderPatch: PatchRenderer = createTwoFilesPatch
 ): Effect.fn.Return<string, PullRequestReviewError> {
   let bytes = 0
   const chunks: Array<string> = []
@@ -327,9 +363,13 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
         `The exact content for ${filePath(file)} exceeds the provider review limit`
       )
     }
-    const chunk = content.before.state === "text" && content.after.state === "text"
-      ? textPatch(file, content.before.text, content.after.text)
-      : binaryPatch(file)
+    let chunk: string
+    if (content.before.state === "text" && content.after.state === "text") {
+      yield* ensureRelayDiffComplexity(file, content.before.text, content.after.text)
+      chunk = textPatch(file, content.before.text, content.after.text, renderPatch)
+    } else {
+      chunk = binaryPatch(file)
+    }
     bytes += textEncoder.encode(chunk).byteLength
     if (bytes > MAXIMUM_RELAY_PATCH_BYTES) {
       return yield* reviewError(
@@ -414,12 +454,17 @@ const AgentMessageEvent = Schema.fromJsonString(
 )
 const decodeAgentMessage = Schema.decodeUnknownOption(AgentMessageEvent)
 const decodeRelayResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayReviewResult))
+const decodeRelayExplainResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayExplainResult))
 
-export const parseRelayReviewResult = (message: string): Option.Option<RelayReviewResult> => {
+export const parseRelayReviewResult = (
+  message: string,
+  kind: RelayReviewKind
+): Option.Option<RelayReviewResult> => {
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
-  return decodeRelayResult(trimmed).pipe(
-    Option.orElse(() => fenced === undefined ? Option.none() : decodeRelayResult(fenced))
+  const decode = kind === "explain" ? decodeRelayExplainResult : decodeRelayResult
+  return decode(trimmed).pipe(
+    Option.orElse(() => fenced === undefined ? Option.none() : decode(fenced))
   )
 }
 
@@ -460,7 +505,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
         Stream.runLast,
         Effect.mapError((cause) => reviewError("relay-review", "Relay review execution failed", cause))
       )
-      const result = parseRelayReviewResult(Option.getOrElse(message, () => ""))
+      const result = parseRelayReviewResult(Option.getOrElse(message, () => ""), kind)
       if (Option.isNone(result)) {
         return yield* reviewError(
           "relay-review-decode",

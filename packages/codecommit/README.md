@@ -293,9 +293,10 @@ revision after the server rechecks its revision ID. Full, security, tests, and
 explanation focuses are available. The server constructs a bounded patch from
 Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
-repository text as untrusted evidence and gives the agent no host tools or
-repository access. Findings are decoded into a bounded local deck and exact line
-findings appear beside the matching diff. Web Relay is advisory and read-only:
+repository text as untrusted evidence, rejects text pairs above its 5,000-line
+or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
+no host tools or repository access. Findings are decoded into a bounded local
+deck and exact line findings appear beside the matching diff. Web Relay is advisory and read-only:
 it does not publish comments, approve, merge, or persist a review result, and a
 changed revision must be reloaded before another run.
 

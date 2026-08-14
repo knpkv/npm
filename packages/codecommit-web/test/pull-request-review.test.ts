@@ -356,6 +356,42 @@ describe("CodeCommit web review boundary", () => {
       expect(reads).toEqual([firstFile.after?.blobId])
     }))
 
+  it.effect("rejects pathological text changes before invoking the synchronous patch renderer", () =>
+    Effect.gen(function*() {
+      const disjointBefore = Array.from({ length: 3_000 }, (_, index) => `before-${index}`).join("\n")
+      const disjointAfter = Array.from({ length: 3_000 }, (_, index) => `after-${index}`).join("\n")
+      const client: ReadClient.CodeCommitReadClientService = {
+        ...makeReadClient(),
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId,
+              bytes: new TextEncoder().encode(
+                blobId === changedFile.before?.blobId ? disjointBefore : disjointAfter
+              )
+            })
+          )
+      }
+      let renderCalls = 0
+      const failure = yield* collectRelayPatch(
+        client,
+        {
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          pullRequest,
+          revision
+        },
+        [changedFile],
+        () => {
+          renderCalls += 1
+          return "unreachable"
+        }
+      ).pipe(Effect.flip)
+
+      expect(failure.operation).toBe("relay-diff")
+      expect(failure.message).toContain("diff complexity limit")
+      expect(renderCalls).toBe(0)
+    }))
+
   it.effect("loads every in-budget Relay file in inventory order", () =>
     Effect.gen(function*() {
       const files = ["first.txt", "second.txt"].map((path, index) =>
@@ -422,21 +458,50 @@ describe("CodeCommit web review boundary", () => {
       publicationTarget: "line-comment",
       location: { scope: "line", filePath: "src/index.ts", line: 10, side: "after" }
     }
-    const parsed = parseRelayReviewResult(JSON.stringify({ findings: [finding], verdict: "One issue." }))
+    const parsed = parseRelayReviewResult(JSON.stringify({ findings: [finding], verdict: "One issue." }), "review")
     expect(Option.isSome(parsed)).toBe(true)
 
-    const duplicate = parseRelayReviewResult(JSON.stringify({ findings: [finding, finding], verdict: "Two issues." }))
+    const duplicate = parseRelayReviewResult(
+      JSON.stringify({ findings: [finding, finding], verdict: "Two issues." }),
+      "review"
+    )
     expect(Option.isNone(duplicate)).toBe(true)
 
     const fenced = parseRelayReviewResult(
-      `\`\`\`json\n${JSON.stringify({ findings: [finding], verdict: "One issue." })}\n\`\`\``
+      `\`\`\`json\n${JSON.stringify({ findings: [finding], verdict: "One issue." })}\n\`\`\``,
+      "review"
     )
     expect(Option.isSome(fenced)).toBe(true)
 
-    const invalidLineTarget = parseRelayReviewResult(JSON.stringify({
-      findings: [{ ...finding, location: { scope: "file", filePath: "src/index.ts" } }],
-      verdict: "One issue."
-    }))
+    const invalidLineTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{ ...finding, location: { scope: "file", filePath: "src/index.ts" } }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
     expect(Option.isNone(invalidLineTarget)).toBe(true)
+
+    const missingExplanation = parseRelayReviewResult(
+      JSON.stringify({ findings: [], verdict: "Architecture overview." }),
+      "explain"
+    )
+    expect(Option.isNone(missingExplanation)).toBe(true)
+
+    const explainWithFindings = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [finding],
+        verdict: "Architecture overview.",
+        explanation: "Uses a service boundary."
+      }),
+      "explain"
+    )
+    expect(Option.isNone(explainWithFindings)).toBe(true)
+
+    const explanation = parseRelayReviewResult(
+      JSON.stringify({ findings: [], verdict: "Architecture overview.", explanation: "Uses a service boundary." }),
+      "explain"
+    )
+    expect(Option.isSome(explanation)).toBe(true)
   })
 })

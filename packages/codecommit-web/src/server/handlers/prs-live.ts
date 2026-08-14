@@ -11,6 +11,7 @@
  * @module
  */
 import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
+import type { PullRequestRepoShape } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
@@ -83,11 +84,30 @@ export const selectedPullRequest = (
     : Effect.succeed(pullRequest)
 }
 
+interface PullRequestLookup {
+  readonly findByAccountAndId: PullRequestRepoShape["findByAccountAndId"]
+}
+
+/** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
+export const cachedPullRequest = (
+  pullRequestRepo: PullRequestLookup,
+  awsAccountId: string,
+  pullRequestId: Domain.PullRequestId
+): Effect.Effect<Domain.PullRequest, ApiError> =>
+  pullRequestRepo.findByAccountAndId(awsAccountId, pullRequestId).pipe(
+    Effect.map((row) => PRService.decodeCachedPR(row)),
+    Effect.mapError(() =>
+      new ApiError({ message: "The selected pull request is not available in the local workspace" })
+    ),
+    Effect.flatMap((pullRequest) => selectedPullRequest([pullRequest], awsAccountId, pullRequestId))
+  )
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
     const readClient = yield* ReadClient.CodeCommitReadClient
+    const pullRequestRepo = yield* CacheService.PullRequestRepo
     const changedFiles = yield* makePullRequestChangedFilesSource(readClient)
     const relaySemaphore = yield* Semaphore.make(1)
     const notificationRepo = yield* CacheService.NotificationRepo
@@ -146,14 +166,12 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("diff", ({ params }) =>
         Effect.gen(function*() {
-          const state = yield* SubscriptionRef.get(prService.state)
-          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("diffContent", ({ params, query }) =>
         Effect.gen(function*() {
-          const state = yield* SubscriptionRef.get(prService.state)
-          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* loadPullRequestDiffContent(
             readClient,
             pullRequest,
@@ -164,8 +182,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("relayReview", ({ params, payload }) =>
         Effect.gen(function*() {
-          const state = yield* SubscriptionRef.get(prService.state)
-          const pullRequest = yield* selectedPullRequest(state.pullRequests, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* withRelayReviewPermit(
             relaySemaphore,
             runPullRequestRelayReview(

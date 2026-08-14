@@ -158,6 +158,14 @@ export const RelayReviewResult = Schema.Struct({
 })
 export type RelayReviewResult = typeof RelayReviewResult.Type
 
+/** Explain-mode results must be explanatory rather than a hidden findings response. */
+export const RelayExplainResult = RelayReviewResult.check(
+  Schema.makeFilter(
+    (result) => result.explanation !== undefined && result.findings.length === 0,
+    { expected: "a nonempty explanation and no findings for Explain mode" }
+  )
+)
+
 /** One ephemeral Relay result bound to the exact diff that was reviewed. */
 export const PullRequestRelayReviewResponse = Schema.Struct({
   pullRequestId: PullRequestId,
@@ -166,7 +174,14 @@ export const PullRequestRelayReviewResponse = Schema.Struct({
   headCommit: Schema.String,
   kind: RelayReviewKind,
   result: RelayReviewResult
-})
+}).check(
+  Schema.makeFilter(
+    (response) =>
+      response.kind !== "explain" ||
+      (response.result.explanation !== undefined && response.result.findings.length === 0),
+    { expected: "an Explain response with a nonempty explanation and no findings" }
+  )
+)
 export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
 
 // Notification schema (unified)
