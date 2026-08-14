@@ -184,6 +184,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   let currentRevision = "revision-1"
   let manualRefreshRequested = false
   let manualRefreshCount = 0
+  const changedRevisionRefresh = Promise.withResolvers<void>()
 
   await page.route("**/api/events/", async (route) => {
     eventCount++
@@ -246,7 +247,10 @@ test("reloads after a completed manual refresh without refetching for ordinary S
         await route.fulfill({ body: "refresh failed", contentType: "text/plain", status: 500 })
         return
       }
-      if (manualRefreshCount === 3) currentRevision = "revision-2"
+      if (manualRefreshCount === 3) {
+        await changedRevisionRefresh.promise
+        currentRevision = "revision-2"
+      }
     }
     await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
   })
@@ -268,9 +272,107 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   expect(diffRequestCount).toBe(2)
 
   await refreshButton.click()
+  await expect(refreshButton).toBeDisabled()
+  expect(diffRequestCount).toBe(2)
+  changedRevisionRefresh.resolve()
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
   expect(diffRequestCount).toBe(3)
+})
+
+test("scopes file selection to the exact pull request while preserving same-revision layout state", async ({ page }) => {
+  const secondPullRequest = {
+    ...pullRequest,
+    id: "43",
+    link: "https://console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/43",
+    title: "fix(payments): keep the retry budget bounded"
+  }
+  const contentRequests = new Map<string, number>()
+  await page.clock.install()
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 2,
+          pullRequests: [pullRequest, secondPullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/*/diff", async (route) => {
+    const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId,
+        revisionId: `revision-${pullRequestId}`,
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: Array.from({ length: 6 }, (_, index) => ({
+          index,
+          status: "modified",
+          path: `src/pr-${pullRequestId}-${String(index)}.ts`,
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }))
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/*/diff/*?*", async (route) => {
+    const segments = new URL(route.request().url()).pathname.split("/")
+    const pullRequestId = segments.at(-3) ?? ""
+    const fileIndex = Number(segments.at(-1))
+    const key = `${pullRequestId}:${String(fileIndex)}`
+    contentRequests.set(key, (contentRequests.get(key) ?? 0) + 1)
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex,
+        revisionId: `revision-${pullRequestId}`,
+        state: "text",
+        before: `export const value = "${key}:before"\n`,
+        after: `export const value = "${key}:after"\n`
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  const navigateTo = async (pullRequestId: string): Promise<void> => {
+    await page.evaluate((nextPullRequestId) => {
+      window.history.pushState({}, "", `/accounts/111111111111/prs/${nextPullRequestId}`)
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    }, pullRequestId)
+  }
+
+  await page.goto("/accounts/111111111111/prs/43")
+  await expect(page.getByText("export const value = \"43:0:after\"")).toBeVisible()
+  expect(contentRequests.get("43:0")).toBe(1)
+
+  await navigateTo("42")
+  await expect(page.getByText("PR 42")).toBeVisible()
+  await page.getByRole("button", { name: /File 6 of 6: src\/pr-42-5\.ts/ }).click()
+  await expect(page.getByText("export const value = \"42:5:after\"")).toBeVisible()
+  await page.clock.fastForward(11_000)
+
+  await navigateTo("43")
+  await expect(page.getByText("export const value = \"43:0:after\"")).toBeVisible()
+  expect(contentRequests.get("43:5")).toBeUndefined()
+
+  await page.getByRole("button", { name: /File 2 of 6: src\/pr-43-1\.ts/ }).click()
+  await expect(page.getByText("export const value = \"43:1:after\"")).toBeVisible()
+  await page.getByRole("button", { name: "Stacked" }).click()
+  await page.getByRole("button", { name: "Wrap" }).click()
+  await expect(page.getByText("export const value = \"43:1:after\"")).toBeVisible()
+  expect(contentRequests.get("43:1")).toBe(1)
 })
 
 test("does not carry a failed Relay run into another pull request", async ({ page }) => {

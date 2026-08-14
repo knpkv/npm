@@ -1,8 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, PRService } from "@knpkv/codecommit-core"
-import { Effect, Schema } from "effect"
+import { Deferred, Effect, Schema } from "effect"
 
-import { cachedPullRequest, selectedPullRequest } from "../src/server/handlers/prs-live.js"
+import {
+  cachedPullRequest,
+  completeSinglePullRequestRefresh,
+  selectedPullRequest
+} from "../src/server/handlers/prs-live.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -38,6 +42,24 @@ const awsAccountPullRequest = new Domain.PullRequest({
 })
 
 describe("PR handler selection", () => {
+  it.effect("acknowledges a manual refresh only after its provider projection completes", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const acknowledged = yield* Deferred.make<string>()
+      const refresh = Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+
+      yield* completeSinglePullRequestRefresh(refresh).pipe(
+        Effect.flatMap((response) => Deferred.succeed(acknowledged, response)),
+        Effect.forkChild
+      )
+      yield* Deferred.await(started)
+      expect(yield* Deferred.isDone(acknowledged)).toBe(false)
+
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Deferred.await(acknowledged)).toBe("ok")
+    }))
+
   it.effect("matches the repository account identifier used by browser routes", () =>
     Effect.gen(function*() {
       const selected = yield* selectedPullRequest([pullRequest], "111122223333", pullRequest.id)

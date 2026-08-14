@@ -109,6 +109,11 @@ export const makeDiffContentResponse = (content: PullRequestDiffContentResponse)
     headers: { "cache-control": "no-store" }
   }).pipe(Effect.mapError((error) => new ApiError({ message: error.message })))
 
+/** A manual refresh is acknowledged only after its durable provider projection completes. */
+export const completeSinglePullRequestRefresh = <E, R>(
+  refresh: Effect.Effect<void, E, R>
+): Effect.Effect<string, E, R> => refresh.pipe(Effect.as("ok"))
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
@@ -147,10 +152,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ params }) =>
-        prService.refreshSinglePR(params.awsAccountId, params.prId).pipe(
-          Effect.forkIn(ownerScope),
-          Effect.map(() => "ok")
-        ))
+        completeSinglePullRequestRefresh(prService.refreshSinglePR(params.awsAccountId, params.prId)))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({
           account: { profile: payload.account.profile, region: payload.account.region },
@@ -160,7 +162,9 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           sourceReference: payload.sourceBranch,
           destinationReference: payload.destinationBranch
         }).pipe(
-          Effect.mapError((e) => new ApiError({ message: e.message }))
+          Effect.mapError((e) =>
+            new ApiError({ message: e.message })
+          )
         ))
       .handle("comments", ({ query }) =>
         awsClient.getCommentsForPullRequest({

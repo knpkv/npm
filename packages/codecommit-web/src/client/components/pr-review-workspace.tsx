@@ -81,6 +81,12 @@ const locationLabel = (finding: RelayReviewFinding): string => {
 const failureMessage = (failure: unknown, fallback: string): string =>
   Predicate.hasProperty(failure, "message") && typeof failure.message === "string" ? failure.message : fallback
 
+const exactReviewIdentity = (
+  accountId: string,
+  pullRequestId: Domain.PullRequestId,
+  diff: Pick<PullRequestDiffResponse, "baseCommit" | "headCommit" | "revisionId">
+): string => `${accountId}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
+
 const toRlyFile = (file: PullRequestDiffResponse["files"][number], content: RlyDiffFileContent): RlyDiffFile =>
   file.status === "renamed" && file.previousPath !== null
     ? {
@@ -374,7 +380,7 @@ const ReadyReviewWorkspace = ({
   const [contentStates, setContentStates] = useState<ReadonlyMap<number, RlyDiffFileContent>>(new Map())
   const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [])
   const runReview = useAtomSet(reviewAtom, { mode: "promise" })
-  const reviewIdentity = `${accountId}:${pullRequest.id}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
+  const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
   const currentReviewIdentity = useRef(reviewIdentity)
   currentReviewIdentity.current = reviewIdentity
   const [completedReview, setCompletedReview] = useState<{
@@ -398,12 +404,6 @@ const ReadyReviewWorkspace = ({
       return new Map(current).set(fileIndex, content)
     })
   }, [])
-
-  useEffect(() => {
-    setSelectedFileIndex(diff.files[0]?.index ?? null)
-    setSelectedFindingId(null)
-    setContentStates(new Map())
-  }, [diff.baseCommit, diff.headCommit, diff.revisionId])
 
   const executeReview = useCallback(async (): Promise<void> => {
     const submittedIdentity = reviewIdentity
@@ -616,7 +616,12 @@ export const PullRequestReviewWorkspace = ({
     )
   }
   return AsyncResult.isSuccess(diff) ? (
-    <ReadyReviewWorkspace accountId={accountId} diff={diff.value} pullRequest={pullRequest} />
+    <ReadyReviewWorkspace
+      accountId={accountId}
+      diff={diff.value}
+      key={exactReviewIdentity(accountId, pullRequest.id, diff.value)}
+      pullRequest={pullRequest}
+    />
   ) : (
     <StatePanel description="Refresh this pull request to retry." title="Exact diff unavailable" tone="critical" />
   )
