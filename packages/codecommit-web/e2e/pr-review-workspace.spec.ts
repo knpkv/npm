@@ -173,10 +173,11 @@ test("reloads the diff only when the streamed pull request revision changes", as
   let eventCount = 0
   let diffRequestCount = 0
   let currentRevision = "revision-1"
+  let advanceRevision = false
 
   await page.route("**/api/events/", async (route) => {
     eventCount++
-    if (eventCount >= 3) currentRevision = "revision-2"
+    if (advanceRevision) currentRevision = "revision-2"
     const fetchedAt = new Date(Date.parse(pullRequest.fetchedAt) + eventCount * 1_000).toISOString()
     const lastModifiedDate = currentRevision === "revision-1"
       ? pullRequest.lastModifiedDate
@@ -237,7 +238,9 @@ test("reloads the diff only when the streamed pull request revision changes", as
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
-  await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(3)
+  const revisionEvent = eventCount + 1
+  advanceRevision = true
+  await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(revisionEvent)
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
   expect(diffRequestCount).toBe(2)
@@ -378,6 +381,78 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByText("No textual changes in this file.")).toBeVisible()
+})
+
+test("reflects loaded exceptional content states in the file tree", async ({ page }) => {
+  await page.route("**/api/events/", async (route) => {
+    await route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [{ ...pullRequest.account, enabled: true }],
+          currentUser: "reviewer",
+          lastUpdated: pullRequest.fetchedAt,
+          pendingReviewCount: 1,
+          pullRequests: [pullRequest],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        files: ["text", "binary", "oversized"].map((name, index) => ({
+          index,
+          status: "modified",
+          path: `src/${name}.ts`,
+          previousPath: null,
+          beforeMode: "100644",
+          afterMode: "100644"
+        }))
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+    const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex,
+        revisionId: "revision-1",
+        state: fileIndex === 0 ? "text" : fileIndex === 1 ? "binary" : "oversized",
+        before: fileIndex === 0 ? "before\n" : null,
+        after: fileIndex === 0 ? "after\n" : null
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.locator("[data-rly-diff-file-id=\"0\"] button")).toHaveAttribute(
+    "data-rly-diff-content-state",
+    "ready"
+  )
+  await page.getByRole("button", { name: /File 2 of 3: src\/binary\.ts/ }).click()
+  await expect(page.getByText("Binary change")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-file-id=\"1\"] button")).toHaveAttribute(
+    "data-rly-diff-content-state",
+    "binary"
+  )
+  await page.getByRole("button", { name: /File 3 of 3: src\/oversized\.ts/ }).click()
+  await expect(page.getByText("File too large")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-file-id=\"2\"] button")).toHaveAttribute(
+    "data-rly-diff-content-state",
+    "oversized"
+  )
 })
 
 test("uses a bounded fallback for newline-dense files", async ({ page }) => {

@@ -280,7 +280,9 @@ describe("CodeCommit web review boundary", () => {
         [changedFile]
       )
 
-      expect(patch).toContain("diff --git a/src/index.ts b/src/index.ts")
+      expect(patch).toContain("diff --git a/src/old.ts b/src/index.ts")
+      expect(patch).toContain("rename from src/old.ts")
+      expect(patch).toContain("rename to src/index.ts")
       expect(patch).toContain("--- a/src/old.ts")
       expect(patch).toContain("+++ b/src/index.ts")
       expect(patch).not.toContain("\"a/src/old.ts\"")
@@ -291,12 +293,12 @@ describe("CodeCommit web review boundary", () => {
       const modeOnly = new ReadClient.CodeCommitChangedFile({
         before: new ReadClient.CodeCommitBlobMetadata({
           blobId: ReadClient.CodeCommitBlobId.make("f".repeat(40)),
-          mode: "100644",
+          mode: "NORMAL",
           path: "scripts/retry.ts"
         }),
         after: new ReadClient.CodeCommitBlobMetadata({
           blobId: ReadClient.CodeCommitBlobId.make("f".repeat(40)),
-          mode: "100755",
+          mode: "EXECUTABLE",
           path: "scripts/retry.ts"
         }),
         status: "modified"
@@ -325,7 +327,50 @@ describe("CodeCommit web review boundary", () => {
       }, [modeOnly])
       expect(patch).toContain("old mode 100644")
       expect(patch).toContain("new mode 100755")
+      expect(patch).toContain("diff --git a/scripts/retry.ts b/scripts/retry.ts")
       expect(modeOnlyBlobReads).toBe(1)
+
+      const unchangedProviderMode = new ReadClient.CodeCommitChangedFile({
+        before: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("e".repeat(40)),
+          mode: "NORMAL",
+          path: "src/unchanged-mode.ts"
+        }),
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("d".repeat(40)),
+          mode: "100644",
+          path: "src/unchanged-mode.ts"
+        }),
+        status: "modified"
+      })
+      const unchangedPatch = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [unchangedProviderMode])
+      expect(unchangedPatch).not.toContain("old mode")
+      expect(unchangedPatch).not.toContain("new mode")
+
+      const symlink = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "SYMLINK",
+          path: "src/current-link"
+        }),
+        status: "added"
+      })
+      const symlinkInventory = yield* loadPullRequestDiff({
+        ...client,
+        streamChangedFiles: () => Stream.make(symlink)
+      }, pullRequest)
+      expect(symlinkInventory.files[0]?.afterMode).toBe("120000")
+      const symlinkPatch = yield* collectRelayPatch(client, {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      }, [symlink])
+      expect(symlinkPatch).toContain("new file mode 120000")
 
       let distinctBlobReads = 0
       const distinctClient: ReadClient.CodeCommitReadClientService = {

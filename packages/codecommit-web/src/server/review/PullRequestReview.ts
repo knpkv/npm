@@ -186,13 +186,26 @@ const loadChangedFiles = (
 
 const filePath = (file: ReadClient.CodeCommitChangedFile): string => file.after?.path ?? file.before?.path ?? "unknown"
 
+const gitFileMode = (mode: string): string => {
+  switch (mode) {
+    case "NORMAL":
+      return "100644"
+    case "EXECUTABLE":
+      return "100755"
+    case "SYMLINK":
+      return "120000"
+    default:
+      return mode
+  }
+}
+
 const inventoryFile = (file: ReadClient.CodeCommitChangedFile, index: number) => ({
   index,
   status: file.status,
   path: filePath(file),
   previousPath: file.status === "renamed" ? (file.before?.path ?? null) : null,
-  beforeMode: file.before?.mode ?? null,
-  afterMode: file.after?.mode ?? null
+  beforeMode: file.before === null ? null : gitFileMode(file.before.mode),
+  afterMode: file.after === null ? null : gitFileMode(file.after.mode)
 })
 
 /** Load the complete changed-file inventory without exposing provider blob locators. */
@@ -286,14 +299,19 @@ const patchSidePath = (
   metadata: ReadClient.CodeCommitBlobMetadata | null
 ): string => metadata === null ? "/dev/null" : `${side}/${metadata.path}`
 
-const patchIdentityPath = (file: ReadClient.CodeCommitChangedFile): string =>
-  file.after?.path ?? file.before?.path ?? "unknown"
+const patchHeaderPaths = (file: ReadClient.CodeCommitChangedFile): readonly [string, string] => {
+  const before = file.before?.path ?? file.after?.path ?? "unknown"
+  const after = file.after?.path ?? file.before?.path ?? "unknown"
+  return [`a/${before}`, `b/${after}`]
+}
 
 const modePatchLines = (file: ReadClient.CodeCommitChangedFile): ReadonlyArray<string> => {
-  if (file.before === null && file.after !== null) return [`new file mode ${file.after.mode}`]
-  if (file.before !== null && file.after === null) return [`deleted file mode ${file.before.mode}`]
-  if (file.before !== null && file.after !== null && file.before.mode !== file.after.mode) {
-    return [`old mode ${file.before.mode}`, `new mode ${file.after.mode}`]
+  if (file.before === null && file.after !== null) return [`new file mode ${gitFileMode(file.after.mode)}`]
+  if (file.before !== null && file.after === null) return [`deleted file mode ${gitFileMode(file.before.mode)}`]
+  if (file.before !== null && file.after !== null) {
+    const before = gitFileMode(file.before.mode)
+    const after = gitFileMode(file.after.mode)
+    if (before !== after) return [`old mode ${before}`, `new mode ${after}`]
   }
   return []
 }
@@ -304,12 +322,12 @@ const renamePatchLines = (file: ReadClient.CodeCommitChangedFile): ReadonlyArray
     : []
 
 const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
-  const identity = patchIdentityPath(file)
+  const [beforeIdentity, afterIdentity] = patchHeaderPaths(file)
   const before = patchSidePath("a", file.before)
   const after = patchSidePath("b", file.after)
   const contentChanged = file.before === null || file.after === null || file.before.blobId !== file.after.blobId
   return [
-    `diff --git a/${identity} b/${identity}`,
+    `diff --git ${beforeIdentity} ${afterIdentity}`,
     ...modePatchLines(file),
     ...renamePatchLines(file),
     ...(contentChanged ? [`Binary files ${before} and ${after} differ`] : []),
@@ -325,12 +343,13 @@ const textPatch = (
   after: string,
   renderPatch: PatchRenderer
 ): string => {
-  const identity = patchIdentityPath(file)
+  const [beforeIdentity, afterIdentity] = patchHeaderPaths(file)
   const beforePath = patchSidePath("a", file.before)
   const afterPath = patchSidePath("b", file.after)
   return [
-    `diff --git a/${identity} b/${identity}`,
+    `diff --git ${beforeIdentity} ${afterIdentity}`,
     ...modePatchLines(file),
+    ...renamePatchLines(file),
     renderPatch(
       beforePath,
       afterPath,

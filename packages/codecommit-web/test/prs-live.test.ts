@@ -28,11 +28,27 @@ const pullRequest = new Domain.PullRequest({
   title: "Review"
 })
 
+const awsAccountPullRequest = new Domain.PullRequest({
+  ...pullRequest,
+  account: new Domain.Account({
+    profile: Domain.AwsProfileName.make("staging"),
+    region: Domain.AwsRegion.make("eu-west-1"),
+    awsAccountId: "444455556666"
+  })
+})
+
 describe("PR handler selection", () => {
   it.effect("matches the repository account identifier used by browser routes", () =>
     Effect.gen(function*() {
       const selected = yield* selectedPullRequest([pullRequest], "111122223333", pullRequest.id)
       expect(selected).toBe(pullRequest)
+
+      const byAwsAccount = yield* selectedPullRequest(
+        [awsAccountPullRequest],
+        "444455556666",
+        awsAccountPullRequest.id
+      )
+      expect(byAwsAccount).toBe(awsAccountPullRequest)
 
       const failure = yield* selectedPullRequest([pullRequest], "999900001111", pullRequest.id).pipe(Effect.flip)
       expect(failure.message).toContain("not available")

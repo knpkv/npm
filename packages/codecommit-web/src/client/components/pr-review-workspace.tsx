@@ -1,7 +1,12 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { BoundedDiffCodeView, type RlyDiffCodeAnnotation, type RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
-import { DiffFileTree, type RlyDiffFile, type RlyDiffInventory } from "@knpkv/rly/diff/workbench"
+import {
+  DiffFileTree,
+  type RlyDiffFile,
+  type RlyDiffFileContent,
+  type RlyDiffInventory
+} from "@knpkv/rly/diff/workbench"
 import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
@@ -67,20 +72,20 @@ const locationLabel = (finding: RelayReviewFinding): string => {
 const failureMessage = (failure: unknown, fallback: string): string =>
   Predicate.hasProperty(failure, "message") && typeof failure.message === "string" ? failure.message : fallback
 
-const toRlyFile = (file: PullRequestDiffResponse["files"][number]): RlyDiffFile =>
+const toRlyFile = (file: PullRequestDiffResponse["files"][number], content: RlyDiffFileContent): RlyDiffFile =>
   file.status === "renamed" && file.previousPath !== null
     ? {
         id: String(file.index),
         path: file.path,
         previousPath: file.previousPath,
         change: "renamed",
-        content: { state: "ready" }
+        content
       }
     : {
         id: String(file.index),
         path: file.path,
         change: file.status === "renamed" ? "modified" : file.status,
-        content: { state: "ready" }
+        content
       }
 
 const annotationsFor = (
@@ -119,6 +124,7 @@ const LoadedFileDiff = ({
   findings,
   headCommit,
   layout,
+  onContentStateChange,
   pullRequestId,
   revisionId,
   wrap
@@ -129,6 +135,7 @@ const LoadedFileDiff = ({
   readonly findings: ReadonlyArray<RelayReviewFinding>
   readonly headCommit: string
   readonly layout: "split" | "stacked"
+  readonly onContentStateChange: (fileIndex: number, content: RlyDiffFileContent) => void
   readonly pullRequestId: Domain.PullRequestId
   readonly revisionId: string
   readonly wrap: boolean
@@ -143,6 +150,41 @@ const LoadedFileDiff = ({
     [accountId, baseCommit, file.index, headCommit, pullRequestId, revisionId]
   )
   const content = useAtomValue(contentAtom)
+  const observedContentState = AsyncResult.isFailure(content)
+    ? "error"
+    : AsyncResult.isSuccess(content)
+      ? content.value.state === "text"
+        ? "ready"
+        : content.value.state
+      : null
+
+  useEffect(() => {
+    switch (observedContentState) {
+      case "ready":
+        onContentStateChange(file.index, { state: "ready" })
+        break
+      case "binary":
+        onContentStateChange(file.index, {
+          state: "binary",
+          reason: "CodeCommit reports binary or non-UTF-8 content."
+        })
+        break
+      case "oversized":
+        onContentStateChange(file.index, {
+          state: "oversized",
+          reason: "Content exceeds the bounded CodeCommit blob limit."
+        })
+        break
+      case "error":
+        onContentStateChange(file.index, {
+          state: "error",
+          reason: "The exact file content request failed."
+        })
+        break
+      case null:
+        break
+    }
+  }, [file.index, observedContentState, onContentStateChange])
 
   if (AsyncResult.isInitial(content) || AsyncResult.isWaiting(content)) {
     return (
@@ -315,6 +357,7 @@ const ReadyReviewWorkspace = ({
   const [kind, setKind] = useState<RelayReviewKind>("review")
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
+  const [contentStates, setContentStates] = useState<ReadonlyMap<number, RlyDiffFileContent>>(new Map())
   const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [])
   const runReview = useAtomSet(reviewAtom, { mode: "promise" })
   const reviewIdentity = `${accountId}:${pullRequest.id}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
@@ -331,12 +374,21 @@ const ReadyReviewWorkspace = ({
   const isReviewing = reviewingIdentity === reviewIdentity
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
-  const files = diff.files.map(toRlyFile)
+  const files = diff.files.map((file) => toRlyFile(file, contentStates.get(file.index) ?? { state: "ready" }))
   const inventory: RlyDiffInventory = { files, state: "ready" }
+
+  const updateContentState = useCallback((fileIndex: number, content: RlyDiffFileContent): void => {
+    setContentStates((current) => {
+      const previous = current.get(fileIndex)
+      if (previous?.state === content.state) return current
+      return new Map(current).set(fileIndex, content)
+    })
+  }, [])
 
   useEffect(() => {
     setSelectedFileIndex(diff.files[0]?.index ?? null)
     setSelectedFindingId(null)
+    setContentStates(new Map())
   }, [diff.baseCommit, diff.headCommit, diff.revisionId])
 
   const executeReview = useCallback(async (): Promise<void> => {
@@ -478,6 +530,7 @@ const ReadyReviewWorkspace = ({
                 headCommit={diff.headCommit}
                 key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
                 layout={layout}
+                onContentStateChange={updateContentState}
                 pullRequestId={pullRequest.id}
                 revisionId={diff.revisionId}
                 wrap={wrap}
