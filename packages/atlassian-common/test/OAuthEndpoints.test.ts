@@ -6,6 +6,7 @@ import {
   AUTH_URL,
   buildAuthUrl,
   computeCodeChallenge,
+  CONFLUENCE_FOLDER_SCOPES,
   CONFLUENCE_SCOPES,
   generateCodeVerifier
 } from "../src/auth/OAuthEndpoints.js"
@@ -17,6 +18,28 @@ describe("OAuthEndpoints", () => {
     it("includes attachment read and write scopes", () => {
       expect(CONFLUENCE_SCOPES).toContain("read:attachment:confluence")
       expect(CONFLUENCE_SCOPES).toContain("write:attachment:confluence")
+    })
+
+    // Control Center feeds this constant straight into its own authorize
+    // request, so folder authority must not leak in here — it would widen every
+    // Control Center sign-in to a scope its documented OAuth app never enables.
+    it("carries no folder or search authority", () => {
+      for (const scope of CONFLUENCE_FOLDER_SCOPES) {
+        expect(CONFLUENCE_SCOPES).not.toContain(scope)
+      }
+    })
+  })
+
+  describe("CONFLUENCE_FOLDER_SCOPES", () => {
+    // Exact strings: Atlassian rejects the whole authorize request for one
+    // unrecognized scope, and a typo surfaces only on a real consent screen.
+    it("names the scopes the folder and CQL-search endpoints require", () => {
+      expect([...CONFLUENCE_FOLDER_SCOPES].sort()).toEqual([
+        "read:content-details:confluence",
+        "read:folder:confluence",
+        "read:hierarchical-content:confluence",
+        "write:folder:confluence"
+      ])
     })
   })
 

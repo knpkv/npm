@@ -51,6 +51,17 @@ export const JIRA_PROPOSAL_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "offline_access"
 ]
 
+/**
+ * Scopes a Confluence profile must hold to be considered valid.
+ *
+ * Deliberately page-only. The CLI also requests the folder and CQL-search scopes
+ * (`CONFLUENCE_FOLDER_SCOPES`), but they are not listed here: this constant also
+ * gates control-center's per-site scope check, and a profile that can read and
+ * write pages is legitimately valid for everything except `folder`/`search`.
+ * The cost is that `atlassian profiles doctor` reports a pre-folder profile as
+ * valid and those two commands then fail with 401/403 until the OAuth app is
+ * updated and the user logs in again — see the confluence-to-markdown README.
+ */
 export const CONFLUENCE_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:page:confluence",
   "write:page:confluence",

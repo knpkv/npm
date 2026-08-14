@@ -15,6 +15,7 @@ import {
   buildAuthUrl,
   buildOAuthTokenAt,
   computeCodeChallenge,
+  CONFLUENCE_FOLDER_SCOPES,
   CONFLUENCE_SCOPES,
   exchangeCodeForTokens,
   generateCodeVerifier,
@@ -68,6 +69,24 @@ import { openBrowser } from "./internal/openBrowser.js"
 
 const TOOL_NAME = "confluence-to-markdown"
 const LEGACY_CONFIG_DIR_NAME = ".confluence"
+
+/**
+ * What this CLI asks for at login: the shared page/attachment set plus the
+ * folder and CQL-search scopes its `folder`/`search` commands need.
+ *
+ * The union lives here rather than in `CONFLUENCE_SCOPES` so control-center,
+ * which shares that constant for its own sign-in, keeps requesting only the
+ * scopes it actually uses.
+ *
+ * Exported so `auth create`/`auth manage` can print the scopes to enable on the
+ * OAuth app from the same source login reads. Atlassian rejects an authorization
+ * request naming a scope the app does not enable, so a hand-maintained list in
+ * the setup instructions drifts into telling users to configure an app that
+ * cannot complete a login.
+ *
+ * @category Scopes
+ */
+export const CLI_LOGIN_SCOPES = [...CONFLUENCE_SCOPES, ...CONFLUENCE_FOLDER_SCOPES]
 
 const TokenStorageLive = Layer.mergeAll(
   NodeFileSystem.layer,
@@ -326,7 +345,7 @@ const make = Effect.gen(function*() {
             state,
             port,
             redirectUri: callbackUrl(port),
-            scopes: CONFLUENCE_SCOPES,
+            scopes: CLI_LOGIN_SCOPES,
             codeChallenge
           })
 

@@ -131,6 +131,158 @@ const parseSearchJqlResponse = (value: unknown): SearchJqlResponse => {
 }
 
 /**
+ * Edits to apply to an issue's list-valued fields.
+ *
+ * `add`/`remove` are incremental and `set` replaces. Prefer the incremental pair:
+ * `fixVersions` and `labels` are **sets**, so a `set` that forgets an existing
+ * value silently drops it — the failure mode when scripting a release scope.
+ *
+ * An empty array reads as "not supplied", not as "clear the field". The CLI's
+ * repeatable flags use `Options.atLeast(0)`, which reports an absent flag as
+ * `[]`, so treating `[]` as a replacement would turn every unpassed flag into a
+ * destructive clear. The consequence is that clearing a field outright is not
+ * currently expressible; it needs an explicit `--clear-*` flag (or a
+ * presence-aware option type) rather than a reinterpretation of `[]`.
+ *
+ * @category Types
+ */
+export interface EditIssueInput {
+  readonly addFixVersions?: ReadonlyArray<string>
+  readonly removeFixVersions?: ReadonlyArray<string>
+  readonly setFixVersions?: ReadonlyArray<string>
+  readonly addLabels?: ReadonlyArray<string>
+  readonly removeLabels?: ReadonlyArray<string>
+  readonly setLabels?: ReadonlyArray<string>
+}
+
+/** Any JSON value, matching what the generated client accepts for field values. */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ReadonlyArray<JsonValue>
+  | { readonly [key: string]: JsonValue }
+
+/** One entry in Jira's `update` map. */
+interface FieldOperation {
+  readonly add?: JsonValue
+  readonly remove?: JsonValue
+}
+
+/** A `PUT /issue/{key}` body: `fields` replaces, `update` applies operations. */
+interface EditIssuePayload {
+  readonly fields?: { readonly [field: string]: JsonValue }
+  readonly update?: { readonly [field: string]: ReadonlyArray<FieldOperation> }
+}
+
+/**
+ * One list-valued field's edits, plus how to render a value for it — Jira wants
+ * `{ name }` objects for fixVersions but bare strings for labels.
+ */
+interface FieldEditSpec {
+  readonly field: string
+  /** Flag stem, so an error can quote the flag the caller actually typed. */
+  readonly flag: string
+  readonly set: ReadonlyArray<string> | undefined
+  readonly add: ReadonlyArray<string> | undefined
+  readonly remove: ReadonlyArray<string> | undefined
+  readonly wrap: (value: string) => JsonValue
+}
+
+/**
+ * Outcome of {@link buildEditIssuePayload}: either a body to send, or the
+ * reason the requested edit is not expressible as one.
+ *
+ * Tagged rather than discriminated by property presence, so a caller matches on
+ * `_tag` and a future third outcome cannot narrow silently.
+ *
+ * @category Types
+ */
+export type EditIssuePayloadResult =
+  | { readonly _tag: "Payload"; readonly payload: EditIssuePayload }
+  | { readonly _tag: "Invalid"; readonly reason: string }
+
+/**
+ * Build the `PUT /issue/{key}` body for an {@link EditIssueInput}.
+ *
+ * Incremental edits go through Jira's `update` verb rather than a
+ * read-modify-write on `fields`: the server applies them atomically, so a
+ * concurrent edit cannot be clobbered and no extra GET is needed.
+ *
+ * Jira rejects a field that appears in both `fields` and `update`, and the error
+ * it returns does not name the field — so that combination is caught here with a
+ * message that does.
+ *
+ * Pure so the payload shape can be tested without the API.
+ *
+ * @category Utilities
+ */
+export const buildEditIssuePayload = (
+  input: EditIssueInput
+): EditIssuePayloadResult => {
+  const fields: Record<string, JsonValue> = {}
+  const update: Record<string, ReadonlyArray<FieldOperation>> = {}
+
+  const specs: ReadonlyArray<FieldEditSpec> = [
+    {
+      field: "fixVersions",
+      flag: "fix-version",
+      set: input.setFixVersions,
+      add: input.addFixVersions,
+      remove: input.removeFixVersions,
+      // fixVersions entries are objects keyed by name.
+      wrap: (name) => ({ name })
+    },
+    {
+      field: "labels",
+      flag: "label",
+      set: input.setLabels,
+      add: input.addLabels,
+      remove: input.removeLabels,
+      // Labels are bare strings.
+      wrap: (label) => label
+    }
+  ]
+
+  for (const spec of specs) {
+    // An empty repeatable flag arrives as `[]`, which means "not passed" rather
+    // than "replace with nothing" — treating it as a set would clear the field.
+    const set = spec.set !== undefined && spec.set.length > 0 ? spec.set : undefined
+    const increments = [
+      ...(spec.add ?? []).map((value) => ({ add: spec.wrap(value) })),
+      ...(spec.remove ?? []).map((value) => ({ remove: spec.wrap(value) }))
+    ]
+    if (set !== undefined && increments.length > 0) {
+      return {
+        _tag: "Invalid",
+        reason: `--${spec.flag} cannot be combined with --add-${spec.flag}/--remove-${spec.flag}; ` +
+          `--${spec.flag} replaces the whole list.`
+      }
+    }
+    if (set !== undefined) fields[spec.field] = set.map(spec.wrap)
+    else if (increments.length > 0) update[spec.field] = increments
+  }
+
+  const hasFields = Object.keys(fields).length > 0
+  const hasUpdate = Object.keys(update).length > 0
+  if (!hasFields && !hasUpdate) {
+    return {
+      _tag: "Invalid",
+      reason:
+        "Nothing to edit. Pass at least one of --add-fix-version, --remove-fix-version, --fix-version, --add-label, --remove-label or --label."
+    }
+  }
+  return {
+    _tag: "Payload",
+    payload: {
+      ...(hasFields ? { fields } : {}),
+      ...(hasUpdate ? { update } : {})
+    }
+  }
+}
+
+/**
  * IssueService interface.
  *
  * @category Services
@@ -145,6 +297,11 @@ export interface IssueServiceShape {
     jql: string,
     options?: { readonly maxResults?: number }
   ) => Effect.Effect<ReadonlyArray<Issue>, JiraApiError>
+  /**
+   * Edit an issue's list-valued fields (fixVersions, labels) and return the
+   * issue as it stands afterwards. Needs `write:jira-work`.
+   */
+  readonly edit: (key: string, input: EditIssueInput) => Effect.Effect<Issue, JiraApiError>
 }
 
 /**
@@ -393,7 +550,18 @@ const make = Effect.gen(function*() {
       return allIssues
     })
 
-  return IssueService.of({ getByKey, search, searchAll })
+  const edit = (key: string, input: EditIssueInput): Effect.Effect<Issue, JiraApiError> =>
+    Effect.gen(function*() {
+      const built = buildEditIssuePayload(input)
+      if (built._tag === "Invalid") return yield* Effect.fail(new JiraApiError({ message: built.reason }))
+      yield* client.editIssue(key, { payload: built.payload }).pipe(
+        Effect.mapError((cause) => new JiraApiError({ message: `Failed to edit issue ${key}`, cause }))
+      )
+      // The 204 carries no body, so re-read to report the resulting state.
+      return yield* getByKey(key)
+    })
+
+  return IssueService.of({ getByKey, search, searchAll, edit })
 })
 
 /**

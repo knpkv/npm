@@ -7735,7 +7735,7 @@
             "in": "query",
             "required": false,
             "description": "Filter the results to spaces based on their status.",
-            "schema": { "type": "string", "enum": ["current", "archived"] }
+            "schema": { "type": "string", "enum": ["current", "archived", "trashed"] }
           },
           {
             "name": "labels",
@@ -15450,7 +15450,11 @@
         "type": "string",
         "description": "The type of space."
       },
-      "SpaceStatus": { "enum": ["current", "archived"], "type": "string", "description": "The status of the space." },
+      "SpaceStatus": {
+        "enum": ["current", "archived", "trashed"],
+        "type": "string",
+        "description": "The status of the space."
+      },
       "Task": {
         "type": "object",
         "properties": {

@@ -47,13 +47,39 @@ confluence page delete
 
 # Check sync status
 confluence sync status
+
+# Folders — containers with no body, so the page commands do not address them
+confluence folder get --url <FOLDER_URL>
+confluence folder get --folder-id <ID> --base-url <URL> [--json]
+confluence folder children --folder-id <ID> --base-url <URL> [--json]
+confluence folder create --base-url <URL> --space <SPACE_ID> --title <TITLE> [--parent <ID_OR_URL>] [-n, --dry-run]
+
+# Find content by title or parent (CQL); one page of results
+confluence search --base-url <URL> --cql <QUERY> [--limit <N>] [--json]
 ```
+
+`folder` and `search` talk to the site directly rather than to the local mirror,
+so they take `--base-url` instead of running inside a `.confluence/` workspace. A
+folder URL carries its own site, so `--base-url` is only needed alongside a bare
+id. `--space` takes the **numeric** space id, not the space key; `--parent`
+accepts a numeric id, a page URL, or a folder URL.
+
+Content ids are per-site, so these commands refuse a site mismatch instead of
+acting on the wrong site: a `--base-url` that disagrees with the URL, a
+`--parent` pasted from another site, and — under OAuth — a `--base-url` that is
+not the site the active profile is signed in to. That last check matters because
+OAuth requests route by the profile's cloud id and ignore `--base-url` entirely,
+so without it a wrong-site `folder create` would silently create the folder on
+the profile's site. Switch sites with `confluence auth use <profile>`.
 
 ### Authentication Commands
 
 ```bash
 # Create OAuth app (opens browser to Atlassian Developer Console)
 confluence auth create
+
+# Open the console to edit an existing app's scopes (prints the scopes to enable)
+confluence auth manage
 
 # Configure OAuth credentials
 confluence auth configure --client-id <ID> --client-secret <SECRET>
@@ -281,6 +307,10 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
      - `delete:page:confluence` - delete pages
      - `read:attachment:confluence` - resolve page attachments
      - `write:attachment:confluence` - upload page attachments
+     - `read:folder:confluence` - read folders (`folder get`)
+     - `write:folder:confluence` - create folders (`folder create`)
+     - `read:hierarchical-content:confluence` - list a folder's direct children (`folder children`)
+     - `read:content-details:confluence` - CQL search (`search --cql`)
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
@@ -316,6 +346,14 @@ confluence auth logout
 Each login is saved as an auth profile keyed by Atlassian account and site. `<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
 
 Existing OAuth profiles created before attachment support need a fresh `confluence auth login` after the OAuth app includes the attachment scopes.
+
+`folder` and `search` need the same treatment, but **update the OAuth app first**. The
+CLI now requests the folder, hierarchical-content, and content-details scopes on
+every `confluence auth login`, and Atlassian rejects an authorization request that
+asks for a scope the app does not enable — so until those scopes are added to the
+app, `confluence auth login` itself fails at the authorize step, not just the new
+commands. Existing tokens keep working for the page and attachment commands
+meanwhile; only `folder` and `search` fail with 401/403 until you re-login.
 
 ### API Token (alternative)
 

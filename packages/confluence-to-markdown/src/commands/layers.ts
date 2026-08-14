@@ -30,8 +30,10 @@ import type { authCommand } from "./auth.js"
 import type { cloneCommand } from "./clone.js"
 import type { deleteCommand } from "./delete.js"
 import type { pageGetCommand } from "./fetch.js"
+import type { folderChildrenCommand, folderCreateCommand, folderGetCommand } from "./folder.js"
 import type { commitCommand, diffCommand, logCommand } from "./git.js"
 import type { newCommand } from "./new.js"
+import type { searchCommand } from "./search.js"
 import { getAuth } from "./shared.js"
 import type { pullCommand, pushCommand, statusCommand } from "./sync.js"
 
@@ -77,7 +79,11 @@ const DummyConfluenceClientLayer = Layer.succeed(
     uploadAttachmentToPage: () => Effect.die("Not configured"),
     getUser: () => Effect.die("Not configured"),
     getSpaceId: () => Effect.die("Not configured"),
-    setEditorVersion: () => Effect.die("Not configured")
+    setEditorVersion: () => Effect.die("Not configured"),
+    getFolder: () => Effect.die("Not configured"),
+    getFolderChildren: () => Effect.die("Not configured"),
+    createFolder: () => Effect.die("Not configured"),
+    searchByCql: () => Effect.die("Not configured")
   })
 )
 
@@ -266,7 +272,14 @@ type AssertNothingUnprovided<T extends never> = T
 
 export type _FetchLayerCoversItsCommands = AssertNothingUnprovided<
   Unprovided<
-    typeof pageGetCommand | typeof pagePutCommand | typeof pagePatchCommand | typeof pageCreateCommand,
+    | typeof pageGetCommand
+    | typeof pagePutCommand
+    | typeof pagePatchCommand
+    | typeof pageCreateCommand
+    | typeof folderGetCommand
+    | typeof folderChildrenCommand
+    | typeof folderCreateCommand
+    | typeof searchCommand,
     typeof FetchLayer
   >
 >
@@ -320,6 +333,13 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
     cmd === "page" &&
     (subcommand === "get" || subcommand === "put" || subcommand === "patch" || subcommand === "create")
   ) {
+    return "fetch"
+  }
+  // folder/search address the site, not the local mirror: they build their own
+  // client from --base-url (or the site a pasted URL names) and need only auth.
+  // Routing them to "full" would demand a `.confluence/` workspace that these
+  // commands never read — and AppLayer fails during construction without one.
+  if (cmd === "folder" || cmd === "search") {
     return "fetch"
   }
   if (

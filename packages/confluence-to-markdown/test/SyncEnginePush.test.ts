@@ -30,6 +30,7 @@ import { LocalFileSystem } from "../src/LocalFileSystem.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
 import type { PageFrontMatter, PageResponse } from "../src/Schemas.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../src/SyncEngine.js"
+import { notCalledConfluenceClient } from "./commandHarness.js"
 
 const DOCS_PATH = ".confluence/docs"
 const PAGE_ID = PageId("123456")
@@ -122,6 +123,7 @@ const TestLayer = (params: {
   const ClientLayer = Layer.succeed(
     ConfluenceClient,
     ConfluenceClient.of({
+      ...notCalledConfluenceClient("not used"),
       getSpaceId: () => Effect.succeed("space-1"),
       getPage: () =>
         Effect.succeed(
@@ -138,14 +140,8 @@ const TestLayer = (params: {
           ),
           Effect.as(remotePage(params.remoteAdfAfterWrite ?? params.remoteAdf))
         ),
-      getChildren: () => Effect.die("not used"),
-      getAllChildren: () => Effect.die("not used"),
-      createPage: () => Effect.die("not used"),
       deletePage,
-      getPageVersions: () => Effect.die("not used"),
       getPageAttachments: () => Effect.succeed([]),
-      uploadAttachmentToPage: () => Effect.die("not used"),
-      getUser: () => Effect.die("not used"),
       setEditorVersion: () => Effect.void
     })
   )

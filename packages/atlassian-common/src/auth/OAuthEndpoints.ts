@@ -68,6 +68,28 @@ export const CONFLUENCE_SCOPES = [
 ]
 
 /**
+ * Additional scopes for the CLI's folder and CQL-search commands.
+ *
+ * Deliberately *not* folded into {@link CONFLUENCE_SCOPES}: that constant is the
+ * shared page/attachment set, and control-center feeds it straight into its own
+ * `authorize` request. Adding folder authority there would widen every
+ * control-center sign-in — asking for a scope its documented OAuth app does not
+ * enable, and granting `write:folder:confluence` to a product that never creates
+ * folders. Union these in only where the folder/search commands actually live.
+ *
+ * @category Scopes
+ */
+export const CONFLUENCE_FOLDER_SCOPES = [
+  // Folders are a separate v2 content type: read/write for the folder itself,
+  // hierarchical-content for its direct children.
+  "read:folder:confluence",
+  "write:folder:confluence",
+  "read:hierarchical-content:confluence",
+  // CQL search (`GET /wiki/rest/api/search`).
+  "read:content-details:confluence"
+]
+
+/**
  * Jira scopes for OAuth2.
  *
  * @category Scopes

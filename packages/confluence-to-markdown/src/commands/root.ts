@@ -11,6 +11,7 @@ import {
   commitCommand,
   deleteCommand,
   diffCommand,
+  folderCommand,
   logCommand,
   newCommand,
   pageCreateCommand,
@@ -19,6 +20,7 @@ import {
   pagePutCommand,
   pullCommand,
   pushCommand,
+  searchCommand,
   statusCommand
 } from "./index.js"
 
@@ -92,6 +94,8 @@ export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
       workspaceCommand,
       syncCommand,
       pageCommand(options.pageGet ?? pageGetCommand),
+      folderCommand,
+      searchCommand,
       skillsCommand
     ])
   )

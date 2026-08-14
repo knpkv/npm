@@ -21,6 +21,8 @@ interface CommandCalls {
   readonly relatedWorkList: number
   readonly relatedWorkAdd: number
   readonly relatedWorkDelete: number
+  readonly issueEdit: number
+  readonly versionCreate: number
   readonly writeMulti: number
 }
 
@@ -34,6 +36,8 @@ const emptyCalls: CommandCalls = {
   versionGet: 0,
   versionList: 0,
   versionUpdate: 0,
+  issueEdit: 0,
+  versionCreate: 0,
   writeMulti: 0
 }
 
@@ -119,6 +123,10 @@ const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
           Ref.update(calls, (state) => ({ ...state, issueGet: state.issueGet + 1 })).pipe(
             Effect.as(sampleIssue)
           ),
+        edit: () =>
+          Ref.update(calls, (state) => ({ ...state, issueEdit: state.issueEdit + 1 })).pipe(
+            Effect.as(sampleIssue)
+          ),
         search: () => Effect.die("IssueService.search should not be called"),
         searchAll: () =>
           Ref.update(calls, (state) => ({ ...state, issueSearch: state.issueSearch + 1 })).pipe(
@@ -139,6 +147,10 @@ const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
         addRelatedWork: () =>
           Ref.update(calls, (state) => ({ ...state, relatedWorkAdd: state.relatedWorkAdd + 1 })).pipe(
             Effect.as(sampleRelatedWork)
+          ),
+        createVersion: () =>
+          Ref.update(calls, (state) => ({ ...state, versionCreate: state.versionCreate + 1 })).pipe(
+            Effect.as(sampleVersion)
           ),
         deleteRelatedWork: () =>
           Ref.update(calls, (state) => ({ ...state, relatedWorkDelete: state.relatedWorkDelete + 1 })),
@@ -373,5 +385,76 @@ describe("Jira command tree", () => {
         relatedWorkDelete: 0,
         relatedWorkList: 1
       })
+    }))
+
+  it.effect("wires up issue edit and reaches IssueService.edit", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["issue", "edit", "PROJ-123", "--add-fix-version", "OOB 100", "--add-label", "domain:oob"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ issueEdit: 1 })
+    }))
+
+  // `Options.atLeast(0)` reports an absent repeatable flag as `[]`, which
+  // `buildEditIssuePayload` reads as "not supplied". Pin that here: with only
+  // one flag passed the command must still resolve, rather than the other five
+  // empty arrays being taken as replacements that clear their fields.
+  it.effect("treats the repeatable flags a caller omits as absent", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["issue", "edit", "PROJ-123", "--add-label", "domain:oob"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ issueEdit: 1 })
+    }))
+
+  // Note: `issue edit PROJ-123` with no flags parses fine and reaches the
+  // service — the "nothing to edit" refusal lives in `buildEditIssuePayload`
+  // inside `IssueService.edit`, which this suite stubs out. That path is covered
+  // by editIssuePayload.test.ts and remoteWrites.test.ts.
+
+  it.effect("wires up version create and reaches VersionService.createVersion", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["version", "create", "--project", "PROJ", "--name", "OOB 100"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ versionCreate: 1 })
+    }))
+
+  // Shape-only date validation would let this through and Jira would answer
+  // with an unattributed 400 — after the version was already created.
+  it.effect("rejects a non-existent --start-date before the remote write", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["version", "create", "--project", "PROJ", "--name", "OOB 100", "--start-date", "2026-02-30"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(yield* Ref.get(calls)).toMatchObject({ versionCreate: 0 })
     }))
 })

@@ -174,6 +174,80 @@ const descriptionOption = Options.string("description").pipe(
   Options.withDescription("New version description")
 )
 
+// === create ===
+
+/**
+ * Jira accepts version dates only as ISO 8601 `yyyy-mm-dd`. Anything else — a
+ * locale format, a timestamp — comes back as a generic 400 that does not name the
+ * offending field, so reject it locally where the message can.
+ */
+export const isIsoDate = (value: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  // Reject real-looking but non-existent dates (2026-02-30): round-tripping
+  // through Date is the cheapest calendar check.
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+const ensureIsoDate = (flag: string, value: string): Effect.Effect<void, JiraApiError> =>
+  isIsoDate(value) ? Effect.void : Effect.fail(
+    new JiraApiError({ message: `Invalid --${flag} "${value}". Expected an ISO 8601 date (yyyy-mm-dd).` })
+  )
+
+// No `-n` alias: it means `--dry-run` everywhere else in these CLIs, and both
+// `getLayerType` implementations route on `argv.includes("-n")`. Reusing it for
+// a value on a remote-write command is the wrong default.
+const nameOption = Options.string("name").pipe(
+  Options.withDescription("Version name (e.g. \"OOB 100\")")
+)
+const optionalDescriptionOption = Options.string("description").pipe(
+  Options.withAlias("d"),
+  Options.withDescription("Version description"),
+  Options.optional
+)
+const startDateOption = Options.string("start-date").pipe(
+  Options.withDescription("Start date, ISO 8601 (yyyy-mm-dd)"),
+  Options.optional
+)
+const releaseDateOption = Options.string("release-date").pipe(
+  Options.withDescription("Release date, ISO 8601 (yyyy-mm-dd)"),
+  Options.optional
+)
+
+const createCommand = Command.make("create", {
+  project: projectOption,
+  name: nameOption,
+  description: optionalDescriptionOption,
+  startDate: startDateOption,
+  releaseDate: releaseDateOption,
+  json: jsonOption
+}, ({ description, json, name, project, releaseDate, startDate }) =>
+  Effect.gen(function*() {
+    if (Option.isSome(startDate)) yield* ensureIsoDate("start-date", startDate.value)
+    if (Option.isSome(releaseDate)) yield* ensureIsoDate("release-date", releaseDate.value)
+
+    const service = yield* VersionService
+    const version = yield* service.createVersion({
+      projectKey: project,
+      name,
+      ...(Option.isSome(description) ? { description: description.value } : {}),
+      ...(Option.isSome(startDate) ? { startDate: startDate.value } : {}),
+      ...(Option.isSome(releaseDate) ? { releaseDate: releaseDate.value } : {})
+    })
+    if (json) {
+      yield* Console.log(JSON.stringify(version, null, 2))
+      return
+    }
+    yield* Console.log(`Created version ${version.name} (${version.id}) on ${project}`)
+    yield* Console.log(`startDate: ${version.startDate ?? "-"}`)
+    yield* Console.log(`releaseDate: ${version.releaseDate ?? "-"}`)
+    yield* Console.log(`description: ${version.description ?? "-"}`)
+  })).pipe(
+    Command.withDescription(
+      "Remote write: create a new unreleased version on a project (requires manage:jira-project scope)"
+    )
+  )
+
 const updateCommand = Command.make("update", { id: idArg, description: descriptionOption, json: jsonOption }, ({
   description,
   id,
@@ -345,5 +419,5 @@ const relatedWorkCommand = Command.make("related-work").pipe(
 
 export const versionCommand = Command.make("version").pipe(
   Command.withDescription("Jira version commands"),
-  Command.withSubcommands([listCommand, getCommand, updateCommand, relatedWorkCommand])
+  Command.withSubcommands([listCommand, getCommand, createCommand, updateCommand, relatedWorkCommand])
 )

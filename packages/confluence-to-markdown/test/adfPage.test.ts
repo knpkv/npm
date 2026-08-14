@@ -26,6 +26,7 @@ import { makePageCreateCommand, makePagePatchCommand, makePagePutCommand } from 
 import { ConfluenceAuth } from "../src/ConfluenceAuth.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import type { PageResponse } from "../src/Schemas.js"
+import { notCalledConfluenceClient } from "./commandHarness.js"
 
 const PAGE_ID = "2333334354"
 
@@ -86,6 +87,7 @@ const ConcurrentlyEditedClientLayer = (updates: Ref.Ref<ReadonlyArray<UpdateCall
   return Layer.succeed(
     ConfluenceClient,
     ConfluenceClient.of({
+      ...notCalledConfluenceClient("unused"),
       getPage: () => {
         reads += 1
         return Effect.succeed(reads === 1 ? pageAt(7, "before") : pageAt(8, "someone else's edit"))
@@ -93,17 +95,7 @@ const ConcurrentlyEditedClientLayer = (updates: Ref.Ref<ReadonlyArray<UpdateCall
       updatePage: (request) =>
         Ref.update(updates, (calls) => [...calls, { version: request.version.number }]).pipe(
           Effect.as(pageAt(request.version.number, "written"))
-        ),
-      getChildren: () => Effect.die("unused"),
-      getAllChildren: () => Effect.die("unused"),
-      createPage: () => Effect.die("unused"),
-      deletePage: () => Effect.die("unused"),
-      getPageVersions: () => Effect.die("unused"),
-      getPageAttachments: () => Effect.die("unused"),
-      uploadAttachmentToPage: () => Effect.die("unused"),
-      getUser: () => Effect.die("unused"),
-      getSpaceId: () => Effect.die("unused"),
-      setEditorVersion: () => Effect.die("unused")
+        )
     })
   )
 }
@@ -111,18 +103,10 @@ const ConcurrentlyEditedClientLayer = (updates: Ref.Ref<ReadonlyArray<UpdateCall
 const NeverCalledClientLayer = Layer.succeed(
   ConfluenceClient,
   ConfluenceClient.of({
+    ...notCalledConfluenceClient("unused"),
     getPage: () => Effect.die("the command must fail before reading the page"),
     updatePage: () => Effect.die("the command must fail before writing the page"),
-    createPage: () => Effect.die("the command must fail before writing the page"),
-    getChildren: () => Effect.die("unused"),
-    getAllChildren: () => Effect.die("unused"),
-    deletePage: () => Effect.die("unused"),
-    getPageVersions: () => Effect.die("unused"),
-    getPageAttachments: () => Effect.die("unused"),
-    uploadAttachmentToPage: () => Effect.die("unused"),
-    getUser: () => Effect.die("unused"),
-    getSpaceId: () => Effect.die("unused"),
-    setEditorVersion: () => Effect.die("unused")
+    createPage: () => Effect.die("the command must fail before writing the page")
   })
 )
 
@@ -131,21 +115,12 @@ const MovedOnClientLayer = (updates: Ref.Ref<ReadonlyArray<UpdateCall>>) =>
   Layer.succeed(
     ConfluenceClient,
     ConfluenceClient.of({
+      ...notCalledConfluenceClient("unused"),
       getPage: () => Effect.succeed(pageAt(9, "someone else's edit")),
       updatePage: (request) =>
         Ref.update(updates, (calls) => [...calls, { version: request.version.number }]).pipe(
           Effect.as(pageAt(request.version.number, "written"))
-        ),
-      getChildren: () => Effect.die("unused"),
-      getAllChildren: () => Effect.die("unused"),
-      createPage: () => Effect.die("unused"),
-      deletePage: () => Effect.die("unused"),
-      getPageVersions: () => Effect.die("unused"),
-      getPageAttachments: () => Effect.die("unused"),
-      uploadAttachmentToPage: () => Effect.die("unused"),
-      getUser: () => Effect.die("unused"),
-      getSpaceId: () => Effect.die("unused"),
-      setEditorVersion: () => Effect.die("unused")
+        )
     })
   )
 

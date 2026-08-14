@@ -24,6 +24,12 @@ import {
   type AtlassianUser,
   AtlassianUserSchema,
   type AttachmentReference,
+  type CqlSearchResponse,
+  CqlSearchResponseSchema,
+  type FolderChild,
+  FolderChildrenResponseSchema,
+  type FolderResponse,
+  FolderResponseSchema,
   type PageChildrenResponse,
   PageChildrenResponseSchema,
   type PageListItem,
@@ -161,6 +167,39 @@ export class ConfluenceClient extends Context.Service<
      * Uses V2 page properties API.
      */
     readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
+
+    /**
+     * Get a folder by id. Folders hold no body, so they are addressed apart from
+     * pages — `/pages/{id}` 404s on a folder id.
+     */
+    readonly getFolder: (id: string) => Effect.Effect<FolderResponse, ApiError | RateLimitError>
+
+    /**
+     * List a folder's direct children, following pagination. Children are mixed
+     * kinds (page / folder / whiteboard / database / embed) — see
+     * {@link FolderChild.type}.
+     */
+    readonly getFolderChildren: (id: string) => Effect.Effect<ReadonlyArray<FolderChild>, ApiError | RateLimitError>
+
+    /**
+     * Create a folder under a parent page or folder.
+     */
+    readonly createFolder: (
+      input: { readonly spaceId: string; readonly title: string; readonly parentId?: string }
+    ) => Effect.Effect<FolderResponse, ApiError | RateLimitError>
+
+    /**
+     * Run a CQL query. The only way to find content by title or parent, since
+     * there is no "list children of a folder by title" endpoint.
+     *
+     * Returns one page of hits alongside Confluence's own `totalSize`, so a
+     * caller can tell a complete answer from one cut off by the page size
+     * (Confluence's default is 25).
+     */
+    readonly searchByCql: (
+      cql: string,
+      options?: { readonly limit?: number }
+    ) => Effect.Effect<CqlSearchResponse, ApiError | RateLimitError>
   }
 >()("@knpkv/confluence-to-markdown/ConfluenceClient") {}
 
@@ -333,6 +372,50 @@ const decodeChildrenResponse = (
   Effect.try({
     try: () => Schema.decodeUnknownSync(PageChildrenResponseSchema)(normalizeNullPagePositions(value)),
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
+  })
+
+/**
+ * Present a folder's `createdAt` as the ISO-8601 string the rest of the CLI
+ * uses.
+ *
+ * The v2 folder endpoints return epoch milliseconds here, even though the
+ * upstream spec declares an ISO string and every other content type honours it
+ * (verified live against `GET /folders/{id}`). The spec patch widens the
+ * generated schema to accept both; this collapses the two shapes back to one so
+ * callers are not handed a field whose type depends on the content type.
+ */
+const normalizeFolderCreatedAt = (value: unknown): unknown => {
+  if (!Predicate.isObject(value)) return value
+  const createdAt = value["createdAt"]
+  if (typeof createdAt !== "number") return value
+  return { ...value, createdAt: new Date(createdAt).toISOString() }
+}
+
+const decodeFolderResponse = (
+  value: unknown,
+  endpoint: string
+): Effect.Effect<FolderResponse, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(FolderResponseSchema)(normalizeFolderCreatedAt(value)),
+    catch: (cause) => mapDecodeError(cause, endpoint)
+  })
+
+const decodeFolderChildrenResponse = (
+  value: unknown,
+  endpoint: string
+): Effect.Effect<Schema.Schema.Type<typeof FolderChildrenResponseSchema>, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(FolderChildrenResponseSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint)
+  })
+
+const decodeCqlSearchResponse = (
+  value: unknown,
+  endpoint: string
+): Effect.Effect<Schema.Schema.Type<typeof CqlSearchResponseSchema>, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(CqlSearchResponseSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint)
   })
 
 const decodeVersionsResponse = (
@@ -818,6 +901,82 @@ const make = (
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${pageId}/properties/editor`, pageId))
       )
 
+    const getFolder = (id: string): Effect.Effect<FolderResponse, ApiError | RateLimitError> =>
+      apiClient.v2.getFolderById(id, undefined).pipe(
+        Effect.mapError((e) => mapApiError(e, `/folders/${id}`)),
+        Effect.retry(readRequestRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/folders/${id}`)),
+        Effect.flatMap((response) => decodeFolderResponse(response, `/folders/${id}`))
+      )
+
+    const getFolderChildren = (id: string): Effect.Effect<ReadonlyArray<FolderChild>, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        const endpoint = `/folders/${id}/direct-children`
+        const all: Array<FolderChild> = []
+        let cursor: string | undefined
+        let iterations = 0
+
+        do {
+          if (iterations >= MAX_PAGINATION_ITERATIONS) {
+            return yield* Effect.fail(
+              new ApiError({
+                status: 0,
+                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
+                endpoint
+              })
+            )
+          }
+
+          const response = yield* apiClient.v2.getFolderDirectChildren(id, {
+            params: { ...(cursor ? { cursor } : {}) }
+          }).pipe(
+            Effect.mapError((e) => mapApiError(e, endpoint)),
+            Effect.retry(readRequestRetry),
+            Effect.mapError((e) => normalizeConfluenceError(e, endpoint)),
+            Effect.flatMap((raw) => decodeFolderChildrenResponse(raw, endpoint))
+          )
+
+          for (const child of response.results) all.push(child)
+
+          cursor = response._links?.next
+            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
+            : undefined
+
+          iterations++
+        } while (cursor)
+
+        return all
+      })
+
+    const createFolder = (
+      input: { readonly spaceId: string; readonly title: string; readonly parentId?: string }
+    ): Effect.Effect<FolderResponse, ApiError | RateLimitError> =>
+      apiClient.v2.createFolder({
+        payload: {
+          spaceId: input.spaceId,
+          title: input.title,
+          ...(input.parentId ? { parentId: input.parentId } : {})
+        }
+      }).pipe(
+        Effect.mapError((e) => mapApiError(e, "/folders")),
+        Effect.retry(writeRequestRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, "/folders")),
+        Effect.flatMap((response) => decodeFolderResponse(response, "/folders"))
+      )
+
+    const searchByCql = (
+      cql: string,
+      options?: { readonly limit?: number }
+    ): Effect.Effect<CqlSearchResponse, ApiError | RateLimitError> =>
+      apiClient.v1.searchByCQL({
+        params: { cql, ...(options?.limit !== undefined ? { limit: options.limit } : {}) }
+      }).pipe(
+        Effect.mapError((e) => mapApiError(e, "/search")),
+        Effect.retry(readRequestRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, "/search")),
+        Effect.flatMap((response) => decodeCqlSearchResponse(response, "/search"))
+      )
+
     return ConfluenceClient.of({
       getPage,
       getChildren,
@@ -830,7 +989,11 @@ const make = (
       uploadAttachmentToPage,
       getUser,
       getSpaceId,
-      setEditorVersion
+      setEditorVersion,
+      getFolder,
+      getFolderChildren,
+      createFolder,
+      searchByCql
     })
   })
 

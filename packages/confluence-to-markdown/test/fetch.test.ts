@@ -6,6 +6,7 @@ import { fetchPageAdf, fetchPageMarkdown } from "../src/commands/fetch.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
 import type { PageResponse } from "../src/Schemas.js"
+import { notCalledConfluenceClient } from "./commandHarness.js"
 
 const page: PageResponse = {
   id: "2333334354",
@@ -23,18 +24,8 @@ const TestLayer = Layer.mergeAll(
   Layer.succeed(
     ConfluenceClient,
     ConfluenceClient.of({
-      getPage: () => Effect.succeed(page),
-      getChildren: () => Effect.die("unused"),
-      getAllChildren: () => Effect.die("unused"),
-      createPage: () => Effect.die("unused"),
-      updatePage: () => Effect.die("unused"),
-      deletePage: () => Effect.die("unused"),
-      getPageVersions: () => Effect.die("unused"),
-      getPageAttachments: () => Effect.die("unused"),
-      uploadAttachmentToPage: () => Effect.die("unused"),
-      getUser: () => Effect.die("unused"),
-      getSpaceId: () => Effect.die("unused"),
-      setEditorVersion: () => Effect.die("unused")
+      ...notCalledConfluenceClient("unused"),
+      getPage: () => Effect.succeed(page)
     })
   ),
   Layer.succeed(
