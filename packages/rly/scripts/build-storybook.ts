@@ -55,4 +55,11 @@ const program = Effect.gen(function*() {
   })
 })
 
-NodeRuntime.runMain(program.pipe(Effect.scoped, Effect.provide(NodeServices.layer)), { disableErrorReporting: true })
+const runnable = program.pipe(
+  Effect.scoped,
+  // This executable boundary is the application composition root.
+  // @effect-diagnostics-next-line strictEffectProvide:off
+  Effect.provide(NodeServices.layer)
+)
+
+NodeRuntime.runMain(runnable, { disableErrorReporting: true })

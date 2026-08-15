@@ -71,9 +71,9 @@ const validatePackageRecords = (records) => {
       if (config.ignoreWarnings !== false || config.ignoreErrors !== false) {
         diagnostics.push(`${record.name}: ${config.path} must make Effect warnings and errors affect the tsc exit code`)
       }
-      if (config.includeSuggestions !== true || config.ignoreSuggestions !== true) {
+      if (config.includeSuggestions !== false || config.ignoreSuggestions !== false) {
         diagnostics.push(
-          `${record.name}: ${config.path} must surface Effect suggestions in tsc without changing its exit code`
+          `${record.name}: ${config.path} must keep successful tsc output clean and never make surfaced suggestions non-blocking`
         )
       }
       for (const diagnostic of strictDiagnostics) {
@@ -90,9 +90,9 @@ const runSelfTest = () => {
   const coveredConfig = {
     hasEffectPlugin: true,
     ignoreErrors: false,
-    ignoreSuggestions: true,
+    ignoreSuggestions: false,
     ignoreWarnings: false,
-    includeSuggestions: true,
+    includeSuggestions: false,
     includesEffectNamespaces: true,
     diagnosticSeverity: {
       strictBooleanExpressions: "suggestion",
@@ -151,8 +151,8 @@ const runSelfTest = () => {
       {
         checkCoversRoot: true,
         effectPackage: true,
-        name: "@fixture/hidden-suggestions",
-        sourceConfigs: [{ ...coveredConfig, includeSuggestions: false }]
+        name: "@fixture/non-blocking-suggestions",
+        sourceConfigs: [{ ...coveredConfig, includeSuggestions: true, ignoreSuggestions: true }]
       },
       {
         checkCoversRoot: true,
@@ -170,7 +170,7 @@ const runSelfTest = () => {
       "@fixture/missing-plugin: tsconfig.json does not load @effect/language-service",
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
       "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
-      "@fixture/hidden-suggestions: tsconfig.json must surface Effect suggestions in tsc without changing its exit code",
+      "@fixture/non-blocking-suggestions: tsconfig.json must keep successful tsc output clean and never make surfaced suggestions non-blocking",
       "@fixture/missing-strict-pattern: tsconfig.json must enable Effect diagnostic strictEffectProvide"
     ]
   )

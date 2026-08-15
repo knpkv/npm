@@ -11,8 +11,8 @@
           "strictBooleanExpressions": "suggestion",
           "strictEffectProvide": "suggestion"
         },
-        "includeSuggestionsInTsc": true,
-        "ignoreEffectSuggestionsInTscExitCode": true,
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
         "ignoreEffectWarningsInTscExitCode": false,
         "ignoreEffectErrorsInTscExitCode": false
       }
