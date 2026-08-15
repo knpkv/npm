@@ -47,9 +47,8 @@ const validateDiagnostics = (records) =>
   )
 
 const launchWaves = (files, concurrency = diagnosticConcurrency) =>
-  Array.from(
-    { length: Math.ceil(files.length / concurrency) },
-    (_, index) => files.slice(index * concurrency, (index + 1) * concurrency)
+  Array.from({ length: Math.ceil(files.length / concurrency) }, (_, index) =>
+    files.slice(index * concurrency, (index + 1) * concurrency)
   )
 
 const decodeInspectionOutput = (file, stdout, stderr, exitCode) => {
@@ -57,9 +56,10 @@ const decodeInspectionOutput = (file, stdout, stderr, exitCode) => {
   try {
     decoded = Schema.decodeUnknownSync(DiagnosticsOutput)(stdout)
   } catch (cause) {
-    const processFailure = exitCode === ChildProcessSpawner.ExitCode(0)
-      ? `${file}: invalid diagnostics output`
-      : `${file}: Effect diagnostics process failed: ${stderr.trim()}`
+    const processFailure =
+      exitCode === ChildProcessSpawner.ExitCode(0)
+        ? `${file}: invalid diagnostics output`
+        : `${file}: Effect diagnostics process failed: ${stderr.trim()}`
     throw new ChangedEffectDiagnosticsError({ cause, reason: processFailure })
   }
   if (exitCode !== ChildProcessSpawner.ExitCode(0) && decoded.diagnostics.length === 0) {
@@ -128,9 +128,9 @@ assert.throws(
 
 const fail = (reason, cause) => Effect.fail(new ChangedEffectDiagnosticsError({ cause, reason }))
 
-const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function*(repositoryRoot) {
+const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function* (repositoryRoot) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  return Effect.fn("ChangedEffectDiagnostics.git")(function*(args) {
+  return Effect.fn("ChangedEffectDiagnostics.git")(function* (args) {
     const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot }))
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
@@ -149,7 +149,7 @@ const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function*(reposito
 
 const gitOption = (git, args) => git(args).pipe(Effect.option, Effect.map(Option.getOrUndefined))
 
-const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function*(git) {
+const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
   const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("EFFECT_DIAGNOSTICS_BASE")))
   const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
   const candidates = [
@@ -166,7 +166,7 @@ const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(
   return yield* fail("Could not resolve a merge base for changed Effect diagnostics")
 })
 
-const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function*(git, mergeBase) {
+const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (git, mergeBase) {
   const outputs = yield* Effect.all([
     git(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}...HEAD`]),
     git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]),
@@ -176,7 +176,7 @@ const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function
 })
 
 const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
-  function*(spawner, executable, repositoryRoot, file) {
+  function* (spawner, executable, repositoryRoot, file) {
     const handle = yield* spawner.spawn(
       ChildProcess.make(executable, ["diagnostics", "--file", file, "--format", "json"], {
         cwd: repositoryRoot
@@ -201,7 +201,7 @@ const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
 )
 
 const inspectFiles = Effect.fn("ChangedEffectDiagnostics.inspectFiles")(
-  function*(spawner, executable, repositoryRoot, files) {
+  function* (spawner, executable, repositoryRoot, files) {
     const records = []
     for (const wave of launchWaves(files)) {
       const waveRecords = yield* Effect.forEach(
@@ -215,7 +215,7 @@ const inspectFiles = Effect.fn("ChangedEffectDiagnostics.inspectFiles")(
   }
 )
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))

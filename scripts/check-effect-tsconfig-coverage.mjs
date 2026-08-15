@@ -271,14 +271,14 @@ const runSelfTest = () => {
   assert.equal(checkCoversRootTsconfig("tsc -p scripts/tsconfig.json"), false)
 }
 
-const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function*(content, location) {
+const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function* (content, location) {
   return yield* Effect.try({
     try: () => JSON.parse(content),
     catch: (cause) => new EffectTsconfigCoverageError({ cause, reason: `${location}: invalid JSON` })
   })
 })
 
-const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function*(root) {
+const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function* (root) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const pending = [root]
@@ -302,7 +302,7 @@ const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function
   return configs.toSorted()
 })
 
-const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(function*(configPath, configDirectory) {
+const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(function* (configPath, configDirectory) {
   return yield* Effect.try({
     try: () => {
       const read = TypeScript.readConfigFile(configPath, TypeScript.sys.readFile)
@@ -334,7 +334,8 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
         ignoreSuggestions: plugin?.ignoreEffectSuggestionsInTscExitCode,
         ignoreWarnings: plugin?.ignoreEffectWarningsInTscExitCode,
         includeSuggestions: plugin?.includeSuggestionsInTsc,
-        includesEffectNamespaces: Array.isArray(plugin?.namespaceImportPackages) &&
+        includesEffectNamespaces:
+          Array.isArray(plugin?.namespaceImportPackages) &&
           plugin.namespaceImportPackages.includes("effect") &&
           plugin.namespaceImportPackages.includes("@effect/*")
       }
@@ -343,7 +344,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
   })
 })
 
-const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(function*(packagesRoot) {
+const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(function* (packagesRoot) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const records = []
@@ -388,7 +389,7 @@ const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(fu
   return records
 })
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   yield* Effect.try({
     try: runSelfTest,
     catch: (cause) => new EffectTsconfigCoverageError({ cause, reason: "Effect tsconfig self-test failed" })
