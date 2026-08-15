@@ -64,10 +64,10 @@ describe("DiffFileTree", () => {
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
-    const renderTree = (selectedFileId: string) =>
+    const renderTree = (selectedFileId: string, files: ReadonlyArray<RlyDiffFile> = stateFiles) =>
       root.render(
         <DiffFileTree
-          data={{ files: stateFiles, state: "ready" }}
+          data={{ files, state: "ready" }}
           heading="Changed files"
           onSelectedFileChange={() => undefined}
           selectedFileId={selectedFileId}
@@ -81,7 +81,14 @@ describe("DiffFileTree", () => {
     expect(directory?.getAttribute("aria-expanded")).toBe("false")
     expect(host.querySelector("[data-rly-diff-file-id='added']")).toBeNull()
 
-    await act(async () => renderTree("error"))
+    const refreshedFiles: ReadonlyArray<RlyDiffFile> = stateFiles.map((file) =>
+      file.id === "added" ? { ...file, content: { label: "Loading content", state: "loading" } } : file
+    )
+    await act(async () => renderTree("added", refreshedFiles))
+    expect(directory?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector("[data-rly-diff-file-id='added']")).toBeNull()
+
+    await act(async () => renderTree("error", refreshedFiles))
     expect(directory?.getAttribute("aria-expanded")).toBe("true")
     expect(host.querySelector("[data-rly-diff-file-id='error']")).not.toBeNull()
     await act(async () => root.unmount())

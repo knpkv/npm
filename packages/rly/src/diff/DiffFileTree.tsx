@@ -187,16 +187,16 @@ export const DiffFileTree = ({
     [data.files]
   )
   const [collapsedDirectories, setCollapsedDirectories] = useState<ReadonlySet<string>>(() => new Set())
+  const selectedPath = data.files.find(({ id }) => id === selectedFileId)?.path
 
   useEffect(() => {
-    const selectedPath = data.files.find(({ id }) => id === selectedFileId)?.path
     if (selectedPath === undefined) return
     const ancestors = directoryAncestors(selectedPath)
     setCollapsedDirectories((current) => {
       if (![...current].some((path) => ancestors.has(path))) return current
       return new Set([...current].filter((path) => !ancestors.has(path)))
     })
-  }, [data.files, selectedFileId])
+  }, [selectedPath])
 
   const renderNodes = (nodes: ReadonlyArray<FileTreeNode>): ReadonlyArray<ReactElement> =>
     nodes.map((node) => {
