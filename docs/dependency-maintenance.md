@@ -53,17 +53,21 @@ Use `pnpm audit` for a full security gate.
 `effect-upstream`. The former `effect-smol` repository is archived and must not
 be used for current updates.
 
-Check the configured remote:
-
-```bash
-git remote -v | rg effect-upstream
-```
-
-If the remote is missing, add it:
+Add the canonical remote if it is missing:
 
 ```bash
 git remote add effect-upstream https://github.com/Effect-TS/effect.git
 ```
+
+Before every fetch, fail closed unless that remote still resolves to the exact
+canonical URL:
+
+```bash
+node scripts/check-effect-reference-alignment.mjs --check-remote
+```
+
+Do not fetch when this check fails. Correct or remove a mismatched remote and
+add the canonical URL again before continuing.
 
 Choose the exact Effect release used by the workspace, then fetch and update the
 vendored source from that release tag. Do not pull `main`: it can contain APIs

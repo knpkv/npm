@@ -13,6 +13,8 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
+const canonicalUpstreamUrl = "https://github.com/Effect-TS/effect.git"
+
 const alignedPackages = new Set([
   "@effect/ai-openai-compat",
   "@effect/atom-react",
@@ -71,6 +73,11 @@ class EffectReferenceAlignmentError extends Data.TaggedError("EffectReferenceAli
 }
 
 const fail = (reason, cause) => Effect.fail(new EffectReferenceAlignmentError({ cause, reason }))
+
+const validateUpstreamUrl = (url) =>
+  url === canonicalUpstreamUrl
+    ? []
+    : [`effect-upstream resolves to ${url}; expected the canonical ${canonicalUpstreamUrl}`]
 
 const validateAlignment = ({ metadata, provenance, referenceVersions, tree, workspaceVersions }) => {
   const violations = []
@@ -150,6 +157,12 @@ const runSelfTest = () => {
     /instead of 4\.0\.0-rc\.109/u,
     "a nearby workspace release mismatch must fail"
   )
+  assert.deepEqual(validateUpstreamUrl(canonicalUpstreamUrl), [], "the canonical Effect remote must pass")
+  assert.match(
+    validateUpstreamUrl("https://example.invalid/Effect-TS/effect.git").join("\n"),
+    /expected the canonical/u,
+    "a same-path remote on an untrusted host must fail"
+  )
 }
 
 const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (repositoryRoot) {
@@ -228,6 +241,13 @@ const program = Effect.gen(function* () {
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
   const metadataPath = path.join(repositoryRoot, "scripts", "effect-reference.json")
   const git = yield* makeGit(repositoryRoot)
+  if (args.includes("--check-remote")) {
+    const remoteUrl = yield* git(["remote", "get-url", "effect-upstream"])
+    const violations = validateUpstreamUrl(remoteUrl)
+    if (violations.length > 0) return yield* fail(violations.join("\n"))
+    yield* Console.log(`Effect upstream remote verified at ${canonicalUpstreamUrl}`)
+    return
+  }
   const metadata = yield* readJson(fileSystem, metadataPath, Metadata)
   const provenance = yield* resolveSubtreeProvenance(git)
 
