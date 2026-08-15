@@ -15,7 +15,6 @@ import * as Equal from "./Equal.ts"
 import type { Equivalence } from "./Equivalence.ts"
 import { dual, identity } from "./Function.ts"
 import type { TypeLambda } from "./HKT.ts"
-import * as InternalRecord from "./internal/record.ts"
 import * as Option from "./Option.ts"
 import * as Reducer from "./Reducer.ts"
 import type { Result } from "./Result.ts"
@@ -28,7 +27,7 @@ import type { NoInfer } from "./Types.ts"
  *
  * **Example** (Defining a readonly record type)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Record } from "effect"
  *
  * // Creating a readonly record type
@@ -38,7 +37,6 @@ import type { NoInfer } from "./Types.ts"
  *   name: "John",
  *   age: 30
  * }
- * user // => { name: "John", age: 30 }
  * ```
  *
  * @category models
@@ -54,7 +52,7 @@ export type ReadonlyRecord<in out K extends string | symbol, out A> = {
  *
  * **Example** (Using readonly record helper types)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Record } from "effect"
  *
  * // Using NonLiteralKey to convert literal keys to generic types
@@ -62,9 +60,6 @@ export type ReadonlyRecord<in out K extends string | symbol, out A> = {
  *
  * // Using IntersectKeys to find common keys between record types
  * type CommonKeys = Record.ReadonlyRecord.IntersectKeys<"a" | "b", "b" | "c"> // "b"
- *
- * "key" satisfies GenericKey
- * "b" satisfies CommonKeys
  * ```
  *
  * @since 2.0.0
@@ -81,7 +76,7 @@ export declare namespace ReadonlyRecord {
    *
    * **Example** (Converting literal keys to non-literal keys)
    *
-   * ```ts import.meta.vitest
+   * ```ts
    * import type { Record } from "effect"
    *
    * // For literal string keys, this becomes 'string'
@@ -89,10 +84,6 @@ export declare namespace ReadonlyRecord {
    *
    * // For symbol keys, this becomes 'symbol'
    * type Example2 = Record.ReadonlyRecord.NonLiteralKey<symbol> // symbol
-   *
-   * const symbol: Example2 = Symbol.for("key")
-   * "key" satisfies Example1
-   * symbol
    * ```
    *
    * @category models
@@ -107,7 +98,7 @@ export declare namespace ReadonlyRecord {
    *
    * **Example** (Intersecting record keys)
    *
-   * ```ts import.meta.vitest
+   * ```ts
    * import type { Record } from "effect"
    *
    * // Intersection of literal keys
@@ -115,9 +106,6 @@ export declare namespace ReadonlyRecord {
    *
    * // Intersection with generic string
    * type Example2 = Record.ReadonlyRecord.IntersectKeys<string, "a" | "b"> // string
-   *
-   * "b" satisfies Example1
-   * "a" satisfies Example2
    * ```
    *
    * @category models
@@ -134,7 +122,7 @@ export declare namespace ReadonlyRecord {
  *
  * **Example** (Applying a readonly record type lambda)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { HKT, Record } from "effect"
  *
  * type Settings = HKT.Kind<
@@ -149,10 +137,9 @@ export declare namespace ReadonlyRecord {
  *   port: 3000,
  *   retries: 3
  * }
- * defaults // => { port: 3000, retries: 3 }
  * ```
  *
- * @category utility types
+ * @category type lambdas
  * @since 2.0.0
  */
 export interface ReadonlyRecordTypeLambda<K extends string = string> extends TypeLambda {
@@ -164,15 +151,16 @@ export interface ReadonlyRecordTypeLambda<K extends string = string> extends Typ
  *
  * **Example** (Creating an empty record)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
  *
  * // Create an empty record
  * const emptyRecord = Record.empty<string, number>()
- * emptyRecord // => {}
+ * console.log(emptyRecord) // {}
  *
  * // The type ensures type safety for future operations
- * Record.set(emptyRecord, "count", 42) // => { count: 42 }
+ * const withValue = Record.set(emptyRecord, "count", 42)
+ * console.log(withValue) // { count: 42 }
  * ```
  *
  * @category constructors
@@ -188,11 +176,12 @@ export const empty = <K extends string | symbol = never, V = never>(): Record<
  *
  * **Example** (Checking for an empty record)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.isEmptyRecord({}) // => true
- * Record.isEmptyRecord({ a: 3 }) // => false
+ * assert.deepStrictEqual(Record.isEmptyRecord({}), true)
+ * assert.deepStrictEqual(Record.isEmptyRecord({ a: 3 }), false)
  * ```
  *
  * @category guards
@@ -206,11 +195,12 @@ export const isEmptyRecord = <K extends string, A>(self: Record<K, A>): self is 
  *
  * **Example** (Checking for an empty readonly record)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.isEmptyReadonlyRecord({}) // => true
- * Record.isEmptyReadonlyRecord({ a: 3 }) // => false
+ * assert.deepStrictEqual(Record.isEmptyReadonlyRecord({}), true)
+ * assert.deepStrictEqual(Record.isEmptyReadonlyRecord({ a: 3 }), false)
  * ```
  *
  * @category guards
@@ -226,10 +216,16 @@ export const isEmptyReadonlyRecord: <K extends string, A>(
  *
  * **Example** (Building a record from mapped iterable values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.fromIterableWith([1, 2, 3, 4], (a) => [String(a), a * 2]) // => { "1": 2, "2": 4, "3": 6, "4": 8 }
+ * const input = [1, 2, 3, 4]
+ *
+ * assert.deepStrictEqual(
+ *   Record.fromIterableWith(input, (a) => [String(a), a * 2]),
+ *   { "1": 2, "2": 4, "3": 6, "4": 8 }
+ * )
  * ```
  *
  * @category constructors
@@ -252,7 +248,7 @@ export const fromIterableWith: {
     const out: Record<string, B> = empty()
     for (const a of self) {
       const [k, b] = f(a)
-      InternalRecord.assignProperty(out, k, b)
+      out[k] = b
     }
     return out
   }
@@ -263,38 +259,31 @@ export const fromIterableWith: {
  *
  * **Example** (Building a record keyed by iterable values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const users = [
  *   { id: "2", name: "name2" },
  *   { id: "1", name: "name1" }
  * ]
  *
- * Record.fromIterableBy(
- *   users,
- *   (user) => user.id
- * ) // => { "1": { id: "1", name: "name1" }, "2": { id: "2", name: "name2" } }
+ * assert.deepStrictEqual(
+ *   Record.fromIterableBy(users, (user) => user.id),
+ *   {
+ *     "2": { id: "2", name: "name2" },
+ *     "1": { id: "1", name: "name1" }
+ *   }
+ * )
  * ```
  *
  * @category constructors
  * @since 2.0.0
  */
-export const fromIterableBy: {
-  <A, K extends string | symbol>(
-    f: (a: A) => K
-  ): (items: Iterable<A>) => Record<ReadonlyRecord.NonLiteralKey<K>, A>
-  <A, K extends string | symbol>(
-    items: Iterable<A>,
-    f: (a: A) => K
-  ): Record<ReadonlyRecord.NonLiteralKey<K>, A>
-} = dual(
-  2,
-  <A, K extends string | symbol>(
-    items: Iterable<A>,
-    f: (a: A) => K
-  ): Record<ReadonlyRecord.NonLiteralKey<K>, A> => fromIterableWith(items, (a) => [f(a), a])
-)
+export const fromIterableBy = <A, K extends string | symbol>(
+  items: Iterable<A>,
+  f: (a: A) => K
+): Record<ReadonlyRecord.NonLiteralKey<K>, A> => fromIterableWith(items, (a) => [f(a), a])
 
 /**
  * Builds a record from an iterable of key-value pairs.
@@ -306,10 +295,13 @@ export const fromIterableBy: {
  *
  * **Example** (Building a record from entries)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.fromEntries([["a", 1], ["b", 2]]) // => { a: 1, b: 2 }
+ * const input: Array<[string, number]> = [["a", 1], ["b", 2]]
+ *
+ * assert.deepStrictEqual(Record.fromEntries(input), { a: 1, b: 2 })
  * ```
  *
  * @category constructors
@@ -324,11 +316,15 @@ export const fromEntries: <Entry extends readonly [string | symbol, any]>(
  *
  * **Example** (Collecting mapped record values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const x = { a: 1, b: 2, c: 3 }
- * Record.collect(x, (key, n) => [key, n]) // => [["a", 1], ["b", 2], ["c", 3]]
+ * assert.deepStrictEqual(Record.collect(x, (key, n) => [key, n]), [["a", 1], [
+ *   "b",
+ *   2
+ * ], ["c", 3]])
  * ```
  *
  * @category converting
@@ -353,11 +349,12 @@ export const collect: {
  *
  * **Example** (Converting a record to entries)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const x = { a: 1, b: 2, c: 3 }
- * Record.toEntries(x) // => [["a", 1], ["b", 2], ["c", 3]]
+ * assert.deepStrictEqual(Record.toEntries(x), [["a", 1], ["b", 2], ["c", 3]])
  * ```
  *
  * @category converting
@@ -373,10 +370,11 @@ export const toEntries: <K extends string, A>(self: ReadonlyRecord<K, A>) => Arr
  *
  * **Example** (Getting the record size)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.size({ a: "a", b: 1, c: true }) // => 3
+ * assert.deepStrictEqual(Record.size({ a: "a", b: 1, c: true }), 3)
  * ```
  *
  * @category getters
@@ -389,14 +387,15 @@ export const size = <K extends string, A>(self: ReadonlyRecord<K, A>): number =>
  *
  * **Example** (Checking key membership)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.has({ a: 1, b: 2 }, "a") // => true
- * Record.has(Record.empty<string>(), "c") // => false
+ * assert.deepStrictEqual(Record.has({ a: 1, b: 2 }, "a"), true)
+ * assert.deepStrictEqual(Record.has(Record.empty<string>(), "c"), false)
  * ```
  *
- * @category predicates
+ * @category guards
  * @since 2.0.0
  */
 export const has: {
@@ -420,13 +419,14 @@ export const has: {
  *
  * **Example** (Getting a value as an Option)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Option, Record as R } from "effect"
+ * import * as assert from "node:assert"
  *
  * const person: Record<string, unknown> = { name: "John Doe", age: 35 }
  *
- * R.get(person, "name") // => Option.some("John Doe")
- * R.get(person, "email") // => Option.none()
+ * assert.deepStrictEqual(R.get(person, "name"), Option.some("John Doe"))
+ * assert.deepStrictEqual(R.get(person, "email"), Option.none())
  * ```
  *
  * @category getters
@@ -438,7 +438,7 @@ export const get: {
 } = dual(
   2,
   <K extends string | symbol, A>(self: ReadonlyRecord<K, A>, key: NoInfer<K>): Option.Option<A> =>
-    Object.hasOwn(self, key) ? Option.some(self[key]) : Option.none()
+    has(self, key) ? Option.some(self[key]) : Option.none()
 )
 
 /**
@@ -447,15 +447,15 @@ export const get: {
  *
  * **Example** (Modifying a value at a key)
  *
- * ```ts import.meta.vitest
- * import { Option, Record } from "effect"
+ * ```ts
+ * import { Record } from "effect"
  *
  * const f = (x: number) => x * 2
  *
  * const input: Record<string, number> = { a: 3 }
  *
- * Record.modify(input, "a", f) // => Option.some({ a: 6 })
- * Record.modify(input, "b", f) // => Option.none()
+ * Record.modify(input, "a", f) // Option.some({ a: 6 })
+ * Record.modify(input, "b", f) // Option.none()
  * ```
  *
  * @category mutations
@@ -494,11 +494,11 @@ export const modify: {
  *
  * **Example** (Replacing a value at a key)
  *
- * ```ts import.meta.vitest
- * import { Option, Record } from "effect"
+ * ```ts
+ * import { Record } from "effect"
  *
- * Record.replace({ a: 1, b: 2, c: 3 }, "a", 10) // => Option.some({ a: 10, b: 2, c: 3 })
- * Record.replace(Record.empty<string>(), "a", 10) // => Option.none()
+ * Record.replace({ a: 1, b: 2, c: 3 }, "a", 10) // Option.some({ a: 10, b: 2, c: 3 })
+ * Record.replace(Record.empty<string>(), "a", 10) // Option.none()
  * ```
  *
  * @category mutations
@@ -537,10 +537,11 @@ export const replace: {
  *
  * **Example** (Removing a key)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.remove({ a: 1, b: 2 }, "a") // => { b: 2 }
+ * assert.deepStrictEqual(Record.remove({ a: 1, b: 2 }, "a"), { b: 2 })
  * ```
  *
  * @category mutations
@@ -568,13 +569,13 @@ export const remove: {
  *
  * **Example** (Popping a value and removing its key)
  *
- * ```ts import.meta.vitest
- * import { Option, Record } from "effect"
+ * ```ts
+ * import { Record } from "effect"
  *
  * const input: Record<string, number> = { a: 1, b: 2 }
  *
- * Record.pop(input, "a") // => Option.some([1, { b: 2 }])
- * Record.pop(input, "c") // => Option.none()
+ * Record.pop(input, "a") // Option.some([1, { b: 2 }])
+ * Record.pop(input, "c") // Option.none()
  * ```
  *
  * @category mutations
@@ -599,16 +600,17 @@ export const pop: {
  *
  * **Example** (Mapping record values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const f = (n: number) => `-${n}`
  *
- * Record.map({ a: 3, b: 5 }, f) // => { a: "-3", b: "-5" }
+ * assert.deepStrictEqual(Record.map({ a: 3, b: 5 }, f), { a: "-3", b: "-5" })
  *
  * const g = (n: number, key: string) => `${key.toUpperCase()}-${n}`
  *
- * Record.map({ a: 3, b: 5 }, g) // => { a: "A-3", b: "B-5" }
+ * assert.deepStrictEqual(Record.map({ a: 3, b: 5 }, g), { a: "A-3", b: "B-5" })
  * ```
  *
  * @category mapping
@@ -622,7 +624,7 @@ export const map: {
   <K extends string, A, B>(self: ReadonlyRecord<K, A>, f: (a: A, key: NoInfer<K>) => B): Record<K, B> => {
     const out: Record<K, B> = { ...self } as any
     for (const key of keys(self)) {
-      InternalRecord.assignProperty(out, key, f(self[key], key))
+      out[key] = f(self[key], key)
     }
     return out
   }
@@ -633,10 +635,14 @@ export const map: {
  *
  * **Example** (Mapping record keys)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.mapKeys({ a: 3, b: 5 }, (key) => key.toUpperCase()) // => { A: 3, B: 5 }
+ * assert.deepStrictEqual(
+ *   Record.mapKeys({ a: 3, b: 5 }, (key) => key.toUpperCase()),
+ *   { A: 3, B: 5 }
+ * )
  * ```
  *
  * @category mapping
@@ -659,7 +665,7 @@ export const mapKeys: {
     const out: Record<K2, A> = {} as any
     for (const key of keys(self)) {
       const a = self[key]
-      InternalRecord.assignProperty(out, f(key, a), a)
+      out[f(key, a)] = a
     }
     return out
   }
@@ -670,10 +676,14 @@ export const mapKeys: {
  *
  * **Example** (Mapping record entries)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.mapEntries({ a: 3, b: 5 }, (a, key) => [key.toUpperCase(), a + 1]) // => { A: 4, B: 6 }
+ * assert.deepStrictEqual(
+ *   Record.mapEntries({ a: 3, b: 5 }, (a, key) => [key.toUpperCase(), a + 1]),
+ *   { A: 4, B: 6 }
+ * )
  * ```
  *
  * @category mapping
@@ -696,7 +706,7 @@ export const mapEntries: {
     const out = {} as Record<K2, B>
     for (const key of keys(self)) {
       const [k, b] = f(self[key], key)
-      InternalRecord.assignProperty(out, k, b)
+      out[k] = b
     }
     return out
   }
@@ -708,12 +718,13 @@ export const mapEntries: {
  *
  * **Example** (Filtering and mapping with Result)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record, Result } from "effect"
+ * import * as assert from "node:assert"
  *
  * const x = { a: 1, b: 2, c: 3 }
  * const f = (a: number, key: string) => a > 2 ? Result.succeed(a * 2) : Result.failVoid
- * Record.filterMap(x, f) // => { c: 6 }
+ * assert.deepStrictEqual(Record.filterMap(x, f), { c: 6 })
  * ```
  *
  * @category filtering
@@ -737,7 +748,7 @@ export const filterMap: {
     for (const key of keys(self)) {
       const result = f(self[key], key)
       if (R.isSuccess(result)) {
-        InternalRecord.assignProperty(out, key, result.success)
+        out[key] = result.success
       }
     }
     return out
@@ -749,11 +760,12 @@ export const filterMap: {
  *
  * **Example** (Filtering record values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const x = { a: 1, b: 2, c: 3, d: 4 }
- * Record.filter(x, (n) => n > 2) // => { c: 3, d: 4 }
+ * assert.deepStrictEqual(Record.filter(x, (n) => n > 2), { c: 3, d: 4 })
  * ```
  *
  * @category filtering
@@ -783,7 +795,7 @@ export const filter: {
     const out: Record<string, A> = empty()
     for (const key of keys(self)) {
       if (predicate(self[key], key)) {
-        InternalRecord.assignProperty(out, key, self[key])
+        out[key] = self[key]
       }
     }
     return out
@@ -796,10 +808,14 @@ export const filter: {
  *
  * **Example** (Extracting Some values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Option, Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.getSomes({ a: Option.some(1), b: Option.none(), c: Option.some(2) }) // => { a: 1, c: 2 }
+ * assert.deepStrictEqual(
+ *   Record.getSomes({ a: Option.some(1), b: Option.none(), c: Option.some(2) }),
+ *   { a: 1, c: 2 }
+ * )
  * ```
  *
  * @category filtering
@@ -814,7 +830,7 @@ export const getSomes: <K extends string, A>(
   for (const key of keys(self)) {
     const option = self[key]
     if (Option.isSome(option)) {
-      InternalRecord.assignProperty(out, key, option.value)
+      out[key] = option.value
     }
   }
   return out
@@ -826,14 +842,18 @@ export const getSomes: <K extends string, A>(
  *
  * **Example** (Extracting Result failures)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record, Result } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.getFailures({
+ * assert.deepStrictEqual(
+ *   Record.getFailures({
  *     a: Result.succeed(1),
  *     b: Result.fail("err"),
  *     c: Result.succeed(2)
- * }) // => { b: "err" }
+ *   }),
+ *   { b: "err" }
+ * )
  * ```
  *
  * @category filtering
@@ -846,7 +866,7 @@ export const getFailures = <K extends string, A, E>(
   for (const key of keys(self)) {
     const value = self[key]
     if (R.isFailure(value)) {
-      InternalRecord.assignProperty(out, key, value.failure)
+      out[key] = value.failure
     }
   }
 
@@ -859,14 +879,18 @@ export const getFailures = <K extends string, A, E>(
  *
  * **Example** (Extracting Result successes)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record, Result } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.getSuccesses({
+ * assert.deepStrictEqual(
+ *   Record.getSuccesses({
  *     a: Result.succeed(1),
  *     b: Result.fail("err"),
  *     c: Result.succeed(2)
- * }) // => { a: 1, c: 2 }
+ *   }),
+ *   { a: 1, c: 2 }
+ * )
  * ```
  *
  * @category filtering
@@ -879,7 +903,7 @@ export const getSuccesses = <K extends string, A, E>(
   for (const key of keys(self)) {
     const value = self[key]
     if (R.isSuccess(value)) {
-      InternalRecord.assignProperty(out, key, value.success)
+      out[key] = value.success
     }
   }
 
@@ -897,12 +921,13 @@ export const getSuccesses = <K extends string, A, E>(
  *
  * **Example** (Partitioning with Result)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record, Result } from "effect"
+ * import * as assert from "node:assert"
  *
  * const x = { a: 1, b: 2, c: 3 }
  * const f = (n: number) => (n % 2 === 0 ? Result.succeed(n) : Result.fail(n))
- * Record.partition(x, f) // => [{ a: 1, c: 3 }, { b: 2 }]
+ * assert.deepStrictEqual(Record.partition(x, f), [{ a: 1, c: 3 }, { b: 2 }])
  * ```
  *
  * @category filtering
@@ -929,9 +954,9 @@ export const partition: {
     for (const key of keys(self)) {
       const e = f(self[key], key)
       if (R.isFailure(e)) {
-        InternalRecord.assignProperty(left, key, e.failure)
+        left[key] = e.failure
       } else {
-        InternalRecord.assignProperty(right, key, e.success)
+        right[key] = e.success
       }
     }
     return [left, right]
@@ -944,10 +969,14 @@ export const partition: {
  *
  * **Example** (Separating Result values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record, Result } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.separate({ a: Result.fail("e"), b: Result.succeed(1) }) // => [{ a: "e" }, { b: 1 }]
+ * assert.deepStrictEqual(
+ *   Record.separate({ a: Result.fail("e"), b: Result.succeed(1) }),
+ *   [{ a: "e" }, { b: 1 }]
+ * )
  * ```
  *
  * @category filtering
@@ -962,10 +991,11 @@ export const separate: <K extends string, A, B>(
  *
  * **Example** (Getting record keys)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.keys({ a: 1, b: 2, c: 3 }) // => ["a", "b", "c"]
+ * assert.deepStrictEqual(Record.keys({ a: 1, b: 2, c: 3 }), ["a", "b", "c"])
  * ```
  *
  * @category getters
@@ -979,10 +1009,11 @@ export const keys = <K extends string | symbol, A>(self: ReadonlyRecord<K, A>): 
  *
  * **Example** (Getting record values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.values({ a: 1, b: 2, c: 3 }) // => [1, 2, 3]
+ * assert.deepStrictEqual(Record.values({ a: 1, b: 2, c: 3 }), [1, 2, 3])
  * ```
  *
  * @category getters
@@ -995,11 +1026,12 @@ export const values = <K extends string, A>(self: ReadonlyRecord<K, A>): Array<A
  *
  * **Example** (Setting a record value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.set("a", 5)({ a: 1, b: 2 }) // => { a: 5, b: 2 }
- * Record.set("c", 5)({ a: 1, b: 2 }) // => { a: 1, b: 2, c: 5 }
+ * assert.deepStrictEqual(Record.set("a", 5)({ a: 1, b: 2 }), { a: 5, b: 2 })
+ * assert.deepStrictEqual(Record.set("c", 5)({ a: 1, b: 2 }), { a: 1, b: 2, c: 5 })
  * ```
  *
  * @category mutations
@@ -1027,49 +1059,12 @@ export const set: {
 )
 
 /**
- * Mutates a record by assigning a value to a property.
- *
- * **When to use**
- *
- * Use when incrementally constructing a new record and copying it for every
- * property would be unnecessary.
- *
- * **Gotchas**
- *
- * This function mutates `self`. When `key` is `"__proto__"`, it creates an
- * own data property instead of changing the object's prototype.
- *
- * **Example** (Assigning an external key safely)
- *
- * ```ts import.meta.vitest
- * import { Record } from "effect"
- *
- * const key: string = "__proto__" // Assume this comes from external input
- * const value = { polluted: true }
- *
- * const unsafe: Record<string, unknown> = {}
- * unsafe[key] = value
- * Object.getPrototypeOf(unsafe) === value // => true
- *
- * const safe: Record<string, unknown> = {}
- * Record.assignProperty(safe, key, value)
- * Object.getPrototypeOf(safe) === Object.prototype // => true
- * safe[key] === value // => true
- * ```
- *
- * @see {@link set} for an immutable update
- * @category mutations
- * @since 4.0.0
- */
-export const assignProperty: (self: object, key: PropertyKey, value: unknown) => void = InternalRecord.assignProperty
-
-/**
  * Checks whether all the keys and values in one record are also found in another record.
  * Uses the provided equivalence function to compare values.
  *
  * **Example** (Checking subrecords with a custom equivalence)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equivalence, Record } from "effect"
  *
  * const isSubrecord = Record.isSubrecordBy(
@@ -1082,9 +1077,15 @@ export const assignProperty: (self: object, key: PropertyKey, value: unknown) =>
  *   status: "active"
  * }
  *
- * isSubrecord(required, available) // => true
- * isSubrecord({ role: "Admin", status: "inactive" }, available) // => false
- * isSubrecord(required, { role: "editor", status: "active" }) // => false
+ * console.log(
+ *   isSubrecord(required, available)
+ * ) // true
+ * console.log(
+ *   isSubrecord({ role: "Admin", status: "inactive" }, available)
+ * ) // false
+ * console.log(
+ *   isSubrecord(required, { role: "editor", status: "active" })
+ * ) // false
  * ```
  *
  * @category predicates
@@ -1113,11 +1114,18 @@ export const isSubrecordBy = <A>(equivalence: Equivalence<A>): {
  *
  * **Example** (Checking subrecords)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.isSubrecord({ a: 1 } as Record<string, number>, { a: 1, b: 2 }) // => true
- * Record.isSubrecord({ a: 1, b: 2 }, { a: 1 } as Record<string, number>) // => false
+ * assert.deepStrictEqual(
+ *   Record.isSubrecord({ a: 1 } as Record<string, number>, { a: 1, b: 2 }),
+ *   true
+ * )
+ * assert.deepStrictEqual(
+ *   Record.isSubrecord({ a: 1, b: 2 }, { a: 1 } as Record<string, number>),
+ *   false
+ * )
  * ```
  *
  * @category predicates
@@ -1133,10 +1141,14 @@ export const isSubrecord: {
  *
  * **Example** (Reducing record values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.reduce({ a: 1, b: 2, c: 3 }, 0, (acc, value) => acc + value) // => 6
+ * assert.deepStrictEqual(
+ *   Record.reduce({ a: 1, b: 2, c: 3 }, 0, (acc, value, key) => acc + value),
+ *   6
+ * )
  * ```
  *
  * @category folding
@@ -1168,14 +1180,15 @@ export const reduce: {
  *
  * **Example** (Checking every record value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.every({ a: 1, b: 2 }, (n) => n > 0) // => true
- * Record.every({ a: 1, b: -1 }, (n) => n > 0) // => false
+ * assert.deepStrictEqual(Record.every({ a: 1, b: 2 }, (n) => n > 0), true)
+ * assert.deepStrictEqual(Record.every({ a: 1, b: -1 }, (n) => n > 0), false)
  * ```
  *
- * @category guards
+ * @category predicates
  * @since 2.0.0
  */
 export const every: {
@@ -1208,11 +1221,12 @@ export const every: {
  *
  * **Example** (Checking for any matching value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.some({ a: 1, b: 2 }, (n) => n > 1) // => true
- * Record.some({ a: 1, b: 2 }, (n) => n > 2) // => false
+ * assert.deepStrictEqual(Record.some({ a: 1, b: 2 }, (n) => n > 1), true)
+ * assert.deepStrictEqual(Record.some({ a: 1, b: 2 }, (n) => n > 2), false)
  * ```
  *
  * @category predicates
@@ -1239,10 +1253,14 @@ export const some: {
  *
  * **Example** (Merging records with union)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.union({ a: 1, b: 2 }, { b: 3, c: 4 }, (a, b) => a + b) // => { a: 1, b: 5, c: 4 }
+ * assert.deepStrictEqual(
+ *   Record.union({ a: 1, b: 2 }, { b: 3, c: 4 }, (a, b) => a + b),
+ *   { a: 1, b: 5, c: 4 }
+ * )
  * ```
  *
  * @category combining
@@ -1274,14 +1292,14 @@ export const union: {
     const out: Record<string, A | B | C> = empty()
     for (const key of keys(self)) {
       if (has(that, key as any)) {
-        InternalRecord.assignProperty(out, key, combine(self[key], that[key as unknown as K1]))
+        out[key] = combine(self[key], that[key as unknown as K1])
       } else {
-        InternalRecord.assignProperty(out, key, self[key])
+        out[key] = self[key]
       }
     }
     for (const key of keys(that)) {
       if (!has(out, key)) {
-        InternalRecord.assignProperty(out, key, that[key])
+        out[key] = that[key]
       }
     }
     return out
@@ -1294,10 +1312,14 @@ export const union: {
  *
  * **Example** (Merging intersecting keys)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.intersection({ a: 1, b: 2 }, { b: 3, c: 4 }, (a, b) => a + b) // => { b: 5 }
+ * assert.deepStrictEqual(
+ *   Record.intersection({ a: 1, b: 2 }, { b: 3, c: 4 }, (a, b) => a + b),
+ *   { b: 5 }
+ * )
  * ```
  *
  * @category combining
@@ -1326,7 +1348,7 @@ export const intersection: {
     }
     for (const key of keys(self)) {
       if (has(that, key as any)) {
-        InternalRecord.assignProperty(out, key, combine(self[key], that[key as unknown as K1]))
+        out[key] = combine(self[key], that[key as unknown as K1])
       }
     }
     return out
@@ -1339,10 +1361,14 @@ export const intersection: {
  *
  * **Example** (Keeping keys unique to each record)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.difference({ a: 1, b: 2 }, { b: 3, c: 4 }) // => { a: 1, c: 4 }
+ * assert.deepStrictEqual(
+ *   Record.difference({ a: 1, b: 2 }, { b: 3, c: 4 }),
+ *   { a: 1, c: 4 }
+ * )
  * ```
  *
  * @category combining
@@ -1369,12 +1395,12 @@ export const difference: {
   const out = {} as Record<K0 | K1, A | B>
   for (const key of keys(self)) {
     if (!has(that, key as any)) {
-      InternalRecord.assignProperty(out, key, self[key])
+      out[key] = self[key]
     }
   }
   for (const key of keys(that)) {
     if (!has(self, key as any)) {
-      InternalRecord.assignProperty(out, key, that[key])
+      out[key] = that[key]
     }
   }
   return out
@@ -1386,13 +1412,14 @@ export const difference: {
  *
  * **Example** (Comparing records with a value equivalence)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal, Record } from "effect"
+ * import * as assert from "node:assert"
  *
  * const recordEquivalence = Record.makeEquivalence(Equal.asEquivalence<number>())
  *
- * recordEquivalence({ a: 1, b: 2 }, { a: 1, b: 2 }) // => true
- * recordEquivalence({ a: 1, b: 2 }, { a: 1, b: 3 }) // => false
+ * assert.deepStrictEqual(recordEquivalence({ a: 1, b: 2 }, { a: 1, b: 2 }), true)
+ * assert.deepStrictEqual(recordEquivalence({ a: 1, b: 2 }, { a: 1, b: 3 }), false)
  * ```
  *
  * @category instances
@@ -1410,10 +1437,11 @@ export const makeEquivalence = <K extends string, A>(
  *
  * **Example** (Creating a singleton record)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Record } from "effect"
+ * import * as assert from "node:assert"
  *
- * Record.singleton("a", 1) // => { a: 1 }
+ * assert.deepStrictEqual(Record.singleton("a", 1), { a: 1 })
  * ```
  *
  * @category constructors
@@ -1488,17 +1516,18 @@ export function makeReducerIntersection<K extends string, A>(
  *
  * **Example** (Finding the first matching entry)
  *
- * ```ts import.meta.vitest
- * import { Option, Record } from "effect"
+ * ```ts
+ * import { Record } from "effect"
  *
  * const record = { a: 1, b: 2, c: 3 }
- * Record.findFirst(
+ * const result = Record.findFirst(
  *   record,
  *   (value, key) => value > 1 && key !== "b"
- * ) // => Option.some(["c", 3])
+ * )
+ * console.log(result) // Option.Some(["c", 3])
  * ```
  *
- * @category searching
+ * @category elements
  * @since 3.14.0
  */
 export const findFirst: {

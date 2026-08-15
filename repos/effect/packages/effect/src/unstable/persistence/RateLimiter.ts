@@ -234,17 +234,16 @@ export const layer: Layer.Layer<
  *
  * **Example** (Applying rate limits to effects)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer } from "effect"
+ * ```ts
+ * import { Effect } from "effect"
  * import { RateLimiter } from "effect/unstable/persistence"
  *
- * const messages: Array<string> = []
- * const program = Effect.gen(function*() {
+ * Effect.gen(function*() {
  *   // Access the `withLimiter` function from the RateLimiter module
  *   const withLimiter = yield* RateLimiter.makeWithRateLimiter
  *
  *   // Apply a rate limiter to an effect
- *   yield* Effect.sync(() => messages.push("Making a request with rate limiting")).pipe(
+ *   yield* Effect.log("Making a request with rate limiting").pipe(
  *     withLimiter({
  *       key: "some-key",
  *       limit: 10,
@@ -253,12 +252,7 @@ export const layer: Layer.Layer<
  *       algorithm: "fixed-window"
  *     })
  *   )
- * }).pipe(
- *   Effect.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory)))
- * )
- *
- * await Effect.runPromise(program)
- * messages // => ["Making a request with rate limiting"]
+ * })
  * ```
  *
  * @category accessors
@@ -285,84 +279,56 @@ export const makeWithRateLimiter: Effect.Effect<
 )
 
 /**
- * Sleeps when the rate limit is exceeded.
+ * Accesses a function that sleeps when the rate limit is exceeded.
  *
  * **Example** (Sleeping until rate limit permits)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer } from "effect"
+ * ```ts
+ * import { Effect } from "effect"
  * import { RateLimiter } from "effect/unstable/persistence"
  *
- * const program = Effect.gen(function*() {
- *   const limiter = yield* RateLimiter.RateLimiter
- *   const partiallyApplied = RateLimiter.sleep(limiter)
- *   const partial = yield* partiallyApplied({
- *     key: "partial",
- *     limit: 10,
- *     window: "5 seconds",
- *     algorithm: "fixed-window"
- *   })
- *   const direct = yield* RateLimiter.sleep(limiter, {
- *     key: "direct",
- *     limit: 10,
- *     window: "5 seconds",
- *     algorithm: "fixed-window"
- *   })
- *   return [partial.remaining, direct.remaining]
- * }).pipe(
- *   Effect.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory)))
- * )
+ * Effect.gen(function*() {
+ *   // Access the `sleep` function from the RateLimiter module
+ *   const sleep = yield* RateLimiter.makeSleep
  *
- * await Effect.runPromise(program) // => [9, 9]
+ *   // Use the `sleep` function with specific rate limiting parameters.
+ *   // This will only sleep if the rate limit has been exceeded.
+ *   yield* sleep({
+ *     key: "some-key",
+ *     limit: 10,
+ *     window: "5 seconds",
+ *     algorithm: "fixed-window"
+ *   })
+ * })
  * ```
  *
  * @category accessors
  * @since 4.0.0
  */
-export function sleep(self: RateLimiter): (options: {
-  readonly algorithm?: "fixed-window" | "token-bucket" | undefined
-  readonly window: Duration.Input
-  readonly limit: number
-  readonly key: string
-  readonly tokens?: number | undefined
-}) => Effect.Effect<ConsumeResult, RateLimiterError>
-export function sleep(self: RateLimiter, options: {
-  readonly algorithm?: "fixed-window" | "token-bucket" | undefined
-  readonly window: Duration.Input
-  readonly limit: number
-  readonly key: string
-  readonly tokens?: number | undefined
-}): Effect.Effect<ConsumeResult, RateLimiterError>
-export function sleep(self: RateLimiter, options?: {
-  readonly algorithm?: "fixed-window" | "token-bucket" | undefined
-  readonly window: Duration.Input
-  readonly limit: number
-  readonly key: string
-  readonly tokens?: number | undefined
-}):
-  | Effect.Effect<ConsumeResult, RateLimiterError>
-  | ((options: {
+export const makeSleep: Effect.Effect<
+  ((options: {
     readonly algorithm?: "fixed-window" | "token-bucket" | undefined
     readonly window: Duration.Input
     readonly limit: number
     readonly key: string
     readonly tokens?: number | undefined
-  }) => Effect.Effect<ConsumeResult, RateLimiterError>)
-{
-  if (options === undefined) {
-    return (options) => sleep(self, options)
-  }
-  return Effect.flatMap(
-    self.consume({
-      ...options,
-      onExceeded: "delay"
-    }),
-    (result) => {
-      if (Duration.isZero(result.delay)) return Effect.succeed(result)
-      return Effect.as(Effect.sleep(result.delay), result)
-    }
+  }) => Effect.Effect<ConsumeResult, RateLimiterError>),
+  never,
+  RateLimiter
+> = RateLimiter.use((limiter) =>
+  Effect.succeed((options) =>
+    Effect.flatMap(
+      limiter.consume({
+        ...options,
+        onExceeded: "delay"
+      }),
+      (result) => {
+        if (Duration.isZero(result.delay)) return Effect.succeed(result)
+        return Effect.as(Effect.sleep(result.delay), result)
+      }
+    )
   )
-}
+)
 
 /**
  * Runtime type identifier for `RateLimiterError`.
@@ -390,14 +356,14 @@ export type ErrorTypeId = "~@effect/experimental/RateLimiter/RateLimiterError"
  * @category errors
  * @since 4.0.0
  */
-export class RateLimitExceeded extends Schema.Error<RateLimitExceeded>(
+export class RateLimitExceeded extends Schema.ErrorClass<RateLimitExceeded>(
   "effect/persistence/RateLimiter/RateLimitExceeded"
 )({
   _tag: Schema.tag("RateLimitExceeded"),
   retryAfter: Schema.DurationFromMillis,
   key: Schema.String,
-  limit: Schema.Finite,
-  remaining: Schema.Finite
+  limit: Schema.Number,
+  remaining: Schema.Number
 }) {
   /**
    * Public message used when the rate limiter rejects a request.
@@ -415,7 +381,7 @@ export class RateLimitExceeded extends Schema.Error<RateLimitExceeded>(
  * @category errors
  * @since 4.0.0
  */
-export class RateLimitStoreError extends Schema.Error<RateLimitStoreError>(
+export class RateLimitStoreError extends Schema.ErrorClass<RateLimitStoreError>(
   "effect/persistence/RateLimiter/RateLimitStoreError"
 )({
   _tag: Schema.tag("RateLimitStoreError"),
@@ -449,7 +415,7 @@ export const RateLimiterErrorReason: Schema.Union<[
  * @category errors
  * @since 4.0.0
  */
-export class RateLimiterError extends Schema.Error<RateLimiterError>(ErrorTypeId)({
+export class RateLimiterError extends Schema.ErrorClass<RateLimiterError>(ErrorTypeId)({
   _tag: Schema.tag("RateLimiterError"),
   reason: RateLimiterErrorReason
 }) {
@@ -520,7 +486,7 @@ export type AdaptivePhase = "inactive" | "cooldown" | "learning" | "learned"
 /**
  * Options for consuming tokens from the adaptive rate limiter store.
  *
- * @category options
+ * @category models
  * @since 4.0.0
  */
 export interface AdaptiveConsumeOptions {
@@ -571,7 +537,7 @@ export interface AdaptiveConsumeResult {
 /**
  * Options for reporting response feedback to the adaptive rate limiter store.
  *
- * @category options
+ * @category models
  * @since 4.0.0
  */
 export interface AdaptiveFeedbackOptions {
@@ -609,7 +575,7 @@ export interface AdaptiveFeedbackOptions {
  * Use to provide the shared counter storage and adaptive feedback state used by
  * persistent rate-limit checks.
  *
- * @category services
+ * @category store
  * @since 4.0.0
  */
 export class RateLimiterStore extends Context.Service<
@@ -689,7 +655,7 @@ interface AdaptiveState {
 /**
  * Provides a process-local in-memory `RateLimiterStore`.
  *
- * @category layers
+ * @category RateLimiterStore
  * @since 4.0.0
  */
 export const layerStoreMemory: Layer.Layer<
@@ -908,7 +874,7 @@ export const layerStoreMemory: Layer.Layer<
  * Creates a Redis-backed `RateLimiterStore` using Lua scripts and the
  * configured key prefix.
  *
- * @category constructors
+ * @category RateLimiterStore
  * @since 4.0.0
  */
 export const makeStoreRedis = Effect.fnUntraced(function*(

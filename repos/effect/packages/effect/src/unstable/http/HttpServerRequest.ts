@@ -16,7 +16,6 @@ import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import * as Inspectable from "../../Inspectable.ts"
-import * as InternalRecord from "../../internal/record.ts"
 import * as Option from "../../Option.ts"
 import type * as Path from "../../Path.ts"
 import type { ReadonlyRecord } from "../../Record.ts"
@@ -45,7 +44,7 @@ export {
    * Use to configure the maximum body size accepted while reading server
    * request bodies.
    *
-   * @category references
+   * @category fiber refs
    * @since 4.0.0
    */
   MaxBodySize
@@ -105,7 +104,7 @@ export interface HttpServerRequest extends HttpIncomingMessage.HttpIncomingMessa
  * Use to access the request currently being handled by HTTP server routes and
  * middleware.
  *
- * @category services
+ * @category context
  * @since 4.0.0
  */
 export const HttpServerRequest: Context.Service<HttpServerRequest, HttpServerRequest> = Context.Service(
@@ -125,7 +124,7 @@ export const HttpServerRequest: Context.Service<HttpServerRequest, HttpServerReq
  * Each key maps to a string value, or to an array when the parameter appears more
  * than once.
  *
- * @category services
+ * @category search params
  * @since 4.0.0
  */
 export class ParsedSearchParams extends Context.Service<
@@ -140,21 +139,21 @@ export class ParsedSearchParams extends Context.Service<
  *
  * Repeated parameters are represented as arrays in insertion order.
  *
- * @category parsing
+ * @category search params
  * @since 4.0.0
  */
 export const searchParamsFromURL = (url: URL): ReadonlyRecord<string, string | Array<string>> => {
   const out: Record<string, string | Array<string>> = {}
   for (const [key, value] of url.searchParams.entries()) {
-    if (Object.hasOwn(out, key)) {
-      const entry = out[key]
+    const entry = out[key]
+    if (entry !== undefined) {
       if (Array.isArray(entry)) {
         entry.push(value)
       } else {
-        InternalRecord.assignProperty(out, key, [entry, value])
+        out[key] = [entry, value]
       }
     } else {
-      InternalRecord.assignProperty(out, key, value)
+      out[key] = value
     }
   }
   return out
@@ -436,19 +435,14 @@ export const toClientRequest = (request: HttpServerRequest): HttpClientRequest.H
     Option.getOrElse(toURL(request), () => request.url)
   )
 
-const toClientBody = (request: HttpServerRequest): HttpBody.HttpBody => {
-  if (!hasBody(request.method)) {
-    return HttpBody.empty
-  }
-  const formData = getFormDataBody(request)
-  return formData === undefined
+const toClientBody = (request: HttpServerRequest): HttpBody.HttpBody =>
+  hasBody(request.method)
     ? HttpBody.stream(
       request.stream,
       request.headers["content-type"],
       parseContentLength(request.headers["content-length"])
     )
-    : HttpBody.formData(formData)
-}
+    : HttpBody.empty
 
 const parseContentLength = (contentLength: string | undefined): number | undefined => {
   if (contentLength === undefined) {
@@ -868,24 +862,24 @@ const rawBodyStream = (request: HttpServerRequest, body: unknown): Stream.Stream
   if (body instanceof Request) {
     return streamFromReadable(request, body.body)
   }
+  if (isFormData(body)) {
+    return streamFromReadable(request, new Response(body).body)
+  }
   if (isReadableStream(body)) {
     return streamFromReadable(request, body)
-  }
-  if (isBodyInit(body)) {
-    return streamFromReadable(request, new Response(body).body)
   }
   return Stream.fail(requestParseError(request, "Unsupported body type"))
 }
 
 const rawBodyBytes = (request: HttpServerRequest, body: unknown): Effect.Effect<Uint8Array, HttpServerError> => {
+  if (body instanceof Blob) {
+    return bytesFromBodyInit(request, body)
+  }
   if (body instanceof Request) {
     return Effect.tryPromise({
       try: () => body.arrayBuffer().then((buffer) => new Uint8Array(buffer)),
       catch: (cause) => requestParseError(request, undefined, cause)
     })
-  }
-  if (isBodyInit(body)) {
-    return bytesFromBodyInit(request, body)
   }
   return Effect.fail(requestParseError(request, "Unsupported body type"))
 }
@@ -999,14 +993,6 @@ const isReadableStream = (u: unknown): u is ReadableStream<Uint8Array> =>
   typeof ReadableStream !== "undefined" && u instanceof ReadableStream
 
 const isFormData = (u: unknown): u is FormData => typeof FormData !== "undefined" && u instanceof FormData
-
-const isBodyInit = (u: unknown): u is BodyInit =>
-  typeof u === "string" ||
-  (typeof ArrayBuffer !== "undefined" && (u instanceof ArrayBuffer || ArrayBuffer.isView(u))) ||
-  (typeof Blob !== "undefined" && u instanceof Blob) ||
-  isFormData(u) ||
-  (typeof URLSearchParams !== "undefined" && u instanceof URLSearchParams) ||
-  isReadableStream(u)
 
 const textDecoder = new TextDecoder()
 

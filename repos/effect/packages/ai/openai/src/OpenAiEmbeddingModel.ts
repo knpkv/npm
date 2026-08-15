@@ -130,9 +130,10 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
 }): Effect.fn.Return<EmbeddingModel.Service, never, OpenAiClient> {
   const client = yield* OpenAiClient
 
-  const makeConfig = Effect.contextWith((services: Context.Context<never>) =>
-    Effect.succeed({ model, ...providerConfig, ...Context.getOrUndefined(services, Config) })
-  )
+  const makeConfig = Effect.gen(function*() {
+    const services = yield* Effect.context<never>()
+    return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
+  })
 
   return yield* EmbeddingModel.make({
     embedMany: Effect.fnUntraced(function*({ inputs }) {

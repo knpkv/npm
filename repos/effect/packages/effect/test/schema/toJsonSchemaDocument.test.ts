@@ -43,7 +43,7 @@ function assertJsonSchemaDocument<T, E, RD>(
   const valid = ajvDraft2020_12.validateSchema(jsonSchema)
   assertTrue(valid)
   // const validate = ajvDraft2020_12.compile(jsonSchema)
-  // const arb = Schema.toArbitrary(schema)(FastCheck)
+  // const arb = Schema.toArbitrary(schema)
   // const codec = Schema.toCodecJson(schema)
   // const encode = Schema.encodeSync(codec)
   // FastCheck.assert(FastCheck.property(arb, (t) => {
@@ -53,139 +53,26 @@ function assertJsonSchemaDocument<T, E, RD>(
 }
 
 describe("toJsonSchemaDocument", () => {
-  describe("unsupported schemas", () => {
-    it("rejects tuple post-rest elements", () => {
+  describe("Unsupported schemas", () => {
+    it("Tuple: unsupported post-rest elements", () => {
       assertUnsupportedSchema(
         Schema.TupleWithRest(Schema.Tuple([]), [Schema.Finite, Schema.String]),
-        `Invalid schema representation document\n  at ["representation"]["rest"]`
+        "Generating a JSON Schema for post-rest elements is not supported"
       )
     })
 
-    it("rejects symbol property names", () => {
+    it("Struct: unsupported property signature name", () => {
       const a = Symbol.for("effect/Schema/test/a")
       assertUnsupportedSchema(
         Schema.Struct({ [a]: Schema.String }),
-        "Objects property names must be strings"
-      )
-    })
-  })
-
-  it("Record(Symbol, Finite)", () => {
-    assertJsonSchemaDocument(Schema.Record(Schema.Symbol, Schema.Finite), {
-      schema: {
-        type: "object",
-        patternProperties: {
-          "^Symbol\\((.*)\\)$": { type: "number" }
-        }
-      }
-    })
-  })
-
-  it("emits content annotations", () => {
-    assertJsonSchemaDocument(
-      Schema.String.annotate({
-        description: "encoded payload",
-        contentMediaType: "application/json",
-        contentSchema: { type: "number" }
-      }),
-      {
-        schema: {
-          type: "string",
-          description: "encoded payload",
-          contentMediaType: "application/json",
-          contentSchema: { type: "number" }
-        }
-      }
-    )
-  })
-
-  describe("reference extraction", () => {
-    it("preserves shared non-trivial schemas with references", () => {
-      const shared = Schema.Struct({ value: Schema.String })
-
-      assertJsonSchemaDocument(
-        Schema.Struct({ left: shared, right: shared }),
-        {
-          schema: {
-            type: "object",
-            properties: {
-              left: { $ref: "#/$defs/Objects_" },
-              right: { $ref: "#/$defs/Objects_" }
-            },
-            required: ["left", "right"],
-            additionalProperties: false
-          },
-          definitions: {
-            Objects_: {
-              type: "object",
-              properties: {
-                value: { type: "string" }
-              },
-              required: ["value"],
-              additionalProperties: false
-            }
-          }
-        }
+        `Unsupported property signature name: Symbol(effect/Schema/test/a)`
       )
     })
 
-    it("preserves repeated optional structural schemas with references", () => {
-      const shared = Schema.Struct({ value: Schema.String })
-
-      assertJsonSchemaDocument(
-        Schema.Struct({ left: Schema.optional(shared), right: Schema.optional(shared) }),
-        {
-          schema: {
-            type: "object",
-            properties: {
-              left: { $ref: "#/$defs/Union_" },
-              right: { $ref: "#/$defs/Union_" }
-            },
-            additionalProperties: false
-          },
-          definitions: {
-            Union_: {
-              anyOf: [
-                {
-                  type: "object",
-                  properties: {
-                    value: { type: "string" }
-                  },
-                  required: ["value"],
-                  additionalProperties: false
-                },
-                { type: "null" }
-              ]
-            }
-          }
-        }
-      )
-    })
-
-    it("inlines shared canonical unions of leaf schemas", () => {
-      assertJsonSchemaDocument(
-        Schema.Struct({ left: Schema.Number, right: Schema.Number }),
-        {
-          schema: {
-            type: "object",
-            properties: {
-              left: {
-                anyOf: [
-                  { type: "number" },
-                  { type: "string", enum: ["Infinity", "-Infinity", "NaN"] }
-                ]
-              },
-              right: {
-                anyOf: [
-                  { type: "number" },
-                  { type: "string", enum: ["Infinity", "-Infinity", "NaN"] }
-                ]
-              }
-            },
-            required: ["left", "right"],
-            additionalProperties: false
-          }
-        }
+    it("Record: unsupported index signature parameter", () => {
+      assertUnsupportedSchema(
+        Schema.Record(Schema.Symbol, Schema.Finite),
+        `Unsupported index signature parameter: Symbol`
       )
     })
   })
@@ -350,6 +237,31 @@ describe("toJsonSchemaDocument", () => {
         )
       })
 
+      it("does not overwrite generated contentSchema with the raw annotation", () => {
+        assertJsonSchemaDocument(
+          Schema.fromJsonString(Schema.Struct({
+            a: Schema.String
+          })),
+          {
+            schema: {
+              "type": "string",
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                },
+                "required": ["a"],
+                "additionalProperties": false
+              }
+            }
+          },
+          { includeAnnotationKey: (key) => key === "contentSchema" }
+        )
+      })
+
       it("passthroughs at property level in structs", () => {
         const schema = Schema.Struct({
           name: Schema.String.annotate({
@@ -433,7 +345,7 @@ describe("toJsonSchemaDocument", () => {
     })
   })
 
-  it("emits standard annotations", () => {
+  it("should support JSON Schema annotations", () => {
     const schema = Schema.String.annotate({
       title: "a",
       description: "b",
@@ -455,8 +367,8 @@ describe("toJsonSchemaDocument", () => {
     })
   })
 
-  describe("identifiers", () => {
-    it(`escapes "~" and "/" in JSON Pointer references`, () => {
+  describe("identifier handling", () => {
+    it(`refs should escape "~" and "/"`, () => {
       const S = Schema.String.annotate({ identifier: "id~a/b" })
       assertJsonSchemaDocument(
         S,
@@ -469,7 +381,7 @@ describe("toJsonSchemaDocument", () => {
       )
     })
 
-    it("reuses a definition for repeated occurrences of the same identified AST", () => {
+    it("using the same identifier annotated schema twice", () => {
       const S = Schema.String.annotate({ identifier: "id" })
       assertJsonSchemaDocument(
         Schema.Union([S, S]),
@@ -487,26 +399,26 @@ describe("toJsonSchemaDocument", () => {
       )
     })
 
-    it("suffixes duplicate identifiers on different schemas", () => {
+    it("should handle duplicate identifiers on different schemas with different representations", () => {
       const S = Schema.Union([
         Schema.String.annotate({ identifier: "id", description: "a" }),
         Schema.String.annotate({ identifier: "id", description: "b" })
       ])
       assertJsonSchemaDocument(S, {
         schema: {
-          anyOf: [
-            { $ref: "#/$defs/id" },
-            { $ref: "#/$defs/id_1" }
+          "anyOf": [
+            { "$ref": "#/$defs/id" },
+            { "$ref": "#/$defs/id1" }
           ]
         },
         definitions: {
-          id: { type: "string", description: "a" },
-          id_1: { type: "string", description: "b" }
+          id: { "type": "string", "description": "a" },
+          id1: { "type": "string", "description": "b" }
         }
       })
     })
 
-    it("reuses one definition when the same identified AST appears in different schema shapes", () => {
+    it("should handle duplicate identifiers on different schemas with the same representation", () => {
       const X = Schema.String.annotate({ title: "X", identifier: "X" })
       const S = Schema.Struct({
         a: X,
@@ -571,17 +483,23 @@ describe("toJsonSchemaDocument", () => {
   })
 
   describe("Declaration", () => {
-    it("opaque Declaration", () => {
-      assertJsonSchemaDocument(Schema.instanceOf(URL), {
-        schema: {}
-      })
-    })
-
     it("Date", () => {
       const schema = Schema.Date
       assertJsonSchemaDocument(schema, {
         schema: {
           "type": "string"
+        }
+      })
+    })
+
+    it("DateValid", () => {
+      const schema = Schema.DateValid
+      assertJsonSchemaDocument(schema, {
+        schema: {
+          "type": "string",
+          "allOf": [
+            { "format": "date-time" }
+          ]
         }
       })
     })
@@ -596,7 +514,7 @@ describe("toJsonSchemaDocument", () => {
     })
 
     it("Error", () => {
-      const schema = Schema.ErrorInstance()
+      const schema = Schema.Error()
       assertJsonSchemaDocument(schema, {
         schema: {
           "type": "object",
@@ -786,7 +704,9 @@ describe("toJsonSchemaDocument", () => {
     assertJsonSchemaDocument(
       schema.annotate({ description: "a" }),
       {
-        schema: {}
+        schema: {
+          "description": "a"
+        }
       }
     )
   })
@@ -805,7 +725,8 @@ describe("toJsonSchemaDocument", () => {
       schema.annotate({ description: "a" }),
       {
         schema: {
-          "type": "null"
+          "type": "null",
+          "description": "a"
         }
       }
     )
@@ -825,7 +746,8 @@ describe("toJsonSchemaDocument", () => {
       schema.annotate({ description: "a" }),
       {
         schema: {
-          "type": "null"
+          "type": "null",
+          "description": "a"
         }
       }
     )
@@ -942,7 +864,7 @@ describe("toJsonSchemaDocument", () => {
       )
     })
 
-    it("ignores annotateKey annotations when the schema is not contextual", () => {
+    it("should ignore annotateKey annotations if the schema is not contextual", () => {
       assertJsonSchemaDocument(
         Schema.String.annotateKey({
           description: "a"
@@ -1147,23 +1069,6 @@ describe("toJsonSchemaDocument", () => {
             ]
           }
         })
-      })
-
-      it("escapes regexp syntax in literal string checks", () => {
-        for (
-          const [check, pattern] of [
-            [Schema.isStartsWith("a.b"), "^a\\.b"],
-            [Schema.isEndsWith("a+b"), "a\\+b$"],
-            [Schema.isIncludes("["), "\\["]
-          ] as const
-        ) {
-          assertJsonSchemaDocument(Schema.String.check(check), {
-            schema: {
-              "type": "string",
-              "allOf": [{ pattern }]
-            }
-          })
-        }
       })
 
       it("isTrimmed", () => {
@@ -1468,7 +1373,9 @@ describe("toJsonSchemaDocument", () => {
           schema: {
             "anyOf": [
               { "type": "number" },
-              { "type": "string", "enum": ["Infinity", "-Infinity", "NaN"] }
+              { "type": "string", "enum": ["NaN"] },
+              { "type": "string", "enum": ["Infinity"] },
+              { "type": "string", "enum": ["-Infinity"] }
             ]
           }
         }
@@ -1479,32 +1386,11 @@ describe("toJsonSchemaDocument", () => {
           schema: {
             "anyOf": [
               { "type": "number" },
-              { "type": "string", "enum": ["Infinity", "-Infinity", "NaN"] }
-            ]
-          }
-        }
-      )
-    })
-
-    it("Number & annotateKey", () => {
-      assertJsonSchemaDocument(
-        Schema.Struct({
-          value: Schema.Number.annotateKey({ description: "the field" })
-        }),
-        {
-          schema: {
-            type: "object",
-            properties: {
-              value: {
-                anyOf: [
-                  { type: "number" },
-                  { type: "string", enum: ["Infinity", "-Infinity", "NaN"] }
-                ],
-                allOf: [{ description: "the field" }]
-              }
-            },
-            required: ["value"],
-            additionalProperties: false
+              { "type": "string", "enum": ["NaN"] },
+              { "type": "string", "enum": ["Infinity"] },
+              { "type": "string", "enum": ["-Infinity"] }
+            ],
+            "description": "a"
           }
         }
       )
@@ -1753,7 +1639,7 @@ describe("toJsonSchemaDocument", () => {
     assertJsonSchemaDocument(
       schema,
       {
-        schema: { anyOf: [{ type: "array" }, { type: "object" }] }
+        schema: { anyOf: [{ type: "object" }, { type: "array" }] }
       }
     )
     assertJsonSchemaDocument(
@@ -1761,9 +1647,10 @@ describe("toJsonSchemaDocument", () => {
       {
         schema: {
           "anyOf": [
-            { "type": "array" },
-            { "type": "object" }
-          ]
+            { "type": "object" },
+            { "type": "array" }
+          ],
+          "description": "a"
         }
       }
     )
@@ -1855,7 +1742,8 @@ describe("toJsonSchemaDocument", () => {
         {
           schema: {
             "type": "string",
-            "enum": ["1"]
+            "enum": ["1"],
+            "description": "a"
           }
         }
       )
@@ -3655,13 +3543,16 @@ describe("toJsonSchemaDocument", () => {
         {
           schema: {
             "type": "string",
-            "contentMediaType": "application/json"
+            "contentMediaType": "application/json",
+            "contentSchema": {
+              "type": "string"
+            }
           }
         }
       )
     })
 
-    it("preserves the content schema identifier as a canonical reference", () => {
+    it("preserves the content schema identifier", () => {
       const MyEvent = Schema.Struct({
         value: Schema.String
       }).annotate({ identifier: "MyEvent" })
@@ -3670,12 +3561,27 @@ describe("toJsonSchemaDocument", () => {
         Schema.fromJsonString(MyEvent),
         {
           schema: {
-            "$ref": "#/$defs/MyEventEncoded"
+            "$ref": "#/$defs/MyEventJsonString"
           },
           definitions: {
-            "MyEventEncoded": {
+            "MyEvent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "MyEventJsonString": {
               "type": "string",
-              "contentMediaType": "application/json"
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "$ref": "#/$defs/MyEvent"
+              }
             }
           }
         }
@@ -3697,9 +3603,54 @@ describe("toJsonSchemaDocument", () => {
             "$ref": "#/$defs/MyWireEvent"
           },
           definitions: {
+            "MyEvent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false
+            },
             "MyWireEvent": {
               "type": "string",
-              "contentMediaType": "application/json"
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "$ref": "#/$defs/MyEvent"
+              }
+            }
+          }
+        }
+      )
+    })
+
+    it("nested fromJsonString", () => {
+      assertJsonSchemaDocument(
+        Schema.fromJsonString(Schema.Struct({
+          a: Schema.fromJsonString(Schema.FiniteFromString)
+        })),
+        {
+          schema: {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": {
+              "additionalProperties": false,
+              "properties": {
+                "a": {
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "type": "string"
+                  },
+                  "type": "string"
+                }
+              },
+              "required": [
+                "a"
+              ],
+              "type": "object"
             }
           }
         }
@@ -3707,7 +3658,7 @@ describe("toJsonSchemaDocument", () => {
     })
   })
 
-  it("Class preserves its identifier as a canonical reference", () => {
+  it("Class", () => {
     class A extends Schema.Class<A>("A")({
       a: Schema.String
     }) {}
@@ -3715,10 +3666,10 @@ describe("toJsonSchemaDocument", () => {
       A,
       {
         schema: {
-          "$ref": "#/$defs/AEncoded"
+          "$ref": "#/$defs/A"
         },
         definitions: {
-          "AEncoded": {
+          A: {
             "type": "object",
             "properties": {
               "a": { "type": "string" }
@@ -3727,21 +3678,20 @@ describe("toJsonSchemaDocument", () => {
             "additionalProperties": false
           }
         }
-      },
-      { includeAnnotationKey: () => true }
+      }
     )
   })
 
-  it("Error preserves its identifier as a canonical reference", () => {
-    class E extends Schema.Error<E>("E")({
+  it("ErrorClass", () => {
+    class E extends Schema.ErrorClass<E>("E")({
       a: Schema.String
     }) {}
     assertJsonSchemaDocument(E, {
       schema: {
-        "$ref": "#/$defs/EEncoded"
+        "$ref": "#/$defs/E"
       },
       definitions: {
-        "EEncoded": {
+        E: {
           "type": "object",
           "properties": {
             "a": { "type": "string" }

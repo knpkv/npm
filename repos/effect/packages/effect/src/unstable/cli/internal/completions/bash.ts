@@ -100,8 +100,7 @@ const generateFunction = (
 
   lines.push(`${funcName}()`)
   lines.push(`{`)
-  lines.push(`  local cur prev words cword i`)
-  lines.push(parentPath.length === 0 ? `  local _command_index=0` : `  local _command_index="$1"`)
+  lines.push(`  local cur prev words cword`)
   lines.push(`  _init_completion || return`)
   lines.push(``)
 
@@ -130,23 +129,13 @@ const generateFunction = (
   // Subcommand dispatch
   if (descriptor.subcommands.length > 0) {
     lines.push(`  # Subcommand dispatch`)
-    lines.push(`  local cmd _skip_next=0`)
-    lines.push(`  for ((i = _command_index + 1; i < cword; i++)); do`)
-    lines.push(`    if (( _skip_next )); then`)
-    lines.push(`      _skip_next=0`)
-    lines.push(`      continue`)
-    lines.push(`    fi`)
+    lines.push(`  local i cmd`)
+    lines.push(`  for ((i = 1; i < cword; i++)); do`)
     lines.push(`    case "\${words[i]}" in`)
-    for (const flag of descriptor.flags) {
-      if (flag.type._tag === "Boolean") continue
-      const forms = flagNamesForWordlist(flag)
-      lines.push(`      ${forms.join("|")}) _skip_next=1 ;;`)
-      lines.push(`      ${forms.map((form) => `${form}=*`).join("|")}) ;;`)
-    }
     for (const sub of descriptor.subcommands) {
       const subFuncName = `_${[...currentPath, sub.name].map(sanitizeFunctionName).join("_")}`
       lines.push(`      ${sub.name})`)
-      lines.push(`        ${subFuncName} "$i"`)
+      lines.push(`        ${subFuncName}`)
       lines.push(`        return`)
       lines.push(`        ;;`)
     }
@@ -170,52 +159,13 @@ const generateFunction = (
   }
 
   // Positional argument completion
-  const argsWithCompletions = descriptor.arguments.flatMap((argument, index) => {
-    const completion = argCompletion(argument.type)
-    return completion === undefined ? [] : [{ argument, completion, index }]
-  })
+  const argsWithCompletions = descriptor.arguments.filter((a) => argCompletion(a.type) !== undefined)
   if (argsWithCompletions.length > 0) {
     lines.push(`  # Positional argument completions`)
-    lines.push(`  local _position=0 _skip_next=0 _end_of_options=0`)
-    lines.push(`  for ((i = _command_index + 1; i < cword; i++)); do`)
-    lines.push(`    if (( _skip_next )); then`)
-    lines.push(`      _skip_next=0`)
-    lines.push(`      continue`)
-    lines.push(`    fi`)
-    lines.push(`    if (( _end_of_options )); then`)
-    lines.push(`      ((_position += 1))`)
-    lines.push(`      continue`)
-    lines.push(`    fi`)
-    lines.push(`    case "\${words[i]}" in`)
-    lines.push(`      --) _end_of_options=1 ;;`)
-    for (const flag of descriptor.flags) {
-      const forms = flagNamesForWordlist(flag)
-      if (flag.type._tag === "Boolean") {
-        lines.push(`      ${forms.join("|")}) ;;`)
-      } else {
-        lines.push(`      ${forms.join("|")}) _skip_next=1 ;;`)
-        lines.push(`      ${forms.map((form) => `${form}=*`).join("|")}) ;;`)
-      }
-    }
-    lines.push(`      -*) ;;`)
-    lines.push(`      *) ((_position += 1)) ;;`)
-    lines.push(`    esac`)
-    lines.push(`  done`)
-    lines.push(`  case "$_position" in`)
-    for (const { argument, completion, index } of argsWithCompletions) {
-      if (argument.variadic) continue
-      lines.push(`    ${index})`)
-      lines.push(`      ${completion}`)
-      lines.push(`      return`)
-      lines.push(`      ;;`)
-    }
-    lines.push(`  esac`)
-    const variadic = argsWithCompletions.find(({ argument }) => argument.variadic)
-    if (variadic !== undefined) {
-      lines.push(`  if (( _position >= ${variadic.index} )); then`)
-      lines.push(`    ${variadic.completion}`)
-      lines.push(`    return`)
-      lines.push(`  fi`)
+    for (const arg of argsWithCompletions) {
+      const comp = argCompletion(arg.type)!
+      lines.push(`  ${comp}`)
+      lines.push(`  return`)
     }
   } else if (descriptor.subcommands.length > 0) {
     const subNames = descriptor.subcommands.map((s) => s.name)

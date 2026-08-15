@@ -103,7 +103,7 @@ export const dehydrate = (
 /**
  * Returns dehydrated state entries as `DehydratedAtomValue` records.
  *
- * @category converting
+ * @category dehydration
  * @since 4.0.0
  */
 export const toValues = (state: ReadonlyArray<DehydratedAtom>): Array<DehydratedAtomValue> => state as any

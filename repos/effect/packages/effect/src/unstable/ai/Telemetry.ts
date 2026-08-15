@@ -229,7 +229,7 @@ export type WellKnownSystem =
  *
  * **Example** (Prefixing telemetry attributes)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Telemetry } from "effect/unstable/ai"
  *
  * type RequestAttrs = {
@@ -245,11 +245,6 @@ export type WellKnownSystem =
  * //   "gen_ai.request.model_name": string
  * //   "gen_ai.request.max_tokens": number
  * // }
- * const attributes: PrefixedAttrs = {
- *   "gen_ai.request.model_name": "gpt-4",
- *   "gen_ai.request.max_tokens": 1000
- * }
- * Object.keys(attributes) // => ["gen_ai.request.model_name", "gen_ai.request.max_tokens"]
  * ```
  *
  * @category utility types
@@ -269,19 +264,12 @@ export type AttributesWithPrefix<Attributes extends Record<string, any>, Prefix 
  *
  * **Example** (Formatting attribute names)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Telemetry } from "effect/unstable/ai"
  *
  * type Formatted1 = Telemetry.FormatAttributeName<"modelName"> // "model_name"
  * type Formatted2 = Telemetry.FormatAttributeName<"maxTokens"> // "max_tokens"
  * type Formatted3 = Telemetry.FormatAttributeName<"temperature"> // "temperature"
- *
- * const formatted: [Formatted1, Formatted2, Formatted3] = [
- *   "model_name",
- *   "max_tokens",
- *   "temperature"
- * ]
- * formatted // => ["model_name", "max_tokens", "temperature"]
  * ```
  *
  * @category utility types
@@ -304,8 +292,9 @@ export type FormatAttributeName<T extends string | number | symbol> = T extends 
  *
  * **Example** (Adding prefixed span attributes)
  *
- * ```ts import.meta.vitest
- * import { Context, Option, String, Tracer } from "effect"
+ * ```ts
+ * import { String } from "effect"
+ * import type { Tracer } from "effect"
  * import { Telemetry } from "effect/unstable/ai"
  *
  * const addCustomAttributes = Telemetry.addSpanAttributes(
@@ -313,22 +302,13 @@ export type FormatAttributeName<T extends string | number | symbol> = T extends 
  *   String.camelToSnake
  * )
  *
- * const span = new Tracer.NativeSpan({
- *   name: "request",
- *   parent: Option.none(),
- *   annotations: Context.empty(),
- *   links: [],
- *   startTime: 0n,
- *   kind: "internal",
- *   sampled: true
- * })
- *
+ * // Usage with a span
+ * declare const span: Tracer.Span
  * addCustomAttributes(span, {
  *   modelName: "gpt-4",
  *   maxTokens: 1000
  * })
- *
- * Array.from(span.attributes.keys()) // => ["custom.ai.model_name", "custom.ai.max_tokens"]
+ * // Results in attributes: "custom.ai.model_name" and "custom.ai.max_tokens"
  * ```
  *
  * @category annotations
@@ -378,7 +358,7 @@ const addSpanUsageAttributes = addSpanAttributes("gen_ai.usage", String.camelToS
  *
  * **Example** (Configuring GenAI telemetry attributes)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Telemetry } from "effect/unstable/ai"
  *
  * const telemetryOptions: Telemetry.GenAITelemetryAttributeOptions = {
@@ -401,8 +381,6 @@ const addSpanUsageAttributes = addSpanAttributes("gen_ai.usage", String.camelToS
  *     outputTokens: 25
  *   }
  * }
- *
- * const result = [telemetryOptions.system, telemetryOptions.usage?.inputTokens] // => ["openai", 50]
  * ```
  *
  * @category options
@@ -450,7 +428,7 @@ export type GenAITelemetryAttributeOptions = BaseAttributes & {
  *
  * **Example** (Adding GenAI telemetry annotations)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { Telemetry } from "effect/unstable/ai"
  *
@@ -462,10 +440,7 @@ export type GenAITelemetryAttributeOptions = BaseAttributes & {
  *     request: { model: "gpt-4", temperature: 0.7 },
  *     usage: { inputTokens: 100, outputTokens: 50 }
  *   })
- *   return (span as { attributes: ReadonlyMap<string, unknown> }).attributes.size
  * })
- *
- * await Effect.runPromise(Effect.withSpan(directUsage, "example")) // => 5
  * ```
  *
  * @category annotations
@@ -493,7 +468,7 @@ export const addGenAIAnnotations: {
  *
  * **Example** (Transforming AI spans)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Telemetry } from "effect/unstable/ai"
  *
  * const customTransformer: Telemetry.SpanTransformer = ({ response, span }) => {
@@ -505,8 +480,6 @@ export const addGenAIAnnotations: {
  *   )
  *   span.attribute("total_text_length", totalTextLength)
  * }
- *
- * typeof customTransformer // => "function"
  * ```
  *
  * @category models

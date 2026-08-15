@@ -36,11 +36,19 @@ import type * as Types from "./Types.ts"
  *
  * **Example** (Inspecting queue lifecycle states)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { TxQueue } from "effect"
  *
- * const state: TxQueue.State<string, Error> = { _tag: "Open" }
- * state._tag // => "Open"
+ * // State progression example
+ * declare const state: TxQueue.State<string, Error>
+ *
+ * if (state._tag === "Open") {
+ *   console.log("Queue is accepting new items")
+ * } else if (state._tag === "Closing") {
+ *   console.log("Queue is draining, cause:", state.cause)
+ * } else {
+ *   console.log("Queue is done, cause:", state.cause)
+ * }
  * ```
  *
  * @category models
@@ -138,7 +146,7 @@ export interface TxQueueState extends Inspectable {
  *
  * **Example** (Offering values through enqueue handles)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  * import type { Cause } from "effect"
  *
@@ -159,11 +167,7 @@ export interface TxQueueState extends Inspectable {
  *   >(5)
  *   yield* TxQueue.offer(completableQueue, "task")
  *   yield* TxQueue.end(completableQueue)
- *
- *   return accepted
  * })
- *
- * await Effect.runPromise(program) // => true
  * ```
  *
  * @category models
@@ -179,7 +183,7 @@ export interface TxEnqueue<in A, in E = never> extends TxQueueState {
  *
  * **Example** (Taking values through dequeue handles)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -187,6 +191,7 @@ export interface TxEnqueue<in A, in E = never> extends TxQueueState {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *   yield* TxQueue.offer(queue, 42)
  *   const item = yield* TxQueue.take(queue)
+ *   console.log(item) // 42
  *
  *   // Queue with error channel - errors propagate through E-channel
  *   const faultTolerantQueue = yield* TxQueue.bounded<number, string>(10)
@@ -195,10 +200,7 @@ export interface TxEnqueue<in A, in E = never> extends TxQueueState {
  *   // All dequeue operations now fail with the error directly
  *   const takeResult = yield* Effect.flip(TxQueue.take(faultTolerantQueue)) // "processing failed"
  *   const peekResult = yield* Effect.flip(TxQueue.peek(faultTolerantQueue)) // "processing failed"
- *   return [item, takeResult, peekResult] as const
  * })
- *
- * await Effect.runPromise(program) // => [42, "processing failed", "processing failed"]
  * ```
  *
  * @category models
@@ -214,7 +216,7 @@ export interface TxDequeue<out A, out E = never> extends TxQueueState {
  *
  * **Example** (Combining enqueue and dequeue operations)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -224,6 +226,7 @@ export interface TxDequeue<out A, out E = never> extends TxQueueState {
  *   // Single operations - automatically transactional
  *   const accepted = yield* TxQueue.offer(queue, 42)
  *   const item = yield* TxQueue.take(queue) // Effect<number, never>
+ *   console.log(item) // 42
  *
  *   // Queue with error channel
  *   const faultTolerantQueue = yield* TxQueue.bounded<number, string>(10)
@@ -231,10 +234,8 @@ export interface TxDequeue<out A, out E = never> extends TxQueueState {
  *   // Operations can handle queue-level failures
  *   yield* TxQueue.fail(faultTolerantQueue, "queue failed")
  *   const result = yield* Effect.flip(TxQueue.take(faultTolerantQueue))
- *   return [accepted, item, result] as const
+ *   console.log(result) // "queue failed"
  * })
- *
- * await Effect.runPromise(program) // => [true, 42, "queue failed"]
  * ```
  *
  * @category models
@@ -249,11 +250,15 @@ export interface TxQueue<in out A, in out E = never> extends TxEnqueue<A, E>, Tx
  *
  * **Example** (Checking enqueue handles)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { TxQueue } from "effect"
  *
- * const someValue: unknown = {}
- * TxQueue.isTxEnqueue(someValue) // => false
+ * declare const someValue: unknown
+ *
+ * if (TxQueue.isTxEnqueue(someValue)) {
+ *   // someValue is now typed as TxEnqueue<unknown, unknown>
+ *   console.log("This is a TxEnqueue")
+ * }
  * ```
  *
  * @category guards
@@ -266,11 +271,15 @@ export const isTxEnqueue = <A = unknown, E = unknown>(u: unknown): u is TxEnqueu
  *
  * **Example** (Checking dequeue handles)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { TxQueue } from "effect"
  *
- * const someValue: unknown = {}
- * TxQueue.isTxDequeue(someValue) // => false
+ * declare const someValue: unknown
+ *
+ * if (TxQueue.isTxDequeue(someValue)) {
+ *   // someValue is now typed as TxDequeue<unknown, unknown>
+ *   console.log("This is a TxDequeue")
+ * }
  * ```
  *
  * @category guards
@@ -283,11 +292,15 @@ export const isTxDequeue = <A = unknown, E = unknown>(u: unknown): u is TxDequeu
  *
  * **Example** (Checking queue handles)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { TxQueue } from "effect"
  *
- * const someValue: unknown = {}
- * TxQueue.isTxQueue(someValue) // => false
+ * declare const someValue: unknown
+ *
+ * if (TxQueue.isTxQueue(someValue)) {
+ *   // someValue is now typed as TxQueue<unknown, unknown>
+ *   console.log("This is a TxQueue")
+ * }
  * ```
  *
  * @category guards
@@ -331,7 +344,7 @@ const TxQueueProto = {
  *
  * **Example** (Creating bounded queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -345,10 +358,9 @@ const TxQueueProto = {
  *   yield* TxQueue.offer(queue, 1)
  *   yield* TxQueue.offer(queue, 2)
  *
- *   return yield* TxQueue.take(queue)
+ *   const item = yield* TxQueue.take(queue)
+ *   console.log(item) // 1
  * })
- *
- * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category constructors
@@ -378,7 +390,7 @@ export const bounded = <A = never, E = never>(
  *
  * **Example** (Creating unbounded queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -392,10 +404,9 @@ export const bounded = <A = never, E = never>(
  *   yield* TxQueue.offer(queue, "hello")
  *   yield* TxQueue.offer(queue, "world")
  *
- *   return yield* TxQueue.size(queue)
+ *   const size = yield* TxQueue.size(queue)
+ *   console.log(size) // 2
  * })
- *
- * await Effect.runPromise(program) // => 2
  * ```
  *
  * @category constructors
@@ -423,7 +434,7 @@ export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>> 
  *
  * **Example** (Creating dropping queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -435,10 +446,9 @@ export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>> 
  *   yield* TxQueue.offer(queue, 2)
  *
  *   // This will be dropped (returns false)
- *   return yield* TxQueue.offer(queue, 3)
+ *   const accepted = yield* TxQueue.offer(queue, 3)
+ *   console.log(accepted) // false
  * })
- *
- * await Effect.runPromise(program) // => false
  * ```
  *
  * @category constructors
@@ -468,7 +478,7 @@ export const dropping = <A = never, E = never>(
  *
  * **Example** (Creating sliding queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -482,10 +492,9 @@ export const dropping = <A = never, E = never>(
  *   // This will evict item 1 and add 3
  *   yield* TxQueue.offer(queue, 3)
  *
- *   return yield* TxQueue.take(queue)
+ *   const item = yield* TxQueue.take(queue)
+ *   console.log(item) // 2 (item 1 was evicted)
  * })
- *
- * await Effect.runPromise(program) // => 2
  * ```
  *
  * @category constructors
@@ -519,17 +528,16 @@ export const sliding = <A = never, E = never>(
  *
  * **Example** (Offering a value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   // Offer an item - returns true if accepted
- *   return yield* TxQueue.offer(queue, 42)
+ *   const accepted = yield* TxQueue.offer(queue, 42)
+ *   console.log(accepted) // true
  * })
- *
- * await Effect.runPromise(program) // => true
  * ```
  *
  * @category combinators
@@ -587,17 +595,17 @@ export const offer: {
  *
  * **Example** (Offering multiple values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   // Offer multiple items - returns rejected items as array
- *   return yield* TxQueue.offerAll(queue, [1, 2, 3, 4, 5])
+ *   const rejected = yield* TxQueue.offerAll(queue, [1, 2, 3, 4, 5])
+ *   console.log(rejected) // [] if all accepted
+ *   console.log(rejected.length) // 0
  * })
- *
- * await Effect.runPromise(program) // => []
  * ```
  *
  * @category combinators
@@ -608,13 +616,11 @@ export const offerAll: {
   <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>>
 } = dual(
   2,
-  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>> => {
-    const valuesArray = Array.from(values)
-
-    return Effect.gen(function*() {
+  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>> =>
+    Effect.gen(function*() {
       const rejected: Array<A> = []
 
-      for (const value of valuesArray) {
+      for (const value of values) {
         const accepted = yield* offer(self, value)
         if (!accepted) {
           rejected.push(value)
@@ -623,7 +629,6 @@ export const offerAll: {
 
       return rejected
     }).pipe(Effect.tx)
-  }
 )
 
 /**
@@ -636,8 +641,8 @@ export const offerAll: {
  *
  * **Example** (Taking a value)
  *
- * ```ts import.meta.vitest
- * import { Effect, Exit, TxQueue } from "effect"
+ * ```ts
+ * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, string>(10)
@@ -645,14 +650,13 @@ export const offerAll: {
  *
  *   // Take an item - blocks if empty
  *   const item = yield* TxQueue.take(queue)
+ *   console.log(item) // 42
  *
  *   // When queue fails, take fails with the same error
  *   yield* TxQueue.fail(queue, "queue error")
- *   const result = yield* Effect.exit(TxQueue.take(queue))
- *   return [item, result] as const
+ *   const result = yield* Effect.flip(TxQueue.take(queue))
+ *   console.log(result) // "queue error"
  * })
- *
- * await Effect.runPromise(program) // => [42, Exit.fail("queue error")]
  * ```
  *
  * @category combinators
@@ -694,7 +698,7 @@ export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E> =>
  *
  * **Example** (Polling without blocking)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Option, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -702,13 +706,12 @@ export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E> =>
  *
  *   // Poll returns Option.none if empty
  *   const maybe = yield* TxQueue.poll(queue)
+ *   console.log(Option.isNone(maybe)) // true
  *
  *   yield* TxQueue.offer(queue, 42)
  *   const item = yield* TxQueue.poll(queue)
- *   return [maybe, item] as const
+ *   console.log(Option.getOrNull(item)) // 42
  * })
- *
- * await Effect.runPromise(program) // => [Option.none(), Option.some(42)]
  * ```
  *
  * @category combinators
@@ -728,11 +731,6 @@ export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A
     }
 
     yield* TxChunk.drop(self.items, 1)
-
-    if (state._tag === "Closing" && (yield* isEmpty(self))) {
-      yield* TxRef.set(self.stateRef, { _tag: "Done", cause: state.cause })
-    }
-
     return Option.some(head.value)
   }).pipe(Effect.tx)
 
@@ -745,15 +743,17 @@ export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A
  *
  * **Example** (Taking all queued values)
  *
- * ```ts import.meta.vitest
- * import { Effect, Exit, TxQueue } from "effect"
+ * ```ts
+ * import { Array, Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, string>(10)
  *   yield* TxQueue.offerAll(queue, [1, 2, 3, 4, 5])
  *
  *   // Take all items atomically - returns NonEmptyArray
- *   return yield* TxQueue.takeAll(queue)
+ *   const items = yield* TxQueue.takeAll(queue)
+ *   console.log(items) // [1, 2, 3, 4, 5]
+ *   console.log(Array.isArrayNonEmpty(items)) // true
  * })
  *
  * // Error propagation example
@@ -763,11 +763,9 @@ export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A
  *   yield* TxQueue.fail(queue, "processing error")
  *
  *   // takeAll() propagates the queue error through E-channel
- *   return yield* Effect.exit(TxQueue.takeAll(queue))
+ *   const result = yield* Effect.flip(TxQueue.takeAll(queue))
+ *   console.log(result) // "processing error"
  * })
- *
- * await Effect.runPromise(program) // => [1, 2, 3, 4, 5]
- * await Effect.runPromise(errorExample) // => Exit.fail("processing error")
  * ```
  *
  * @category combinators
@@ -810,7 +808,7 @@ export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmpty
  *
  * **Example** (Taking a fixed number of values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -818,14 +816,13 @@ export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmpty
  *   yield* TxQueue.offerAll(queue, [1, 2, 3, 4])
  *
  *   const items = yield* TxQueue.takeN(queue, 4)
+ *   console.log(items) // [1, 2, 3, 4]
  *
  *   // This requests more than capacity (5), so takes all available (up to 5)
  *   yield* TxQueue.offerAll(queue, [5, 6, 7, 8, 9])
  *   const all = yield* TxQueue.takeN(queue, 10)
- *   return [items, all] as const
+ *   console.log(all) // [5, 6, 7, 8, 9]
  * })
- *
- * await Effect.runPromise(program) // => [[1, 2, 3, 4], [5, 6, 7, 8, 9]]
  * ```
  *
  * @category combinators
@@ -901,7 +898,7 @@ export const takeN: {
  *
  * **Example** (Taking batches within bounds)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -910,16 +907,15 @@ export const takeN: {
  *
  *   // Take between 2 and 5 items
  *   const batch1 = yield* TxQueue.takeBetween(queue, 2, 5)
+ *   console.log(batch1) // [1, 2, 3, 4, 5] - took 5 (up to max)
  *
  *   // Take between 1 and 10 items (but only 3 remain)
  *   const batch2 = yield* TxQueue.takeBetween(queue, 1, 10)
+ *   console.log(batch2) // [6, 7, 8] - took 3 (all remaining)
  *
  *   // Would wait for at least 1 item to be available
  *   // const batch3 = yield* TxQueue.takeBetween(queue, 1, 3)
- *   return [batch1, batch2] as const
  * })
- *
- * await Effect.runPromise(program) // => [[1, 2, 3, 4, 5], [6, 7, 8]]
  * ```
  *
  * @category taking
@@ -990,8 +986,8 @@ export const takeBetween: {
  *
  * **Example** (Peeking without removing values)
  *
- * ```ts import.meta.vitest
- * import { Effect, Exit, TxQueue } from "effect"
+ * ```ts
+ * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, string>(10)
@@ -999,10 +995,11 @@ export const takeBetween: {
  *
  *   // Peek at the next item without removing it
  *   const item = yield* TxQueue.peek(queue)
+ *   console.log(item) // 42
  *
  *   // Item is still in the queue
  *   const size = yield* TxQueue.size(queue)
- *   return [item, size] as const
+ *   console.log(size) // 1
  * })
  *
  * // Error handling example
@@ -1011,11 +1008,9 @@ export const takeBetween: {
  *   yield* TxQueue.fail(queue, "queue failed")
  *
  *   // peek() propagates the queue error through E-channel
- *   return yield* Effect.exit(TxQueue.peek(queue))
+ *   const result = yield* Effect.flip(TxQueue.peek(queue))
+ *   console.log(result) // "queue failed"
  * })
- *
- * await Effect.runPromise(program) // => [42, 1]
- * await Effect.runPromise(errorExample) // => Exit.fail("queue failed")
  * ```
  *
  * @category combinators
@@ -1042,17 +1037,16 @@ export const peek = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E> =>
  *
  * **Example** (Reading queue size)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *   yield* TxQueue.offerAll(queue, [1, 2, 3])
  *
- *   return yield* TxQueue.size(queue)
+ *   const size = yield* TxQueue.size(queue)
+ *   console.log(size) // 3
  * })
- *
- * await Effect.runPromise(program) // => 3
  * ```
  *
  * @category combinators
@@ -1065,23 +1059,22 @@ export const size = (self: TxQueueState): Effect.Effect<number> => TxChunk.size(
  *
  * **Example** (Checking whether a queue is empty)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   const empty = yield* TxQueue.isEmpty(queue)
+ *   console.log(empty) // true
  *
  *   yield* TxQueue.offer(queue, 42)
  *   const stillEmpty = yield* TxQueue.isEmpty(queue)
- *   return [empty, stillEmpty] as const
+ *   console.log(stillEmpty) // false
  * })
- *
- * await Effect.runPromise(program) // => [true, false]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 2.0.0
  */
 export const isEmpty = (self: TxQueueState): Effect.Effect<boolean> => TxChunk.isEmpty(self.items)
@@ -1091,23 +1084,22 @@ export const isEmpty = (self: TxQueueState): Effect.Effect<boolean> => TxChunk.i
  *
  * **Example** (Checking whether a queue is full)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(2)
  *
  *   const full = yield* TxQueue.isFull(queue)
+ *   console.log(full) // false
  *
  *   yield* TxQueue.offerAll(queue, [1, 2])
  *   const nowFull = yield* TxQueue.isFull(queue)
- *   return [full, nowFull] as const
+ *   console.log(nowFull) // true
  * })
- *
- * await Effect.runPromise(program) // => [false, true]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 2.0.0
  */
 export const isFull = (self: TxQueueState): Effect.Effect<boolean> =>
@@ -1124,7 +1116,7 @@ export const isFull = (self: TxQueueState): Effect.Effect<boolean> =>
  *
  * **Example** (Interrupting queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -1132,10 +1124,9 @@ export const isFull = (self: TxQueueState): Effect.Effect<boolean> =>
  *   yield* TxQueue.offer(queue, 42)
  *
  *   // Interrupt gracefully - allows remaining items to be consumed
- *   return yield* TxQueue.interrupt(queue)
+ *   const result = yield* TxQueue.interrupt(queue)
+ *   console.log(result) // true
  * })
- *
- * await Effect.runPromise(program) // => true
  * ```
  *
  * @category combinators
@@ -1153,17 +1144,16 @@ export const interrupt = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean> =
  *
  * **Example** (Failing queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, string>(10)
  *
  *   // Fail the queue with an error
- *   return yield* TxQueue.fail(queue, "connection lost")
+ *   const result = yield* TxQueue.fail(queue, "connection lost")
+ *   console.log(result) // true
  * })
- *
- * await Effect.runPromise(program) // => true
  * ```
  *
  * @category combinators
@@ -1199,7 +1189,7 @@ export const fail: {
  *
  * **Example** (Failing queues with causes)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Cause, Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -1208,10 +1198,8 @@ export const fail: {
  *   // Complete with specific cause
  *   const cause = Cause.interrupt()
  *   const result = yield* TxQueue.failCause(queue, cause)
- *   return [cause, result] as const
+ *   console.log(result) // true
  * })
- *
- * await Effect.runPromise(program) // => [Cause.interrupt(), true]
  * ```
  *
  * @category combinators
@@ -1251,23 +1239,23 @@ export const failCause: {
  *
  * **Example** (Ending queues)
  *
- * ```ts import.meta.vitest
- * import { Cause, Effect, Exit, TxQueue } from "effect"
+ * ```ts
+ * import { Cause, Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, Cause.Done>(10)
  *
  *   // Signal the end of the queue
  *   const result = yield* TxQueue.end(queue)
+ *   console.log(result) // true
  *
  *   // All operations will now fail with Done
- *   const takeResult = yield* Effect.exit(TxQueue.take(queue))
+ *   const takeResult = yield* Effect.flip(TxQueue.take(queue))
+ *   console.log(Cause.isDone(takeResult)) // true
  *
- *   const peekResult = yield* Effect.exit(TxQueue.peek(queue))
- *   return [result, takeResult, peekResult] as const
+ *   const peekResult = yield* Effect.flip(TxQueue.peek(queue))
+ *   console.log(Cause.isDone(peekResult)) // true
  * })
- *
- * await Effect.runPromise(program) // => [true, Exit.fail(Cause.Done()), Exit.fail(Cause.Done())]
  * ```
  *
  * @category combinators
@@ -1277,15 +1265,16 @@ export const end = <A, E>(self: TxEnqueue<A, E | Cause.Done>): Effect.Effect<boo
   failCause(self, Cause.fail(Cause.Done()))
 
 /**
- * Removes and returns all currently buffered elements.
+ * Removes and returns all currently buffered elements without changing the
+ * queue state.
  *
  * **Details**
  *
- * If the queue is closing, draining its buffered elements transitions it to done. If the queue is already done with a `Cause.Done` error, returns an empty array. If the queue is done for any other cause, including interruption or failure, that cause is propagated.
+ * If the queue is already done with a `Cause.Done` error, returns an empty array. If the queue is done for any other cause, including interruption or failure, that cause is propagated.
  *
  * **Example** (Clearing queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -1293,14 +1282,14 @@ export const end = <A, E>(self: TxEnqueue<A, E | Cause.Done>): Effect.Effect<boo
  *   yield* TxQueue.offerAll(queue, [1, 2, 3, 4, 5])
  *
  *   const sizeBefore = yield* TxQueue.size(queue)
+ *   console.log(sizeBefore) // 5
  *
  *   const cleared = yield* TxQueue.clear(queue)
+ *   console.log(cleared) // [1, 2, 3, 4, 5]
  *
  *   const sizeAfter = yield* TxQueue.size(queue)
- *   return [sizeBefore, cleared, sizeAfter] as const
+ *   console.log(sizeAfter) // 0
  * })
- *
- * await Effect.runPromise(program) // => [5, [1, 2, 3, 4, 5], 0]
  * ```
  *
  * @category combinators
@@ -1318,9 +1307,6 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
     }
     const chunk = yield* TxChunk.get(self.items)
     yield* TxChunk.set(self.items, Chunk.empty())
-    if (state._tag === "Closing") {
-      yield* TxRef.set(self.stateRef, { _tag: "Done", cause: state.cause })
-    }
     return Chunk.toArray(chunk)
   }).pipe(Effect.tx)
 
@@ -1333,7 +1319,7 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
  *
  * **Example** (Shutting down queues)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -1341,16 +1327,16 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
  *   yield* TxQueue.offerAll(queue, [1, 2, 3, 4, 5])
  *
  *   const sizeBefore = yield* TxQueue.size(queue)
+ *   console.log(sizeBefore) // 5
  *
  *   yield* TxQueue.shutdown(queue)
  *
  *   const sizeAfter = yield* TxQueue.size(queue)
+ *   console.log(sizeAfter) // 0 (cleared)
  *
  *   const isShutdown = yield* TxQueue.isShutdown(queue)
- *   return [sizeBefore, sizeAfter, isShutdown] as const
+ *   console.log(isShutdown) // true (interrupted)
  * })
- *
- * await Effect.runPromise(program) // => [5, 0, true]
  * ```
  *
  * @category combinators
@@ -1358,7 +1344,7 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
  */
 export const shutdown = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean> =>
   Effect.gen(function*() {
-    yield* Effect.ignoreCause(clear(self))
+    yield* Effect.ignore(clear(self))
     return yield* interrupt(self)
   }).pipe(Effect.tx)
 
@@ -1367,23 +1353,22 @@ export const shutdown = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean> =>
  *
  * **Example** (Checking open state)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   const open = yield* TxQueue.isOpen(queue)
+ *   console.log(open) // true
  *
  *   yield* TxQueue.interrupt(queue)
  *   const stillOpen = yield* TxQueue.isOpen(queue)
- *   return [open, stillOpen] as const
+ *   console.log(stillOpen) // false
  * })
- *
- * await Effect.runPromise(program) // => [true, false]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 4.0.0
  */
 export const isOpen = (self: TxQueueState): Effect.Effect<boolean> =>
@@ -1394,7 +1379,7 @@ export const isOpen = (self: TxQueueState): Effect.Effect<boolean> =>
  *
  * **Example** (Checking closing state)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -1402,16 +1387,15 @@ export const isOpen = (self: TxQueueState): Effect.Effect<boolean> =>
  *   yield* TxQueue.offer(queue, 42)
  *
  *   const closing = yield* TxQueue.isClosing(queue)
+ *   console.log(closing) // false
  *
  *   yield* TxQueue.interrupt(queue)
  *   const nowClosing = yield* TxQueue.isClosing(queue)
- *   return [closing, nowClosing] as const
+ *   console.log(nowClosing) // true
  * })
- *
- * await Effect.runPromise(program) // => [false, true]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 4.0.0
  */
 export const isClosing = (self: TxQueueState): Effect.Effect<boolean> =>
@@ -1422,23 +1406,22 @@ export const isClosing = (self: TxQueueState): Effect.Effect<boolean> =>
  *
  * **Example** (Checking done state)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   const done = yield* TxQueue.isDone(queue)
+ *   console.log(done) // false
  *
  *   yield* TxQueue.interrupt(queue)
  *   const nowDone = yield* TxQueue.isDone(queue)
- *   return [done, nowDone] as const
+ *   console.log(nowDone) // true
  * })
- *
- * await Effect.runPromise(program) // => [false, true]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 4.0.0
  */
 export const isDone = (self: TxQueueState): Effect.Effect<boolean> =>
@@ -1449,23 +1432,22 @@ export const isDone = (self: TxQueueState): Effect.Effect<boolean> =>
  *
  * **Example** (Checking shutdown state)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number>(10)
  *
  *   const isShutdown = yield* TxQueue.isShutdown(queue)
+ *   console.log(isShutdown) // false
  *
  *   yield* TxQueue.shutdown(queue)
  *   const nowShutdown = yield* TxQueue.isShutdown(queue)
- *   return [isShutdown, nowShutdown] as const
+ *   console.log(nowShutdown) // true
  * })
- *
- * await Effect.runPromise(program) // => [false, true]
  * ```
  *
- * @category predicates
+ * @category combinators
  * @since 2.0.0
  */
 export const isShutdown = (self: TxQueueState): Effect.Effect<boolean> => isDone(self)
@@ -1475,20 +1457,19 @@ export const isShutdown = (self: TxQueueState): Effect.Effect<boolean> => isDone
  *
  * **Example** (Awaiting queue completion)
  *
- * ```ts import.meta.vitest
- * import { Effect, Fiber, TxQueue } from "effect"
+ * ```ts
+ * import { Effect, TxQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const queue = yield* TxQueue.bounded<number, string>(10)
  *
- *   const waiter = yield* Effect.forkChild(TxQueue.awaitCompletion(queue))
- *   yield* TxQueue.interrupt(queue)
+ *   // In another fiber, end the queue
+ *   yield* Effect.forkChild(Effect.delay(TxQueue.interrupt(queue), "100 millis"))
  *
- *   yield* Fiber.join(waiter)
- *   return "Queue completed successfully"
+ *   // Wait for completion - succeeds when queue ends
+ *   yield* TxQueue.awaitCompletion(queue)
+ *   console.log("Queue completed successfully")
  * })
- *
- * await Effect.runPromise(program) // => "Queue completed successfully"
  * ```
  *
  * @category combinators

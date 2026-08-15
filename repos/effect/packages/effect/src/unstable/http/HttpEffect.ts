@@ -25,7 +25,7 @@ import { HttpServerRequest } from "./HttpServerRequest.ts"
 import * as Request from "./HttpServerRequest.ts"
 import type { HttpServerResponse } from "./HttpServerResponse.ts"
 import * as Response from "./HttpServerResponse.ts"
-import * as preResponseHandler from "./internal/preResponseHandler.ts"
+import { appendPreResponseHandlerUnsafe, requestPreResponseHandlers } from "./internal/preResponseHandler.ts"
 
 /**
  * Runs an HTTP server effect, sends the produced response with the supplied handler, and converts failures into HTTP responses.
@@ -46,7 +46,7 @@ export const toHandled = <E, R, EH, RH>(
       const fiber = Fiber.getCurrent()!
       reportCauseUnsafe(fiber, cause)
       const request = Context.getUnsafe(fiber.context, HttpServerRequest)
-      const handler = preResponseHandler.requestPreResponseHandlers.get(request.source)
+      const handler = requestPreResponseHandlers.get(request.source)
       const cont = cause.reasons.length === 0 ? Effect.succeed(response) : Effect.failCause(cause)
       if (handler === undefined) {
         ;(request as any)[handledSymbol] = true
@@ -69,7 +69,7 @@ export const toHandled = <E, R, EH, RH>(
     onSuccess: (response) => {
       const fiber = Fiber.getCurrent()!
       const request = Context.getUnsafe(fiber.context, HttpServerRequest)
-      const handler = preResponseHandler.requestPreResponseHandlers.get(request.source)
+      const handler = requestPreResponseHandlers.get(request.source)
       if (handler === undefined) {
         ;(request as any)[handledSymbol] = true
         return Effect.mapEager(handleResponse(request, response), () => response)
@@ -172,7 +172,7 @@ const scoped = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 /**
  * Function run with the current request and response just before the response is sent, allowing the response to be replaced or failing with `HttpServerError`.
  *
- * @category handlers
+ * @category Pre-response handlers
  * @since 4.0.0
  */
 export type PreResponseHandler = (
@@ -183,7 +183,7 @@ export type PreResponseHandler = (
 /**
  * Registers an additional pre-response handler for the current HTTP server request.
  *
- * @category handlers
+ * @category fiber refs
  * @since 4.0.0
  */
 export const appendPreResponseHandler = (handler: PreResponseHandler): Effect.Effect<void, never, HttpServerRequest> =>
@@ -192,21 +192,20 @@ export const appendPreResponseHandler = (handler: PreResponseHandler): Effect.Ef
     return Effect.void
   })
 
-/**
- * Registers a pre-response handler for the supplied HTTP server request.
- *
- * @category unsafe
- * @since 4.0.0
- */
-export const appendPreResponseHandlerUnsafe: (
-  request: HttpServerRequest,
-  handler: PreResponseHandler
-) => void = preResponseHandler.appendPreResponseHandlerUnsafe
+export {
+  /**
+   * Registers a pre-response handler for the supplied HTTP server request.
+   *
+   * @category fiber refs
+   * @since 4.0.0
+   */
+  appendPreResponseHandlerUnsafe
+}
 
 /**
  * Runs an effect after registering a pre-response handler for the current HTTP server request.
  *
- * @category handlers
+ * @category fiber refs
  * @since 4.0.0
  */
 export const withPreResponseHandler: {
@@ -247,18 +246,18 @@ export const toWebHandlerWith = <Provided, R = never, ReqR = Exclude<R, Provided
     )
     return Effect.void
   }, middleware)
-  return (request: Request, _context?: Context.Context<never> | undefined): Promise<globalThis.Response> =>
+  return (request: Request, reqContext?: Context.Context<never> | undefined): Promise<globalThis.Response> =>
     new Promise((resolve) => {
-      let reqContext = context
-      if (Context.isContext(_context)) {
-        for (const [key, value] of _context.mapUnsafe) {
-          reqContext = Context.addUnsafe(reqContext, key, value)
+      const contextMap = new Map<string, any>(context.mapUnsafe)
+      if (Context.isContext(reqContext)) {
+        for (const [key, value] of reqContext.mapUnsafe) {
+          contextMap.set(key, value)
         }
       }
       const httpServerRequest = Request.fromWeb(request)
-      reqContext = Context.add(reqContext, HttpServerRequest, httpServerRequest)
+      contextMap.set(HttpServerRequest.key, httpServerRequest)
       ;(httpServerRequest as any)[resolveSymbol] = resolve
-      const fiber = Effect.runForkWith(reqContext)(httpApp as any)
+      const fiber = Effect.runForkWith(Context.makeUnsafe(contextMap))(httpApp as any)
       request.signal?.addEventListener("abort", () => {
         fiber.interruptUnsafe(undefined, ClientAbort.annotation)
       }, { once: true })

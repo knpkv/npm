@@ -13,15 +13,16 @@
 
 import * as Arr from "./Array.ts"
 import * as Cause from "./Cause.ts"
+import type * as Combiner from "./Combiner.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
 import { format, formatPropertyKey } from "./Formatter.ts"
-import { identity, memoize, memoizeIdempotent } from "./Function.ts"
+import { memoize } from "./Function.ts"
 import { effectIsExit, iterateEager } from "./internal/effect.ts"
-import * as InternalRecord from "./internal/record.ts"
+import * as internalRecord from "./internal/record.ts"
 import * as InternalAnnotations from "./internal/schema/annotations.ts"
 import * as InternalSchemaCause from "./internal/schema/cause.ts"
-import * as InternalParser from "./internal/schema/parser.ts"
+import * as Option from "./Option.ts"
 import * as Pipeable from "./Pipeable.ts"
 import * as Predicate from "./Predicate.ts"
 import * as Result from "./Result.ts"
@@ -450,8 +451,6 @@ export type Encoding = readonly [Link, ...Array<Link>]
  *   transformations.
  * - `concurrency` — maximum number of async parse effects to run concurrently;
  *   defaults to `1`, or use `"unbounded"`.
- * - `reportInput` — includes rejected input values in value-bearing schema
- *   issues.
  *
  * @category options
  * @since 3.10.0
@@ -518,35 +517,6 @@ export interface ParseOptions {
    * @default 1
    */
   readonly concurrency?: number | "unbounded" | undefined
-
-  /**
-   * Whether schema issues should retain and report rejected input values.
-   *
-   * **Details**
-   *
-   * When enabled, value-bearing issues created by the parser expose an `input`
-   * field. Built-in formatters may include reported input in default messages.
-   * The input is retained by reference rather than copied.
-   *
-   * **Gotchas**
-   *
-   * Enabling this option can retain or disclose secrets, personally
-   * identifiable information, and large object graphs. The `input` field is
-   * enumerable and may be included by object enumeration, spread, or
-   * serialization. Disabling it on a nested schema does not redact that value
-   * from an ancestor issue whose input reporting remains enabled. Issues
-   * returned directly by user-defined declarations, checks, transformations,
-   * and middleware are not modified; their authors decide whether to retain an
-   * input. To respect this option, pass the callback's input and parse options
-   * directly to a value-bearing issue constructor. Custom messages and
-   * annotations remain the caller's responsibility regardless of this option.
-   * Formatting an issue with `SchemaIssue.makeFormatterDefault()`, reading
-   * `SchemaError.message`, or formatting a Standard Schema failure can disclose
-   * retained input.
-   *
-   * @default false
-   */
-  readonly reportInput?: boolean | undefined
 }
 
 /** @internal */
@@ -563,7 +533,7 @@ export const defaultParseOptions: ParseOptions = {}
  *
  * - `isOptional` — the property key may be absent from the input.
  * - `isMutable` — the property is `readonly` when `false`.
- * - `constructorDefault` — a {@link Link} applied during construction to
+ * - `defaultValue` — an {@link Encoding} applied during construction to
  *   supply missing values.
  * - `annotations` — key-level annotations (e.g. description of the key
  *   itself).
@@ -577,19 +547,19 @@ export class Context {
   readonly isOptional: boolean
   readonly isMutable: boolean
   /** Used for constructor default values (e.g. `withConstructorDefault` API) */
-  readonly constructorDefault: Link | undefined
+  readonly defaultValue: Encoding | undefined
   readonly annotations: Schema.Annotations.Key<unknown> | undefined
 
   constructor(
     isOptional: boolean,
     isMutable: boolean,
     /** Used for constructor default values (e.g. `withConstructorDefault` API) */
-    constructorDefault: Link | undefined = undefined,
+    defaultValue: Encoding | undefined = undefined,
     annotations: Schema.Annotations.Key<unknown> | undefined = undefined
   ) {
     this.isOptional = isOptional
     this.isMutable = isMutable
-    this.constructorDefault = constructorDefault
+    this.defaultValue = defaultValue
     this.annotations = annotations
   }
 }
@@ -702,10 +672,10 @@ export class Declaration extends Base {
   }
   /** @internal */
   getParser(): SchemaParser.Parser {
-    let run: ReturnType<typeof this.run>
-    return (input, options) => {
-      if (input === InternalParser.missing) return InternalParser.missingExit
-      return (run ??= this.run(this.typeParameters))(input, this, options)
+    const run = this.run(this.typeParameters)
+    return (oinput, options) => {
+      if (Option.isNone(oinput)) return Effect.succeedNone
+      return Effect.mapEager(run(oinput.value, this, options), Option.some)
     }
   }
   private _rebuild(recur: (ast: AST) => AST, checks: Checks | undefined, encodingChecks: Checks | undefined) {
@@ -846,8 +816,7 @@ export class Void extends Base {
   readonly _tag = "Void"
   /** @internal */
   getParser() {
-    const succeed = InternalParser.succeed(undefined)
-    return (input: unknown) => input === InternalParser.missing ? InternalParser.missingExit : succeed
+    return fromAnyToConst(undefined)
   }
   /** @internal */
   toCodecJson(): AST {
@@ -1111,9 +1080,9 @@ function isTemplateLiteralPart(ast: AST): ast is TemplateLiteralPart {
       return true
     case "Literal":
     case "TemplateLiteral":
-      return !ast.checks
+      return ast.checks === undefined
     case "Union":
-      return !ast.checks && ast.types.every(isTemplateLiteralPart)
+      return ast.checks === undefined && ast.types.every(isTemplateLiteralPart)
     default:
       return false
   }
@@ -1137,10 +1106,6 @@ export class TemplateLiteral extends Base {
   readonly parts: ReadonlyArray<AST>
   /** @internal */
   readonly encodedParts: ReadonlyArray<TemplateLiteralPart>
-  /** @internal */
-  readonly literals: ReadonlyArray<string | undefined>
-  /** @internal */
-  readonly suffixLengths: ReadonlyArray<number>
 
   constructor(
     parts: ReadonlyArray<AST>,
@@ -1151,40 +1116,25 @@ export class TemplateLiteral extends Base {
   ) {
     super(annotations, checks, encoding, context)
     const encodedParts: Array<TemplateLiteralPart> = []
-    const literals: Array<string | undefined> = []
     for (const part of parts) {
       const encoded = toEncoded(part)
       if (isTemplateLiteralPart(encoded)) {
         encodedParts.push(encoded)
-        literals.push(encoded._tag === "Literal" ? globalThis.String(encoded.literal) : undefined)
       } else {
         throw new Error(`Invalid TemplateLiteral part ${encoded._tag}`)
       }
     }
-    const suffixLengths = new Array<number>(encodedParts.length + 1)
-    suffixLengths[encodedParts.length] = 0
-    for (let i = encodedParts.length - 1; i >= 0; i--) {
-      suffixLengths[i] = suffixLengths[i + 1] + (literals[i]?.length ?? 0)
-    }
     this.parts = parts
     this.encodedParts = encodedParts
-    this.literals = literals
-    this.suffixLengths = suffixLengths
   }
   /** @internal */
-  getParser(compile: SchemaParser.Compiler): SchemaParser.Parser {
-    const parser = compile(this.asTemplateLiteralParser())
-    return (input, options) => {
-      if (input === InternalParser.missing) return InternalParser.missingExit
-      const result = parser(input, options)
-      if ((result as Exit.Exit<unknown, unknown>)._tag === "Success") {
-        return InternalParser.sameExit
-      }
-      return Effect.mapBothEager(result, {
-        onSuccess: () => input,
-        onFailure: (issue) => new SchemaIssue.Composite(this, [issue], input, options)
+  getParser(recur: (ast: AST) => SchemaParser.Parser): SchemaParser.Parser {
+    const parser = recur(this.asTemplateLiteralParser())
+    return (oinput: Option.Option<unknown>, options: ParseOptions) =>
+      Effect.mapBothEager(parser(oinput, options), {
+        onSuccess: () => oinput,
+        onFailure: (issue) => new SchemaIssue.Composite(this, oinput, [issue])
       })
-    }
   }
   /** @internal */
   getExpected(): string {
@@ -1192,7 +1142,7 @@ export class TemplateLiteral extends Base {
   }
   /** @internal */
   matchPart(s: string, options: ParseOptions): string | undefined {
-    return segmentTemplateLiteralParts(this, s, options) === undefined ? undefined : s
+    return segmentTemplateLiteralParts(this.encodedParts, s, options) === undefined ? undefined : s
   }
   /** @internal */
   asTemplateLiteralParser(): Arrays {
@@ -1202,14 +1152,12 @@ export class TemplateLiteral extends Base {
       tuple,
       new SchemaTransformation.Transformation(
         SchemaGetter.transformOrFail((s: string, options) => {
-          const segments = segmentTemplateLiteralParts(this, s, options)
-          if (segments) return Effect.succeed(segments)
+          const segments = segmentTemplateLiteralParts(this.encodedParts, s, options)
+          if (segments !== undefined) return Effect.succeed(segments)
           return Effect.fail(
-            new SchemaIssue.InvalidValue(
-              { expected: "a string matching template literal parts" },
-              s,
-              options
-            )
+            new SchemaIssue.InvalidValue(Option.some(s), {
+              message: `Expected a string matching template literal parts, got ${format(s)}`
+            })
           )
         }),
         SchemaGetter.transform((parts) => parts.join(""))
@@ -1280,11 +1228,11 @@ export type LiteralValue = string | number | boolean | bigint
  *
  * **Example** (Creating a literal AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { SchemaAST } from "effect"
  *
  * const ast = new SchemaAST.Literal("active")
- * ast.literal // => "active"
+ * console.log(ast.literal) // "active"
  * ```
  *
  * @see {@link LiteralValue}
@@ -1361,8 +1309,7 @@ export class String extends Base {
   }
   /** @internal */
   matchPart(s: string, options: ParseOptions): string | undefined {
-    const checks = this.checks
-    return checks && !options.disableChecks && collectIssues(checks, s, undefined, this, options) ? undefined : s
+    return applyTemplateLiteralPartChecks(this, s, options)
   }
   /** @internal */
   getExpected(): string {
@@ -1419,24 +1366,20 @@ export class Number extends Base {
     return this._match(isStringFiniteRegExp, s, options)
   }
   private _match(regexp: RegExp, s: string, options: ParseOptions): number | undefined {
-    if (!regexp.test(s)) return undefined
-    const value = globalThis.Number(s)
-    if (options.disableChecks || !this.checks) return value
-    return collectIssues(this.checks, value, undefined, this, options) ? undefined : value
+    return regexp.test(s)
+      ? applyTemplateLiteralPartChecks(this, globalThis.Number(s), options)
+      : undefined
   }
   /** @internal */
   toCodecJson(): AST {
-    if (
-      this.checks &&
-      (hasCheck(this.checks, "effect/schema/isFinite") || hasCheck(this.checks, "effect/schema/isInt"))
-    ) {
+    if (this.checks && (hasCheck(this.checks, "isFinite") || hasCheck(this.checks, "isInt"))) {
       return this
     }
-    return replaceEncoding(this, [numberToJson(this.checks)])
+    return replaceEncoding(this, [numberToJson])
   }
   /** @internal */
   toCodecStringTree(): AST {
-    if (this.toCodecJson() === this) {
+    if (this.checks && (hasCheck(this.checks, "isFinite") || hasCheck(this.checks, "isInt"))) {
       return replaceEncoding(this, [finiteToString])
     }
     return replaceEncoding(this, [numberToString])
@@ -1447,25 +1390,16 @@ export class Number extends Base {
   }
 }
 
-function hasCheck(checks: ReadonlyArray<Check<unknown>>, id: string): boolean {
-  return checks.some((check) =>
-    check.annotations?.representation?.id === id ||
-    (check._tag === "FilterGroup" && hasCheck(check.checks, id))
-  )
-}
-
-function numberToJson(checks: Checks | undefined): Link {
-  const encodedFinite = !checks
-    ? finite
-    : appendChecks(finite, checks)
-
-  return new Link(
-    new Union([encodedFinite, nonFiniteLiterals], "anyOf"),
-    new SchemaTransformation.Transformation(
-      SchemaGetter.Number(),
-      SchemaGetter.transform((n) => globalThis.Number.isFinite(n) ? n : globalThis.String(n))
-    )
-  )
+// oxlint-disable-next-line only-used-in-recursion - @gcanti what's this? :-)
+function hasCheck(checks: ReadonlyArray<Check<unknown>>, tag: string): boolean {
+  return checks.some((c) => {
+    switch (c._tag) {
+      case "Filter":
+        return c.annotations?.meta?._tag === tag
+      case "FilterGroup":
+        return hasCheck(c.checks, tag)
+    }
+  })
 }
 
 /**
@@ -1547,8 +1481,7 @@ export class Symbol extends Base {
   }
   /** @internal */
   matchKey(s: symbol, options: ParseOptions): symbol | undefined {
-    if (options.disableChecks || !this.checks) return s
-    return collectIssues(this.checks, s, undefined, this, options) ? undefined : s
+    return applyTemplateLiteralPartChecks(this, s, options)
   }
   /** @internal */
   toCodecStringTree(): AST {
@@ -1601,10 +1534,9 @@ export class BigInt extends Base {
   }
   /** @internal */
   matchPart(s: string, options: ParseOptions): bigint | undefined {
-    if (!isStringBigIntRegExp.test(s)) return undefined
-    const value = globalThis.BigInt(s)
-    if (options.disableChecks || !this.checks) return value
-    return collectIssues(this.checks, value, undefined, this, options) ? undefined : value
+    return isStringBigIntRegExp.test(s)
+      ? applyTemplateLiteralPartChecks(this, globalThis.BigInt(s), options)
+      : undefined
   }
   /** @internal */
   toCodecStringTree(): AST {
@@ -1658,14 +1590,15 @@ export const bigInt = new BigInt()
  *
  * **Example** (Inspecting a tuple AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.Tuple([Schema.String, Schema.Number])
  * const ast = schema.ast
  *
  * if (SchemaAST.isArrays(ast)) {
- *   [ast.elements.length, ast.rest.length] // => [2, 0]
+ *   console.log(ast.elements.length) // 2
+ *   console.log(ast.rest.length)     // 0
  * }
  * ```
  *
@@ -1697,71 +1630,58 @@ export class Arrays extends Base {
     this.rest = rest
     this.encodingChecks = encodingChecks
 
-    let hasOptional = false
-    for (let i = 0; i < elements.length; i++) {
-      if (isOptional(elements[i])) {
-        hasOptional = true
-      } else if (hasOptional) {
-        throw new Error("A required element cannot follow an optional element. ts(1257)")
-      }
-    }
-    if (hasOptional && rest.length > 1) {
+    // A required element cannot follow an optional element. ts(1257)
+    const i = elements.findIndex(isOptional)
+    if (i !== -1 && (elements.slice(i + 1).some((e) => !isOptional(e)) || rest.length > 1)) {
       throw new Error("A required element cannot follow an optional element. ts(1257)")
     }
 
     // An optional element cannot follow a rest element.ts(1266)
-    for (let i = 1; i < rest.length; i++) {
-      if (isOptional(rest[i])) {
-        throw new Error("An optional element cannot follow a rest element. ts(1266)")
-      }
+    if (rest.length > 1 && rest.slice(1).some(isOptional)) {
+      throw new Error("An optional element cannot follow a rest element. ts(1266)")
     }
   }
   /** @internal */
-  getParser(
-    compile: SchemaParser.Compiler,
-    compileConstructorDefault: SchemaParser.Compiler = compile
-  ): SchemaParser.Parser {
+  getParser(recur: (ast: AST) => SchemaParser.Parser): SchemaParser.Parser {
     // oxlint-disable-next-line @typescript-eslint/no-this-alias
     const ast = this
-    type ElementParser = { readonly ast: AST; readonly parser: SchemaParser.Parser }
-    let elements: Array<ElementParser> | undefined
-    let rest: Array<ElementParser> | undefined
-    const elementLen = ast.elements.length
-    const tailLen = Math.max(0, ast.rest.length - 1)
+    const elements = ast.elements.map((ast) => ({ ast, parser: recur(ast) }))
+    const rest = ast.rest.map((ast) => ({ ast, parser: recur(ast) }))
+    const elementLen = elements.length
+
+    const [head, ...tail] = rest
+    const tailLen = tail.length
 
     function getParser(
       tailThreshold: number,
       index: number
     ): { readonly ast: AST; readonly parser: SchemaParser.Parser } {
       if (index < elementLen) {
-        return elements![index]
+        return elements[index]
       } else if (index >= tailThreshold) {
-        return rest![index - tailThreshold + 1]
+        return tail[index - tailThreshold]
       }
-      return rest![0]
+      return head
     }
 
-    return Effect.fnUntracedEager(function*(input, options) {
-      if (input === InternalParser.missing) {
-        return InternalParser.missing
+    return Effect.fnUntracedEager(function*(oinput, options) {
+      if (oinput._tag === "None") {
+        return oinput
       }
+      const input = oinput.value
 
       // If the input is not an array, return early with an error
       if (!Array.isArray(input)) {
-        return yield* Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
-      }
-      if (!elements) {
-        elements = ast.elements.map((ast) => ({ ast, parser: compileConstructorDefault(ast) }))
-        rest = ast.rest.map((ast) => ({ ast, parser: compileConstructorDefault(ast) }))
+        return yield* Effect.fail(new SchemaIssue.InvalidType(ast, oinput))
       }
 
       const len = input.length
       const state = {
         ast,
         getParser,
-        input,
+        oinput,
         len,
-        tailThreshold: Math.max(elementLen, len - tailLen),
+        tailThreshold: resolveTailThreshold(len, elementLen, tailLen),
         output: new globalThis.Array(len),
         issues: undefined as Arr.NonEmptyArray<SchemaIssue.Issue> | undefined,
         options
@@ -1778,24 +1698,19 @@ export class Arrays extends Base {
       // ---------------------------------------------
       if (ast.rest.length === 0 && len > elementLen) {
         for (let i = elementLen; i <= len - 1; i++) {
-          const unexpected = new SchemaIssue.UnexpectedKey(ast, input[i], options)
-          const issue = new SchemaIssue.Pointer([i], unexpected)
+          const issue = new SchemaIssue.Pointer([i], new SchemaIssue.UnexpectedKey(ast, input[i]))
           if (options.errors === "all") {
             if (state.issues) state.issues.push(issue)
             else state.issues = [issue]
           } else {
-            return yield* Effect.fail(
-              new SchemaIssue.Composite(ast, [issue], input, options)
-            )
+            return yield* Effect.fail(new SchemaIssue.Composite(ast, oinput, [issue]))
           }
         }
       }
       if (state.issues) {
-        return yield* Effect.fail(
-          new SchemaIssue.Composite(ast, state.issues, input, options)
-        )
+        return yield* Effect.fail(new SchemaIssue.Composite(ast, oinput, state.issues))
       }
-      return state.output
+      return Option.some(state.output)
     })
   }
   private _rebuild(recur: (ast: AST) => AST, checks: Checks | undefined, encodingChecks: Checks | undefined) {
@@ -1830,7 +1745,7 @@ export class Arrays extends Base {
 }
 const parseArray = iterateEager<{
   readonly ast: AST
-  readonly input: unknown
+  readonly oinput: Option.Option<unknown>
   readonly len: number
   readonly getParser: (
     tailThreshold: number,
@@ -1842,18 +1757,14 @@ const parseArray = iterateEager<{
   issues: Array<SchemaIssue.Issue> | undefined
 }, unknown>()({
   onItem(s, item, i) {
-    const value = i < s.len ? item : InternalParser.missing
+    const value = i < s.len ? Option.some(item) : Option.none()
     return s.getParser(s.tailThreshold, i).parser(value, s.options)
   },
-  step(s, item, exit, i) {
+  step(s, _, exit, i) {
     if (exit._tag === "Failure") {
       return wrapPropertyKeyIssue(s, s.ast, i, exit)
-    }
-    const value = exit === InternalParser.sameExit
-      ? item
-      : (exit as InternalParser.Success<unknown, SchemaIssue.Issue>)[InternalParser.args]
-    if (value !== InternalParser.missing) {
-      s.output[i] = value
+    } else if (exit.value._tag === "Some") {
+      s.output[i] = exit.value.value
     } else {
       const p = s.getParser(s.tailThreshold, i)
       if (isOptional(p.ast)) return
@@ -1862,13 +1773,19 @@ const parseArray = iterateEager<{
         if (s.issues) s.issues.push(issue)
         else s.issues = [issue]
       } else {
-        return Exit.fail(
-          new SchemaIssue.Composite(s.ast, [issue], s.input, s.options)
-        )
+        return Exit.fail(new SchemaIssue.Composite(s.ast, s.oinput, [issue]))
       }
     }
   }
 })
+
+function resolveTailThreshold(
+  inputLen: number,
+  elementLen: number,
+  tailLen: number
+) {
+  return Math.max(elementLen, inputLen - tailLen)
+}
 
 const resolveConcurrency = (value: number | "unbounded" | undefined) => {
   value = value === "unbounded" ? Infinity : value ?? 1
@@ -1877,7 +1794,7 @@ const resolveConcurrency = (value: number | "unbounded" | undefined) => {
 
 const wrapPropertyKeyIssue = (
   s: {
-    readonly input: unknown
+    readonly oinput: Option.Option<unknown>
     readonly options: ParseOptions
     issues: Array<SchemaIssue.Issue> | undefined
   },
@@ -1893,13 +1810,7 @@ const wrapPropertyKeyIssue = (
     return Exit.failCause(
       Cause.map(
         exit.cause,
-        (issue) =>
-          new SchemaIssue.Composite(
-            ast,
-            [new SchemaIssue.Pointer([key], issue)],
-            s.input,
-            s.options
-          )
+        (issue) => new SchemaIssue.Composite(ast, s.oinput, [new SchemaIssue.Pointer([key], issue)])
       )
     )
   }
@@ -1908,9 +1819,7 @@ const wrapPropertyKeyIssue = (
     if (s.issues) s.issues.push(pointer)
     else s.issues = [pointer]
   } else {
-    return Exit.fail(
-      new SchemaIssue.Composite(ast, [pointer], s.input, s.options)
-    )
+    return Exit.fail(new SchemaIssue.Composite(ast, s.oinput, [pointer]))
   }
 }
 
@@ -1978,6 +1887,37 @@ export class PropertySignature {
   }
 }
 
+/**
+ * Represents a bidirectional merge strategy for index signature key-value pairs.
+ *
+ * **Details**
+ *
+ * Used by {@link IndexSignature} when the same key appears multiple times
+ * (e.g. from `Schema.extend` or overlapping records). Provides separate
+ * `decode` and `encode` combiners that determine how duplicate entries are
+ * merged.
+ *
+ * @see {@link IndexSignature}
+ * @category models
+ * @since 4.0.0
+ */
+export class KeyValueCombiner {
+  readonly decode: Combiner.Combiner<readonly [key: PropertyKey, value: any]> | undefined
+  readonly encode: Combiner.Combiner<readonly [key: PropertyKey, value: any]> | undefined
+
+  constructor(
+    decode: Combiner.Combiner<readonly [key: PropertyKey, value: any]> | undefined,
+    encode: Combiner.Combiner<readonly [key: PropertyKey, value: any]> | undefined
+  ) {
+    this.decode = decode
+    this.encode = encode
+  }
+  /** @internal */
+  flip(): KeyValueCombiner {
+    return new KeyValueCombiner(this.encode, this.decode)
+  }
+}
+
 type IndexSignatureParameter =
   | String
   | Number
@@ -2016,6 +1956,7 @@ function isIndexSignatureParameter(ast: AST): ast is IndexSignatureParameter {
  * - `parameter` — the key type AST (e.g. {@link String} for `string` keys,
  *   {@link TemplateLiteral} for patterned keys).
  * - `type` — the value type SchemaAST.
+ * - `merge` — optional {@link KeyValueCombiner} for handling duplicate keys.
  *
  * **Gotchas**
  *
@@ -2030,16 +1971,19 @@ function isIndexSignatureParameter(ast: AST): ast is IndexSignatureParameter {
 export class IndexSignature {
   readonly parameter: IndexSignatureParameter
   readonly type: AST
+  readonly merge: KeyValueCombiner | undefined
 
   constructor(
     parameter: AST,
-    type: AST
+    type: AST,
+    merge: KeyValueCombiner | undefined
   ) {
     if (!isIndexSignatureParameter(parameter)) {
       throw new Error(`Invalid index signature parameter ${parameter._tag}`)
     }
     this.parameter = parameter
     this.type = type
+    this.merge = merge
     if (isOptional(type) && !containsUndefined(type)) {
       throw new Error("Cannot use `Schema.optionalKey` with index signatures, use `Schema.optional` instead.")
     }
@@ -2070,14 +2014,17 @@ export class IndexSignature {
  *
  * **Example** (Inspecting a struct AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.Struct({ name: Schema.String })
  * const ast = schema.ast
  *
  * if (SchemaAST.isObjects(ast)) {
- *   ast.propertySignatures.map((ps) => [ps.name, ps.type._tag]) // => [["name", "String"]]
+ *   for (const ps of ast.propertySignatures) {
+ *     console.log(ps.name, ps.type._tag)
+ *   }
+ *   // "name" "String"
  * }
  * ```
  *
@@ -2115,126 +2062,101 @@ export class Objects extends Base {
     }
   }
   /** @internal */
-  getParser(
-    compile: SchemaParser.Compiler,
-    compileConstructorDefault: SchemaParser.Compiler = compile
-  ): SchemaParser.Parser {
+  getParser(recur: (ast: AST) => SchemaParser.Parser): SchemaParser.Parser {
     // oxlint-disable-next-line @typescript-eslint/no-this-alias
     const ast = this
     const expectedKeys: Array<PropertyKey> = []
+    const expectedKeysSet = new Set<PropertyKey>()
+    const properties: Array<{
+      readonly ps: PropertySignature | IndexSignature
+      readonly parser: SchemaParser.Parser
+      readonly name: PropertyKey
+      readonly type: AST
+    }> = []
     for (const ps of ast.propertySignatures) {
       expectedKeys.push(ps.name)
+      expectedKeysSet.add(ps.name)
+      properties.push({
+        ps,
+        parser: recur(ps.type),
+        name: ps.name,
+        type: ps.type
+      })
     }
-    const hasProperties = expectedKeys.length
     const indexCount = ast.indexSignatures.length
-    let expectedKeysSet = hasProperties && indexCount ? new Set(expectedKeys) : undefined
     // ---------------------------------------------
     // handle empty struct
     // ---------------------------------------------
-    if (!hasProperties && !indexCount) {
+    if (ast.propertySignatures.length === 0 && ast.indexSignatures.length === 0) {
       return fromRefinement(ast, Predicate.isNotNullish)
     }
 
-    let properties: Array<ParsedProperty> | undefined
-    let indexes:
-      | Array<{
-        readonly is: IndexSignature
-        readonly parserKey: SchemaParser.Parser
-        readonly parserValue: SchemaParser.Parser
-      }>
-      | undefined
-    type Index = NonNullable<typeof indexes>[number]
-    const finishIndex = (
-      s: ObjectParserState,
-      key: PropertyKey,
-      k2: PropertyKey | typeof InternalParser.missing,
-      inputValue: unknown,
-      exitValue: Exit.Exit<unknown, SchemaIssue.Issue>
-    ): Effect.Effect<void, SchemaIssue.Issue, any> => {
-      if (exitValue._tag === "Failure") {
-        return wrapPropertyKeyIssue(s, ast, key, exitValue) ?? Exit.void
-      }
-      const value = exitValue === InternalParser.sameExit
-        ? inputValue
-        : (exitValue as InternalParser.Success<unknown, SchemaIssue.Issue>)[InternalParser.args]
-      if (k2 !== InternalParser.missing && value !== InternalParser.missing) {
-        if (hasProperties && (expectedKeysSet!.has(key) || expectedKeysSet!.has(k2))) return Exit.void
-        InternalRecord.assignProperty(s.out, k2, value)
-      }
-      return Exit.void
-    }
-    const parseIndex = (
-      s: ObjectParserState,
-      key: PropertyKey,
-      index: Index,
-      exitKey?: Exit.Exit<unknown, SchemaIssue.Issue>
-    ): Effect.Effect<void, SchemaIssue.Issue, any> => {
-      if (!exitKey) {
-        const eff = index.parserKey(key, s.options)
-        if (!effectIsExit(eff)) {
-          return Effect.flatMap(Effect.exit(eff), (exit) => parseIndex(s, key, index, exit))
-        }
-        exitKey = eff
-      }
-      if (exitKey._tag === "Failure") {
-        return wrapPropertyKeyIssue(s, ast, key, exitKey) ?? Exit.void
-      }
-      const k2 = exitKey === InternalParser.sameExit
-        ? key
-        : (exitKey as InternalParser.Success<PropertyKey, SchemaIssue.Issue>)[InternalParser.args]
-      const inputValue = s.input[key]
-      const result = index.parserValue(inputValue, s.options)
-      return effectIsExit(result)
-        ? finishIndex(s, key, k2, inputValue, result)
-        : Effect.flatMap(Effect.exit(result), (exit) => finishIndex(s, key, k2, inputValue, exit))
-    }
-    const parseStringIndex = (
-      s: ObjectParserState,
-      key: PropertyKey,
-      index: Index
-    ): Effect.Effect<void, SchemaIssue.Issue, any> => {
-      const inputValue = s.input[key]
-      const result = index.parserValue(inputValue, s.options)
-      return effectIsExit(result)
-        ? finishIndex(s, key, key, inputValue, result)
-        : Effect.flatMap(Effect.exit(result), (exit) => finishIndex(s, key, key, inputValue, exit))
-    }
-    const parseIndexes = indexCount ?
-      iterateEager<ObjectParserState, [key: PropertyKey, index: Index]>()({
-        onItem: (s, [key, index]) => parseIndex(s, key, index),
+    const parseIndexes = indexCount > 0 ?
+      iterateEager<{
+        readonly oinput: Option.Option<unknown>
+        readonly input: Record<PropertyKey, unknown>
+        readonly options: ParseOptions
+        readonly out: Record<PropertyKey, unknown>
+        issues: Array<SchemaIssue.Issue> | undefined
+      }, [key: PropertyKey, is: IndexSignature]>()({
+        onItem: Effect.fnUntracedEager(function*(
+          s,
+          [key, is]
+        ) {
+          const parserKey = recur(parameterFromPropertyKey(is.parameter))
+          const effKey = parserKey(Option.some(key), s.options)
+          const exitKey = (effectIsExit(effKey) ? effKey : yield* Effect.exit(effKey)) as Exit.Exit<
+            Option.Option<PropertyKey>,
+            SchemaIssue.Issue
+          >
+          if (exitKey._tag === "Failure") {
+            const eff = wrapPropertyKeyIssue(s, ast, key, exitKey)
+            if (eff) yield* eff
+            return
+          }
+
+          const value: Option.Option<unknown> = Option.some(s.input[key])
+          const parserValue = recur(is.type)
+          const effValue = parserValue(value, s.options)
+          const exitValue = effectIsExit(effValue) ? effValue : yield* Effect.exit(effValue)
+          if (exitValue._tag === "Failure") {
+            const eff = wrapPropertyKeyIssue(s, ast, key, exitValue)
+            if (eff) yield* eff
+            return
+          } else if (exitKey.value._tag === "Some" && exitValue.value._tag === "Some") {
+            const k2 = exitKey.value.value
+            if (expectedKeysSet.has(key) || expectedKeysSet.has(k2)) {
+              return
+            }
+            const v2 = exitValue.value.value
+            if (is.merge && is.merge.decode && Object.hasOwn(s.out, k2)) {
+              const [k, v] = is.merge.decode.combine([k2, s.out[k2]], [k2, v2])
+              internalRecord.set(s.out, k, v)
+            } else {
+              internalRecord.set(s.out, k2, v2)
+            }
+          }
+        }),
         step: (_s, _, exit: Exit.Exit<void, SchemaIssue.Issue>) => exit._tag === "Failure" ? exit : undefined
       }) :
       undefined
 
-    return Effect.fnUntracedEager(function*(input, options) {
-      if (input === InternalParser.missing) {
-        return InternalParser.missing
+    return Effect.fnUntracedEager(function*(oinput, options) {
+      if (oinput._tag === "None") {
+        return oinput
       }
+      const input = oinput.value as Record<PropertyKey, unknown>
 
       // If the input is not a record, return early with an error
       if (!(typeof input === "object" && input !== null && !Array.isArray(input))) {
-        return yield* Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
-      }
-      if (!properties) {
-        properties = ast.propertySignatures.map((ps) => ({
-          parser: compileConstructorDefault(ps.type),
-          name: ps.name,
-          type: ps.type
-        }))
-        indexes = indexCount
-          ? ast.indexSignatures.map((is) => ({
-            is,
-            parserKey: compile(parameterFromPropertyKey(is.parameter)),
-            parserValue: compileConstructorDefault(is.type)
-          }))
-          : undefined
+        return yield* Effect.fail(new SchemaIssue.InvalidType(ast, oinput))
       }
 
-      const record = input as Record<PropertyKey, unknown>
       const out: Record<PropertyKey, unknown> = {}
       const state = {
         ast,
-        input: record,
+        oinput,
+        input,
         out,
         issues: undefined as Arr.NonEmptyArray<SchemaIssue.Issue> | undefined,
         options
@@ -2247,16 +2169,14 @@ export class Objects extends Base {
       // handle excess properties
       // ---------------------------------------------
       let inputKeys: Array<PropertyKey> | undefined
-      if (!indexCount && (onExcessPropertyError || onExcessPropertyPreserve)) {
-        expectedKeysSet ??= new Set(expectedKeys)
-        inputKeys = Reflect.ownKeys(record)
+      if (ast.indexSignatures.length === 0 && (onExcessPropertyError || onExcessPropertyPreserve)) {
+        inputKeys = Reflect.ownKeys(input)
         for (let i = 0; i < inputKeys.length; i++) {
           const key = inputKeys[i]
           if (!expectedKeysSet.has(key)) {
             // key is unexpected
             if (onExcessPropertyError) {
-              const unexpected = new SchemaIssue.UnexpectedKey(ast, record[key], options)
-              const issue = new SchemaIssue.Pointer([key], unexpected)
+              const issue = new SchemaIssue.Pointer([key], new SchemaIssue.UnexpectedKey(ast, input[key]))
               if (errorsAllOption) {
                 if (state.issues) {
                   state.issues.push(issue)
@@ -2265,13 +2185,11 @@ export class Objects extends Base {
                 }
                 continue
               } else {
-                return yield* Effect.fail(
-                  new SchemaIssue.Composite(ast, [issue], input, options)
-                )
+                return yield* Effect.fail(new SchemaIssue.Composite(ast, oinput, [issue]))
               }
             } else {
               // preserve key
-              InternalRecord.assignProperty(out, key, record[key])
+              internalRecord.set(out, key, input[key])
             }
           }
         }
@@ -2282,34 +2200,20 @@ export class Objects extends Base {
       // ---------------------------------------------
       // handle property signatures
       // ---------------------------------------------
-      if (hasProperties) {
-        const eff = parseProperties(state, properties!, concurrency)
-        if (eff) yield* eff
-      }
+      const eff = parseProperties(state, properties, concurrency)
+      if (eff) yield* eff
 
       // ---------------------------------------------
       // handle index signatures
       // ---------------------------------------------
-      if (indexCount && !concurrency) {
+      if (parseIndexes) {
+        const keyPairs = Arr.empty<[PropertyKey, IndexSignature]>()
         for (let i = 0; i < indexCount; i++) {
-          const index = indexes![i]
-          const parse = index.is.parameter === string ? parseStringIndex : parseIndex
-          const keys = index.is.parameter === string
-            ? Object.keys(record)
-            : getIndexSignatureKeys(record, index.is.parameter, options)
+          const is = ast.indexSignatures[i]
+          const keys = getIndexSignatureKeys(input, is.parameter, options)
           for (let j = 0; j < keys.length; j++) {
-            const eff = parse(state, keys[j], index)
-            if (!effectIsExit(eff)) yield* eff
-            else if (eff._tag === "Failure") return yield* eff as Exit.Exit<never, SchemaIssue.Issue>
-          }
-        }
-      } else if (parseIndexes) {
-        const keyPairs = Arr.empty<[PropertyKey, Index]>()
-        for (let i = 0; i < indexCount; i++) {
-          const index = indexes![i]
-          const keys = getIndexSignatureKeys(record, index.is.parameter, options)
-          for (let j = 0; j < keys.length; j++) {
-            keyPairs.push([keys[j], index])
+            const key = keys[j]
+            keyPairs.push([key, is])
           }
         }
         const eff = parseIndexes(state, keyPairs, concurrency)
@@ -2317,27 +2221,26 @@ export class Objects extends Base {
       }
 
       if (state.issues) {
-        return yield* Effect.fail(
-          new SchemaIssue.Composite(ast, state.issues, input, options)
-        )
+        return yield* Effect.fail(new SchemaIssue.Composite(ast, oinput, state.issues))
       }
       if (options.propertyOrder === "original") {
         // preserve input keys order
-        const keys = (inputKeys ?? Reflect.ownKeys(record)).concat(expectedKeys)
+        const keys = (inputKeys ?? Reflect.ownKeys(input)).concat(expectedKeys)
         const preserved: Record<PropertyKey, unknown> = {}
         for (const key of keys) {
           if (Object.hasOwn(out, key)) {
-            InternalRecord.assignProperty(preserved, key, out[key])
+            internalRecord.set(preserved, key, out[key])
           }
         }
-        return preserved
+        return Option.some(preserved)
       }
-      return out
+      return Option.some(out)
     })
   }
   private _rebuild(
     recur: (ast: AST) => AST,
     recurParameter: (ast: AST) => AST,
+    flipMerge: boolean,
     checks: Checks | undefined,
     encodingChecks: Checks | undefined
   ): Objects {
@@ -2349,9 +2252,10 @@ export class Objects extends Base {
     const indexes = mapOrSame(this.indexSignatures, (is) => {
       const p = recurParameter(is.parameter)
       const t = recur(is.type)
-      return p === is.parameter && t === is.type
+      const merge = flipMerge ? is.merge?.flip() : is.merge
+      return p === is.parameter && t === is.type && merge === is.merge
         ? is
-        : new IndexSignature(p, t)
+        : new IndexSignature(p, t, merge)
     })
 
     return props === this.propertySignatures && indexes === this.indexSignatures && checks === this.checks &&
@@ -2369,11 +2273,11 @@ export class Objects extends Base {
   }
   /** @internal */
   flip(recur: (ast: AST) => AST): AST {
-    return this._rebuild(recur, recur, this.encodingChecks, this.checks)
+    return this._rebuild(recur, recur, true, this.encodingChecks, this.checks)
   }
   /** @internal */
   recur(recur: (ast: AST) => AST, recurParameter: (ast: AST) => AST = recur): AST {
-    return this._rebuild(recur, recurParameter, this.checks, this.encodingChecks)
+    return this._rebuild(recur, recurParameter, false, this.checks, this.encodingChecks)
   }
   /** @internal */
   getExpected(): string {
@@ -2382,41 +2286,42 @@ export class Objects extends Base {
   }
 }
 
-type ObjectParserState = {
-  readonly ast: Objects
-  readonly input: Record<PropertyKey, unknown>
-  readonly options: ParseOptions
-  readonly out: Record<PropertyKey, unknown>
-  issues: Array<SchemaIssue.Issue> | undefined
-}
-
 type ParsedProperty = {
+  readonly ps: PropertySignature | IndexSignature
   readonly parser: SchemaParser.Parser
   readonly name: PropertyKey
   readonly type: AST
 }
 
-const parseProperties = iterateEager<ObjectParserState, ParsedProperty>()({
-  onItem(s, p) {
-    if (!Object.hasOwn(s.input, p.name)) {
-      return p.parser(InternalParser.missing, s.options)
-    }
-    const value = s.input[p.name]
-    InternalRecord.assignProperty(s.out, p.name, value)
+const parseProperties = iterateEager<{
+  readonly ast: AST
+  readonly oinput: Option.Option<unknown>
+  readonly input: Record<PropertyKey, unknown>
+  readonly options: ParseOptions
+  readonly out: Record<PropertyKey, unknown>
+  issues: Array<SchemaIssue.Issue> | undefined
+}, ParsedProperty>()({
+  onItem(
+    s: {
+      readonly oinput: Option.Option<unknown>
+      readonly input: Record<PropertyKey, unknown>
+      readonly options: ParseOptions
+      readonly out: Record<PropertyKey, unknown>
+      issues: Array<SchemaIssue.Issue> | undefined
+    },
+    p
+  ) {
+    const value: Option.Option<unknown> = Object.hasOwn(s.input, p.name)
+      ? Option.some(s.input[p.name])
+      : Option.none()
     return p.parser(value, s.options)
   },
   step(s, p, exit) {
     if (exit._tag === "Failure") {
       return wrapPropertyKeyIssue(s, s.ast, p.name, exit)
-    }
-    if (exit === InternalParser.sameExit) return
-    const value = (exit as InternalParser.Success<unknown, SchemaIssue.Issue>)[InternalParser.args]
-    if (value !== InternalParser.missing) {
-      InternalRecord.assignProperty(s.out, p.name, value)
-      return
-    }
-    delete s.out[p.name]
-    if (!isOptional(p.type)) {
+    } else if (exit.value._tag === "Some") {
+      internalRecord.set(s.out, p.name, exit.value.value)
+    } else if (!isOptional(p.type)) {
       const issue = new SchemaIssue.Pointer([p.name], new SchemaIssue.MissingKey(p.type.context?.annotations))
       if (s.options.errors === "all") {
         if (s.issues) s.issues.push(issue)
@@ -2424,7 +2329,7 @@ const parseProperties = iterateEager<ObjectParserState, ParsedProperty>()({
         return
       } else {
         return Exit.fail(
-          new SchemaIssue.Composite(s.ast, [issue], s.input, s.options)
+          new SchemaIssue.Composite(s.ast, s.oinput, [issue])
         )
       }
     }
@@ -2517,21 +2422,6 @@ export type Sentinel = {
   readonly literal: LiteralValue | symbol
 }
 
-const toCandidate = memoizeIdempotent((ast: AST): AST => {
-  while (true) {
-    if (isSuspend(ast)) return unknown
-    const encoding = ast.encoding
-    if (!encoding) {
-      // Index signature parameters do not participate in union selection.
-      return (ast as any).recur?.(toCandidate, identity) ?? ast
-    }
-    if (
-      encoding.some((link) => link.transformation._tag === "Middleware" && link.transformation.decode !== identity)
-    ) return unknown
-    ast = encoding[encoding.length - 1].to
-  }
-})
-
 function getCandidateTypes(ast: AST): ReadonlyArray<Type> {
   switch (ast._tag) {
     case "Null":
@@ -2557,7 +2447,7 @@ function getCandidateTypes(ast: AST): ReadonlyArray<Type> {
     case "Objects":
       return ast.propertySignatures.length || ast.indexSignatures.length
         ? ["object"]
-        : ["string", "number", "boolean", "symbol", "bigint", "object", "array", "function"]
+        : ["object", "array"]
     case "Enum":
       return Array.from(new Set(ast.enums.map(([, v]) => typeof v)))
     case "Literal":
@@ -2581,12 +2471,12 @@ function getCandidateTypes(ast: AST): ReadonlyArray<Type> {
 }
 
 /** @internal */
-export function collectSentinels(ast: AST): ReadonlyArray<Sentinel> {
+export function collectSentinels(ast: AST): Array<Sentinel> {
   switch (ast._tag) {
     default:
       return []
     case "Declaration": {
-      const s = ast.annotations?.[InternalAnnotations.SENTINELS_ANNOTATION_KEY]
+      const s = ast.annotations?.["~sentinels"]
       return Array.isArray(s) ? s : []
     }
     case "Objects":
@@ -2603,182 +2493,62 @@ export function collectSentinels(ast: AST): ReadonlyArray<Sentinel> {
         return []
       })
     case "Arrays":
-      return ast.elements.flatMap((e, i): Array<Sentinel> => {
-        if (!isOptional(e)) {
-          if (isLiteral(e)) {
-            return [{ key: i, literal: e.literal }]
-          }
-          if (isUniqueSymbol(e)) {
-            return [{ key: i, literal: e.symbol }]
-          }
-        }
-        return []
+      return ast.elements.flatMap((e, i) => {
+        return isLiteral(e) && !isOptional(e)
+          ? [{ key: i, literal: e.literal }]
+          : []
       })
-    case "Union": {
-      if (ast.types.length === 0) return []
-      const members = ast.types.map((type) => collectSentinels(toCandidate(type)))
-      return members[0].filter((s) =>
-        members.every((sentinels) => sentinels.some((o) => o.key === s.key && o.literal === s.literal))
-      )
-    }
     case "Suspend":
       return collectSentinels(ast.thunk())
   }
 }
 
-type CandidateIndex = (input: any, isConstructor: boolean) => ReadonlyArray<AST>
-type SentinelEntry = readonly [
-  byValue: Map<LiteralValue | symbol, Set<number>>,
-  all: Set<number>
-]
-type SentinelIndex = Map<PropertyKey, SentinelEntry>
+type CandidateIndex = {
+  byType?: { [K in Type]?: Array<AST> }
+  bySentinel?: Map<PropertyKey, Map<LiteralValue | symbol, Array<AST>>>
+  otherwise?: { [K in Type]?: Array<AST> }
+}
 
 const candidateIndexCache = new WeakMap<ReadonlyArray<AST>, CandidateIndex>()
-const emptyCandidates: ReadonlyArray<never> = Object.freeze([])
 
 function getIndex(types: ReadonlyArray<AST>): CandidateIndex {
-  let index = candidateIndexCache.get(types)
-  if (index) return index
+  let idx = candidateIndexCache.get(types)
+  if (idx) return idx
 
-  let bySentinel: SentinelIndex | undefined
-  let sentinelCandidateCount = 0
-  let otherwise: { [K in Type]?: Array<number> } | undefined
-  let literalCandidates: Map<LiteralValue | symbol, Array<AST>> | undefined
-  let onlyLiterals = true
-  for (let i = 0; i < types.length; i++) {
-    const a = types[i]
-    const encoded = toCandidate(a)
+  idx = {}
+  for (const a of types) {
+    const encoded = toEncoded(a)
     if (isNever(encoded)) continue
 
-    if (onlyLiterals) {
-      if (isLiteral(encoded) || isUniqueSymbol(encoded)) {
-        literalCandidates ??= new Map()
-        const literal = isLiteral(encoded) ? encoded.literal : encoded.symbol
-        let arr = literalCandidates.get(literal)
-        if (!arr) literalCandidates.set(literal, arr = [])
-        arr.push(a)
-      } else {
-        onlyLiterals = false
-      }
-    }
-
+    const types = getCandidateTypes(encoded)
     const sentinels = collectSentinels(encoded)
 
-    if (sentinels.length) { // discriminated variants
-      bySentinel ??= new Map()
-      sentinelCandidateCount++
+    // by-type (always filled – cheap primary filter)
+    idx.byType ??= {}
+    for (const t of types) (idx.byType[t] ??= []).push(a)
+
+    if (sentinels.length > 0) { // discriminated variants
+      idx.bySentinel ??= new Map()
       for (const { key, literal } of sentinels) {
-        let entry = bySentinel.get(key)
-        if (!entry) bySentinel.set(key, entry = [new Map(), new Set()])
-        entry[1].add(i)
-        let indexes = entry[0].get(literal)
-        if (!indexes) entry[0].set(literal, indexes = new Set())
-        indexes.add(i)
+        let m = idx.bySentinel.get(key)
+        if (!m) idx.bySentinel.set(key, m = new Map())
+        let arr = m.get(literal)
+        if (!arr) m.set(literal, arr = [])
+        arr.push(a)
       }
     } else { // non-discriminated
-      otherwise ??= {}
-      const candidateTypes = getCandidateTypes(encoded)
-      for (const t of candidateTypes) (otherwise[t] ??= []).push(i)
+      idx.otherwise ??= {}
+      for (const t of types) (idx.otherwise[t] ??= []).push(a)
     }
   }
 
-  if (onlyLiterals && literalCandidates) {
-    literalCandidates.forEach(Object.freeze)
-    index = (input) => literalCandidates.get(input) ?? emptyCandidates
-  } else if (bySentinel?.size === 1 && !otherwise) {
-    const [key, [byValue]] = bySentinel.entries().next().value!
-    const candidates = byValue as unknown as Map<LiteralValue | symbol, ReadonlyArray<AST>>
-    for (const [literal, indexes] of byValue) {
-      candidates.set(literal, Object.freeze(Array.from(indexes, (index) => types[index])))
-    }
-    index = (input, isConstructor) => {
-      if (Predicate.isObjectKeyword(input)) {
-        const value = Object.hasOwn(input, key) ? (input as any)[key] : undefined
-        if (value !== undefined) return candidates.get(value) ?? emptyCandidates
-        if (isConstructor) return types
-      }
-      return emptyCandidates
-    }
-  } else if (bySentinel) {
-    // A key owned by every discriminated candidate is safe to use as the initial selector: no candidate can
-    // be excluded merely because it uses a different sentinel key. Prefer the key with the most distinct values
-    // to minimize the matching bucket.
-    let commonSentinel: [PropertyKey, SentinelEntry] | undefined
-    for (const entry of bySentinel) {
-      if (
-        (!commonSentinel || entry[1][0].size > commonSentinel[1][0].size) &&
-        entry[1][1].size === sentinelCandidateCount
-      ) {
-        commonSentinel = entry
-      }
-    }
-
-    index = (input, isConstructor) => {
-      const runtimeType: Type = input === null ? "null" : Array.isArray(input) ? "array" : typeof input
-      const base = otherwise?.[runtimeType] ?? emptyCandidates
-      if (!Predicate.isObjectKeyword(input)) return base.map((i) => types[i])
-
-      // Non-discriminated candidates are runtime-type fallbacks and are never removed by sentinel checks.
-      const selected = new Set(base)
-      let directKey: PropertyKey | undefined
-      // An observed common key can seed the selection directly; an unknown value rules out every
-      // discriminated candidate.
-      if (commonSentinel) {
-        const [key, [byValue]] = commonSentinel
-        const hasKey = Object.hasOwn(input, key)
-        const value = hasKey ? (input as any)[key] : undefined
-        if (hasKey && (!isConstructor || value !== undefined)) {
-          const match = byValue.get(value)
-          if (!match) return base.map((i) => types[i])
-          for (const i of match) selected.add(i)
-          directKey = key
-        }
-      }
-
-      // Without an observed common key, collect positive matches from every sentinel. Constructor mode treats
-      // absent and undefined keys as unconstrained and therefore selects every candidate that owns the key.
-      if (directKey === undefined) {
-        for (const [key, [byValue, all]] of bySentinel) {
-          const hasKey = Object.hasOwn(input, key)
-          const value = hasKey ? (input as any)[key] : undefined
-          if (hasKey && (!isConstructor || value !== undefined)) {
-            const match = byValue.get(value)
-            if (match) {
-              for (const i of match) selected.add(i)
-            }
-          } else if (isConstructor) {
-            for (const i of all) selected.add(i)
-          }
-        }
-      }
-      // Missing keys are neutral. An observed key rejects only selected candidates that own it and do not match.
-      for (const [key, [byValue, all]] of bySentinel) {
-        if (key === directKey) continue
-        const hasKey = Object.hasOwn(input, key)
-        const value = hasKey ? (input as any)[key] : undefined
-        if (hasKey && (!isConstructor || value !== undefined)) {
-          const match = byValue.get(value)
-          for (const i of selected) {
-            if (all.has(i) && !match?.has(i)) selected.delete(i)
-          }
-        }
-      }
-      return Array.from(selected).sort((a, b) => a - b).map((i) => types[i])
-    }
-  } else {
-    index = (input) => {
-      const runtimeType: Type = input === null ? "null" : Array.isArray(input) ? "array" : typeof input
-      return (otherwise?.[runtimeType] ?? emptyCandidates).map((i) => types[i]).filter(filterLiterals(input))
-    }
-  }
-
-  candidateIndexCache.set(types, index)
-  return index
+  candidateIndexCache.set(types, idx)
+  return idx
 }
 
 function filterLiterals(input: any) {
   return (ast: AST) => {
-    const encoded = toCandidate(ast)
+    const encoded = toEncoded(ast)
     return encoded._tag === "Literal" ?
       encoded.literal === input
       : encoded._tag === "UniqueSymbol" ?
@@ -2793,12 +2563,26 @@ function filterLiterals(input: any) {
  *
  * @internal
  */
-export function getCandidates(
-  input: any,
-  types: ReadonlyArray<AST>,
-  isConstructor = false
-): ReadonlyArray<AST> {
-  return getIndex(types)(input, isConstructor)
+export function getCandidates(input: any, types: ReadonlyArray<AST>): ReadonlyArray<AST> {
+  const idx = getIndex(types)
+  const runtimeType: Type = input === null ? "null" : Array.isArray(input) ? "array" : typeof input
+
+  // 1. Try sentinel-based dispatch (most selective)
+  if (idx.bySentinel) {
+    const base = idx.otherwise?.[runtimeType] ?? []
+    if (runtimeType === "object" || runtimeType === "array") {
+      for (const [k, m] of idx.bySentinel) {
+        if (Object.hasOwn(input, k)) {
+          const match = m.get((input as any)[k])
+          if (match) return [...match, ...base].filter(filterLiterals(input))
+        }
+      }
+    }
+    return base
+  }
+
+  // 2. Fallback: runtime-type dispatch only
+  return (idx.byType?.[runtimeType] ?? []).filter(filterLiterals(input))
 }
 
 /**
@@ -2816,14 +2600,15 @@ export function getCandidates(
  *
  * **Example** (Inspecting a union AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.Union([Schema.String, Schema.Number])
  * const ast = schema.ast
  *
  * if (SchemaAST.isUnion(ast)) {
- *   [ast.types.length, ast.mode] // => [2, "anyOf"]
+ *   console.log(ast.types.length) // 2
+ *   console.log(ast.mode)         // "anyOf"
  * }
  * ```
  *
@@ -2852,46 +2637,38 @@ export class Union<A extends AST = AST> extends Base {
     this.encodingChecks = encodingChecks
   }
   /** @internal */
-  getParser(
-    compile: SchemaParser.Compiler,
-    compileConstructorDefault?: SchemaParser.Compiler
-  ): SchemaParser.Parser {
+  getParser(recur: (ast: AST) => SchemaParser.Parser): SchemaParser.Parser {
     // oxlint-disable-next-line @typescript-eslint/no-this-alias
     const ast = this
 
-    return (input, options) => {
-      if (input === InternalParser.missing) {
-        return InternalParser.missingExit
+    return (oinput, options) => {
+      if (oinput._tag === "None") {
+        return Effect.succeed(oinput)
       }
-      const candidates = getCandidates(input, ast.types, compileConstructorDefault !== undefined)
-
-      if (candidates.length === 1) {
-        const result = compile(candidates[0])(input, options)
-        if ((result as Exit.Exit<unknown, SchemaIssue.Issue>)._tag === "Success") return result
-        return effectIsExit(result)
-          ? failSingleUnionCandidate(ast, (result as Exit.Failure<unknown, SchemaIssue.Issue>).cause, input, options)
-          : Effect.catchCause(result, (cause) => failSingleUnionCandidate(ast, cause, input, options))
-      }
+      const input = oinput.value
+      const candidates = getCandidates(input, ast.types)
 
       const state = {
         ast,
-        compile,
+        recur,
+        oinput,
         input,
         out: undefined,
-        successes: ast.mode === "oneOf" ? [] : undefined,
+        successes: [],
         issues: undefined as Arr.NonEmptyArray<SchemaIssue.Issue> | undefined,
         options
       }
       const concurrency = resolveConcurrency(options?.concurrency)
-      const eff = parseUnion(state, candidates, concurrency ? { ...concurrency, orderedStep: true } : undefined)
+      const eff = parseUnion(state, candidates, concurrency)
       if (!eff) {
-        if (state.out) return state.out
-        return Effect.fail(new SchemaIssue.AnyOf(ast, state.issues ?? [], input, options))
+        return state.out
+          ? Effect.succeed(state.out)
+          : Effect.fail(new SchemaIssue.AnyOf(ast, input, state.issues ?? []))
       }
-      return Effect.flatMapEager(eff, (_) => {
-        if (state.out === InternalParser.sameExit) return Effect.succeed(input)
-        if (state.out) return state.out
-        return Effect.fail(new SchemaIssue.AnyOf(ast, state.issues ?? [], input, options))
+      return Effect.flatMap(eff, (_) => {
+        return state.out
+          ? Effect.succeed(state.out)
+          : Effect.fail(new SchemaIssue.AnyOf(ast, input, state.issues ?? []))
       })
     }
   }
@@ -2956,29 +2733,19 @@ export class Union<A extends AST = AST> extends Base {
   }
 }
 
-function failSingleUnionCandidate(
-  ast: Union,
-  cause: Cause.Cause<SchemaIssue.Issue>,
-  input: unknown,
-  options: ParseOptions
-) {
-  const issue = InternalSchemaCause.getSchemaIssue(cause)
-  if (!issue) return Exit.failCause(cause)
-  return Exit.fail(new SchemaIssue.AnyOf(ast, [issue], input, options))
-}
-
 const parseUnion = iterateEager<{
-  readonly compile: (ast: AST) => SchemaParser.Parser
+  readonly recur: (ast: AST) => SchemaParser.Parser
   readonly ast: Union
+  readonly oinput: Option.Option<unknown>
   readonly input: unknown
   readonly options: ParseOptions
-  out: Exit.Success<unknown, SchemaIssue.Issue> | undefined
-  readonly successes: Array<AST> | undefined
+  out: Option.Option<unknown> | undefined
+  successes: Array<AST>
   issues: Array<SchemaIssue.Issue> | undefined
 }, AST>()({
   onItem(s, ast) {
-    const parser = s.compile(ast)
-    return parser(s.input, s.options)
+    const parser = s.recur(ast)
+    return parser(s.oinput, s.options)
   },
   step(s, candidate, exit) {
     if (exit._tag === "Failure") {
@@ -2989,14 +2756,13 @@ const parseUnion = iterateEager<{
       if (s.issues) s.issues.push(issue)
       else s.issues = [issue]
     } else {
-      if (s.out && s.successes) {
+      if (s.out && s.ast.mode === "oneOf") {
         s.successes.push(candidate)
-        return Exit.fail(new SchemaIssue.OneOf(s.ast, s.successes, s.input, s.options))
+        return Exit.fail(new SchemaIssue.OneOf(s.ast, s.input, s.successes))
       }
-      s.out = exit
-      if (s.successes) {
-        s.successes.push(candidate)
-      } else {
+      s.out = exit.value
+      s.successes.push(candidate)
+      if (s.ast.mode === "anyOf") {
         return Exit.void
       }
     }
@@ -3008,6 +2774,14 @@ const nonFiniteLiterals = new Union([
   new Literal("-Infinity"),
   new Literal("NaN")
 ], "anyOf")
+
+const numberToJson = new Link(
+  new Union([number, nonFiniteLiterals], "anyOf"),
+  new SchemaTransformation.Transformation(
+    SchemaGetter.Number(),
+    SchemaGetter.transform((n) => globalThis.Number.isFinite(n) ? n : globalThis.String(n))
+  )
+)
 
 function formatIsMutable(isMutable: boolean | undefined): string {
   return isMutable ? "" : "readonly "
@@ -3042,7 +2816,7 @@ export function memoizeThunk<A>(f: () => A): () => A {
  *
  * **Example** (Defining recursive schema ASTs)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * interface Category {
@@ -3055,7 +2829,7 @@ export function memoizeThunk<A>(f: () => A): () => A {
  *   children: Schema.Array(Schema.suspend((): Schema.Codec<Category> => Category))
  * })
  *
- * SchemaAST.isObjects(Category.ast) // => true
+ * // The recursive branch is a Suspend node
  * ```
  *
  * @see {@link isSuspend}
@@ -3073,16 +2847,15 @@ export class Suspend extends Base {
     encoding?: Encoding,
     context?: Context
   ) {
-    if (checks) {
+    if (checks !== undefined) {
       throw new Error("Cannot add checks to Suspend")
     }
     super(annotations, undefined, encoding, context)
     this.thunk = memoizeThunk(thunk)
   }
   /** @internal */
-  getParser(compile: SchemaParser.Compiler): SchemaParser.Parser {
-    let parser: SchemaParser.Parser
-    return (input, options) => (parser ??= compile(this.thunk()))(input, options)
+  getParser(recur: (ast: AST) => SchemaParser.Parser): SchemaParser.Parser {
+    return recur(this.thunk())
   }
   /** @internal */
   recur(recur: (ast: AST) => AST) {
@@ -3111,8 +2884,8 @@ export class Suspend extends Base {
  *
  * - `run` — the validation function. Returns `undefined` on success, or an
  *   `Issue` on failure.
- * - `annotations` — optional filter-level annotations (expected message,
- *   representation, arbitrary constraint hints).
+ * - `annotations` — optional filter-level metadata (expected message, meta
+ *   tags, arbitrary constraint hints).
  * - `aborted` — when `true`, parsing stops immediately after this filter
  *   fails (no further checks run).
  *
@@ -3217,7 +2990,7 @@ export function makeFilter<T>(
   aborted: boolean = false
 ): Filter<T> {
   return new Filter(
-    (input, ast, options) => SchemaIssue.normalizeFilterOutput(ast, filter(input, ast, options), input, options),
+    (input, ast, options) => SchemaIssue.make(input, ast, filter(input, ast, options)),
     annotations,
     aborted
   )
@@ -3229,37 +3002,11 @@ export function makeFilterByGuard<T extends E, E>(
   annotations?: Schema.Annotations.Filter
 ): Filter<any> {
   return new Filter(
-    (input: E, _ast, options) => is(input) ? undefined : new SchemaIssue.InvalidValue(undefined, input, options),
+    (input: E) => is(input) ? undefined : new SchemaIssue.InvalidValue(Option.some(input)),
     annotations,
     true // after a guard, we always want to abort
   )
 }
-
-/** @internal */
-export function isFinite(annotations?: Schema.Annotations.Filter) {
-  return makeFilter(
-    (n: number) => globalThis.Number.isFinite(n),
-    {
-      expected: "a finite number",
-      representation: {
-        id: "effect/schema/isFinite",
-        payload: null
-      },
-      toJsonSchema: () => ({ type: "number" }),
-      toCode: () => ({ runtime: "Schema.isFinite()" }),
-      arbitrary: {
-        constraint: {
-          noInfinity: true,
-          noNaN: true
-        }
-      },
-      ...annotations
-    }
-  )
-}
-
-/** @internal */
-export const finite = appendChecks(number, [isFinite()])
 
 /**
  * Creates a {@link Filter} that validates strings by running `RegExp.test`.
@@ -3272,25 +3019,21 @@ export const finite = appendChecks(number, [isFinite()])
  * **Details**
  *
  * The filter can be used with `Schema.filter` or attached directly to a
- * `String` AST node through checks. The regular expression is cloned and its
- * `lastIndex` is reset before each test, so global and sticky expressions are
- * deterministic and the provided regular expression is not mutated. The
- * regular expression source is stored in annotations for serialization and
- * arbitrary generation.
+ * `String` AST node through checks. The regular expression source is stored in
+ * annotations for serialization and arbitrary generation.
  *
  * **Gotchas**
  *
- * When deriving an arbitrary, only `regExp.source` is used. Regular expression
- * flags are ignored because fast-check does not support them.
+ * Use a non-global, non-sticky regular expression, or reset `lastIndex`
+ * yourself, because `RegExp.test` is stateful for expressions with the `g` or
+ * `y` flag.
  *
  * **Example** (Validating an email pattern)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { SchemaAST } from "effect"
  *
  * const emailFilter = SchemaAST.isPattern(/^[^@]+@[^@]+$/)
- * emailFilter.run("alice@example.com", SchemaAST.string, {}) // => undefined
- * emailFilter.run("invalid", SchemaAST.string, {})?._tag // => "InvalidValue"
  * ```
  *
  * @see {@link Filter}
@@ -3299,19 +3042,14 @@ export const finite = appendChecks(number, [isFinite()])
  */
 export function isPattern(regExp: globalThis.RegExp, annotations?: Schema.Annotations.Filter) {
   const source = regExp.source
-  const pattern = new globalThis.RegExp(source, regExp.flags)
   return makeFilter(
-    (s: string) => {
-      pattern.lastIndex = 0
-      return pattern.test(s)
-    },
+    (s: string) => regExp.test(s),
     {
       expected: `a string matching the RegExp ${source}`,
-      representation: {
-        id: "effect/schema/isPattern",
-        payload: { source, flags: regExp.flags }
+      meta: {
+        _tag: "isPattern",
+        regExp
       },
-      toJsonSchema: () => ({ pattern: source }),
       arbitrary: {
         constraint: {
           patterns: [regExp.source]
@@ -3333,13 +3071,6 @@ function modifyOwnPropertyDescriptors<A extends AST>(
   return Object.create(Object.getPrototypeOf(ast), d)
 }
 
-const contextOwners = new WeakMap<AST, AST>()
-
-/** @internal */
-export function getContextOwner(ast: AST): AST {
-  return contextOwners.get(ast) ?? ast
-}
-
 /** @internal */
 export function replaceEncoding<A extends AST>(ast: A, encoding: Encoding | undefined): A {
   if (ast.encoding === encoding) {
@@ -3355,15 +3086,9 @@ export function replaceContext<A extends AST>(ast: A, context: Context | undefin
   if (ast.context === context) {
     return ast
   }
-  const owner = getContextOwner(ast)
-  if (owner.context === context) {
-    return owner as A
-  }
-  const out = modifyOwnPropertyDescriptors(ast, (d) => {
+  return modifyOwnPropertyDescriptors(ast, (d) => {
     d.context.value = context
   })
-  contextOwners.set(out, owner)
-  return out
 }
 
 /** @internal */
@@ -3384,7 +3109,7 @@ export function annotate<A extends AST>(ast: A, annotations: Schema.Annotations.
 
 /** @internal */
 export function replaceChecks<A extends AST>(ast: A, checks: Checks | undefined): A {
-  if (ast._tag === "Suspend" && checks) {
+  if (ast._tag === "Suspend" && checks !== undefined) {
     throw new Error("Cannot add checks to Suspend")
   }
   if (ast.checks === checks) {
@@ -3400,17 +3125,14 @@ export function appendChecks<A extends AST>(ast: A, checks: Checks | undefined):
   return replaceChecks(ast, combineChecks(ast.checks, checks))
 }
 
-/** @internal */
-export function mapLink(link: Link, f: (ast: AST) => AST): Link {
-  const to = f(link.to)
-  return to === link.to ? link : new Link(to, link.transformation)
-}
-
 function updateLastLink(encoding: Encoding, f: (ast: AST) => AST): Encoding {
   const links = encoding
   const last = links[links.length - 1]
-  const out = mapLink(last, f)
-  return out === last ? encoding : Arr.append(encoding.slice(0, encoding.length - 1), out)
+  const to = f(last.to)
+  if (to !== last.to) {
+    return Arr.append(encoding.slice(0, encoding.length - 1), new Link(to, last.transformation))
+  }
+  return encoding
 }
 
 /** @internal */
@@ -3419,31 +3141,11 @@ export function applyToLastLink(f: (ast: AST) => AST) {
 }
 
 /** @internal */
-export function replaceContextLastLink<A extends AST>(ast: A, context: Context): A {
-  return applyToLastLink((ast) => replaceContext(ast, context))(ast)
-}
-
-/** @internal */
 export function applyToSelfOrLastLinkEncoding(f: (ast: AST) => AST) {
   function out(ast: AST): AST {
     return ast.encoding ? replaceEncoding(ast, updateLastLink(ast.encoding, out)) : f(ast)
   }
   return memoize(out)
-}
-
-/** @internal */
-export function applyToSelfOrLastLinkEncodingIdempotent(
-  f: (ast: AST) => AST,
-  options?: { readonly stopAt?: (link: Link) => boolean }
-) {
-  function out(ast: AST): AST {
-    if (ast.encoding) {
-      const last = ast.encoding[ast.encoding.length - 1]
-      return options?.stopAt?.(last) ? ast : replaceEncoding(ast, updateLastLink(ast.encoding, out))
-    }
-    return f(ast)
-  }
-  return memoizeIdempotent(out)
 }
 
 /** @internal */
@@ -3506,7 +3208,7 @@ export function annotateKey<A extends AST>(ast: A, annotations: Schema.Annotatio
     new Context(
       ast.context.isOptional,
       ast.context.isMutable,
-      ast.context.constructorDefault,
+      ast.context.defaultValue,
       { ...ast.context.annotations, ...annotations }
     ) :
     new Context(false, false, undefined, annotations)
@@ -3514,33 +3216,42 @@ export function annotateKey<A extends AST>(ast: A, annotations: Schema.Annotatio
 }
 
 /** @internal */
-export const optionalKey: <A extends AST>(ast: A) => A = memoizeIdempotent(<A extends AST>(ast: A): A => {
+export const optionalKeyLastLink = applyToLastLink(optionalKey)
+
+/**
+ * Marks an AST node's property key as optional by setting
+ * {@link Context.isOptional} to `true`.
+ *
+ * **Details**
+ *
+ * Also propagates the optional flag through the last link of the encoding
+ * chain if present.
+ *
+ * @see {@link isOptional}
+ * @see {@link Context}
+ * @category transforming
+ * @since 4.0.0
+ */
+export function optionalKey<A extends AST>(ast: A): A {
   const context = ast.context ?
     ast.context.isOptional === false ?
-      new Context(true, ast.context.isMutable, ast.context.constructorDefault, ast.context.annotations) :
+      new Context(true, ast.context.isMutable, ast.context.defaultValue, ast.context.annotations) :
       ast.context :
     new Context(true, false)
   return optionalKeyLastLink(replaceContext(ast, context))
-})
+}
 
-const optionalKeyLastLink = applyToLastLink(optionalKey)
-
-/** @internal */
-export const optional = memoize(<A extends AST>(ast: A): Union<A | Undefined> =>
-  optionalKey(new Union([ast, undefined_], "anyOf"))
-)
+const mutableKeyLastLink = applyToLastLink(mutableKey)
 
 /** @internal */
-export const mutableKey = memoizeIdempotent(<A extends AST>(ast: A): A => {
+export function mutableKey<A extends AST>(ast: A): A {
   const context = ast.context ?
     ast.context.isMutable === false ?
-      new Context(ast.context.isOptional, true, ast.context.constructorDefault, ast.context.annotations) :
+      new Context(ast.context.isOptional, true, ast.context.defaultValue, ast.context.annotations) :
       ast.context :
     new Context(false, true)
   return mutableKeyLastLink(replaceContext(ast, context))
-})
-
-const mutableKeyLastLink = applyToLastLink(mutableKey)
+}
 
 /** @internal */
 export function withConstructorDefault<A extends AST>(
@@ -3551,10 +3262,10 @@ export function withConstructorDefault<A extends AST>(
     SchemaGetter.withDefault(defaultValue),
     SchemaGetter.passthrough()
   )
-  const constructorDefault = new Link(unknown, transformation)
+  const encoding: Encoding = [new Link(unknown, transformation)]
   const context = ast.context ?
-    new Context(ast.context.isOptional, ast.context.isMutable, constructorDefault, ast.context.annotations) :
-    new Context(false, false, constructorDefault)
+    new Context(ast.context.isOptional, ast.context.isMutable, encoding, ast.context.annotations) :
+    new Context(false, false, encoding)
   return replaceContext(ast, context)
 }
 
@@ -3616,11 +3327,11 @@ function parseParameter(ast: AST): {
 }
 
 /** @internal */
-export function record(key: AST, value: AST): Objects {
+export function record(key: AST, value: AST, keyValueCombiner: KeyValueCombiner | undefined): Objects {
   const { literals, parameters: indexSignatures } = parseParameter(key)
   return new Objects(
     literals.map((literal) => new PropertySignature(literal, value)),
-    indexSignatures.map((parameter) => new IndexSignature(parameter, value))
+    indexSignatures.map((parameter) => new IndexSignature(parameter, value, keyValueCombiner))
   )
 }
 
@@ -3650,20 +3361,6 @@ export function isMutable(ast: AST): boolean {
   return ast.context?.isMutable ?? false
 }
 
-function isStructuralCheck(check: Check<any>): boolean {
-  return check.annotations?.[InternalAnnotations.STRUCTURAL_ANNOTATION_KEY] === true ||
-    check._tag === "FilterGroup" && check.checks.every(isStructuralCheck)
-}
-
-function extractStructuralChecks(checks: Checks): Checks | undefined {
-  function extract(check: Check<any>): Array<Check<any>> {
-    if (isStructuralCheck(check)) return [check]
-    return check._tag === "FilterGroup" ? check.checks.flatMap(extract) : []
-  }
-  const out = checks.flatMap(extract)
-  return Arr.isArrayNonEmpty(out) ? out : undefined
-}
-
 /**
  * Strips all encoding transformations from an AST, returning the decoded
  * (type-level) representation.
@@ -3676,12 +3373,12 @@ function extractStructuralChecks(checks: Checks): Checks | undefined {
  *
  * **Example** (Getting the type AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.NumberFromString
  * const typeAst = SchemaAST.toType(schema.ast)
- * typeAst._tag // => "Number"
+ * console.log(typeAst._tag) // "Number"
  * ```
  *
  * @see {@link toEncoded}
@@ -3689,22 +3386,19 @@ function extractStructuralChecks(checks: Checks): Checks | undefined {
  * @category transforming
  * @since 4.0.0
  */
-export const toType = memoizeIdempotent(<A extends AST>(ast: A): A => {
+export const toType = memoize(<A extends AST>(ast: A): A => {
   if (ast.encoding) {
     return toType(replaceEncoding(ast, undefined))
   }
   const out: any = ast
   const type = out.recur?.(toType) ?? out
-  const encodingChecks: Checks | undefined = type.encodingChecks
+  const encodingChecks = type.encodingChecks
   if (encodingChecks) {
-    const checks = type === ast
-      ? encodingChecks
-      : isArrays(type) || isObjects(type) || isDeclaration(type) && type.typeParameters.length > 0
-      ? extractStructuralChecks(encodingChecks)
-      : undefined
     return modifyOwnPropertyDescriptors(type, (d) => {
       d.encodingChecks.value = undefined
-      d.checks.value = combineChecks(type.checks, checks)
+      if (type === ast) {
+        d.checks.value = combineChecks(type.checks, encodingChecks)
+      }
     })
   }
   return type
@@ -3723,12 +3417,12 @@ export const toType = memoizeIdempotent(<A extends AST>(ast: A): A => {
  *
  * **Example** (Getting the encoded AST)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.NumberFromString
  * const encodedAst = SchemaAST.toEncoded(schema.ast)
- * encodedAst._tag // => "String"
+ * console.log(encodedAst._tag) // "String"
  * ```
  *
  * @see {@link toType}
@@ -3736,7 +3430,7 @@ export const toType = memoizeIdempotent(<A extends AST>(ast: A): A => {
  * @category transforming
  * @since 4.0.0
  */
-export const toEncoded = memoizeIdempotent((ast: AST): AST => {
+export const toEncoded = memoize((ast: AST): AST => {
   return toType(flip(ast))
 })
 
@@ -3799,44 +3493,54 @@ function fromConst<const T>(
   ast: AST,
   value: T
 ): SchemaParser.Parser {
-  const succeed = InternalParser.succeed(value)
-  return (input, options) => {
-    if (input === InternalParser.missing) return InternalParser.missingExit
-    if (input === value) return succeed
-    return Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
+  const succeed = Effect.succeedSome(value)
+  return (oinput) => {
+    if (oinput._tag === "None") {
+      return Effect.succeedNone
+    }
+    return oinput.value === value
+      ? succeed
+      : Effect.fail(new SchemaIssue.InvalidType(ast, oinput))
   }
+}
+
+function fromAnyToConst<const T>(value: T): SchemaParser.Parser {
+  const succeed = Effect.succeedSome(value)
+  return (oinput) => oinput._tag === "None" ? Effect.succeedNone : succeed
 }
 
 function fromRefinement<T>(
   ast: AST,
   refinement: (input: unknown) => input is T
 ): SchemaParser.Parser {
-  return (input, options) => {
-    if (input === InternalParser.missing) return InternalParser.missingExit
-    if (refinement(input)) return InternalParser.sameExit
-    return Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
+  return (oinput) => {
+    if (oinput._tag === "None") {
+      return Effect.succeedNone
+    }
+    return refinement(oinput.value)
+      ? Effect.succeed(oinput)
+      : Effect.fail(new SchemaIssue.InvalidType(ast, oinput))
   }
 }
 
+function applyTemplateLiteralPartChecks<A>(ast: AST, value: A, options: ParseOptions): A | undefined {
+  if (options?.disableChecks || ast.checks === undefined) return value
+  const issues: Array<SchemaIssue.Issue> = []
+  collectIssues(ast.checks, value, issues, ast, options)
+  return issues.length === 0 ? value : undefined
+}
+
 function segmentTemplateLiteralParts(
-  ast: TemplateLiteral,
+  parts: ReadonlyArray<TemplateLiteralPart>,
   input: string,
   options: ParseOptions
 ): Array<string> | undefined {
-  const parts = ast.encodedParts
-  const literals = ast.literals
-  const inputLength = input.length
-  for (let i = 0; i < literals.length; i++) {
-    const literal = literals[i]
-    if (literal && !input.includes(literal)) return undefined
-  }
-  if (ast.suffixLengths[0] > inputLength) return undefined
-
   const out = new Array<string>(parts.length)
-  let failures: Set<number> | undefined
+  const failures = new Set<string>()
   function go(i: number, pos: number): boolean {
-    if (i === parts.length) return pos === inputLength
-    if (failures?.has(i * (inputLength + 1) + pos)) return false
+    if (i === parts.length) return pos === input.length
+    const key = `${i}/${pos}`
+    if (failures.has(key)) return false
     const part = parts[i]
     if (i === parts.length - 1) {
       const s = input.slice(pos)
@@ -3845,28 +3549,21 @@ function segmentTemplateLiteralParts(
         return true
       }
     } else if (part._tag === "Literal") {
-      const s = literals[i]!
+      const s = globalThis.String(part.literal)
       if (input.startsWith(s, pos) && go(i + 1, pos + s.length)) {
         out[i] = s
         return true
       }
     } else {
-      const maximumEnd = inputLength - ast.suffixLengths[i + 1]
-      // Splits preceding a literal only need to consider occurrences of that literal.
-      const anchor = literals[i + 1]
-      let end = anchor === undefined ? maximumEnd : input.lastIndexOf(anchor, maximumEnd)
-      while (end >= pos) {
+      for (let end = input.length; end >= pos; end--) {
         const s = input.slice(pos, end)
         if (part.matchPart(s, options) !== undefined && go(i + 1, end)) {
           out[i] = s
           return true
         }
-        if (end === 0) break
-        end = anchor === undefined ? end - 1 : input.lastIndexOf(anchor, end - 1)
       }
     }
-    failures ??= new Set()
-    failures.add(i * (inputLength + 1) + pos)
+    failures.add(key)
     return false
   }
   return go(0, 0) ? out : undefined
@@ -3880,7 +3577,7 @@ export const enumsToLiterals = memoize((ast: Enum): Union<Literal> => {
   )
 })
 
-const parameterFromPropertyKey = applyToSelfOrLastLinkEncodingIdempotent((ast) => {
+const parameterFromPropertyKey = applyToSelfOrLastLinkEncoding((ast) => {
   switch (ast._tag) {
     default:
       return ast
@@ -3892,7 +3589,7 @@ const parameterFromPropertyKey = applyToSelfOrLastLinkEncodingIdempotent((ast) =
 })
 
 /** @internal */
-export const parameterFromString = applyToSelfOrLastLinkEncodingIdempotent((ast) => {
+export const parameterFromString = applyToSelfOrLastLinkEncoding((ast) => {
   switch (ast._tag) {
     default:
       return ast
@@ -3904,7 +3601,7 @@ export const parameterFromString = applyToSelfOrLastLinkEncodingIdempotent((ast)
   }
 })
 
-const partFromString = applyToSelfOrLastLinkEncodingIdempotent((ast) => {
+const partFromString = applyToSelfOrLastLinkEncoding((ast) => {
   switch (ast._tag) {
     default:
       return ast
@@ -3925,7 +3622,7 @@ export const STRING_PATTERN = "[\\s\\S]*?"
 
 const isStringFiniteRegExp = new globalThis.RegExp(`^${FINITE_PATTERN}$`)
 
-const isStringNumberRegExp = new globalThis.RegExp(`^(?:${FINITE_PATTERN}|Infinity|-Infinity|NaN)$`)
+const isStringNumberRegExp = new globalThis.RegExp(`(?:${FINITE_PATTERN}|Infinity|-Infinity|NaN)`)
 
 /** @internal */
 export function isStringFinite(annotations?: Schema.Annotations.Filter) {
@@ -3933,11 +3630,10 @@ export function isStringFinite(annotations?: Schema.Annotations.Filter) {
     isStringFiniteRegExp,
     {
       expected: "a string representing a finite number",
-      representation: {
-        id: "effect/schema/isStringFinite",
-        payload: null
+      meta: {
+        _tag: "isStringFinite",
+        regExp: isStringFiniteRegExp
       },
-      toJsonSchema: () => ({ pattern: isStringFiniteRegExp.source }),
       ...annotations
     }
   )
@@ -3968,11 +3664,10 @@ export function isStringBigInt(annotations?: Schema.Annotations.Filter) {
     isStringBigIntRegExp,
     {
       expected: "a string representing a bigint",
-      representation: {
-        id: "effect/schema/isStringBigInt",
-        payload: null
+      meta: {
+        _tag: "isStringBigInt",
+        regExp: isStringBigIntRegExp
       },
-      toJsonSchema: () => ({ pattern: isStringBigIntRegExp.source }),
       ...annotations
     }
   )
@@ -4002,17 +3697,13 @@ const symbolToString = new Link(
   symbolString,
   new SchemaTransformation.Transformation(
     SchemaGetter.transform((description) => globalThis.Symbol.for(isStringSymbolRegExp.exec(description)![1])),
-    SchemaGetter.transformOrFail((sym: symbol, options) => {
+    SchemaGetter.transformOrFail((sym: symbol) => {
       const key = globalThis.Symbol.keyFor(sym)
       if (key !== undefined) {
         return Effect.succeed(globalThis.String(sym))
       }
       return Effect.fail(
-        new SchemaIssue.Forbidden(
-          { message: "cannot serialize to string, Symbol is not registered" },
-          sym,
-          options
-        )
+        new SchemaIssue.Forbidden(Option.some(sym), { message: "cannot serialize to string, Symbol is not registered" })
       )
     })
   )
@@ -4024,11 +3715,10 @@ export function isStringSymbol(annotations?: Schema.Annotations.Filter) {
     isStringSymbolRegExp,
     {
       expected: "a string representing a symbol",
-      representation: {
-        id: "effect/schema/isStringSymbol",
-        payload: null
+      meta: {
+        _tag: "isStringSymbol",
+        regExp: isStringSymbolRegExp
       },
-      toJsonSchema: () => ({ pattern: isStringSymbolRegExp.source }),
       ...annotations
     }
   )
@@ -4038,33 +3728,24 @@ export function isStringSymbol(annotations?: Schema.Annotations.Filter) {
 export function collectIssues<T>(
   checks: ReadonlyArray<Check<T>>,
   value: T,
-  issues: Arr.NonEmptyArray<SchemaIssue.Issue> | undefined,
+  issues: Array<SchemaIssue.Issue>,
   ast: AST,
   options: ParseOptions
-): Arr.NonEmptyArray<SchemaIssue.Issue> | undefined {
+) {
   for (let i = 0; i < checks.length; i++) {
     const check = checks[i]
     if (check._tag === "FilterGroup") {
-      issues = collectIssues(check.checks, value, issues, ast, options)
-      if (
-        issues &&
-        (options.errors !== "all" || (issues[issues.length - 1] as SchemaIssue.Filter).filter.aborted)
-      ) {
-        return issues
-      }
+      collectIssues(check.checks, value, issues, ast, options)
     } else {
       const issue = check.run(value, ast, options)
       if (issue) {
-        const filter = new SchemaIssue.Filter(check, issue, value, options)
-        if (issues) issues.push(filter)
-        else issues = [filter]
-        if (options.errors !== "all" || check.aborted) {
-          return issues
+        issues.push(new SchemaIssue.Filter(value, check, issue))
+        if (check.aborted || options?.errors !== "all") {
+          return
         }
       }
     }
   }
-  return issues
 }
 
 /** @internal */
@@ -4072,26 +3753,20 @@ export function runChecks<T>(
   checks: readonly [Check<T>, ...Array<Check<T>>],
   s: T
 ): Result.Result<T, SchemaIssue.Issue> {
-  const issues = collectIssues(checks, s, undefined, unknown, { errors: "all" })
-  if (issues) {
-    const issue = new SchemaIssue.Composite(unknown, issues)
+  const issues: Array<SchemaIssue.Issue> = []
+  collectIssues(checks, s, issues, unknown, { errors: "all" })
+  if (Arr.isArrayNonEmpty(issues)) {
+    const issue = new SchemaIssue.Composite(unknown, Option.some(s), issues)
     return Result.fail(issue)
   }
   return Result.succeed(s)
 }
 
 /** @internal */
-export interface ConstructorDescriptor {
-  readonly isConstructed: Predicate.Predicate<unknown>
-  readonly link: Link
-}
+export const ClassTypeId = "~effect/Schema/Class"
 
 /** @internal */
-export function getConstructorDescriptor(ast: AST): ConstructorDescriptor | undefined {
-  if (!isDeclaration(ast)) return undefined
-  const getDescriptor = ast.annotations?.[InternalAnnotations.CONSTRUCTOR_ANNOTATION_KEY]
-  return Predicate.isFunction(getDescriptor) ? getDescriptor(ast.typeParameters) : undefined
-}
+export const STRUCTURAL_ANNOTATION_KEY = "~structural"
 
 /**
  * Returns all annotations from the AST node.
@@ -4104,12 +3779,12 @@ export function getConstructorDescriptor(ast: AST): ConstructorDescriptor | unde
  *
  * **Example** (Reading annotations)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Schema, SchemaAST } from "effect"
  *
  * const schema = Schema.String.annotate({ title: "Name" })
  * const annotations = SchemaAST.resolve(schema.ast)
- * annotations?.title // => "Name"
+ * console.log(annotations?.title) // "Name"
  * ```
  *
  * @see {@link resolveAt}
@@ -4174,82 +3849,6 @@ export const resolveTitle: (ast: AST) => string | undefined = InternalAnnotation
  */
 export const resolveDescription: (ast: AST) => string | undefined = InternalAnnotations.resolveDescription
 
-type TreeFrame = {
-  readonly value: object
-  // Object keys or an array length snapshot.
-  readonly keys: ReadonlyArray<string> | number
-  index: number
-}
-
-function isJsonLeaf(u: unknown): boolean {
-  return u === null || typeof u === "string" || typeof u === "boolean" ||
-    typeof u === "number" && globalThis.Number.isFinite(u)
-}
-
-function isStringTreeLeaf(u: unknown): boolean {
-  return u === undefined || typeof u === "string"
-}
-
-function isTree(u: unknown, isLeaf: (u: unknown) => boolean): boolean {
-  const cache = new WeakMap<object, boolean>()
-  const stack: Array<TreeFrame> = []
-  outer: while (true) {
-    if (typeof u !== "object" || u === null) {
-      if (!isLeaf(u)) {
-        return false
-      }
-    } else {
-      const value = u
-      const cached = cache.get(value)
-      // `false` marks a node on the current path, while `true` marks a fully
-      // validated node that can be safely reused by a DAG.
-      if (cached === false) {
-        return false
-      }
-      if (cached === undefined) {
-        const isArray = Array.isArray(value)
-        if (!isArray) {
-          const prototype = Object.getPrototypeOf(value)
-          // A plain object from another realm has a different Object.prototype,
-          // but that prototype still has a null prototype.
-          if (
-            prototype !== null &&
-            prototype !== Object.prototype &&
-            Object.getPrototypeOf(prototype) !== null
-          ) {
-            return false
-          }
-        }
-        cache.set(value, false)
-        stack.push({
-          value,
-          keys: isArray ? value.length : Object.keys(value),
-          index: 0
-        })
-      }
-    }
-
-    while (stack.length > 0) {
-      const frame = stack[stack.length - 1]
-      const keys = frame.keys
-      if (typeof keys === "number") {
-        if (frame.index < keys) {
-          // A sparse slot is read as `undefined`; the leaf predicate determines
-          // whether that is valid for the current tree.
-          u = (frame.value as ReadonlyArray<unknown>)[frame.index++]
-          continue outer
-        }
-      } else if (frame.index < keys.length) {
-        u = (frame.value as Record<string, unknown>)[keys[frame.index++]]
-        continue outer
-      }
-      cache.set(frame.value, true)
-      stack.pop()
-    }
-    return true
-  }
-}
-
 /**
  * Returns true if the value is a JSON value.
  *
@@ -4258,48 +3857,90 @@ function isTree(u: unknown, isLeaf: (u: unknown) => boolean): boolean {
  * @internal
  */
 export function isJson(u: unknown): u is Schema.Json {
-  return isTree(u, isJsonLeaf)
+  // `onPath` is the current recursion stack: nodes between the root and the
+  // one being visited. A hit here means we looped back to an ancestor — a
+  // real cycle, not a DAG — so the value is not JSON.
+  const onPath = new Set<unknown>()
+  // `validated` memoizes subtrees we've already fully checked. Without it, a
+  // diamond-shaped DAG (same node reached through multiple parents) would be
+  // re-traversed once per parent, which is exponential in the nesting depth.
+  const validated = new Set<unknown>()
+  return recur(u)
+
+  function recur(u: unknown): boolean {
+    if (u === null || typeof u === "string" || typeof u === "boolean") {
+      return true
+    }
+    if (typeof u === "number") {
+      return globalThis.Number.isFinite(u)
+    }
+    if (typeof u !== "object" || u === undefined) {
+      return false
+    }
+    if (onPath.has(u)) {
+      return false
+    }
+    if (validated.has(u)) {
+      return true
+    }
+    onPath.add(u)
+    const ok = Array.isArray(u)
+      ? u.every(recur)
+      : Object.keys(u).every((key) => recur((u as Record<string, unknown>)[key]))
+    // Pop on exit so siblings reaching the same node via a different path
+    // don't see it as an ancestor (that would reject valid DAGs).
+    onPath.delete(u)
+    if (ok) {
+      validated.add(u)
+    }
+    return ok
+  }
 }
 
 /** @internal */
 export const Json = new Declaration(
   [],
-  () => (input, ast, options) =>
+  () => (input, ast) =>
     isJson(input) ?
-      InternalParser.sameExit :
-      Effect.fail(new SchemaIssue.InvalidType(ast, input, options)),
+      Effect.succeed(input) :
+      Effect.fail(new SchemaIssue.InvalidType(ast, Option.some(input))),
   {
-    representation: {
-      id: "effect/schema/Json",
-      payload: null
+    typeConstructor: {
+      _tag: "effect/Json"
+    },
+    generation: {
+      runtime: `Schema.Json`,
+      Type: `Schema.Json`
     },
     expected: "JSON value",
-    toCodecJson: () => undefined,
-    toCodecStringTree: () => unknownToStringTree,
+    toCodecJson: () => new Link(unknown, SchemaTransformation.passthrough()),
     toArbitrary: () => (fc: typeof FastCheck) => fc.jsonValue()
   }
 )
 
 /** @internal */
 export const MutableJson = annotate(Json, {
-  representation: {
-    id: "effect/schema/MutableJson",
-    payload: null
+  typeConstructor: {
+    _tag: "effect/MutableJson"
+  },
+  generation: {
+    runtime: `Schema.MutableJson`,
+    Type: `Schema.MutableJson`
   }
 })
 
 /** @internal */
-export const unknownToJson = new Link(
-  Json,
-  SchemaTransformation.passthrough()
+export const unknownToNull = new Link(
+  null_,
+  new SchemaTransformation.Transformation(
+    SchemaGetter.passthrough(),
+    SchemaGetter.transform(() => null)
+  )
 )
 
 /** @internal */
-export const objectKeywordToJson = new Link(
-  new Union([
-    new Arrays(false, [], [Json]),
-    new Objects([], [new IndexSignature(string, Json)])
-  ], "anyOf"),
+export const unknownToJson = new Link(
+  Json,
   SchemaTransformation.passthrough()
 )
 
@@ -4311,16 +3952,34 @@ export const objectKeywordToJson = new Link(
  * @internal
  */
 export function isStringTree(u: unknown): u is Schema.StringTree {
-  return isTree(u, isStringTreeLeaf)
+  const seen = new Set<unknown>()
+  return recur(u)
+
+  function recur(u: unknown): boolean {
+    if (u === undefined || typeof u === "string") {
+      return true
+    }
+    if (typeof u !== "object" || u === null) {
+      return false
+    }
+    if (seen.has(u)) {
+      return false
+    }
+    seen.add(u)
+    if (Array.isArray(u)) {
+      return u.every(recur)
+    }
+    return Object.keys(u).every((key) => recur((u as Record<string, unknown>)[key]))
+  }
 }
 
 const StringTree = new Declaration(
   [],
-  () => (input, ast, options) =>
+  () => (input, ast) =>
     isStringTree(input) ?
-      InternalParser.sameExit :
-      Effect.fail(new SchemaIssue.InvalidType(ast, input, options)),
-  { expected: "StringTree", toCodecStringTree: () => undefined }
+      Effect.succeed(input) :
+      Effect.fail(new SchemaIssue.InvalidType(ast, Option.some(input))),
+  { expected: "StringTree" }
 )
 
 /** @internal */

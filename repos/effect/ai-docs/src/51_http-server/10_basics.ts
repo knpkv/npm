@@ -24,9 +24,7 @@ const SystemApiHandlers = HttpApiBuilder.group(
   Api,
   "system",
   Effect.fn(function*(handlers) {
-    return handlers.handleAll({
-      health: () => Effect.void
-    })
+    return handlers.handle("health", () => Effect.void)
   })
 )
 

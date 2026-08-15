@@ -130,20 +130,24 @@ export const makeExternalSpan = (options: {
   readonly traceFlags?: number | undefined
   readonly traceState?: string | Otel.TraceState | undefined
 }): Tracer.ExternalSpan => {
-  let annotations = Context.empty()
-  if (options.traceFlags !== undefined) {
-    annotations = Context.add(annotations, OtelTraceFlags, options.traceFlags)
-  }
-
-  if (typeof options.traceState === "string") {
-    try {
-      annotations = Context.add(annotations, OtelTraceState, Otel.createTraceState(options.traceState))
-    } catch {
-      //
+  const annotations = Context.mutate(Context.empty(), (annotations) => {
+    let next = annotations
+    if (options.traceFlags !== undefined) {
+      next = Context.add(next, OtelTraceFlags, options.traceFlags)
     }
-  } else if (options.traceState) {
-    annotations = Context.add(annotations, OtelTraceState, options.traceState)
-  }
+
+    if (typeof options.traceState === "string") {
+      try {
+        next = Context.add(next, OtelTraceState, Otel.createTraceState(options.traceState))
+      } catch {
+        //
+      }
+    } else if (options.traceState) {
+      next = Context.add(next, OtelTraceState, options.traceState)
+    }
+
+    return next
+  })
 
   return {
     _tag: "ExternalSpan",
@@ -310,7 +314,7 @@ const makeOtelSpan = (span: Tracer.Span, clock: Clock.Clock): Otel.Span => {
       return self
     },
     setStatus(status) {
-      exit = status.code === Otel.SpanStatusCode.ERROR
+      exit = Otel.SpanStatusCode.ERROR
         ? Exit.die(status.message ?? "Unknown error")
         : Exit.void
       return self
@@ -514,23 +518,18 @@ export class OtelSpan implements Tracer.Span {
 const isSampled = (traceFlags: Otel.TraceFlags): boolean =>
   (traceFlags & Otel.TraceFlags.SAMPLED) === Otel.TraceFlags.SAMPLED
 
-class OtelParentSpanContext extends Context.Service<
-  OtelParentSpanContext,
-  Otel.SpanContext
->()("@effect/opentelemetry/Tracer/OtelParentSpanContext") {}
-
 const getOtelParent = (
   tracer: Otel.TraceAPI,
   context: Otel.Context,
   annotations: Context.Context<never>
 ): Option.Option<Tracer.AnySpan> => {
-  const otelParent = tracer.getSpanContext(context)
+  const otelParent = tracer.getSpan(context)?.spanContext()
   if (!otelParent) return Option.none()
   return Option.some(Tracer.externalSpan({
     spanId: otelParent.spanId,
     traceId: otelParent.traceId,
-    sampled: isSampled(otelParent.traceFlags),
-    annotations: Context.add(annotations, OtelParentSpanContext, otelParent)
+    sampled: (otelParent.traceFlags & 1) === 1,
+    annotations
   }))
 }
 
@@ -538,17 +537,6 @@ const makeSpanContext = (
   span: Tracer.AnySpan,
   annotations?: Context.Context<never>
 ): Otel.SpanContext => {
-  const otelParent = Context.getOrUndefined(span.annotations, OtelParentSpanContext)
-  if (otelParent !== undefined) {
-    if (annotations === undefined) return otelParent
-    const traceFlags = extractTraceService(span, annotations, OtelTraceFlags)
-    const traceState = extractTraceService(span, annotations, OtelTraceState)
-    return {
-      ...otelParent,
-      traceFlags: traceFlags ?? otelParent.traceFlags,
-      traceState: traceState ?? otelParent.traceState!
-    }
-  }
   const traceFlags = makeTraceFlags(span, annotations)
   const traceState = makeTraceState(span, annotations)!
   return ({

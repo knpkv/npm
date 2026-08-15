@@ -69,9 +69,8 @@ export const layerTracerProvider = (
           return provider
         }),
         (provider) =>
-          Effect.promise(() => provider.forceFlush()).pipe(
-            Effect.ensuring(Effect.promise(() => provider.shutdown())),
-            Effect.ignore
+          Effect.ignore(
+            Effect.promise(() => provider.forceFlush().then(() => provider.shutdown()))
           )
       )
     })
@@ -112,30 +111,30 @@ export const layer: {
         ? evaluate as Effect.Effect<Configuration>
         : Effect.sync(evaluate)
 
-      const ResourceLayer = Resource.layer(config.resource)
+      const ResourceLive = Resource.layer(config.resource)
 
-      const TracerLayer = isNonEmpty(config.spanProcessor)
+      const TracerLive = isNonEmpty(config.spanProcessor)
         ? Layer.provide(
           Tracer.layer,
           layerTracerProvider(config.spanProcessor, config.tracerConfig)
         )
         : Layer.empty
 
-      const LoggerLayer = isNonEmpty(config.logRecordProcessor)
+      const LoggerLive = isNonEmpty(config.logRecordProcessor)
         ? Layer.provide(
           Logger.layer({ mergeWithExisting: config.loggerMergeWithExisting }),
           Logger.layerLoggerProvider(config.logRecordProcessor, config.loggerProviderConfig)
         )
         : Layer.empty
 
-      const MetricsLayer = isNonEmpty(config.metricReader)
+      const MetricsLive = isNonEmpty(config.metricReader)
         ? Metrics.layer(constant(config.metricReader), {
           temporality: config.metricTemporality
         })
         : Layer.empty
 
-      return Layer.mergeAll(TracerLayer, MetricsLayer, LoggerLayer).pipe(
-        Layer.provideMerge(ResourceLayer)
+      return Layer.mergeAll(TracerLive, MetricsLive, LoggerLive).pipe(
+        Layer.provideMerge(ResourceLive)
       )
     })
   )

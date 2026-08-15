@@ -1,17 +1,17 @@
 {
   "name": "@effect/sql-mssql",
-  "version": "4.0.0-rc.109",
+  "version": "4.0.0-beta.97",
   "type": "module",
   "license": "MIT",
   "description": "A Microsoft SQL Server toolkit for Effect",
   "homepage": "https://effect.website",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Effect-TS/effect.git",
+    "url": "https://github.com/Effect-TS/effect-smol.git",
     "directory": "packages/sql/mssql"
   },
   "bugs": {
-    "url": "https://github.com/Effect-TS/effect/issues"
+    "url": "https://github.com/Effect-TS/effect-smol/issues"
   },
   "tags": [
     "typescript",
@@ -29,7 +29,6 @@
     ".": "./src/index.ts",
     "./*": "./src/*.ts",
     "./internal/*": null,
-    "./index": null,
     "./*/index": null
   },
   "files": [
@@ -37,10 +36,7 @@
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "ai-docs/**/*"
+    "dist/**/*.d.ts.map"
   ],
   "publishConfig": {
     "access": "public",
@@ -50,7 +46,6 @@
       ".": "./dist/index.js",
       "./*": "./dist/*.js",
       "./internal/*": null,
-      "./index": null,
       "./*/index": null
     }
   },
@@ -58,10 +53,11 @@
     "codegen": "effect-utils codegen",
     "build": "tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "coverage": "vitest --coverage"
   },
   "devDependencies": {
-    "@testcontainers/mssqlserver": "^12.0.4",
     "effect": "workspace:^"
   },
   "peerDependencies": {

@@ -41,7 +41,7 @@ import * as Snowflake from "./Snowflake.ts"
  * sending and notifying messages, coordinating persisted replies, and marking
  * runners unavailable.
  *
- * @category services
+ * @category context
  * @since 4.0.0
  */
 export class Runners extends Context.Service<Runners, {
@@ -90,8 +90,7 @@ export class Runners extends Context.Service<Runners, {
   >
 
   /**
-   * Notify a Runner that a message is available. Persisted messages recover
-   * replies from storage, while volatile messages complete after delivery.
+   * Notify a Runner that a message is available, then read replies from storage.
    */
   readonly notify: <R extends Rpc.Any>(
     options: {
@@ -99,14 +98,7 @@ export class Runners extends Context.Service<Runners, {
       readonly message: Message.Outgoing<R>
       readonly discard: boolean
     }
-  ) => Effect.Effect<
-    void,
-    | EntityNotAssignedToRunner
-    | RunnerUnavailable
-    | MailboxFull
-    | AlreadyProcessingMessage
-    | PersistenceError
-  >
+  ) => Effect.Effect<void, PersistenceError>
 
   /**
    * Notify the current Runner that a message is available, then read replies from
@@ -152,6 +144,12 @@ export class Runners extends Context.Service<Runners, {
  * possible, and pending replies are polled according to
  * `ShardingConfig.entityReplyPollInterval`.
  *
+ * **Gotchas**
+ *
+ * `notify` and `notifyLocal` only support RPCs annotated as persisted; calling
+ * either path with a non-persisted message dies instead of returning a typed
+ * error.
+ *
  * @see {@link makeRpc} for the RPC-backed implementation built on top of this constructor
  * @see {@link makeNoop} for a no-op implementation when remote runner communication is not needed
  *
@@ -177,7 +175,7 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
     const rpc = message.rpc as any as Rpc.AnyWithProps
     const persisted = Context.get(rpc.annotations, Persisted)
     if (!persisted) {
-      return afterPersist(message, false)
+      return Effect.die("Runners.notify only supports persisted messages")
     }
 
     if (message._tag === "OutgoingEnvelope") {
@@ -427,7 +425,7 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
  * `EntityNotAssignedToRunner` and ignores notifications, pings, and unavailable
  * runner reports.
  *
- * @category constructors
+ * @category No-op
  * @since 4.0.0
  */
 export const makeNoop: Effect.Effect<
@@ -468,18 +466,17 @@ const rpcErrors: Schema.Union<[
  * RPC group used for runner-to-runner communication, including ping, notify,
  * effect, stream, and envelope messages.
  *
- * @category models
+ * @category Rpcs
  * @since 4.0.0
  */
 export class Rpcs extends RpcGroup.make(
   Rpc.make("Ping"),
   Rpc.make("Notify", {
     payload: {
-      envelope: Envelope.Partial,
-      persisted: Schema.Boolean
+      envelope: Envelope.Partial
     },
     success: Schema.Void,
-    error: rpcErrors
+    error: Schema.Union([EntityNotAssignedToRunner, AlreadyProcessingMessage])
   }),
   Rpc.make("Effect", {
     payload: {
@@ -510,7 +507,7 @@ export class Rpcs extends RpcGroup.make(
 /**
  * Client interface generated from the runner RPC group.
  *
- * @category models
+ * @category Rpcs
  * @since 4.0.0
  */
 export interface RpcClient extends RpcClient_.FromGroup<typeof Rpcs, RpcClientError> {}
@@ -519,7 +516,7 @@ export interface RpcClient extends RpcClient_.FromGroup<typeof Rpcs, RpcClientEr
  * Builds a runner RPC client from the current `RpcClient.Protocol`, using the
  * `Runners` span prefix with tracing disabled.
  *
- * @category constructors
+ * @category Rpcs
  * @since 4.0.0
  */
 export const makeRpcClient: Effect.Effect<
@@ -577,22 +574,11 @@ export const makeRpc: Effect.Effect<
               persisted: isPersisted
             })
           ),
+          Effect.catchTag("RpcClientError", Effect.die),
           Effect.scoped,
-          Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address })))
+          Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
         )
       }
-      // Persisted requests can recover their reply from storage via the
-      // `RunnerUnavailable` path, volatile requests receive the defect as their reply.
-      const respondDefect = (defect: unknown) =>
-        isPersisted
-          ? Effect.fail(new RunnerUnavailable({ address }))
-          : message.respond(
-            new Reply.WithExit({
-              id: snowflakeGen.nextUnsafe(),
-              requestId: message.envelope.requestId,
-              exit: Exit.die(defect)
-            })
-          )
       const isStream = RpcSchema.isStreamSchema(rpc.successSchema)
       if (!isStream) {
         return Effect.matchEffect(Message.serializeRequest(message), {
@@ -604,6 +590,7 @@ export const makeRpc: Effect.Effect<
                   persisted: isPersisted
                 })
               ),
+              Effect.catchTag("RpcClientError", Effect.die),
               Effect.flatMap((reply) =>
                 Schema.decodeEffect(Reply.Reply(message.rpc))(reply).pipe(
                   Effect.provideContext(message.context),
@@ -612,8 +599,7 @@ export const makeRpc: Effect.Effect<
               ),
               Effect.flatMap(message.respond),
               Effect.scoped,
-              Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address }))),
-              Effect.catchDefect(respondDefect)
+              Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
             ),
           onFailure: (error) =>
             message.respond(
@@ -640,10 +626,10 @@ export const makeRpc: Effect.Effect<
                 Effect.flatMap((reply) => Effect.orDie(decode(reply))),
                 Effect.flatMap(message.respond),
                 Effect.forever,
+                Effect.catchTag("RpcClientError", Effect.die),
                 Effect.provideContext(message.context),
                 Effect.catchTag("Done", (_) => Effect.void),
-                Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address }))),
-                Effect.catchDefect(respondDefect)
+                Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
               )
             }),
             Effect.scoped
@@ -662,23 +648,15 @@ export const makeRpc: Effect.Effect<
       if (Option.isNone(address)) {
         return Effect.void
       }
-      const rpc = message.rpc as any as Rpc.AnyWithProps
-      const isPersisted = Context.get(rpc.annotations, Persisted)
       const envelope = message.envelope
       const encode: Effect.Effect<Envelope.AckChunk | Envelope.Interrupt | Envelope.PartialRequest> =
         message._tag === "OutgoingRequest" ? Effect.orDie(Message.serializeRequest(message)) : Effect.succeed(envelope)
-      const notify = Effect.flatMap(encode, (envelope) =>
+      return Effect.flatMap(encode, (envelope) =>
         RcMap.get(clients, address.value).pipe(
-          Effect.flatMap((client) =>
-            client.Notify({
-              envelope,
-              persisted: isPersisted
-            })
-          ),
+          Effect.flatMap((client) => client.Notify({ envelope })),
           Effect.scoped,
-          Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address: address.value })))
+          Effect.ignore
         ))
-      return isPersisted ? Effect.ignore(notify) : notify
     },
     onRunnerUnavailable: (address) => RcMap.invalidate(clients, address)
   })
@@ -703,7 +681,7 @@ export const layerRpc: Layer.Layer<
  * Service that creates an RPC client protocol for communicating with a runner at a
  * given address.
  *
- * @category services
+ * @category client
  * @since 4.0.0
  */
 export class RpcClientProtocol extends Context.Service<

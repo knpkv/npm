@@ -1,21 +1,24 @@
-# @effect/vitest
+# Introduction
 
-Helpers for testing Effect-based code with [Vitest](https://vitest.dev). Provides an enhanced `it` function with support for scoped tests, test services such as `TestClock`, shared layers, and property testing.
+Welcome to your guide on testing Effect-based applications using `vitest` and the `@effect/vitest` package. This package simplifies running tests for Effect-based code with Vitest.
 
-## Installation
+In this guide, we'll walk you through setting up the necessary dependencies and provide examples of how to write Effect-based tests using `@effect/vitest`.
 
-Ensure a supported `vitest` version is installed (`^4.1.0`), then add the package as a dev dependency:
+# Requirements
+
+First, ensure you have [`vitest`](https://vitest.dev/guide/) installed (version `1.6.0` or later).
 
 ```sh
-npm install -D vitest @effect/vitest@rc
+pnpm add -D vitest
 ```
 
-## Documentation
+Next, install the `@effect/vitest` package, which integrates Effect with Vitest.
 
-- [Effect website](https://effect.website)
-- [API reference](https://effect.website/docs/v4/api/vitest)
+```sh
+pnpm add -D @effect/vitest
+```
 
-## Overview
+# Overview
 
 The main entry point is the following import:
 
@@ -25,15 +28,15 @@ import { it } from "@effect/vitest"
 
 This import enhances the standard `it` function from `vitest` with several powerful features, including:
 
-| Feature        | Description                                                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------- |
-| `it.effect`    | Runs a scoped test with test services such as `TestClock` and `TestConsole`.                        |
-| `it.live`      | Runs a scoped test with the live Effect environment.                                                |
-| `it.layer`     | Shares a `Layer` between multiple tests.                                                            |
-| `it.prop`      | Runs property tests using Effect `Schema` values or FastCheck arbitraries.                          |
-| `it.flakyTest` | Retries an Effect that might occasionally fail until it succeeds or reaches the configured timeout. |
+| Feature         | Description                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------ |
+| `it.effect`     | Automatically injects a `TestContext` (e.g., `TestClock`) when running a test.                         |
+| `it.live`       | Runs the test with the live Effect environment.                                                        |
+| `it.scoped`     | Allows running an Effect program that requires a `Scope`.                                              |
+| `it.scopedLive` | Combines the features of `scoped` and `live`, using a live Effect environment that requires a `Scope`. |
+| `it.flakyTest`  | Facilitates the execution of tests that might occasionally fail.                                       |
 
-## Writing Tests with `it.effect`
+# Writing Tests with `it.effect`
 
 Here's how to use `it.effect` to write your tests:
 
@@ -45,9 +48,9 @@ import { it } from "@effect/vitest"
 it.effect("test name", () => EffectContainingAssertions, timeout: number | TestOptions = 5_000)
 ```
 
-`it.effect` automatically provides the Effect test services, including [`TestClock`](#using-the-testclock), and a fresh `Scope` for each test. The scope is closed when the test finishes.
+`it.effect` automatically provides a `TestContext`, allowing access to services like [`TestClock`](#using-the-testclock).
 
-### Testing Successful Operations
+## Testing Successful Operations
 
 To write a test, place your assertions directly within the main effect. This ensures that your assertions are evaluated as part of the test's execution.
 
@@ -73,7 +76,7 @@ it.effect("test success", () =>
   }))
 ```
 
-### Testing Successes and Failures as `Exit`
+## Testing Successes and Failures as `Exit`
 
 When you need to handle both success and failure cases in a test, you can use `Effect.exit` to capture the outcome as an `Exit` object. This allows you to verify both successful and failed results within the same test structure.
 
@@ -105,9 +108,9 @@ it.effect("test failure as Exit", () =>
   }))
 ```
 
-### Using the TestClock
+## Using the TestClock
 
-When writing tests with `it.effect`, Effect test services are automatically provided. These include the [`TestClock`](https://effect.website/docs/guides/testing/testclock), which allows you to simulate the passage of time in your tests.
+When writing tests with `it.effect`, a `TestContext` is automatically provided. This context gives access to various testing services, including the [`TestClock`](https://effect.website/docs/guides/testing/testclock), which allows you to simulate the passage of time in your tests.
 
 **Note**: If you want to use the real-time clock (instead of the simulated one), you can switch to `it.live`.
 
@@ -123,8 +126,7 @@ Here are examples that demonstrate how you can work with time in your tests usin
 
 ```ts
 import { it } from "@effect/vitest"
-import { Clock, Effect } from "effect"
-import { TestClock } from "effect/testing"
+import { Clock, Effect, TestClock } from "effect"
 
 // Effect to log the current time
 const logNow = Effect.gen(function*() {
@@ -152,7 +154,7 @@ it.effect("run the test with the test environment and the time adjusted", () =>
   }))
 ```
 
-### Skipping Tests
+## Skipping Tests
 
 If you need to temporarily disable a test but don't want to delete or comment out the code, you can use `it.effect.skip`. This is helpful when you're working on other parts of your test suite but want to keep the test for future execution.
 
@@ -176,7 +178,7 @@ it.effect.skip("test failure as Exit", () =>
   }))
 ```
 
-### Running a Single Test
+## Running a Single Test
 
 When you're developing or debugging, it's often useful to run a specific test without executing the entire test suite. You can achieve this by using `it.effect.only`, which will run just the selected test and ignore the others.
 
@@ -200,7 +202,7 @@ it.effect.only("test failure as Exit", () =>
   }))
 ```
 
-### Expecting Tests to Fail
+## Expecting Tests to Fail
 
 When adding new failing tests, you might not be able to fix them right away. Instead of skipping them, you may want to assert it fails, so that when you fix them, you'll know and can re-enable them before it regresses.
 
@@ -210,7 +212,7 @@ When adding new failing tests, you might not be able to fix them right away. Ins
 import { it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 
-function divide(a: number, b: number) {
+function divide(a: number, b: number): number {
   if (b === 0) return Effect.fail("Cannot divide by zero")
   return Effect.succeed(a / b)
 }
@@ -223,7 +225,7 @@ it.effect.fails("dividing by zero special cases", ({ expect }) =>
   }))
 ```
 
-### Logging
+## Logging
 
 By default, `it.effect` suppresses log output, which can be useful for keeping test results clean. However, if you want to enable logging during tests, you can use `it.live` or provide a custom logger to control the output.
 
@@ -244,7 +246,7 @@ it.effect("providing a logger displays a log", () =>
   Effect.gen(function*() {
     yield* Effect.log("it.effect with custom logger") // Log will be displayed
   }).pipe(
-    Effect.provide(Logger.layer([Logger.consolePretty()])) // Providing a pretty logger for log output
+    Effect.provide(Logger.pretty) // Providing a pretty logger for log output
   ))
 
 // This test runs using `it.live`, which enables logging by default
@@ -254,11 +256,11 @@ it.live("it.live displays a log", () =>
   }))
 ```
 
-## Resource Safety and Scope
+# Writing Tests with `it.scoped`
 
-Both `it.effect` and `it.live` provide a fresh `Scope` and close it after each test. Test bodies can therefore use scoped resources directly. Do not wrap the test body in `Effect.scoped`, because the test runner already manages its scope.
+The `it.scoped` method is used for tests that involve `Effect` programs needing a `Scope`. A `Scope` ensures that any resources your test acquires are managed properly, meaning they will be released when the test completes. This helps prevent resource leaks and guarantees test isolation.
 
-**Example** (Managing a Resource Lifecycle)
+**Example** (Using `it.scoped` to Manage Resource Lifecycle)
 
 ```ts
 import { it } from "@effect/vitest"
@@ -271,13 +273,20 @@ const release = Console.log("release resource")
 // Defining a resource that requires proper management
 const resource = Effect.acquireRelease(acquire, () => release)
 
+// Incorrect usage: This will result in a type error because it lacks a scope
 it.effect("run with scope", () =>
+  Effect.gen(function*() {
+    yield* resource
+  }))
+
+// Correct usage: Using 'it.scoped' to manage the scope correctly
+it.scoped("run with scope", () =>
   Effect.gen(function*() {
     yield* resource
   }))
 ```
 
-## Writing Tests with `it.flakyTest`
+# Writing Tests with `it.flakyTest`
 
 `it.flakyTest` is a utility designed to manage tests that may not succeed consistently on the first attempt. These tests, often referred to as "flaky," can fail due to factors like timing issues, external dependencies, or randomness. `it.flakyTest` allows for retrying these tests until they pass or a specified timeout is reached.
 

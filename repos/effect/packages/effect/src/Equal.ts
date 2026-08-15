@@ -28,7 +28,7 @@ import { hasProperty } from "./Predicate.ts"
  *
  * **Example** (Implementing Equal on a class)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal, Hash } from "effect"
  *
  * class UserId implements Equal.Equal {
@@ -42,9 +42,6 @@ import { hasProperty } from "./Predicate.ts"
  *     return Hash.string(this.id)
  *   }
  * }
- *
- * Equal.equals(new UserId("1"), new UserId("1")) // => true
- * Equal.equals(new UserId("1"), new UserId("2")) // => false
  * ```
  *
  * @see {@link Equal} — the interface that uses this symbol
@@ -79,7 +76,7 @@ export const symbol = "~effect/interfaces/Equal"
  *
  * **Example** (Comparing coordinates by value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal, Hash } from "effect"
  *
  * class Coordinate implements Equal.Equal {
@@ -96,8 +93,8 @@ export const symbol = "~effect/interfaces/Equal"
  *   }
  * }
  *
- * Equal.equals(new Coordinate(1, 2), new Coordinate(1, 2)) // => true
- * Equal.equals(new Coordinate(1, 2), new Coordinate(3, 4)) // => false
+ * console.log(Equal.equals(new Coordinate(1, 2), new Coordinate(1, 2))) // true
+ * console.log(Equal.equals(new Coordinate(1, 2), new Coordinate(3, 4))) // false
  * ```
  *
  * @see {@link symbol} — the property key used by the equality method
@@ -142,25 +139,30 @@ export interface Equal extends Hash.Hash {
  *
  * **Example** (Comparing values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal } from "effect"
  *
- * Equal.equals(1, 1) // => true
- * Equal.equals(NaN, NaN) // => true
- * Equal.equals("a", "b") // => false
+ * // Primitives
+ * console.log(Equal.equals(1, 1))         // true
+ * console.log(Equal.equals(NaN, NaN))     // true
+ * console.log(Equal.equals("a", "b"))     // false
  *
- * Equal.equals({ a: 1, b: 2 }, { a: 1, b: 2 }) // => true
- * Equal.equals([1, [2, 3]], [1, [2, 3]]) // => true
+ * // Objects and arrays
+ * console.log(Equal.equals({ a: 1, b: 2 }, { a: 1, b: 2 })) // true
+ * console.log(Equal.equals([1, [2, 3]], [1, [2, 3]]))         // true
  *
- * Equal.equals(new Date("2024-01-01"), new Date("2024-01-01")) // => true
+ * // Dates
+ * console.log(Equal.equals(new Date("2024-01-01"), new Date("2024-01-01"))) // true
  *
+ * // Maps (order-independent)
  * const m1 = new Map([["a", 1], ["b", 2]])
  * const m2 = new Map([["b", 2], ["a", 1]])
- * Equal.equals(m1, m2) // => true
+ * console.log(Equal.equals(m1, m2)) // true
  *
+ * // Curried form
  * const is5 = Equal.equals(5)
- * is5(5) // => true
- * is5(3) // => false
+ * console.log(is5(5)) // true
+ * console.log(is5(3)) // false
  * ```
  *
  * @see {@link Equal} — the interface for custom equality
@@ -233,9 +235,7 @@ function compareObjects(self: object, that: object): boolean {
     return false
   } else if (self instanceof Date) {
     if (!(that instanceof Date)) return false
-    const selfTime = self.getTime()
-    const thatTime = that.getTime()
-    return selfTime === thatTime || (Number.isNaN(selfTime) && Number.isNaN(thatTime))
+    return self.toISOString() === that.toISOString()
   } else if (self instanceof RegExp) {
     if (!(that instanceof RegExp)) return false
     return self.toString() === that.toString()
@@ -256,20 +256,8 @@ function compareObjects(self: object, that: object): boolean {
       }
       return compareArrays(self, that)
     } else if (ArrayBuffer.isView(self)) {
-      const selfIsDataView = self instanceof DataView
-      if (
-        !ArrayBuffer.isView(that) ||
-        self.byteLength !== that.byteLength ||
-        selfIsDataView !== (that instanceof DataView)
-      ) {
+      if (!ArrayBuffer.isView(that) || self.byteLength !== that.byteLength) {
         return false
-      }
-      if (selfIsDataView) {
-        const thatDataView = that as DataView
-        return compareTypedArrays(
-          new Uint8Array(self.buffer, self.byteOffset, self.byteLength),
-          new Uint8Array(thatDataView.buffer, thatDataView.byteOffset, thatDataView.byteLength)
-        )
       }
       return compareTypedArrays(self as Uint8Array, that as Uint8Array)
     } else if (self instanceof Map) {
@@ -360,14 +348,10 @@ function compareRecords(
 /** @internal */
 export function makeCompareMap<K, V>(keyEquivalence: Equivalence<K>, valueEquivalence: Equivalence<V>) {
   return function compareMaps(self: Iterable<[K, V]>, that: Iterable<[K, V]>): boolean {
-    const thatEntries = Array.from(that)
     for (const [selfKey, selfValue] of self) {
       let found = false
-      for (let i = 0; i < thatEntries.length; i++) {
-        const [thatKey, thatValue] = thatEntries[i]
+      for (const [thatKey, thatValue] of that) {
         if (keyEquivalence(selfKey, thatKey) && valueEquivalence(selfValue, thatValue)) {
-          thatEntries[i] = thatEntries[thatEntries.length - 1]
-          thatEntries.pop()
           found = true
           break
         }
@@ -386,14 +370,10 @@ const compareMaps = makeCompareMap(compareBoth, compareBoth)
 /** @internal */
 export function makeCompareSet<A>(equivalence: Equivalence<A>) {
   return function compareSets(self: Iterable<A>, that: Iterable<A>): boolean {
-    const thatValues = Array.from(that)
     for (const selfValue of self) {
       let found = false
-      for (let i = 0; i < thatValues.length; i++) {
-        const thatValue = thatValues[i]
+      for (const thatValue of that) {
         if (equivalence(selfValue, thatValue)) {
-          thatValues[i] = thatValues[thatValues.length - 1]
-          thatValues.pop()
           found = true
           break
         }
@@ -426,7 +406,7 @@ const compareSets = makeCompareSet(compareBoth)
  *
  * **Example** (Checking Equal values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal, Hash } from "effect"
  *
  * class Token implements Equal.Equal {
@@ -439,9 +419,9 @@ const compareSets = makeCompareSet(compareBoth)
  *   }
  * }
  *
- * Equal.isEqual(new Token("abc")) // => true
- * Equal.isEqual({ x: 1 }) // => false
- * Equal.isEqual(42) // => false
+ * console.log(Equal.isEqual(new Token("abc"))) // true
+ * console.log(Equal.isEqual({ x: 1 }))         // false
+ * console.log(Equal.isEqual(42))                // false
  * ```
  *
  * @see {@link Equal} — the interface being checked
@@ -467,10 +447,12 @@ export const isEqual = (u: unknown): u is Equal => hasProperty(u, symbol)
  *
  * **Example** (Deduplicating with Equal semantics)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Array, Equal } from "effect"
  *
- * Array.dedupeWith([1, 2, 2, 3, 1], Equal.asEquivalence<number>()) // => [1, 2, 3]
+ * const eq = Equal.asEquivalence<number>()
+ * const result = Array.dedupeWith([1, 2, 2, 3, 1], eq)
+ * console.log(result) // [1, 2, 3]
  * ```
  *
  * @see {@link equals} — the underlying comparison function
@@ -499,18 +481,18 @@ export const asEquivalence: <A>() => Equivalence<A> = () => equals
  *
  * **Example** (Opting out of structural equality)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal } from "effect"
  *
  * const a = { x: 1 }
  * const b = { x: 1 }
  *
- * Equal.equals(a, b) // => true
+ * console.log(Equal.equals(a, b)) // true  (structural)
  *
  * const aRef = Equal.byReference(a)
- * Equal.equals(aRef, b) // => false
- * Equal.equals(aRef, aRef) // => true
- * aRef.x // => 1
+ * console.log(Equal.equals(aRef, b))    // false (reference)
+ * console.log(Equal.equals(aRef, aRef)) // true  (same reference)
+ * console.log(aRef.x)                   // 1     (proxy reads through)
  * ```
  *
  * @see {@link byReferenceUnsafe} — same effect without a proxy (mutates the
@@ -544,17 +526,17 @@ export const byReference = <T extends object>(obj: T): T => byReferenceUnsafe(ne
  *
  * **Example** (Marking an object for reference equality)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Equal } from "effect"
  *
  * const obj1 = { a: 1, b: 2 }
  * const obj2 = { a: 1, b: 2 }
  *
- * const marked = Equal.byReferenceUnsafe(obj1)
+ * Equal.byReferenceUnsafe(obj1)
  *
- * Equal.equals(obj1, obj2) // => false
- * Equal.equals(obj1, obj1) // => true
- * marked === obj1 // => true
+ * console.log(Equal.equals(obj1, obj2))   // false (reference)
+ * console.log(Equal.equals(obj1, obj1))   // true  (same reference)
+ * console.log(obj1 === Equal.byReferenceUnsafe(obj1)) // true (same object)
  * ```
  *
  * @see {@link byReference} — safer alternative that creates a proxy

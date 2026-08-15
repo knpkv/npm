@@ -130,22 +130,6 @@ describe("Queue", () => {
       assert.deepStrictEqual(result, [5])
     }))
 
-  it.effect("take can be interrupted without losing offers", () =>
-    Effect.gen(function*() {
-      const queue = yield* Queue.unbounded<number>()
-      const interruptedFiber = yield* Queue.take(queue).pipe(Effect.forkChild)
-
-      yield* Effect.yieldNow
-      yield* Fiber.interrupt(interruptedFiber)
-      assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(interruptedFiber)))
-
-      const liveFiber = yield* Queue.take(queue).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
-      yield* Queue.offer(queue, 1)
-
-      assert.strictEqual(yield* Fiber.join(liveFiber), 1)
-    }))
-
   it.effect("done completes takes", () =>
     Effect.gen(function*() {
       const queue = yield* Queue.bounded<number, Cause.Done>(2)
@@ -317,28 +301,6 @@ describe("Queue", () => {
       yield* Effect.flip(Queue.takeAll(queue))
       yield* Effect.yieldNow
       assert.isNotNull(fiber.pollUnsafe())
-    }))
-
-  it.effect("end preserves Done for take and excludes it from await", () =>
-    Effect.gen(function*() {
-      const queue = yield* Queue.unbounded<never, Cause.Done>()
-      const takeFiber = yield* Queue.take(queue).pipe(Effect.forkChild)
-      const awaitFiber = yield* Queue.await(queue).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
-      yield* Queue.end(queue)
-
-      assert.deepStrictEqual(yield* Fiber.await(takeFiber), Exit.fail(Cause.Done()))
-      assert.strictEqual(yield* Fiber.join(awaitFiber), void 0)
-    }))
-
-  it.effect("await preserves non-Done failures", () =>
-    Effect.gen(function*() {
-      const queue = yield* Queue.unbounded<number, string>()
-      const fiber = yield* Queue.await(queue).pipe(Effect.exit, Effect.forkChild)
-      yield* Effect.yieldNow
-      yield* Queue.fail(queue, "boom")
-
-      assert.deepStrictEqual(yield* Fiber.join(fiber), Exit.fail("boom"))
     }))
 
   it.effect("bounded 0 capacity", () =>

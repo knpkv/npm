@@ -6,12 +6,12 @@
 
 import { Effect, Schema } from "effect"
 
-export class ValidationError extends Schema.TaggedError<ValidationError>()("ValidationError", {
+export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("ValidationError", {
   message: Schema.String
 }) {}
 
-export class NetworkError extends Schema.TaggedError<NetworkError>()("NetworkError", {
-  statusCode: Schema.Int
+export class NetworkError extends Schema.TaggedErrorClass<NetworkError>()("NetworkError", {
+  statusCode: Schema.Number
 }) {}
 
 declare const fetchUser: (id: string) => Effect.Effect<string, ValidationError | NetworkError>

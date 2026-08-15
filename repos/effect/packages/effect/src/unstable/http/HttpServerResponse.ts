@@ -34,7 +34,6 @@ import * as HttpClientRequest from "./HttpClientRequest.ts"
 import * as HttpClientResponse from "./HttpClientResponse.ts"
 import * as HttpIncomingMessage from "./HttpIncomingMessage.ts"
 import type { HttpPlatform } from "./HttpPlatform.ts"
-import * as bodyInternal from "./internal/httpBody.ts"
 import * as Template from "./Template.ts"
 import * as UrlParams from "./UrlParams.ts"
 
@@ -534,24 +533,6 @@ export const setHeader: {
     makeResponse({
       ...self,
       headers: Headers.set(self.headers, key, value)
-    }, true)
-)
-
-/**
- * Returns a response with the specified header removed.
- *
- * @category combinators
- * @since 4.0.0
- */
-export const removeHeader: {
-  (key: string): (self: HttpServerResponse) => HttpServerResponse
-  (self: HttpServerResponse, key: string): HttpServerResponse
-} = dual(
-  2,
-  (self: HttpServerResponse, key: string): HttpServerResponse =>
-    makeResponse({
-      ...self,
-      headers: Headers.remove(self.headers, key)
     })
 )
 
@@ -570,7 +551,7 @@ export const setHeaders: {
     makeResponse({
       ...self,
       headers: Headers.setAll(self.headers, input)
-    }, true)
+    })
 )
 
 /**
@@ -932,8 +913,7 @@ export const setBody: {
   (self: HttpServerResponse, body: Body.HttpBody): HttpServerResponse
 } = dual(
   2,
-  (self: HttpServerResponse, body: Body.HttpBody): HttpServerResponse =>
-    makeResponse({ ...self, headers: bodyInternal.updateHeaders(self.headers, body), body })
+  (self: HttpServerResponse, body: Body.HttpBody): HttpServerResponse => makeResponse({ ...self, body })
 )
 
 /**
@@ -1339,7 +1319,7 @@ const makeResponse = (options: {
   readonly headers?: Headers.Headers | undefined
   readonly cookies?: Cookies.Cookies | undefined
   readonly body?: Body.HttpBody | undefined
-}, preferHeaders = false) => {
+}) => {
   const self = Object.create(Proto) as Mutable<HttpServerResponse>
   self.status = options.status
   self.statusText = options.statusText
@@ -1347,13 +1327,13 @@ const makeResponse = (options: {
   self.body = options.body ?? Body.empty
   if (
     self.body._tag !== "Empty" &&
-    (self.body.contentType || self.body.contentLength !== undefined)
+    (self.body.contentType || self.body.contentLength)
   ) {
     const newHeaders = Headers.fromRecordUnsafe({ ...options.headers }) as any
-    if (self.body.contentType && (!preferHeaders || newHeaders["content-type"] === undefined)) {
+    if (self.body.contentType) {
       newHeaders["content-type"] = self.body.contentType
     }
-    if (self.body.contentLength !== undefined && (!preferHeaders || newHeaders["content-length"] === undefined)) {
+    if (self.body.contentLength) {
       newHeaders["content-length"] = self.body.contentLength.toString()
     }
     self.headers = newHeaders

@@ -31,14 +31,18 @@ import type * as Types from "./Types.ts"
  *
  * **Example** (Yielding a wrapped value in a generator)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Utils } from "effect"
  *
  * const gen = new Utils.SingleShotGen<string, number>("hello")
  *
- * gen.next(0) // => { value: "hello", done: false }
+ * // First call yields the wrapped value
+ * console.log(gen.next(0))
+ * // { value: "hello", done: false }
  *
- * gen.next(42) // => { value: 42, done: true }
+ * // Second call signals completion with the provided value
+ * console.log(gen.next(42))
+ * // { value: 42, done: true }
  * ```
  *
  * @see {@link Gen} for the type-level signature that relies on `SingleShotGen`
@@ -109,21 +113,15 @@ export class SingleShotGen<T, A> implements IterableIterator<T, A> {
  *
  * **Example** (Declaring variance for a TypeLambda)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { Option, Utils } from "effect"
  *
- * const variance: Utils.Variance<
+ * declare const variance: Utils.Variance<
  *   Option.OptionTypeLambda,
- *   unknown,
- *   string,
- *   string
- * > = {
- *   _F: (value) => value,
- *   _R: () => {},
- *   _O: () => "output",
- *   _E: () => "error"
- * }
- * Array.of(variance._O(undefined as never), variance._E(undefined as never)) // => ["output", "error"]
+ *   never,
+ *   never,
+ *   never
+ * >
  * ```
  *
  * @see {@link Gen} for the type-level signature that uses `Variance`
@@ -154,15 +152,10 @@ export interface Variance<in out F extends TypeLambda, in R, out O, out E> {
  *
  * **Example** (Typing a gen function for Option)
  *
- * ```ts import.meta.vitest
- * import { Option } from "effect"
- * import type { Utils } from "effect"
+ * ```ts
+ * import type { Option, Utils } from "effect"
  *
- * const gen: Utils.Gen<Option.OptionTypeLambda> = Option.gen
- * const result = gen(function*() {
- *   return yield* Option.some(1)
- * })
- * result // => Option.some(1)
+ * declare const gen: Utils.Gen<Option.OptionTypeLambda>
  * ```
  *
  * @see {@link Variance} for encoding the variance used for inference

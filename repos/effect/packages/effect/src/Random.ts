@@ -33,20 +33,21 @@ import * as Predicate from "./Predicate.ts"
  *
  * **Example** (Accessing the random service)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const float = yield* Random.next
  *   const integer = yield* Random.nextInt
  *   const inRange = yield* Random.nextIntBetween(1, 100)
- *   return [float, integer, inRange] as const
- * })
  *
- * await Effect.runPromise(program.pipe(Random.withSeed("example"))) // => [0.1633802591287037, 3434461687501127, 1]
+ *   console.log("Float:", float)
+ *   console.log("Integer:", integer)
+ *   console.log("In range:", inRange)
+ * })
  * ```
  *
- * @category services
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const Random: Context.Reference<{
@@ -67,13 +68,16 @@ const randomWith = <A>(f: (random: typeof Random["Service"]) => A): Effect.Effec
  *
  * **Example** (Generating a random number)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.next.pipe(Random.withSeed("example"))) // => 0.1633802591287037
+ * const program = Effect.gen(function*() {
+ *   const randomDouble = yield* Random.next
+ *   console.log("Random double:", randomDouble)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const next: Effect.Effect<number> = randomWith((r) => r.nextDoubleUnsafe())
@@ -87,13 +91,16 @@ export const next: Effect.Effect<number> = randomWith((r) => r.nextDoubleUnsafe(
  *
  * **Example** (Generating a random boolean)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.nextBoolean.pipe(Random.withSeed("example"))) // => false
+ * const program = Effect.gen(function*() {
+ *   const value = yield* Random.nextBoolean
+ *   console.log("Random boolean:", value)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const nextBoolean: Effect.Effect<boolean> = randomWith((r) => r.nextDoubleUnsafe() > 0.5)
@@ -109,13 +116,16 @@ export const nextBoolean: Effect.Effect<boolean> = randomWith((r) => r.nextDoubl
  *
  * **Example** (Generating a random integer)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.nextInt.pipe(Random.withSeed("example"))) // => -6064002158214091
+ * const program = Effect.gen(function*() {
+ *   const randomInt = yield* Random.nextInt
+ *   console.log("Random integer:", randomInt)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const nextInt: Effect.Effect<number> = randomWith((r) => r.nextIntUnsafe())
@@ -129,13 +139,16 @@ export const nextInt: Effect.Effect<number> = randomWith((r) => r.nextIntUnsafe(
  *
  * **Example** (Generating a bounded random number)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.nextBetween(0, 1).pipe(Random.withSeed("example"))) // => 0.1633802591287037
+ * const program = Effect.gen(function*() {
+ *   const randomDouble = yield* Random.nextBetween(0, 1)
+ *   console.log("Random double: ", randomDouble)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 4.0.0
  */
 export const nextBetween = (min: number, max: number): Effect.Effect<number> =>
@@ -156,7 +169,7 @@ export const nextBetween = (min: number, max: number): Effect.Effect<number> =>
  *
  * **Example** (Generating a bounded random integer)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -165,13 +178,10 @@ export const nextBetween = (min: number, max: number): Effect.Effect<number> =>
  *     halfOpen: true
  *   })
  *   const diceRoll3 = yield* Random.nextIntBetween(0, 10)
- *   return [diceRoll1, diceRoll2, diceRoll3]
  * })
- *
- * await Effect.runPromise(program.pipe(Random.withSeed("example"))) // => [1, 4, 0]
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const nextIntBetween = (min: number, max: number, options?: {
@@ -194,13 +204,16 @@ export const nextIntBetween = (min: number, max: number, options?: {
  *
  * **Example** (Shuffling values)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.shuffle([1, 2, 3, 4, 5]).pipe(Random.withSeed("example"))) // => [4, 2, 5, 3, 1]
+ * const program = Effect.gen(function*() {
+ *   const values = yield* Random.shuffle([1, 2, 3, 4, 5])
+ *   console.log(values)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 2.0.0
  */
 export const shuffle = <A>(elements: Iterable<A>): Effect.Effect<Array<A>> =>
@@ -230,13 +243,16 @@ export const shuffle = <A>(elements: Iterable<A>): Effect.Effect<Array<A>> =>
  *
  * **Example** (Choosing a random value)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
- * await Effect.runPromise(Random.choice(["red", "green", "blue"] as const).pipe(Random.withSeed("example"))) // => "red"
+ * const program = Effect.gen(function*() {
+ *   const value = yield* Random.choice(["red", "green", "blue"] as const)
+ *   console.log(value)
+ * })
  * ```
  *
- * @category generators
+ * @category Random Number Generators
  * @since 3.6.0
  */
 export const choice: <Self extends Iterable<unknown>>(
@@ -269,22 +285,25 @@ export const choice: <Self extends Iterable<unknown>>(
  *
  * **Example** (Seeding random generation)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Random } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const value1 = yield* Random.next
  *   const value2 = yield* Random.next
- *   return [value1, value2]
+ *   console.log(value1, value2)
  * })
  *
- * await Effect.runPromise(Effect.all([
- *   program.pipe(Random.withSeed("my-seed")),
- *   program.pipe(Random.withSeed("my-seed"))
- * ])) // => [[0.018368576514773527, 0.4010840628128671], [0.018368576514773527, 0.4010840628128671]]
+ * // Same seed produces same sequence
+ * const seeded1 = program.pipe(Random.withSeed("my-seed"))
+ * const seeded2 = program.pipe(Random.withSeed("my-seed"))
+ *
+ * // Both will output identical values
+ * Effect.runPromise(seeded1)
+ * Effect.runPromise(seeded2)
  * ```
  *
- * @category providing services
+ * @category Seeding
  * @since 4.0.0
  */
 export const withSeed: {

@@ -21,16 +21,13 @@ import type { DiscoveredProvider } from "./Discovery.ts"
  *
  * **Example** (Creating a generation error)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import * as Generator from "@effect/ai-codegen/Generator"
  *
  * const error = new Generator.GenerationError({
  *   provider: "openai",
  *   cause: new Error("Invalid spec")
  * })
- *
- * error._tag // => "GenerationError"
- * error.provider // => "openai"
  * ```
  *
  * @category errors
@@ -46,16 +43,13 @@ export class GenerationError extends Data.TaggedError("GenerationError")<{
  *
  * **Example** (Creating a patch error)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import * as Generator from "@effect/ai-codegen/Generator"
  *
  * const error = new Generator.PatchError({
  *   provider: "openai",
  *   cause: new Error("Invalid patch")
  * })
- *
- * error._tag // => "PatchError"
- * error.provider // => "openai"
  * ```
  *
  * @category errors
@@ -69,7 +63,7 @@ export class PatchError extends Data.TaggedError("PatchError")<{
 /**
  * Service for generating Effect code from OpenAPI specs.
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface CodeGenerator {

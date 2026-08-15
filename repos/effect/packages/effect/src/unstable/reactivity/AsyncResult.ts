@@ -17,7 +17,6 @@ import * as Exit from "../../Exit.ts"
 import type { LazyArg } from "../../Function.ts"
 import { constTrue, dual, identity } from "../../Function.ts"
 import * as Hash from "../../Hash.ts"
-import * as InternalRecord from "../../internal/record.ts"
 import * as Option from "../../Option.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import type { Predicate, Refinement } from "../../Predicate.ts"
@@ -142,7 +141,7 @@ const ResultProto = {
 /**
  * Returns whether an `AsyncResult` is currently waiting for an asynchronous computation or refresh to finish.
  *
- * @category predicates
+ * @category refinements
  * @since 4.0.0
  */
 export const isWaiting = <A, E>(result: AsyncResult<A, E>): boolean => result.waiting
@@ -194,7 +193,7 @@ export const waitingFrom = <A, E>(previous: Option.Option<AsyncResult<A, E>>): A
 /**
  * Returns `true` when an `AsyncResult` is in the `Initial` state.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isInitial = <A, E>(result: AsyncResult<A, E>): result is Initial<A, E> => result._tag === "Initial"
@@ -202,7 +201,7 @@ export const isInitial = <A, E>(result: AsyncResult<A, E>): result is Initial<A,
 /**
  * Returns `true` when an `AsyncResult` is either `Success` or `Failure`.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isNotInitial = <A, E>(result: AsyncResult<A, E>): result is Success<A, E> | Failure<A, E> =>
@@ -236,7 +235,7 @@ export interface Success<A, E = never> extends AsyncResult.Proto<A, E> {
 /**
  * Returns `true` when an `AsyncResult` is a `Success`.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isSuccess = <A, E>(result: AsyncResult<A, E>): result is Success<A, E> => result._tag === "Success"
@@ -274,7 +273,7 @@ export interface Failure<A, E = never> extends AsyncResult.Proto<A, E> {
 /**
  * Returns `true` when an `AsyncResult` is a `Failure`.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isFailure = <A, E>(result: AsyncResult<A, E>): result is Failure<A, E> => result._tag === "Failure"
@@ -282,7 +281,7 @@ export const isFailure = <A, E>(result: AsyncResult<A, E>): result is Failure<A,
 /**
  * Returns `true` when an `AsyncResult` is a `Failure` whose cause contains only interruptions.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isInterrupted = <A, E>(result: AsyncResult<A, E>): result is Failure<A, E> =>
@@ -695,12 +694,12 @@ export const all = <const Arg extends Iterable<any> | Record<string, any>>(
   for (let i = 0; i < entries.length; i++) {
     const [key, result] = entries[i]
     if (!isAsyncResult(result)) {
-      InternalRecord.assignProperty(successes, key, result)
+      successes[key] = result
       continue
     } else if (!isSuccess(result)) {
       return result as any
     }
-    InternalRecord.assignProperty(successes, key, result.value)
+    successes[key] = result.value
     if (result.waiting) {
       waiting = true
     }
@@ -725,7 +724,7 @@ export const builder = <A extends AsyncResult<any, any>>(self: A): Builder<
 /**
  * Type marker used by `Builder` to track whether defect failures still need to be handled.
  *
- * @category utility types
+ * @category models
  * @since 4.0.0
  */
 export interface Defect {
@@ -735,7 +734,7 @@ export interface Defect {
 /**
  * Type marker used by `Builder` to track whether interrupt failures still need to be handled.
  *
- * @category utility types
+ * @category models
  * @since 4.0.0
  */
 export interface Interrupt {
@@ -961,7 +960,7 @@ export const Schema = <
     [success_, Schema_.Cause(error, Schema_.Defect())],
     ([value, cause]) => (input, ast, options) => {
       if (!isAsyncResult(input)) {
-        return Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
+        return Effect.fail(new SchemaIssue.InvalidType(ast, Option.some(input)))
       }
       switch (input._tag) {
         case "Initial":
@@ -971,7 +970,8 @@ export const Schema = <
             SchemaParser.decodeUnknownEffect(value)(input.value, options),
             {
               onSuccess: (value) => success(value, input),
-              onFailure: (issue) => SchemaIssue.makeCompositeAtKey(ast, "value", issue, input, options)
+              onFailure: (issue) =>
+                new SchemaIssue.Composite(ast, Option.some(input), [new SchemaIssue.Pointer(["value"], issue)])
             }
           )
         case "Failure": {
@@ -982,14 +982,9 @@ export const Schema = <
                 {
                   onSuccess: (value) => Option.some(success<A["Type"], E["Type"]>(value, ps)),
                   onFailure: (issue) =>
-                    new SchemaIssue.Composite(
-                      ast,
-                      [
-                        new SchemaIssue.Pointer(["previousSuccess", "value"], issue)
-                      ],
-                      input,
-                      options
-                    )
+                    new SchemaIssue.Composite(ast, Option.some(input), [
+                      new SchemaIssue.Pointer(["previousSuccess", "value"], issue)
+                    ])
                 }
               )
             ),
@@ -997,7 +992,7 @@ export const Schema = <
           )
           const causeEffect = Effect.mapErrorEager(
             SchemaParser.decodeUnknownEffect(cause)(input.cause, options),
-            (issue) => SchemaIssue.makeCompositeAtKey(ast, "cause", issue, input, options)
+            (issue) => new SchemaIssue.Composite(ast, Option.some(input), [new SchemaIssue.Pointer(["cause"], issue)])
           )
           return Effect.flatMapEager(
             prevSuccessEffect,
@@ -1014,7 +1009,7 @@ export const Schema = <
     {
       expected: "AsyncResult",
       toCodec([value, cause]) {
-        const Success = Schema_.TaggedStruct("Success", { value, waiting: Schema_.Boolean, timestamp: Schema_.Int })
+        const Success = Schema_.TaggedStruct("Success", { value, waiting: Schema_.Boolean, timestamp: Schema_.Number })
         return Schema_.link<AsyncResult<A["Encoded"], E["Encoded"]>>()(
           Schema_.Union([
             Schema_.TaggedStruct("Initial", { waiting: Schema_.Boolean }),

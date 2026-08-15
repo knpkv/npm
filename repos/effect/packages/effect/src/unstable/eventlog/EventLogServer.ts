@@ -80,8 +80,7 @@ export const layerRpcHandlers = (options: {
     signingPublicKey: Uint8Array<ArrayBuffer>
   ) => Effect.Effect<Uint8Array<ArrayBuffer>>
   readonly onWrite: (
-    data: Uint8Array<ArrayBuffer>,
-    authenticatedPublicKeys: ReadonlySet<string>
+    data: Uint8Array<ArrayBuffer>
   ) => Effect.Effect<void, EventLogProtocolError>
   readonly changes: (options: {
     readonly publicKey: string
@@ -162,46 +161,24 @@ export const layerRpcHandlers = (options: {
           })
         }
 
-        const authenticatedIdentities = new Set(
-          Context.getOrUndefined(client.annotations, AuthenticatedIdentities)
-        )
-        authenticatedIdentities.add(request.publicKey)
         void client
           .annotate(EventLog.Identity, {
             publicKey: request.publicKey,
             privateKey: constEmptyPrivateKey
           })
-          .annotate(AuthenticatedIdentities, authenticatedIdentities)
           .annotate(ChunkedMessageState, new Map())
       }),
-      "EventLog.WriteSingle": Effect.fnUntraced(function*(request, { client }) {
-        yield* options.onWrite(
-          request.data,
-          Context.getOrUndefined(client.annotations, AuthenticatedIdentities) ?? new Set()
-        )
+      "EventLog.WriteSingle": Effect.fnUntraced(function*(request) {
+        yield* options.onWrite(request.data)
       }),
       "EventLog.WriteChunked": Effect.fnUntraced(function*(request, { client }) {
         const state = Context.get(client.annotations, ChunkedMessageState)
         const data = ChunkedMessage.join(state, request)
         if (!data) return
-        yield* options.onWrite(
-          data,
-          Context.getOrUndefined(client.annotations, AuthenticatedIdentities) ?? new Set()
-        )
+        yield* options.onWrite(data)
       }),
-      "EventLog.Changes": (request, { client }) => {
-        const authenticatedIdentities = Context.getOrUndefined(client.annotations, AuthenticatedIdentities)
-        if (!authenticatedIdentities?.has(request.publicKey)) {
-          return Stream.fail(
-            new EventLogProtocolError({
-              requestTag: "Changes",
-              publicKey: request.publicKey,
-              code: "Forbidden",
-              message: "Identity is not authenticated"
-            })
-          )
-        }
-        return options.changes({
+      "EventLog.Changes": (request) =>
+        options.changes({
           publicKey: request.publicKey,
           storeId: request.storeId,
           startSequence: request.startSequence
@@ -223,7 +200,6 @@ export const layerRpcHandlers = (options: {
             )
           )
         )
-      }
     })
   })).pipe(
     Layer.merge(layerAuthMiddleware)
@@ -238,7 +214,7 @@ export const layerRpcHandlers = (options: {
  * Use to keep per-client chunk assembly state while handling chunked event-log
  * writes.
  *
- * @category services
+ * @category chunked message state
  * @since 4.0.0
  */
 export class ChunkedMessageState extends Context.Reference<
@@ -250,16 +226,6 @@ export class ChunkedMessageState extends Context.Reference<
 >("effect/eventlog/EventLogServer/ChunkedMessageState", {
   defaultValue: () => new Map()
 }) {}
-
-/**
- * Annotation containing the public keys authenticated on an RPC connection.
- *
- * @category services
- * @since 4.0.0
- */
-export class AuthenticatedIdentities extends Context.Service<AuthenticatedIdentities, Set<string>>()(
-  "effect/eventlog/EventLogServer/AuthenticatedIdentities"
-) {}
 
 class SessionAuthCacheKey extends Data.Class<{
   readonly publicKey: string

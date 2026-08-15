@@ -26,7 +26,7 @@ import * as Utils from "./Utils.ts"
  * types, and the implementation body. The generator swaps implementations to
  * choose between schema-backed clients and type-only clients.
  *
- * @category services
+ * @category code generation
  * @since 4.0.0
  */
 export class OpenApiTransformer extends Context.Service<
@@ -40,30 +40,21 @@ export class OpenApiTransformer extends Context.Service<
 
 interface ImportRequirements {
   readonly eventStream: boolean
-  readonly eventStreamData: boolean
-  readonly eventStreamSchema: boolean
   readonly octetStream: boolean
 }
 
 const computeImportRequirements = (operations: ReadonlyArray<ParsedOperation>): ImportRequirements => {
   let eventStream = false
-  let eventStreamData = false
-  let eventStreamSchema = false
   let octetStream = false
   for (const op of operations) {
     if (op.sseSchema) {
       eventStream = true
-      if (op.sseSchemaMode === "event") {
-        eventStreamSchema = true
-      } else {
-        eventStreamData = true
-      }
     }
     if (op.binaryResponse) {
       octetStream = true
     }
   }
-  return { eventStream, eventStreamData, eventStreamSchema, octetStream }
+  return { eventStream, octetStream }
 }
 
 const requiresStreaming = (requirements: ImportRequirements): boolean =>
@@ -182,11 +173,8 @@ ${clientErrorSource(name)}`
     const jsdoc = Utils.toComment(operation.description)
     const methodKey = `readonly "${operation.id}Sse"`
     const parameters = args.join(", ")
-    const value = operation.sseSchemaMode === "event"
-      ? `typeof ${operation.sseSchema}.Type`
-      : `{ readonly event: string; readonly id: string | undefined; readonly data: typeof ${operation.sseSchema}.Type }`
     const returnType =
-      `Stream.Stream<${value}, HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError, typeof ${operation.sseSchema}.DecodingServices>`
+      `Stream.Stream<{ readonly event: string; readonly id: string | undefined; readonly data: typeof ${operation.sseSchema}.Type }, HttpClientError.HttpClientError | SchemaError | Sse.Retry, typeof ${operation.sseSchema}.DecodingServices>`
     return `${jsdoc}${methodKey}: (${parameters}) => ${returnType}`
   }
 
@@ -238,11 +226,8 @@ ${clientErrorSource(name)}`
     }
 
     const helpers: Array<string> = [commonSource]
-    if (requirements.eventStreamData) {
+    if (requirements.eventStream) {
       helpers.push(sseRequestSource(importName))
-    }
-    if (requirements.eventStreamSchema) {
-      helpers.push(sseEventRequestSource)
     }
     if (requirements.octetStream) {
       helpers.push(binaryRequestSource)
@@ -385,7 +370,7 @@ export const make = (
       pipeline.push(`HttpClientRequest.bodyJsonUnsafe(options.payload)`)
     }
 
-    pipeline.push(`${operation.sseSchemaMode === "event" ? "sseEventRequest" : "sseRequest"}(${operation.sseSchema})`)
+    pipeline.push(`sseRequest(${operation.sseSchema})`)
 
     return (
       `"${operation.id}Sse": (${params}) => ` +
@@ -477,7 +462,7 @@ export const make = (
  * Use when you use this layer when generated HttpClient code should perform runtime response
  * decoding with generated Effect Schema values.
  *
- * @category layers
+ * @category code generation
  * @since 4.0.0
  */
 export const layerTransformerSchema = Layer.sync(
@@ -888,7 +873,7 @@ export const make = (
  * generated client relies on TypeScript types instead of runtime Schema
  * decoding.
  *
- * @category layers
+ * @category code generation
  * @since 4.0.0
  */
 export const layerTransformerTs = Layer.sync(
@@ -938,7 +923,7 @@ const sseRequestSource = (_importName: string) =>
       request: HttpClientRequest.HttpClientRequest
     ): Stream.Stream<
       { readonly event: string; readonly id: string | undefined; readonly data: Type },
-      HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
+      HttpClientError.HttpClientError | SchemaError | Sse.Retry,
       DecodingServices
     > =>
       HttpClient.filterStatusOk(httpClient).execute(request).pipe(
@@ -946,21 +931,6 @@ const sseRequestSource = (_importName: string) =>
         Stream.unwrap,
         Stream.decodeText(),
         Stream.pipeThroughChannel(Sse.decodeDataSchema(schema))
-      )`
-
-const sseEventRequestSource = `const sseEventRequest = <S extends Sse.EventCodec>(schema: S) =>
-    (
-      request: HttpClientRequest.HttpClientRequest
-    ): Stream.Stream<
-      S["Type"],
-      HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
-      S["DecodingServices"]
-    > =>
-      HttpClient.filterStatusOk(httpClient).execute(request).pipe(
-        Effect.map((response) => response.stream),
-        Stream.unwrap,
-        Stream.decodeText(),
-        Stream.pipeThroughChannel(Sse.decodeSchema(schema))
       )`
 
 const binaryRequestSource =

@@ -17,7 +17,6 @@ import * as Effectable from "../../Effectable.ts"
 import type * as Fiber from "../../Fiber.ts"
 import { constUndefined } from "../../Function.ts"
 import * as internalEffect from "../../internal/effect.ts"
-import * as InternalRecord from "../../internal/record.ts"
 import { hasProperty } from "../../Predicate.ts"
 import { TracerTimingEnabled } from "../../References.ts"
 import * as Stream from "../../Stream.ts"
@@ -99,7 +98,7 @@ export type Transformer = (
  * Context reference for an optional current SQL statement transformer applied
  * before statement execution.
  *
- * @category services
+ * @category transformer
  * @since 4.0.0
  */
 export const CurrentTransformer = Context.Reference<Transformer | undefined>("effect/sql/CurrentTransformer", {
@@ -738,7 +737,7 @@ const emptyFragment = fragment([literal("")])
  * Dialect-specific compiler that converts a SQL `Fragment` into SQL text and
  * bind parameters, with a no-transform variant.
  *
- * @category models
+ * @category compiler
  * @since 4.0.0
  */
 export interface Compiler {
@@ -754,7 +753,7 @@ export interface Compiler {
  * Callbacks used by `makeCompiler` to render dialect placeholders,
  * identifiers, insert helpers, update helpers, and custom SQL segments.
  *
- * @category models
+ * @category compiler
  * @since 4.0.0
  */
 export type CompilerOptions<C extends Custom<any, any, any, any> = any> = {
@@ -789,7 +788,7 @@ export type CompilerOptions<C extends Custom<any, any, any, any> = any> = {
 /**
  * Creates a dialect-specific SQL `Compiler` from rendering callbacks.
  *
- * @category constructors
+ * @category compiler
  * @since 4.0.0
  */
 export const makeCompiler = <C extends Custom<any, any, any, any> = any>(
@@ -799,24 +798,21 @@ export const makeCompiler = <C extends Custom<any, any, any, any> = any>(
   self.options = options
   self.dialect = options.dialect
   self.disableTransforms = false
-  self.statementCache = new WeakMap<Fragment, CompiledStatement>()
-  self.statementCacheNoTransform = new WeakMap<Fragment, CompiledStatement>()
   return self
 }
-
-type CompiledStatement = readonly [sql: string, binds: ReadonlyArray<unknown>]
 
 interface CompilerImpl extends Compiler {
   readonly options: CompilerOptions
   readonly disableTransforms: boolean
-  readonly statementCache: WeakMap<Fragment, CompiledStatement>
-  readonly statementCacheNoTransform: WeakMap<Fragment, CompiledStatement>
   compile(
     statement: Fragment,
     withoutTransform?: boolean,
     placeholderOverride?: (u: unknown) => string
-  ): CompiledStatement
+  ): readonly [sql: string, binds: ReadonlyArray<unknown>]
 }
+
+const statementCacheSymbol = Symbol.for("effect/unstable/sql/Statement/statementCache")
+const statementCacheNoTransformSymbol = Symbol.for("effect/unstable/sql/Statement/statementCacheNoTransform")
 
 const CompilerProto = {
   compile(
@@ -827,10 +823,9 @@ const CompilerProto = {
   ): readonly [sql: string, binds: ReadonlyArray<unknown>] {
     const opts = this.options
     withoutTransform = withoutTransform || this.disableTransforms
-    const cache = withoutTransform ? this.statementCacheNoTransform : this.statementCache
-    const cached = cache.get(statement)
-    if (cached !== undefined) {
-      return cached
+    const cacheSymbol = withoutTransform ? statementCacheNoTransformSymbol : statementCacheSymbol
+    if (cacheSymbol in statement) {
+      return (statement as any)[cacheSymbol]
     }
 
     const segments = statement.segments
@@ -1037,8 +1032,7 @@ const CompilerProto = {
     if (placeholderOverride !== undefined) {
       return result
     }
-    cache.set(statement, result)
-    return result
+    return (statement as any)[cacheSymbol] = result
   },
 
   get withoutTransform() {
@@ -1054,7 +1048,7 @@ const CompilerProto = {
  * Creates a SQLite compiler that uses `?` placeholders and quoted identifiers,
  * optionally transforming identifier names before escaping.
  *
- * @category constructors
+ * @category compiler
  * @since 4.0.0
  */
 export const makeCompilerSqlite = (transform?: ((_: string) => string) | undefined): Compiler =>
@@ -1097,7 +1091,7 @@ export function defaultEscape(c: string) {
  * Classifies a JavaScript value as a SQL primitive kind, treating `undefined`
  * as `null` and defaulting unrecognized objects to `string`.
  *
- * @category converting
+ * @category predicates
  * @since 4.0.0
  */
 export const primitiveKind = (value: unknown): PrimitiveKind => {
@@ -1152,8 +1146,8 @@ export const defaultTransforms = (
 
   const transformObject = (obj: Record<string, any>): any => {
     const newObj: Record<string, any> = {}
-    for (const key of Object.keys(obj)) {
-      InternalRecord.assignProperty(newObj, transformer(key), transformValue(obj[key]))
+    for (const key in obj) {
+      newObj[transformer(key)] = transformValue(obj[key])
     }
     return newObj
   }
@@ -1168,8 +1162,8 @@ export const defaultTransforms = (
         newRows[i] = transformArrayNested(row) as any
       } else {
         const obj: any = {}
-        for (const [key, value] of Object.entries(row)) {
-          InternalRecord.assignProperty(obj, transformer(key), transformValue(value))
+        for (const key in row) {
+          obj[transformer(key)] = transformValue(row[key])
         }
         newRows[i] = obj
       }
@@ -1187,8 +1181,8 @@ export const defaultTransforms = (
         newRows[i] = transformArray(row) as any
       } else {
         const obj: any = {}
-        for (const [key, value] of Object.entries(row)) {
-          InternalRecord.assignProperty(obj, transformer(key), value)
+        for (const key in row) {
+          obj[transformer(key)] = row[key]
         }
         newRows[i] = obj
       }
@@ -1259,6 +1253,23 @@ const StatementProto: Omit<
   StatementImpl<any>,
   "segments" | "acquirer" | "compiler" | "spanAttributes" | "transformRows"
 > = {
+  ...Effectable.Prototype<StatementImpl<any>>({
+    label: "Statement",
+    evaluate(fiber) {
+      const span = internalEffect.makeSpanUnsafe(fiber, "sql.execute", { kind: "client" })
+      const clock = fiber.getRef(Clock)
+      const timingEnabled = fiber.getRef(TracerTimingEnabled)
+      return Effect.onExit(
+        this.withConnectionSpan(
+          "execute",
+          (connection, sql, params) => connection.execute(sql, params, this.transformRows),
+          false,
+          span
+        ),
+        (exit) => internalEffect.endSpan(span, exit, clock, timingEnabled)
+      )
+    }
+  }),
   [FragmentTypeId]: FragmentTypeId,
   withConnection<XA, E>(
     this: StatementImpl<any>,
@@ -1361,24 +1372,6 @@ const StatementProto: Omit<
       (connection, sql, params) => connection.executeUnprepared(sql, params, self.transformRows)
     )
   },
-
-  ...Effectable.Prototype<StatementImpl<any>>({
-    label: "Statement",
-    evaluate(fiber) {
-      const span = internalEffect.makeSpanUnsafe(fiber, "sql.execute", { kind: "client" })
-      const clock = fiber.getRef(Clock)
-      const timingEnabled = fiber.getRef(TracerTimingEnabled)
-      return Effect.onExit(
-        this.withConnectionSpan(
-          "execute",
-          (connection, sql, params) => connection.execute(sql, params, this.transformRows),
-          false,
-          span
-        ),
-        (exit) => internalEffect.endSpan(span, exit, clock, timingEnabled)
-      )
-    }
-  }),
 
   compile(
     this: StatementImpl<any>,

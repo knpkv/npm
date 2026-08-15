@@ -34,12 +34,7 @@ import * as RpcClient from "../rpc/RpcClient.ts"
 import * as RpcGroup from "../rpc/RpcGroup.ts"
 import * as RpcSchema from "../rpc/RpcSchema.ts"
 import * as RpcServer from "../rpc/RpcServer.ts"
-import type {
-  AlreadyProcessingMessage,
-  EntityNotAssignedToRunner,
-  MailboxFull,
-  PersistenceError
-} from "./ClusterError.ts"
+import type { AlreadyProcessingMessage, MailboxFull, PersistenceError } from "./ClusterError.ts"
 import { Persisted, ShardGroup, Uninterruptible } from "./ClusterSchema.ts"
 import { EntityAddress } from "./EntityAddress.ts"
 import type { EntityId } from "./EntityId.ts"
@@ -122,7 +117,7 @@ export interface Entity<
       entityId: string
     ) => RpcClient.RpcClient.From<
       Rpcs,
-      MailboxFull | AlreadyProcessingMessage | PersistenceError | EntityNotAssignedToRunner
+      MailboxFull | AlreadyProcessingMessage | PersistenceError
     >,
     never,
     Sharding
@@ -221,7 +216,7 @@ export type Any = Entity<string, Rpc.Any>
  * Each handler receives the entity request envelope for that RPC and returns the
  * RPC result or a supported RPC wrapper.
  *
- * @category utility types
+ * @category models
  * @since 4.0.0
  */
 export type HandlersFrom<Rpc extends Rpc.Any> = {
@@ -237,7 +232,7 @@ export type HandlersFrom<Rpc extends Rpc.Any> = {
  *
  * The check is based on the internal entity type identifier.
  *
- * @category guards
+ * @category refinements
  * @since 4.0.0
  */
 export const isEntity = (u: unknown): u is Any => Predicate.hasProperty(u, TypeId)
@@ -354,7 +349,7 @@ const Proto = {
           ),
           Stream.unwrap
         )
-      const handlers: Record<string, any> = Object.create(null)
+      const handlers: Record<string, any> = {}
       for (const rpc_ of this.protocol.requests.values()) {
         const rpc = rpc_ as any as Rpc.AnyWithProps
         handlers[rpc._tag] = RpcSchema.isStreamSchema(rpc.successSchema) ? streamHandler : handler
@@ -469,7 +464,7 @@ export const make = <const Type extends string, Rpcs extends ReadonlyArray<Rpc.A
  * Use to read the current entity identity and shard address from entity
  * handlers and keep-alive logic.
  *
- * @category services
+ * @category context
  * @since 4.0.0
  */
 export class CurrentAddress extends Context.Service<
@@ -485,7 +480,7 @@ export class CurrentAddress extends Context.Service<
  * Use to read the runner address associated with the current entity handler
  * registration.
  *
- * @category services
+ * @category context
  * @since 4.0.0
  */
 export class CurrentRunnerAddress extends Context.Service<
@@ -501,7 +496,7 @@ export class CurrentRunnerAddress extends Context.Service<
  * Use when you use it to complete an entity request by succeeding, failing, failing with a
  * cause, or supplying an explicit `Exit`.
  *
- * @category models
+ * @category Replier
  * @since 4.0.0
  */
 export interface Replier<Rpcs extends Rpc.Any> {
@@ -540,7 +535,7 @@ export declare namespace Replier {
    * For streaming RPCs this may be either a stream of success chunks or a dequeue
    * of success chunks. For non-streaming RPCs it is the RPC success value.
    *
-   * @category utility types
+   * @category Replier
    * @since 4.0.0
    */
   export type Success<R extends Rpc.Any> = Rpc.Success<R> extends Stream.Stream<infer _A, infer _E, infer _R> ?
@@ -556,7 +551,7 @@ export declare namespace Replier {
  * It includes the underlying request envelope plus the last stream reply chunk
  * that was sent, allowing handlers to resume chunk sequencing after a restart.
  *
- * @category models
+ * @category request
  * @since 4.0.0
  */
 export class Request<Rpc extends Rpc.Any> extends Data.Class<
@@ -650,11 +645,12 @@ export const makeTestClient: <Type extends string, Rpcs extends Rpc.Any, LA, LE,
       shardId: makeShardId(entityId)
     })
     const scope = yield* Effect.scope
-    const handlerContext = entityEntry.context.pipe(
-      Context.add(CurrentRunnerAddress, runnerAddress),
-      Context.add(CurrentAddress, address),
-      Context.add(Scope, scope)
-    )
+    const handlerContext = Context.mutate(entityEntry.context, (context) =>
+      context.pipe(
+        Context.add(CurrentRunnerAddress, runnerAddress),
+        Context.add(CurrentAddress, address),
+        Context.add(Scope, scope)
+      ))
     const handlers = yield* entityEntry.build.pipe(
       Effect.setContext(handlerContext as Context.Context<any>)
     )
@@ -703,7 +699,7 @@ export const makeTestClient: <Type extends string, Rpcs extends Rpc.Any, LA, LE,
  * When enabled it sends the internal keep-alive RPC for the current address; when
  * disabled it releases the keep-alive latch if one is present.
  *
- * @category keep alive
+ * @category Keep alive
  * @since 4.0.0
  */
 export const keepAlive: (
@@ -759,7 +755,7 @@ export const keepAlive: (
  * The RPC is marked as persisted and uninterruptible so the keep-alive signal
  * survives normal entity restarts.
  *
- * @category keep alive
+ * @category Keep alive
  * @since 4.0.0
  */
 export const KeepAliveRpc = Rpc.make("Cluster/Entity/keepAlive")
@@ -774,7 +770,7 @@ export const KeepAliveRpc = Rpc.make("Cluster/Entity/keepAlive")
  * `keepAlive` closes the latch when keep-alive is active and opens it again when
  * the resource no longer needs to keep the entity alive.
  *
- * @category services
+ * @category Keep alive
  * @since 4.0.0
  */
 export class KeepAliveLatch extends Context.Service<KeepAliveLatch, Latch.Latch>()(

@@ -42,7 +42,7 @@ const TrieProto: TR.Trie<unknown> = {
     return hash
   },
   [Equal.symbol]<V>(this: TrieImpl<V>, that: unknown): boolean {
-    if (isTrie(that) && size(this) === size(that)) {
+    if (isTrie(that)) {
       const entries = Array.from(that)
       return Array.from(this).every((itemSelf, i) => {
         const itemThat = entries[i]
@@ -103,8 +103,8 @@ class TrieIterator<in out V, out T> implements IterableIterator<T> {
         const value = node.value
         if (value !== undefined) {
           const key = keyString + node.key
-          if (this.filter(key, value.value)) {
-            return { done: false, value: this.f(key, value.value) }
+          if (this.filter(key, value)) {
+            return { done: false, value: this.f(key, value) }
           }
         }
       } else {
@@ -172,7 +172,7 @@ export const insert = dual<
     key: key[0],
     count: 0
   }
-  let count = n.count + 1
+  const count = n.count + 1
   let cIndex = 0
 
   while (cIndex < key.length) {
@@ -194,17 +194,7 @@ export const insert = dual<
       }
     } else {
       if (cIndex === key.length - 1) {
-        if (n.value !== undefined) {
-          count -= 1
-        }
-        nStack[nStack.length - 1] = {
-          key: n.key,
-          count,
-          value: { value },
-          left: n.left,
-          mid: n.mid,
-          right: n.right
-        }
+        n.value = value
       } else if (n.mid === undefined) {
         dStack.push(0)
         n = { key: key[cIndex + 1], count }
@@ -413,7 +403,7 @@ export const get = dual<
         }
       } else {
         if (cIndex === key.length - 1) {
-          return n.value === undefined ? Option.none() : Option.some(n.value.value)
+          return Option.fromUndefinedOr(n.value)
         } else {
           if (n.mid === undefined) {
             return Option.none()
@@ -642,7 +632,7 @@ export const modify = dual<
     nStack[nStack.length - 1] = {
       key: updateNode.key,
       count: updateNode.count,
-      value: { value: f(updateNode.value.value) }, // Update
+      value: f(updateNode.value), // Update
       left: updateNode.left,
       mid: updateNode.mid,
       right: updateNode.right
@@ -703,6 +693,10 @@ export const longestPrefixOf = dual<
     let cIndex = 0
     while (cIndex < key.length) {
       const c = key[cIndex]
+      if (n.value !== undefined) {
+        longestPrefixNode = Option.some([key.slice(0, cIndex + 1), n.value])
+      }
+
       if (c > n.key) {
         if (n.right === undefined) {
           break
@@ -716,9 +710,6 @@ export const longestPrefixOf = dual<
           n = n.left
         }
       } else {
-        if (n.value !== undefined) {
-          longestPrefixNode = Option.some([key.slice(0, cIndex + 1), n.value.value])
-        }
         if (n.mid === undefined) {
           break
         } else {
@@ -735,7 +726,7 @@ export const longestPrefixOf = dual<
 interface Node<V> {
   key: string
   count: number
-  value?: { readonly value: V } | undefined
+  value?: V | undefined
   left?: Node<V> | undefined
   mid?: Node<V> | undefined
   right?: Node<V> | undefined

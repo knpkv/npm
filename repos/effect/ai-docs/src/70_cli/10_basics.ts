@@ -5,7 +5,7 @@
  * handlers into a single executable command.
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Console, Effect, Option, Schema } from "effect"
+import { Console, Effect } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 
 // You can define flags outside of commands and reuse them across multiple
@@ -29,34 +29,18 @@ const tasks = Command.make("tasks").pipe(
   Command.withDescription("Track and manage tasks")
 )
 
-// Arguments and flags parse plain strings; use `withSchema` to validate or
-// transform the parsed value with any schema.
-const Email = Schema.String.pipe(
-  Schema.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, {
-    message: "Expected a valid email address"
-  }))
-)
-
 const create = Command.make(
   "create",
   {
     title: Argument.string("title").pipe(
-      Argument.withDescription("Task title"),
-      // Reject empty titles at parse time, so the handler only ever sees
-      // valid input
-      Argument.withSchema(Schema.NonEmptyString)
+      Argument.withDescription("Task title")
     ),
     priority: Flag.choice("priority", ["low", "normal", "high"]).pipe(
       Flag.withDescription("Priority for the new task"),
       Flag.withDefault("normal")
-    ),
-    assignee: Flag.string("assignee").pipe(
-      Flag.withDescription("Email address of the person to assign"),
-      Flag.withSchema(Email),
-      Flag.optional
     )
   },
-  Effect.fn(function*({ assignee, priority, title }) {
+  Effect.fn(function*({ title, priority }) {
     // Subcommands can read parent command input by yielding the parent command.
     const root = yield* tasks
 
@@ -65,10 +49,6 @@ const create = Command.make(
     }
 
     yield* Console.log(`Created "${title}" in ${root.workspace} with ${priority} priority`)
-
-    if (Option.isSome(assignee)) {
-      yield* Console.log(`Assigned to ${assignee.value}`)
-    }
   })
 ).pipe(
   Command.withDescription("Create a task"),
@@ -76,10 +56,6 @@ const create = Command.make(
     {
       command: "tasks create \"Ship 4.0\" --priority high",
       description: "Create a high-priority task"
-    },
-    {
-      command: "tasks create \"Ship 4.0\" --assignee dev@acme.com",
-      description: "Create a task assigned to a team member"
     }
   ])
 )

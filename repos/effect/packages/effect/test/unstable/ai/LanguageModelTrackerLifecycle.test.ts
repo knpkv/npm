@@ -393,8 +393,7 @@ describe("LanguageModel tracker lifecycle integration", () => {
               id: toolCallId,
               name: "ApprovalTool",
               result: { result: "approved-result" },
-              isFailure: false,
-              providerExecuted: false
+              isFailure: false
             })
           ]
         })

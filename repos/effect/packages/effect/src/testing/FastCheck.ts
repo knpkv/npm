@@ -20,7 +20,7 @@
  *
  * **Example** (Checking an array reversal property)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { FastCheck } from "effect/testing"
  *
  * // Property: reverse of reverse should equal original
@@ -29,18 +29,17 @@
  *   (arr: Array<number>) => {
  *     const reversed = arr.slice().reverse()
  *     const doubleReversed = reversed.slice().reverse()
- *     return arr.length === doubleReversed.length &&
- *       arr.every((value, index) => value === doubleReversed[index])
+ *     return JSON.stringify(arr) === JSON.stringify(doubleReversed)
  *   }
  * )
  *
  * // Run the property test
- * FastCheck.assert(reverseProp, { seed: 1, numRuns: 100 }) // => undefined
+ * FastCheck.assert(reverseProp)
  * ```
  *
  * **Example** (Checking string concatenation properties)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { FastCheck } from "effect/testing"
  *
  * // Test string concatenation properties
@@ -55,12 +54,12 @@
  *   }
  * )
  *
- * FastCheck.assert(concatProp, { seed: 2, numRuns: 100 }) // => undefined
+ * FastCheck.assert(concatProp)
  * ```
  *
  * **Example** (Generating record data for properties)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { FastCheck } from "effect/testing"
  *
  * // Generate random data for testing
@@ -81,7 +80,7 @@
  *   }
  * )
  *
- * FastCheck.assert(validPersonProp, { seed: 3, numRuns: 100 }) // => undefined
+ * FastCheck.assert(validPersonProp)
  * ```
  *
  * @category re-exports

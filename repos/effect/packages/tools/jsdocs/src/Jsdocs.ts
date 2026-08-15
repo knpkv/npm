@@ -275,20 +275,8 @@ export interface ParsedJSDocImports {
   readonly flatNames: ReadonlyArray<string>
 }
 
-/**
- * Kinds of public API records represented in a JSDoc model.
- *
- * @category models
- * @since 4.0.0
- */
 export type JSDocApiKind = "root-declaration" | "namespace" | "namespace-declaration" | "member"
 
-/**
- * Recommended import declaration and usage for an importable API.
- *
- * @category models
- * @since 4.0.0
- */
 export type JSDocApiImportGuidance =
   | {
     readonly style: "namespace-barrel"
@@ -306,12 +294,6 @@ export type JSDocApiImportGuidance =
     readonly usage: string
   }
 
-/**
- * Resolution result for a link in an API's `@see` tags.
- *
- * @category models
- * @since 4.0.0
- */
 export type JSDocApiSeeLinkResolution =
   | {
     readonly _tag: "Resolved"
@@ -324,33 +306,15 @@ export type JSDocApiSeeLinkResolution =
     readonly candidates: ReadonlyArray<string>
   }
 
-/**
- * Parsed `@see` link paired with its public API resolution.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocApiSeeLink extends ParsedInlineLink {
   readonly resolution: JSDocApiSeeLinkResolution
 }
 
-/**
- * Parsed `@see` tag and its resolved links.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocApiSeeTag {
   readonly text: string
   readonly links: ReadonlyArray<JSDocApiSeeLink>
 }
 
-/**
- * Standard tags attached to a public API record.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocApiTags {
   readonly category: string | null
   readonly since: string | null
@@ -358,12 +322,6 @@ export interface JSDocApiTags {
   readonly default: string | null
 }
 
-/**
- * One public API record in an extracted JSDoc model.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocApi {
   readonly id: string
   readonly kind: JSDocApiKind
@@ -833,24 +791,12 @@ function resolveJSDocImports(
   }
 }
 
-/**
- * Reads source text from an Oxlint-compatible rule context.
- *
- * @category getters
- * @since 4.0.0
- */
 export function getSourceText(context: {
   readonly sourceCode: { readonly text?: string; getText(node?: unknown): string }
 }): string {
   return context.sourceCode.text ?? context.sourceCode.getText()
 }
 
-/**
- * Resolves the working directory from an Oxlint-compatible rule context.
- *
- * @category getters
- * @since 4.0.0
- */
 export function getCwd(context: { readonly cwd?: string; getCwd?: () => string }): string {
   return context.cwd ?? context.getCwd?.() ?? process.cwd()
 }
@@ -882,12 +828,6 @@ function skipDirectiveComments(source: string, end: number): number {
   return end
 }
 
-/**
- * Finds the JSDoc block immediately preceding an AST node.
- *
- * @category parsing
- * @since 4.0.0
- */
 export function findLeadingJSDoc(
   source: string,
   node: AstNode,
@@ -918,9 +858,7 @@ export function findLeadingJSDoc(
  *
  * **Example** (Parsing a block)
  *
- * ```ts import.meta.vitest
- * import { parseJSDoc } from "@effect/jsdocs"
- *
+ * ```ts
  * const rawBlock = [
  *   "/" + "**",
  *   " * A value.",
@@ -930,8 +868,6 @@ export function findLeadingJSDoc(
  *   " *" + "/"
  * ].join("\n")
  * const result = parseJSDoc(rawBlock)
- *
- * result._tag // => "Success"
  * ```
  *
  * @category parsing
@@ -1247,7 +1183,7 @@ function parseSection(lines: Array<string>, headingIndex: number): {
   while (index < lines.length) {
     const trimmed = lines[index].trim()
     if (trimmed.startsWith("```")) {
-      if (isTypeScriptFence(trimmed)) {
+      if (trimmed === "```ts") {
         diagnostics.push(diagnostic("loose-ts-fence", "TypeScript examples must use **Example** (Title) sections"))
       }
       inFence = !inFence
@@ -1276,8 +1212,6 @@ function parseSection(lines: Array<string>, headingIndex: number): {
   return { body: joinBody(bodyLines), nextIndex: index, diagnostics }
 }
 
-const isTypeScriptFence = (line: string): boolean => /^```ts(?:\s.*)?$/.test(line)
-
 function parseExample(lines: Array<string>, headingIndex: number): {
   readonly example?: ParsedExample
   readonly nextIndex: number
@@ -1298,7 +1232,7 @@ function parseExample(lines: Array<string>, headingIndex: number): {
   let fenceIndex = -1
   while (index < lines.length) {
     const trimmed = lines[index].trim()
-    if (isTypeScriptFence(trimmed)) {
+    if (trimmed === "```ts") {
       fenceIndex = index
       break
     }
@@ -1331,7 +1265,7 @@ function parseExample(lines: Array<string>, headingIndex: number): {
   index = fenceIndex + 1
   const codeStart = index
   while (index < lines.length && lines[index].trim() !== "```") {
-    if (isTypeScriptFence(lines[index].trim())) {
+    if (lines[index].trim() === "```ts") {
       diagnostics.push(diagnostic("malformed-example", "Examples must contain exactly one TypeScript code fence"))
     }
     index++
@@ -1587,12 +1521,6 @@ function collectTsConfigFiles(tsconfigPath: string, seen: Set<string>, fileNames
   return result
 }
 
-/**
- * Loads and caches the TypeScript program for a project configuration.
- *
- * @category constructors
- * @since 4.0.0
- */
 export function getProgram(tsconfigPath: string): ProgramCacheEntry {
   const cached = programCache.get(tsconfigPath)
   if (cached !== undefined) return cached
@@ -1805,22 +1733,10 @@ function attachSeeLinkSymbols<T extends ParsedDeclarationTags | ParsedNamespaceT
   return attachSeeLinkSymbolsFromSourceFile(tags, node.getSourceFile(), block, linkContext)
 }
 
-/**
- * JSDoc diagnostic paired with its source range.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocModelDiagnostic extends JSDocDiagnostic {
   readonly range: readonly [number, number]
 }
 
-/**
- * Parsed JSDoc and diagnostics for one source file in a model.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocModelFile extends ParsedJSDocFile {
   readonly file: string
   readonly hash: string
@@ -1828,12 +1744,6 @@ export interface JSDocModelFile extends ParsedJSDocFile {
   readonly imports?: ParsedJSDocImports
 }
 
-/**
- * Versioned output of a repository JSDoc extraction.
- *
- * @category models
- * @since 4.0.0
- */
 export interface JSDocModel {
   readonly version: 2
   readonly generatedBy: "@effect/jsdocs"
@@ -1843,12 +1753,6 @@ export interface JSDocModel {
   readonly apis: ReadonlyArray<JSDocApi>
 }
 
-/**
- * File selection and output configuration for JSDoc extraction.
- *
- * @category configuration
- * @since 4.0.0
- */
 export interface JSDocConfig {
   readonly tsconfig: string
   readonly include: ReadonlyArray<string>
@@ -1856,12 +1760,6 @@ export interface JSDocConfig {
   readonly output: string
 }
 
-/**
- * JSDoc extraction configuration with an optional working directory.
- *
- * @category configuration
- * @since 4.0.0
- */
 export interface ExtractJSDocsOptions extends JSDocConfig {
   readonly cwd?: string
 }
@@ -1873,12 +1771,6 @@ function addInputFile(files: Set<string>, filename: string) {
   }
 }
 
-/**
- * Computes the cache key for the configured JSDoc extraction inputs.
- *
- * @category hashing
- * @since 4.0.0
- */
 export function computeJSDocInputHash(options: ExtractJSDocsOptions): string {
   const cwd = path.resolve(options.cwd ?? process.cwd())
   const hash = crypto.createHash("sha256")
@@ -3358,24 +3250,12 @@ function parseSourceFileDocs(
   }
 }
 
-/**
- * Loads a JSDoc extraction configuration from JSON.
- *
- * @category configuration
- * @since 4.0.0
- */
 export function loadJSDocConfig(cwd = process.cwd(), configPath = "jsdocs.config.json"): JSDocConfig {
   const absolute = path.resolve(cwd, configPath)
   const parsed = JSON.parse(fs.readFileSync(absolute, "utf8")) as JSDocConfig
   return parsed
 }
 
-/**
- * Extracts a complete JSDoc model synchronously.
- *
- * @category extraction
- * @since 4.0.0
- */
 export function extractJSDocsSync(options: ExtractJSDocsOptions): JSDocModel {
   const cwd = path.resolve(options.cwd ?? process.cwd())
   const tsconfigPath = path.resolve(cwd, options.tsconfig)
@@ -3457,33 +3337,15 @@ export function extractJSDocsSync(options: ExtractJSDocsOptions): JSDocModel {
   }
 }
 
-/**
- * Extracts a complete JSDoc model in `Effect`.
- *
- * @category extraction
- * @since 4.0.0
- */
 export const extractJSDocs = (options: ExtractJSDocsOptions): Effect.Effect<JSDocModel> =>
   Effect.sync(() => extractJSDocsSync(options))
 
-/**
- * Writes a JSDoc model as formatted JSON.
- *
- * @category persistence
- * @since 4.0.0
- */
 export function writeJSDocModel(cwd: string, output: string, model: JSDocModel) {
   const filename = path.resolve(cwd, output)
   fs.mkdirSync(path.dirname(filename), { recursive: true })
   fs.writeFileSync(filename, `${JSON.stringify(model, null, 2)}\n`)
 }
 
-/**
- * Reads and validates the outer structure of a persisted JSDoc model.
- *
- * @category persistence
- * @since 4.0.0
- */
 export function readJSDocModel(filename: string): Result<JSDocModel, string> {
   if (!fs.existsSync(filename)) return { _tag: "Failure", error: "missing" }
   try {
@@ -3497,12 +3359,6 @@ export function readJSDocModel(filename: string): Result<JSDocModel, string> {
   }
 }
 
-/**
- * Computes the content hash stored for a source file in a JSDoc model.
- *
- * @category hashing
- * @since 4.0.0
- */
 export function sourceHash(source: string): string {
   return hashSource(source)
 }

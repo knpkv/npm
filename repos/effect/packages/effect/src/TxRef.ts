@@ -36,7 +36,7 @@ const TypeId = "~effect/transactions/TxRef"
  *
  * **Example** (Using a transactional reference)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -49,10 +49,9 @@ const TypeId = "~effect/transactions/TxRef"
  *     yield* TxRef.set(ref, current + 1)
  *   }))
  *
- *   return yield* TxRef.get(ref)
+ *   const final = yield* TxRef.get(ref)
+ *   console.log(final) // 1
  * })
- *
- * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category models
@@ -75,7 +74,7 @@ export interface TxRef<in out A> extends Pipeable {
  *
  * **Example** (Creating transactional references)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -89,10 +88,9 @@ export interface TxRef<in out A> extends Pipeable {
  *     yield* TxRef.set(name, "Bob")
  *   }))
  *
- *   return [yield* TxRef.get(counter), yield* TxRef.get(name)]
+ *   console.log(yield* TxRef.get(counter)) // 42
+ *   console.log(yield* TxRef.get(name)) // "Bob"
  * })
- *
- * await Effect.runPromise(program) // => [42, "Bob"]
  * ```
  *
  * @category constructors
@@ -110,7 +108,7 @@ export const make = <A>(initial: A) => Effect.sync(() => makeUnsafe(initial))
  *
  * **Example** (Creating transactional references unsafely)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { TxRef } from "effect"
  *
  * // Create a TxRef synchronously (unsafe - use make instead in Effect contexts)
@@ -118,8 +116,8 @@ export const make = <A>(initial: A) => Effect.sync(() => makeUnsafe(initial))
  * const config = TxRef.makeUnsafe({ timeout: 5000, retries: 3 })
  *
  * // These are now ready to use in transactions
- * counter.value // => 0
- * config.value // => { timeout: 5000, retries: 3 }
+ * console.log(counter.value) // 0
+ * console.log(config.value) // { timeout: 5000, retries: 3 }
  * ```
  *
  * @category constructors
@@ -145,7 +143,7 @@ export const makeUnsafe = <A>(initial: A): TxRef<A> => ({
  *
  * **Example** (Modifying transactional references)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -154,10 +152,9 @@ export const makeUnsafe = <A>(initial: A): TxRef<A> => ({
  *   // Modify and return both old and new value
  *   const result = yield* TxRef.modify(counter, (current) => [current * 2, current + 1])
  *
- *   return [result, yield* TxRef.get(counter)]
+ *   console.log(result) // 0 (the return value: current * 2)
+ *   console.log(yield* TxRef.get(counter)) // 1 (the new value: current + 1)
  * })
- *
- * await Effect.runPromise(program) // => [0, 1]
  * ```
  *
  * @category combinators
@@ -194,7 +191,7 @@ export const modify: {
  *
  * **Example** (Updating transactional references)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -205,10 +202,8 @@ export const modify: {
  *     TxRef.update(counter, (current) => current * 2)
  *   )
  *
- *   return yield* TxRef.get(counter)
+ *   console.log(yield* TxRef.get(counter)) // 20
  * })
- *
- * await Effect.runPromise(program) // => 20
  * ```
  *
  * @category combinators
@@ -231,7 +226,7 @@ export const update: {
  *
  * **Example** (Reading transactional references)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -242,10 +237,8 @@ export const update: {
  *     TxRef.get(counter)
  *   )
  *
- *   return value
+ *   console.log(value) // 42
  * })
- *
- * await Effect.runPromise(program) // => 42
  * ```
  *
  * @category combinators
@@ -262,7 +255,7 @@ export const get = <A>(self: TxRef<A>): Effect.Effect<A> => modify(self, (curren
  *
  * **Example** (Setting transactional references)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, TxRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -273,10 +266,8 @@ export const get = <A>(self: TxRef<A>): Effect.Effect<A> => modify(self, (curren
  *     TxRef.set(counter, 100)
  *   )
  *
- *   return yield* TxRef.get(counter)
+ *   console.log(yield* TxRef.get(counter)) // 100
  * })
- *
- * await Effect.runPromise(program) // => 100
  * ```
  *
  * @category combinators

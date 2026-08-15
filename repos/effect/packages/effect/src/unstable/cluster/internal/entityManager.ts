@@ -56,27 +56,9 @@ export interface EntityManager {
   }) => boolean
   readonly clearProcessed: () => void
 
-  readonly isResidentUnsafe: (address: EntityAddress) => boolean
-  readonly residentAddressesUnsafe: () => Array<EntityAddress>
-
-  readonly interruptShard: (shardId: ShardId, options?: {
-    readonly force?: boolean
-  }) => Effect.Effect<void>
+  readonly interruptShard: (shardId: ShardId) => Effect.Effect<void>
 
   readonly activeEntityCount: Effect.Effect<number>
-}
-
-// Tracks how many entities are resident on the runner across all entity
-// managers, so the spawn of new entities can be gated by
-// `ShardingConfig.maxResidentEntities`.
-/** @internal */
-export interface Residency {
-  /**
-   * Reserve a slot for a new entity. Returns `false` when the runner is at
-   * capacity.
-   */
-  readonly admitUnsafe: () => boolean
-  readonly releaseUnsafe: () => void
 }
 
 // Represents the entities managed by this entity manager
@@ -110,7 +92,6 @@ export const make = Effect.fnUntraced(function*<
     readonly sharding: Sharding["Service"]
     readonly storage: MessageStorage.MessageStorage["Service"]
     readonly runnerAddress: RunnerAddress
-    readonly residency: Residency
     readonly maxIdleTime?: Input | undefined
     readonly concurrency?: number | "unbounded" | undefined
     readonly mailboxCapacity?: number | "unbounded" | undefined
@@ -127,7 +108,7 @@ export const make = Effect.fnUntraced(function*<
   const clock = yield* Clock
   const context = yield* Effect.context<Rpc.Services<Rpcs> | Rpc.Middleware<Rpcs> | RX>()
   const defectRetryPolicy = options.defectRetryPolicy
-    ? Schedule.concat(options.defectRetryPolicy, defaultRetryPolicy)
+    ? Schedule.andThen(options.defectRetryPolicy, defaultRetryPolicy)
     : defaultRetryPolicy
   const retryDriver = yield* Schedule.toStepWithSleep(defectRetryPolicy)
   const entityRpcs = new Map(entity.protocol.requests)
@@ -136,43 +117,27 @@ export const make = Effect.fnUntraced(function*<
   entityRpcs.set(KeepAliveRpc._tag, KeepAliveRpc as any)
 
   const activeServers = new Map<EntityId, EntityState>()
-  const serverCloseLatches = new Map<EntityAddress, {
-    readonly closed: Latch.Latch
-    readonly force: Latch.Latch
-  }>()
+  const serverCloseLatches = new Map<EntityAddress, Latch.Latch>()
   const processedRequestIds = new Set<Snowflake.Snowflake>()
 
   const entities: ResourceMap<
     EntityAddress,
     EntityState,
-    EntityNotAssignedToRunner | MailboxFull
+    EntityNotAssignedToRunner
   > = yield* ResourceMap.make(Effect.fnUntraced(function*(address: EntityAddress) {
     if (!options.sharding.hasShardId(address.shardId)) {
       return yield* new EntityNotAssignedToRunner({ address })
     }
 
     const scope = yield* Effect.scope
-
-    // Gate the spawn on the runner-wide entity cap. Registering the release
-    // must be atomic with taking the slot, otherwise an interrupt in between
-    // would leak it.
-    yield* Effect.uninterruptible(Effect.suspend(() =>
-      options.residency.admitUnsafe()
-        ? Scope.addFinalizer(scope, Effect.sync(options.residency.releaseUnsafe))
-        : Effect.fail(new MailboxFull({ address }))
-    ))
     const endLatch = Latch.makeUnsafe()
     const keepAliveLatch = Latch.makeUnsafe()
-    const closeLatches = {
-      closed: Latch.makeUnsafe(),
-      force: Latch.makeUnsafe()
-    }
 
     // on shutdown, reset the storage for the entity
     yield* Scope.addFinalizerExit(
       scope,
       () => {
-        serverCloseLatches.get(address)?.closed.openUnsafe()
+        serverCloseLatches.get(address)?.openUnsafe()
         serverCloseLatches.delete(address)
         return Effect.void
       }
@@ -189,13 +154,14 @@ export const make = Effect.fnUntraced(function*<
       Effect.fnUntraced(function*(scope) {
         let isShuttingDown = false
 
-        const handlerContext = context.pipe(
-          Context.add(CurrentAddress, address),
-          Context.add(CurrentRunnerAddress, options.runnerAddress),
-          Context.add(KeepAliveLatch, keepAliveLatch),
-          Context.add(Scope.Scope, scope),
-          Context.add(CurrentLogAnnotations, {})
-        )
+        const handlerContext = Context.mutate(context, (context) =>
+          context.pipe(
+            Context.add(CurrentAddress, address),
+            Context.add(CurrentRunnerAddress, options.runnerAddress),
+            Context.add(KeepAliveLatch, keepAliveLatch),
+            Context.add(Scope.Scope, scope),
+            Context.add(CurrentLogAnnotations, {})
+          ))
 
         // Initiate the behavior for the entity
         const handlers = yield* (entity.protocol.toHandlers(buildHandlers as any).pipe(
@@ -241,21 +207,15 @@ export const make = Effect.fnUntraced(function*<
                   (isShuttingDown || isUninterruptibleForServer(request.message.annotations))
                 ) {
                   if (!isShuttingDown) {
-                    return server.write(
-                      0,
-                      {
+                    return server.write(0, {
+                      ...request.message.envelope,
+                      id: request.message.envelope.requestId as any,
+                      tag: request.message.envelope.tag as any,
+                      payload: new Request({
                         ...request.message.envelope,
-                        id: request.message.envelope.requestId as any,
-                        tag: request.message.envelope.tag as any,
-                        payload: new Request({
-                          ...request.message.envelope,
-                          lastSentChunk: request.lastSentChunk
-                        } as any) as any
-                      },
-                      Context.get(request.rpc.annotations, WithTransaction)
-                        ? { onRequest: options.storage.withTransaction }
-                        : undefined
-                    ).pipe(
+                        lastSentChunk: request.lastSentChunk
+                      } as any) as any
+                    }).pipe(
                       Effect.forkIn(scope)
                     )
                   }
@@ -335,22 +295,16 @@ export const make = Effect.fnUntraced(function*<
           for (const id of defectRequestIds) {
             const request = activeRequests.get(id)
             if (!request) continue
-            const { lastSentChunk, message, rpc } = request
-            yield* server.write(
-              0,
-              {
+            const { lastSentChunk, message } = request
+            yield* server.write(0, {
+              ...message.envelope,
+              id: message.envelope.requestId as any,
+              tag: message.envelope.tag as any,
+              payload: new Request({
                 ...message.envelope,
-                id: message.envelope.requestId as any,
-                tag: message.envelope.tag as any,
-                payload: new Request({
-                  ...message.envelope,
-                  lastSentChunk
-                } as any) as any
-              },
-              Context.get(rpc.annotations, WithTransaction)
-                ? { onRequest: options.storage.withTransaction }
-                : undefined
-            )
+                lastSentChunk
+              } as any) as any
+            })
           }
           defectRequestIds.clear()
         }
@@ -387,11 +341,11 @@ export const make = Effect.fnUntraced(function*<
     const state: EntityState = {
       scope,
       address,
-      write(clientId, message, writeOptions) {
+      write(clientId, message) {
         if (writeRef.state.current._tag !== "Acquired") {
-          return Effect.flatMap(writeRef.await, (write) => write(clientId, message, writeOptions))
+          return Effect.flatMap(writeRef.await, (write) => write(clientId, message))
         }
-        return writeRef.state.current.value(clientId, message, writeOptions)
+        return writeRef.state.current.value(clientId, message)
       },
       activeRequests,
       lastActiveCheck: clock.currentTimeMillisUnsafe(),
@@ -407,19 +361,14 @@ export const make = Effect.fnUntraced(function*<
       scope,
       Effect.withFiber((fiber) => {
         activeServers.delete(address.entityId)
+        serverCloseLatches.set(address, Latch.makeUnsafe())
         internalInterruptors.add(fiber.id)
-        return Effect.raceFirst(
-          state.write(0, { _tag: "Eof" }).pipe(
-            Effect.andThen(endLatch.await),
-            Effect.timeoutOption(config.entityTerminationTimeout),
-            Effect.interruptible
-          ),
-          Effect.interruptible(closeLatches.force.await)
+        return state.write(0, { _tag: "Eof" }).pipe(
+          Effect.andThen(Effect.interruptible(endLatch.await)),
+          Effect.timeoutOption(config.entityTerminationTimeout)
         )
       })
     )
-    // Do not make shard interruption wait for an entity that is still building.
-    serverCloseLatches.set(address, closeLatches)
     activeServers.set(address.entityId, state)
 
     return state
@@ -523,23 +472,21 @@ export const make = Effect.fnUntraced(function*<
                 })
               }
               server.activeRequests.set(message.envelope.requestId, entry)
-              return server.write(
-                0,
-                {
+              let write = server.write(0, {
+                ...message.envelope,
+                id: message.envelope.requestId as any,
+                payload: new Request({
                   ...message.envelope,
-                  id: message.envelope.requestId as any,
-                  payload: new Request({
-                    ...message.envelope,
-                    lastSentChunk: Option.filter(
-                      message.lastSentReply,
-                      (reply): reply is Reply.Chunk<R> => reply._tag === "Chunk"
-                    )
-                  })
-                },
-                Context.get(message.annotations, WithTransaction)
-                  ? { onRequest: options.storage.withTransaction }
-                  : undefined
-              )
+                  lastSentChunk: Option.filter(
+                    message.lastSentReply,
+                    (reply): reply is Reply.Chunk<R> => reply._tag === "Chunk"
+                  )
+                })
+              })
+              if (Context.get(message.annotations, WithTransaction)) {
+                write = options.storage.withTransaction(write)
+              }
+              return write
             }
             case "IncomingEnvelope": {
               const entry = server.activeRequests.get(message.envelope.requestId)
@@ -571,29 +518,22 @@ export const make = Effect.fnUntraced(function*<
     )
   }
 
-  const decodeMessage = makeMessageDecode(entityRpcs)
+  const decodeMessage = makeMessageDecode(entity, entityRpcs)
 
   const runFork = Effect.runForkWith(context)
 
   return identity<EntityManager>({
-    interruptShard: (shardId: ShardId, options) =>
+    interruptShard: (shardId: ShardId) =>
       Effect.suspend(function loop(): Effect.Effect<void> {
         const fibers = Arr.empty<Fiber.Fiber<void>>()
-        if (options?.force === true) {
-          serverCloseLatches.forEach((latches, address) => {
-            if (shardId[Equal.symbol](address.shardId)) {
-              latches.force.openUnsafe()
-            }
-          })
-        }
         activeServers.forEach((state) => {
           if (shardId[Equal.symbol](state.address.shardId)) {
             fibers.push(runFork(entities.removeIgnore(state.address)))
           }
         })
-        serverCloseLatches.forEach((latches, address) => {
+        serverCloseLatches.forEach((latch, address) => {
           if (shardId[Equal.symbol](address.shardId)) {
-            fibers.push(runFork(latches.closed.await))
+            fibers.push(runFork(latch.await))
           }
         })
         if (fibers.length === 0) return Effect.void
@@ -616,8 +556,6 @@ export const make = Effect.fnUntraced(function*<
     clearProcessed() {
       processedRequestIds.clear()
     },
-    isResidentUnsafe: (address) => entities.hasUnsafe(address),
-    residentAddressesUnsafe: () => entities.keysUnsafe(),
     sendLocal,
     send: (message) =>
       decodeMessage(message).pipe(
@@ -677,7 +615,10 @@ const defaultRetryPolicy = Schedule.min([
   Schedule.spaced("10 seconds")
 ])
 
-const makeMessageDecode = <Rpcs extends Rpc.Any>(entityRpcs: Map<string, Rpcs>) => {
+const makeMessageDecode = <Type extends string, Rpcs extends Rpc.Any>(
+  entity: Entity<Type, Rpcs>,
+  entityRpcs: Map<string, Rpcs>
+) => {
   const decodeRequest = Effect.fnUntracedEager(function*(
     message: Message.IncomingRequest<Rpcs>,
     rpc: Rpc.AnyWithProps
@@ -715,8 +656,8 @@ const makeMessageDecode = <Rpcs extends Rpc.Any>(entityRpcs: Map<string, Rpcs>) 
     if (!rpc) {
       return Effect.fail(
         new Schema.SchemaError(
-          new SchemaIssue.InvalidValue({
-            message: "Expected a known entity RPC tag"
+          new SchemaIssue.InvalidValue(Option.some(message), {
+            message: `Unknown tag ${message.envelope.tag} for entity type ${entity.type}`
           })
         )
       )

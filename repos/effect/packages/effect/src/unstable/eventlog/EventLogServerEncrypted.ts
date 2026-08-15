@@ -10,10 +10,10 @@
  *
  * @since 4.0.0
  */
+import * as Uuid from "uuid"
 import * as Arr from "../../Array.ts"
 import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
-import * as Uuid from "../../internal/uuid.ts"
 import * as Layer from "../../Layer.ts"
 import * as PubSub from "../../PubSub.ts"
 import * as RcMap from "../../RcMap.ts"
@@ -47,7 +47,7 @@ export const layerRpcHandlers = Layer.unwrap(Effect.gen(function*() {
     remoteId,
     getOrCreateSessionAuthBinding: (publicKey, signingPublicKey) =>
       storage.getOrCreateSessionAuthBinding(publicKey, signingPublicKey),
-    onWrite: Effect.fnUntraced(function*(data, authenticatedPublicKeys) {
+    onWrite: Effect.fnUntraced(function*(data) {
       const request = yield* WriteEntries.decode(data).pipe(
         Effect.mapError((_) =>
           new EventLogProtocolError({
@@ -58,19 +58,11 @@ export const layerRpcHandlers = Layer.unwrap(Effect.gen(function*() {
           })
         )
       )
-      if (!authenticatedPublicKeys.has(request.publicKey)) {
-        return yield* new EventLogProtocolError({
-          requestTag: "WriteEntries",
-          publicKey: request.publicKey,
-          code: "Forbidden",
-          message: "Identity is not authenticated"
-        })
-      }
       if (request.encryptedEntries.length === 0) return
-      const entries = request.encryptedEntries.map(({ encryptedEntry, entryId, iv }) =>
+      const entries = request.encryptedEntries.map(({ encryptedEntry, entryId }) =>
         new PersistedEntry({
           entryId,
-          iv,
+          iv: request.iv,
           encryptedEntry
         })
       )
@@ -124,7 +116,7 @@ export const layer: Layer.Layer<never, never, RpcServer.Protocol | Storage> = Rp
 /**
  * Schema for encrypted entries persisted by the encrypted event-log server.
  *
- * @category models
+ * @category storage
  * @since 4.0.0
  */
 export class PersistedEntry extends Schema.Class<PersistedEntry>(
@@ -158,7 +150,7 @@ export class PersistedEntry extends Schema.Class<PersistedEntry>(
  * persists encrypted entries, and streams encrypted changes for a public key and
  * store id.
  *
- * @category services
+ * @category storage
  * @since 4.0.0
  */
 export class Storage extends Context.Service<Storage, {
@@ -187,7 +179,7 @@ export class Storage extends Context.Service<Storage, {
  * Data, session authentication bindings, and streams are process-local and are
  * released with the surrounding scope.
  *
- * @category constructors
+ * @category storage
  * @since 4.0.0
  */
 export const makeStorageMemory: Effect.Effect<Storage["Service"], never, Scope.Scope> = Effect.gen(function*() {
@@ -263,7 +255,7 @@ export const makeStorageMemory: Effect.Effect<Storage["Service"], never, Scope.S
 /**
  * Provides encrypted server `Storage` using the in-memory implementation.
  *
- * @category layers
+ * @category storage
  * @since 4.0.0
  */
 export const layerStorageMemory: Layer.Layer<Storage> = Layer.effect(Storage)(makeStorageMemory)

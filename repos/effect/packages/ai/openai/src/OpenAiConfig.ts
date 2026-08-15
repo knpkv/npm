@@ -35,7 +35,7 @@ export class OpenAiConfig extends Context.Service<
    */
   static readonly getOrUndefined: Effect.Effect<typeof OpenAiConfig.Service | undefined> = Effect.map(
     Effect.context<never>(),
-    Context.getOrUndefined(OpenAiConfig)
+    (context) => context.mapUnsafe.get(OpenAiConfig.key)
   )
 }
 
@@ -49,7 +49,7 @@ export declare namespace OpenAiConfig {
    * Configuration values read by OpenAI provider operations when executing
    * requests.
    *
-   * @category services
+   * @category models
    * @since 4.0.0
    */
   export interface Service {

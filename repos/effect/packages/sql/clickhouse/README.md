@@ -1,14 +1,7 @@
-# @effect/sql-clickhouse
+# `@effect/sql-clickhouse`
 
-An Effect SQL client for [ClickHouse](https://clickhouse.com), built on the [`@clickhouse/client`](https://clickhouse.com/docs/integrations/javascript) library.
-
-## Installation
-
-```sh
-npm install effect@rc @effect/sql-clickhouse@rc
-```
+An `@effect/sql` implementation for [ClickHouse](https://clickhouse.com/).
 
 ## Documentation
 
-- [Effect website](https://effect.website)
-- [API reference](https://effect.website/docs/v4/api/sql-clickhouse)
+- **API Reference**: [View the full documentation](https://effect-ts.github.io/effect/docs/sql-clickhouse).

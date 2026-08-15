@@ -122,12 +122,7 @@ describe("HttpClient", () => {
         limiter,
         key: "test",
         limit: 1,
-        window: "1 minute",
-        times: 2,
-        responseHeaders: {
-          limit: "x-vendor-limit",
-          retryAfter: "x-vendor-retry-after"
-        }
+        window: "1 minute"
       } as const
 
       const dataLast = client.pipe(HttpClient.withRateLimiter(options))

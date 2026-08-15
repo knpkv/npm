@@ -19,14 +19,12 @@ import * as HttpServerResponse from "../http/HttpServerResponse.ts"
  *
  * **Example** (Mapping metric names)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { PrometheusMetrics } from "effect/unstable/observability"
  *
  * // Convert camelCase to snake_case
  * const mapper: PrometheusMetrics.MetricNameMapper = (name) =>
  *   name.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
- *
- * mapper("httpRequests") // => "http_requests"
  * ```
  *
  * @category models
@@ -70,7 +68,7 @@ export interface HttpOptions extends FormatOptions {
  *
  * **Example** (Formatting metrics)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect, Metric } from "effect"
  * import { PrometheusMetrics } from "effect/unstable/observability"
  *
@@ -90,11 +88,7 @@ export interface HttpOptions extends FormatOptions {
  *
  *   // Format with prefix
  *   const output2 = yield* PrometheusMetrics.format({ prefix: "myapp" })
- *
- *   return [output1.includes("api_requests_total"), output2.includes("myapp_active_connections")]
  * })
- *
- * Effect.runSync(program) // => [true, true]
  * ```
  *
  * @category formatting
@@ -162,8 +156,7 @@ export const formatUnsafe = (
  *
  * **Example** (Serving metrics over HTTP)
  *
- * ```ts import.meta.vitest
- * import { Layer } from "effect"
+ * ```ts
  * import { PrometheusMetrics } from "effect/unstable/observability"
  *
  * // Create a layer that adds /metrics endpoint to the router
@@ -174,11 +167,9 @@ export const formatUnsafe = (
  *   path: "/prometheus/metrics",
  *   prefix: "myapp"
  * })
- *
- * const result = [Layer.isLayer(PrometheusLayer), Layer.isLayer(CustomPrometheusLayer)] // => [true, true]
  * ```
  *
- * @category layers
+ * @category Http
  * @since 4.0.0
  */
 export const layerHttp = (

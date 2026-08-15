@@ -8,12 +8,12 @@
   "homepage": "https://effect.website",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Effect-TS/effect.git",
+    "url": "https://github.com/Effect-TS/effect-smol.git",
     "directory": "packages/tools/oxc"
   },
   "sideEffects": [],
   "bugs": {
-    "url": "https://github.com/Effect-TS/effect/issues"
+    "url": "https://github.com/Effect-TS/effect-smol/issues"
   },
   "tags": [
     "typescript",
@@ -53,16 +53,18 @@
   "scripts": {
     "build": "tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@oxlint/plugins": "^1.76.0"
+    "@effect/jsdocs": "workspace:^"
   },
   "peerDependencies": {
     "typescript": ">=5.0.0 <7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.1.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

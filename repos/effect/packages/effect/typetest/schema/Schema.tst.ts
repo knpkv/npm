@@ -1,3 +1,4 @@
+import type { SchemaAST } from "effect"
 import {
   Brand,
   Context,
@@ -6,9 +7,7 @@ import {
   Option,
   Predicate,
   Schema,
-  type SchemaAST,
   SchemaGetter,
-  type SchemaIssue,
   SchemaTransformation,
   Struct,
   Tuple
@@ -20,19 +19,13 @@ type Make<In, Out> = (input: In, options?: Schema.MakeOptions | undefined) => Ou
 type MakeEffect<In, Out> = (
   input: In,
   options?: Schema.MakeOptions | undefined
-) => Effect.Effect<Out, SchemaIssue.Issue>
+) => Effect.Effect<Out, Schema.SchemaError>
 
 const revealClass = <Self, S extends Schema.Struct<Schema.Struct.Fields>, Inherited>(
   klass: Schema.Class<Self, S, Inherited>
 ): Schema.Class<Self, S, Inherited> => klass
 
 describe("Schema", () => {
-  it("RedactedFromValue", () => {
-    const schema = Schema.RedactedFromValue(Schema.String)
-    expect(schema).type.toBe<Schema.RedactedFromValue<Schema.String>>()
-    expect(schema.from).type.toBe<Schema.String>()
-  })
-
   describe("variance", () => {
     it("Type", () => {
       const f1 = hole<
@@ -339,16 +332,16 @@ describe("Schema", () => {
       })
     })
 
-    describe("Error", () => {
+    describe("ErrorClass", () => {
       it("make with void input", () => {
-        class E extends Schema.Error<E>("E")({}) {}
+        class E extends Schema.ErrorClass<E>("E")({}) {}
         expect(E.make).type.toBe<Make<void | {}, E>>()
       })
     })
 
-    describe("TaggedError", () => {
+    describe("TaggedErrorClass", () => {
       it("make with void input", () => {
-        class E extends Schema.TaggedError<E>()("E", {}) {}
+        class E extends Schema.TaggedErrorClass<E>()("E", {}) {}
         expect(E.make).type.toBe<Make<void | { readonly _tag?: "E" }, E>>()
       })
     })
@@ -1442,7 +1435,7 @@ describe("Schema", () => {
 
     describe("Error", () => {
       it("extend Fields", () => {
-        class E extends Schema.Error<E>("E")({
+        class E extends Schema.ErrorClass<E>("E")({
           a: Schema.String
         }) {}
 
@@ -1456,7 +1449,7 @@ describe("Schema", () => {
       })
 
       it("extend Struct", () => {
-        class E extends Schema.Error<E>("E")(Schema.Struct({
+        class E extends Schema.ErrorClass<E>("E")(Schema.Struct({
           a: Schema.String
         })) {}
 
@@ -1470,7 +1463,7 @@ describe("Schema", () => {
       })
 
       it("should reject non existing props", () => {
-        class E extends Schema.Error<E>("E")({
+        class E extends Schema.ErrorClass<E>("E")({
           a: Schema.String
         }) {}
 
@@ -1479,7 +1472,7 @@ describe("Schema", () => {
       })
 
       it("mutable field", () => {
-        class E extends Schema.Error<E>("E")({
+        class E extends Schema.ErrorClass<E>("E")({
           a: Schema.String.pipe(Schema.mutableKey)
         }) {}
 
@@ -1507,15 +1500,15 @@ describe("Schema", () => {
         )
       })
 
-      it("Error", () => {
-        expect(Schema.Error("A")({})).type.toBe(
-          "Missing `Self` generic - use `class Self extends Schema.Error<Self>(...)`"
+      it("ErrorClass", () => {
+        expect(Schema.ErrorClass("A")({})).type.toBe(
+          "Missing `Self` generic - use `class Self extends Schema.ErrorClass<Self>(...)`"
         )
       })
 
-      it("TaggedError", () => {
-        expect(Schema.TaggedError("A")("A", {})).type.toBe(
-          "Missing `Self` generic - use `class Self extends Schema.TaggedError<Self>(...)`"
+      it("TaggedErrorClass", () => {
+        expect(Schema.TaggedErrorClass("A")("A", {})).type.toBe(
+          "Missing `Self` generic - use `class Self extends Schema.TaggedErrorClass<Self>(...)`"
         )
       })
     })
@@ -1853,115 +1846,26 @@ describe("Schema", () => {
     })
   })
 
-  describe("class extension", () => {
-    it("keeps protocol bases constructor-free", () => {
-      const bottomWithoutNew: Schema.BottomWithoutNew<
-        string,
-        string,
-        never,
-        never,
-        (typeof Schema.String)["ast"],
-        Schema.String
-      > = Schema.String
-      expect(bottomWithoutNew).type.not.toBeAssignableTo<
-        abstract new(...args: Array<any>) => unknown
+  describe("asClass", () => {
+    it("preserves schema Type", () => {
+      class A extends Schema.asClass(Schema.String) {}
+      expect(Schema.revealCodec(A)).type.toBe<Schema.Codec<string, string, never, never>>()
+
+      class B extends Schema.asClass(Schema.Struct({ name: Schema.String })) {}
+      expect(Schema.revealCodec(B)).type.toBe<
+        Schema.Codec<{ readonly name: string }, { readonly name: string }, never, never>
       >()
-
-      const struct = Schema.Struct({ name: Schema.String })
-      const bottomLazyWithoutNew: Schema.BottomLazyWithoutNew<
-        (typeof struct)["ast"],
-        (typeof struct)["Rebuild"]
-      > = struct
-      expect(bottomLazyWithoutNew).type.not.toBeAssignableTo<
-        abstract new(...args: Array<any>) => unknown
-      >()
-    })
-
-    it("keeps class-compatible bases extendable", () => {
-      const bottom: Schema.Bottom<
-        string,
-        string,
-        never,
-        never,
-        (typeof Schema.String)["ast"],
-        Schema.String
-      > = Schema.String
-      class A extends bottom {}
-
-      const struct = Schema.Struct({ name: Schema.String })
-      const bottomLazy: Schema.BottomLazy<
-        (typeof struct)["ast"],
-        (typeof struct)["Rebuild"]
-      > = struct
-      class B extends bottomLazy {}
-
-      expect(Schema.revealCodec(A)).type.toBe<Schema.Codec<string>>()
-      expect(B).type.toBeAssignableTo<Schema.Top>()
-    })
-
-    it("keeps Opaque assignable to Top", () => {
-      class A extends Schema.Opaque<A>()(Schema.Struct({ name: Schema.String })) {}
-
-      expect(A).type.toBeAssignableTo<Schema.Top>()
-    })
-
-    it("keeps Schema.Class assignable to Top", () => {
-      class A extends Schema.Class<A>("A")({ name: Schema.String }) {}
-
-      expect(A).type.toBeAssignableTo<Schema.Top>()
-    })
-
-    it("preserves codec parameters", () => {
-      interface DecodingService {
-        readonly DecodingService: unique symbol
-      }
-      interface EncodingService {
-        readonly EncodingService: unique symbol
-      }
-
-      const schema = Schema.FiniteFromString.pipe(
-        Schema.middlewareDecoding((effect) =>
-          Effect.andThen(
-            Effect.context<DecodingService>(),
-            effect
-          )
-        ),
-        Schema.middlewareEncoding((effect) =>
-          Effect.andThen(
-            Effect.context<EncodingService>(),
-            effect
-          )
-        )
-      )
-
-      class A extends schema {}
-
-      expect(Schema.revealCodec(A)).type.toBe<
-        Schema.Codec<number, string, DecodingService, EncodingService>
-      >()
-    })
-
-    it("preserves Struct fields", () => {
-      class B extends Schema.Struct({ name: Schema.String }) {}
-
       expect(B.fields).type.toBe<{ readonly name: Schema.String }>()
     })
 
-    it("cannot be constructed", () => {
-      class A extends Schema.String {}
-
-      expect(A).type.not.toBeConstructableWith()
-      expect(A).type.not.toBeConstructableWith("a")
-    })
-
     it("annotate returns the original schema type", () => {
-      class A extends Schema.String {}
+      class A extends Schema.asClass(Schema.String) {}
 
       expect(A.annotate({})).type.toBe<Schema.String>()
     })
 
     it("should support static methods", () => {
-      class A extends Schema.FiniteFromString {
+      class A extends Schema.asClass(Schema.FiniteFromString) {
         static readonly decodeUnknownSync = Schema.decodeUnknownSync(this)
         static get encodeSync() {
           return Schema.encodeSync(this)

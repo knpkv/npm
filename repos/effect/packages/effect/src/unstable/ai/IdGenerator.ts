@@ -32,7 +32,7 @@ import * as Random from "../../Random.ts"
  *
  * **Example** (Accessing the ID generator service)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { IdGenerator } from "effect/unstable/ai"
  *
@@ -41,13 +41,6 @@ import * as Random from "../../Random.ts"
  *   const newId = yield* idGenerator.generateId()
  *   return newId
  * })
- *
- * const program = useIdGenerator.pipe(
- *   Effect.provideService(IdGenerator.IdGenerator, {
- *     generateId: () => Effect.succeed("id-1")
- *   })
- * )
- * await Effect.runPromise(program) // => "id-1"
  * ```
  *
  * @category services
@@ -68,7 +61,7 @@ export class IdGenerator extends Context.Service<IdGenerator, Service>()(
  *
  * **Example** (Implementing a custom ID generator)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import type { IdGenerator } from "effect/unstable/ai"
  *
@@ -78,9 +71,11 @@ export class IdGenerator extends Context.Service<IdGenerator, Service>()(
  *   generateId: () => Effect.sync(() => `custom_${++nextId}`)
  * }
  *
- * const program = customService.generateId()
- *
- * await Effect.runPromise(program) // => "custom_1"
+ * const program = Effect.gen(function*() {
+ *   const id = yield* customService.generateId()
+ *   console.log(id) // "custom_1"
+ *   return id
+ * })
  * ```
  *
  * @category models
@@ -95,7 +90,7 @@ export interface Service {
  *
  * **Example** (Configuring generated IDs)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import type { IdGenerator } from "effect/unstable/ai"
  *
  * // Configuration for tool call IDs
@@ -107,7 +102,6 @@ export interface Service {
  * }
  *
  * // This will generate IDs like: "tool_A1B2C3D4"
- * const result = [toolCallOptions.prefix, toolCallOptions.size] // => ["tool", 8]
  * ```
  *
  * @category options
@@ -168,12 +162,13 @@ const makeGenerator = ({
  *
  * **Example** (Generating default IDs)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { IdGenerator } from "effect/unstable/ai"
  *
  * const program = Effect.gen(function*() {
  *   const id = yield* IdGenerator.defaultIdGenerator.generateId()
+ *   console.log(id) // "id_A7xK9mP2qR5tY8uV"
  *   return id
  * })
  *
@@ -184,9 +179,6 @@ const makeGenerator = ({
  *     IdGenerator.defaultIdGenerator
  *   )
  * )
- *
- * const id = await Effect.runPromise(withDefault)
- * const result = [id.startsWith("id_"), id.length] // => [true, 19]
  * ```
  *
  * @category constructors
@@ -206,7 +198,7 @@ export const defaultIdGenerator: Service = {
  *
  * **Example** (Creating a custom generator)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { IdGenerator } from "effect/unstable/ai"
  *
@@ -219,16 +211,15 @@ export const defaultIdGenerator: Service = {
  *     size: 10
  *   })
  *
- *   return yield* messageIdGen.generateId()
+ *   const messageId = yield* messageIdGen.generateId()
+ *   console.log(messageId) // "msg-A7X9K2M5P8"
+ *   return messageId
  * })
- *
- * const messageId = await Effect.runPromise(program)
- * const result = [messageId.startsWith("msg-"), messageId.length] // => [true, 14]
  * ```
  *
  * **Example** (Handling invalid generator options)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { IdGenerator } from "effect/unstable/ai"
  *
@@ -240,8 +231,14 @@ export const defaultIdGenerator: Service = {
  *   size: 8
  * })
  *
- * const error = await Effect.runPromise(Effect.flip(invalidConfig))
- * error.message // => 'The separator "A" must not be part of the alphabet "ABC123".'
+ * const program = Effect.gen(function*() {
+ *   const generator = yield* invalidConfig
+ *   return generator
+ * }).pipe(
+ *   Effect.catch((error) =>
+ *     Effect.succeed(`Configuration error: ${error.message}`)
+ *   )
+ * )
  * ```
  *
  * @category constructors
@@ -276,7 +273,7 @@ export const make = Effect.fnUntraced(function*({
  *
  * **Example** (Providing an ID generator layer)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Effect } from "effect"
  * import { IdGenerator } from "effect/unstable/ai"
  *
@@ -290,14 +287,13 @@ export const make = Effect.fnUntraced(function*({
  *
  * const program = Effect.gen(function*() {
  *   const idGen = yield* IdGenerator.IdGenerator
- *   return yield* idGen.generateId()
+ *   const toolCallId = yield* idGen.generateId()
+ *   console.log(toolCallId) // "tool_call_A7XK9MP2QR5T"
+ *   return toolCallId
  * }).pipe(Effect.provide(toolCallIdLayer))
- *
- * const toolCallId = await Effect.runPromise(program)
- * const result = [toolCallId.startsWith("tool_call_"), toolCallId.length] // => [true, 22]
  * ```
  *
- * @category layers
+ * @category constructors
  * @since 4.0.0
  */
 export const layer = (options: MakeOptions): Layer.Layer<IdGenerator, Cause.IllegalArgumentError> =>

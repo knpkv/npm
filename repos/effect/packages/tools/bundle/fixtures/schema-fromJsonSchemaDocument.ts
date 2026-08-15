@@ -1,6 +1,6 @@
 import * as SchemaRepresentation from "effect/SchemaRepresentation"
 
-export const schema = SchemaRepresentation.fromJsonSchemaDocument({
+const doc = SchemaRepresentation.fromJsonSchemaDocument({
   "dialect": "draft-2020-12",
   "schema": {
     "type": "object",
@@ -12,3 +12,5 @@ export const schema = SchemaRepresentation.fromJsonSchemaDocument({
   },
   "definitions": {}
 })
+
+console.dir(doc, { depth: null })

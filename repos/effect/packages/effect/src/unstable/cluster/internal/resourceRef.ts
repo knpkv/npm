@@ -1,4 +1,3 @@
-import type * as Cause from "../../../Cause.ts"
 import * as Effect from "../../../Effect.ts"
 import * as Exit from "../../../Exit.ts"
 import * as Latch from "../../../Latch.ts"
@@ -8,7 +7,7 @@ import * as Scope from "../../../Scope.ts"
 import { internalInterruptors } from "./interruptors.ts"
 
 /** @internal */
-export type State<A, E> = {
+export type State<A> = {
   readonly _tag: "Closed"
 } | {
   readonly _tag: "Acquiring"
@@ -17,10 +16,6 @@ export type State<A, E> = {
   readonly _tag: "Acquired"
   readonly scope: Scope.Closeable
   readonly value: A
-} | {
-  readonly _tag: "Failed"
-  readonly scope: Scope.Closeable
-  readonly cause: Cause.Cause<E>
 }
 
 /** @internal */
@@ -29,7 +24,7 @@ export class ResourceRef<A, E = never> {
     parentScope: Scope.Scope,
     acquire: (scope: Scope.Scope) => Effect.Effect<A, E>
   ) {
-    const state = MutableRef.make<State<A, E>>({ _tag: "Closed" })
+    const state = MutableRef.make<State<A>>({ _tag: "Closed" })
 
     yield* Scope.addFinalizerExit(parentScope, (exit) => {
       const s = MutableRef.get(state)
@@ -49,10 +44,10 @@ export class ResourceRef<A, E = never> {
     return new ResourceRef(state, acquire)
   })
 
-  readonly state: MutableRef.MutableRef<State<A, E>>
+  readonly state: MutableRef.MutableRef<State<A>>
   readonly acquire: (scope: Scope.Scope) => Effect.Effect<A, E>
   constructor(
-    state: MutableRef.MutableRef<State<A, E>>,
+    state: MutableRef.MutableRef<State<A>>,
     acquire: (scope: Scope.Scope) => Effect.Effect<A, E>
   ) {
     this.state = state
@@ -89,32 +84,15 @@ export class ResourceRef<A, E = never> {
         MutableRef.set(this.state, { _tag: "Acquired", scope, value })
         return this.latch.open
       })
-    ).pipe(
-      Effect.onExit((exit) => {
-        if (Exit.isSuccess(exit)) {
-          return Effect.void
-        }
-        return Scope.close(scope, exit).pipe(
-          Effect.ensuring(Effect.sync(() => {
-            const state = this.state.current
-            if (state._tag === "Acquiring" && state.scope === scope) {
-              MutableRef.set(this.state, { _tag: "Failed", scope, cause: exit.cause })
-              this.latch.openUnsafe()
-            }
-          }))
-        )
-      })
     )
   }
 
-  await: Effect.Effect<A, E> = Effect.suspend(() => {
+  await: Effect.Effect<A> = Effect.suspend(() => {
     const s = this.state.current
     if (s._tag === "Closed") {
       return Effect.interrupt
     } else if (s._tag === "Acquired") {
       return Effect.succeed(s.value)
-    } else if (s._tag === "Failed") {
-      return Effect.failCause(s.cause)
     }
     return Effect.flatMap(this.latch.await, () => this.await)
   })

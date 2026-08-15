@@ -24,7 +24,6 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
-import * as Rec from "effect/Record"
 import * as Scope from "effect/Scope"
 import * as ScopedRef from "effect/ScopedRef"
 import * as Semaphore from "effect/Semaphore"
@@ -60,7 +59,7 @@ export type TypeId = "~@effect/sql-sqlite-wasm/SqliteClient"
 /**
  * SQLite WASM client service interface, extending `SqlClient` with database `export` and `import` operations and marking `updateValues` as unsupported for SQLite.
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface SqliteClient extends Client.SqlClient {
@@ -184,7 +183,7 @@ export const makeMemory = (
                 if (rowMode === "object") {
                   const obj: Record<string, any> = {}
                   for (let i = 0; i < columns.length; i++) {
-                    Rec.assignProperty(obj, columns[i], row[i])
+                    obj[columns[i]] = row[i]
                   }
                   results.push(obj)
                 } else {
@@ -225,7 +224,7 @@ export const makeMemory = (
                 const row = sqlite3.row(stmt)
                 const obj: Record<string, any> = {}
                 for (let i = 0; i < columns.length; i++) {
-                  Rec.assignProperty(obj, columns[i], row[i])
+                  obj[columns[i]] = row[i]
                 }
                 yield obj
               }
@@ -306,9 +305,10 @@ export const make = (
     const transformRows = options.transformResultNames ?
       Statement.defaultTransforms(options.transformResultNames).array :
       undefined
+    const pending = new Map<number, (effect: Exit.Exit<any, SqlError>) => void>()
+
     const makeConnection = Effect.gen(function*() {
       let currentId = 0
-      const pending = new Map<number, (effect: Exit.Exit<any, SqlError>) => void>()
       const scope = yield* Effect.scope
       const readyDeferred = yield* Deferred.make<void>()
 
@@ -344,15 +344,7 @@ export const make = (
       }
       port.addEventListener("message", onMessage)
 
-      function onError(cause: Event) {
-        const exit = Exit.fail(
-          new SqlError({ reason: classifyError(cause, "SQLite WASM worker failed", "worker") })
-        )
-        const requests = Array.from(pending.values())
-        pending.clear()
-        for (const resume of requests) {
-          resume(exit)
-        }
+      function onError() {
         Effect.runFork(ScopedRef.set(connectionRef, makeConnection))
       }
       if ("onerror" in worker) {
@@ -464,7 +456,7 @@ export const make = (
 function rowToObject(columns: Array<string>, row: Array<any>) {
   const obj: Record<string, any> = {}
   for (let i = 0; i < columns.length; i++) {
-    Rec.assignProperty(obj, columns[i], row[i])
+    obj[columns[i]] = row[i]
   }
   return obj
 }
@@ -474,7 +466,7 @@ const extractRows = (rows: [Array<string>, Array<any>]) => rows[1]
 /**
  * Fiber reference that stores transferables to include with worker-backed SQLite WASM query messages.
  *
- * @category services
+ * @category transferables
  * @since 4.0.0
  */
 export const Transferables = Context.Reference<ReadonlyArray<Transferable>>(

@@ -621,7 +621,7 @@ describe("HttpApiClient", () => {
       type StreamError = { readonly reason: string }
       type ClientStream = Stream.Stream<
         Event,
-        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry | Sse.SseError
+        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry
       >
 
       expect(f()).type.toBe<
@@ -638,76 +638,6 @@ describe("HttpApiClient", () => {
       >()
       expect(f({ responseMode: "response-only" })).type.toBe<
         Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>
-      >()
-    })
-
-    it("widens only the body stream errors for WithHeaders StreamSse successes", () => {
-      const Api = HttpApi.make("Api")
-        .add(
-          HttpApiGroup.make("group")
-            .add(
-              HttpApiEndpoint.get("a", "/a", {
-                success: HttpApiSchema.WithHeaders(
-                  HttpApiSchema.StreamSse({
-                    data: Schema.Struct({ id: Schema.String }),
-                    error: Schema.Struct({ reason: Schema.String })
-                  }),
-                  { "x-count": Schema.Int }
-                )
-              })
-            )
-        )
-      const client = Effect.runSync(
-        HttpApiClient.make(Api).pipe(Effect.provide(FetchHttpClient.layer))
-      )
-      const f = client.group.a
-
-      type ClientStream = Stream.Stream<
-        { readonly id: string },
-        | { readonly reason: string }
-        | HttpClientError.HttpClientError
-        | Schema.SchemaError
-        | Sse.Retry
-        | Sse.SseError
-      >
-      type Success = HttpApiSchema.withHeaders<ClientStream, { readonly "x-count": number }>
-
-      expect(f()).type.toBe<
-        Effect.Effect<Success, HttpClientError.HttpClientError | Schema.SchemaError>
-      >()
-      expect(f({ responseMode: "decoded-and-response" })).type.toBe<
-        Effect.Effect<
-          [Success, HttpClientResponse.HttpClientResponse],
-          HttpClientError.HttpClientError | Schema.SchemaError
-        >
-      >()
-    })
-
-    it("widens the body transport error for WithHeaders StreamUint8Array successes", () => {
-      const Api = HttpApi.make("Api")
-        .add(
-          HttpApiGroup.make("group")
-            .add(
-              HttpApiEndpoint.get("a", "/a", {
-                success: HttpApiSchema.WithHeaders(
-                  HttpApiSchema.StreamUint8Array(),
-                  { "x-count": Schema.Int }
-                )
-              })
-            )
-        )
-      const client = Effect.runSync(
-        HttpApiClient.make(Api).pipe(Effect.provide(FetchHttpClient.layer))
-      )
-      const f = client.group.a
-
-      type Success = HttpApiSchema.withHeaders<
-        Stream.Stream<Uint8Array, HttpClientError.HttpClientError>,
-        { readonly "x-count": number }
-      >
-
-      expect(f()).type.toBe<
-        Effect.Effect<Success, HttpClientError.HttpClientError | Schema.SchemaError>
       >()
     })
 
@@ -733,7 +663,7 @@ describe("HttpApiClient", () => {
       type StreamError = { readonly reason: string }
       type ClientStream = Stream.Stream<
         Data,
-        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry | Sse.SseError
+        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry
       >
 
       expect(f()).type.toBe<
@@ -767,7 +697,7 @@ describe("HttpApiClient", () => {
       type Data = { readonly id: string }
       type ClientStream = Stream.Stream<
         Data,
-        HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry | Sse.SseError
+        HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry
       >
 
       expect(f()).type.toBe<
@@ -834,7 +764,7 @@ describe("HttpApiClient", () => {
 
       type ClientStream = Stream.Stream<
         Event,
-        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry | Sse.SseError
+        StreamError | HttpClientError.HttpClientError | Schema.SchemaError | Sse.Retry
       >
 
       expect(f({ responseMode: "decoded-only" })).type.toBe<
@@ -913,7 +843,7 @@ describe("HttpApiClient", () => {
     })
 
     it("preserves custom client errors when normalizing HttpClientError", () => {
-      class CustomClientError extends Schema.Error<CustomClientError>("CustomClientError")({
+      class CustomClientError extends Schema.ErrorClass<CustomClientError>("CustomClientError")({
         _tag: Schema.tag("CustomClientError")
       }) {}
 
@@ -1027,10 +957,10 @@ describe("HttpApiClient", () => {
     })
 
     it("selects within the requested group when endpoint identifiers overlap", () => {
-      class UsersEndpointError extends Schema.TaggedError<UsersEndpointError>()("UsersEndpointError", {}) {}
-      class AdminsEndpointError extends Schema.TaggedError<AdminsEndpointError>()("AdminsEndpointError", {}) {}
-      class UsersClientError extends Schema.TaggedError<UsersClientError>()("UsersClientError", {}) {}
-      class AdminsClientError extends Schema.TaggedError<AdminsClientError>()("AdminsClientError", {}) {}
+      class UsersEndpointError extends Schema.TaggedErrorClass<UsersEndpointError>()("UsersEndpointError", {}) {}
+      class AdminsEndpointError extends Schema.TaggedErrorClass<AdminsEndpointError>()("AdminsEndpointError", {}) {}
+      class UsersClientError extends Schema.TaggedErrorClass<UsersClientError>()("UsersClientError", {}) {}
+      class AdminsClientError extends Schema.TaggedErrorClass<AdminsClientError>()("AdminsClientError", {}) {}
 
       class UsersMiddleware extends HttpApiMiddleware.Service<UsersMiddleware, {
         clientError: UsersClientError
@@ -1187,7 +1117,7 @@ describe("HttpApiClient", () => {
         readonly customService: "customService"
       }
 
-      class CustomClientError extends Schema.Error<CustomClientError>("CustomClientError")({
+      class CustomClientError extends Schema.ErrorClass<CustomClientError>("CustomClientError")({
         _tag: Schema.tag("CustomClientError")
       }) {}
 
@@ -1206,15 +1136,7 @@ describe("HttpApiClient", () => {
 
       const httpClient = hole<HttpClient.HttpClient.With<CustomClientError, CustomService>>()
       const getUser = Effect.runSync(
-        HttpApiClient.endpoint(Api, {
-          group: "users",
-          endpoint: "getUser",
-          httpClient,
-          transformClient: (client) => {
-            expect(client).type.toBe<HttpClient.HttpClient.With<CustomClientError, CustomService>>()
-            return client
-          }
-        })
+        HttpApiClient.endpoint(Api, { group: "users", endpoint: "getUser", httpClient })
       )
 
       expect(getUser({ params: { id: "1" } })).type.toBe<
@@ -1229,11 +1151,11 @@ describe("HttpApiClient", () => {
 
   describe("client middleware", () => {
     it("requires layers and includes errors for required client middleware", () => {
-      class RequiredClientError extends Schema.Error<RequiredClientError>("RequiredClientError")({
+      class RequiredClientError extends Schema.ErrorClass<RequiredClientError>("RequiredClientError")({
         _tag: Schema.tag("RequiredClientError")
       }) {}
 
-      class OptionalClientError extends Schema.Error<OptionalClientError>("OptionalClientError")({
+      class OptionalClientError extends Schema.ErrorClass<OptionalClientError>("OptionalClientError")({
         _tag: Schema.tag("OptionalClientError")
       }) {}
 
@@ -1282,7 +1204,7 @@ describe("HttpApiClient", () => {
     })
 
     it("enforces required middleware for makeWith, group, and endpoint", () => {
-      class RequiredClientError extends Schema.Error<RequiredClientError>("RequiredClientError")({
+      class RequiredClientError extends Schema.ErrorClass<RequiredClientError>("RequiredClientError")({
         _tag: Schema.tag("RequiredClientError")
       }) {}
 

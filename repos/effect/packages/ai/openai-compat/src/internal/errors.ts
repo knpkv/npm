@@ -10,7 +10,6 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import * as String from "effect/String"
 import * as AiError from "effect/unstable/ai/AiError"
 import type * as Response from "effect/unstable/ai/Response"
-import type * as Sse from "effect/unstable/encoding/Sse"
 import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -23,7 +22,7 @@ export const OpenAiErrorBody = Schema.Struct({
     type: Schema.optional(Schema.NullOr(Schema.String)),
     status: Schema.optional(Schema.NullOr(Schema.String)),
     param: Schema.optional(Schema.NullOr(Schema.String)),
-    code: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Finite])))
+    code: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Number])))
   })
 })
 const OpenAiErrorBodyJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Union([
@@ -48,17 +47,6 @@ export const mapSchemaError = dual<
     module: "OpenAiClient",
     method,
     reason: AiError.InvalidOutputError.fromSchemaError(error)
-  }))
-
-/** @internal */
-export const mapSseError = dual<
-  (method: string) => (error: Sse.SseError) => AiError.AiError,
-  (error: Sse.SseError, method: string) => AiError.AiError
->(2, (error, method) =>
-  AiError.make({
-    module: "OpenAiClient",
-    method,
-    reason: new AiError.InvalidOutputError({ description: error.message })
   }))
 
 /** @internal */

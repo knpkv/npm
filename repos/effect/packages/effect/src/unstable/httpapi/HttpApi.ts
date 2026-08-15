@@ -10,11 +10,12 @@
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
 import * as Context from "../../Context.ts"
-import * as InternalRecord from "../../internal/record.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Record from "../../Record.ts"
 import type * as Schema from "../../Schema.ts"
+import type * as SchemaAST from "../../SchemaAST.ts"
+import type { Mutable } from "../../Types.ts"
 import type { PathInput } from "../http/HttpRouter.ts"
 import * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
 import type * as HttpApiGroup from "./HttpApiGroup.ts"
@@ -66,22 +67,7 @@ export interface HttpApi<
   add<const A extends NonEmptyReadonlyArray<HttpApiGroup.Constraint>>(...groups: A): HttpApi<Id, Groups | A[number]>
 
   /**
-   * Adds every group from another `HttpApi` while preserving its annotation scope.
-   *
-   * **When to use**
-   *
-   * Use when you want to compose an API from groups declared and annotated under another API.
-   *
-   * **Details**
-   *
-   * The added API is flattened into this API rather than retained as a nested value. Each added group
-   * is copied with the added API's annotations, leaving the added API unchanged. Annotation precedence
-   * from least to most specific is this API, the added API, the group, and then the endpoint.
-   *
-   * **Gotchas**
-   *
-   * Annotations from the added API do not become top-level annotations of the result and do not affect
-   * groups already present in this API. They remain scoped to the groups and endpoints being added.
+   * Add another `HttpApi` to the `HttpApi`.
    */
   addHttpApi<Id2 extends string, Groups2 extends HttpApiGroup.Constraint>(
     api: HttpApi<Id2, Groups2>
@@ -144,7 +130,7 @@ const Proto = {
   ) {
     const groups = { ...this.groups }
     for (const group of toAdd) {
-      InternalRecord.assignProperty(groups, group.identifier, group)
+      groups[group.identifier] = group
     }
     return makeProto({
       ...optionsFromApi(this),
@@ -156,13 +142,10 @@ const Proto = {
     api: Top
   ) {
     const newGroups = { ...this.groups }
-    for (const key of Object.keys(api.groups)) {
-      const group = api.groups[key]
-      InternalRecord.assignProperty(
-        newGroups,
-        key,
-        group.annotateMerge(Context.merge(api.annotations, group.annotations))
-      )
+    for (const key in api.groups) {
+      const newGroup: Mutable<HttpApiGroup.Top> = api.groups[key]
+      newGroup.annotations = Context.merge(api.annotations, newGroup.annotations)
+      newGroups[key] = newGroup as any
     }
     return makeProto({
       ...optionsFromApi(this),
@@ -289,11 +272,11 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Constrain
         mergedAnnotations: Context.merge(groupAnnotations, endpoint.annotations),
         successes: extractResponseContent(
           HttpApiEndpoint.getSuccessSchemas(endpoint),
-          HttpApiSchema.getStatusSuccessSchema
+          HttpApiSchema.getStatusSuccess
         ),
         errors: extractResponseContent(
           HttpApiEndpoint.getErrorSchemas(endpoint),
-          HttpApiSchema.getStatusErrorSchema
+          HttpApiSchema.getStatusError
         )
       })
     }
@@ -304,7 +287,7 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Constrain
 
 const extractResponseContent = (
   schemas: Array<Schema.Top>,
-  getStatus: (schema: Schema.Constraint) => number
+  getStatus: (ast: SchemaAST.AST) => number
 ): ReadonlyMap<number, [Schema.Top, ...Array<Schema.Top>]> => {
   const map = new Map<number, [Schema.Top, ...Array<Schema.Top>]>()
 
@@ -313,9 +296,9 @@ const extractResponseContent = (
   return map
 
   function add(schema: Schema.Top) {
-    const body = HttpApiSchema.isWithHeaders(schema) ? schema.schema : schema
-    if (HttpApiSchema.isStreamSchema(body)) return
-    const status = getStatus(schema)
+    if (HttpApiSchema.isStreamSchema(schema)) return
+    const ast = schema.ast
+    const status = getStatus(ast)
     const schemas = map.get(status)
     if (schemas === undefined) {
       map.set(status, [schema])

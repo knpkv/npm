@@ -154,7 +154,7 @@ export function make<A extends ReadonlyArray<Interpolated>>(
             values[index] = primitiveToString(value)
           })),
       {
-        concurrency: "unbounded",
+        concurrency: "inherit",
         discard: true
       }
     ),
@@ -215,12 +215,11 @@ export function stream<A extends ReadonlyArray<InterpolatedWithStream>>(
     buffer = ""
   }
 
-  return Stream.fromIterable(chunks).pipe(
-    Stream.mapEffect(
-      (chunk) => Effect.isEffect(chunk) ? chunk : Effect.succeed(chunk),
-      { concurrency: "unbounded" }
-    ),
-    Stream.flatMap((chunk) => typeof chunk === "string" ? Stream.succeed(chunk) : chunk)
+  return Stream.flatMap(
+    Stream.fromIterable(chunks),
+    (chunk) =>
+      typeof chunk === "string" ? Stream.succeed(chunk) : Effect.isEffect(chunk) ? Stream.fromEffect(chunk) : chunk,
+    { concurrency: "unbounded" }
   )
 }
 

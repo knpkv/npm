@@ -47,14 +47,8 @@ const lexTokens = (args: ReadonlyArray<string>): ReadonlyArray<Token> => {
     if (!arg.startsWith("-")) {
       tokens.push({ _tag: "Value", value: arg })
     } else if (arg.startsWith("--")) {
-      const equalIndex = arg.indexOf("=")
-      if (equalIndex !== -1) {
-        const name = arg.slice(2, equalIndex)
-        const value = arg.slice(equalIndex + 1)
-        tokens.push({ _tag: "LongOption", name, raw: arg, value })
-      } else {
-        tokens.push({ _tag: "LongOption", name: arg.slice(2), raw: arg })
-      }
+      const [name, value] = arg.slice(2).split("=", 2)
+      tokens.push({ _tag: "LongOption", name, raw: arg, value })
     } else if (arg.length > 1) {
       const flags = arg.slice(1)
       const equalIndex = flags.indexOf("=")

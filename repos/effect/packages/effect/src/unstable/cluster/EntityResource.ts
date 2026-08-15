@@ -10,6 +10,7 @@
  *
  * @since 4.0.0
  */
+import type * as v1 from "kubernetes-types/core/v1.d.ts"
 import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
@@ -18,7 +19,6 @@ import * as RcRef from "../../RcRef.ts"
 import * as Scope from "../../Scope.ts"
 import * as Entity from "./Entity.ts"
 import * as K8sHttpClient from "./K8sHttpClient.ts"
-import type { Pod as K8sPod } from "./K8sTypes.ts"
 import type { Sharding } from "./Sharding.ts"
 
 /**
@@ -66,7 +66,7 @@ export interface EntityResource<out A, out E = never> {
  *
  * It is not closed during restarts, due to shard movement or node shutdowns.
  *
- * @category services
+ * @category resource management
  * @since 4.0.0
  */
 export class CloseScope extends Context.Service<
@@ -156,11 +156,11 @@ export const make: <A, E, R>(options: {
  * The pod is created and waited on through `K8sHttpClient`, and is kept alive
  * until the resource is closed or its idle time to live expires.
  *
- * @category constructors
+ * @category Kubernetes
  * @since 4.0.0
  */
 export const makeK8sPod: (
-  spec: K8sPod,
+  spec: v1.Pod,
   options?: {
     readonly idleTimeToLive?: Duration.Input | undefined
   } | undefined
@@ -168,7 +168,7 @@ export const makeK8sPod: (
   EntityResource<K8sHttpClient.PodStatus>,
   never,
   Scope.Scope | Sharding | Entity.CurrentAddress | K8sHttpClient.K8sHttpClient
-> = Effect.fnUntraced(function*(spec: K8sPod, options?: {
+> = Effect.fnUntraced(function*(spec: v1.Pod, options?: {
   readonly idleTimeToLive?: Duration.Input | undefined
 }) {
   const createPod = yield* K8sHttpClient.makeCreatePod

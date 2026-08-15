@@ -977,8 +977,13 @@ export const hasBy = dual<
   return false
 })
 
-const setHash = <K, V>(self: HashMap<K, V>, key: K, hash: number, value: V): HashMap<K, V> => {
+/** @internal */
+export const set = dual<
+  <K, V>(key: K, value: V) => (self: HashMap<K, V>) => HashMap<K, V>,
+  <K, V>(self: HashMap<K, V>, key: K, value: V) => HashMap<K, V>
+>(3, <K, V>(self: HashMap<K, V>, key: K, value: V): HashMap<K, V> => {
   const impl = self as HashMapImpl<K, V>
+  const hash = Hash.hash(key)
   const added = { value: false }
 
   // Pass edit context: use current edit if editable, otherwise NaN (never matches any edit)
@@ -1000,14 +1005,6 @@ const setHash = <K, V>(self: HashMap<K, V>, key: K, hash: number, value: V): Has
   }
 
   return new HashMapImpl(false, impl._edit, newRoot, impl._size + (added.value ? 1 : 0))
-}
-
-/** @internal */
-export const set = dual<
-  <K, V>(key: K, value: V) => (self: HashMap<K, V>) => HashMap<K, V>,
-  <K, V>(self: HashMap<K, V>, key: K, value: V) => HashMap<K, V>
->(3, <K, V>(self: HashMap<K, V>, key: K, value: V): HashMap<K, V> => {
-  return setHash(self, key, Hash.hash(key), value)
 })
 
 /** @internal */
@@ -1107,10 +1104,10 @@ export const modifyHash = dual<
   const updated = f(current)
 
   if (Option.isNone(updated)) {
-    return hasHash(self, key, hash) ? removeHash(self, key, hash) : self
+    return hasHash(self, key, hash) ? remove(self, key) : self
   }
 
-  return setHash(self, key, hash, updated.value)
+  return set(self, key, updated.value)
 })
 
 /** @internal */
@@ -1133,8 +1130,13 @@ export const union = dual<
   return result
 })
 
-const removeHash = <K, V>(self: HashMap<K, V>, key: K, hash: number): HashMap<K, V> => {
+/** @internal */
+export const remove = dual<
+  <K>(key: K) => <V>(self: HashMap<K, V>) => HashMap<K, V>,
+  <K, V>(self: HashMap<K, V>, key: K) => HashMap<K, V>
+>(2, <K, V>(self: HashMap<K, V>, key: K): HashMap<K, V> => {
   const impl = self as HashMapImpl<K, V>
+  const hash = Hash.hash(key)
   const removed = { value: false }
 
   const edit = impl._editable ? impl._edit : NaN
@@ -1155,14 +1157,6 @@ const removeHash = <K, V>(self: HashMap<K, V>, key: K, hash: number): HashMap<K,
   }
 
   return new HashMapImpl(false, impl._edit, newRoot, impl._size - 1)
-}
-
-/** @internal */
-export const remove = dual<
-  <K>(key: K) => <V>(self: HashMap<K, V>) => HashMap<K, V>,
-  <K, V>(self: HashMap<K, V>, key: K) => HashMap<K, V>
->(2, <K, V>(self: HashMap<K, V>, key: K): HashMap<K, V> => {
-  return removeHash(self, key, Hash.hash(key))
 })
 
 /** @internal */

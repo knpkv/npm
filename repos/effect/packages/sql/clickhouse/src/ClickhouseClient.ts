@@ -104,7 +104,7 @@ export type TypeId = "~@effect/sql-clickhouse/ClickhouseClient"
  * typed parameter fragments, command-mode execution, insert queries, and
  * per-effect query ID and ClickHouse settings.
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface ClickhouseClient extends Client.SqlClient {
@@ -149,7 +149,7 @@ export const ClickhouseClient = Context.Service<ClickhouseClient>("@effect/sql-c
  * `@clickhouse/client` options with optional span attributes and query/result
  * name transforms.
  *
- * @category models
+ * @category constructors
  * @since 4.0.0
  */
 export interface ClickhouseClientConfig extends Clickhouse.ClickHouseClientConfigOptions {
@@ -175,16 +175,16 @@ export const make = (
       ? Statement.defaultTransforms(options.transformResultNames).array
       : undefined
 
-    const client = yield* Effect.acquireRelease(
-      Effect.sync(() => Clickhouse.createClient(options)),
-      (client) => Effect.promise(() => client.close())
-    )
+    const client = Clickhouse.createClient(options)
 
-    yield* Effect.tryPromise({
-      try: () => client.exec({ query: "SELECT 1" }),
-      catch: (cause) =>
-        new SqlError({ reason: classifyError(cause, "ClickhouseClient: Failed to connect", "connect", "connection") })
-    }).pipe(
+    yield* Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () => client.exec({ query: "SELECT 1" }),
+        catch: (cause) =>
+          new SqlError({ reason: classifyError(cause, "ClickhouseClient: Failed to connect", "connect", "connection") })
+      }),
+      () => Effect.promise(() => client.close())
+    ).pipe(
       Effect.timeoutOrElse({
         duration: Duration.seconds(5),
         orElse: () =>
@@ -253,12 +253,7 @@ export const make = (
             }
             return Effect.suspend(() => {
               controller.abort()
-              return Effect.promise(() =>
-                this.conn.command({
-                  query: "KILL QUERY WHERE query_id = {queryId:String}",
-                  query_params: { queryId }
-                })
-              )
+              return Effect.promise(() => this.conn.command({ query: `KILL QUERY WHERE query_id = '${queryId}'` }))
             })
           })
         })
@@ -268,11 +263,12 @@ export const make = (
         return this.runRaw(sql, params, format).pipe(
           Effect.flatMap((result) => {
             if ("json" in result) {
-              return Effect.tryPromise({
-                try: () => result.json().then((result) => "data" in result ? result.data : result as any),
-                catch: (cause) =>
-                  new SqlError({ reason: classifyError(cause, "Failed to parse result", "parseResult") })
-              })
+              return Effect.promise(() =>
+                result.json().then(
+                  (result) => "data" in result ? result.data : result as any,
+                  () => []
+                )
+              )
             }
             return Effect.succeed([])
           })
@@ -380,12 +376,7 @@ export const make = (
             )
             return Effect.suspend(() => {
               controller.abort()
-              return Effect.promise(() =>
-                client.command({
-                  query: "KILL QUERY WHERE query_id = {queryId:String}",
-                  query_params: { queryId }
-                })
-              )
+              return Effect.promise(() => client.command({ query: `KILL QUERY WHERE query_id = '${queryId}'` }))
             })
           })
         },
@@ -408,7 +399,7 @@ export const make = (
  * Fiber reference read by the low-level ClickHouse connection to choose query
  * or command execution for statements; defaults to `query`.
  *
- * @category services
+ * @category references
  * @since 4.0.0
  */
 export const ClientMethod = Context.Reference<"query" | "command" | "insert">(
@@ -422,7 +413,7 @@ export const ClientMethod = Context.Reference<"query" | "command" | "insert">(
  * Fiber reference for the ClickHouse `query_id` applied to queries and
  * inserts; a random UUID is generated when no query ID is set.
  *
- * @category services
+ * @category references
  * @since 4.0.0
  */
 export const QueryId = Context.Reference<string | undefined>(
@@ -434,7 +425,7 @@ export const QueryId = Context.Reference<string | undefined>(
  * Fiber reference containing ClickHouse settings to attach to queries,
  * commands, and inserts.
  *
- * @category services
+ * @category references
  * @since 4.0.0
  */
 export const ClickhouseSettings: Context.Reference<
@@ -493,7 +484,7 @@ const typeFromUnknown = (value: unknown): string => {
   }
   switch (typeof value) {
     case "number":
-      return "Float64"
+      return "Decimal"
     case "bigint":
       return "Int64"
     case "boolean":
@@ -513,7 +504,7 @@ const typeFromUnknown = (value: unknown): string => {
  * `{pN: Type}` placeholders and escaping identifiers with an optional query
  * name transform.
  *
- * @category constructors
+ * @category compiler
  * @since 4.0.0
  */
 export const makeCompiler = (transform?: (_: string) => string) =>
@@ -543,13 +534,13 @@ const escape = Statement.defaultEscape("\"")
  * Custom SQL fragment type used for ClickHouse typed parameters created by
  * `ClickhouseClient.param`.
  *
- * @category models
+ * @category custom types
  * @since 4.0.0
  */
 export type ClickhouseCustom = ClickhouseParam
 
 /**
- * @category models
+ * @category custom types
  * @since 4.0.0
  */
 interface ClickhouseParam extends Statement.Custom<"ClickhouseParam", string, unknown> {}

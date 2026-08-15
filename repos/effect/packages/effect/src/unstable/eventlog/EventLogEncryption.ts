@@ -19,15 +19,14 @@ import type { Identity } from "./EventLog.ts"
 import { makeGetIdentityRootSecretMaterial } from "./internal/identityRootSecretDerivation.ts"
 
 /**
- * Schema for an encrypted journal entry paired with its initialization vector
- * and the id of the original entry.
+ * Schema for an encrypted journal entry paired with the id of the original
+ * entry.
  *
  * @category models
  * @since 4.0.0
  */
 export const EncryptedEntry = Schema.Struct({
   entryId: EntryId,
-  iv: Transferable.Uint8Array,
   encryptedEntry: Transferable.Uint8Array
 })
 
@@ -47,7 +46,7 @@ export interface EncryptedRemoteEntry extends Schema.Schema.Type<typeof Encrypte
  * @since 4.0.0
  */
 export const EncryptedRemoteEntry = Schema.Struct({
-  sequence: Schema.Natural,
+  sequence: Schema.Number,
   iv: Transferable.Uint8Array,
   entryId: EntryId,
   encryptedEntry: Transferable.Uint8Array
@@ -77,12 +76,10 @@ export class EventLogEncryption extends Context.Service<EventLogEncryption, {
   readonly encrypt: (
     identity: Identity["Service"],
     entries: ReadonlyArray<Entry>
-  ) => Effect.Effect<
-    ReadonlyArray<{
-      readonly iv: Uint8Array<ArrayBuffer>
-      readonly encryptedEntry: Uint8Array<ArrayBuffer>
-    }>
-  >
+  ) => Effect.Effect<{
+    readonly iv: Uint8Array<ArrayBuffer>
+    readonly encryptedEntries: ReadonlyArray<Uint8Array<ArrayBuffer>>
+  }>
   readonly decrypt: (
     identity: Identity["Service"],
     entries: ReadonlyArray<EncryptedRemoteEntry>
@@ -107,18 +104,22 @@ export const makeEncryptionSubtle = (crypto: Crypto): Effect.Effect<EventLogEncr
       encrypt: Effect.fnUntraced(function*(identity, entries) {
         const data = yield* Effect.orDie(Entry.encodeArray(entries))
         const key = (yield* getIdentityRootSecretMaterial(identity)).encryptionKey
-        return yield* Effect.promise(() =>
+        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const encryptedEntries = yield* Effect.promise(() =>
           Promise.all(
-            data.map((entry) => {
-              const iv = crypto.getRandomValues(new Uint8Array(12))
-              return crypto.subtle.encrypt(
+            data.map((entry) =>
+              crypto.subtle.encrypt(
                 { name: "AES-GCM", iv: toBufferSource(iv), tagLength: 128 },
                 key,
                 toBufferSource(entry)
-              ).then((encryptedEntry) => ({ iv, encryptedEntry: new Uint8Array(encryptedEntry) }))
-            })
+              )
+            )
           )
         )
+        return {
+          iv,
+          encryptedEntries: encryptedEntries.map((entry) => new Uint8Array(entry))
+        }
       }),
       decrypt: Effect.fnUntraced(function*(identity, entries) {
         const key = (yield* getIdentityRootSecretMaterial(identity)).encryptionKey
@@ -159,7 +160,7 @@ export const makeEncryptionSubtle = (crypto: Crypto): Effect.Effect<EventLogEncr
 /**
  * Provides `EventLogEncryption` using `globalThis.crypto`.
  *
- * @category layers
+ * @category encryption
  * @since 4.0.0
  */
 export const layerSubtle: Layer.Layer<EventLogEncryption> = Layer.effect(

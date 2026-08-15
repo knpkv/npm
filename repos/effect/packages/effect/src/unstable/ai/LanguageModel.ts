@@ -20,9 +20,9 @@ import type * as JsonSchema from "../../JsonSchema.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Queue from "../../Queue.ts"
+import { CurrentConcurrency } from "../../References.ts"
 import * as Schema from "../../Schema.ts"
 import * as SchemaAST from "../../SchemaAST.ts"
-import * as Semaphore from "../../Semaphore.ts"
 import * as Sink from "../../Sink.ts"
 import * as Stream from "../../Stream.ts"
 import type { Span } from "../../Tracer.ts"
@@ -52,21 +52,9 @@ import * as Toolkit from "./Toolkit.ts"
  *
  * **Example** (Accessing the language model service)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer, Stream } from "effect"
+ * ```ts
+ * import { Effect } from "effect"
  * import { LanguageModel } from "effect/unstable/ai"
- *
- * const FakeLanguageModel = Layer.effect(
- *   LanguageModel.LanguageModel,
- *   LanguageModel.make({
- *     generateText: () =>
- *       Effect.succeed([{
- *         type: "text",
- *         text: "Machine learning finds patterns in data."
- *       }]),
- *     streamText: () => Stream.empty
- *   })
- * )
  *
  * const program = Effect.gen(function*() {
  *   const model = yield* LanguageModel.LanguageModel
@@ -75,8 +63,6 @@ import * as Toolkit from "./Toolkit.ts"
  *   })
  *   return response.text
  * })
- *
- * await Effect.runPromise(program.pipe(Effect.provide(FakeLanguageModel))) // => "Machine learning finds patterns in data."
  * ```
  *
  * @category services
@@ -200,12 +186,9 @@ export interface Service {
  *
  * Different language model providers have varying constraints on the JSON
  * schemas they accept. A `CodecTransformer` rewrites a codec's encoded side to
- * satisfy those constraints while preserving the decoded type. A provider
- * schema may be less restrictive than the codec when the provider cannot
- * express every constraint; the returned codec remains authoritative for
- * validating model output.
+ * satisfy those constraints while preserving the decoded type.
  *
- * @category utility types
+ * @category models
  * @since 4.0.0
  */
 export type CodecTransformer = <T, E, RD, RE>(schema: Schema.ConstraintCodec<T, E, RD, RE>) => {
@@ -351,14 +334,21 @@ export type ToolChoice<ToolName extends string> =
  *
  * **Example** (Inspecting a text response)
  *
- * ```ts import.meta.vitest
- * import { LanguageModel, Response } from "effect/unstable/ai"
+ * ```ts
+ * import { Effect } from "effect"
+ * import { LanguageModel } from "effect/unstable/ai"
  *
- * const response = new LanguageModel.GenerateTextResponse([
- *   Response.makePart("text", { text: "Plants convert light into energy." })
- * ])
+ * const program = Effect.gen(function*() {
+ *   const response = yield* LanguageModel.generateText({
+ *     prompt: "Explain photosynthesis"
+ *   })
  *
- * const result = [response.text, response.finishReason] // => ["Plants convert light into energy.", "unknown"]
+ *   console.log(response.text) // Generated text content
+ *   console.log(response.finishReason) // "stop", "length", etc.
+ *   console.log(response.usage) // Usage information
+ *
+ *   return response
+ * })
  * ```
  *
  * @category models
@@ -455,16 +445,26 @@ export class GenerateTextResponse<Tools extends Record<string, Tool.Any>> {
  *
  * **Example** (Inspecting an object response)
  *
- * ```ts import.meta.vitest
- * import { LanguageModel, Response } from "effect/unstable/ai"
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { LanguageModel } from "effect/unstable/ai"
  *
- * const response = new LanguageModel.GenerateObjectResponse(
- *   { name: "John Doe", email: "john@example.com" },
- *   [Response.makePart("text", { text: '{"name":"John Doe","email":"john@example.com"}' })]
- * )
+ * const UserSchema = Schema.Struct({
+ *   name: Schema.String,
+ *   email: Schema.String
+ * })
  *
- * response.value // => { name: "John Doe", email: "john@example.com" }
- * response.text // => '{"name":"John Doe","email":"john@example.com"}'
+ * const program = Effect.gen(function*() {
+ *   const response = yield* LanguageModel.generateObject({
+ *     prompt: "Create user: John Doe, john@example.com",
+ *     schema: UserSchema
+ *   })
+ *
+ *   console.log(response.value) // { name: "John Doe", email: "john@example.com" }
+ *   console.log(response.text) // Raw generated text
+ *
+ *   return response.value
+ * })
  * ```
  *
  * @category models
@@ -1004,8 +1004,6 @@ export const make: (params: {
   ) {
     const tracker = Option.getOrUndefined(yield* Effect.serviceOption(ResponseIdTracker.ResponseIdTracker))
     const toolChoice = options.toolChoice ?? "auto"
-    const concurrency = options.concurrency ?? "unbounded"
-    providerOptions.span.attribute("concurrency", concurrency)
 
     const generateWithNonIncrementalFallback = () => {
       const requestOptions: ProviderOptions = {
@@ -1123,7 +1121,7 @@ export const make: (params: {
       const approvedResults = yield* executeApprovedToolCalls(
         approved,
         toolkit,
-        concurrency
+        options.concurrency
       )
       const deniedResults = createDenialResults(denied)
       const preResolvedResults = [...approvedResults, ...deniedResults]
@@ -1191,7 +1189,7 @@ export const make: (params: {
       rawContent,
       toolkit,
       providerOptions.prompt.content,
-      concurrency
+      options.concurrency
     ).pipe(
       Stream.filter(
         (result) =>
@@ -1241,8 +1239,6 @@ export const make: (params: {
   ) {
     const tracker = Option.getOrUndefined(yield* Effect.serviceOption(ResponseIdTracker.ResponseIdTracker))
     const toolChoice = options.toolChoice ?? "auto"
-    const concurrency = options.concurrency ?? "unbounded"
-    providerOptions.span.attribute("concurrency", concurrency)
 
     const streamWithNonIncrementalFallback = () => {
       const requestOptions: ProviderOptions = {
@@ -1383,7 +1379,7 @@ export const make: (params: {
       const approvedResults = yield* executeApprovedToolCalls(
         pendingApproved,
         toolkit,
-        concurrency
+        options.concurrency
       )
       const deniedResults = createDenialResults(pendingDenied)
       const preResolvedResults = [...approvedResults, ...deniedResults]
@@ -1490,9 +1486,6 @@ export const make: (params: {
 
     // FiberSet to track concurrent tool call handlers
     const toolCallFibers = yield* FiberSet.make<void, AiError.AiError>()
-    const toolCallSemaphore = concurrency === "unbounded"
-      ? undefined
-      : yield* Semaphore.make(concurrency)
 
     // Helper function to handle tool calls with approval logic
     const handleToolCall = Effect.fnUntraced(function*(part: Response.ToolCallPartEncoded) {
@@ -1516,7 +1509,7 @@ export const make: (params: {
         return
       }
 
-      yield* toolkit.handle(part.name, part.params as any, part.id).pipe(
+      yield* toolkit.handle(part.name, part.params as any).pipe(
         Stream.unwrap,
         Stream.runForEach((result) => {
           const toolResultPart = Response.makePart("tool-result", {
@@ -1557,11 +1550,7 @@ export const make: (params: {
           // Fork tool call handlers - use the raw chunk for encoded params
           for (const part of chunk) {
             if (part.type === "tool-call" && part.providerExecuted !== true) {
-              const effect = handleToolCall(part)
-              yield* FiberSet.run(
-                toolCallFibers,
-                toolCallSemaphore ? toolCallSemaphore.withPermit(effect) : effect
-              )
+              yield* FiberSet.run(toolCallFibers, handleToolCall(part))
             }
           }
         })
@@ -1603,43 +1592,21 @@ export const make: (params: {
  *
  * **Example** (Generating text with options)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer, Stream } from "effect"
+ * ```ts
+ * import { Effect } from "effect"
  * import { LanguageModel } from "effect/unstable/ai"
  *
- * const FakeLanguageModel = Layer.effect(
- *   LanguageModel.LanguageModel,
- *   LanguageModel.make({
- *     generateText: (options) =>
- *       Effect.succeed([
- *         {
- *           type: "text",
- *           text: options.toolChoice === "none"
- *             ? "Code flows through types / Errors become values / Programs stay composed"
- *             : "Unexpected tool choice"
- *         },
- *         {
- *           type: "finish",
- *           reason: "stop",
- *           usage: {
- *             inputTokens: { total: 6 },
- *             outputTokens: { total: 12 }
- *           }
- *         }
- *       ]),
- *     streamText: () => Stream.empty
+ * const program = Effect.gen(function*() {
+ *   const response = yield* LanguageModel.generateText({
+ *     prompt: "Write a haiku about programming",
+ *     toolChoice: "none"
  *   })
- * )
  *
- * const program = LanguageModel.generateText({
- *   prompt: "Write a haiku about programming",
- *   toolChoice: "none"
- * }).pipe(
- *   Effect.map((response) => [response.text, response.usage.inputTokens.total]),
- *   Effect.provide(FakeLanguageModel)
- * )
+ *   console.log(response.text)
+ *   console.log(response.usage.inputTokens.total)
  *
- * await Effect.runPromise(program) // => ["Code flows through types / Errors become values / Programs stay composed", 6]
+ *   return response
+ * })
  * ```
  *
  * @category text generation
@@ -1694,8 +1661,8 @@ export const generateText: {
  *
  * **Example** (Generating an object)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer, Schema, Stream } from "effect"
+ * ```ts
+ * import { Effect, Schema } from "effect"
  * import { LanguageModel } from "effect/unstable/ai"
  *
  * const EventSchema = Schema.Struct({
@@ -1704,31 +1671,22 @@ export const generateText: {
  *   location: Schema.String
  * })
  *
- * const FakeLanguageModel = Layer.effect(
- *   LanguageModel.LanguageModel,
- *   LanguageModel.make({
- *     generateText: () =>
- *       Effect.succeed([{
- *         type: "text",
- *         text: '{"title":"Tech Conference","date":"March 15th","location":"San Francisco"}'
- *       }]),
- *     streamText: () => Stream.empty
+ * const program = Effect.gen(function*() {
+ *   const response = yield* LanguageModel.generateObject({
+ *     prompt:
+ *       "Extract event info: Tech Conference on March 15th in San Francisco",
+ *     schema: EventSchema,
+ *     objectName: "event"
  *   })
- * )
  *
- * const program = LanguageModel.generateObject({
- *   prompt: "Extract event info: Tech Conference on March 15th in San Francisco",
- *   schema: EventSchema,
- *   objectName: "event"
- * }).pipe(
- *   Effect.map((response) => response.value),
- *   Effect.provide(FakeLanguageModel)
- * )
+ *   console.log(response.value)
+ *   // { title: "Tech Conference", date: "March 15th", location: "San Francisco" }
  *
- * await Effect.runPromise(program) // => { title: "Tech Conference", date: "March 15th", location: "San Francisco" }
+ *   return response.value
+ * })
  * ```
  *
- * @category generators
+ * @category object generation
  * @since 4.0.0
  */
 export const generateObject = <
@@ -1760,30 +1718,18 @@ export const generateObject = <
  *
  * **Example** (Streaming text deltas)
  *
- * ```ts import.meta.vitest
- * import { Effect, Layer, Stream } from "effect"
+ * ```ts
+ * import { Console, Effect, Stream } from "effect"
  * import { LanguageModel } from "effect/unstable/ai"
- *
- * const FakeLanguageModel = Layer.effect(
- *   LanguageModel.LanguageModel,
- *   LanguageModel.make({
- *     generateText: () => Effect.succeed([]),
- *     streamText: () =>
- *       Stream.make(
- *         { type: "text-delta", id: "story", delta: "The explorer reached orbit." },
- *         { type: "text-delta", id: "story", delta: " Earth glowed below." }
- *       )
- *   })
- * )
  *
  * const program = LanguageModel.streamText({
  *   prompt: "Write a story about a space explorer"
- * }).pipe(
- *   Stream.runFold(() => "", (text, part) => part.type === "text-delta" ? text + part.delta : text),
- *   Effect.provide(FakeLanguageModel)
- * )
- *
- * await Effect.runPromise(program) // => "The explorer reached orbit. Earth glowed below."
+ * }).pipe(Stream.runForEach((part) => {
+ *   if (part.type === "text-delta") {
+ *     return Console.log(part.delta)
+ *   }
+ *   return Effect.void
+ * }))
  * ```
  *
  * @category text generation
@@ -2008,7 +1954,7 @@ const isApprovalNeeded = Effect.fnUntraced(function*<T extends Tool.Any>(
 const executeApprovedToolCalls = <Tools extends Record<string, Tool.Any>>(
   approvals: ReadonlyArray<ApprovalResult>,
   toolkit: Toolkit.WithHandler<Tools>,
-  concurrency: Concurrency
+  concurrency: Concurrency | undefined
 ): Effect.Effect<
   Array<Prompt.ToolResultPart>,
   Tool.HandlerError<Tools[keyof Tools]> | AiError.AiError,
@@ -2036,8 +1982,7 @@ const executeApprovedToolCalls = <Tools extends Record<string, Tool.Any>>(
 
     const resultStream = yield* toolkit.handle(
       toolCall.name,
-      toolCall.params as any,
-      approval.toolCallId
+      toolCall.params as any
     )
 
     const terminalResult = yield* resultStream.pipe(
@@ -2055,13 +2000,18 @@ const executeApprovedToolCalls = <Tools extends Record<string, Tool.Any>>(
       id: approval.toolCallId,
       name: toolCall.name,
       isFailure: terminalResult.isFailure,
-      result: terminalResult.encodedResult,
-      providerExecuted: false
+      result: terminalResult.encodedResult
     })
   })
 
-  return Effect.forEach(approvals, executeTool, {
-    concurrency
+  return Effect.gen(function*() {
+    const resolveConcurrency = concurrency === "inherit"
+      ? yield* Effect.service(CurrentConcurrency)
+      : (concurrency ?? "unbounded")
+
+    return yield* Effect.forEach(approvals, executeTool, {
+      concurrency: resolveConcurrency
+    })
   })
 }
 
@@ -2076,8 +2026,7 @@ const createDenialResults = (
           id: denial.toolCallId,
           name: denial.toolCall.name,
           isFailure: true,
-          result: { type: "execution-denied", reason: denial.reason },
-          providerExecuted: false
+          result: { type: "execution-denied", reason: denial.reason }
         })
       )
     }
@@ -2101,7 +2050,7 @@ const resolveToolCalls = <Tools extends Record<string, Tool.Any>>(
   content: ReadonlyArray<Response.AllPartsEncoded>,
   toolkit: Toolkit.WithHandler<Tools>,
   messages: ReadonlyArray<Prompt.Message>,
-  concurrency: Concurrency
+  concurrency: Concurrency | undefined
 ): Stream.Stream<
   ToolResolutionResult<Tools>,
   Tool.HandlerError<Tools[keyof Tools]> | AiError.AiError,
@@ -2149,7 +2098,7 @@ const resolveToolCalls = <Tools extends Record<string, Tool.Any>>(
       }
 
       if (approvedToolCallIds.has(toolCall.id)) {
-        return toolkit.handle(toolCall.name, toolCall.params as any, toolCall.id).pipe(
+        return toolkit.handle(toolCall.name, toolCall.params as any).pipe(
           Stream.unwrap,
           Stream.map(
             (result) =>
@@ -2175,7 +2124,7 @@ const resolveToolCalls = <Tools extends Record<string, Tool.Any>>(
         )
       }
 
-      return toolkit.handle(toolCall.name, toolCall.params as any, toolCall.id).pipe(
+      return toolkit.handle(toolCall.name, toolCall.params as any).pipe(
         Stream.unwrap,
         Stream.map(
           (result) =>
@@ -2190,7 +2139,14 @@ const resolveToolCalls = <Tools extends Record<string, Tool.Any>>(
     }).pipe(Stream.unwrap)
   )
 
-  return Stream.mergeAll(streams, { concurrency })
+  const resolveConcurrency = concurrency === "inherit"
+    ? Effect.service(CurrentConcurrency)
+    : Effect.succeed(concurrency ?? "unbounded")
+
+  return resolveConcurrency.pipe(
+    Effect.map((concurrency) => Stream.mergeAll(streams, { concurrency })),
+    Stream.unwrap
+  )
 }
 
 // =============================================================================

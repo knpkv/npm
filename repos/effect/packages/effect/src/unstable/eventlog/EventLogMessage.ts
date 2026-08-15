@@ -39,7 +39,7 @@ export const StoreIdTypeId: StoreIdTypeId = "effect/eventlog/EventLog/StoreId"
 /**
  * Branded string identifying a logical event-log store.
  *
- * @category models
+ * @category StoreId
  * @since 4.0.0
  */
 export type StoreId = string & Brand<StoreIdTypeId>
@@ -47,7 +47,7 @@ export type StoreId = string & Brand<StoreIdTypeId>
 /**
  * Schema for branded event-log store ids.
  *
- * @category schemas
+ * @category StoreId
  * @since 4.0.0
  */
 export const StoreId = Schema.String.pipe(Schema.brand(StoreIdTypeId))
@@ -63,7 +63,7 @@ export const StoreId = Schema.String.pipe(Schema.brand(StoreIdTypeId))
  * @category protocols
  * @since 4.0.0
  */
-export class EventLogProtocolError extends Schema.TaggedError<EventLogProtocolError>(
+export class EventLogProtocolError extends Schema.TaggedErrorClass<EventLogProtocolError>(
   "effect/eventlog/EventLogRemote/ProtocolError"
 )("EventLogProtocolError", {
   requestTag: Schema.String,
@@ -163,12 +163,8 @@ export class SingleMessage
  */
 export class ChunkedMessage
   extends Schema.TaggedClass<ChunkedMessage>("effect/eventlog/EventLogRemote/ChunkedMessage")("Chunked", {
-    id: Schema.Int,
-    part: Schema.Tuple([Schema.Natural, Schema.Natural]).check(
-      Schema.makeFilter(([index, total]) => index < total, {
-        expected: "a chunk part with an index less than its total"
-      })
-    ),
+    id: Schema.Number,
+    part: Schema.Tuple([Schema.Number, Schema.Number]),
     data: Transferable.Uint8Array
   })
 {
@@ -225,9 +221,6 @@ export class ChunkedMessage
       }
       map.set(part.id, entry)
     }
-    if (entry.parts[index] !== undefined) {
-      return
-    }
     entry.parts[index] = part.data
     entry.count++
     entry.bytes += part.data.byteLength
@@ -261,8 +254,8 @@ export class WriteChunkedRpc extends Rpc.make("EventLog.WriteChunked", {
  *
  * **Details**
  *
- * It includes the client public key, target store id, and encrypted entries
- * with their AES-GCM initialization vectors.
+ * It includes the client public key, target store id, AES-GCM initialization
+ * vector, and encrypted entries.
  *
  * @category protocols
  * @since 4.0.0
@@ -270,6 +263,7 @@ export class WriteChunkedRpc extends Rpc.make("EventLog.WriteChunked", {
 export class WriteEntries extends Schema.Class<WriteEntries>("effect/eventlog/EventLogRemote/WriteEntries")({
   publicKey: Schema.String,
   storeId: StoreId,
+  iv: Transferable.Uint8Array,
   encryptedEntries: Schema.Array(EncryptedEntry)
 }) {
   static FromMsgpack = Msgpack.schema(WriteEntries)
@@ -330,7 +324,7 @@ export class ChangesRpc extends Rpc.make("EventLog.Changes", {
   payload: {
     publicKey: Schema.String,
     storeId: StoreId,
-    startSequence: Schema.Natural
+    startSequence: Schema.Number
   },
   success: Schema.Union([SingleMessage, ChunkedMessage]),
   error: EventLogProtocolError,

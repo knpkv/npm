@@ -1,16 +1,21 @@
-import { Cause, Exit, HashMap, Option, Predicate, Record, Result, Schema, SchemaTransformation } from "effect"
-import { describe, it } from "vitest"
 import {
-  assertNone,
-  assertSchemaIssueError,
-  assertSome,
-  deepStrictEqual,
-  strictEqual,
-  throws
-} from "../utils/assert.ts"
+  Cause,
+  Data,
+  Exit,
+  HashMap,
+  Option,
+  Predicate,
+  Record,
+  Result,
+  Schema,
+  SchemaTransformation,
+  SchemaUtils
+} from "effect"
+import { describe, it } from "vitest"
+import { assertNone, assertSome, deepStrictEqual, strictEqual, throws } from "../utils/assert.ts"
 
 class Value extends Schema.Class<Value, { readonly brand: unique symbol }>("Value")({
-  a: Schema.Date
+  a: Schema.DateValid
 }) {}
 
 function addOne(date: Date): Date {
@@ -74,9 +79,7 @@ describe("Optic generation", () => {
         const modify = optic.modify((n) => schema.make(n - 1))
 
         strictEqual(modify(schema.make(2)), 1)
-        throws(() => modify(schema.make(1)), (error) => {
-          assertSchemaIssueError(error, "Expected a value greater than 0")
-        })
+        throws(() => modify(schema.make(1)), "Expected a value greater than 0, got 0")
       })
     })
 
@@ -318,7 +321,7 @@ describe("Optic generation", () => {
     })
 
     it("Error", () => {
-      const schema = Schema.ErrorInstance()
+      const schema = Schema.Error()
       const optic = Schema.toIso(schema)
       const modify = optic.modify((e) => new Error(e.message + "!"))
 
@@ -326,7 +329,7 @@ describe("Optic generation", () => {
     })
 
     it("Exit", () => {
-      const schema = Schema.Exit(Value, Schema.ErrorInstance(), Schema.Defect())
+      const schema = Schema.Exit(Value, Schema.Error(), Schema.Defect())
       const optic = Schema.toIso(schema).tag("Success").key("value").key("a")
       const modify = optic.modify(addOne)
 
@@ -370,6 +373,22 @@ describe("Optic generation", () => {
         HashMap.toEntries(modify(HashMap.make(["a", Value.make({ a: new Date(0) })]))),
         HashMap.toEntries(HashMap.make(["a", Value.make({ a: new Date(1) })]))
       )
+    })
+
+    it("getNativeClassSchema", () => {
+      const Props = Schema.Struct({
+        message: Schema.String
+      })
+      class Err extends Data.Error<typeof Props.Type> {
+        constructor(props: typeof Props.Type) {
+          super(Props.make(props))
+        }
+      }
+      const schema = SchemaUtils.getNativeClassSchema(Err, { encoding: Props })
+      const optic = Schema.toIso(schema)
+      const modify = optic.modify((e) => new Err({ message: e.message + "!" }))
+
+      deepStrictEqual(modify(new Err({ message: "a" })), new Err({ message: "a!" }))
     })
   })
 })

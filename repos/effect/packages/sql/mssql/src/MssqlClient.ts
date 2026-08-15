@@ -19,7 +19,6 @@ import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Pool from "effect/Pool"
-import * as Rec from "effect/Record"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -160,7 +159,7 @@ export type TypeId = typeof TypeId
 /**
  * Microsoft SQL Server client service, extending `SqlClient` with typed parameter fragments and stored procedure calls.
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface MssqlClient extends Client.SqlClient {
@@ -206,13 +205,7 @@ export interface MssqlClientConfig {
   readonly domain?: string | undefined
   readonly server: string
   readonly instanceName?: string | undefined
-  /**
-   * Whether to encrypt traffic between the client and server. Defaults to `true`. Setting this to `false` disables transport encryption and transmits credentials in cleartext.
-   */
   readonly encrypt?: boolean | undefined
-  /**
-   * Whether to trust the server certificate without validating it. Defaults to `false`. Setting this to `true` disables TLS certificate validation.
-   */
   readonly trustServer?: boolean | undefined
   readonly port?: number | undefined
   readonly authType?: string | undefined
@@ -290,7 +283,7 @@ export const make = (
         options: {
           port: options.port,
           database: options.database,
-          trustServerCertificate: options.trustServer ?? false,
+          trustServerCertificate: options.trustServer ?? true,
           multiSubnetFailover: options.multiSubnetFailover,
           connectTimeout: options.connectTimeout
             ? Duration.toMillis(Duration.fromInputUnsafe(options.connectTimeout))
@@ -298,7 +291,7 @@ export const make = (
           rowCollectionOnRequestCompletion: true,
           useColumnNames: false,
           instanceName: options.instanceName,
-          encrypt: options.encrypt ?? true,
+          encrypt: options.encrypt ?? false,
           cancelTimeout: options.cancelTimeout
             ? Duration.toMillis(Duration.fromInputUnsafe(options.cancelTimeout))
             : undefined,
@@ -373,7 +366,6 @@ export const make = (
 
           conn.cancel()
           conn.execSql(req)
-          return Effect.sync(() => conn.cancel())
         })
 
       const runProcedure = (
@@ -397,7 +389,7 @@ export const make = (
                 }
                 resume(
                   Effect.succeed({
-                    output: result,
+                    params: result,
                     rows
                   })
                 )
@@ -417,12 +409,11 @@ export const make = (
           }
 
           req.on("returnValue", (name, value) => {
-            Rec.assignProperty(result, name, value)
+            result[name] = value
           })
 
           conn.cancel()
           conn.callProcedure(req)
-          return Effect.sync(() => conn.cancel())
         })
 
       const connection = identity<MssqlConnection>({
@@ -657,7 +648,7 @@ export const layer = (
 /**
  * Creates the SQL Server statement compiler, using `@1`-style placeholders, bracket-escaped identifiers, and SQL Server `OUTPUT INSERTED` returning clauses.
  *
- * @category constructors
+ * @category compiler
  * @since 4.0.0
  */
 export const makeCompiler = (transform?: (_: string) => string) =>
@@ -709,12 +700,12 @@ function numberToParamName(n: number) {
 /**
  * Default mapping from Effect SQL primitive value kinds to Tedious SQL Server parameter data types.
  *
- * @category constants
+ * @category configuration
  * @since 4.0.0
  */
 export const defaultParameterTypes: Record<Statement.PrimitiveKind, DataType> = {
-  string: Tedious.TYPES.NVarChar,
-  number: Tedious.TYPES.Float,
+  string: Tedious.TYPES.VarChar,
+  number: Tedious.TYPES.Int,
   bigint: Tedious.TYPES.BigInt,
   boolean: Tedious.TYPES.Bit,
   Date: Tedious.TYPES.DateTime,
@@ -747,7 +738,7 @@ function rowsToObjects(rows: ReadonlyArray<any>) {
     const newRow: any = {}
     for (let j = 0, columnLen = row.length; j < columnLen; j++) {
       const column = row[j]
-      Rec.assignProperty(newRow, column.metadata.colName, column.value)
+      newRow[column.metadata.colName] = column.value
     }
     newRows[i] = newRow
   }

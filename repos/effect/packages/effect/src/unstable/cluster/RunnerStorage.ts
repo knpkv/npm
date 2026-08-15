@@ -24,7 +24,7 @@ import * as ShardId from "./ShardId.ts"
  * Represents a generic interface to the persistent storage required by the
  * cluster.
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export class RunnerStorage extends Context.Service<RunnerStorage, {
@@ -84,7 +84,7 @@ export class RunnerStorage extends Context.Service<RunnerStorage, {
  * String-encoded runner storage interface used by adapters that persist runner
  * addresses, runners, machine ids, and shard ids outside the in-memory model.
  *
- * @category services
+ * @category Encoded
  * @since 4.0.0
  */
 export interface Encoded {
@@ -195,34 +195,32 @@ export const makeEncoded = (encoded: Encoded) =>
  *
  * **Details**
  *
- * Runner health and shard acquisition are kept only in process memory.
+ * Registered runners are treated as healthy and shard acquisition is kept only in
+ * process memory.
  *
  * @category constructors
  * @since 4.0.0
  */
 export const makeMemory = Effect.gen(function*() {
-  const runners = MutableHashMap.empty<RunnerAddress, readonly [runner: Runner, healthy: boolean]>()
+  const runners = MutableHashMap.empty<RunnerAddress, Runner>()
   let acquired: Array<ShardId.ShardId> = []
   let id = 0
 
   return RunnerStorage.of({
-    getRunners: Effect.sync(() => Array.from(MutableHashMap.values(runners))),
-    register: (runner, healthy) =>
+    getRunners: Effect.sync(() => Array.from(MutableHashMap.values(runners), (runner) => [runner, true])),
+    register: (runner) =>
       Effect.sync(() => {
-        MutableHashMap.set(runners, runner.address, [runner, healthy])
+        MutableHashMap.set(runners, runner.address, runner)
         return MachineId.make(id++)
       }),
     unregister: (address) =>
       Effect.sync(() => {
         MutableHashMap.remove(runners, address)
       }),
-    setRunnerHealth: (address, healthy) =>
-      Effect.sync(() => {
-        MutableHashMap.modify(runners, address, ([runner]) => [runner, healthy] as const)
-      }),
+    setRunnerHealth: () => Effect.void,
     acquire: (_address, shardIds) => {
       acquired = Array.from(shardIds)
-      return Effect.succeed(acquired)
+      return Effect.succeed(Array.from(shardIds))
     },
     refresh: () => Effect.sync(() => acquired),
     release: () => Effect.void,

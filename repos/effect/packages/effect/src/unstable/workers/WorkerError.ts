@@ -31,10 +31,10 @@ export const isWorkerError = (u: unknown): u is WorkerError => hasProperty(u, Ty
 /**
  * Worker error reason for failures while spawning or setting up a worker.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
-export class WorkerSpawnError extends Schema.Error<WorkerSpawnError>(
+export class WorkerSpawnError extends Schema.ErrorClass<WorkerSpawnError>(
   "effect/workers/WorkerError/WorkerSpawnError"
 )({
   _tag: Schema.tag("WorkerSpawnError"),
@@ -45,10 +45,10 @@ export class WorkerSpawnError extends Schema.Error<WorkerSpawnError>(
 /**
  * Worker error reason for failures while sending a message to a worker.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
-export class WorkerSendError extends Schema.Error<WorkerSendError>(
+export class WorkerSendError extends Schema.ErrorClass<WorkerSendError>(
   "effect/workers/WorkerError/WorkerSendError"
 )({
   _tag: Schema.tag("WorkerSendError"),
@@ -60,10 +60,10 @@ export class WorkerSendError extends Schema.Error<WorkerSendError>(
  * Worker error reason for failures while receiving or handling a message from a
  * worker.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
-export class WorkerReceiveError extends Schema.Error<WorkerReceiveError>(
+export class WorkerReceiveError extends Schema.ErrorClass<WorkerReceiveError>(
   "effect/workers/WorkerError/WorkerReceiveError"
 )({
   _tag: Schema.tag("WorkerReceiveError"),
@@ -74,10 +74,10 @@ export class WorkerReceiveError extends Schema.Error<WorkerReceiveError>(
 /**
  * Worker error reason for an unclassified worker failure.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
-export class WorkerUnknownError extends Schema.Error<WorkerUnknownError>(
+export class WorkerUnknownError extends Schema.ErrorClass<WorkerUnknownError>(
   "effect/workers/WorkerError/WorkerUnknownError"
 )({
   _tag: Schema.tag("WorkerUnknownError"),
@@ -88,7 +88,7 @@ export class WorkerUnknownError extends Schema.Error<WorkerUnknownError>(
 /**
  * Union of the specific failure reasons that can be wrapped by a `WorkerError`.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
 export type WorkerErrorReason =
@@ -100,7 +100,7 @@ export type WorkerErrorReason =
 /**
  * Schema for decoding and encoding all supported worker error reason variants.
  *
- * @category schemas
+ * @category models
  * @since 4.0.0
  */
 export const WorkerErrorReason: Schema.Union<[
@@ -119,10 +119,10 @@ export const WorkerErrorReason: Schema.Union<[
  * Error raised by worker APIs, wrapping a specific `WorkerErrorReason` and
  * exposing its message and cause.
  *
- * @category errors
+ * @category models
  * @since 4.0.0
  */
-export class WorkerError extends Schema.Error<WorkerError>(TypeId)({
+export class WorkerError extends Schema.ErrorClass<WorkerError>(TypeId)({
   _tag: Schema.tag("WorkerError"),
   reason: WorkerErrorReason
 }) {

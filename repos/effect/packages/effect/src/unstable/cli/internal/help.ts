@@ -111,7 +111,6 @@ const getSharedFlagsForCommandPath = (
     const ancestorImpl = toImpl(ancestor)
     for (const flag of ancestorImpl.contextConfig.flags) {
       const singles = Param.extractSingleParams(flag)
-      const metadata = Param.getParamMetadata(flag)
       for (const single of singles) {
         if (seen.has(single.name)) {
           continue
@@ -123,7 +122,7 @@ const getSharedFlagsForCommandPath = (
           continue
         }
         seen.add(single.name)
-        sharedFlags.push(toFlagDoc(single, metadata))
+        sharedFlags.push(toFlagDoc(single))
       }
     }
   }
@@ -166,14 +165,13 @@ export const getHelpForCommandPath = <Name extends string, Input, E, R, ContextI
     const globalFlagDocs: Array<FlagDoc> = []
     for (const flag of flags) {
       const singles = Param.extractSingleParams(flag.flag)
-      const metadata = Param.getParamMetadata(flag.flag)
       for (const single of singles) {
         // Same rule as command-local flags: hidden globals are still parsed
         // and still trigger their handlers, they just don't appear under
         // "GLOBAL FLAGS" in --help.
         if (single.hidden) continue
         globalFlagDocs.push({
-          ...toFlagDoc(single, metadata),
+          ...toFlagDoc(single),
           required: false
         })
       }

@@ -11,10 +11,27 @@ describe("toArbitrary", () => {
     const arbitrary = Schema.toArbitrary(schema)
 
     expect(arbitrary).type.toBe<
-      Schema.Arbitrary<{
+      FastCheck.Arbitrary<{
         readonly name: string
         readonly age: number
       }>
+    >()
+  })
+
+  it("returns a report when requested", () => {
+    const schema = Schema.Struct({
+      name: Schema.String,
+      age: Schema.Number
+    })
+    const result = Schema.toArbitrary(schema, { report: true })
+
+    expect(result).type.toBe<
+      Schema.Annotations.ToArbitrary.WithReport<
+        FastCheck.Arbitrary<{
+          readonly name: string
+          readonly age: number
+        }>
+      >
     >()
   })
 

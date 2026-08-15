@@ -166,31 +166,20 @@ export interface ChildProcessHandle {
    *
    * **Example** (Temporarily unreferencing a child process)
    *
-   * ```ts import.meta.vitest
+   * ```ts
    * import { Effect } from "effect"
-   * import type { ChildProcessSpawner } from "effect/unstable/process"
-   *
-   * let referenced = true
-   *
-   * const unref: ChildProcessSpawner.ChildProcessHandle["unref"] = Effect.sync(() => {
-   *   referenced = false
-   *   const reref: ChildProcessSpawner.Reref = Effect.sync(() => {
-   *     referenced = true
-   *   })
-   *   return reref
-   * })
+   * import { NodeServices } from "@effect/platform-node"
+   * import { ChildProcess } from "effect/unstable/process"
    *
    * const program = Effect.gen(function*() {
-   *   const states = [] as Array<boolean>
-   *   const reref = yield* unref
-   *   states.push(referenced)
+   *   const handle = yield* ChildProcess.make`./server`
+   *   const reref = yield* handle.unref
+   *
+   *   yield* Effect.sleep("1 second")
    *
    *   yield* reref
-   *   states.push(referenced)
-   *   return states
-   * })
-   *
-   * Effect.runSync(program) // => [false, true]
+   *   return yield* handle.exitCode
+   * }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
    * ```
    */
   readonly unref: Effect.Effect<Reref, PlatformError.PlatformError>
@@ -211,13 +200,13 @@ const HandleProto = {
  * @since 4.0.0
  */
 export const makeHandle = (params: Omit<ChildProcessHandle, typeof HandleTypeId>): ChildProcessHandle =>
-  Object.setPrototypeOf({ ...params }, HandleProto)
+  Object.assign(Object.create(HandleProto), params)
 
 /**
  * Creates a `ChildProcessSpawner` service from a `spawn` function, deriving
  * helpers for exit codes and output collection from that implementation.
  *
- * @category constructors
+ * @category models
  * @since 4.0.0
  */
 export const make = (spawn: ChildProcessSpawner["Service"]["spawn"]): ChildProcessSpawner["Service"] => {

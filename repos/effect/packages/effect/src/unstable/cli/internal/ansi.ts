@@ -58,9 +58,6 @@ export const red = `${ESC}31m`
 export const green = `${ESC}32m`
 
 /** @internal */
-export const magenta = `${ESC}35m`
-
-/** @internal */
 export const white = `${ESC}37m`
 
 /** @internal */
@@ -79,9 +76,9 @@ export const combine = (...styles: Array<string>): Array<string> => styles
 /** @internal */
 export const cursorTo = (column: number, row?: number): string => {
   if (row === undefined) {
-    return `${ESC}${Math.max(column + 1, 0)}G`
+    return `\x1b${Math.max(column + 1, 0)} G`
   }
-  return `${ESC}${row + 1}${SEP}${Math.max(column + 1, 0)}H`
+  return `\x1b${row + 1}${SEP}${Math.max(column + 1, 0)} H`
 }
 
 /** @internal */

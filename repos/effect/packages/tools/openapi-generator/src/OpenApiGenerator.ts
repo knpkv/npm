@@ -15,7 +15,6 @@ import * as Effect from "effect/Effect"
 import type * as JsonSchema from "effect/JsonSchema"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
-import * as Rec from "effect/Record"
 import * as String from "effect/String"
 import type { OpenAPISecurityScheme, OpenAPISpec, OpenAPISpecMethodName } from "effect/unstable/httpapi/OpenApi"
 import SwaggerToOpenApi from "swagger2openapi"
@@ -157,7 +156,7 @@ export const make = Effect.gen(function*() {
       const generation = options.format === "httpapi"
         ? generator.generateHttpApi(
           source,
-          withHttpApiMultipartSchemas(spec.components?.schemas ?? {}, multipartSchemaRefs, resolveRef),
+          withHttpApiMultipartSchemas(spec.components?.schemas ?? {}, multipartSchemaRefs),
           {
             onEnter: options.onEnter,
             multipartSchemaRefs
@@ -605,23 +604,11 @@ const parseOpenApi = (
           }
         }
 
-        const sseMediaType = content?.["text/event-stream"]
-        const sseResponseSchema = sseMediaType?.schema
+        const sseResponseSchema = content?.["text/event-stream"]?.schema
         if (!isHttpApi && Predicate.isUndefined(op.sseSchema) && Predicate.isNotUndefined(sseResponseSchema)) {
           const statusMajorNumber = Number(parsedStatus[0])
           if (!Number.isNaN(statusMajorNumber) && statusMajorNumber < 4) {
-            const effectStream = sseMediaType["x-effect-stream"]
-            op.sseSchemaMode = getEffectStreamEncoding(sseMediaType) === "sse" ? "event" : "data"
-            op.sseSchema = addSchema(
-              `${schemaId}${status}Sse`,
-              op.sseSchemaMode === "event"
-                ? makeSseEventSchema(
-                  resolveReference(sseResponseSchema, resolveRef),
-                  effectStream?.encoding === "sse" ? effectStream.failureEvent : undefined
-                )
-                : sseResponseSchema,
-              op
-            )
+            op.sseSchema = addSchema(`${schemaId}${status}Sse`, sseResponseSchema, op)
           }
         }
 
@@ -757,14 +744,14 @@ const buildParameterSchema = <
 
       for (const [name, propertySchema] of Object.entries(paramSchema.properties)) {
         const adjustedName = `${parameter.name}[${name}]`
-        Rec.assignProperty(schema.properties, adjustedName, propertySchema as JsonSchema.JsonSchema)
+        schema.properties[adjustedName] = propertySchema as JsonSchema.JsonSchema
         if (required.includes(name)) {
           schema.required.push(adjustedName)
         }
         added.push(adjustedName)
       }
     } else {
-      Rec.assignProperty(schema.properties, parameter.name, parameter.schema as JsonSchema.JsonSchema)
+      schema.properties[parameter.name] = parameter.schema as JsonSchema.JsonSchema
       if (parameter.required) {
         schema.required.push(parameter.name)
       }
@@ -820,14 +807,13 @@ const toDefinitionRef = (name: string): string => `#/$defs/${name.replaceAll("~"
 
 const withHttpApiMultipartSchemas = (
   definitions: JsonSchema.Definitions,
-  multipartSchemaRefs: HttpApiMultipartSchemaRefs | undefined,
-  resolveRef: (ref: string) => unknown
+  multipartSchemaRefs: HttpApiMultipartSchemaRefs | undefined
 ): JsonSchema.Definitions => {
   if (multipartSchemaRefs === undefined) {
     return definitions
   }
   return {
-    ...Rec.map(definitions, (schema) => transformMultipartSchema(schema, multipartSchemaRefs, resolveRef)),
+    ...definitions,
     [multipartSchemaRefs.singleFile]: {
       type: "string",
       format: "binary"
@@ -864,21 +850,18 @@ const transformMultipartSchema = (
     }
 
     if (typeof value.$ref === "string" && value.$ref.startsWith("#/components/schemas/")) {
-      const { $ref, ...siblings } = value
-      const withSiblings = (schema: unknown): unknown =>
-        Object.keys(siblings).length === 0 ? schema : { allOf: [schema, visit(siblings)] }
-      const cached = cache.get($ref)
+      const cached = cache.get(value.$ref)
       if (cached !== undefined) {
-        return withSiblings(cached)
+        return cached
       }
-      if (stack.has($ref)) {
+      if (stack.has(value.$ref)) {
         return value
       }
-      stack.add($ref)
-      const transformed = visit(resolveRef($ref))
-      stack.delete($ref)
-      cache.set($ref, transformed)
-      return withSiblings(transformed)
+      stack.add(value.$ref)
+      const transformed = visit(resolveSchemaReference(value.$ref, resolveRef))
+      stack.delete(value.$ref)
+      cache.set(value.$ref, transformed)
+      return transformed
     }
 
     if (isMultipartBinaryFile(value)) {
@@ -887,7 +870,7 @@ const transformMultipartSchema = (
 
     const out: Record<string, unknown> = {}
     for (const [key, current] of Object.entries(value)) {
-      Rec.assignProperty(out, key, visit(current))
+      out[key] = visit(current)
     }
 
     if (isMultipartBinaryFiles(out, singleFileRef)) {
@@ -898,6 +881,19 @@ const transformMultipartSchema = (
   }
 
   return visit(schema) as JsonSchema.JsonSchema
+}
+
+const resolveSchemaReference = (ref: string, resolveRef: (ref: string) => unknown): unknown => {
+  let current: unknown = { $ref: ref }
+  const seen = new Set<string>()
+  while (Predicate.isObject(current) && typeof current.$ref === "string") {
+    if (seen.has(current.$ref)) {
+      return current
+    }
+    seen.add(current.$ref)
+    current = resolveRef(current.$ref)
+  }
+  return current
 }
 
 const isMultipartBinaryFile = (value: unknown): value is JsonSchema.JsonSchema =>
@@ -981,59 +977,6 @@ const getEffectStreamErrorSchema = (mediaType: object): JsonSchema.JsonSchema | 
     return
   }
   return stream.errorSchema as JsonSchema.JsonSchema
-}
-
-const makeSseEventSchema = (
-  input: JsonSchema.JsonSchema,
-  failureEvent: string | undefined
-): JsonSchema.JsonSchema => {
-  const eventSchema = normalizeSseEventSchema(input)
-  if (failureEvent === undefined) {
-    return eventSchema
-  }
-  return {
-    anyOf: [
-      eventSchema,
-      {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          event: { const: failureEvent },
-          data: { type: "string" }
-        },
-        required: ["event", "data"],
-        additionalProperties: false
-      }
-    ]
-  }
-}
-
-const normalizeSseEventSchema = (input: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
-  const schema = { ...input } as Record<string, any>
-  for (const key of ["allOf", "anyOf", "oneOf"] as const) {
-    if (Array.isArray(schema[key])) {
-      schema[key] = schema[key].map(normalizeSseEventSchema)
-    }
-  }
-  if (
-    schema.type !== "object" ||
-    !Predicate.isObject(schema.properties) ||
-    !Object.hasOwn(schema.properties, "id") ||
-    !Object.hasOwn(schema.properties, "event") ||
-    !Object.hasOwn(schema.properties, "data")
-  ) {
-    return schema as JsonSchema.JsonSchema
-  }
-
-  // OpenAPI represents `undefined` as required nullable; restore the SSE parser's optional wire field.
-  schema.properties = {
-    ...schema.properties,
-    id: { type: "string" }
-  }
-  if (Array.isArray(schema.required)) {
-    schema.required = schema.required.filter((name: unknown) => name !== "id")
-  }
-  return schema as JsonSchema.JsonSchema
 }
 
 const resolveReference = (input: unknown, resolveRef: (ref: string) => unknown): any => {

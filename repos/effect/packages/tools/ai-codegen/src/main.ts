@@ -229,7 +229,7 @@ const ServicesLayer = Layer.mergeAll(
 /**
  * Run the CLI.
  *
- * @category running
+ * @category execution
  * @since 4.0.0
  */
 export const run = Command.run(root, { version: "0.0.0" }).pipe(

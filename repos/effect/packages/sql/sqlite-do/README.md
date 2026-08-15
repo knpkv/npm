@@ -1,14 +1,7 @@
-# @effect/sql-sqlite-do
+# `@effect/sql-sqlite-do`
 
-An Effect SQL client for the SQLite storage in [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/).
-
-## Installation
-
-```sh
-npm install effect@rc @effect/sql-sqlite-do@rc
-```
+An `@effect/sql` implementation for Cloudflare Durable Objects sqlite storage.
 
 ## Documentation
 
-- [Effect website](https://effect.website)
-- [API reference](https://effect.website/docs/v4/api/sql-sqlite-do)
+- **API Reference**: [View the full documentation](https://effect-ts.github.io/effect/docs/sql-sqlite-do).

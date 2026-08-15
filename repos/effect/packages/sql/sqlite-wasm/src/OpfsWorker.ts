@@ -36,7 +36,7 @@ export interface OpfsWorkerConfig {
 /**
  * Runs the SQLite OPFS worker loop, opening the configured database, posting a ready message, handling query/import/export/update-hook messages, and closing when a close message is received.
  *
- * @category running
+ * @category constructors
  * @since 4.0.0
  */
 export const run = (
@@ -45,10 +45,7 @@ export const run = (
   Effect.gen(function*() {
     const factory = yield* Effect.promise(() => SQLiteESMFactory())
     const sqlite3 = WaSqlite.Factory(factory)
-    const vfs = yield* Effect.acquireRelease(
-      Effect.promise(() => AccessHandlePoolVFS.create("opfs", factory)),
-      (vfs) => Effect.promise(() => vfs.close())
-    )
+    const vfs = yield* Effect.promise(() => AccessHandlePoolVFS.create("opfs", factory))
     sqlite3.vfs_register(vfs, false)
     const db = yield* Effect.acquireRelease(
       Effect.try({

@@ -26,9 +26,6 @@ import { OpenAiClient } from "./OpenAiClient.ts"
  */
 export type Model = string
 
-type ConfigOptions = Simplify<Partial<Omit<CreateEmbeddingRequestJson, "input">>>
-type ModelConfig = Omit<ConfigOptions, "model"> & { readonly [x: string]: unknown }
-
 /**
  * Context service for OpenAI embedding model configuration.
  *
@@ -46,12 +43,22 @@ type ModelConfig = Omit<ConfigOptions, "model"> & { readonly [x: string]: unknow
  *
  * @see {@link withConfigOverride} for scoping embedding request overrides
  *
- * @category services
+ * @category context
  * @since 4.0.0
  */
 export class Config extends Context.Service<
   Config,
-  ConfigOptions & { readonly [x: string]: unknown }
+  Simplify<
+    & Partial<
+      Omit<
+        CreateEmbeddingRequestJson,
+        "input"
+      >
+    >
+    & {
+      readonly [x: string]: unknown
+    }
+  >
 >()("@effect/ai-openai-compat/OpenAiEmbeddingModel/Config") {}
 
 /**
@@ -70,9 +77,9 @@ export class Config extends Context.Service<
  */
 export const model = (
   model: string,
-  options: Omit<ConfigOptions, "model" | "dimensions"> & {
+  options: {
     readonly dimensions: number
-    readonly [x: string]: unknown
+    readonly config?: Omit<typeof Config.Service, "model" | "dimensions">
   }
 ): AiModel.Model<"openai", EmbeddingModel.EmbeddingModel | EmbeddingModel.Dimensions, OpenAiClient> =>
   AiModel.make(
@@ -81,7 +88,10 @@ export const model = (
     Layer.merge(
       layer({
         model,
-        config: options
+        config: {
+          ...options.config,
+          dimensions: options.dimensions
+        }
       }),
       Layer.succeed(EmbeddingModel.Dimensions, options.dimensions)
     )
@@ -117,13 +127,14 @@ export const model = (
  */
 export const make = Effect.fnUntraced(function*({ model, config: providerConfig }: {
   readonly model: string
-  readonly config?: ModelConfig | undefined
+  readonly config?: Omit<typeof Config.Service, "model"> | undefined
 }): Effect.fn.Return<EmbeddingModel.Service, never, OpenAiClient> {
   const client = yield* OpenAiClient
 
-  const makeConfig = Effect.contextWith((services: Context.Context<never>) =>
-    Effect.succeed({ model, ...providerConfig, ...Context.getOrUndefined(services, Config) })
-  )
+  const makeConfig = Effect.gen(function*() {
+    const services = yield* Effect.context<never>()
+    return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
+  })
 
   return yield* EmbeddingModel.make({
     embedMany: Effect.fnUntraced(function*({ inputs }) {
@@ -151,7 +162,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
  */
 export const layer = (options: {
   readonly model: string
-  readonly config?: ModelConfig | undefined
+  readonly config?: Omit<typeof Config.Service, "model"> | undefined
 }): Layer.Layer<EmbeddingModel.EmbeddingModel, never, OpenAiClient> =>
   Layer.effect(EmbeddingModel.EmbeddingModel, make(options))
 

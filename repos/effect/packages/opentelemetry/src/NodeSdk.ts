@@ -74,7 +74,7 @@ export const layerTracerProvider = (
           return provider
         }),
         (provider) =>
-          Effect.promise(() => provider.forceFlush().finally(() => provider.shutdown())).pipe(
+          Effect.promise(() => provider.forceFlush().then(() => provider.shutdown())).pipe(
             Effect.ignore,
             Effect.interruptible,
             Effect.timeoutOption(config?.shutdownTimeout ?? 3000)
@@ -118,9 +118,9 @@ export const layer: {
         ? evaluate as Effect.Effect<Configuration>
         : Effect.sync(evaluate)
 
-      const ResourceLayer = Resource.layerFromEnv(config.resource && Resource.configToAttributes(config.resource))
+      const ResourceLive = Resource.layerFromEnv(config.resource && Resource.configToAttributes(config.resource))
 
-      const TracerLayer = isNonEmpty(config.spanProcessor)
+      const TracerLive = isNonEmpty(config.spanProcessor)
         ? Layer.provide(
           Tracer.layer,
           layerTracerProvider(config.spanProcessor, {
@@ -130,14 +130,14 @@ export const layer: {
         )
         : Layer.empty
 
-      const MetricsLayer = isNonEmpty(config.metricReader)
+      const MetricsLive = isNonEmpty(config.metricReader)
         ? Metrics.layer(constant(config.metricReader), {
           shutdownTimeout: config.shutdownTimeout,
           temporality: config.metricTemporality
         })
         : Layer.empty
 
-      const LoggerLayer = isNonEmpty(config.logRecordProcessor)
+      const LoggerLive = isNonEmpty(config.logRecordProcessor)
         ? Layer.provide(
           Logger.layer({ mergeWithExisting: config.loggerMergeWithExisting }),
           Logger.layerLoggerProvider(config.logRecordProcessor, {
@@ -147,8 +147,8 @@ export const layer: {
         )
         : Layer.empty
 
-      return Layer.mergeAll(TracerLayer, MetricsLayer, LoggerLayer).pipe(
-        Layer.provideMerge(ResourceLayer)
+      return Layer.mergeAll(TracerLive, MetricsLive, LoggerLive).pipe(
+        Layer.provideMerge(ResourceLive)
       )
     })
   )

@@ -87,11 +87,6 @@ export * as K8sHttpClient from "./K8sHttpClient.ts"
 /**
  * @since 4.0.0
  */
-export * as K8sTypes from "./K8sTypes.ts"
-
-/**
- * @since 4.0.0
- */
 export * as MachineId from "./MachineId.ts"
 
 /**

@@ -5,7 +5,7 @@
  * This module defines two kinds of global flags: action flags, which run an
  * effect and stop normal command execution, and setting flags, which provide a
  * parsed value to the command handler through the Effect context. It also
- * defines the built-in help, version, wizard, shell-completion, and log-level flags
+ * defines the built-in help, version, shell-completion, and log-level flags
  * used by `Command.run` and `Command.runWith`.
  *
  * @since 4.0.0
@@ -37,7 +37,6 @@ export interface HandlerContext {
   readonly command: Command.Command.Any
   readonly commandPath: ReadonlyArray<string>
   readonly version: string
-  readonly builtIns: ReadonlyArray<BuiltIn>
 }
 
 /**
@@ -58,7 +57,7 @@ export interface Action<A> {
 /**
  * Setting flag: configure command handler's environment (--log-level, --config).
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface Setting<Id extends string, A> extends Context.Service<Setting.Identifier<Id>, A> {
@@ -157,11 +156,12 @@ export const Help: Action<boolean> = action({
     Flag.withAlias("h"),
     Flag.withDescription("Show help information")
   ),
-  run: Effect.fnUntraced(function*(_, { builtIns, command, commandPath }) {
-    const formatter = yield* CliOutput.Formatter
-    const helpDoc = yield* HelpInternal.getHelpForCommandPath(command, commandPath, builtIns)
-    yield* Console.log(formatter.formatHelpDoc(helpDoc))
-  })
+  run: (_, { command, commandPath }) =>
+    Effect.gen(function*() {
+      const formatter = yield* CliOutput.Formatter
+      const helpDoc = yield* HelpInternal.getHelpForCommandPath(command, commandPath, BuiltIns)
+      yield* Console.log(formatter.formatHelpDoc(helpDoc))
+    })
 })
 
 /**
@@ -179,28 +179,11 @@ export const Version: Action<boolean> = action({
     Flag.withAlias("v"),
     Flag.withDescription("Show version information")
   ),
-  run: Effect.fnUntraced(function*(_, { command, version }) {
-    const formatter = yield* CliOutput.Formatter
-    yield* Console.log(formatter.formatVersion(command.name, version))
-  })
-})
-
-/**
- * Defines the global action flag for starting interactive wizard mode.
- *
- * **Details**
- *
- * `Command.run` and `Command.runWith` handle this action specially so the
- * generated arguments can be passed back through the command parser.
- *
- * @category references
- * @since 4.0.0
- */
-export const Wizard: Action<boolean> = action({
-  flag: Flag.boolean("wizard").pipe(
-    Flag.withDescription("Start wizard mode for a command")
-  ),
-  run: () => Effect.void
+  run: (_, { command, version }) =>
+    Effect.gen(function*() {
+      const formatter = yield* CliOutput.Formatter
+      yield* Console.log(formatter.formatVersion(command.name, version))
+    })
 })
 
 /**
@@ -223,13 +206,14 @@ export const Completions: Action<Option.Option<"bash" | "zsh" | "fish">> = actio
       Flag.withMetavar("<bash|zsh|fish|sh>"),
       Flag.withDescription("Print shell completion script")
     ),
-  run: Effect.fnUntraced(function*(shell, { command }) {
-    if (Option.isNone(shell)) return
-    const descriptor = CommandDescriptor.fromCommand(command)
-    yield* Console.log(
-      Completions_.generate(command.name, shell.value, descriptor)
-    )
-  })
+  run: (shell, { command }) =>
+    Effect.gen(function*() {
+      if (Option.isNone(shell)) return
+      const descriptor = CommandDescriptor.fromCommand(command)
+      yield* Console.log(
+        Completions_.generate(command.name, shell.value, descriptor)
+      )
+    })
 })
 
 /**
@@ -278,7 +262,7 @@ export const LogLevel: Setting<"log-level", Option.Option<LogLevelType>> = setti
  *
  * **Details**
  *
- * The built-ins are `Help`, `Version`, `Wizard`, `Completions`, and `LogLevel`.
+ * The built-ins are `Help`, `Version`, `Completions`, and `LogLevel`.
  * `Command.runWith` prepends these built-ins when collecting and parsing global
  * flags.
  *
@@ -295,18 +279,17 @@ export const LogLevel: Setting<"log-level", Option.Option<LogLevelType>> = setti
  * @category references
  * @since 4.0.0
  */
-export const BuiltIns: readonly [
-  Action<boolean>,
-  Action<boolean>,
-  Action<boolean>,
-  Action<Option.Option<"bash" | "zsh" | "fish">>,
-  Setting<"log-level", Option.Option<LogLevelType>>
-] = [Help, Version, Wizard, Completions, LogLevel]
+export const BuiltIns: ReadonlyArray<GlobalFlag<any>> = [
+  Help,
+  Version,
+  Completions,
+  LogLevel
+]
 
 /**
- * Global flag included in the default command-runner configuration.
+ * Built-in setting context identifiers.
  *
  * @category models
  * @since 4.0.0
  */
-export type BuiltIn = typeof BuiltIns[number]
+export type BuiltInSettingContext = Setting.Identifier<"log-level">

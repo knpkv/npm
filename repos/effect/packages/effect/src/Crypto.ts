@@ -11,7 +11,6 @@
  */
 import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
-import * as Uuid from "./internal/uuid.ts"
 import * as PlatformError from "./PlatformError.ts"
 
 const TypeId = "~effect/platform/Crypto"
@@ -26,7 +25,7 @@ const TypeId = "~effect/platform/Crypto"
  *
  * **Example** (Using a digest algorithm)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Crypto } from "effect"
  *
  * const algorithm: Crypto.DigestAlgorithm = "SHA-256"
@@ -48,7 +47,7 @@ export type DigestAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"
  *
  * **Example** (Using cryptographic operations)
  *
- * ```ts import.meta.vitest
+ * ```ts
  * import { Crypto, Effect, Layer } from "effect"
  *
  * const TestCrypto = Layer.succeed(
@@ -63,14 +62,15 @@ export type DigestAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"
  *   const crypto = yield* Crypto.Crypto
  *   const bytes = yield* crypto.randomBytes(16)
  *   const uuidv4 = yield* crypto.randomUUIDv4
+ *   const uuidv7 = yield* crypto.randomUUIDv7
  *   const hash = yield* crypto.digest("SHA-256", bytes)
- *   return [bytes.length, uuidv4.length, hash.length]
+ *   return { uuidv4, uuidv7, hash }
  * })
  *
- * await Effect.runPromise(Effect.provide(program, TestCrypto)) // => [16, 36, 16]
+ * Effect.runPromise(Effect.provide(program, TestCrypto))
  * ```
  *
- * @category services
+ * @category models
  * @since 4.0.0
  */
 export interface Crypto {
@@ -196,15 +196,16 @@ export const Crypto: Context.Service<Crypto, Crypto> = Context.Service("effect/C
  *
  * **Example** (Creating a Crypto service)
  *
- * ```ts import.meta.vitest
- * import { Crypto, Effect } from "effect"
+ * ```ts
+ * import { Crypto, Effect, Layer } from "effect"
  *
- * const testCrypto = Crypto.make({
- *   randomBytes: (size) => new Uint8Array(size),
- *   digest: (_algorithm, data) => Effect.succeed(data)
- * })
- *
- * await Effect.runPromise(testCrypto.randomBytes(4)) // => new Uint8Array([0, 0, 0, 0])
+ * const TestCrypto = Layer.succeed(
+ *   Crypto.Crypto,
+ *   Crypto.make({
+ *     randomBytes: (size) => new Uint8Array(size),
+ *     digest: (_algorithm, data) => Effect.succeed(data)
+ *   })
+ * )
  * ```
  *
  * @category constructors
@@ -223,24 +224,15 @@ export const make = (
 
   const randomBytes: Crypto["randomBytes"] = (size) => Effect.map(validateSize("randomBytes", size), randomBytesUnsafe)
 
-  const readUint53 = (bytes: Uint8Array): number =>
-    ((bytes[0] & 0x1f) * 2 ** 48) + (bytes[1] * 2 ** 40) + (bytes[2] * 2 ** 32) +
-    (bytes[3] * 2 ** 24) + (bytes[4] * 2 ** 16) + (bytes[5] * 2 ** 8) + bytes[6]
-
-  const nextDoubleUnsafe = (): number => readUint53(randomBytesUnsafe(7)) / 2 ** 53
-
-  const nextIntUnsafe = (): number => {
-    while (true) {
-      const bytes = randomBytesUnsafe(7)
-      const value = readUint53(bytes)
-      if ((bytes[0] & 0x20) === 0) {
-        return value + Number.MIN_SAFE_INTEGER
-      }
-      if (value < Number.MAX_SAFE_INTEGER) {
-        return value + 1
-      }
-    }
+  const nextDoubleUnsafe = (): number => {
+    const bytes = randomBytesUnsafe(7)
+    const value = ((bytes[0] & 0x1f) * 2 ** 48) + (bytes[1] * 2 ** 40) + (bytes[2] * 2 ** 32) +
+      (bytes[3] * 2 ** 24) + (bytes[4] * 2 ** 16) + (bytes[5] * 2 ** 8) + bytes[6]
+    return value / 2 ** 53
   }
+
+  const nextIntUnsafe = (): number =>
+    Math.floor(nextDoubleUnsafe() * (Number.MAX_SAFE_INTEGER - Number.MIN_SAFE_INTEGER + 1)) + Number.MIN_SAFE_INTEGER
 
   return Crypto.of({
     [TypeId]: TypeId,
@@ -271,9 +263,9 @@ export const make = (
         }
         return buffer
       }),
-    randomUUIDv4: Effect.sync(() => Uuid.v4String(randomBytesUnsafe(16))),
+    randomUUIDv4: Effect.sync(() => formatUUIDv4(randomBytesUnsafe(16))),
     randomUUIDv7: Effect.clockWith((clock) =>
-      Effect.succeed(Uuid.v7String(clock.currentTimeMillisUnsafe(), randomBytesUnsafe(16)))
+      Effect.succeed(formatUUIDv7(clock.currentTimeMillisUnsafe(), randomBytesUnsafe(16)))
     )
   })
 }
@@ -286,3 +278,41 @@ const validateSize = (method: string, size: number): Effect.Effect<number, Platf
       method,
       description: "size must be a non-negative safe integer"
     }))
+
+const hex = (byte: number): string => byte.toString(16).padStart(2, "0")
+
+const formatUUID = (bytes: Uint8Array): string => {
+  const segments = [
+    bytes.subarray(0, 4),
+    bytes.subarray(4, 6),
+    bytes.subarray(6, 8),
+    bytes.subarray(8, 10),
+    bytes.subarray(10, 16)
+  ]
+
+  return segments.map((segment) => Array.from(segment, hex).join("")).join("-")
+}
+
+const formatUUIDv4 = (bytes: Uint8Array): string => {
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+  return formatUUID(bytes)
+}
+
+const maxUUIDv7Timestamp = 2 ** 48 - 1
+
+const formatUUIDv7 = (timestampMillis: number, bytes: Uint8Array): string => {
+  const timestamp = Math.min(Math.max(0, Math.trunc(timestampMillis)), maxUUIDv7Timestamp)
+
+  bytes[0] = Math.floor(timestamp / 2 ** 40)
+  bytes[1] = Math.floor(timestamp / 2 ** 32) & 0xff
+  bytes[2] = Math.floor(timestamp / 2 ** 24) & 0xff
+  bytes[3] = Math.floor(timestamp / 2 ** 16) & 0xff
+  bytes[4] = Math.floor(timestamp / 2 ** 8) & 0xff
+  bytes[5] = timestamp & 0xff
+  bytes[6] = (bytes[6] & 0x0f) | 0x70
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+  return formatUUID(bytes)
+}
