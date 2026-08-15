@@ -104,6 +104,12 @@ const parseRemoteTagCommit = (tag, output) => {
 const matchingSubtreeProvenance = (metadata, candidates) =>
   candidates.filter((candidate) => candidate.split === metadata.upstreamCommit && candidate.tree === metadata.tree)
 
+const hasUnstagedReferenceChange = (status) =>
+  status
+    .split("\n")
+    .filter(Boolean)
+    .some((line) => line.startsWith("??") || line[1] !== " ")
+
 const validateAlignment = ({ metadata, provenance, referenceVersions, tagCommit, tree, workspaceVersions }) => {
   const violations = []
 
@@ -230,6 +236,47 @@ const runSelfTest = () => {
     2,
     "multiple matching imports must remain ambiguous"
   )
+
+  assert.equal(
+    hasUnstagedReferenceChange(" M repos/effect/packages/effect/src/Effect.ts"),
+    true,
+    "an unstaged modification must fail"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("M  repos/effect/packages/effect/src/Effect.ts"),
+    false,
+    "a staged-only modification must pass"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("R  repos/effect/old.ts -> repos/effect/new.ts"),
+    false,
+    "a staged-only rename must pass"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("RM repos/effect/old.ts -> repos/effect/new.ts"),
+    true,
+    "a rename with an unstaged modification must fail"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("C  repos/effect/source.ts -> repos/effect/copy.ts"),
+    false,
+    "a staged-only copy must pass"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("CM repos/effect/source.ts -> repos/effect/copy.ts"),
+    true,
+    "a copy with an unstaged modification must fail"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("UU repos/effect/packages/effect/src/Effect.ts"),
+    true,
+    "an unmerged path must fail"
+  )
+  assert.equal(
+    hasUnstagedReferenceChange("?? repos/effect/packages/effect/src/NewEffect.ts"),
+    true,
+    "an untracked path must fail"
+  )
 }
 
 const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (repositoryRoot) {
@@ -250,7 +297,7 @@ const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (reposit
         `git ${args.join(" ")} failed with exit code ${exitCode}${stderr.trim() === "" ? "" : `: ${stderr.trim()}`}`
       )
     }
-    return stdout.trim()
+    return stdout.trimEnd()
   })
 })
 
@@ -349,11 +396,7 @@ const program = Effect.gen(function* () {
   const provenance = yield* resolveSubtreeProvenance(git, metadata)
 
   const worktreeStatus = yield* git(["status", "--porcelain=v1", "--untracked-files=all", "--", "repos/effect"])
-  const unstagedReferenceChange = worktreeStatus
-    .split("\n")
-    .filter(Boolean)
-    .some((line) => line.startsWith("??") || line[1] !== " ")
-  if (unstagedReferenceChange) {
+  if (hasUnstagedReferenceChange(worktreeStatus)) {
     return yield* fail("Effect reference alignment requires subtree changes to be staged")
   }
 
