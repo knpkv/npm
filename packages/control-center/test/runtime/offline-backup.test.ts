@@ -43,6 +43,11 @@ const stableFileMetadata = (info: FileSystemType.File.Info): Omit<FileSystemType
   uid: info.uid
 })
 
+const durableDataRootEntries = (entries: ReadonlyArray<string>) =>
+  entries
+    .filter((entry) => entry !== "control-center.db-shm" && entry !== "control-center.db-wal")
+    .sort()
+
 const snapshotRegularFiles = Effect.fn("OfflineBackupTest.snapshotRegularFiles")(function*(
   fileSystem: FileSystemType.FileSystem,
   path: Path.Path,
@@ -273,14 +278,20 @@ describe("offline backup commands", () => {
       const claimBefore = yield* fileSystem.readLink(configuredRoot)
       const markerPath = path.join(prepared.dataRoot, ".control-center-root")
       const markerBefore = yield* fileSystem.readFile(markerPath)
-      const entriesBefore = (yield* fileSystem.readDirectory(prepared.dataRoot)).sort()
+      // SQLite may checkpoint and remove clean WAL sidecars after the fixture's
+      // database scope closes. They are lifecycle artifacts, not root contents
+      // owned by the read-only resolver.
+      const entriesBefore = durableDataRootEntries(yield* fileSystem.readDirectory(prepared.dataRoot))
 
       const resolved = yield* resolvePreparedControlCenterDataRoot(configured)
 
       assert.strictEqual(resolved.dataRoot, prepared.dataRoot)
       assert.strictEqual(yield* fileSystem.readLink(configuredRoot), claimBefore)
       assert.deepStrictEqual(yield* fileSystem.readFile(markerPath), markerBefore)
-      assert.deepStrictEqual((yield* fileSystem.readDirectory(prepared.dataRoot)).sort(), entriesBefore)
+      assert.deepStrictEqual(
+        durableDataRootEntries(yield* fileSystem.readDirectory(prepared.dataRoot)),
+        entriesBefore
+      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects missing, unprepared, and legacy roots without adopting or cleaning them", () =>
