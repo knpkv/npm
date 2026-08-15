@@ -41,7 +41,7 @@ export type PluginEntityType = typeof PluginEntityType.Type
 const SafeSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
 const MaximumDiffContentBytes = 1_048_576
 const MaximumDiffContentBase64Characters = 4 * Math.ceil(MaximumDiffContentBytes / 3)
-const hasSafeRelativePathShape = Schema.makeFilter(
+const hasSafeRelativePathContract = Schema.makeFilter(
   (value: string) => {
     if (value.startsWith("/") || value.includes("\\") || /^[a-zA-Z]:/u.test(value)) return false
     return (
@@ -69,7 +69,7 @@ const hasMaximumDecodedDiffBytes = Schema.makeFilter(
 export const PluginRelativePathV1 = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(4_096),
-  hasSafeRelativePathShape
+  hasSafeRelativePathContract
 ).pipe(Schema.brand("PluginRelativePathV1"))
 
 /** Decoded normalized provider-relative path. */

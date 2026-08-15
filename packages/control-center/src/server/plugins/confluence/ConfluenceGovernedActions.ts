@@ -35,8 +35,7 @@ import {
   PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
-import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
-import { type ConfluencePageClientFailure, type ConfluencePageClientShape } from "./ConfluencePageClient.js"
+import { type ConfluencePageClientContract, type ConfluencePageClientFailure } from "./ConfluencePageClient.js"
 import {
   RawConfluenceCurrentUser,
   RawConfluenceDraftPage,
@@ -120,7 +119,7 @@ const CreatePageActionPayload = Schema.TaggedStruct(CREATE_ACTION_KIND, {
 type CreatePageActionPayload = typeof CreatePageActionPayload.Type
 
 interface GovernedActionsInput {
-  readonly client: ConfluencePageClientShape
+  readonly client: ConfluencePageClientContract
   readonly converter: MarkdownConverter["Service"]
   readonly cryptoService: Crypto.Crypto
   readonly siteId: string
@@ -134,9 +133,9 @@ interface GovernedActionsInput {
 const malformed = (operation: string, diagnosticCode: string): PluginMalformedResponseFailure =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
 
-const decodePage = Effect.fn("ConfluenceGovernedActions.decodePage")(function*(
+const decodePage = Effect.fn("ConfluenceGovernedActions.decodePage")(function*<UnparsedInput>(
   operation: string,
-  raw: unknown,
+  raw: UnparsedInput,
   pageId: string,
   spaceId: string
 ) {
@@ -197,10 +196,10 @@ const safeProviderCall = <Value>(
     )
   )
 
-const output = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const output = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(operation, `confluence-${operation}-output-invalid`))
@@ -430,7 +429,7 @@ type ExactVersionRead =
   | { readonly _tag: "unknown" }
 
 const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string,
   targetVersion: number
 ): Effect.fn.Return<ExactVersionRead, PluginFailure> {
@@ -449,7 +448,7 @@ const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")
 })
 
 const hasDivergentDraft = Effect.fn("ConfluenceGovernedActions.hasDivergentDraft")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   page: RawConfluencePage
 ): Effect.fn.Return<boolean, PluginFailure> {
   const result = yield* client.getPageDraft(page.id).pipe(Effect.result)
@@ -476,13 +475,7 @@ const hasDivergentDraft = Effect.fn("ConfluenceGovernedActions.hasDivergentDraft
 /** Build the governed Confluence proposal and executor surfaces. @internal */
 export const makeConfluenceGovernedActions = (
   input: GovernedActionsInput
-): {
-  readonly actionActorIdentity: Effect.Effect<typeof PluginActionActorIdentityV1.Type, PluginFailure>
-  readonly proposeAction: (
-    request: ProposePluginActionRequestV1
-  ) => Effect.Effect<typeof PluginActionProposalV1.Type, PluginFailure>
-  readonly executor: AuthorizedPluginExecutorV1
-} => {
+) => {
   const actorIdentity = Effect.gen(function*() {
     const user = input.cachedUser ??
       (yield* safeProviderCall(input.client.getCurrentUser).pipe(

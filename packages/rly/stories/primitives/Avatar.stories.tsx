@@ -10,15 +10,15 @@ const AvatarGallery = () => (
       Identity fallbacks
     </Text>
     <div style={rowStyle}>
-      <Avatar data-avatar-shape="circle" data-avatar-size="small" fallback="AD" label="Avery Diaz" size="small" />
+      <Avatar data-avatar-form="circle" data-avatar-size="small" fallback="AD" label="Avery Diaz" size="small" />
       <Avatar data-avatar-size="default" fallback="BK" label="Blake Kim" />
       <Avatar data-avatar-size="large" fallback="CS" label="Casey Singh" size="large" />
       <Avatar
-        data-avatar-shape="rounded-square"
+        data-avatar-form="rounded-square"
         data-avatar-size="hero"
         fallback="DT"
         label="Delivery team"
-        shape="rounded-square"
+        form="rounded-square"
         size="hero"
       />
     </div>
@@ -38,7 +38,7 @@ export const Gallery: Story = {
     await expect(canvas.getByRole("img", { name: "Avery Diaz" })).toBeVisible()
     await expect(canvas.getByRole("img", { name: "Delivery team" })).toBeVisible()
     await expect(canvasElement.querySelectorAll("[data-avatar-size]")).toHaveLength(4)
-    await expect(canvasElement.querySelectorAll("[data-avatar-shape]")).toHaveLength(2)
+    await expect(canvasElement.querySelectorAll("[data-avatar-form]")).toHaveLength(2)
   },
   render: () => <AvatarGallery />
 }

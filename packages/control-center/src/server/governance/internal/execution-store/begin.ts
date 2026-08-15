@@ -27,6 +27,7 @@ import { Database } from "../../../persistence/Database.js"
 import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { makeGovernedActionTransactionWrite } from "../../../persistence/repositories/governed-action/write.js"
+import type { SqlRow } from "../../../persistence/repositories/sqlRow.js"
 import { PluginRuntimeAuthoritySource } from "../../../plugins/internal/PluginRuntimeAuthoritySource.js"
 import { verifyGovernedActionDispatchAuthority } from "../../governedActionAuthority.js"
 import { digestGovernedActionPolicyEvaluation } from "../../governedActionDigests.js"
@@ -54,7 +55,7 @@ const inactive = (state: GovernedActionState): GovernedActionBeginResult => ({
   state
 })
 
-const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+const storeFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("PluginRuntimeAuthorityUnavailable")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "begin", reason: "authority-changed" })
@@ -210,7 +211,7 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
           })
           const publication = record.envelope.releasePublication
           if (publication !== undefined) {
-            const rows = yield* sql<Record<string, unknown>>`SELECT
+            const rows = yield* sql<SqlRow>`SELECT
                 revision.snapshot_json AS snapshotJson
               FROM releases AS release
               JOIN release_revisions AS revision
@@ -281,7 +282,7 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             evidence: record.envelope.evidence,
             now
           })
-          const attemptCountRows = yield* sql<Record<string, unknown>>`WITH RECURSIVE
+          const attemptCountRows = yield* sql<SqlRow>`WITH RECURSIVE
             retry_edges(source_execution_id, result_execution_id) AS (
               SELECT source.vendor_immutable_id, retry.provider_operation_id
               FROM governed_actions AS retry

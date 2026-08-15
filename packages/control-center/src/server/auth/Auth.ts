@@ -304,8 +304,8 @@ export class Auth extends Context.Service<Auth, Effect.Success<typeof makeAuth>>
 }
 
 /** Build a standalone Auth service from persistence configuration. */
-export const authLayer = (
-  persistenceConfigInput: unknown
+export const authLayer = <UnparsedInput>(
+  persistenceConfigInput: UnparsedInput
 ): Layer.Layer<
   Auth,
   Layer.Error<ReturnType<typeof databaseLayer>>,

@@ -2,7 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { Button, StateLabel, StatePanel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
 import { useNavigate } from "react-router"
-import { appStateAtom, deleteSandboxAtom, restartSandboxAtom, stopSandboxAtom } from "../atoms/app.js"
+import { type AppState, appStateAtom, deleteSandboxAtom, restartSandboxAtom, stopSandboxAtom } from "../atoms/app.js"
 import styles from "./sandbox.module.css"
 
 const provisioningStatuses = new Set(["creating", "cloning", "starting"])
@@ -37,13 +37,44 @@ const formatTime = (timestamp: string): string => {
   return `${Math.floor(elapsed / 86_400_000)}d ago`
 }
 
-/** Inventory of isolated review environments with lifecycle actions kept next to their owner revision. */
+interface SandboxActionRequest {
+  readonly params: { readonly sandboxId: SandboxId }
+}
+
+export interface SandboxesPageViewProps {
+  readonly state: AppState
+  readonly stopSandbox: (request: SandboxActionRequest) => void
+  readonly restartSandbox: (request: SandboxActionRequest) => void
+  readonly deleteSandbox: (request: SandboxActionRequest) => void
+  readonly navigate: (href: string) => void
+}
+
+/** Inventory route wired to the application atom and router boundaries. */
 export function SandboxesPage() {
   const state = useAtomValue(appStateAtom)
   const stopSandbox = useAtomSet(stopSandboxAtom)
   const restartSandbox = useAtomSet(restartSandboxAtom)
   const deleteSandbox = useAtomSet(deleteSandboxAtom)
   const navigate = useNavigate()
+  return (
+    <SandboxesPageView
+      deleteSandbox={deleteSandbox}
+      navigate={navigate}
+      restartSandbox={restartSandbox}
+      state={state}
+      stopSandbox={stopSandbox}
+    />
+  )
+}
+
+/** Inventory presentation with explicit lifecycle and navigation dependencies. */
+export function SandboxesPageView({
+  deleteSandbox,
+  navigate,
+  restartSandbox,
+  state,
+  stopSandbox
+}: SandboxesPageViewProps) {
   const sandboxes = state.sandboxes ?? []
   const runningCount = sandboxes.filter(({ status }) => status === "running").length
 

@@ -71,7 +71,7 @@ const saveToDisk = (fs: FileSystem.FileSystem, path: string, config: Permissions
     yield* fs.rename(tmpPath, path)
   }).pipe(Effect.catch(() => Effect.void))
 
-export interface PermissionServiceShape {
+export interface PermissionServiceContract {
   readonly check: (operation: OperationName) => Effect.Effect<PermissionState>
   readonly set: (operation: OperationName, state: PermissionState) => Effect.Effect<void>
   readonly getAll: () => Effect.Effect<Record<string, PermissionState>>
@@ -135,7 +135,15 @@ const makePermissionService = Effect.gen(function*() {
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
     })
 
-  return { check, set, getAll, resetAll, isAuditEnabled, getAuditRetention, setAudit } satisfies PermissionServiceShape
+  return {
+    check,
+    set,
+    getAll,
+    resetAll,
+    isAuditEnabled,
+    getAuditRetention,
+    setAudit
+  } satisfies PermissionServiceContract
 })
 
 // Context.Service key with an explicit live layer for v4 beta.
@@ -143,7 +151,7 @@ const makePermissionService = Effect.gen(function*() {
 // FileSystem comes from the providing layer (PlatformLive in Server.ts).
 export class PermissionService extends Context.Service<
   PermissionService,
-  PermissionServiceShape
+  PermissionServiceContract
 >()("PermissionService") {
   static readonly Default = Layer.effect(PermissionService, makePermissionService)
 }

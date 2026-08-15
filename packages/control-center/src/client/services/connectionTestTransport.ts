@@ -108,7 +108,7 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
         return yield* client.plugins.createAtlassianOAuthGrant({
-          payload: { providers, ...(configuration === undefined ? {} : { configuration }) }
+          payload: { providers, ...(!(configuration === undefined) && { configuration }) }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }

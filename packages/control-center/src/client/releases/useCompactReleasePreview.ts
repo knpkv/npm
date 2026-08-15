@@ -3,8 +3,13 @@ import { useSyncExternalStore } from "react"
 const COMPACT_RELEASE_PREVIEW_QUERY = "(max-width: 40rem)"
 const REDUCED_RELEASE_MOTION_QUERY = "(prefers-reduced-motion: reduce)"
 
-const mediaQuery = (query: string): MediaQueryList | null =>
-  typeof window === "undefined" ? null : window.matchMedia(query)
+const mediaQuery = (query: string): MediaQueryList | null => {
+  try {
+    return window.matchMedia(query)
+  } catch {
+    return null
+  }
+}
 
 const subscribe = (onChange: () => void): () => void => {
   const query = mediaQuery(COMPACT_RELEASE_PREVIEW_QUERY)

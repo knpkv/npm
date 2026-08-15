@@ -103,7 +103,8 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknownEffect(RawToPullRequestDetail)(raw)
+const decodePullRequestDetail = <UnparsedInput>(raw: UnparsedInput) =>
+  Schema.decodeUnknownEffect(RawToPullRequestDetail)(raw)
 
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {

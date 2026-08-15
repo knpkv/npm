@@ -1,6 +1,7 @@
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
 import { Effect, Schema } from "effect"
+import * as Predicate from "effect/Predicate"
 import * as AiError from "effect/unstable/ai/AiError"
 import { WorktreeError, type WorktreePlan, type WorktreeResult } from "../WorktreeService.js"
 import { ConsoleLaunchError, type ConsoleLaunchReason } from "./console-launch.js"
@@ -12,7 +13,9 @@ const DIFF_CONTEXT_LINES = 3
 const BINARY_SAMPLE_BYTES = 8_000
 const MAX_PREVIEW_BLOB_BYTES = ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES
 const MAX_ACTION_DIAGNOSTIC_CHARACTERS = 2_048
-const FILETYPE_ALIASES: Record<string, string> = {
+interface FiletypeLookup extends Readonly<Record<string, string>> {}
+
+const FILETYPE_ALIASES: FiletypeLookup = {
   cjs: "javascript",
   js: "javascript",
   json: "json",
@@ -66,10 +69,10 @@ const unresolvedAccountPullRequestSelection = (
     if (!Array.isArray(value)) return null
     if (
       value.length === 4 &&
-      typeof value[0] === "string" &&
-      typeof value[1] === "string" &&
-      typeof value[2] === "string" &&
-      typeof value[3] === "string"
+      Predicate.isString(value[0]) &&
+      Predicate.isString(value[1]) &&
+      Predicate.isString(value[2]) &&
+      Predicate.isString(value[3])
     ) {
       return {
         awsAccountId: null,
@@ -82,11 +85,11 @@ const unresolvedAccountPullRequestSelection = (
     }
     if (
       value.length === 5 &&
-      typeof value[0] === "string" &&
-      typeof value[1] === "string" &&
-      (typeof value[2] === "string" || value[2] === null) &&
-      typeof value[3] === "string" &&
-      typeof value[4] === "string"
+      Predicate.isString(value[0]) &&
+      Predicate.isString(value[1]) &&
+      (Predicate.isString(value[2]) || value[2] === null) &&
+      Predicate.isString(value[3]) &&
+      Predicate.isString(value[4])
     ) {
       return {
         awsAccountId: null,
@@ -98,12 +101,12 @@ const unresolvedAccountPullRequestSelection = (
       }
     }
     return value.length === 6 &&
-        typeof value[0] === "string" &&
-        typeof value[1] === "string" &&
-        (typeof value[2] === "string" || value[2] === null) &&
-        (typeof value[3] === "string" || value[3] === null) &&
-        typeof value[4] === "string" &&
-        typeof value[5] === "string"
+        Predicate.isString(value[0]) &&
+        Predicate.isString(value[1]) &&
+        (Predicate.isString(value[2]) || value[2] === null) &&
+        (Predicate.isString(value[3]) || value[3] === null) &&
+        Predicate.isString(value[4]) &&
+        Predicate.isString(value[5])
       ? {
         awsAccountId: Domain.normalizeAccountId(value[2]) ?? null,
         profile: value[0],
@@ -352,7 +355,7 @@ export const addAmbiguousMergeGuard = (
   guards: AmbiguousMergeGuards,
   pr: Domain.PullRequest,
   refreshGeneration = 0
-): AmbiguousMergeGuards => {
+) => {
   const guard = beginAmbiguousMergeGuard(pr, refreshGeneration)
   return { ...guards, [guard.selectionKey]: guard }
 }
@@ -659,7 +662,7 @@ const isWorkspaceRefreshActionError = Schema.is(WorkspaceRefreshActionError)
 const isConsoleLaunchError = Schema.is(ConsoleLaunchError)
 
 /** Retains only bounded, already-sanitized fields from typed action failures. */
-export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
+export const actionDiagnostic = <UnparsedInput>(error: UnparsedInput): ActionDiagnostic => {
   if (isConsoleLaunchError(error)) {
     return {
       consoleLaunchReason: error.reason,
@@ -689,7 +692,7 @@ export const actionDiagnostic = (error: unknown): ActionDiagnostic => {
   return { message: "Unexpected action failure", operation: "action" }
 }
 
-const actionFailure = (requestId: string, error: unknown): ActionOutcome<never> => ({
+const actionFailure = <UnparsedInput>(requestId: string, error: UnparsedInput): ActionOutcome<never> => ({
   _tag: "failure",
   diagnostic: actionDiagnostic(error),
   requestId
@@ -1237,10 +1240,7 @@ export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "is
 })
 
 /** Cached list decisions have no revision identifier, so they cannot label an exact-head workspace. */
-export const exactRevisionReviewState = (): {
-  readonly approval: "UNVERIFIED"
-  readonly mergeability: "UNVERIFIED"
-} => ({
+export const exactRevisionReviewState = () => ({
   approval: "UNVERIFIED",
   mergeability: "UNVERIFIED"
 })
@@ -1437,7 +1437,7 @@ export const buildUnifiedDiff = (
   file: ReadClient.CodeCommitChangedFile,
   beforeText: string,
   afterText: string
-): { readonly diff: string; readonly metadata: string | null; readonly truncated: boolean } => {
+) => {
   const beforePath = terminalSafeText(file.before?.path ?? "/dev/null")
   const afterPath = terminalSafeText(file.after?.path ?? "/dev/null")
   const oldFileName = file.before === null ? "/dev/null" : `a/${beforePath}`

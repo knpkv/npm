@@ -40,6 +40,7 @@ import { mapPersistenceOperation, readChanges } from "./internal.js"
 import { ContentBlobDigest, RecordRevision } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const WorkspaceSettingsRow = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -140,9 +141,9 @@ class MalformedWorkspaceSettingsRecord extends Data.TaggedError(
   readonly row: unknown
 }> {}
 
-const isMalformedWorkspaceSettingsRecord = (
-  failure: unknown
-): failure is MalformedWorkspaceSettingsRecord =>
+const isMalformedWorkspaceSettingsRecord = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & MalformedWorkspaceSettingsRecord =>
   Predicate.isTagged("MalformedWorkspaceSettingsRecord")(failure) &&
   Predicate.hasProperty(failure, "error") &&
   Schema.is(PersistedRecordError)(failure.error) &&
@@ -163,7 +164,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
   })
 
   const readRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       schema_version AS schemaVersion,
       revision,
@@ -180,7 +181,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     revision: RecordRevision
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       schema_version AS schemaVersion,
       revision,
@@ -198,7 +199,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     mutationId?: WorkspaceSettingsMutationId
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       mutation_id AS mutationId,
       request_digest AS requestDigest,
@@ -217,9 +218,9 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
       AND (${mutationId ?? null} IS NULL OR mutation_id = ${mutationId ?? null})
     ORDER BY to_revision`
 
-  const quarantineMalformed = Effect.fn("WorkspaceSettingsRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("WorkspaceSettingsRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
-    row: unknown,
+    row: UnparsedInput,
     diagnosticCode: "workspace-settings-digest-mismatch" | "workspace-settings-schema-invalid",
     diagnosticSummary:
       | "Stored workspace settings digest does not match its content."
@@ -236,9 +237,9 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     })
   })
 
-  const decodeCurrent = Effect.fn("WorkspaceSettingsRepository.decodeCurrent")(function*(
+  const decodeCurrent = Effect.fn("WorkspaceSettingsRepository.decodeCurrent")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
-    row: unknown,
+    row: UnparsedInput,
     quarantineMode: "deferred" | "immediate"
   ) {
     const failMalformed = (
@@ -358,20 +359,22 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     return yield* malformed.error
   })
 
-  const decodeAudit = Effect.fn("WorkspaceSettingsRepository.decodeAudit")(function*(row: unknown) {
-    const decodedRow = yield* Schema.decodeUnknownEffect(WorkspaceSettingsAuditRow)(row).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.decode-audit" }))
-    )
-    const changedSections = decodeChangedSections(decodedRow.changedSectionsJson)
-    if (Result.isFailure(changedSections)) {
-      return yield* new PersistenceOperationError({ operation: "workspace-settings.decode-audit" })
+  const decodeAudit = Effect.fn("WorkspaceSettingsRepository.decodeAudit")(
+    function*<UnparsedInput>(row: UnparsedInput) {
+      const decodedRow = yield* Schema.decodeUnknownEffect(WorkspaceSettingsAuditRow)(row).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.decode-audit" }))
+      )
+      const changedSections = decodeChangedSections(decodedRow.changedSectionsJson)
+      if (Result.isFailure(changedSections)) {
+        return yield* new PersistenceOperationError({ operation: "workspace-settings.decode-audit" })
+      }
+      return WorkspaceSettingsAuditRecord.make({
+        ...decodedRow,
+        changedSections: changedSections.success,
+        governed: decodedRow.governed === 1
+      })
     }
-    return WorkspaceSettingsAuditRecord.make({
-      ...decodedRow,
-      changedSections: changedSections.success,
-      governed: decodedRow.governed === 1
-    })
-  })
+  )
 
   const ensureDefault = Effect.fn("WorkspaceSettingsRepository.ensureDefault")(function*(
     workspaceId: WorkspaceId

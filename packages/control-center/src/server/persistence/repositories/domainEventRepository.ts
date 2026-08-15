@@ -35,6 +35,7 @@ import { mapPersistenceOperation } from "./internal.js"
 import { ContentBlobDigest } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const AllocatedCursorRow = Schema.Struct({ eventCursor: PersistedEventCursor })
 const EventIdentity = Schema.Struct({ eventId: DomainEventId })
@@ -61,11 +62,11 @@ const metadataColumns = (metadata: AppendDomainEventInputType["metadata"]) => ({
   jobId: metadata.jobId ?? null
 })
 
-const makeMetadata = (row: DomainEventRowType): Record<string, string> => ({
-  ...(row.releaseId === null ? {} : { releaseId: row.releaseId }),
-  ...(row.pluginConnectionId === null ? {} : { pluginConnectionId: row.pluginConnectionId }),
-  ...(row.entityId === null ? {} : { entityId: row.entityId }),
-  ...(row.jobId === null ? {} : { jobId: row.jobId })
+const makeMetadata = (row: DomainEventRowType) => ({
+  ...(!(row.releaseId === null) && { releaseId: row.releaseId }),
+  ...(!(row.pluginConnectionId === null) && { pluginConnectionId: row.pluginConnectionId }),
+  ...(!(row.entityId === null) && { entityId: row.entityId }),
+  ...(!(row.jobId === null) && { jobId: row.jobId })
 })
 
 const makeDomainEventRepository = Effect.gen(function*() {
@@ -93,7 +94,7 @@ const makeDomainEventRepository = Effect.gen(function*() {
     eventType: AppendDomainEventInputType["eventType"],
     dedupeKey: AppendDomainEventInputType["dedupeKey"]
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       event_cursor AS eventCursor,
       event_id AS eventId,
@@ -123,7 +124,7 @@ const makeDomainEventRepository = Effect.gen(function*() {
     after: typeof EventCursor.Type,
     limit: typeof DomainEventPageSize.Type
   ) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       event_cursor AS eventCursor,
       event_id AS eventId,
@@ -146,9 +147,9 @@ const makeDomainEventRepository = Effect.gen(function*() {
     ORDER BY event_cursor
     LIMIT ${limit}`
 
-  const quarantineMalformed = Effect.fn("DomainEventRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("DomainEventRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: typeof WorkspaceId.Type,
-    rawRow: unknown,
+    rawRow: UnparsedInput,
     diagnosticCode: "domain-event-payload-digest-mismatch" | "domain-event-schema-invalid",
     diagnosticSummary:
       | "Stored domain event payload digest does not match its content."
@@ -166,9 +167,9 @@ const makeDomainEventRepository = Effect.gen(function*() {
     })
   })
 
-  const decodeRow = Effect.fn("DomainEventRepository.decodeRow")(function*(
+  const decodeRow = Effect.fn("DomainEventRepository.decodeRow")(function*<UnparsedInput>(
     workspaceId: typeof WorkspaceId.Type,
-    rawRow: unknown
+    rawRow: UnparsedInput
   ) {
     const decodedRow = Schema.decodeUnknownResult(DomainEventRow)(rawRow)
     if (Result.isFailure(decodedRow)) {
@@ -251,7 +252,7 @@ const makeDomainEventRepository = Effect.gen(function*() {
   const readStreamState = Effect.fn("DomainEventRepository.readStreamState")(function*(
     workspaceId: typeof WorkspaceId.Type
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       next_cursor - 1 AS headCursor,
       pruned_through_cursor AS prunedThroughCursor
     FROM domain_event_streams

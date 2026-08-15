@@ -177,7 +177,7 @@ function AppContent({ onQuit }: AppProps) {
     (comment: string) => {
       setFrozenOnTimer(true) // keep big timer visible while popup shows
       setIsStopping(false)
-      stopTimer({ comment: comment.trim() || undefined, ...(correctedEnd ? { endedAt: correctedEnd } : {}) })
+      stopTimer({ comment: comment.trim() || undefined, ...(correctedEnd && { endedAt: correctedEnd }) })
     },
     [stopTimer, correctedEnd]
   )

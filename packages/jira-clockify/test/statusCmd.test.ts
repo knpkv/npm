@@ -21,7 +21,7 @@
  */
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape, TimeEntry } from "@knpkv/clockify-api-client"
+import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -69,7 +69,7 @@ const unreachable = (name: string) => Effect.die(new Error(`${name} must not be 
 // Only the members `status` is allowed to reach are implemented; everything
 // else defects, so a future change that widens the command's API surface fails
 // here loudly instead of silently passing.
-const baseClient: ClockifyApiClientShape = {
+const baseClient: ClockifyApiClientContract = {
   getUser: () => unreachable("getUser"),
   getWorkspaces: () => unreachable("getWorkspaces"),
   getProjects: () => Effect.succeed([]),
@@ -93,7 +93,7 @@ interface Capture {
 
 const makeCapture = (): Capture => ({ cleared: false, written: [] })
 
-const layersFor = (client: ClockifyApiClientShape, capture: Capture) =>
+const layersFor = (client: ClockifyApiClientContract, capture: Capture) =>
   Layer.mergeAll(
     Layer.succeed(ClockifyApiClient, client),
     Layer.succeed(ClockifyAuth, {
@@ -119,7 +119,7 @@ const layersFor = (client: ClockifyApiClientShape, capture: Capture) =>
     NodeServices.layer
   )
 
-const run = (client: ClockifyApiClientShape, capture: Capture) =>
+const run = (client: ClockifyApiClientContract, capture: Capture) =>
   Command.runWith(statusCmd, { version: "0.0.0-test" })([]).pipe(
     Effect.provide(layersFor(client, capture)),
     Effect.exit

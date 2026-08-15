@@ -8,7 +8,7 @@
  * {@link makeApiError} (factory produces AwsApiError with correct fields).
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { parseRuleContent } from "../src/AwsClient/approvalRuleContent.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
@@ -137,7 +137,7 @@ describe("AwsClient internals", () => {
       })
       const result = runParse(content)
       expect(result.requiredApprovals).toBe(3)
-      expect(typeof result.requiredApprovals).toBe("number")
+      expect(Predicate.isNumber(result.requiredApprovals)).toBe(true)
     })
 
     it("falls back to 1 when NumberOfApprovalsNeeded is non-numeric", () => {

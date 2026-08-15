@@ -171,7 +171,7 @@ export const readLocalCliRuntimeMetadata = Effect.fn("AgentRuntimeMetadata.readL
       stderr: "pipe",
       stdin: "ignore",
       stdout: "pipe",
-      ...(cwd === undefined ? {} : { cwd })
+      ...(!(cwd === undefined) && { cwd })
     }
   )
   const result = yield* Effect.scoped(

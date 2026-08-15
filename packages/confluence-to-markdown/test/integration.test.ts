@@ -12,6 +12,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Config, Effect, Option, Schedule } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -108,19 +110,20 @@ interface RawAdfSnapshot {
   readonly evidence: RawAdfEvidence
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Record<string, Schema.Json> =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
-const recordOrNull = (value: unknown): Record<string, unknown> | null => isRecord(value) ? value : null
+const recordOrNull = <UnparsedInput>(value: UnparsedInput): Record<string, Schema.Json> | null =>
+  isRecord(value) ? value : null
 
 // === Helper Functions ===
 
-const integrationHttpRetry: {
-  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
-  readonly times: number
-} = {
+const integrationHttpRetry = {
   schedule: Schedule.exponential("1 second"),
   times: 3
+} satisfies {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
 }
 
 const runPlatform = <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices>): Promise<A> =>
@@ -388,7 +391,7 @@ const deleteLocalFile = (filePath: string) =>
     expect(yield* pathExists(filePath)).toBe(false)
   })
 
-const adfEvidence = (adf: unknown): RawAdfEvidence => {
+const adfEvidence = <UnparsedInput>(adf: UnparsedInput): RawAdfEvidence => {
   const evidence: RawAdfEvidence = {
     types: new Set<string>(),
     attrSignatures: new Set<string>(),
@@ -399,10 +402,10 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
   }
   const selectedMarkTypes = new Set<string>(RAW_ROUND_TRIP_MARK_TYPES)
   const selectedNodeTypes = new Set<string>(RAW_ROUND_TRIP_NODE_TYPES)
-  const normalizeAttrs = (value: unknown): unknown => {
+  const normalizeAttrs = <UnparsedInput>(value: UnparsedInput) => {
     if (Array.isArray(value)) return value.map(normalizeAttrs)
     if (isRecord(value)) {
-      const normalized: Record<string, unknown> = {}
+      const normalized: Record<string, Schema.Json> = {}
       for (const [key, rawValue] of Object.entries(value)) {
         const attr = normalizeAttrs(rawValue)
         if (key === "localId" || key === "macroMetadata") continue
@@ -421,7 +424,7 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
     }
     return value
   }
-  const stableJson = (value: unknown): string => {
+  const stableJson = <UnparsedInput>(value: UnparsedInput): string => {
     if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
     if (isRecord(value)) {
       return `{${
@@ -434,29 +437,29 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
     }
     return JSON.stringify(value) ?? "null"
   }
-  const markSignature = (mark: Record<string, unknown>): string =>
+  const markSignature = (mark: Record<string, Schema.Json>): string =>
     `${String(mark["type"])}:${stableJson(mark["attrs"] ?? {})}`
-  const cardUrl = (attrs: Record<string, unknown>): string | null => {
+  const cardUrl = (attrs: Record<string, Schema.Json>): string | null => {
     const url = attrs["url"]
-    if (typeof url === "string") return url
+    if (Predicate.isString(url)) return url
     const data = recordOrNull(attrs["data"])
     if (data !== null) {
       const dataUrl = data["url"]
-      if (typeof dataUrl === "string") return dataUrl
+      if (Predicate.isString(dataUrl)) return dataUrl
     }
     return null
   }
-  const walk = (node: unknown): void => {
+  const walk = <UnparsedInput>(node: UnparsedInput): void => {
     const record = recordOrNull(node)
     if (record === null) return
     const type = record["type"]
-    if (typeof type === "string") evidence.types.add(type)
+    if (Predicate.isString(type)) evidence.types.add(type)
     const attrs = record["attrs"]
     if (
-      typeof type === "string" &&
+      Predicate.isString(type) &&
       selectedNodeTypes.has(type) &&
       attrs !== null &&
-      typeof attrs === "object" &&
+      Predicate.isObjectOrArray(attrs) &&
       !Array.isArray(attrs)
     ) {
       const normalized = normalizeAttrs(attrs)
@@ -479,7 +482,7 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
         const markRecord = recordOrNull(mark)
         if (markRecord === null) continue
         const markType = markRecord["type"]
-        if (typeof markType !== "string") continue
+        if (!Predicate.isString(markType)) continue
         evidence.markTypes.add(markType)
         if (selectedMarkTypes.has(markType)) {
           const signature = markSignature(markRecord)
@@ -516,7 +519,7 @@ const getRemoteAdfSnapshot = (pageId: string) =>
       const body = recordOrNull(pageRecord?.["body"])
       const atlasDocFormat = recordOrNull(body?.["atlas_doc_format"])
       const rawValue = atlasDocFormat?.["value"]
-      const value = typeof rawValue === "string" ? rawValue : "{}"
+      const value = Predicate.isString(rawValue) ? rawValue : "{}"
       const adf: unknown = JSON.parse(value)
       return { value, evidence: adfEvidence(adf) }
     },

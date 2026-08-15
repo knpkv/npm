@@ -61,8 +61,8 @@ describe("ContentStore", () => {
         const config = yield* makePersistenceTestConfig("control-center-content-")
         yield* Effect.gen(function*() {
           const persistence = yield* Persistence
-          assert.strictEqual(typeof persistence.people.createRoleAssignment, "function")
-          assert.strictEqual(typeof persistence.people.updateRoleAssignment, "function")
+          assert.strictEqual(Predicate.isFunction(persistence.people.createRoleAssignment), true)
+          assert.strictEqual(Predicate.isFunction(persistence.people.updateRoleAssignment), true)
           const bytes = new Uint8Array([10, 20, 30, 40])
           const input: PutContentInput = {
             bytes,

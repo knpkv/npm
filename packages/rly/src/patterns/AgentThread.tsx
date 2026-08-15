@@ -3,14 +3,15 @@ import { Avatar } from "../primitives/Avatar.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import type { RlyPerson } from "./Person.js"
 import styles from "./AgentThread.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
 const requireSlot = (value: ReactNode, label: string): void => {
-  if (value === undefined || value === null || typeof value === "boolean") {
+  if (value === undefined || value === null || Predicate.isBoolean(value)) {
     throw new Error(`${label} must contain renderable content`)
   }
-  if (typeof value === "string") requireText(value, label)
+  if (Predicate.isString(value)) requireText(value, label)
 }
 
 /** A human participant whose circular identity distinguishes them from automation. */
@@ -100,10 +101,10 @@ const actorIdentity = (actor: RlyAgentThreadActor): ReactElement => {
     <div className={classNames(style("actor"), style(actor.kind))} data-rly-agent-thread-actor={actor.kind}>
       <Avatar
         className={style("avatar")}
-        data-rly-agent-thread-avatar-shape={actor.kind === "human" ? "circle" : "rounded-square"}
+        data-rly-agent-thread-avatar-form={actor.kind === "human" ? "circle" : "rounded-square"}
         decorative
         fallback={fallback}
-        shape={actor.kind === "human" ? "circle" : "rounded-square"}
+        form={actor.kind === "human" ? "circle" : "rounded-square"}
         size="default"
         {...(src === undefined ? {} : { src })}
       />

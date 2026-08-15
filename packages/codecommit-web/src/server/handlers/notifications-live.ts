@@ -36,9 +36,9 @@ export const NotificationsLive = HttpApiBuilder.group(
         .handle("list", ({ query }) =>
           notificationRepo.findAll({
             limit: query.limit ?? 20,
-            ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
-            ...(query.filter !== undefined ? { filter: query.filter } : {}),
-            ...(query.unreadOnly ? { unreadOnly: true } : {})
+            ...((query.cursor !== undefined) && { cursor: query.cursor }),
+            ...((query.filter !== undefined) && { filter: query.filter }),
+            ...((query.unreadOnly) && { unreadOnly: true })
           }).pipe(Effect.orDie))
         .handle("count", () =>
           notificationRepo.unreadCount().pipe(

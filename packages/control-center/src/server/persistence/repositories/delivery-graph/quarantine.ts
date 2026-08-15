@@ -23,19 +23,19 @@ interface DeliveryGraphQuarantineDiagnostic {
 }
 
 /** Internal carrier that keeps malformed values out of the public error channel. */
-export class MalformedDeliveryGraphRecord {
+export class MalformedDeliveryGraphRecord<Row = unknown> {
   readonly _tag = "MalformedDeliveryGraphRecord"
   readonly error: PersistedRecordError
-  readonly row: unknown
+  readonly row: Row
 
-  constructor(error: PersistedRecordError, row: unknown) {
+  constructor(error: PersistedRecordError, row: Row) {
     this.error = error
     this.row = row
   }
 }
 
 /** Attach an ephemeral raw row to a bounded graph decode failure for later redacted quarantine. */
-export const captureMalformedDeliveryGraphRow = (row: unknown) =>
+export const captureMalformedDeliveryGraphRow = <UnparsedInput>(row: UnparsedInput) =>
 <Success, Failure, Requirements>(
   effect: Effect.Effect<Success, Failure, Requirements>
 ) =>

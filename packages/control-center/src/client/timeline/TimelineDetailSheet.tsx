@@ -8,12 +8,12 @@ import type { TimelineEvent, TimelineEventDetail, TimelineSourceKind } from "../
 import styles from "./TimelineDetailSheet.module.css"
 import { type TimelineDetailTransport, useTimelineDetail } from "./useTimelineDetail.js"
 
-const sourceLabels: Readonly<Record<TimelineSourceKind, string>> = {
+const sourceLabels = {
   action: "Governed action",
   "plugin-sync": "Service sync",
   relationship: "Delivery link",
   system: "Control Center"
-}
+} satisfies Readonly<Record<TimelineSourceKind, string>>
 
 const formatTimestamp = (event: TimelineEvent): string =>
   DateTime.formatUtc(event.occurredAt, {

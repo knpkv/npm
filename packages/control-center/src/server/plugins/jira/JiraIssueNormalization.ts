@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import * as Predicate from "effect/Predicate"
 import type { NormalizedIssueFixVersion } from "../../../domain/normalizedIssue.js"
 import {
   MAXIMUM_NORMALIZED_ISSUE_COLLABORATORS,
@@ -154,7 +155,8 @@ const MAX_RICH_TEXT_CHARACTERS = 16_000
 const MAX_CHANGE_VALUE_CHARACTERS = 1_000
 const jsonEncoder = new TextEncoder()
 
-const jsonByteLength = (value: unknown): number => jsonEncoder.encode(JSON.stringify(value)).byteLength
+const jsonByteLength = <UnparsedInput>(value: UnparsedInput): number =>
+  jsonEncoder.encode(JSON.stringify(value)).byteLength
 
 const protectedFencedCodeBlock = /^(`{3,})[^\n]*\n[\s\S]*?^\1$/gmu
 
@@ -195,7 +197,7 @@ const escapedMarkdownText = (value: string): string =>
 const cardMarkdownLink = (record: typeof JsonRecord.Type): string => {
   const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
   const data = attrs?.data === undefined ? null : decodedJsonRecord(attrs.data)
-  const candidate = typeof attrs?.url === "string" ? attrs.url : typeof data?.url === "string" ? data.url : null
+  const candidate = Predicate.isString(attrs?.url) ? attrs.url : Predicate.isString(data?.url) ? data.url : null
   if (candidate === null) return ""
   const decoded = Schema.decodeUnknownResult(SourceUrl)(candidate)
   if (Result.isFailure(decoded)) return ""
@@ -230,7 +232,7 @@ const adfTextWithMarks = (record: typeof JsonRecord.Type, value: string): string
     if (mark.type === "code") code = true
     if (mark.type !== "link") continue
     const attrs = mark.attrs === undefined ? null : decodedJsonRecord(mark.attrs)
-    if (typeof attrs?.href !== "string") continue
+    if (!Predicate.isString(attrs?.href)) continue
     const decoded = Schema.decodeUnknownResult(SourceUrl)(attrs.href)
     if (Result.isFailure(decoded)) continue
     linkTarget = Schema.encodeSync(SourceUrl)(decoded.success)
@@ -243,7 +245,7 @@ const adfTextWithMarks = (record: typeof JsonRecord.Type, value: string): string
 }
 
 const adfText = (value: Schema.Json): string => {
-  if (typeof value === "string") return escapedMarkdownText(value)
+  if (Predicate.isString(value)) return escapedMarkdownText(value)
   if (Array.isArray(value)) return value.map(adfText).join("")
   const record = decodedJsonRecord(value)
   if (record === null) return ""
@@ -251,19 +253,19 @@ const adfText = (value: Schema.Json): string => {
   if (record.type === "inlineCard" || record.type === "blockCard") return cardMarkdownLink(record)
   if (record.type === "mention") {
     const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
-    return typeof attrs?.text === "string" ? escapedMarkdownText(attrs.text) : ""
+    return Predicate.isString(attrs?.text) ? escapedMarkdownText(attrs.text) : ""
   }
-  return typeof record.text === "string"
+  return Predicate.isString(record.text)
     ? adfTextWithMarks(record, record.text)
     : adfContent(record).map(adfText).join("")
 }
 
 const rawAdfText = (value: Schema.Json): string => {
-  if (typeof value === "string") return value
+  if (Predicate.isString(value)) return value
   if (Array.isArray(value)) return value.map(rawAdfText).join("")
   const record = decodedJsonRecord(value)
   if (record === null) return ""
-  return typeof record.text === "string" ? record.text : adfContent(record).map(rawAdfText).join("")
+  return Predicate.isString(record.text) ? record.text : adfContent(record).map(rawAdfText).join("")
 }
 
 const markdownCodeFence = (value: string): string => {
@@ -281,7 +283,7 @@ const indented = (value: string, prefix: string): string =>
     .join("\n")
 
 const renderAdfBlock = (value: Schema.Json): string => {
-  if (typeof value === "string") return escapedMarkdownText(value)
+  if (Predicate.isString(value)) return escapedMarkdownText(value)
   if (Array.isArray(value)) {
     return value
       .map(renderAdfBlock)
@@ -301,7 +303,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
       return content.map(adfText).join("")
     case "heading": {
       const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
-      const level = typeof attrs?.level === "number" && Number.isInteger(attrs.level)
+      const level = Predicate.isNumber(attrs?.level) && Number.isInteger(attrs.level)
         ? Math.min(6, Math.max(1, attrs.level))
         : 1
       return `${"#".repeat(level)} ${content.map(adfText).join("")}`
@@ -310,7 +312,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
       return content.map((item) => indented(renderAdfBlock(item), "- ")).join("\n")
     case "orderedList": {
       const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
-      const start = typeof attrs?.order === "number" && Number.isInteger(attrs.order) ? attrs.order : 1
+      const start = Predicate.isNumber(attrs?.order) && Number.isInteger(attrs.order) ? attrs.order : 1
       return content.map((item, index) => indented(renderAdfBlock(item), `${String(start + index)}. `)).join("\n")
     }
     case "listItem":
@@ -320,7 +322,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
         .join("\n")
     case "codeBlock": {
       const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
-      const language = typeof attrs?.language === "string" ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
+      const language = Predicate.isString(attrs?.language) ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
       const code = content.map(rawAdfText).join("")
       const fence = markdownCodeFence(code)
       return `${fence}${language}\n${code}${code.endsWith("\n") ? "" : "\n"}${fence}`
@@ -340,7 +342,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
     case "hardBreak":
       return "\n"
     default:
-      return typeof record.text === "string"
+      return Predicate.isString(record.text)
         ? adfText(record)
         : content
           .map(renderAdfBlock)
@@ -363,26 +365,26 @@ const acceptanceCriteriaFromAdf = (
   value: Schema.Json | null | undefined,
   maximum: number | null = MAX_RICH_TEXT_CHARACTERS
 ): string | null => {
-  if (value === null || value === undefined || typeof value === "string" || Array.isArray(value)) return null
+  if (value === null || value === undefined || Predicate.isString(value) || Array.isArray(value)) return null
   const document = decodedJsonRecord(value)
   if (document === null) return null
   const blocks = adfContent(document)
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index]
-    if (typeof block !== "object" || block === null || Array.isArray(block)) continue
+    if (!Predicate.isObjectOrArray(block) || block === null || Array.isArray(block)) continue
     const heading = decodedJsonRecord(block)
     if (heading?.type !== "heading") continue
     const headingText = normalizedRenderedText(adfContent(heading).map(rawAdfText).join(""), 255)
     if (headingText === null || !/^acceptance criteria:?$/iu.test(headingText)) continue
     const attrs = heading.attrs === undefined ? null : decodedJsonRecord(heading.attrs)
-    const level = typeof attrs?.level === "number" && Number.isInteger(attrs.level) ? attrs.level : 1
+    const level = Predicate.isNumber(attrs?.level) && Number.isInteger(attrs.level) ? attrs.level : 1
     const criteria: Array<Schema.Json> = []
     for (const candidate of blocks.slice(index + 1)) {
-      if (typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)) {
+      if (Predicate.isObjectOrArray(candidate) && candidate !== null && !Array.isArray(candidate)) {
         const candidateRecord = decodedJsonRecord(candidate)
         if (candidateRecord?.type === "heading") {
           const candidateAttrs = candidateRecord.attrs === undefined ? null : decodedJsonRecord(candidateRecord.attrs)
-          const candidateLevel = typeof candidateAttrs?.level === "number" && Number.isInteger(candidateAttrs.level)
+          const candidateLevel = Predicate.isNumber(candidateAttrs?.level) && Number.isInteger(candidateAttrs.level)
             ? candidateAttrs.level
             : 1
           if (candidateLevel <= level) break
@@ -854,11 +856,13 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   return event
 })
 
-const normalizedEvent = Effect.fn("JiraIssueNormalization.normalizedEvent")(function*(input: unknown) {
-  return yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))(input).pipe(
-    Effect.mapError(() => malformed("jira-normalized-related-event-invalid"))
-  )
-})
+const normalizedEvent = Effect.fn("JiraIssueNormalization.normalizedEvent")(
+  function*<UnparsedInput>(input: UnparsedInput) {
+    return yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))(input).pipe(
+      Effect.mapError(() => malformed("jira-normalized-related-event-invalid"))
+    )
+  }
+)
 
 const releaseRevision = (version: typeof NormalizedIssueFixVersion.Type): string =>
   `${version.released ? "released" : "candidate"}:${version.releaseDate ?? "none"}:${version.name ?? "unnamed"}`

@@ -52,11 +52,11 @@ export const browserWorkspaceItemsTransport: WorkspaceItemsTransport = {
         const client = yield* makeControlCenterApiClient()
         return yield* client.deliveryGraph.workspaceEntityProjections({
           query: {
-            ...(query.query.length === 0 ? {} : { q: query.query }),
-            ...(query.owner === "all" ? {} : { owner: query.owner }),
-            ...(query.service === "all" ? {} : { service: query.service }),
-            ...(query.status === "all" ? {} : { status: query.status }),
-            ...(query.type === "all" ? {} : { type: query.type })
+            ...(!(query.query.length === 0) && { q: query.query }),
+            ...(!(query.owner === "all") && { owner: query.owner }),
+            ...(!(query.service === "all") && { service: query.service }),
+            ...(!(query.status === "all") && { status: query.status }),
+            ...(!(query.type === "all") && { type: query.type })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -73,7 +73,7 @@ export const useWorkspaceItems = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: WorkspaceItemsTransport = browserWorkspaceItemsTransport
-): { readonly retry: () => void; readonly state: WorkspaceItemsState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<WorkspaceItemsState>({ _tag: "idle" })
   const releaseScopeKey = [...routableReleaseIds].join(":")

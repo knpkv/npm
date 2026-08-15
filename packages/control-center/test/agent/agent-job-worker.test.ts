@@ -12,6 +12,7 @@ import {
 import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream, Tracer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
+import * as Predicate from "effect/Predicate"
 import { AgentModelId, type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
 import { JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PrReviewReport, type PrReviewSubject, reconcilePrReviewReports } from "../../src/domain/prReview.js"
@@ -489,7 +490,7 @@ describe("agent job worker", () => {
             name: span.name,
             status: span.status
           })),
-          (_key, value) => typeof value === "bigint" ? value.toString() : value
+          (_key, value) => Predicate.isBigInt(value) ? value.toString() : value
         )
         assert.notInclude(telemetry, REPLACEMENT_TELEMETRY_CANARY)
         assert.include(telemetry, JOB_ID)

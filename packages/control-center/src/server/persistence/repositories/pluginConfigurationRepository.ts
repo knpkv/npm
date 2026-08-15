@@ -27,6 +27,7 @@ import {
   type StoredPluginConfiguration as StoredPluginConfigurationType
 } from "./pluginConfigurationModels.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const PluginConfigurationRow = Schema.Struct({
   workspaceId: Schema.String,
@@ -63,7 +64,7 @@ const makePluginConfigurationRepository = Effect.gen(function*() {
   })
 
   const readRows = (workspaceId: WorkspaceId, pluginConnectionId: PluginConnectionId) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       workspace_id AS workspaceId,
       plugin_connection_id AS pluginConnectionId,
       revision,
@@ -75,10 +76,10 @@ const makePluginConfigurationRepository = Effect.gen(function*() {
     WHERE workspace_id = ${workspaceId}
       AND plugin_connection_id = ${pluginConnectionId}`
 
-  const quarantineMalformed = Effect.fn("PluginConfigurationRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("PluginConfigurationRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    row: unknown
+    row: UnparsedInput
   ) {
     const serialized = yield* Effect.try({
       try: () => JSON.stringify(row),
@@ -237,7 +238,7 @@ const makePluginConfigurationRepository = Effect.gen(function*() {
   })
 
   const pendingSecretCleanup = Effect.fn("PluginConfigurationRepository.pendingSecretCleanup")(function*() {
-    const rows = yield* sql<Record<string, unknown>>`SELECT secret_ref AS secretRef
+    const rows = yield* sql<SqlRow>`SELECT secret_ref AS secretRef
       FROM plugin_secret_cleanup
       ORDER BY requested_at, secret_ref
       LIMIT 100`.pipe(

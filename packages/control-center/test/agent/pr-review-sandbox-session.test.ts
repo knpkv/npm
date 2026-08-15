@@ -5,6 +5,7 @@ import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
+import * as Predicate from "effect/Predicate"
 import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   PrReviewSandboxSessions,
@@ -576,7 +577,7 @@ describe("PrReviewSandboxSessions", () => {
           name: span.name,
           status: span.status
         })),
-        (_key, value) => typeof value === "bigint" ? value.toString() : value
+        (_key, value) => Predicate.isBigInt(value) ? value.toString() : value
       )
       for (
         const canary of [

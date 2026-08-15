@@ -14,6 +14,7 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
+import * as Predicate from "effect/Predicate"
 import {
   AuthorizedPluginActionV1,
   MaximumPluginPayloadBytes,
@@ -30,8 +31,8 @@ import {
   makeConfluencePageAdapter
 } from "../../src/server/plugins/confluence/ConfluencePageAdapter.js"
 import {
-  ConfluencePageClientFailure,
-  type ConfluencePageClientShape
+  type ConfluencePageClientContract,
+  ConfluencePageClientFailure
 } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
@@ -157,7 +158,7 @@ const converter = (
     }))
 })
 
-const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): ConfluencePageClientShape => ({
+const defaultClient = (overrides: Partial<ConfluencePageClientContract> = {}): ConfluencePageClientContract => ({
   getCurrentUser: Effect.succeed({
     accountId: "account-current-user",
     displayName: "Avery Bell",
@@ -193,7 +194,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
 })
 
 const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   markdown?: string,
   onConvert?: () => void,
   configured: ConfluencePageAdapterConfiguration = configuration
@@ -249,19 +250,20 @@ const normalizedAttributes = (
   contributors
 })
 
-const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const jsonBytes = <UnparsedInput>(value: UnparsedInput): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength
 
-const isTaggedFailure = (
-  value: unknown
-): value is {
+const isTaggedFailure = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & {
   readonly _tag: string
   readonly diagnosticCode?: string
   readonly operation?: string
 } =>
-  typeof value === "object" &&
+  Predicate.isObjectOrArray(value) &&
   value !== null &&
   "_tag" in value &&
-  typeof value._tag === "string"
+  Predicate.isString(value._tag)
 
 const expectFailureTag = <A>(
   exit: Exit.Exit<A, unknown>,
@@ -292,7 +294,7 @@ describe("Confluence page adapter", () => {
   it.effect("publishes the frozen ADF payload and accepts a provider-normalized marker suffix", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
-      const updates: Array<Parameters<ConfluencePageClientShape["updatePage"]>[1]> = []
+      const updates: Array<Parameters<ConfluencePageClientContract["updatePage"]>[1]> = []
       const client = defaultClient({
         getPageDraft: () =>
           Effect.succeed({
@@ -1149,7 +1151,7 @@ describe("Confluence page adapter", () => {
             pageNumber += 1
             return {
               results: versions.slice(index * 100, (index + 1) * 100),
-              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+              ...((index < 4) && { _links: { next: `/versions?cursor=page-${index + 1}` } })
             }
           })
       }
@@ -1207,7 +1209,7 @@ describe("Confluence page adapter", () => {
             pageNumber += 1
             return {
               results: versions.slice(index * 100, (index + 1) * 100),
-              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+              ...((index < 4) && { _links: { next: `/versions?cursor=page-${index + 1}` } })
             }
           })
       }
@@ -1252,7 +1254,7 @@ describe("Confluence page adapter", () => {
             pageNumber += 1
             return {
               results: versions.slice(index * 100, (index + 1) * 100),
-              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+              ...((index < 4) && { _links: { next: `/versions?cursor=page-${index + 1}` } })
             }
           })
       }
@@ -1432,7 +1434,7 @@ describe("Confluence page adapter", () => {
             pageNumber += 1
             return {
               results: versions.slice(index * 100, (index + 1) * 100),
-              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+              ...((index < 4) && { _links: { next: `/versions?cursor=page-${index + 1}` } })
             }
           }),
         getUsers: (accountIds) =>
@@ -1758,9 +1760,7 @@ describe("Confluence page adapter", () => {
               fileSize: index,
               version: currentPage.version
             })),
-            ...(cursor === null
-              ? { _links: { next: `/wiki/api/v2/pages/${pageId}/attachments?cursor=second` } }
-              : {})
+            ...((cursor === null) && { _links: { next: `/wiki/api/v2/pages/${pageId}/attachments?cursor=second` } })
           })
         }
       }))
@@ -2327,7 +2327,7 @@ describe("Confluence page adapter", () => {
             versionPage += 1
             return {
               results: versions.slice(page * 100, (page + 1) * 100),
-              ...(page < 4 ? { _links: { next: `/versions?cursor=page-${page + 1}` } } : {})
+              ...((page < 4) && { _links: { next: `/versions?cursor=page-${page + 1}` } })
             }
           }),
         getUsers: (accountIds) =>

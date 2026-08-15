@@ -15,6 +15,7 @@ import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../errors.js"
+import type { SqlRow } from "../sqlRow.js"
 import {
   decodeGovernedActionAttemptRow,
   decodeGovernedActionAuditEventRow,
@@ -70,10 +71,10 @@ const malformed = (
     diagnosticCode
   })
 
-const decodeRawRow = <SchemaType extends Schema.Top>(
+const decodeRawRow = <SchemaType extends Schema.Top, UnparsedInput>(
   request: GovernedActionReadInput,
   schema: SchemaType,
-  raw: unknown,
+  raw: UnparsedInput,
   recordKind: GovernedActionQuarantineRecordKind,
   diagnosticCode: GovernedActionQuarantineReasonCode
 ) =>
@@ -90,11 +91,11 @@ const decodeRows = <SchemaType extends Schema.Top>(
   diagnosticCode: GovernedActionQuarantineReasonCode
 ) => Effect.forEach(rows, (row) => decodeRawRow(request, schema, row, recordKind, diagnosticCode))
 
-const failMalformed = (
+const failMalformed = <UnparsedInput>(
   request: GovernedActionReadInput,
   recordKind: GovernedActionQuarantineRecordKind,
   diagnosticCode: GovernedActionQuarantineReasonCode,
-  row: unknown,
+  row: UnparsedInput,
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
 
@@ -175,10 +176,10 @@ export const decodeGovernedActionIdempotencyRows = Effect.fn(
 /** Build verified governed-action aggregate reads over one transaction-local SQL client. */
 export const makeGovernedActionRead = Effect.gen(function*() {
   const { sql } = yield* Database
-  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
+  const run = (plan: RenderedSql) => sql.unsafe<SqlRow>(plan.sql, [...plan.params])
 
   const read = Effect.fn("GovernedActionReader.read")(function*(request: GovernedActionReadInput) {
-    const rootRows = yield* sql<Record<string, unknown>>`SELECT
+    const rootRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId,
       plugin_connection_id AS pluginConnectionId, provider_id AS providerId,
       target_entity_id AS targetEntityId, idempotency_key AS idempotencyKey,
@@ -225,7 +226,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
       )
     }
 
-    const transitionRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const transitionRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, transition_id AS transitionId,
       previous_transition_id AS previousTransitionId, sequence, command_id AS commandId,
       command_tag AS commandTag, authorization_id AS authorizationId, attempt_id AS attemptId,
@@ -279,7 +280,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
         )
     )
 
-    const auditRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const auditRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, transition_id AS transitionId,
       audit_event_id AS auditEventId, event_kind AS eventKind, cause_kind AS causeKind,
       actor_id AS actorId, session_id AS sessionId, job_id AS jobId,
@@ -376,7 +377,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
       )
     }
 
-    const authorizationRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const authorizationRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, authorization_id AS authorizationId,
       session_id AS sessionId, envelope_digest AS envelopeDigest,
       authorization_digest AS authorizationDigest, authorization_json AS authorizationJson,
@@ -384,13 +385,13 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     FROM governed_action_authorizations
     WHERE workspace_id = ${request.workspaceId} AND action_id = ${request.actionId}
     LIMIT 2`
-    const policyRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const policyRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, evaluation_digest AS evaluationDigest,
       evaluation_json AS evaluationJson, decision, evaluated_at AS evaluatedAt
     FROM governed_action_policy_evaluations
     WHERE workspace_id = ${request.workspaceId} AND action_id = ${request.actionId}
     LIMIT 2`
-    const attemptRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const attemptRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, attempt_id AS attemptId,
       authorization_id AS authorizationId, policy_evaluation_digest AS policyEvaluationDigest,
       attempt_digest AS attemptDigest, attempt_number AS attemptNumber,
@@ -568,9 +569,9 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     const expectedRevision = request.expectedRevision ?? null
     let cursor: typeof GovernedActionTargetCandidateIdentity.Type | null = null
     while (!hasEnoughTerminalByTargetCandidates(request, candidates)) {
-      const rows: ReadonlyArray<Record<string, unknown>> = request.actionKind === "record-approval"
+      const rows: ReadonlyArray<SqlRow> = request.actionKind === "record-approval"
         ? cursor === null
-          ? yield* sql<Record<string, unknown>>`SELECT
+          ? yield* sql<SqlRow>`SELECT
               action.action_id AS actionId,
               COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
             FROM governed_actions AS action
@@ -593,7 +594,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               COALESCE(authorization.authorized_at, action.updated_at) DESC,
               action.action_id DESC
             LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
-          : yield* sql<Record<string, unknown>>`SELECT
+          : yield* sql<SqlRow>`SELECT
               action.action_id AS actionId,
               COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
             FROM governed_actions AS action
@@ -624,7 +625,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               action.action_id DESC
             LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
         : cursor === null
-        ? yield* sql<Record<string, unknown>>`SELECT
+        ? yield* sql<SqlRow>`SELECT
             action.action_id AS actionId, action.updated_at AS sortAt
           FROM governed_actions AS action
           JOIN governed_action_target_dimensions AS dimensions
@@ -641,7 +642,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
             )
           ORDER BY action.updated_at DESC, action.action_id DESC
           LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
-        : yield* sql<Record<string, unknown>>`SELECT
+        : yield* sql<SqlRow>`SELECT
             action.action_id AS actionId, action.updated_at AS sortAt
           FROM governed_actions AS action
           JOIN governed_action_target_dimensions AS dimensions
@@ -695,7 +696,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     "GovernedActionReader.readLatestTerminalReleasePublications"
   )(function*(request: GovernedActionReleasePublicationReadInput) {
     const releaseIdsJson = JSON.stringify(request.releaseIds)
-    const rows = yield* sql<Record<string, unknown>>`WITH requested_release_ids AS (
+    const rows = yield* sql<SqlRow>`WITH requested_release_ids AS (
         SELECT value AS releaseId
         FROM json_each(${releaseIdsJson})
       ),

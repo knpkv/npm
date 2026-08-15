@@ -40,6 +40,7 @@ const visibleKeys: ReadonlyArray<FilterKey> = [
 ]
 
 type OptionGroups = Readonly<Record<string, ReadonlyArray<string>>>
+interface FilterOptions extends Record<FilterKey, ReadonlyArray<string>> {}
 
 interface FilterComboboxProps {
   readonly filterKey: FilterKey
@@ -216,15 +217,16 @@ export function FilterSidebar() {
   const cascadedOptions = useMemo(() => {
     const byGroup = groupQueueFilters(state.filters)
 
-    const result: Record<FilterKey, ReadonlyArray<string>> = {
-      account: [],
-      author: [],
-      approver: [],
-      commenter: [],
-      scope: [],
-      repo: [],
-      status: [],
-      size: []
+    const emptyValues = (): ReadonlyArray<string> => []
+    const result: FilterOptions = {
+      account: emptyValues(),
+      author: emptyValues(),
+      approver: emptyValues(),
+      commenter: emptyValues(),
+      scope: emptyValues(),
+      repo: emptyValues(),
+      status: emptyValues(),
+      size: emptyValues()
     }
     for (const key of visibleKeys) {
       const otherGroups = [...byGroup.entries()].filter(

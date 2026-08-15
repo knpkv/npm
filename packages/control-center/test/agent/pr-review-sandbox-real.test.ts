@@ -6,6 +6,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { createServer, type Server } from "node:net"
 
+import * as Predicate from "effect/Predicate"
 import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   PrReviewSandboxSessions,
@@ -15,7 +16,7 @@ import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrRevie
 import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { reviewCommandArtifactTestLayer } from "./reviewCommandArtifactTestLayer.js"
 
-const gitEnvironment = (path: string): Readonly<Record<string, string>> => ({
+const gitEnvironment = (path: string) => ({
   GIT_AUTHOR_EMAIL: "review-sbx-smoke@example.invalid",
   GIT_AUTHOR_NAME: "Review sbx smoke",
   GIT_COMMITTER_EMAIL: "review-sbx-smoke@example.invalid",
@@ -103,7 +104,7 @@ const acquireNetworkProbe = (
   Effect.gen(function*() {
     const server = yield* Effect.acquireRelease(startNetworkProbe, release)
     const address = addressOf(server)
-    if (address === null || typeof address === "string") {
+    if (address === null || Predicate.isString(address)) {
       return yield* Effect.fail(
         new NetworkProbeFixtureError({
           message: "Network probe did not expose an internet port"

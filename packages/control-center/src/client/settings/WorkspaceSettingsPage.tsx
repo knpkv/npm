@@ -39,7 +39,7 @@ const SettingsSection = ({
   readonly description: string
   readonly title: string
 }): ReactElement => (
-  <Surface className={styles.section} padding="default" shape="grouped">
+  <Surface className={styles.section} padding="default" form="grouped">
     <div className={styles.sectionHeading}>
       <Text as="h2" variant="section-title">
         {title}
@@ -709,7 +709,7 @@ export const WorkspaceSettingsPage = ({
         </Text>
       ) : null}
       {canEdit && requiresGovernedConfirmation ? (
-        <Surface className={styles.governance} padding="default" shape="grouped">
+        <Surface className={styles.governance} padding="default" form="grouped">
           <Checkbox
             checked={governedChangeConfirmed}
             disabled={status === "saving"}
@@ -731,7 +731,7 @@ export const WorkspaceSettingsPage = ({
           {...(browserSessionTransport === undefined ? {} : { transport: browserSessionTransport })}
         />
       )}
-      <Surface className={styles.theme} padding="default" shape="grouped">
+      <Surface className={styles.theme} padding="default" form="grouped">
         <div>
           <Text as="h2" variant="section-title">
             Theme

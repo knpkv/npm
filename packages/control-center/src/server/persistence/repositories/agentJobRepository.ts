@@ -106,6 +106,7 @@ import {
   makeReviewSuggestionRevisionOperations,
   ReviewSuggestionRevisedPayload
 } from "./internal/reviewSuggestionRevisions.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const DISPATCH_CANDIDATE_LIMIT = 32
 const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
@@ -336,9 +337,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
     return `${SHA_256_PREFIX}${Encoding.encodeHex(digest)}`
   })
 
-  const encodePayload = Effect.fn("AgentJobRepository.encodePayload")(function*(
+  const encodePayload = Effect.fn("AgentJobRepository.encodePayload")(function*<UnparsedInput>(
     schema: Schema.Codec<unknown, unknown, never, never>,
-    payload: unknown
+    payload: UnparsedInput
   ): Effect.fn.Return<EncodedPayload, PersistenceOperationError> {
     const json = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(schema))(payload).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.encode-payload" }))
@@ -456,7 +457,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     threadKind: typeof AgentJobTaskTag.Type,
     subjectKey: string
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       thread_id AS threadId, thread_kind AS threadKind,
       subject_key AS subjectKey, release_id AS releaseId
       FROM agent_threads
@@ -491,7 +492,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     workspaceId: typeof WorkspaceId.Type,
     jobId: typeof JobId.Type
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, job_id AS jobId, thread_id AS threadId,
       release_id AS releaseId, provider_id AS providerId, model, access, prompt,
       context_fingerprint AS contextFingerprint, subject_revision AS subjectRevision,
@@ -530,7 +531,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     readonly observedAt: typeof UtcTimestamp.Type
   }) {
     const currentTime = yield* DateTime.now
-    const leaseRows = yield* sql<Record<string, unknown>>`SELECT
+    const leaseRows = yield* sql<SqlRow>`SELECT
       lease.lease_token AS leaseToken, lease.lease_expires_at AS leaseExpiresAt
       FROM agent_job_leases lease
       WHERE lease.workspace_id = ${options.workspaceId}
@@ -550,7 +551,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         reason: "lease-lost"
       })
     }
-    const attemptRows = yield* sql<Record<string, unknown>>`SELECT
+    const attemptRows = yield* sql<SqlRow>`SELECT
       started_at AS startedAt, completed_at AS completedAt
       FROM agent_job_attempts
       WHERE workspace_id = ${options.workspaceId}
@@ -627,10 +628,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
         AND job_id = ${options.jobId}`
   })
 
-  const decodeRuntimePayload = Effect.fn("AgentJobRepository.decodeRuntimePayload")(function*(
+  const decodeRuntimePayload = Effect.fn("AgentJobRepository.decodeRuntimePayload")(function*<UnparsedInput>(
     workspaceId: typeof WorkspaceId.Type,
     row: typeof ThreadEventRow.Type,
-    parsed: unknown
+    parsed: UnparsedInput
   ) {
     const decoded = Schema.decodeUnknownResult(AgentRuntimeEvent)(parsed)
     if (Result.isFailure(decoded)) {
@@ -783,7 +784,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     if (task._tag !== "pr-review") {
       return { reviewBudgetMillis: undefined, reviewBudgetExtensionCount: 0 }
     }
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, thread_id AS threadId,
       event_sequence AS eventSequence, job_id AS jobId,
       attempt_sequence AS attemptSequence, event_kind AS eventKind,
@@ -858,7 +859,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       limit: REVIEW_CONTEXT_EVENT_LIMIT + 1
     })
     const unknownRows = yield* sql
-      .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+      .unsafe<SqlRow>(rendered.sql, [...rendered.params])
       .pipe(mapPersistenceOperation("agent-job.review-context"))
     const decodedRows = Schema.decodeUnknownResult(
       Schema.Array(ReviewContextThreadEventRow)
@@ -1104,7 +1105,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     input: typeof AgentReviewResultInput.Type
   ) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultInput))(input)
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, thread_id AS threadId,
       event_sequence AS eventSequence, job_id AS jobId,
       attempt_sequence AS attemptSequence, event_kind AS eventKind,
@@ -1142,7 +1143,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         "agent-review-result-payload-invalid"
       )
     }
-    const publicationRows = yield* sql<Record<string, unknown>>`SELECT
+    const publicationRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, thread_id AS threadId,
       event_sequence AS eventSequence, job_id AS jobId,
       attempt_sequence AS attemptSequence, event_kind AS eventKind,
@@ -1180,7 +1181,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       }
       publishedSuggestionIds.add(decodedPublication.success.suggestionId)
     }
-    const lifecycleRows = yield* sql<Record<string, unknown>>`SELECT
+    const lifecycleRows = yield* sql<SqlRow>`SELECT
       revision.suggestion_id AS suggestionId,
       revision.revision_json AS revisionJson,
       revision.revision_digest AS revisionDigest
@@ -1282,7 +1283,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const request = yield* Schema.decodeUnknownEffect(
       Schema.toType(AgentReviewResultInput)
     )(input)
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, thread_id AS threadId,
       event_sequence AS eventSequence, job_id AS jobId,
       attempt_sequence AS attemptSequence, event_kind AS eventKind,
@@ -1358,7 +1359,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       limit: 32
     })
     const rows = yield* sql
-      .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+      .unsafe<SqlRow>(rendered.sql, [...rendered.params])
       .pipe(mapPersistenceOperation("agent-job.previous-review"))
     for (const rawRow of rows) {
       const row = Schema.decodeUnknownResult(LatestReviewRow)(rawRow)
@@ -1386,7 +1387,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
   const decodeThreadEventRows = Effect.fn("AgentJobRepository.decodeThreadEventRows")(function*(
     workspaceId: typeof WorkspaceId.Type,
     threadId: typeof AgentThreadId.Type,
-    rows: ReadonlyArray<Record<string, unknown>>
+    rows: ReadonlyArray<SqlRow>
   ) {
     const decodedRows = yield* Schema.decodeUnknownEffect(
       Schema.Array(ReplayThreadEventRow)
@@ -1452,7 +1453,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       limit
     })
     const rows = yield* sql
-      .unsafe<Record<string, unknown>>(replay.sql, [...replay.params])
+      .unsafe<SqlRow>(replay.sql, [...replay.params])
       .pipe(mapPersistenceOperation("agent-job.thread-after"))
     const events = yield* decodeThreadEventRows(workspaceId, threadId, rows)
     return {
@@ -1474,7 +1475,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       limit
     })
     const rows = yield* sql
-      .unsafe<Record<string, unknown>>(history.sql, [...history.params])
+      .unsafe<SqlRow>(history.sql, [...history.params])
       .pipe(mapPersistenceOperation("agent-job.thread-before"))
     const events = yield* decodeThreadEventRows(
       workspaceId,
@@ -1498,7 +1499,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       limit
     })
     const rows = yield* sql
-      .unsafe<Record<string, unknown>>(tail.sql, [...tail.params])
+      .unsafe<SqlRow>(tail.sql, [...tail.params])
       .pipe(mapPersistenceOperation("agent-job.thread-tail"))
     const events = yield* decodeThreadEventRows(
       workspaceId,
@@ -1803,7 +1804,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               taskTags: request.taskTags,
               limit: DISPATCH_CANDIDATE_LIMIT
             })
-            const candidateRows = yield* sql.unsafe<Record<string, unknown>>(dispatch.sql, [...dispatch.params])
+            const candidateRows = yield* sql.unsafe<SqlRow>(dispatch.sql, [...dispatch.params])
             const candidates = Schema.decodeUnknownResult(Schema.Array(DispatchCandidateRow))(candidateRows)
             if (Result.isFailure(candidates)) {
               return yield* persistedRecordError(
@@ -1835,7 +1836,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 expectedState: candidate.state satisfies ClaimableAgentJobState,
                 observedAt
               })
-              const claimedRows = yield* sql.unsafe<Record<string, unknown>>(claim.sql, [...claim.params])
+              const claimedRows = yield* sql.unsafe<SqlRow>(claim.sql, [...claim.params])
               if (claimedRows.length === 0) continue
               const claimed = Schema.decodeUnknownResult(JobRow)(claimedRows[0])
               if (Result.isFailure(claimed)) {
@@ -1861,7 +1862,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               const contextPayload = yield* encodePayload(AgentContextSnapshotRecord, context)
               let sessionRef: null | typeof ClaimedAgentJob.fields.sessionRef.Type = null
               if (candidate.attemptSequence > 0) {
-                const previousRows = yield* sql<Record<string, unknown>>`SELECT
+                const previousRows = yield* sql<SqlRow>`SELECT
               context_snapshot_json AS contextSnapshotJson,
               context_snapshot_digest AS contextSnapshotDigest,
               session_ref AS sessionRef
@@ -1925,9 +1926,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 access: claimed.success.access,
                 prompt: claimed.success.prompt,
                 context,
-                ...(reviewBudget.reviewBudgetMillis === undefined
-                  ? {}
-                  : { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
+                ...(!(reviewBudget.reviewBudgetMillis === undefined) &&
+                  { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
                 reviewBudgetExtensionCount: reviewBudget.reviewBudgetExtensionCount,
                 sessionRef,
                 cancellationRequested: claimed.success.state === "cancel-requested"
@@ -1946,7 +1946,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     ) =>
       Effect.gen(function*() {
         const observedAt = encodeTimestamp(yield* DateTime.now)
-        const rows = yield* sql<Record<string, unknown>>`SELECT COUNT(*) AS active
+        const rows = yield* sql<SqlRow>`SELECT COUNT(*) AS active
         FROM agent_jobs job
         JOIN agent_job_leases lease
           ON lease.workspace_id = job.workspace_id
@@ -2376,7 +2376,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const request = yield* Schema.decodeUnknownEffect(
         Schema.toType(ReadReviewSuggestionPublicationInput)
       )(input)
-      const rows = yield* sql<Record<string, unknown>>`SELECT
+      const rows = yield* sql<SqlRow>`SELECT
         revision_id AS revisionId, content_digest AS contentDigest, state,
         publication_id AS publicationId, comment_id AS commentId,
         previous_content_digest AS previousContentDigest,
@@ -2418,7 +2418,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       return yield* database.transaction(
         Effect.gen(function*() {
           const operation = request.operation ?? "create"
-          const existingRows = yield* sql<Record<string, unknown>>`SELECT
+          const existingRows = yield* sql<SqlRow>`SELECT
             revision_id AS revisionId, content_digest AS contentDigest, state,
             publication_id AS publicationId, comment_id AS commentId,
             previous_content_digest AS previousContentDigest,
@@ -2480,7 +2480,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 _tag: "published",
                 publicationId: existing.publicationId,
                 publishedAt: existing.publishedAt,
-                ...(existing.commentId === null ? {} : { commentId: existing.commentId })
+                ...(!(existing.commentId === null) && { commentId: existing.commentId })
               })
               : existing.publicationId !== null && existing.publishedAt !== null
               ? ReviewSuggestionPublicationReservation.make({
@@ -2488,7 +2488,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 publicationId: existing.publicationId,
                 publishedAt: existing.publishedAt,
                 reservationId: existing.reservationId,
-                ...(existing.commentId === null ? {} : { commentId: existing.commentId })
+                ...(!(existing.commentId === null) && { commentId: existing.commentId })
               })
               : yield* Effect.gen(function*() {
                 const recoveryEligibleAt = DateTime.add(existing.reservationAcquiredAt, {
@@ -2497,7 +2497,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 if (DateTime.Order(request.reservedAt, recoveryEligibleAt) < 0) {
                   return ReviewSuggestionPublicationReservation.make({
                     _tag: "in-progress",
-                    ...(existing.commentId === null ? {} : { commentId: existing.commentId })
+                    ...(!(existing.commentId === null) && { commentId: existing.commentId })
                   })
                 }
                 yield* sql`UPDATE agent_review_suggestion_publications
@@ -2514,7 +2514,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                     AND reservation_acquired_at = ${encodeTimestamp(existing.reservationAcquiredAt)}`
                 return ReviewSuggestionPublicationReservation.make({
                   _tag: (yield* readChanges(sql)) === 1 ? "acquired" : "in-progress",
-                  ...(existing.commentId === null ? {} : { commentId: existing.commentId })
+                  ...(!(existing.commentId === null) && { commentId: existing.commentId })
                 })
               })
           }
@@ -2526,7 +2526,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             })
           }
           yield* currentPublishableReviewSuggestion(request)
-          const inserted = yield* sql<Record<string, unknown>>`INSERT INTO agent_review_suggestion_publications (
+          const inserted = yield* sql<SqlRow>`INSERT INTO agent_review_suggestion_publications (
             workspace_id, job_id, suggestion_id, revision_id, content_digest, state,
             publication_id, comment_id, reservation_id, reservation_acquired_at,
             reserved_at, published_at, previous_content_digest,
@@ -2539,7 +2539,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             ${encodeTimestamp(request.reservedAt)}, NULL, NULL, NULL, NULL
           ) ON CONFLICT DO NOTHING
           RETURNING suggestion_id AS suggestionId`
-          const rows = yield* sql<Record<string, unknown>>`SELECT
+          const rows = yield* sql<SqlRow>`SELECT
             revision_id AS revisionId, content_digest AS contentDigest, state,
             publication_id AS publicationId, comment_id AS commentId,
             previous_content_digest AS previousContentDigest,
@@ -2572,7 +2572,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               _tag: "published",
               publicationId: row.success.publicationId,
               publishedAt: row.success.publishedAt,
-              ...(row.success.commentId === null ? {} : { commentId: row.success.commentId })
+              ...(!(row.success.commentId === null) && { commentId: row.success.commentId })
             })
             : row.success.publicationId !== null && row.success.publishedAt !== null
             ? ReviewSuggestionPublicationReservation.make({
@@ -2580,7 +2580,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               publicationId: row.success.publicationId,
               publishedAt: row.success.publishedAt,
               reservationId: row.success.reservationId,
-              ...(row.success.commentId === null ? {} : { commentId: row.success.commentId })
+              ...(!(row.success.commentId === null) && { commentId: row.success.commentId })
             })
             : ReviewSuggestionPublicationReservation.make({
               _tag: inserted.length === 1 ? "acquired" : "in-progress"
@@ -2638,7 +2638,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       return yield* database.transaction(
         Effect.gen(function*() {
           const job = yield* getJob(request.workspaceId, request.jobId)
-          const publicationRows = yield* sql<Record<string, unknown>>`SELECT
+          const publicationRows = yield* sql<SqlRow>`SELECT
             revision_id AS revisionId, content_digest AS contentDigest, state,
             publication_id AS publicationId, comment_id AS commentId,
             previous_content_digest AS previousContentDigest,
@@ -2840,7 +2840,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     listRunningPrReviewAttempts: Effect.fn("AgentJobRepository.listRunningPrReviewAttempts")(function*(
       workspaceId: typeof WorkspaceId.Type
     ) {
-      const rows = yield* sql<Record<string, unknown>>`SELECT
+      const rows = yield* sql<SqlRow>`SELECT
         job.job_id AS jobId, attempt.attempt_sequence AS attemptSequence,
         job.provider_id AS providerId, attempt.session_ref AS sessionRef
         FROM agent_jobs job
@@ -2915,7 +2915,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       )(input)
       return yield* database.transaction(
         Effect.gen(function*() {
-          const rows = yield* sql<Record<string, unknown>>`SELECT job_id AS jobId
+          const rows = yield* sql<SqlRow>`SELECT job_id AS jobId
             FROM agent_jobs
             WHERE workspace_id = ${request.workspaceId}
               AND state IN ('running', 'cancel-requested')`
@@ -2926,7 +2926,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             )
             const job = yield* getJob(request.workspaceId, jobId)
             if (job.task._tag !== "pr-review") continue
-            const attemptRows = yield* sql<Record<string, unknown>>`SELECT attempt_sequence AS attemptSequence
+            const attemptRows = yield* sql<SqlRow>`SELECT attempt_sequence AS attemptSequence
               FROM agent_job_attempts
               WHERE workspace_id = ${request.workspaceId}
                 AND job_id = ${jobId}
@@ -3131,14 +3131,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
-        ...(request.excludeJobId === undefined ? {} : { excludeJobId: request.excludeJobId }),
-        ...(request.allowDifferentHead === true ? {} : { subjectRevision: request.subject.headRevision }),
+        ...(!(request.excludeJobId === undefined) && { excludeJobId: request.excludeJobId }),
+        ...(!(request.allowDifferentHead === true) && { subjectRevision: request.subject.headRevision }),
         taskContextPrefix: request.allowDifferentHead === true ? identityPrefix : taskContextPrefix,
         excludeTargeted: true,
-        ...(request.jobId === undefined ? {} : { jobId: request.jobId })
+        ...(!(request.jobId === undefined) && { jobId: request.jobId })
       })
       const rows = yield* sql
-        .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+        .unsafe<SqlRow>(rendered.sql, [...rendered.params])
         .pipe(mapPersistenceOperation("agent-job.latest-review"))
       if (rows.length === 0) return Option.none<typeof LatestAgentReviewRecord.Type>()
       const row = Schema.decodeUnknownResult(LatestReviewRow)(rows[0])
@@ -3158,7 +3158,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       )
       let interrupted = false
       if (row.success.state === "failed") {
-        const interruptionRows = yield* sql<Record<string, unknown>>`SELECT COUNT(*) AS interrupted
+        const interruptionRows = yield* sql<SqlRow>`SELECT COUNT(*) AS interrupted
           FROM agent_thread_events
           WHERE workspace_id = ${request.workspaceId}
             AND job_id = ${row.success.jobId}
@@ -3191,7 +3191,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.jobId,
         task
       )
-      const startedRows = yield* sql<Record<string, unknown>>`SELECT MAX(started_at) AS startedAt
+      const startedRows = yield* sql<SqlRow>`SELECT MAX(started_at) AS startedAt
         FROM agent_job_attempts
         WHERE workspace_id = ${request.workspaceId} AND job_id = ${row.success.jobId}`.pipe(
         mapPersistenceOperation("agent-job.latest-review-started-at")
@@ -3216,7 +3216,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         }).pipe(Effect.catchTag("RecordNotFoundError", () => Effect.succeed(null)))
         : null
       const report = reviewResult === null ? null : reviewResult.report
-      const activityRows = yield* sql<Record<string, unknown>>`SELECT
+      const activityRows = yield* sql<SqlRow>`SELECT
         workspace_id AS workspaceId, thread_id AS threadId,
         event_sequence AS eventSequence, job_id AS jobId,
         attempt_sequence AS attemptSequence, event_kind AS eventKind,
@@ -3265,9 +3265,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
         ...row.success,
         state: interrupted ? "interrupted" : row.success.state,
         startedAt: startedAt.success.startedAt,
-        ...(reviewBudget.reviewBudgetMillis === undefined
-          ? {}
-          : { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
+        ...(!(reviewBudget.reviewBudgetMillis === undefined) &&
+          { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
         reviewBudgetExtensionCount: reviewBudget.reviewBudgetExtensionCount,
         taskIntent: task.intent ?? null,
         report,
@@ -3392,7 +3391,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         limit: request.limit
       })
       const rows = yield* sql
-        .unsafe<Record<string, unknown>>(history.sql, [...history.params])
+        .unsafe<SqlRow>(history.sql, [...history.params])
         .pipe(mapPersistenceOperation("agent-job.review-thread-history"))
       const events = yield* decodeThreadEventRows(
         request.workspaceId,

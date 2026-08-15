@@ -45,6 +45,7 @@ import {
   PluginSyncPage
 } from "./pluginRuntimeModels.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 type DescriptorRejection = {
   readonly code:
@@ -99,7 +100,7 @@ const descriptorRejection = (diagnosticCode: string): DescriptorRejection => {
   }
 }
 
-const serialize = Effect.fn("PluginRuntimeRepository.serialize")(function*(value: unknown) {
+const serialize = Effect.fn("PluginRuntimeRepository.serialize")(function*<UnparsedInput>(value: UnparsedInput) {
   return yield* Effect.try({
     try: () => JSON.stringify(value),
     catch: () => new PersistenceOperationError({ operation: "plugin-runtime.serialize" })
@@ -124,10 +125,12 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return ContentBlobDigest.make(Encoding.encodeHex(digest))
   })
 
-  const digestUnknown = Effect.fn("PluginRuntimeRepository.digestUnknown")(function*(value: unknown) {
-    const encoded = yield* serialize(value).pipe(Effect.orElseSucceed(() => "<unserializable>"))
-    return yield* digestText(encoded)
-  })
+  const digestUnknown = Effect.fn("PluginRuntimeRepository.digestUnknown")(
+    function*<UnparsedInput>(value: UnparsedInput) {
+      const encoded = yield* serialize(value).pipe(Effect.orElseSucceed(() => "<unserializable>"))
+      return yield* digestText(encoded)
+    }
+  )
 
   const normalizedRecordKey = Effect.fn("PluginRuntimeRepository.normalizedRecordKey")(function*(
     event: typeof NormalizedPluginEventV1.Type
@@ -182,7 +185,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, plugin_connection_id AS pluginConnectionId,
       provider_id AS providerId, revision, descriptor_generation AS descriptorGeneration,
       descriptor_schema_version AS descriptorSchemaVersion,
@@ -215,18 +218,18 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     const decoded = Schema.decodeUnknownResult(PluginRuntimeRecord)({ ...row, health })
     const descriptorText = row?.descriptorJson
     const descriptorDigest = row?.descriptorDigest
-    const descriptor = typeof descriptorText === "string"
+    const descriptor = Predicate.isString(descriptorText)
       ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(descriptorText)
       : null
     const canonical = descriptor !== null && Result.isSuccess(descriptor)
       ? Schema.decodeUnknownResult(NegotiatedPluginDescriptorV1)(descriptor.success)
       : null
-    const actualDigest = typeof descriptorText === "string" ? yield* digestText(descriptorText) : null
+    const actualDigest = Predicate.isString(descriptorText) ? yield* digestText(descriptorText) : null
     if (
       Result.isFailure(decoded) ||
       canonical === null ||
       Result.isFailure(canonical) ||
-      typeof descriptorDigest !== "string" ||
+      !Predicate.isString(descriptorDigest) ||
       actualDigest !== descriptorDigest ||
       canonical.success.descriptor.contractVersion.major !== row?.descriptorSchemaVersion
     ) {
@@ -250,10 +253,10 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return decoded.success
   })
 
-  const acceptDescriptor = Effect.fn("PluginRuntimeRepository.acceptDescriptor")(function*(
+  const acceptDescriptor = Effect.fn("PluginRuntimeRepository.acceptDescriptor")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    candidate: unknown,
+    candidate: UnparsedInput,
     expectedRevision: number,
     acceptedAt: UtcTimestamp
   ) {
@@ -318,11 +321,11 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return yield* getRuntime(workspaceId, pluginConnectionId)
   })
 
-  const acceptPluginDescriptor = Effect.fn("PluginRuntimeRepository.acceptPluginDescriptor")(function*(
+  const acceptPluginDescriptor = Effect.fn("PluginRuntimeRepository.acceptPluginDescriptor")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
     providerId: typeof ProviderId.Type,
-    rawDescriptor: unknown,
+    rawDescriptor: UnparsedInput,
     expectedRevision: number,
     observedAt: UtcTimestamp
   ) {
@@ -432,7 +435,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT workspace_id AS workspaceId,
+    const rows = yield* sql<SqlRow>`SELECT workspace_id AS workspaceId,
       plugin_connection_id AS pluginConnectionId, provider_id AS providerId,
       stream_key AS streamKey, revision, checkpoint_json AS checkpointJson,
       checkpoint_digest AS checkpointDigest, last_page_id AS lastPageId,
@@ -451,12 +454,12 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     const decoded = Schema.decodeUnknownResult(PluginStreamRecord)(row)
     const checkpointText = row?.checkpointJson
     const checkpointDigest = row?.checkpointDigest
-    const actualDigest = typeof checkpointText === "string" ? yield* digestText(checkpointText) : null
+    const actualDigest = Predicate.isString(checkpointText) ? yield* digestText(checkpointText) : null
     if (
       Result.isFailure(decoded) ||
       ((checkpointText === null || checkpointText === undefined)
         ? checkpointDigest !== null
-        : typeof checkpointDigest !== "string" || actualDigest !== checkpointDigest)
+        : !Predicate.isString(checkpointDigest) || actualDigest !== checkpointDigest)
     ) {
       const observedAt = yield* DateTime.now
       yield* quarantine.recordMalformed(workspaceId, {
@@ -627,7 +630,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     streamKey: PluginStreamKey
   ) {
     const rendered = renderPluginSyncAttemptsQuery({ workspaceId, pluginConnectionId, streamKey })
-    const rows = yield* sql.unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+    const rows = yield* sql.unsafe<SqlRow>(rendered.sql, [...rendered.params])
     return yield* Schema.decodeUnknownEffect(Schema.Array(PluginSyncAttemptRecord))(rows)
   })
 
@@ -637,7 +640,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     streamKey: PluginStreamKey
   ) {
     const rendered = renderPluginSyncAttemptStateQuery({ workspaceId, pluginConnectionId, streamKey })
-    const rows = yield* sql.unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+    const rows = yield* sql.unsafe<SqlRow>(rendered.sql, [...rendered.params])
     const decodedRows = yield* Schema.decodeUnknownEffect(
       Schema.Array(PluginSyncAttemptRecord).check(Schema.isMaxLength(2))
     )(rows)
@@ -709,10 +712,10 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     })).pipe(mapPersistenceOperation("plugin-runtime.complete-sync-attempt"))
   })
 
-  const commitPageReceipt = Effect.fn("PluginRuntimeRepository.commitPageReceipt")(function*(
+  const commitPageReceipt = Effect.fn("PluginRuntimeRepository.commitPageReceipt")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    input: unknown
+    input: UnparsedInput
   ) {
     const decoded = Schema.decodeUnknownResult(PluginSyncPage)(input)
     const observedAt = Result.isSuccess(decoded) ? decoded.success.committedAt : yield* DateTime.now
@@ -902,10 +905,10 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     }
   })
 
-  const commitPage = Effect.fn("PluginRuntimeRepository.commitPage")(function*(
+  const commitPage = Effect.fn("PluginRuntimeRepository.commitPage")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    input: unknown
+    input: UnparsedInput
   ) {
     return (yield* commitPageReceipt(workspaceId, pluginConnectionId, input)).stream
   })
@@ -1039,7 +1042,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       page.successful_health_json AS successfulHealthJson,
       page.successful_health_digest AS successfulHealthDigest,
       page.expected_revision AS pageExpectedRevision,
@@ -1068,12 +1071,12 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     ) return null
     const healthJson = row?.successfulHealthJson
     const healthDigest = row?.successfulHealthDigest
-    const exactHead = typeof row?.pageExpectedRevision === "number" &&
-      typeof row.streamRevision === "number" &&
+    const exactHead = Predicate.isNumber(row?.pageExpectedRevision) &&
+      Predicate.isNumber(row.streamRevision) &&
       row.pageExpectedRevision + 1 === row.streamRevision &&
-      typeof row.pageCheckpointDigest === "string" &&
+      Predicate.isString(row.pageCheckpointDigest) &&
       row.pageCheckpointDigest === row.streamCheckpointDigest &&
-      typeof row.pageCommittedAt === "string" &&
+      Predicate.isString(row.pageCommittedAt) &&
       row.pageCommittedAt === row.streamSynchronizedAt
     if (!exactHead) {
       const observedAt = yield* DateTime.now
@@ -1094,15 +1097,15 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       })
     }
     if (healthJson === null && healthDigest === null) return null
-    const parsed = typeof healthJson === "string"
+    const parsed = Predicate.isString(healthJson)
       ? Schema.decodeUnknownResult(Schema.fromJsonString(PluginHealth))(healthJson)
       : null
-    const actualDigest = typeof healthJson === "string" ? yield* digestText(healthJson) : null
+    const actualDigest = Predicate.isString(healthJson) ? yield* digestText(healthJson) : null
     if (
       parsed === null ||
       Result.isFailure(parsed) ||
       (parsed.success._tag !== "healthy" && parsed.success._tag !== "degraded") ||
-      typeof healthDigest !== "string" ||
+      !Predicate.isString(healthDigest) ||
       actualDigest !== healthDigest
     ) {
       const observedAt = yield* DateTime.now
@@ -1128,27 +1131,27 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
   const decodeCacheRows = Effect.fn("PluginRuntimeRepository.decodeCacheRows")(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    rows: ReadonlyArray<Record<string, unknown>>
+    rows: ReadonlyArray<SqlRow>
   ) {
     const records: Array<typeof PluginCacheRecord.Type> = []
     for (const row of rows) {
       const decoded = Schema.decodeUnknownResult(PluginCacheRecord)(row)
       const payloadText = row.payloadJson
       const payloadDigest = row.payloadDigest
-      const payload = typeof payloadText === "string"
+      const payload = Predicate.isString(payloadText)
         ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(payloadText)
         : null
       const normalized = payload !== null && Result.isSuccess(payload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(payload.success)
         : null
       const latestEventText = row.latestEventJson
-      const latestEventPayload = typeof latestEventText === "string"
+      const latestEventPayload = Predicate.isString(latestEventText)
         ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(latestEventText)
         : null
       const latestEvent = latestEventPayload !== null && Result.isSuccess(latestEventPayload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(latestEventPayload.success)
         : null
-      const actualDigest = typeof payloadText === "string" ? yield* digestText(payloadText) : null
+      const actualDigest = Predicate.isString(payloadText) ? yield* digestText(payloadText) : null
       const expectedRecordKey = latestEvent !== null && Result.isSuccess(latestEvent)
         ? yield* normalizedRecordKey(latestEvent.success)
         : null
@@ -1198,7 +1201,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+    const rows = yield* sql<SqlRow>`SELECT cache.workspace_id AS workspaceId,
       cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
       cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
       cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
@@ -1227,7 +1230,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     const records = new Map<string, typeof PluginCacheRecord.Type>()
     for (const tombstone of tombstones) {
       const recordKey = yield* normalizedRecordKey(tombstone)
-      const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+      const rows = yield* sql<SqlRow>`SELECT cache.workspace_id AS workspaceId,
         cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
         cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
         cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
@@ -1310,7 +1313,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
           ORDER BY cached_at DESC, record_key
           LIMIT ${maximumExecutions}`
       for (const row of executionRows) {
-        if (executionSelectors.size >= maximumExecutions || typeof row.executionId !== "string") break
+        if (executionSelectors.size >= maximumExecutions || !Predicate.isString(row.executionId)) break
         const executionId = row.executionId.trim()
         if (executionId.length === 0 || executionId.length > 512) continue
         const executionSelector = { ...selector, executionId }
@@ -1320,7 +1323,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
 
     const records = new Map<string, typeof PluginCacheRecord.Type>()
     for (const selector of executionSelectors.values()) {
-      const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+      const rows = yield* sql<SqlRow>`SELECT cache.workspace_id AS workspaceId,
         cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
         cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
         cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
@@ -1372,7 +1375,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT evidence.workspace_id AS workspaceId,
+    const rows = yield* sql<SqlRow>`SELECT evidence.workspace_id AS workspaceId,
       evidence.plugin_connection_id AS pluginConnectionId, evidence.stream_key AS streamKey,
       evidence.page_id AS pageId, evidence.ordinal, evidence.event_kind AS eventKind,
       evidence.event_id AS eventId, evidence.event_digest AS eventDigest,
@@ -1392,13 +1395,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     for (const row of rows) {
       const decoded = Schema.decodeUnknownResult(PluginEvidenceRecord)(row)
       const payloadText = row.payloadJson
-      const payload = typeof payloadText === "string"
+      const payload = Predicate.isString(payloadText)
         ? Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(payloadText)
         : null
       const normalized = payload !== null && Result.isSuccess(payload)
         ? Schema.decodeUnknownResult(NormalizedPluginEventV1)(payload.success)
         : null
-      const actualDigest = typeof payloadText === "string" ? yield* digestText(payloadText) : null
+      const actualDigest = Predicate.isString(payloadText) ? yield* digestText(payloadText) : null
       const expectedRecordKey = normalized !== null && Result.isSuccess(normalized)
         ? yield* normalizedRecordKey(normalized.success)
         : null

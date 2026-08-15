@@ -8,12 +8,14 @@ import { SandboxView } from "./components/sandbox-view.js"
 import { SandboxesPage } from "./components/sandboxes-page.js"
 import { SettingsPage } from "./components/settings-page.js"
 import { StatsPage } from "./components/stats-page.js"
+import * as Predicate from "effect/Predicate"
 
 interface RouteHandle {
   readonly fullWidth?: boolean
 }
 
-const isRouteHandle = (h: unknown): h is RouteHandle => h != null && typeof h === "object" && "fullWidth" in h
+const isRouteHandle = <UnparsedInput,>(h: UnparsedInput): h is UnparsedInput & RouteHandle =>
+  h != null && Predicate.hasProperty(h, "fullWidth")
 
 const hasFullWidth = (m: { handle?: unknown }): boolean => isRouteHandle(m.handle) && m.handle.fullWidth === true
 

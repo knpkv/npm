@@ -139,13 +139,14 @@ import { DialogFindingConversation } from "../ui/DialogFindingConversation.js"
 import { DialogFindingTarget } from "../ui/DialogFindingTarget.js"
 import { DialogMergeStrategy } from "../ui/DialogMergeStrategy.js"
 import { DialogReviewSkills } from "../ui/DialogReviewSkills.js"
+import * as Predicate from "effect/Predicate"
 
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
 let nextActionRequestSequence = 0
 
-const hasVerticalScroll = (value: object): value is object & { scrollY: number } =>
-  "scrollY" in value && typeof value.scrollY === "number"
+const hasVerticalScroll = <Scrollable extends object>(value: Scrollable): value is Scrollable & { scrollY: number } =>
+  "scrollY" in value && Predicate.isNumber(value.scrollY)
 
 const scrollDiffBy = (diff: DiffRenderable | null, lines: number): void => {
   if (diff === null) return
@@ -539,12 +540,12 @@ export function DetailsView() {
   // land before the next key in the same batch, so two presses would both read an idle
   // status and start two handovers over the one tty.
   const updateConsoleStatus = (next: ConsoleStatus | ((current: ConsoleStatus) => ConsoleStatus)) => {
-    consoleStatusRef.current = typeof next === "function" ? next(consoleStatusRef.current) : next
+    consoleStatusRef.current = Predicate.isFunction(next) ? next(consoleStatusRef.current) : next
     setConsoleStatusState(consoleStatusRef.current)
   }
 
   const updateEditorStatus = (next: EditorLaunchStatus | ((current: EditorLaunchStatus) => EditorLaunchStatus)) => {
-    editorStatusRef.current = typeof next === "function" ? next(editorStatusRef.current) : next
+    editorStatusRef.current = Predicate.isFunction(next) ? next(editorStatusRef.current) : next
     setEditorStatusState(editorStatusRef.current)
   }
 
@@ -742,7 +743,7 @@ export function DetailsView() {
       account: pr.account,
       file: selectedFile,
       identity: workspace.identity,
-      ...(localWorktreePath === undefined ? {} : { localWorktreePath }),
+      ...(!(localWorktreePath === undefined) && { localWorktreePath }),
       repositoryName: workspace.revision.repositoryName,
       revision: workspace.revision
     })
@@ -945,10 +946,10 @@ export function DetailsView() {
       updatePostingFinding(null)
       return
     }
-    const nextDispositions: Record<string, FindingDisposition> = {
+    const nextDispositions = {
       ...findingDispositions,
       [postingFinding.findingId]: "posted"
-    }
+    } satisfies Record<string, FindingDisposition>
     const findingIds = action._tag === "reviewed" ? action.result.findings.map((finding) => finding.id) : []
     setFindingDispositions(nextDispositions)
     setSelectedFindingIndex((index) => nextPendingFindingIndex(findingIds, nextDispositions, index))
@@ -1462,7 +1463,7 @@ export function DetailsView() {
     openEditor({
       editor,
       filePath: headEditorPath,
-      ...(lineNumber === undefined ? {} : { lineNumber }),
+      ...(!(lineNumber === undefined) && { lineNumber }),
       requestId,
       worktreePath: workspace.localDiff.worktree.path
     })

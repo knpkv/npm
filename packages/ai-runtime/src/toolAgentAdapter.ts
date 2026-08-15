@@ -39,9 +39,9 @@ const boundedMessage = (message: string): string => {
     .slice(0, 1_000)
 }
 
-const normalizeFailure = (
+const normalizeFailure = <UnparsedInput>(
   request: AgentRunRequest,
-  failure: unknown
+  failure: UnparsedInput
 ): AgentProviderError => {
   if (isTimeout(failure)) {
     return new AgentProviderError({

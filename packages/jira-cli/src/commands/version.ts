@@ -105,7 +105,7 @@ const listCommand = Command.make("list", {
     const versions = yield* service.listProjectVersions(project, {
       released,
       unreleased,
-      ...(Option.isSome(max) ? { maxResults: max.value } : {}),
+      ...((Option.isSome(max)) && { maxResults: max.value }),
       customFieldNames: customFields
     })
     if (json) {
@@ -230,9 +230,9 @@ const createCommand = Command.make("create", {
     const version = yield* service.createVersion({
       projectKey: project,
       name,
-      ...(Option.isSome(description) ? { description: description.value } : {}),
-      ...(Option.isSome(startDate) ? { startDate: startDate.value } : {}),
-      ...(Option.isSome(releaseDate) ? { releaseDate: releaseDate.value } : {})
+      ...((Option.isSome(description)) && { description: description.value }),
+      ...((Option.isSome(startDate)) && { startDate: startDate.value }),
+      ...((Option.isSome(releaseDate)) && { releaseDate: releaseDate.value })
     })
     if (json) {
       yield* Console.log(JSON.stringify(version, null, 2))

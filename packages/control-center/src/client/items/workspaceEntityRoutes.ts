@@ -89,7 +89,7 @@ export const workspaceEntityTargetFromHref = (href: string): WorkspaceEntityTarg
 }
 
 /** Decode one entity route segment at the browser boundary. */
-export const decodeEntityRouteId = (value: unknown): EntityIdType | null => {
+export const decodeEntityRouteId = <UnparsedInput>(value: UnparsedInput): EntityIdType | null => {
   const decoded = Schema.decodeUnknownOption(EntityId)(value)
   return Option.isSome(decoded) ? decoded.value : null
 }
@@ -154,8 +154,8 @@ export const isSafeWorkspaceEntityOrigin = (
   return target !== null && retainReleaseRouteState(origin.state, workspaceId, target.releaseId) !== null
 }
 
-const reusableStoredOrigin = (
-  state: unknown,
+const reusableStoredOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType
 ): WorkspaceEntityOrigin | null => {
   const decoded = Schema.decodeUnknownOption(WorkspaceEntityRouteStateSchema)(state)
@@ -172,8 +172,8 @@ const reusableStoredOrigin = (
  * A previously validated entity origin is carried through related-entity navigation so the
  * shell's explicit Back action still returns to the root activation surface.
  */
-export const makeWorkspaceEntityRouteState = (
-  state: unknown,
+export const makeWorkspaceEntityRouteState = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   entityId: EntityIdType,
   origin: WorkspaceEntityOrigin
@@ -188,8 +188,8 @@ export const makeWorkspaceEntityRouteState = (
 })
 
 /** Decode safe history state for the exact workspace/entity pair or use the Items parent. */
-export const resolveWorkspaceEntityOrigin = (
-  state: unknown,
+export const resolveWorkspaceEntityOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   entityId: EntityIdType
 ): ResolvedWorkspaceEntityOrigin => {

@@ -329,12 +329,12 @@ interface PatchAccumulator {
   readonly chunks: ReadonlyArray<Uint8Array>
 }
 
-const focusByKind: Record<RelayReviewKind, string> = {
+const focusByKind = {
   review: "Find correctness, security, reliability, and maintainability defects. Prioritize actionable findings.",
   security: "Perform a security-focused review. Trace trust boundaries, authorization, secrets, and unsafe inputs.",
   tests: "Review the test strategy. Find missing behavioral guardrails and weak or misleading coverage.",
   explain: "Explain the change, its architecture, and the highest merge risks for a human reviewer."
-}
+} satisfies Record<RelayReviewKind, string>
 
 const untrustedDelimiter = (content: string, name: "patch" | "review_state"): string => {
   const occupiedSuffixes = new Set<string>()

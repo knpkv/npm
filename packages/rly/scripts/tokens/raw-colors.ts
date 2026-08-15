@@ -18,7 +18,7 @@ const ruleForValue = (value: string): ColorPolicyRule | undefined => {
   return RAW_COLOR.test(value) ? "raw-color" : undefined
 }
 
-const position = (source: string, offset: number): { readonly column: number; readonly line: number } => {
+const position = (source: string, offset: number) => {
   const before = source.slice(0, offset)
   const lines = before.split("\n")
   return { column: (lines.at(-1)?.length ?? 0) + 1, line: lines.length }

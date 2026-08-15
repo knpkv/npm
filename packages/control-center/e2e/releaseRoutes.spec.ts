@@ -902,7 +902,7 @@ const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): v
   expect(geometry.computedName).toBe(geometry.name)
 }
 
-const transitionIdentity = (geometry: ReleaseTransitionGeometry): { readonly name: string; readonly part: string } => ({
+const transitionIdentity = (geometry: ReleaseTransitionGeometry) => ({
   name: geometry.name,
   part: geometry.part
 })
@@ -1393,9 +1393,7 @@ test("launches an exact-head review and presents its durable findings", async ({
     focusedDiffLine.evaluate((line) => {
       if (
         !("cloneNode" in line) ||
-        typeof line.cloneNode !== "function" ||
-        !("replaceWith" in line) ||
-        typeof line.replaceWith !== "function"
+        !("replaceWith" in line)
       ) {
         throw new Error("Expected a replaceable rendered diff line")
       }

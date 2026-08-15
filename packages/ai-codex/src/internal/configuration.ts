@@ -148,22 +148,21 @@ const reviewedChildEnvironment = Config.all({
   xdgConfigHome: optionalEnvironmentValue("XDG_CONFIG_HOME")
 }).pipe(
   Config.map((configured) => ({
-    ...(Option.isSome(configured.codexAccessToken) ? { CODEX_ACCESS_TOKEN: configured.codexAccessToken.value } : {}),
-    ...(Option.isSome(configured.codexApiKey) ? { CODEX_API_KEY: configured.codexApiKey.value } : {}),
-    ...(Option.isSome(configured.codexCaCertificate)
-      ? { CODEX_CA_CERTIFICATE: configured.codexCaCertificate.value }
-      : {}),
-    ...(Option.isSome(configured.codexHome) ? { CODEX_HOME: configured.codexHome.value } : {}),
-    ...(Option.isSome(configured.codexSqliteHome) ? { CODEX_SQLITE_HOME: configured.codexSqliteHome.value } : {}),
-    ...(Option.isSome(configured.home) ? { HOME: configured.home.value } : {}),
-    ...(Option.isSome(configured.path) ? { PATH: configured.path.value } : {}),
-    ...(Option.isSome(configured.rustLog) ? { RUST_LOG: configured.rustLog.value } : {}),
-    ...(Option.isSome(configured.sslCertFile) ? { SSL_CERT_FILE: configured.sslCertFile.value } : {}),
-    ...(Option.isSome(configured.temp) ? { TEMP: configured.temp.value } : {}),
-    ...(Option.isSome(configured.tmp) ? { TMP: configured.tmp.value } : {}),
-    ...(Option.isSome(configured.tmpdir) ? { TMPDIR: configured.tmpdir.value } : {}),
-    ...(Option.isSome(configured.userProfile) ? { USERPROFILE: configured.userProfile.value } : {}),
-    ...(Option.isSome(configured.xdgConfigHome) ? { XDG_CONFIG_HOME: configured.xdgConfigHome.value } : {})
+    ...((Option.isSome(configured.codexAccessToken)) && { CODEX_ACCESS_TOKEN: configured.codexAccessToken.value }),
+    ...((Option.isSome(configured.codexApiKey)) && { CODEX_API_KEY: configured.codexApiKey.value }),
+    ...((Option.isSome(configured.codexCaCertificate)) &&
+      { CODEX_CA_CERTIFICATE: configured.codexCaCertificate.value }),
+    ...((Option.isSome(configured.codexHome)) && { CODEX_HOME: configured.codexHome.value }),
+    ...((Option.isSome(configured.codexSqliteHome)) && { CODEX_SQLITE_HOME: configured.codexSqliteHome.value }),
+    ...((Option.isSome(configured.home)) && { HOME: configured.home.value }),
+    ...((Option.isSome(configured.path)) && { PATH: configured.path.value }),
+    ...((Option.isSome(configured.rustLog)) && { RUST_LOG: configured.rustLog.value }),
+    ...((Option.isSome(configured.sslCertFile)) && { SSL_CERT_FILE: configured.sslCertFile.value }),
+    ...((Option.isSome(configured.temp)) && { TEMP: configured.temp.value }),
+    ...((Option.isSome(configured.tmp)) && { TMP: configured.tmp.value }),
+    ...((Option.isSome(configured.tmpdir)) && { TMPDIR: configured.tmpdir.value }),
+    ...((Option.isSome(configured.userProfile)) && { USERPROFILE: configured.userProfile.value }),
+    ...((Option.isSome(configured.xdgConfigHome)) && { XDG_CONFIG_HOME: configured.xdgConfigHome.value })
   }))
 )
 

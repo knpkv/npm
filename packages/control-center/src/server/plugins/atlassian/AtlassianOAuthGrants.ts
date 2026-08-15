@@ -359,20 +359,20 @@ const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileM
 
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
-const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
+const oauthScopes = {
   jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_SCOPES
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
-const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
+const requiredSiteScopes = {
   jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES.filter((scope) => scope.includes(":jira")),
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
-const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
+const requiredTokenScopes = {
   jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
 const mergeProductResourceScopes = (
   resources: ReadonlyArray<AccessibleResource>

@@ -16,6 +16,7 @@ import { PersistedRecordError, PersistenceOperationError, RecordNotFoundError } 
 import { mapAlreadyExists, mapPersistenceOperation } from "./internal.js"
 import { ContentBlobDigest, ContentBlobMetadata, ContentBlobStorageClass } from "./models.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const ContentBlobKey = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -39,8 +40,8 @@ const makeContentBlobMetadataRepository = Effect.gen(function*() {
   const quarantine = yield* QuarantineRepository
   const sql = database.sql
 
-  const digestPersistedRow = Effect.fn("ContentBlobMetadataRepository.digestPersistedRow")(function*(
-    row: unknown
+  const digestPersistedRow = Effect.fn("ContentBlobMetadataRepository.digestPersistedRow")(function*<UnparsedInput>(
+    row: UnparsedInput
   ) {
     const serialized = yield* Effect.try({
       try: () => JSON.stringify(row),
@@ -57,9 +58,9 @@ const makeContentBlobMetadataRepository = Effect.gen(function*() {
     return ContentBlobDigest.make(Encoding.encodeHex(digest))
   })
 
-  const quarantineMalformed = Effect.fn("ContentBlobMetadataRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("ContentBlobMetadataRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
-    row: unknown,
+    row: UnparsedInput,
     fallbackKey: ContentBlobDigest | WorkspaceId
   ) {
     const identity = Schema.decodeUnknownResult(ContentBlobIdentity)(row)
@@ -87,12 +88,12 @@ const makeContentBlobMetadataRepository = Effect.gen(function*() {
   FROM content_blobs`
 
   const findRows = ({ digest, workspaceId }: typeof ContentBlobKey.Type) =>
-    sql<Record<string, unknown>>`${selectColumns}
+    sql<SqlRow>`${selectColumns}
       WHERE workspace_id = ${workspaceId}
         AND digest = ${digest}`
 
   const listRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`${selectColumns}
+    sql<SqlRow>`${selectColumns}
       WHERE workspace_id = ${workspaceId}
       ORDER BY created_at DESC, digest`
 

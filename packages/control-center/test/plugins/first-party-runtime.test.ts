@@ -3054,7 +3054,7 @@ describe("first-party plugin runtime", () => {
                           : 409,
                         headers: {
                           "content-type": "application/json",
-                          ...(scenario === "rate-limited" && rateLimited ? { "retry-after": "1" } : {})
+                          ...((scenario === "rate-limited" && rateLimited) && { "retry-after": "1" })
                         }
                       }
                     )

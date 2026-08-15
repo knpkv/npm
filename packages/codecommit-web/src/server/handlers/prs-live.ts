@@ -11,7 +11,7 @@
  * @module
  */
 import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
-import type { PullRequestRepoShape } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
+import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
@@ -43,14 +43,14 @@ const copyToClipboard = (text: string) => {
   )
 }
 
-const extractAwsMessage = (e: unknown): string => {
+const extractAwsMessage = <Failure>(e: Failure): string => {
   if (!Predicate.isObjectKeyword(e)) return String(e)
   // AwsApiError.cause may contain the real AWS exception
   const cause = Predicate.hasProperty(e, "cause") ? e.cause : undefined
   if (Predicate.hasProperty(cause, "message")) {
     return String(cause.message)
   }
-  if (Predicate.hasProperty(e, "message") && typeof e.message === "string" && e.message) return e.message
+  if (Predicate.hasProperty(e, "message") && Predicate.isString(e.message) && e.message) return e.message
   // PermissionDeniedError or other tagged errors
   if (Predicate.hasProperty(e, "reason")) {
     const operation = Predicate.hasProperty(e, "operation") ? e.operation : "unknown operation"
@@ -91,7 +91,7 @@ export const selectedPullRequest = (
 }
 
 interface PullRequestLookup {
-  readonly findAll: PullRequestRepoShape["findAll"]
+  readonly findAll: PullRequestRepoContract["findAll"]
 }
 
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */

@@ -72,7 +72,7 @@ export class FakeReleaseNormalizationError extends Schema.TaggedError<FakeReleas
 const normalizationError = (diagnosticCode: string): FakeReleaseNormalizationError =>
   new FakeReleaseNormalizationError({ diagnosticCode })
 
-const decodeAttributes = (attributes: unknown) =>
+const decodeAttributes = <UnparsedInput>(attributes: UnparsedInput) =>
   Schema.decodeUnknownEffect(FakeReleaseAttributes)(attributes).pipe(
     Effect.mapError(() => normalizationError("fake-release-attributes-invalid"))
   )

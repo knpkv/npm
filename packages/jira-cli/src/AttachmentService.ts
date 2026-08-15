@@ -20,7 +20,7 @@ export interface UploadAttachmentInput {
   readonly mediaType?: string | undefined
 }
 
-export interface AttachmentServiceShape {
+export interface AttachmentServiceContract {
   readonly uploadToIssue: (
     issueIdOrKey: string,
     input: UploadAttachmentInput
@@ -29,7 +29,7 @@ export interface AttachmentServiceShape {
 
 export class AttachmentService extends Context.Service<
   AttachmentService,
-  AttachmentServiceShape
+  AttachmentServiceContract
 >()("@knpkv/jira-cli/AttachmentService") {}
 
 const UploadedAttachmentSchema = Schema.Struct({
@@ -41,7 +41,7 @@ const UploadedAttachmentSchema = Schema.Struct({
   size: Schema.optional(Schema.NullOr(Schema.Number))
 })
 
-const decodeUploadedAttachment = (raw: unknown): Effect.Effect<Attachment, JiraApiError> =>
+const decodeUploadedAttachment = <UnparsedInput>(raw: UnparsedInput): Effect.Effect<Attachment, JiraApiError> =>
   Schema.decodeUnknownEffect(UploadedAttachmentSchema)(raw).pipe(
     Effect.mapError((cause) => new JiraApiError({ message: "Jira returned an invalid attachment response", cause })),
     Effect.flatMap((record) => {
@@ -62,7 +62,7 @@ const decodeUploadedAttachment = (raw: unknown): Effect.Effect<Attachment, JiraA
     })
   )
 
-const decodeFirstUploadedAttachment = (raw: unknown): Effect.Effect<Attachment, JiraApiError> => {
+const decodeFirstUploadedAttachment = <UnparsedInput>(raw: UnparsedInput): Effect.Effect<Attachment, JiraApiError> => {
   if (!Array.isArray(raw)) {
     return Effect.fail(new JiraApiError({ message: "Jira did not return an attachment array" }))
   }
@@ -78,7 +78,7 @@ const make = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
-  const uploadToIssue: AttachmentServiceShape["uploadToIssue"] = (issueIdOrKey, input) =>
+  const uploadToIssue: AttachmentServiceContract["uploadToIssue"] = (issueIdOrKey, input) =>
     Effect.gen(function*() {
       const bytes = yield* fs.readFile(input.filePath).pipe(
         Effect.mapError((cause) =>
@@ -89,7 +89,7 @@ const make = Effect.gen(function*() {
       const result = yield* client.uploadAttachment(issueIdOrKey, {
         bytes,
         filename,
-        ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType })
+        ...(!(input.mediaType === undefined) && { mediaType: input.mediaType })
       }).pipe(
         Effect.mapError((cause) =>
           new JiraApiError({ message: `Failed to upload attachment to ${issueIdOrKey}`, cause })

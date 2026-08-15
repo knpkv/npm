@@ -14,6 +14,7 @@ import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../.
 import { Revision } from "../../../../domain/sourceRevision.js"
 import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
+import type { SqlRow } from "../sqlRow.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
 import { makeDeliveryGraphDecoders } from "./decode.js"
 import { captureMalformedDeliveryGraphRow } from "./quarantine.js"
@@ -458,7 +459,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           personId: owner.personId,
           rolesCsv: [...owner.roles].sort().join(",")
         })
-        const identityRows = yield* sql<Record<string, unknown>>`SELECT
+        const identityRows = yield* sql<SqlRow>`SELECT
             identity.plugin_connection_id AS pluginConnectionId,
             identity.provider_id AS providerId,
             identity.vendor_person_id AS vendorPersonId

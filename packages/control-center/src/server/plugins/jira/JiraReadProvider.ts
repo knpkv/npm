@@ -7,7 +7,7 @@
  *
  * @internal
  */
-import { JiraApi, type JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraApi, type JiraApiClientContract } from "@knpkv/jira-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -19,6 +19,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
+import * as Predicate from "effect/Predicate"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -83,8 +84,8 @@ const JiraNumericProjectId = Schema.String.check(
 )
 
 /** Decode an untrusted Jira path parameter before crossing the provider boundary. @internal */
-export const decodeJiraProviderPathIdentifier = (
-  value: unknown
+export const decodeJiraProviderPathIdentifier = <UnparsedInput>(
+  value: UnparsedInput
 ): Effect.Effect<string, PluginConfigurationFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(JiraProviderPathIdentifier))(value).pipe(
     Effect.mapError(() =>
@@ -222,15 +223,15 @@ const StatusResponse = Schema.Struct({
   response: Schema.Struct({ status: Schema.Number })
 })
 
-const statusOf = (error: unknown): number | undefined => {
+const statusOf = <UnparsedInput>(error: UnparsedInput): number | undefined => {
   if (HttpClientError.isHttpClientError(error)) return error.response?.status
   const decoded = Schema.decodeUnknownResult(StatusResponse)(error)
   return Result.isSuccess(decoded) ? decoded.success.response.status : undefined
 }
 
-const isNotFound = (error: unknown): boolean => statusOf(error) === 404
+const isNotFound = <UnparsedInput>(error: UnparsedInput): boolean => statusOf(error) === 404
 
-const retryAfterSeconds = (error: unknown, now: DateTime.DateTime): number => {
+const retryAfterSeconds = <UnparsedInput>(error: UnparsedInput, now: DateTime.DateTime): number => {
   if (!HttpClientError.isHttpClientError(error)) return 60
   const value = error.response?.headers["retry-after"]
   if (value === undefined) return 60
@@ -242,9 +243,9 @@ const retryAfterSeconds = (error: unknown, now: DateTime.DateTime): number => {
   return Math.min(Math.max(Math.ceil(delayMillis / 1_000), 0), 3_600)
 }
 
-const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
+const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*<UnparsedInput>(
   operation: string,
-  error: unknown
+  error: UnparsedInput
 ): Effect.fn.Return<never, PluginFailure> {
   const status = statusOf(error)
   if (status === 401) return yield* new PluginAuthenticationFailure({ operation })
@@ -297,7 +298,7 @@ const providerCall = <Value, Error>(
 const nullableChangelogValueKeys = new Set(["from", "fromString", "to", "toString"])
 
 const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
-  value !== null && !Array.isArray(value) && typeof value === "object"
+  value !== null && !Array.isArray(value) && Predicate.isObjectOrArray(value)
 
 const omitNullableChangelogItemValues = (item: Schema.Json): Schema.Json =>
   isJsonObject(item)
@@ -322,7 +323,7 @@ const omitNullableChangelogValues = (response: Schema.Json): Schema.Json => {
 }
 
 const getChangelogs = (
-  client: JiraApiClientShape,
+  client: JiraApiClientContract,
   issueId: string,
   request: JiraPageRequest
 ): Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure> =>
@@ -429,8 +430,8 @@ const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
   return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, key ASC`
 })
 
-const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
-  response: unknown
+const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*<UnparsedInput>(
+  response: UnparsedInput
 ): Effect.fn.Return<JiraProjectIssuePage, PluginMalformedResponseFailure> {
   const decoded = yield* Schema.decodeUnknownEffect(JiraProjectIssuePageResponse)(response).pipe(
     Effect.mapError(() =>
@@ -454,7 +455,7 @@ const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePag
 })
 
 /** Build the production provider boundary from the shared generated Jira client. @internal */
-export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
+export const makeJiraReadProvider = (client: JiraApiClientContract): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
   getServerInfo: providerCall("jira-server-info", client.getServerInfo(undefined)),
   getProject: (projectId) =>
@@ -520,7 +521,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               jql,
               maxResults: request.maxResults,
               fields: ISSUE_FIELDS,
-              ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
+              ...(!(request.nextPageToken === null) && { nextPageToken: request.nextPageToken })
             }
           })
         )
@@ -733,7 +734,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
             payload: {
               name,
               projectId,
-              ...(description === null ? {} : { description })
+              ...(!(description === null) && { description })
             }
           })
         )

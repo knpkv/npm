@@ -44,8 +44,8 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
   // Build URL params for REST calls
   const restParams = useMemo(() => ({
     limit: 20,
-    ...(filter ? { filter } : {}),
-    ...(unreadOnly ? { unreadOnly: 1 } : {})
+    ...(filter && { filter }),
+    ...(unreadOnly && { unreadOnly: 1 })
   }), [filter, unreadOnly])
 
   // Fetch first page via REST when filters are active
@@ -56,7 +56,7 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
       if (cancelled) return
       setRestFirstPage({
         items: result.items,
-        ...(result.nextCursor !== undefined ? { nextCursor: result.nextCursor } : {})
+        ...((result.nextCursor !== undefined) && { nextCursor: result.nextCursor })
       })
     }).catch(() => {})
     return () => {
@@ -81,7 +81,7 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
       })
       const page: Page = {
         items: result.items,
-        ...(result.nextCursor !== undefined ? { nextCursor: result.nextCursor } : {})
+        ...((result.nextCursor !== undefined) && { nextCursor: result.nextCursor })
       }
       setExtraPages((prev) => [...prev, page])
     } catch {

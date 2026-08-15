@@ -159,10 +159,10 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
 // repository file bytes, so its message must never reach the logs.
 const operationLogsRejectedValue = (operation: string): boolean => operation !== "get-blob"
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.tapError((error) =>
@@ -175,33 +175,35 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
     Effect.mapError(() => malformed(operation))
   )
 
-const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(function*(value: unknown) {
-  const raw = yield* decodeProvider("get-pull-request", RawPullRequestResponse, value)
-  const pullRequest = raw.pullRequest
-  const target = pullRequest.pullRequestTargets[0]
-  if (target === undefined) return yield* malformed("get-pull-request")
-  return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestRevision)({
-    pullRequestId: pullRequest.pullRequestId,
-    revisionId: pullRequest.revisionId,
-    repositoryName: target.repositoryName,
-    title: pullRequest.title.trim(),
-    description: pullRequest.description,
-    authorArn: pullRequest.authorArn ?? null,
-    status: target.mergeMetadata?.isMerged === true ? "MERGED" : pullRequest.pullRequestStatus,
-    sourceReference: target.sourceReference,
-    destinationReference: target.destinationReference,
-    sourceCommit: target.sourceCommit,
-    destinationCommit: target.destinationCommit,
-    mergeBase: target.mergeBase ?? null,
-    creationDate: pullRequest.creationDate,
-    lastActivityDate: pullRequest.lastActivityDate
-  }).pipe(Effect.mapError(() => malformed("get-pull-request")))
-})
+const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(
+  function*<UnparsedInput>(value: UnparsedInput) {
+    const raw = yield* decodeProvider("get-pull-request", RawPullRequestResponse, value)
+    const pullRequest = raw.pullRequest
+    const target = pullRequest.pullRequestTargets[0]
+    if (target === undefined) return yield* malformed("get-pull-request")
+    return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestRevision)({
+      pullRequestId: pullRequest.pullRequestId,
+      revisionId: pullRequest.revisionId,
+      repositoryName: target.repositoryName,
+      title: pullRequest.title.trim(),
+      description: pullRequest.description,
+      authorArn: pullRequest.authorArn ?? null,
+      status: target.mergeMetadata?.isMerged === true ? "MERGED" : pullRequest.pullRequestStatus,
+      sourceReference: target.sourceReference,
+      destinationReference: target.destinationReference,
+      sourceCommit: target.sourceCommit,
+      destinationCommit: target.destinationCommit,
+      mergeBase: target.mergeBase ?? null,
+      creationDate: pullRequest.creationDate,
+      lastActivityDate: pullRequest.lastActivityDate
+    }).pipe(Effect.mapError(() => malformed("get-pull-request")))
+  }
+)
 
 /** Decode caller identity evidence obtained inside an already-bound AWS runtime. @internal */
 export const decodeAccountIdentityProviderResponse = Effect.fn(
   "CodeCommitReadClient.decodeAccountIdentityProviderResponse"
-)(function*(value: unknown) {
+)(function*<UnparsedInput>(value: UnparsedInput) {
   const identity = yield* decodeProvider("discover-account", RawCallerIdentity, value)
   return new CodeCommitAccountIdentity({ accountId: identity.Account, arn: identity.Arn })
 })
@@ -209,7 +211,7 @@ export const decodeAccountIdentityProviderResponse = Effect.fn(
 /** Decode repository ownership evidence obtained inside an already-bound AWS runtime. @internal */
 export const decodeRepositoryIdentityProviderResponse = Effect.fn(
   "CodeCommitReadClient.decodeRepositoryIdentityProviderResponse"
-)(function*(value: unknown) {
+)(function*<UnparsedInput>(value: UnparsedInput) {
   const response = yield* decodeProvider("get-repository-identity", RawRepositoryIdentity, value)
   return yield* Schema.decodeUnknownEffect(CodeCommitRepositoryIdentity)(response.repositoryMetadata).pipe(
     Effect.mapError(() => malformed("get-repository-identity"))

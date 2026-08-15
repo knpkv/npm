@@ -1,7 +1,13 @@
 "use client"
 
-import { CodeView, type CodeViewHandle, type CodeViewItem, type DiffLineAnnotation } from "@pierre/diffs/react"
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
+import {
+  CodeView,
+  type CodeViewHandle,
+  type CodeViewItem,
+  type CodeViewProps,
+  type DiffLineAnnotation
+} from "@pierre/diffs/react"
+import { forwardRef, type ComponentType, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cssClass } from "../internal/component.js"
 import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "./annotation.js"
 import styles from "./DiffCodeView.module.css"
@@ -11,9 +17,21 @@ import { ensureRlyDiffThemes, RLY_DIFF_THEMES } from "./themes.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle, RlyDiffCodeViewProps } from "./types.js"
 import { useDiffWorkerState } from "./worker-pool.js"
 
-interface AnnotationMetadata {
+export interface AnnotationMetadata {
   readonly annotation: RlyDiffCodeAnnotation
 }
+
+export interface DiffCodeRendererAdapterProps {
+  readonly rendererProps: CodeViewProps<AnnotationMetadata> & {
+    readonly ref: Ref<CodeViewHandle<AnnotationMetadata>>
+  }
+}
+
+export type DiffCodeRendererAdapter = ComponentType<DiffCodeRendererAdapterProps>
+
+const PierreDiffCodeRenderer: DiffCodeRendererAdapter = ({ rendererProps }) => (
+  <CodeView<AnnotationMetadata> {...rendererProps} />
+)
 
 const annotationsForItem = (
   itemId: string,
@@ -50,7 +68,7 @@ const toRendererItem = (
 ): CodeViewItem<AnnotationMetadata> => {
   return {
     annotations: annotationsForItem(item.id, annotations),
-    ...(item.collapsed === undefined ? {} : { collapsed: item.collapsed }),
+    ...(!(item.collapsed === undefined) && { collapsed: item.collapsed }),
     fileDiff: parseDiffFilePair(item),
     id: item.id,
     type: "diff",
@@ -99,139 +117,148 @@ const keepRenderedDiffKeyboardAccessible = (
   }
 }
 
-/** Render and incrementally update complete text changes through rly's isolated renderer adapter. */
-export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>(function DiffCodeView(
-  {
-    annotations = [],
-    className,
-    contextLines = 3,
-    empty = "No renderable source changes.",
-    expandContext = false,
-    initialItems,
-    mode = "split",
-    onItemRender,
-    onSelectedLinesChange,
-    selectedLines,
-    virtualization = "buffered",
-    wrap = false
-  },
-  ref
-) {
-  requireInitialItems(initialItems)
-  requireDiffCodeAnnotations(annotations)
-  if (!Number.isInteger(contextLines) || contextLines < 0) {
-    throw new Error("Diff context lines must be a non-negative integer")
-  }
-  ensureRlyDiffThemes()
-
-  const workerState = useDiffWorkerState()
-  const rendererContainerRef = useRef<HTMLDivElement>(null)
-  const rendererRef = useRef<CodeViewHandle<AnnotationMetadata>>(null)
-  const annotationsRef = useRef(annotations)
-  const previousAnnotationsRef = useRef(annotations)
-  annotationsRef.current = annotations
-  const [sourceItems] = useState(() => new Map(initialItems.map((item) => [item.id, item])))
-  const [versions] = useState(() => new Map(initialItems.map((item) => [item.id, item.version ?? 0])))
-  const rendererItems = [...sourceItems.values()].map((item) =>
-    toRendererItem(item, annotations, versions.get(item.id) ?? item.version ?? 0)
-  )
-
-  useEffect(() => {
-    const changedItemIds = annotationItemsChanged(previousAnnotationsRef.current, annotations)
-    previousAnnotationsRef.current = annotations
-    for (const itemId of changedItemIds) {
-      const item = sourceItems.get(itemId)
-      if (item === undefined) continue
-      const nextVersion = (versions.get(item.id) ?? item.version ?? 0) + 1
-      versions.set(item.id, nextVersion)
-      rendererRef.current?.updateItem(toRendererItem(item, annotations, nextVersion))
+/** Build the diff view against an explicit renderer adapter. */
+export const createDiffCodeView = (Renderer: DiffCodeRendererAdapter) =>
+  forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>(function DiffCodeView(
+    {
+      annotations = [],
+      className,
+      contextLines = 3,
+      empty = "No renderable source changes.",
+      expandContext = false,
+      initialItems,
+      mode = "split",
+      onItemRender,
+      onSelectedLinesChange,
+      selectedLines,
+      virtualization = "buffered",
+      wrap = false
+    },
+    ref
+  ) {
+    requireInitialItems(initialItems)
+    requireDiffCodeAnnotations(annotations)
+    if (!Number.isInteger(contextLines) || contextLines < 0) {
+      throw new Error("Diff context lines must be a non-negative integer")
     }
-  }, [annotations, sourceItems, versions])
+    ensureRlyDiffThemes()
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      addItems(items) {
-        requireInitialItems(items)
-        for (const item of items) {
-          if (sourceItems.has(item.id)) throw new Error(`Diff item id ${item.id} already exists`)
-        }
-        const rendererItems = items.map((item) => {
-          sourceItems.set(item.id, item)
-          const version = item.version ?? 0
-          versions.set(item.id, version)
-          return toRendererItem(item, annotationsRef.current, version)
-        })
-        rendererRef.current?.addItems(rendererItems)
-      },
-      focusLine(target) {
-        const container = rendererContainerRef.current?.querySelector<HTMLElement>(
-          `diffs-container[data-rly-diff-item="${CSS.escape(target.id)}"]`
-        )
-        if (container === null || container === undefined) return false
-        const line = renderedDiffLine(container, target)
-        if (line === null) return false
-        line.tabIndex = -1
-        line.focus({ preventScroll: true })
-        return container.shadowRoot?.activeElement === line
-      },
-      scrollTo(target) {
-        rendererRef.current?.scrollTo(target)
-      },
-      updateItem(item) {
-        validateDiffCodeItem(item)
-        if (!sourceItems.has(item.id)) return false
-        const version = Math.max(item.version ?? 0, (versions.get(item.id) ?? 0) + 1)
-        versions.set(item.id, version)
-        sourceItems.set(item.id, item)
-        return rendererRef.current?.updateItem(toRendererItem(item, annotationsRef.current, version)) ?? false
+    const workerState = useDiffWorkerState()
+    const rendererContainerRef = useRef<HTMLDivElement>(null)
+    const rendererRef = useRef<CodeViewHandle<AnnotationMetadata>>(null)
+    const annotationsRef = useRef(annotations)
+    const previousAnnotationsRef = useRef(annotations)
+    annotationsRef.current = annotations
+    const [sourceItems] = useState(() => new Map(initialItems.map((item) => [item.id, item])))
+    const [versions] = useState(() => new Map(initialItems.map((item) => [item.id, item.version ?? 0])))
+    const rendererItems = [...sourceItems.values()].map((item) =>
+      toRendererItem(item, annotations, versions.get(item.id) ?? item.version ?? 0)
+    )
+
+    useEffect(() => {
+      const changedItemIds = annotationItemsChanged(previousAnnotationsRef.current, annotations)
+      previousAnnotationsRef.current = annotations
+      for (const itemId of changedItemIds) {
+        const item = sourceItems.get(itemId)
+        if (item === undefined) continue
+        const nextVersion = (versions.get(item.id) ?? item.version ?? 0) + 1
+        versions.set(item.id, nextVersion)
+        rendererRef.current?.updateItem(toRendererItem(item, annotations, nextVersion))
       }
-    }),
-    [sourceItems, versions]
-  )
+    }, [annotations, sourceItems, versions])
 
-  if (initialItems.length === 0) {
-    return <p className={joinClassNames(className)}>{empty}</p>
-  }
+    useImperativeHandle(
+      ref,
+      () => ({
+        addItems(items) {
+          requireInitialItems(items)
+          for (const item of items) {
+            if (sourceItems.has(item.id)) throw new Error(`Diff item id ${item.id} already exists`)
+          }
+          const rendererItems = items.map((item) => {
+            sourceItems.set(item.id, item)
+            const version = item.version ?? 0
+            versions.set(item.id, version)
+            return toRendererItem(item, annotationsRef.current, version)
+          })
+          rendererRef.current?.addItems(rendererItems)
+        },
+        focusLine(target) {
+          const container = rendererContainerRef.current?.querySelector<HTMLElement>(
+            `diffs-container[data-rly-diff-item="${CSS.escape(target.id)}"]`
+          )
+          if (container === null || container === undefined) return false
+          const line = renderedDiffLine(container, target)
+          if (line === null) return false
+          line.tabIndex = -1
+          line.focus({ preventScroll: true })
+          return container.shadowRoot?.activeElement === line
+        },
+        scrollTo(target) {
+          rendererRef.current?.scrollTo(target)
+        },
+        updateItem(item) {
+          validateDiffCodeItem(item)
+          if (!sourceItems.has(item.id)) return false
+          const version = Math.max(item.version ?? 0, (versions.get(item.id) ?? 0) + 1)
+          versions.set(item.id, version)
+          sourceItems.set(item.id, item)
+          return rendererRef.current?.updateItem(toRendererItem(item, annotationsRef.current, version)) ?? false
+        }
+      }),
+      [sourceItems, versions]
+    )
 
-  return (
-    <div className={joinClassNames(className)} data-rly-diff-code-view="" data-rly-diff-mode={mode}>
-      {workerState.status === "fallback" ? (
-        <p aria-live="polite" className={styles.fallbackNotice} role="status">
-          Worker acceleration is unavailable. The complete diff is rendered on this device.
-        </p>
-      ) : null}
-      <CodeView<AnnotationMetadata>
-        key={workerState.status}
-        ref={rendererRef}
-        className={cssClass(styles, "viewer")}
-        containerRef={rendererContainerRef}
-        disableWorkerPool={workerState.status !== "worker"}
-        initialItems={rendererItems}
-        {...(onSelectedLinesChange === undefined ? {} : { onSelectedLinesChange })}
-        options={{
-          collapsedContextThreshold: contextLines,
-          diffIndicators: "bars",
-          diffStyle: mode === "split" ? "split" : "unified",
-          disableVirtualizationBuffers: virtualization === "strict",
-          enableLineSelection: true,
-          expandUnchanged: expandContext,
-          expansionLineCount: contextLines,
-          hunkSeparators: "line-info-basic",
-          layout: { gap: 8, paddingBottom: 8, paddingTop: 8 },
-          onPostRender: (node, _instance, phase, context) => {
-            keepRenderedDiffKeyboardAccessible(node, context.item.id, phase, !wrap)
-            if (phase !== "unmount") onItemRender?.(context.item.id, workerState.status)
-          },
-          overflow: wrap ? "wrap" : "scroll",
-          stickyHeaders: true,
-          theme: RLY_DIFF_THEMES
-        }}
-        renderAnnotation={(annotation) => (
-          <DiffCodeAnnotation annotation={annotation.metadata.annotation} className={cssClass(styles, "annotation")} />
-        )}
-        {...(selectedLines === undefined ? {} : { selectedLines })}
-      />
-    </div>
-  )
-})
+    if (initialItems.length === 0) {
+      return <p className={joinClassNames(className)}>{empty}</p>
+    }
+
+    return (
+      <div className={joinClassNames(className)} data-rly-diff-code-view="" data-rly-diff-mode={mode}>
+        {workerState.status === "fallback" ? (
+          <p aria-live="polite" className={styles.fallbackNotice} role="status">
+            Worker acceleration is unavailable. The complete diff is rendered on this device.
+          </p>
+        ) : null}
+        <Renderer
+          key={workerState.status}
+          rendererProps={{
+            ref: rendererRef,
+            className: cssClass(styles, "viewer"),
+            containerRef: rendererContainerRef,
+            disableWorkerPool: workerState.status !== "worker",
+            initialItems: rendererItems,
+            ...(!(onSelectedLinesChange === undefined) && { onSelectedLinesChange }),
+            options: {
+              collapsedContextThreshold: contextLines,
+              diffIndicators: "bars",
+              diffStyle: mode === "split" ? "split" : "unified",
+              disableVirtualizationBuffers: virtualization === "strict",
+              enableLineSelection: true,
+              expandUnchanged: expandContext,
+              expansionLineCount: contextLines,
+              hunkSeparators: "line-info-basic",
+              layout: { gap: 8, paddingBottom: 8, paddingTop: 8 },
+              onPostRender: (node, _instance, phase, context) => {
+                keepRenderedDiffKeyboardAccessible(node, context.item.id, phase, !wrap)
+                if (phase !== "unmount") onItemRender?.(context.item.id, workerState.status)
+              },
+              overflow: wrap ? "wrap" : "scroll",
+              stickyHeaders: true,
+              theme: RLY_DIFF_THEMES
+            },
+            renderAnnotation: (annotation) => (
+              <DiffCodeAnnotation
+                annotation={annotation.metadata.annotation}
+                className={cssClass(styles, "annotation")}
+              />
+            ),
+            ...(!(selectedLines === undefined) && { selectedLines })
+          }}
+        />
+      </div>
+    )
+  })
+
+/** Render and incrementally update complete text changes through rly's isolated renderer adapter. */
+export const DiffCodeView = createDiffCodeView(PierreDiffCodeRenderer)

@@ -38,6 +38,7 @@ import {
   AppendReviewSuggestionRevisionInput,
   ReadReviewSuggestionRevisionsInput
 } from "../agentJobModels.js"
+import type { SqlRow } from "../sqlRow.js"
 
 const REVISION_ID_NAMESPACE = "review-suggestion-revision/v1"
 
@@ -265,7 +266,7 @@ export const makeReviewSuggestionRevisionOperations = <
     jobId: JobId,
     suggestionId: PrReviewSuggestionId
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       COUNT(*) AS revisionCount,
       MIN(revision_sequence) AS minimumSequence,
       MAX(revision_sequence) AS maximumSequence
@@ -309,7 +310,7 @@ export const makeReviewSuggestionRevisionOperations = <
     workspaceId: WorkspaceId,
     jobId: JobId,
     suggestionId: PrReviewSuggestionId,
-    unknownRow: Record<string, unknown>
+    unknownRow: SqlRow
   ) {
     const row = Schema.decodeUnknownResult(RevisionRow)(unknownRow)
     if (Result.isFailure(row)) {
@@ -391,7 +392,7 @@ export const makeReviewSuggestionRevisionOperations = <
     const original = yield* originalRevision(workspaceId, jobId, suggestionId)
     const stats = yield* revisionStats(workspaceId, jobId, suggestionId)
     if (stats.maximumSequence === null) return original
-    const rows = yield* sql<Record<string, unknown>>`SELECT
+    const rows = yield* sql<SqlRow>`SELECT
       revision_sequence AS revisionSequence,
       revision_id AS revisionId,
       predecessor_revision_id AS predecessorRevisionId,
@@ -440,7 +441,7 @@ export const makeReviewSuggestionRevisionOperations = <
     }
     const unknownRows = before <= 2
       ? []
-      : yield* sql<Record<string, unknown>>`SELECT
+      : yield* sql<SqlRow>`SELECT
         revision_sequence AS revisionSequence,
         revision_id AS revisionId,
         predecessor_revision_id AS predecessorRevisionId,
@@ -648,7 +649,7 @@ export const makeReviewSuggestionRevisionOperations = <
       )({
         suggestionId: request.suggestionId,
         state: request.state ?? current.suggestion.state,
-        ...(request.dismissalReason === undefined ? {} : { dismissalReason: request.dismissalReason }),
+        ...(!(request.dismissalReason === undefined) && { dismissalReason: request.dismissalReason }),
         ...request.edit
       }).pipe(
         Effect.mapError(() => operationFailure("agent-job.review-revision-suggestion-invalid"))

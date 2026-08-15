@@ -63,9 +63,9 @@ const storeError = (
   reason: GovernedActionExecutionStoreError["reason"]
 ): GovernedActionExecutionStoreError => new GovernedActionExecutionStoreError({ operation, reason })
 
-const mapStoreFailure = (
+const mapStoreFailure = <UnparsedInput>(
   operation: DispatchInboxOperation,
-  failure: unknown
+  failure: UnparsedInput
 ): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) return storeError(operation, "not-found")
@@ -156,7 +156,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
   const recordOutcome = Effect.fn("GovernedActionExecutionDispatchInbox.recordOutcome")(function*(
     input: DispatchInboxInput
   ) {
-    const mapFailure = (failure: unknown): GovernedActionExecutionStoreError =>
+    const mapFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError =>
       mapStoreFailure(input.operation, failure)
     const permitTokenDigest = yield* digestGovernedActionPermitToken(input.permitToken).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),

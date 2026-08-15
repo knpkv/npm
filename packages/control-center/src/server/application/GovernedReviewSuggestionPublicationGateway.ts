@@ -235,7 +235,7 @@ const makeGateway = Effect.gen(function*() {
           : operation === "reply"
           ? { commentId: command.commentId }
           : {}),
-        ...(operation === "create" ? expectedLocation : {})
+        ...((operation === "create") && expectedLocation)
       },
       evidenceIds: [
         `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`
@@ -306,10 +306,8 @@ const makeGateway = Effect.gen(function*() {
             expectedRevision: Revision.make(command.target.sourceRevision),
             payload: {
               content: command.finalContent,
-              ...(operation === "update" || operation === "reply"
-                ? { commentId: command.commentId }
-                : {}),
-              ...(operation === "create" && location !== undefined ? { location } : {})
+              ...((operation === "update" || operation === "reply") && { commentId: command.commentId }),
+              ...((operation === "create" && location !== undefined) && { location })
             },
             evidenceIds: [
               `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`

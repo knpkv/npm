@@ -4,11 +4,11 @@
  * @packageDocumentation
  */
 
-export { ConfluenceApiConfig, type ConfluenceApiConfigShape } from "./ConfluenceApiConfig.js"
+export { ConfluenceApiConfig, type ConfluenceApiConfigContract } from "./ConfluenceApiConfig.js"
 
 export {
   ConfluenceApiClient,
-  type ConfluenceApiClientShape,
+  type ConfluenceApiClientContract,
   layer,
   make,
   makeV1,

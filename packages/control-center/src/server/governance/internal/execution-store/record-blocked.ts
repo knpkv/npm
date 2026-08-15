@@ -15,7 +15,7 @@ import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionSto
 import { makeGovernedActionExecutionPreparationReader } from "./preparation.js"
 import { digestGovernedActionPreparationToken } from "./tokens.js"
 
-const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+const storeFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "block", reason: "not-found" })

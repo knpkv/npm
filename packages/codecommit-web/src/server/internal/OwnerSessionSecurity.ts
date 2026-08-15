@@ -2,7 +2,7 @@ import { Clock, Context, Crypto, Effect, Layer, Redacted, Ref, Schema } from "ef
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
 
-export interface OwnerSessionSecretsShape {
+export interface OwnerSessionSecretsContract {
   readonly bootstrapAvailable: Ref.Ref<boolean>
   readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
   readonly bootstrapToken: Redacted.Redacted<string>
@@ -12,7 +12,7 @@ export interface OwnerSessionSecretsShape {
 
 export class OwnerSessionSecrets extends Context.Service<
   OwnerSessionSecrets,
-  OwnerSessionSecretsShape
+  OwnerSessionSecretsContract
 >()("@knpkv/codecommit-web/OwnerSessionSecrets") {}
 
 export class UnsafeServerHostnameError extends Schema.TaggedError<UnsafeServerHostnameError>()(
@@ -55,7 +55,7 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecre
 })
 
 export const activateOwnerSessionBootstrap = Effect.fn("OwnerSessionSecurity.activateBootstrap")(
-  function*(secrets: OwnerSessionSecretsShape) {
+  function*(secrets: OwnerSessionSecretsContract) {
     const now = yield* Clock.currentTimeMillis
     yield* Ref.set(secrets.bootstrapExpiresAtMillis, now + 60_000)
   }
@@ -69,12 +69,12 @@ export const ownerSessionOrigin = (hostname: string, port: number): string => {
 export const ownerSessionUrl = (
   hostname: string,
   port: number,
-  secrets: OwnerSessionSecretsShape
+  secrets: OwnerSessionSecretsContract
 ): string => ownerSessionUrlForOrigin(ownerSessionOrigin(hostname, port), secrets)
 
 export const ownerSessionUrlForOrigin = (
   origin: string,
-  secrets: Pick<OwnerSessionSecretsShape, "bootstrapToken">
+  secrets: Pick<OwnerSessionSecretsContract, "bootstrapToken">
 ): string => {
   const bootstrapToken = encodeURIComponent(Redacted.value(secrets.bootstrapToken))
   return `${origin.replace(/\/+$/u, "")}/#bootstrap_token=${bootstrapToken}`
@@ -103,7 +103,7 @@ export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoop
 )
 
 export const ownerSessionCookie = (
-  secrets: Pick<OwnerSessionSecretsShape, "ownerToken">
+  secrets: Pick<OwnerSessionSecretsContract, "ownerToken">
 ): string => `cc_owner=${Redacted.value(secrets.ownerToken)}; HttpOnly; Path=/api; SameSite=Strict`
 
 interface OwnerRequestAuthorization {
@@ -115,7 +115,7 @@ interface OwnerRequestAuthorization {
 }
 
 export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRequest")(
-  function*(request: OwnerRequestAuthorization, secrets: OwnerSessionSecretsShape) {
+  function*(request: OwnerRequestAuthorization, secrets: OwnerSessionSecretsContract) {
     if (request.credential !== Redacted.value(secrets.ownerToken)) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
@@ -142,7 +142,7 @@ interface BootstrapAuthorization {
 }
 
 export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authorizeBootstrap")(
-  function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsShape) {
+  function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsContract) {
     if (request.authorization !== `Bearer ${Redacted.value(secrets.bootstrapToken)}`) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
     }

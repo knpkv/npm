@@ -16,12 +16,7 @@ const anchorLabel = (suggestion: PrReviewSuggestion): string => {
   }
 }
 
-const replacementSides = (
-  unifiedDiff: string
-): {
-  readonly after: string
-  readonly before: string
-} => {
+const replacementSides = (unifiedDiff: string) => {
   const before = new Array<string>()
   const after = new Array<string>()
   let currentPath = ""

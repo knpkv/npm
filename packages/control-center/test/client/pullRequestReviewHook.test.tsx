@@ -53,6 +53,10 @@ import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/do
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
+interface PullRequestReviewThreadRef {
+  current: PullRequestReviewThread | null
+}
+
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000601")
 const OTHER_ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000699")
 const BASE_A = "0".repeat(40)
@@ -557,7 +561,7 @@ describe("usePullRequestReview", () => {
     async (order) => {
       const history = deferred<PullRequestReviewThread>()
       const live = deferred<PullRequestReviewThread>()
-      const target: { current: PullRequestReviewThread | null } = { current: null }
+      const target: PullRequestReviewThreadRef = { current: null }
       const signal = new AbortController().signal
       const installHistory = history.promise.then((thread) => installNewestThread(target, thread, signal))
       const installLive = live.promise.then((thread) => installNewestThread(target, thread, signal))
@@ -608,7 +612,7 @@ describe("usePullRequestReview", () => {
       historyLoaded: false,
       nextCursor: ReleaseAgentThreadCursor.make(1)
     }
-    const target: { current: PullRequestReviewThread | null } = { current: original }
+    const target: PullRequestReviewThreadRef = { current: original }
     const conflicting = threadEvent(1)
     if (conflicting._tag !== "operator-message") {
       throw new Error("Expected operator-message fixture")
@@ -629,7 +633,7 @@ describe("usePullRequestReview", () => {
   it("rejects stale history from before a retained-window replacement", async () => {
     const staleHistory = deferred<PullRequestReviewThread>()
     const signal = new AbortController().signal
-    const target: { current: PullRequestReviewThread | null } = {
+    const target: PullRequestReviewThreadRef = {
       current: {
         events: [threadEvent(1)],
         hasEarlier: false,
@@ -686,7 +690,7 @@ describe("usePullRequestReview", () => {
 
   it("keeps the newer of two equal-generation replacement tails", () => {
     const signal = new AbortController().signal
-    const target: { current: PullRequestReviewThread | null } = {
+    const target: PullRequestReviewThreadRef = {
       current: {
         events: [threadEvent(1)],
         hasEarlier: false,
@@ -743,7 +747,7 @@ describe("usePullRequestReview", () => {
 
   it("preserves loaded history when a newer replacement tail overlaps it", () => {
     const signal = new AbortController().signal
-    const target: { current: PullRequestReviewThread | null } = {
+    const target: PullRequestReviewThreadRef = {
       current: {
         events: [threadEvent(99), threadEvent(100)],
         hasEarlier: true,
@@ -803,7 +807,7 @@ describe("usePullRequestReview", () => {
   it("publishes merged history after an older refresh snapshot resolves", async () => {
     const live = deferred<PullRequestReviewThread>()
     const history = deferred<PullRequestReviewThread>()
-    const target: { current: PullRequestReviewThread | null } = { current: null }
+    const target: PullRequestReviewThreadRef = { current: null }
     const signal = new AbortController().signal
     const liveInstall = live.promise.then((thread) => installNewestThread(target, thread, signal))
     const historyInstall = history.promise.then((thread) => installNewestThread(target, thread, signal))

@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import type * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
@@ -32,13 +33,14 @@ export interface AlreadyExistsOptions {
   readonly recordKey: string
 }
 
-const isUniqueViolation = (error: unknown): error is SqlError.SqlError =>
+const isUniqueViolation: Predicate.Refinement<unknown, SqlError.SqlError> = (error): error is SqlError.SqlError =>
   SqlError.isSqlError(error) && error.reason._tag === "UniqueViolation"
 
 type PersistenceInfrastructureError = SqlError.SqlError | Schema.SchemaError
 
-const isPersistenceInfrastructureError = (error: unknown): error is PersistenceInfrastructureError =>
-  SqlError.isSqlError(error) || Schema.isSchemaError(error)
+const isPersistenceInfrastructureError: Predicate.Refinement<unknown, PersistenceInfrastructureError> = (
+  error
+): error is PersistenceInfrastructureError => SqlError.isSqlError(error) || Schema.isSchemaError(error)
 
 /** Preserve operational SQL failures while classifying duplicate identities. */
 export const mapAlreadyExists =

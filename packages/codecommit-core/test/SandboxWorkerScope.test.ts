@@ -1,6 +1,6 @@
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Ref } from "effect"
+import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
@@ -295,7 +295,7 @@ describe("SandboxWorkerScope", () => {
         status: "error",
         error: "Symbol(hostile message)"
       })
-      expect(typeof row?.error).toBe("string")
+      expect(Predicate.isString(row?.error)).toBe(true)
     }))
 
   it.effect("interrupts the production sandbox worker when its service layer closes", () =>

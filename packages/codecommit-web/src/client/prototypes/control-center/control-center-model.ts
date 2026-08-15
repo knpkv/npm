@@ -56,7 +56,7 @@ function getItem<T>(items: ReadonlyArray<T>, index: number): T {
   return item
 }
 
-export const traceDetails: Readonly<Record<TraceId, TraceDetail>> = {
+export const traceDetails = {
   ticket: {
     type: "Jira ticket",
     title: "OPS-412",
@@ -174,7 +174,7 @@ export const traceDetails: Readonly<Record<TraceId, TraceDetail>> = {
     ]],
     activity: ["30m gap auto-filled after approval", "Entries linked to OPS-412", "Release roll-up recalculated"]
   }
-}
+} satisfies Readonly<Record<TraceId, TraceDetail>>
 
 export const releaseTickets: NonEmptyReadonlyArray<ReleaseTicket> = [
   { key: "OPS-412", title: "Production access approval", status: "Ready · approval missing", tone: "warning" },

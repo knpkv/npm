@@ -16,7 +16,7 @@ class GenerateContractError extends Data.TaggedError("GenerateContractError")<{
   readonly reason: string
 }> {}
 
-const PackageJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+const PackageJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json))
 
 const listFiles: (
   fs: FileSystem.FileSystem,

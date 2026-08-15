@@ -16,15 +16,15 @@ type AtlassianProviderId = Extract<ProviderId, "jira" | "confluence">
 /** Canonical credential store for OAuth grants created by Control Center. */
 export const CONTROL_CENTER_AUTH_STORE_NAME = "control-center"
 
-const legacyProfileStores: Readonly<Record<AtlassianProviderId, string>> = {
+const legacyProfileStores = {
   jira: "jira-cli",
   confluence: "confluence-to-markdown"
-}
+} satisfies Readonly<Record<AtlassianProviderId, string>>
 
-const requiredScopes: Readonly<Record<AtlassianProviderId, ReadonlyArray<string>>> = {
+const requiredScopes = {
   jira: JIRA_PROPOSAL_REQUIRED_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
-}
+} satisfies Readonly<Record<AtlassianProviderId, ReadonlyArray<string>>>
 
 const providers: ReadonlyArray<AtlassianProviderId> = ["jira", "confluence"]
 

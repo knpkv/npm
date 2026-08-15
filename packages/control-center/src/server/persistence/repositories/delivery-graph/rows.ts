@@ -164,7 +164,7 @@ export const edgeJson = Schema.fromJsonString(Schema.Struct({
 
 export const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
 
-export const decodeRows = <SchemaType extends Schema.Top>(schema: SchemaType, rows: unknown) =>
+export const decodeRows = <SchemaType extends Schema.Top, UnparsedInput>(schema: SchemaType, rows: UnparsedInput) =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows)
 
 export const graphRecordError = (

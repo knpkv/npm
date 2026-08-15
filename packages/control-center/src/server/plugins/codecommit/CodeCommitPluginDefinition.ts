@@ -151,10 +151,10 @@ const descriptor = {
 /** Current persisted descriptor snapshot used by first-party compatibility checks. @internal */
 export const codeCommitPluginDescriptor = descriptor
 
-const output = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const output = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError(() =>
@@ -469,7 +469,7 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
 
 const actionImpact = (
   actionKind: CodeCommitActionKind
-): { readonly level: "medium"; readonly summary: string } => ({
+) => ({
   level: "medium",
   summary: actionKind === "approve" || actionKind === "revoke-approval"
     ? "Changes the signed-in AWS identity's approval state"
@@ -510,8 +510,8 @@ const reviewRequestContent = (
   }\n\nRequested reviewers:\n${reviewers}`
 }
 
-const decodeNormalizedActionPayload = (
-  value: unknown
+const decodeNormalizedActionPayload = <UnparsedInput>(
+  value: UnparsedInput
 ): Effect.Effect<CodeCommitActionPayload, PluginConfigurationFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(CodeCommitActionPayload))(value).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
@@ -533,8 +533,8 @@ const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientReque
     sourceCommit: pullRequest.sourceCommit,
     destinationCommit: pullRequest.destinationCommit,
     content,
-    ...(commentId === undefined ? {} : { commentId }),
-    ...(location === undefined ? {} : { location })
+    ...(!(commentId === undefined) && { commentId }),
+    ...(!(location === undefined) && { location })
   }).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
     Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
@@ -574,7 +574,7 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         destinationCommit: pullRequest.destinationCommit,
         destinationReference: pullRequest.destinationReference,
         content: decoded.content,
-        ...(decoded.location === undefined ? {} : { location: decoded.location }),
+        ...(!(decoded.location === undefined) && { location: decoded.location }),
         clientRequestToken: yield* commentClientRequestToken(
           actionKind,
           decoded.content,
@@ -781,7 +781,7 @@ const actionFromPayload = (
         target,
         content: payload.content,
         clientRequestToken: payload.clientRequestToken,
-        ...(payload.location === undefined ? {} : { location: payload.location })
+        ...(!(payload.location === undefined) && { location: payload.location })
       }
     case "update-comment":
     case "reply-comment":

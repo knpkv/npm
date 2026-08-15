@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import { execFile } from "node:child_process"
 import { describe, expect, it } from "vitest"
 
@@ -25,7 +26,7 @@ const runCodecommit = (args: ReadonlyArray<string>): Promise<CliResult> =>
         timeout: 10_000
       },
       (error, stdout, stderr) => {
-        const code = typeof error?.code === "number" ? error.code : error ? 1 : 0
+        const code = Predicate.isNumber(error?.code) ? error.code : error ? 1 : 0
         resolve({ code, stderr, stdout })
       }
     )

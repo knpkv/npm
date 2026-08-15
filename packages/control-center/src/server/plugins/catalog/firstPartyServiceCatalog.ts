@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import {
@@ -35,7 +36,7 @@ const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string |
   const authMode = configured.get("authMode")
   if (authMode === "oauth") {
     const profileId = configured.get("oauthProfileId")
-    return typeof profileId === "string" &&
+    return Predicate.isString(profileId) &&
       profileId.length > 0 &&
       !configured.has("email") &&
       !configured.has("apiToken")
@@ -43,7 +44,7 @@ const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string |
   const apiToken = configured.get("apiToken")
   return authMode === "api-token" &&
     Schema.is(AtlassianBasicAuthEmail)(configured.get("email")) &&
-    typeof apiToken === "string" &&
+    Predicate.isString(apiToken) &&
     apiToken.length > 0 &&
     !configured.has("oauthProfileId")
 }
@@ -277,10 +278,10 @@ const clockifyFields = [
   })
 ]
 
-const entry = (
+const entry = <UnparsedInput>(
   identity: FirstPartyServiceIdentity,
   configurationFields: ReadonlyArray<PluginServiceCatalogField>,
-  rawDescriptor: unknown,
+  rawDescriptor: UnparsedInput,
   validatesSetup: FirstPartyServiceCatalogEntry["validatesSetup"]
 ): FirstPartyServiceCatalogEntry => ({
   metadata: { ...identity, configurationFields },

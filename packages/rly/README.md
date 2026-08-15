@@ -81,7 +81,7 @@ types.
 import { Avatar, Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 
 export const Decision = () => (
-  <Surface padding="spacious" shape="grouped">
+  <Surface padding="spacious" form="grouped">
     <Text as="h2" variant="section-title">
       Ready for review
     </Text>

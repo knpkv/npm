@@ -10,6 +10,19 @@ export interface ApplicationLogForbiddenValue {
   readonly value: string
 }
 
+interface ConsoleSerializableObject {
+  readonly [key: string]: ConsoleSerializableValue
+}
+
+type ConsoleSerializableValue =
+  | boolean
+  | number
+  | string
+  | null
+  | undefined
+  | ReadonlyArray<ConsoleSerializableValue>
+  | ConsoleSerializableObject
+
 const logEntriesExposeValue = (entries: ReadonlyArray<string>, value: string): boolean =>
   value.length > 0 && entries.some((entry) => entry.includes(value))
 
@@ -18,21 +31,22 @@ const serializeConsoleArgument = async (handle: JSHandle): Promise<string> =>
     const maxDepth = 5
     const maxEntries = 50
     const maxStringLength = 16_000
-    if (typeof value === "string") return JSON.stringify(value)
+    if (Object.prototype.toString.call(value) === "[object String]") return JSON.stringify(String(value))
     const seen = new WeakSet<object>()
-    const visit = (candidate: unknown, depth: number): unknown => {
-      if (typeof candidate === "string") return candidate.slice(0, maxStringLength)
-      if (
-        candidate === null ||
-        typeof candidate === "boolean" ||
-        typeof candidate === "number" ||
-        typeof candidate === "undefined"
-      ) {
-        return candidate
-      }
-      if (typeof candidate === "bigint" || typeof candidate === "symbol" || typeof candidate === "function") {
-        return `[${typeof candidate}]`
-      }
+    const isReference = <UnparsedInput>(candidate: UnparsedInput): candidate is UnparsedInput & object =>
+      candidate !== null && candidate !== undefined && Object(candidate) === candidate
+    const visit = <UnparsedInput>(candidate: UnparsedInput, depth: number): ConsoleSerializableValue => {
+      const runtimeTag = Object.prototype.toString.call(candidate)
+      if (runtimeTag === "[object String]") return String(candidate).slice(0, maxStringLength)
+      if (candidate === null) return null
+      if (candidate === true) return true
+      if (candidate === false) return false
+      if (runtimeTag === "[object Number]") return Number(candidate)
+      if (candidate === undefined) return undefined
+      if (runtimeTag === "[object BigInt]") return "[bigint]"
+      if (runtimeTag === "[object Symbol]") return "[symbol]"
+      if (runtimeTag.endsWith("Function]")) return "[function]"
+      if (!isReference(candidate)) return `[${runtimeTag.slice(8, -1).toLowerCase()}]`
       if (depth >= maxDepth) return "[maximum depth]"
       if (seen.has(candidate)) return "[circular]"
       seen.add(candidate)
@@ -44,7 +58,7 @@ const serializeConsoleArgument = async (handle: JSHandle): Promise<string> =>
             .map(([, descriptor]) => "value" in descriptor ? visit(descriptor.value, depth + 1) : "[accessor]")
         }
         return Object.fromEntries(
-          descriptors.map(([key, descriptor]) => [
+          descriptors.map(([key, descriptor]): readonly [string, ConsoleSerializableValue] => [
             key.slice(0, 200),
             "value" in descriptor ? visit(descriptor.value, depth + 1) : "[accessor]"
           ])

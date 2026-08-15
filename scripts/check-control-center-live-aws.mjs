@@ -51,7 +51,7 @@ const objectKeys = (value) => Object.keys(value).toSorted()
 
 const runDigest = (value) => createHash("sha256").update(value).digest("hex")
 
-const assertStepShape = (step, expectedKeys) => {
+const assertStepContract = (step, expectedKeys) => {
   assert.deepEqual(objectKeys(step), expectedKeys.toSorted())
 }
 
@@ -170,8 +170,8 @@ const validateProbeWorkflow = (workflow) => {
     ["env", "name", "run", "shell"],
     ["env", "name", "run", "shell"]
   ]
-  prepareSteps.forEach((step, index) => assertStepShape(step, prepareStepKeys[index]))
-  protectedSteps.forEach((step, index) => assertStepShape(step, protectedStepKeys[index]))
+  prepareSteps.forEach((step, index) => assertStepContract(step, prepareStepKeys[index]))
+  protectedSteps.forEach((step, index) => assertStepContract(step, protectedStepKeys[index]))
 
   assert.deepEqual(
     prepareSteps.map(({ run: _, ...step }) => step),

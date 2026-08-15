@@ -155,10 +155,10 @@ const reviewTask = {
 
 const releaseChatTask = { _tag: "release-chat" } satisfies EnqueueAgentJobTask
 
-const threadEvent = (
+const threadEvent = <UnparsedInput>(
   eventSequence: number,
   eventKind: AgentThreadEvent["eventKind"],
-  payload: unknown,
+  payload: UnparsedInput,
   options: {
     readonly jobId?: typeof JobId.Type
     readonly task?: EnqueueAgentJobTask
@@ -170,7 +170,7 @@ const threadEvent = (
     eventSequence: AgentEventCursor.make(eventSequence),
     jobId: options.jobId ?? JOB_ID,
     attemptSequence: null,
-    ...(options.task === undefined ? {} : { task: options.task }),
+    ...(!(options.task === undefined) && { task: options.task }),
     eventKind,
     payload,
     occurredAt: STARTED_AT

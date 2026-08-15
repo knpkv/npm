@@ -59,8 +59,8 @@ export const PersistenceConfig = Schema.Struct({
 export type PersistenceConfig = typeof PersistenceConfig.Type
 
 /** Decode untrusted persistence configuration without exposing rejected values. */
-export const decodePersistenceConfig = Effect.fn("decodePersistenceConfig")(function*(
-  input: unknown
+export const decodePersistenceConfig = Effect.fn("decodePersistenceConfig")(function*<UnparsedInput>(
+  input: UnparsedInput
 ): Effect.fn.Return<PersistenceConfig, PersistenceConfigError> {
   return yield* Schema.decodeUnknownEffect(PersistenceConfig)(input).pipe(
     Effect.mapError(

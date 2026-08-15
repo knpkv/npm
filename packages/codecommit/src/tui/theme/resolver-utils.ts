@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 /**
  * Pure helpers for theme resolution.
  *
@@ -34,7 +35,7 @@ export const rgbaToHex = (rgba: RGBALike): string => {
   return `#${r}${g}${b}`
 }
 
-export const isThemeJson = (json: unknown): json is ThemeJson => {
-  if (typeof json !== "object" || json === null) return false
+export const isThemeJson = <UnparsedInput>(json: UnparsedInput): json is UnparsedInput & ThemeJson => {
+  if (!Predicate.isObjectOrArray(json) || json === null) return false
   return "theme" in json
 }

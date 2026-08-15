@@ -14,7 +14,7 @@ const SurfaceGallery = () => (
       Structural surfaces
     </Text>
     <div style={gridStyle}>
-      <Surface data-surface-padding="none" data-surface-shape="card" data-surface-tone="primary" padding="none">
+      <Surface data-surface-padding="none" data-surface-form="card" data-surface-tone="primary" padding="none">
         <div style={callerSpacingStyle}>
           <Text as="h2" variant="card-title">
             Primary card
@@ -24,10 +24,10 @@ const SurfaceGallery = () => (
       </Surface>
       <Surface
         data-surface-padding="compact"
-        data-surface-shape="grouped"
+        data-surface-form="grouped"
         data-surface-tone="secondary"
         padding="compact"
-        shape="grouped"
+        form="grouped"
         tone="secondary"
       >
         <div style={contentStyle}>
@@ -66,7 +66,7 @@ export const Gallery: Story = {
     await expect(canvas.getAllByRole("heading")).toHaveLength(5)
     await expect(canvasElement.querySelectorAll("[data-surface-padding]")).toHaveLength(4)
     await expect(canvasElement.querySelectorAll("[data-surface-tone]")).toHaveLength(3)
-    await expect(canvasElement.querySelectorAll("[data-surface-shape]")).toHaveLength(2)
+    await expect(canvasElement.querySelectorAll("[data-surface-form]")).toHaveLength(2)
   },
   render: () => <SurfaceGallery />
 }

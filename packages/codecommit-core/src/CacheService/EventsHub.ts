@@ -57,11 +57,11 @@ const makeEventsHub = Effect.gen(function*() {
   return { publish, batch, subscribe }
 })
 
-export interface EventsHubShape extends Success<typeof makeEventsHub> {}
+export interface EventsHubContract extends Success<typeof makeEventsHub> {}
 
 export class EventsHub extends Context.Service<
   EventsHub,
-  EventsHubShape
+  EventsHubContract
 >()("EventsHub") {
   static readonly Default = Layer.effect(EventsHub, makeEventsHub)
 }

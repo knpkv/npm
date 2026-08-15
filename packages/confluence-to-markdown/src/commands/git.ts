@@ -60,8 +60,8 @@ export const logCommand = Command.make(
       const opts = {
         n: limit,
         oneline,
-        ...(Option.isSome(since) ? { since: since.value } : {}),
-        ...(Option.isSome(file) ? { file: file.value } : {})
+        ...((Option.isSome(since)) && { since: since.value }),
+        ...((Option.isSome(file)) && { file: file.value })
       }
       const commits = yield* git.log(opts)
       if (commits.length === 0) {
@@ -101,8 +101,8 @@ export const diffCommand = Command.make(
       const git = yield* GitService
       const opts = {
         staged,
-        ...(Option.isSome(commit) ? { commit: commit.value } : {}),
-        ...(Option.isSome(file) ? { file: file.value } : {})
+        ...((Option.isSome(commit)) && { commit: commit.value }),
+        ...((Option.isSome(file)) && { file: file.value })
       }
       const diff = yield* git.diff(opts)
       if (diff === "") {

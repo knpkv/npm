@@ -30,7 +30,7 @@ import {
   serviceUnavailableApiError
 } from "./ErrorMapping.js"
 
-const requestShape = (request: HttpServerRequest.HttpServerRequest) => ({
+const requestContract = (request: HttpServerRequest.HttpServerRequest) => ({
   method: request.method,
   host: request.headers.host ?? "",
   origin: request.headers.origin ?? null,
@@ -81,7 +81,7 @@ export const isAuthenticatedReadTransportEndpoint = (
 export const authorizePairingRequest = Effect.fn("ApiMiddleware.authorizePairing")(function*() {
   const config = yield* ApiBindConfiguration
   const request = yield* HttpServerRequest.HttpServerRequest
-  yield* authorizeRequest(config, requestShape(request), "public-pair").pipe(
+  yield* authorizeRequest(config, requestContract(request), "public-pair").pipe(
     Effect.catchTag("RequestSecurityError", mapPairingSecurityFailure)
   )
 })
@@ -105,7 +105,7 @@ export const sessionCookieAuthLayer = Layer.effect(
               yield* authorizeRead({
                 capability: capabilityFor(group.identifier, endpoint.identifier),
                 config,
-                request: requestShape(request)
+                request: requestContract(request)
               }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
             }
             const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
@@ -143,7 +143,7 @@ export const mutationCsrfLayer = Layer.effect(
                 capability: capabilityFor(group.identifier, endpoint.identifier),
                 config,
                 request: {
-                  ...requestShape(request),
+                  ...requestContract(request),
                   csrfToken: Redacted.value(credential)
                 }
               },

@@ -15,7 +15,7 @@ const nodeId = (suffix: string) => GraphNodeId.make(`01890f6f-6d6a-7cc0-98d2-${s
 
 const entity = (
   index: number,
-  projection: Readonly<Record<string, unknown>>,
+  projection: Readonly<Record<string, Schema.Json>>,
   releaseIds: ReadonlyArray<ReleaseId> = []
 ): RelationshipInferenceEntity => ({
   nodeId: nodeId(String(100 + index)),

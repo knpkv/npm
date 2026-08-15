@@ -26,8 +26,8 @@ export const protectPartialFixtureAllocation = <A, E, R, E2, R2>(
   })
 
 /** Preserve both the initiating setup failure and any failure raised while cleaning it up. */
-export const disposeFailedFixtureSetup = async (
-  setupFailure: unknown,
+export const disposeFailedFixtureSetup = async <UnparsedInput>(
+  setupFailure: UnparsedInput,
   dispose: () => Promise<void>
 ): Promise<never> => {
   try {

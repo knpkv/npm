@@ -16,7 +16,7 @@ import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type {
   CachedPullRequest,
-  PullRequestRepoShape,
+  PullRequestRepoContract,
   UpsertInput
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
@@ -62,7 +62,7 @@ export interface RefreshSinglePRResult {
 export type RefreshSinglePRError = AwsClientError | RefreshError
 
 /** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
-const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: string) =>
+const resolveAccountFromCache = (prRepo: PullRequestRepoContract, awsAccountId: string) =>
   Effect.gen(function*() {
     // Check other cached PRs from the same AWS account
     const allCached = yield* prRepo.findAll().pipe(

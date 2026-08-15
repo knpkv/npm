@@ -94,9 +94,11 @@ const TokenStorageLive = Layer.mergeAll(
   HomeDirectoryLive
 )
 
-const parseJsonOrNull = (content: string): unknown | null => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parseJsonOrNull = (content: string): Schema.Json | null => {
   try {
-    return JSON.parse(content)
+    return decodeJson(content)
   } catch {
     return null
   }

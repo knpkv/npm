@@ -382,10 +382,10 @@ const unsupported = (capabilityId: "action.cancel") =>
     diagnosticCode: "codepipeline-read-adapter-capability-not-offered"
   })
 
-const decodeOutput = <Codec extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeOutput = <Codec extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: Codec,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<Codec["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError(() =>
@@ -483,10 +483,10 @@ const executionRevision = (snapshot: CodePipelineExecutionSnapshot): string =>
       : formatDate(snapshot.execution.updatedAt)
   }`
 
-const impactFor = (
+const impactFor = <UnparsedInput>(
   kind: CodePipelineActionKind,
-  payload: unknown
-): { readonly level: "low" | "medium" | "high" | "critical"; readonly summary: string } => {
+  payload: UnparsedInput
+) => {
   switch (kind) {
     case "pipeline.start":
       return { level: "high", summary: "Starts a new execution at explicit source revisions" }

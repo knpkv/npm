@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
 import { PlatformError, SystemError } from "effect/PlatformError"
+import * as Predicate from "effect/Predicate"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -119,8 +120,8 @@ describe("model", () => {
         expect(() => Object.assign(command.args, { 0: "--dangerously-skip-permissions" })).toThrow()
         expect(() => Object.assign(command.options, { extendEnv: true })).toThrow()
         expect(() => Object.assign(environment ?? {}, { AWS_SECRET_ACCESS_KEY: "injected" })).toThrow()
-        expect(typeof stdin === "object" && stdin !== null && Object.isFrozen(stdin)).toBe(true)
-        if (typeof stdin === "object" && stdin !== null && "endOnDone" in stdin) {
+        expect(Predicate.isObjectOrArray(stdin) && stdin !== null && Object.isFrozen(stdin)).toBe(true)
+        if (Predicate.isObjectOrArray(stdin) && stdin !== null && "endOnDone" in stdin) {
           expect(stdin.endOnDone).toBe(true)
           expect(() => Object.assign(stdin, { endOnDone: false })).toThrow()
           expect(stdin.endOnDone).toBe(true)
@@ -193,7 +194,7 @@ describe("model", () => {
       const command = calls[0]
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         const stdin = command.options.stdin
-        if (typeof stdin === "object" && stdin !== null && "stream" in stdin && Stream.isStream(stdin.stream)) {
+        if (Predicate.isObjectOrArray(stdin) && stdin !== null && "stream" in stdin && Stream.isStream(stdin.stream)) {
           const prompt = yield* stdin.stream.pipe(Stream.decodeText(), Stream.mkString)
           expect(prompt).toContain("Checked the release constraints")
           expect(prompt).toContain("Continue the review")

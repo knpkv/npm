@@ -8,6 +8,7 @@ import { submitBrowserReleasePublication } from "../releases/releaseAgentTranspo
 import type { WorkspaceConfluencePagePresentation } from "./presentWorkspaceConfluencePage.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
 import styles from "./WorkspaceConfluencePageDetails.module.css"
+import * as Predicate from "effect/Predicate"
 
 type EditorState =
   | { readonly _tag: "idle" }
@@ -23,7 +24,7 @@ const isCheckboxInput = (node: Element): node is Element & { readonly checked: b
   "type" in node &&
   node.type === "checkbox" &&
   "checked" in node &&
-  typeof node.checked === "boolean"
+  Predicate.isBoolean(node.checked)
 
 const inlineMarkdown = (node: Node): string => {
   if (node.nodeType === Node.TEXT_NODE) return markdownEscape(node.textContent ?? "")

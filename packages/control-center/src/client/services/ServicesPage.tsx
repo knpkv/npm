@@ -183,7 +183,7 @@ const ConnectionCard = ({
   const isChanging = enablementState === "changing"
   const status = connectionStatus(connection, testState)
   return (
-    <Surface as="article" className={styles.card} padding="default" shape="grouped">
+    <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
           <ServiceMark service={connection.providerId} size="compact" />
@@ -400,7 +400,7 @@ const CatalogCard = ({
   const isAws = catalog.providerId === "codecommit" || catalog.providerId === "codepipeline"
   const isAtlassian = catalog.providerId === "jira" || catalog.providerId === "confluence"
   return (
-    <Surface as="article" className={styles.card} padding="default" shape="grouped">
+    <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
           <ServiceMark service={catalog.providerId} size="compact" />
@@ -481,7 +481,7 @@ const ServicePreviewCard = ({
   readonly statusLabel?: string
   readonly statusTone?: "critical" | "neutral" | "positive" | "progress"
 }): ReactElement => (
-  <Surface as="article" className={styles.card} padding="default" shape="grouped">
+  <Surface as="article" className={styles.card} padding="default" form="grouped">
     <div className={styles.cardHeading}>
       <div className={styles.connectionIdentity}>
         <ServiceMark service={service.providerId} size="compact" />
@@ -1375,7 +1375,7 @@ export const ServicesPage = ({
                     const discover = transport.discoverAwsResources
                     if (discover === undefined)
                       return Promise.reject(new Error("AWS resource discovery is unavailable"))
-                    return discover(request, signal).catch((failure: unknown) => {
+                    return discover(request, signal).catch(<UnparsedInput,>(failure: UnparsedInput) => {
                       if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) {
                         invalidateSession(sessionKey)
                       }

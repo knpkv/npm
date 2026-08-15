@@ -6,7 +6,7 @@
 
 export {
   AttachmentService,
-  type AttachmentServiceShape,
+  type AttachmentServiceContract,
   layer as AttachmentServiceLayer,
   type UploadAttachmentInput
 } from "./AttachmentService.js"
@@ -15,7 +15,7 @@ export {
   type Comment,
   type Issue,
   IssueService,
-  type IssueServiceShape,
+  type IssueServiceContract,
   layer as IssueServiceLayer,
   type SearchOptions,
   type SearchResult,
@@ -29,7 +29,7 @@ export {
   type LoginOptions
 } from "./JiraAuth.js"
 export * from "./JiraCliError.js"
-export { layer as MarkdownWriterLayer, MarkdownWriter, type MarkdownWriterShape } from "./MarkdownWriter.js"
+export { layer as MarkdownWriterLayer, MarkdownWriter, type MarkdownWriterContract } from "./MarkdownWriter.js"
 export {
   type DesiredRelatedWork,
   layer as VersionServiceLayer,
@@ -38,5 +38,5 @@ export {
   type RelatedWorkSyncPlan,
   type Version,
   VersionService,
-  type VersionServiceShape
+  type VersionServiceContract
 } from "./VersionService.js"

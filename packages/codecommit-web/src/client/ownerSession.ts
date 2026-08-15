@@ -12,7 +12,13 @@ export type OwnerSessionBootstrapStatus =
 const ready: OwnerSessionBootstrapStatus = { _tag: "Ready" }
 const failed = (message: string): OwnerSessionBootstrapStatus => ({ _tag: "Failed", message })
 
-const browserAvailable = (): boolean => typeof window !== "undefined"
+const browserAvailable = (): boolean => {
+  try {
+    return !Predicate.isUndefined(window)
+  } catch {
+    return false
+  }
+}
 
 export const readOwnerCsrfToken = (): string | null => {
   if (!browserAvailable()) return null

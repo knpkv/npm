@@ -37,6 +37,7 @@ import {
 } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const RELEASE_SCHEMA_VERSION = 1
 
@@ -351,13 +352,13 @@ const makeReleaseRepository = Effect.gen(function*() {
   })
 
   const findReleaseHeadRows = ({ releaseId, workspaceId }: typeof ReleaseKey.Type) =>
-    sql<Record<string, unknown>>`SELECT current_revision AS revision, created_at AS createdAt
+    sql<SqlRow>`SELECT current_revision AS revision, created_at AS createdAt
       FROM releases
       WHERE workspace_id = ${workspaceId}
         AND release_id = ${releaseId}`
 
   const findRevisionRows = ({ releaseId, workspaceId }: typeof ReleaseKey.Type) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       revision,
       snapshot_json AS snapshotJson,
       snapshot_digest AS snapshotDigest,
@@ -368,7 +369,7 @@ const makeReleaseRepository = Effect.gen(function*() {
     ORDER BY revision DESC`
 
   const listHeadRows = (workspaceId: WorkspaceId, limit: ReleaseListLimit) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       release_id AS releaseId,
       current_revision AS revision,
       updated_at AS updatedAt

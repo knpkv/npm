@@ -1,3 +1,4 @@
+import * as Predicate from "./predicates.js"
 /** Preserve literal variant keys without type assertions. */
 export const defineVariants = <const Variants>(variants: Variants): Variants => variants
 
@@ -10,7 +11,7 @@ export const cssClass = (sheet: Readonly<Record<string, string>>, name: string):
 
 /** Join owned component classes with an optional consumer class. */
 export const classNames = (...values: ReadonlyArray<string | undefined | false>): string =>
-  values.filter((value): value is string => typeof value === "string" && value.length > 0).join(" ")
+  values.filter((value): value is string => Predicate.isString(value) && value.length > 0).join(" ")
 
 /** Enforce runtime text invariants that TypeScript cannot express. */
 export const requireText = (value: string, label: string): string => {

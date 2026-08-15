@@ -347,49 +347,33 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     options.releaseAgent === undefined || options.releaseAgent === null
       ? {}
       : {
-        ...(options.releaseAgent.enabledProviders.includes("codex")
-          ? {
-            codex: {
-              cwd: options.releaseAgent.cwd,
-              ...(options.releaseAgent.codexExecutable === undefined
-                ? {}
-                : { executable: options.releaseAgent.codexExecutable }),
-              ...(options.releaseAgent.codexModel === undefined
-                ? {}
-                : { model: options.releaseAgent.codexModel })
-            }
+        ...((options.releaseAgent.enabledProviders.includes("codex")) && {
+          codex: {
+            cwd: options.releaseAgent.cwd,
+            ...(!(options.releaseAgent.codexExecutable === undefined) &&
+              { executable: options.releaseAgent.codexExecutable }),
+            ...(!(options.releaseAgent.codexModel === undefined) && { model: options.releaseAgent.codexModel })
           }
-          : {}),
-        ...(options.releaseAgent.enabledProviders.includes("claude")
-          ? {
-            claude: {
-              cwd: options.releaseAgent.cwd,
-              ...(options.releaseAgent.claudeExecutable === undefined
-                ? {}
-                : { executable: options.releaseAgent.claudeExecutable }),
-              ...(options.releaseAgent.claudeModel === undefined
-                ? {}
-                : { model: options.releaseAgent.claudeModel })
-            }
+        }),
+        ...((options.releaseAgent.enabledProviders.includes("claude")) && {
+          claude: {
+            cwd: options.releaseAgent.cwd,
+            ...(!(options.releaseAgent.claudeExecutable === undefined) &&
+              { executable: options.releaseAgent.claudeExecutable }),
+            ...(!(options.releaseAgent.claudeModel === undefined) && { model: options.releaseAgent.claudeModel })
           }
-          : {}),
-        ...(options.releaseAgent.openAiCompatible === undefined
-          ? {}
-          : { openAiCompatible: options.releaseAgent.openAiCompatible }),
-        ...(options.prReviewWorker === undefined || options.prReviewWorker === null
-          ? {}
-          : {
-            prReviewEnabled: true,
-            ...(options.prReviewWorker.codexExecutable === undefined
-              ? {}
-              : { prReviewCodexExecutable: options.prReviewWorker.codexExecutable }),
-            ...(options.prReviewWorker.claudeExecutable === undefined
-              ? {}
-              : { prReviewClaudeExecutable: options.prReviewWorker.claudeExecutable }),
-            ...(options.prReviewWorker.reviewBudgetMillis === undefined
-              ? {}
-              : { prReviewBudgetMillis: options.prReviewWorker.reviewBudgetMillis })
-          })
+        }),
+        ...(!(options.releaseAgent.openAiCompatible === undefined) &&
+          { openAiCompatible: options.releaseAgent.openAiCompatible }),
+        ...(!(options.prReviewWorker === undefined || options.prReviewWorker === null) && {
+          prReviewEnabled: true,
+          ...(!(options.prReviewWorker.codexExecutable === undefined) &&
+            { prReviewCodexExecutable: options.prReviewWorker.codexExecutable }),
+          ...(!(options.prReviewWorker.claudeExecutable === undefined) &&
+            { prReviewClaudeExecutable: options.prReviewWorker.claudeExecutable }),
+          ...(!(options.prReviewWorker.reviewBudgetMillis === undefined) &&
+            { prReviewBudgetMillis: options.prReviewWorker.reviewBudgetMillis })
+        })
       }
   )
   const releaseAgentWorkerWorkspaceId = options.releaseAgent === undefined ||
@@ -543,9 +527,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       const sourceWorkspace = configured.sourceWorkspace === undefined
         ? prReviewSourceWorkspaceLayer({
           workspaceRoot: configured.workspaceRoot,
-          ...(configured.maximumSourceDuration === undefined
-            ? {}
-            : { maximumDuration: configured.maximumSourceDuration })
+          ...(!(configured.maximumSourceDuration === undefined) &&
+            { maximumDuration: configured.maximumSourceDuration })
         }).pipe(
           Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
           Layer.provide(
@@ -557,11 +540,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
         : Layer.succeed(PrReviewSourceWorkspace, configured.sourceWorkspace)
       const sandboxes = configured.sandboxSessions === undefined
         ? prReviewSandboxSessionsLayer({
-          ...(configured.sbxExecutable === undefined ? {} : { executable: configured.sbxExecutable }),
-          ...(configured.sbxTemplate === undefined ? {} : { template: configured.sbxTemplate }),
-          ...(configured.maximumSandboxDurationMillis === undefined
-            ? {}
-            : { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
+          ...(!(configured.sbxExecutable === undefined) && { executable: configured.sbxExecutable }),
+          ...(!(configured.sbxTemplate === undefined) && { template: configured.sbxTemplate }),
+          ...(!(configured.maximumSandboxDurationMillis === undefined) &&
+            { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
         }).pipe(Layer.provide(sourceWorkspace))
           .pipe(Layer.provide(reviewCommandArtifactRepository))
         : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
@@ -577,12 +559,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       )
       return prReviewWorkerStartupLayer({
         workspaceId: configured.workspaceId,
-        ...(configured.idlePollInterval === undefined
-          ? {}
-          : { idlePollInterval: configured.idlePollInterval }),
-        ...(configured.failurePollInterval === undefined
-          ? {}
-          : { failurePollInterval: configured.failurePollInterval })
+        ...(!(configured.idlePollInterval === undefined) && { idlePollInterval: configured.idlePollInterval }),
+        ...(!(configured.failurePollInterval === undefined) && { failurePollInterval: configured.failurePollInterval })
       }).pipe(
         Layer.provide(worker),
         Layer.provide(sandboxes),

@@ -11,7 +11,7 @@ import type * as Redacted from "effect/Redacted"
  *
  * @category Config
  */
-export interface ConfluenceApiConfigShape {
+export interface ConfluenceApiConfigContract {
   readonly baseUrl: string
   readonly auth:
     | { readonly type: "basic"; readonly email: string; readonly apiToken: Redacted.Redacted<string> }
@@ -39,6 +39,6 @@ export interface ConfluenceApiConfigShape {
  *
  * @category Config
  */
-export class ConfluenceApiConfig extends Context.Service<ConfluenceApiConfig, ConfluenceApiConfigShape>()(
+export class ConfluenceApiConfig extends Context.Service<ConfluenceApiConfig, ConfluenceApiConfigContract>()(
   "@knpkv/confluence-api-client/ConfluenceApiConfig"
 ) {}

@@ -54,7 +54,7 @@ const CodePipelineStateProviderOutput = Schema.Struct({
  */
 export const decodeCodePipelineStateProviderOutput = Effect.fn(
   "CodePipelineStateDecoder.decodeCodePipelineStateProviderOutput"
-)(function*(value: unknown) {
+)(function*<UnparsedInput>(value: UnparsedInput) {
   return yield* Schema.decodeUnknownEffect(Schema.toType(CodePipelineStateProviderOutput))(value).pipe(
     Effect.mapError(
       () =>

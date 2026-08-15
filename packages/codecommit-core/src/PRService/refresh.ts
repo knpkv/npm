@@ -22,12 +22,12 @@ import { calculateHealthScores } from "./refreshScore.js"
 const idleStatus: AppStatus = "idle"
 const errorStatus: AppStatus = "error"
 
-const refreshErrorMessage = (error: unknown): string =>
+const refreshErrorMessage = <UnparsedInput>(error: UnparsedInput): string =>
   Result.try(() => String(Predicate.isError(error) ? error.message : error) || "Unknown error").pipe(
     Result.getOrElse(() => "Unknown error")
   )
 
-const transitionToRefreshError = (state: PRState, error: unknown) =>
+const transitionToRefreshError = <UnparsedInput>(state: PRState, error: UnparsedInput) =>
   SubscriptionRef.update(state, (current) => ({
     ...current,
     status: errorStatus,

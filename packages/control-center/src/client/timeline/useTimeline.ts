@@ -50,13 +50,11 @@ export const browserTimelineTransport: TimelineTransport = {
           : yield* Schema.decodeUnknownEffect(UtcTimestamp)(`${filters.to}T23:59:59.999Z`)
         return yield* client.timeline.page({
           query: {
-            ...(filters.actorKind === "all" ? {} : { actor: filters.actorKind }),
-            ...(cursor === null
-              ? {}
-              : { beforeEventKey: cursor.eventKey, beforeOccurredAt: cursor.occurredAt }),
-            ...(from === undefined ? {} : { from }),
+            ...(!(filters.actorKind === "all") && { actor: filters.actorKind }),
+            ...(!(cursor === null) && { beforeEventKey: cursor.eventKey, beforeOccurredAt: cursor.occurredAt }),
+            ...(!(from === undefined) && { from }),
             limit: 50,
-            ...(to === undefined ? {} : { to })
+            ...(!(to === undefined) && { to })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -72,11 +70,7 @@ export const useTimeline = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: TimelineTransport = browserTimelineTransport
-): {
-  readonly loadMore: () => void
-  readonly retry: () => void
-  readonly state: TimelineState
-} => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<TimelineState>({ _tag: "idle" })
   const activeRequest = useRef<AbortController | null>(null)

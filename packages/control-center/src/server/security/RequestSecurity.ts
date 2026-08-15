@@ -34,7 +34,7 @@ export const CsrfToken = Schema.String.check(
 
 export type CsrfToken = typeof CsrfToken.Type
 
-const RequestShape = Schema.Struct({
+const RequestContract = Schema.Struct({
   method: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(16)),
   host: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(260)),
   origin: Schema.Union([Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(2_048)), Schema.Null]),
@@ -44,7 +44,7 @@ const RequestShape = Schema.Struct({
   remoteAddress: Schema.Union([Schema.String.check(Schema.isMaxLength(64)), Schema.Null])
 })
 
-export type RequestShape = typeof RequestShape.Type
+export type RequestContract = typeof RequestContract.Type
 
 export interface SessionCookiePolicy {
   readonly name: "cc_session"
@@ -88,8 +88,8 @@ const lowerHost = (value: string): string => value.toLowerCase()
 /** Forwarded headers are authoritative only from an exact trusted proxy address. */
 export const effectiveRequestAuthority = (
   config: BindConfig,
-  request: RequestShape
-): { readonly host: string; readonly protocol: "http" | "https" } => {
+  request: RequestContract
+) => {
   const trusted = request.remoteAddress !== null &&
     config.trustedProxyAddresses.some((address) => address === request.remoteAddress)
   const host = trusted && request.forwardedHost !== null ? request.forwardedHost : request.host
@@ -97,11 +97,11 @@ export const effectiveRequestAuthority = (
   return { host: lowerHost(host), protocol }
 }
 
-const authorizeRequestAuthority = Effect.fn("RequestSecurity.authorizeAuthority")(function*(
+const authorizeRequestAuthority = Effect.fn("RequestSecurity.authorizeAuthority")(function*<UnparsedInput>(
   config: BindConfig,
-  input: unknown
+  input: UnparsedInput
 ) {
-  const request = yield* Schema.decodeUnknownEffect(RequestShape)(input).pipe(
+  const request = yield* Schema.decodeUnknownEffect(RequestContract)(input).pipe(
     Effect.mapError(() => new RequestSecurityError({ reason: "invalid-request" }))
   )
   const trustedProxy = request.remoteAddress !== null &&
@@ -119,7 +119,7 @@ const authorizeRequestAuthority = Effect.fn("RequestSecurity.authorizeAuthority"
 
 const authorizeMutationOrigin = Effect.fn("RequestSecurity.authorizeMutationOrigin")(function*(
   config: BindConfig,
-  request: RequestShape
+  request: RequestContract
 ) {
   if (SAFE_METHODS.has(request.method.toUpperCase())) {
     return yield* new RequestSecurityError({ reason: "method-mismatch" })
@@ -131,9 +131,9 @@ const authorizeMutationOrigin = Effect.fn("RequestSecurity.authorizeMutationOrig
 })
 
 /** Authorize a public pairing mutation or an authenticated safe read. */
-export const authorizeRequest = Effect.fn("RequestSecurity.authorize")(function*(
+export const authorizeRequest = Effect.fn("RequestSecurity.authorize")(function*<UnparsedInput>(
   config: BindConfig,
-  input: unknown,
+  input: UnparsedInput,
   access: RequestAccess
 ) {
   const request = yield* authorizeRequestAuthority(config, input)

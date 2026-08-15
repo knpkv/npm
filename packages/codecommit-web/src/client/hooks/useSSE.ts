@@ -129,7 +129,7 @@ const normalizeNotifications = (
   notifications: NonNullable<typeof SsePayload.Type["notifications"]>
 ): NonNullable<AppState["notifications"]> => ({
   items: notifications.items,
-  ...(notifications.nextCursor !== undefined ? { nextCursor: notifications.nextCursor } : {})
+  ...((notifications.nextCursor !== undefined) && { nextCursor: notifications.nextCursor })
 })
 
 const toAppState = (payload: typeof SsePayload.Type): AppState => {
@@ -146,16 +146,15 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
     })),
     status: payload.status,
     pendingReviewCount: payload.pendingReviewCount,
-    ...(payload.statusDetail !== undefined ? { statusDetail: payload.statusDetail } : {}),
-    ...(payload.error !== undefined ? { error: payload.error } : {}),
-    ...(payload.lastUpdated !== undefined ? { lastUpdated: payload.lastUpdated } : {}),
-    ...(payload.currentUser !== undefined ? { currentUser: payload.currentUser } : {}),
-    ...(payload.unreadNotificationCount !== undefined
-      ? { unreadNotificationCount: payload.unreadNotificationCount }
-      : {}),
-    ...(notifications !== undefined ? { notifications } : {}),
-    ...(payload.sandboxes !== undefined ? { sandboxes: payload.sandboxes } : {}),
-    ...(payload.permissionPrompt !== undefined ? { permissionPrompt: payload.permissionPrompt } : {})
+    ...((payload.statusDetail !== undefined) && { statusDetail: payload.statusDetail }),
+    ...((payload.error !== undefined) && { error: payload.error }),
+    ...((payload.lastUpdated !== undefined) && { lastUpdated: payload.lastUpdated }),
+    ...((payload.currentUser !== undefined) && { currentUser: payload.currentUser }),
+    ...((payload.unreadNotificationCount !== undefined) &&
+      { unreadNotificationCount: payload.unreadNotificationCount }),
+    ...((notifications !== undefined) && { notifications }),
+    ...((payload.sandboxes !== undefined) && { sandboxes: payload.sandboxes }),
+    ...((payload.permissionPrompt !== undefined) && { permissionPrompt: payload.permissionPrompt })
   }
 }
 

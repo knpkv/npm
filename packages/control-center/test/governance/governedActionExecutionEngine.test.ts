@@ -243,7 +243,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   }
   const executorMap = {
     contextEffect: () => Effect.succeed(lease),
-    contextEffectForAuthority: (_scope: unknown, expected: PluginRuntimeAuthorityToken) =>
+    contextEffectForAuthority: <UnparsedInput>(_scope: UnparsedInput, expected: PluginRuntimeAuthorityToken) =>
       expected === lease.runtimeAuthorityToken
         ? Effect.succeed(lease)
         : Effect.fail(new PluginRuntimeAuthorityUnavailable()),

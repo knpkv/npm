@@ -31,7 +31,7 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Duration, Effect, Layer, Schedule, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import { HttpClient } from "effect/unstable/http"
-import { AwsClientConfig, type AwsClientConfigShape } from "../AwsClientConfig.js"
+import { AwsClientConfig, type AwsClientConfigContract } from "../AwsClientConfig.js"
 import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
 
@@ -42,7 +42,7 @@ export type { AwsClientError } from "../Errors.js"
  * Check if an error is an AWS throttling exception.
  * Inspects structured error properties instead of pretty-printing.
  */
-export const isThrottlingError = (error: unknown): boolean => {
+export const isThrottlingError = <UnparsedInput>(error: UnparsedInput): boolean => {
   const name = Predicate.hasProperty(error, "name") ? String(error.name) : ""
   const code = Predicate.hasProperty(error, "code") ? String(error.code).toLowerCase() : ""
   const message = Predicate.isError(error)
@@ -71,8 +71,8 @@ const decodeAwsCredentialIdentity = (
 ): AwsCredentialIdentity => ({
   accessKeyId: identity.accessKeyId,
   secretAccessKey: identity.secretAccessKey,
-  ...(identity.sessionToken === undefined ? {} : { sessionToken: identity.sessionToken }),
-  ...(identity.expiration === undefined ? {} : { expiration: identity.expiration })
+  ...(!(identity.sessionToken === undefined) && { sessionToken: identity.sessionToken }),
+  ...(!(identity.expiration === undefined) && { expiration: identity.expiration })
 })
 
 type AwsRuntimeEnv =
@@ -81,7 +81,7 @@ type AwsRuntimeEnv =
   | DistilledRegion.Region
   | HttpClient.HttpClient
 
-const makeThrottleSchedule = (config: AwsClientConfigShape) =>
+const makeThrottleSchedule = (config: AwsClientConfigContract) =>
   Schedule.max([
     Schedule.exponential(config.retryBaseDelay, 2).pipe(Schedule.jittered),
     Schedule.recurs(config.maxRetries)

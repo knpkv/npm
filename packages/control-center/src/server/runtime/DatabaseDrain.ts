@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
-import { Database, type DatabaseShape } from "../persistence/Database.js"
+import { Database, type DatabaseContract } from "../persistence/Database.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const WalCheckpointRow = Schema.Struct({
@@ -11,7 +11,7 @@ const WalCheckpointRow = Schema.Struct({
   log: Schema.Number
 })
 
-const checkpointWal = Effect.fn("DatabaseDrain.checkpointWal")(function*(database: DatabaseShape) {
+const checkpointWal = Effect.fn("DatabaseDrain.checkpointWal")(function*(database: DatabaseContract) {
   const rows = yield* database.sql`PRAGMA wal_checkpoint(TRUNCATE)`
   const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(WalCheckpointRow))(rows)
   if (decoded.length !== 1 || decoded[0]?.busy !== 0) {

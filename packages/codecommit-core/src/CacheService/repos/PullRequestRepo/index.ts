@@ -35,11 +35,11 @@ const makePullRequestRepo = Effect.gen(function*() {
   return service
 })
 
-export interface PullRequestRepoShape extends Success<typeof makePullRequestRepo> {}
+export interface PullRequestRepoContract extends Success<typeof makePullRequestRepo> {}
 
 export class PullRequestRepo extends Context.Service<
   PullRequestRepo,
-  PullRequestRepoShape
+  PullRequestRepoContract
 >()("PullRequestRepo") {
   static readonly Default = Layer.effect(PullRequestRepo, makePullRequestRepo).pipe(
     Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))

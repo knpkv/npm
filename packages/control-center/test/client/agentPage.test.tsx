@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PortfolioReleaseSummary } from "../../src/api/portfolio.js"
 import {
   AgentPage,
+  type AgentPageProps,
   boundedReleaseAgentHistory,
   ConnectedAgentPage,
   contextFor,
@@ -23,13 +24,9 @@ import { EntityId, EventCursor, GovernedActionId } from "../../src/domain/identi
 import { ReleaseVersion } from "../../src/domain/release.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
-const submitReleasePublication = vi.hoisted(() =>
-  vi.fn(async () => ({ actionId: "01890f6f-6d6a-7cc0-98d2-000000000090", state: "succeeded" }))
-)
-
-vi.mock("../../src/client/releases/releaseAgentTransport.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  submitBrowserReleasePublication: submitReleasePublication
+const submitReleasePublication = vi.fn<NonNullable<AgentPageProps["submitPublication"]>>(async () => ({
+  actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000090"),
+  state: "succeeded"
 }))
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -368,7 +365,9 @@ describe("AgentPage context", () => {
             <Route element={<Outlet context={context} />}>
               <Route
                 path="/w/:workspaceId/releases/:releaseId/agent"
-                element={<AgentPage runTurn={async () => Promise.reject()} />}
+                element={
+                  <AgentPage runTurn={async () => Promise.reject()} submitPublication={submitReleasePublication} />
+                }
               />
             </Route>
           </Routes>
@@ -454,7 +453,9 @@ describe("AgentPage context", () => {
             <Route element={<Outlet context={context} />}>
               <Route
                 path="/w/:workspaceId/releases/:releaseId/agent"
-                element={<AgentPage runTurn={async () => Promise.reject()} />}
+                element={
+                  <AgentPage runTurn={async () => Promise.reject()} submitPublication={submitReleasePublication} />
+                }
               />
             </Route>
           </Routes>
@@ -501,7 +502,9 @@ describe("AgentPage context", () => {
             <Route element={<Outlet context={context} />}>
               <Route
                 path="/w/:workspaceId/releases/:releaseId/agent"
-                element={<AgentPage runTurn={async () => Promise.reject()} />}
+                element={
+                  <AgentPage runTurn={async () => Promise.reject()} submitPublication={submitReleasePublication} />
+                }
               />
             </Route>
           </Routes>
@@ -547,7 +550,9 @@ describe("AgentPage context", () => {
             <Route element={<Outlet context={context} />}>
               <Route
                 path="/w/:workspaceId/releases/:releaseId/agent"
-                element={<AgentPage runTurn={async () => Promise.reject()} />}
+                element={
+                  <AgentPage runTurn={async () => Promise.reject()} submitPublication={submitReleasePublication} />
+                }
               />
             </Route>
           </Routes>

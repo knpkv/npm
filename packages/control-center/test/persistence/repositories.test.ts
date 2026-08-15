@@ -98,14 +98,14 @@ const testConfig = Effect.gen(function*() {
   }
 })
 
-interface RepositoryTestConfigShape {
+interface RepositoryTestConfigContract {
   readonly blobRoot: BlobRoot
   readonly busyTimeoutMilliseconds: number
   readonly databaseUrl: string
   readonly maxConnections: number
 }
 
-class RepositoryTestConfig extends Context.Service<RepositoryTestConfig, RepositoryTestConfigShape>()(
+class RepositoryTestConfig extends Context.Service<RepositoryTestConfig, RepositoryTestConfigContract>()(
   "@knpkv/control-center/test/RepositoryTestConfig"
 ) {}
 

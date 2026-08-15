@@ -2,6 +2,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import * as Predicate from "effect/Predicate"
 import { DeliveryEntityDetails } from "../../domain/deliveryGraph.js"
 import type { NormalizedPluginEventV1 } from "../../domain/plugins/events.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -122,7 +123,7 @@ const optionalBounded = (value: string | null | undefined, maximum: number): str
 }
 
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
-  typeof value === "string" ? value : (value?.name ?? null)
+  Predicate.isString(value) ? value : (value?.name ?? null)
 
 /** Collapse provider statuses into the canonical execution state vocabulary. */
 export const pipelineStatus = (
@@ -152,8 +153,8 @@ export const pipelineStatus = (
   }
 }
 
-const normalizedTimestamp = Effect.fn("PipelineExecutionProjection.normalizeTimestamp")(function*(
-  value: unknown,
+const normalizedTimestamp = Effect.fn("PipelineExecutionProjection.normalizeTimestamp")(function*<UnparsedInput>(
+  value: UnparsedInput,
   eventId: string
 ): Effect.fn.Return<string | null, PipelineExecutionProjectionError> {
   if (value === null || value === undefined) return null

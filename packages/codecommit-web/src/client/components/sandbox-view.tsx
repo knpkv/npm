@@ -3,9 +3,10 @@ import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { Button, StateLabel, StatePanel, type RlyStateTone } from "@knpkv/rly/primitives"
 import { AsyncResult } from "effect/unstable/reactivity"
 import { CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import {
+  type AppState,
   appStateAtom,
   deleteSandboxAtom,
   restartSandboxAtom,
@@ -105,7 +106,23 @@ const SandboxCredentialsBar = ({ sandboxId }: { readonly sandboxId: SandboxId })
   )
 }
 
-/** Full-width authenticated sandbox workspace with explicit lifecycle and credential boundaries. */
+interface SandboxActionRequest {
+  readonly params: { readonly sandboxId: SandboxId }
+}
+
+export interface SandboxViewContentProps {
+  readonly state: AppState
+  readonly sandboxId: string | undefined
+  readonly initialView: "editor" | "logs"
+  readonly onViewChange: (view: "editor" | "logs") => void
+  readonly stopSandbox: (request: SandboxActionRequest) => void
+  readonly restartSandbox: (request: SandboxActionRequest) => void
+  readonly deleteSandbox: (request: SandboxActionRequest) => void
+  readonly navigate: (href: string) => void
+  readonly renderCredentials: (sandboxId: SandboxId) => ReactNode
+}
+
+/** Full-width authenticated sandbox route wired to atoms and router state. */
 export function SandboxView() {
   const { sandboxId } = useParams<{ sandboxId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -114,7 +131,36 @@ export function SandboxView() {
   const restartSandbox = useAtomSet(restartSandboxAtom)
   const deleteSandbox = useAtomSet(deleteSandboxAtom)
   const navigate = useNavigate()
-  const [showLogs, setShowLogs] = useState(searchParams.get("view") === "logs")
+  return (
+    <SandboxViewContent
+      deleteSandbox={deleteSandbox}
+      initialView={searchParams.get("view") === "logs" ? "logs" : "editor"}
+      navigate={navigate}
+      onViewChange={(view) =>
+        setSearchParams(view === "logs" ? { view: "logs" } : {}, { preventScrollReset: true, replace: true })
+      }
+      renderCredentials={(id) => <SandboxCredentialsBar sandboxId={id} />}
+      restartSandbox={restartSandbox}
+      sandboxId={sandboxId}
+      state={state}
+      stopSandbox={stopSandbox}
+    />
+  )
+}
+
+/** Sandbox workspace presentation with explicit lifecycle, routing, and credential dependencies. */
+export function SandboxViewContent({
+  deleteSandbox,
+  initialView,
+  navigate,
+  onViewChange,
+  renderCredentials,
+  restartSandbox,
+  sandboxId,
+  state,
+  stopSandbox
+}: SandboxViewContentProps) {
+  const [showLogs, setShowLogs] = useState(initialView === "logs")
 
   const sandbox = useMemo(
     () => state.sandboxes?.find((candidate) => candidate.id === sandboxId) ?? null,
@@ -125,9 +171,9 @@ export function SandboxView() {
     (view: "editor" | "logs") => {
       const nextShowsLogs = view === "logs"
       setShowLogs(nextShowsLogs)
-      setSearchParams(nextShowsLogs ? { view: "logs" } : {}, { preventScrollReset: true, replace: true })
+      onViewChange(view)
     },
-    [setSearchParams]
+    [onViewChange]
   )
 
   const handleStop = useCallback(() => {
@@ -233,7 +279,7 @@ export function SandboxView() {
         </div>
       </header>
 
-      {isRunning && !displaysLogs ? <SandboxCredentialsBar sandboxId={SandboxId.make(sandbox.id)} /> : null}
+      {isRunning && !displaysLogs ? renderCredentials(SandboxId.make(sandbox.id)) : null}
 
       {displaysLogs ? (
         <div className={styles.workspaceContent}>

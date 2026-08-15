@@ -136,7 +136,7 @@ const makeSandboxService = Effect.gen(function*() {
     extra?: { containerId?: string; port?: number; error?: string }
   ) => repo.updateStatus(id, status, extra)
 
-  const recordCreationFailure = (id: SandboxId, error: unknown) =>
+  const recordCreationFailure = <UnparsedInput>(id: SandboxId, error: UnparsedInput) =>
     Effect.gen(function*() {
       yield* Effect.logError(`Sandbox ${id} creation failed`, error)
       const errorDetail = Result.try(() => String(Predicate.isError(error) ? error.message : error)).pipe(
@@ -557,11 +557,11 @@ const makeSandboxService = Effect.gen(function*() {
   return service
 })
 
-export interface SandboxServiceShape extends Success<typeof makeSandboxService> {}
+export interface SandboxServiceContract extends Success<typeof makeSandboxService> {}
 
 export class SandboxService extends Context.Service<
   SandboxService,
-  SandboxServiceShape
+  SandboxServiceContract
 >()("SandboxService") {
   /** Dependency-requiring layer used by composition tests and custom runtimes. @internal */
   static readonly layer = Layer.effect(SandboxService, makeSandboxService)

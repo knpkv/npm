@@ -97,7 +97,7 @@ const descriptor = {
   }]
 }
 
-const success = (value: unknown): FakePluginResponse => ({ _tag: "success", value })
+const success = <UnparsedInput>(value: UnparsedInput): FakePluginResponse => ({ _tag: "success", value })
 
 const releasePage = (
   includeApprover = true,

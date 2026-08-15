@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -273,8 +274,7 @@ describe("ClockifyApiClient", () => {
       if (requests[0]?.body._tag !== "FormData") throw new Error("Expected a FormData request body")
       const file = requests[0].body.formData.get("file")
       expect(requests[0].body.formData).toBeInstanceOf(FormData)
-      expect(typeof file).not.toBe("string")
-      if (file === null || typeof file === "string") throw new Error("Expected a file field")
+      if (file === null || Predicate.isString(file)) throw new Error("Expected a file field")
       expect(yield* Effect.promise(() => file.text())).toBe("avatar bytes")
       expect(requests[0]?.headers["x-api-key"]).toBe("secret")
     })

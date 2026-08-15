@@ -4,7 +4,7 @@ const jsonEncoder = new TextEncoder()
 
 const hasMaximumJsonBytes = (maximumBytes: number) =>
   Schema.makeFilter(
-    (value: unknown) => {
+    <UnparsedInput>(value: UnparsedInput) => {
       const serialized = JSON.stringify(value)
       return serialized !== undefined && jsonEncoder.encode(serialized).byteLength <= maximumBytes
     },

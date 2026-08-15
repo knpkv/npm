@@ -95,10 +95,10 @@ export class BlobStore extends Context.Service<BlobStore, BlobStoreService>()(
     Layer.effect(BlobStore, makeBlobStore(options))
 }
 
-const decodeInput = <S extends Schema.ConstraintDecoder<unknown>>(
+const decodeInput = <S extends Schema.ConstraintDecoder<unknown>, UnparsedInput>(
   operation: string,
   schema: S,
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<S["Type"], BlobStoreInputError> => {
   const result = Schema.decodeUnknownResult(schema)(input)
 

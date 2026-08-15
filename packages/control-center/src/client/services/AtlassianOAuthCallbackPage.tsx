@@ -192,7 +192,7 @@ export const AtlassianOAuthCallbackPage = ({
           </Text>
         ) : null}
         {state.grant.sites.map((site) => (
-          <Surface as="article" className={styles.site} key={site.cloudId} padding="default" shape="grouped">
+          <Surface as="article" className={styles.site} key={site.cloudId} padding="default" form="grouped">
             <div className={styles.identity}>
               <Text as="h2" variant="card-title">
                 {site.name}

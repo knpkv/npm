@@ -15,7 +15,7 @@ import {
   authorizeBootstrapRequest,
   authorizeOwnerRequest,
   ownerSessionCookie,
-  type OwnerSessionSecretsShape,
+  type OwnerSessionSecretsContract,
   ownerSessionUrl,
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
@@ -24,7 +24,7 @@ import {
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
-  function*(active = true): Effect.fn.Return<OwnerSessionSecretsShape> {
+  function*(active = true): Effect.fn.Return<OwnerSessionSecretsContract> {
     return {
       ownerToken: Redacted.make("owner-secret"),
       csrfToken: Redacted.make("csrf-secret"),
@@ -37,11 +37,15 @@ const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
 
 const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
 
+type PermissionStateResolver = (operation: string) => PermissionState
+
+const fixedPermissionState = (state: PermissionState): PermissionStateResolver => () => state
+
 const makePermissionService = (
-  state: PermissionState | ((operation: string) => PermissionState),
+  resolveState: PermissionStateResolver,
   updates?: Ref.Ref<ReadonlyArray<readonly [string, PermissionState]>>
 ): PermissionService["Service"] => ({
-  check: (operation) => Effect.succeed(typeof state === "function" ? state(operation) : state),
+  check: (operation) => Effect.succeed(resolveState(operation)),
   getAll: () => Effect.succeed({}),
   getAuditRetention: () => Effect.succeed(30),
   isAuditEnabled: () => Effect.succeed(true),
@@ -113,7 +117,7 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
   permissionUpdates?: Ref.Ref<ReadonlyArray<readonly [string, PermissionState]>>
 ) {
   return yield* makePermissionedReadClient(makeObservedReadClient(calls)).pipe(
-    Effect.provideService(PermissionService, makePermissionService(state, permissionUpdates)),
+    Effect.provideService(PermissionService, makePermissionService(fixedPermissionState(state), permissionUpdates)),
     Effect.provideService(PermissionGate, PermissionGate.of({ request: gateRequest })),
     Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
   )
@@ -348,7 +352,7 @@ describe("CodeCommit web security boundary", () => {
           )
       }
       const failed = yield* makePermissionedReadClient(failedInner).pipe(
-        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("always_allow"))),
         Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
         Effect.provideService(AuditLogRepo, makeAuditLog(failedAudit))
       )
@@ -437,7 +441,7 @@ describe("CodeCommit web security boundary", () => {
           )
       }
       const client = yield* makePermissionedReadClient(inner).pipe(
-        Effect.provideService(PermissionService, makePermissionService("allow")),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("allow"))),
         Effect.provideService(
           PermissionGate,
           PermissionGate.of({
@@ -477,7 +481,7 @@ describe("CodeCommit web security boundary", () => {
             )
           )
       }).pipe(
-        Effect.provideService(PermissionService, makePermissionService("always_allow")),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("always_allow"))),
         Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
         Effect.provideService(AuditLogRepo, makeAuditLog(repeatedAudit))
       )

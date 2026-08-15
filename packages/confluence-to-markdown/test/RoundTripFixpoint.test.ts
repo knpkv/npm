@@ -29,7 +29,7 @@ const SIDECAR_HREF = "./page.adf.json"
  * One pull/push cycle, including the sidecar externalization the workspace
  * applies on the way to disk and hydration on the way back.
  */
-const cycle = (adf: unknown) =>
+const cycle = <UnparsedInput>(adf: UnparsedInput) =>
   Effect.gen(function*() {
     const converter = yield* MarkdownConverter
     const markdown = yield* converter.adfToMarkdown(JSON.stringify(adf))
@@ -173,7 +173,7 @@ describe("ADF round-trip fixpoint", () => {
       expect(JSON.stringify(back)).not.toContain("adf:/expand")
     }).pipe(Effect.provide(TestLayer)))
 
-  const inCell = (node: unknown) => ({
+  const inCell = <UnparsedInput>(node: UnparsedInput) => ({
     type: "doc",
     version: 1,
     content: [{

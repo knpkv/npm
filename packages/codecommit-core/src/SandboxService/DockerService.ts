@@ -205,11 +205,11 @@ const makeDockerService = Effect.gen(function*() {
   return service
 })
 
-export interface DockerServiceShape extends Success<typeof makeDockerService> {}
+export interface DockerServiceContract extends Success<typeof makeDockerService> {}
 
 export class DockerService extends Context.Service<
   DockerService,
-  DockerServiceShape
+  DockerServiceContract
 >()("DockerService") {
   static readonly Default = Layer.effect(DockerService, makeDockerService)
 }

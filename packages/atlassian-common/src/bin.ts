@@ -106,7 +106,9 @@ const program = Effect.gen(function*() {
       HomeDirectoryLive
     )
   ),
-  Effect.catch((error: unknown) => Console.error(String(error)).pipe(Effect.andThen(Effect.fail(error))))
+  Effect.catch(<UnparsedInput>(error: UnparsedInput) =>
+    Console.error(String(error)).pipe(Effect.andThen(Effect.fail(error)))
+  )
 )
 
 NodeRuntime.runMain(program, { disableErrorReporting: true })

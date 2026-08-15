@@ -19,7 +19,7 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Generated from "./generated/JiraApi.js"
-import { JiraApiConfig, type JiraApiConfigShape } from "./JiraApiConfig.js"
+import { JiraApiConfig, type JiraApiConfigContract } from "./JiraApiConfig.js"
 
 export interface UploadAttachmentInput {
   readonly bytes: Uint8Array
@@ -27,26 +27,26 @@ export interface UploadAttachmentInput {
   readonly mediaType?: string | undefined
 }
 
-export interface JiraApiClientShape extends Generated.JiraApi {
+export interface JiraApiClientContract extends Generated.JiraApi {
   readonly uploadAttachment: (
     issueIdOrKey: string,
     input: UploadAttachmentInput
   ) => Effect.Effect<Generated.AddAttachment200, HttpClientError.HttpClientError | SchemaError>
 }
 
-const authorizationHeader = (config: JiraApiConfigShape): string =>
+const authorizationHeader = (config: JiraApiConfigContract): string =>
   config.auth.type === "basic"
     ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
     : `Bearer ${Redacted.value(config.auth.accessToken)}`
 
-const apiBaseUrl = (config: JiraApiConfigShape): string =>
+const apiBaseUrl = (config: JiraApiConfigContract): string =>
   config.auth.type === "oauth2"
     ? `https://api.atlassian.com/ex/jira/${config.auth.cloudId}`
     : config.baseUrl
 
 export const make = (
   httpClient: HttpClient.HttpClient,
-  config: JiraApiConfigShape
+  config: JiraApiConfigContract
 ): Generated.JiraApi =>
   Generated.make(httpClient.pipe(
     HttpClient.mapRequest(flow(
@@ -57,7 +57,7 @@ export const make = (
   ))
 
 const makeUploadAttachment =
-  (api: Generated.JiraApi): JiraApiClientShape["uploadAttachment"] => (issueIdOrKey, input) => {
+  (api: Generated.JiraApi): JiraApiClientContract["uploadAttachment"] => (issueIdOrKey, input) => {
     const buffer = new ArrayBuffer(input.bytes.byteLength)
     new Uint8Array(buffer).set(input.bytes)
     const form = new FormData()
@@ -77,7 +77,7 @@ const makeUploadAttachment =
     )
   }
 
-export class JiraApiClient extends Context.Service<JiraApiClient, JiraApiClientShape>()(
+export class JiraApiClient extends Context.Service<JiraApiClient, JiraApiClientContract>()(
   "@knpkv/jira-api-client/JiraApiClient"
 ) {
   static readonly layer: Layer.Layer<

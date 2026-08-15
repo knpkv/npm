@@ -892,9 +892,9 @@ const syncProject = (
   )
 }
 
-const makeRuntime = (
+const makeRuntime = <UnparsedInput>(
   provider: JiraReadProvider,
-  configuration: unknown,
+  configuration: UnparsedInput,
   verifiedSiteId: string | null,
   includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
   releasePublicationEnabled: boolean
@@ -1029,8 +1029,8 @@ const makeRuntime = (
 }
 
 /** Build a production Jira runtime from the configured shared API client. */
-export const makeJiraReadPluginRuntime = (
-  configuration: unknown,
+export const makeJiraReadPluginRuntime = <UnparsedInput>(
+  configuration: UnparsedInput,
   verifiedSiteId: string | null = null,
   includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
   releasePublicationEnabled = true
@@ -1048,9 +1048,9 @@ export const makeJiraReadPluginRuntime = (
   )
 
 /** Build the runtime around a deterministic provider double. @internal */
-export const makeJiraReadPluginRuntimeFromProvider = (
+export const makeJiraReadPluginRuntimeFromProvider = <UnparsedInput>(
   provider: JiraReadProvider,
-  configuration: unknown,
+  configuration: UnparsedInput,
   verifiedSiteId: string | null = null,
   includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
   releasePublicationEnabled = true

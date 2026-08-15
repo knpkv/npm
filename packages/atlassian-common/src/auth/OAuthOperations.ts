@@ -50,6 +50,15 @@ export interface ExchangeCodeOptions {
   readonly codeVerifier?: string | undefined
 }
 
+interface AuthorizationCodeTokenBody {
+  readonly grant_type: string
+  readonly client_id: string
+  readonly client_secret: string
+  readonly code: string
+  readonly redirect_uri: string
+  code_verifier?: string
+}
+
 /**
  * Exchange authorization code for tokens.
  *
@@ -59,10 +68,10 @@ export const exchangeCodeForTokens = (
   code: string,
   config: OAuthConfig,
   options: ExchangeCodeOptions
-): Effect.Effect<TokenResponse, OAuthError, HttpClient.HttpClient> =>
+) =>
   Effect.gen(function*() {
     const httpClient = yield* HttpClient.HttpClient
-    const tokenBody: Record<string, string> = {
+    const tokenBody: AuthorizationCodeTokenBody = {
       grant_type: "authorization_code",
       client_id: config.clientId,
       client_secret: config.clientSecret,
@@ -206,7 +215,7 @@ export const refreshToken = (
           step: "refresh",
           cause: `HTTP ${response.status}: ${text}`,
           status: response.status,
-          ...(errorCode === undefined ? {} : { errorCode })
+          ...(!(errorCode === undefined) && { errorCode })
         })
       )
     }

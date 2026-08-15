@@ -1,5 +1,6 @@
 import { AuthProfilesFileSchema } from "@knpkv/atlassian-common/config"
 import { expect, test } from "@playwright/test"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { type ChildProcess, type ChildProcessByStdio, spawn } from "node:child_process"
 import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises"
@@ -43,7 +44,7 @@ const stopServer = async (server: ChildProcess): Promise<void> => {
 }
 
 const isMissingPathError = (cause: unknown): boolean =>
-  typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT"
+  Predicate.isObjectOrArray(cause) && cause !== null && "code" in cause && cause.code === "ENOENT"
 
 const startServer = async (
   dataRoot: string,
@@ -116,12 +117,12 @@ const collectFiles = async (root: string, excludedDirectory?: string): Promise<R
   return contents
 }
 
-const collectCredentialStrings = (value: unknown, key = ""): Array<string> => {
-  if (typeof value === "string") {
+const collectCredentialStrings = <UnparsedInput>(value: UnparsedInput, key = ""): Array<string> => {
+  if (Predicate.isString(value)) {
     return /(?:token|secret|credential)/iu.test(key) && value.length > 20 ? [value] : []
   }
   if (Array.isArray(value)) return value.flatMap((item) => collectCredentialStrings(item, key))
-  if (value !== null && typeof value === "object") {
+  if (value !== null && Predicate.isObjectOrArray(value)) {
     return Object.entries(value).flatMap(([entryKey, entryValue]) => collectCredentialStrings(entryValue, entryKey))
   }
   return []

@@ -88,7 +88,9 @@ interface RelayPatchEvidence {
 }
 
 const reviewError = (operation: string, message: string, cause?: unknown): PullRequestReviewError =>
-  new PullRequestReviewError({ operation, message, ...(cause === undefined ? {} : { cause }) })
+  cause === undefined
+    ? new PullRequestReviewError({ operation, message })
+    : new PullRequestReviewError({ operation, message, cause })
 
 const ensureRevisionMatchesPullRequest = (
   pullRequest: Domain.PullRequest,
@@ -393,10 +395,12 @@ const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
 
 type PatchRenderer = typeof createTwoFilesPatch
 
-const changedLinesFromPatch = (patch: string): {
+interface ChangedPatchLines {
   readonly beforeLines: ReadonlySet<number>
   readonly afterLines: ReadonlySet<number>
-} => {
+}
+
+const changedLinesFromPatch = (patch: string): ChangedPatchLines => {
   const beforeLines = new Set<number>()
   const afterLines = new Set<number>()
   for (const parsed of parsePatch(patch)) {
@@ -581,12 +585,12 @@ export const withRelayReviewPermit = <A, E, R>(
     }))
   )
 
-const focusByKind: Record<RelayReviewKind, string> = {
+const focusByKind = {
   review: "Find correctness, security, reliability, and maintainability defects. Prioritize actionable findings.",
   security: "Perform a security-focused review. Trace trust boundaries, authorization, secrets, and unsafe inputs.",
   tests: "Review the test strategy. Find missing behavioral guardrails and weak or misleading coverage.",
   explain: "Explain the change, its architecture, and the highest merge risks for a human reviewer."
-}
+} satisfies Record<RelayReviewKind, string>
 
 const untrustedDelimiter = (patch: string): string => {
   const occupied = new Set(Array.from(patch.matchAll(/<\/?untrusted_patch_([0-9]+)>/gu), (match) => match[1]))

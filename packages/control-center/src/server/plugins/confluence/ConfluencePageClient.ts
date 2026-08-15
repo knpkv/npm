@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { ConfluenceApiClient, type ConfluenceApiClientShape } from "@knpkv/confluence-api-client"
+import { ConfluenceApiClient, type ConfluenceApiClientContract } from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -51,7 +51,7 @@ export class ConfluencePageClientFailure extends Schema.TaggedError<ConfluencePa
 ) {}
 
 /** Minimal provider operations needed for the Confluence page vertical slice. @internal */
-export interface ConfluencePageClientShape {
+export interface ConfluencePageClientContract {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
@@ -97,7 +97,7 @@ export interface ConfluencePageClientShape {
 }
 
 /** Injectable Confluence page client. @internal */
-export class ConfluencePageClient extends Context.Service<ConfluencePageClient, ConfluencePageClientShape>()(
+export class ConfluencePageClient extends Context.Service<ConfluencePageClient, ConfluencePageClientContract>()(
   "@knpkv/control-center/internal/ConfluencePageClient"
 ) {}
 
@@ -154,8 +154,8 @@ const bounded = <Success, Failure>(
 
 /** Build the narrow production boundary from the supported generated client. @internal */
 export const makeConfluencePageClient = (
-  api: ConfluenceApiClientShape
-): ConfluencePageClientShape => ({
+  api: ConfluenceApiClientContract
+): ConfluencePageClientContract => ({
   getCurrentUser: bounded("confluence-current-user", api.v1.getCurrentUser(undefined)),
   getSystemInfo: bounded("confluence-system-info", api.v1.getSystemInfo(undefined)),
   getPage: (pageId) =>
@@ -231,7 +231,7 @@ export const makeConfluencePageClient = (
           spaceId: input.spaceId,
           status: "current",
           title: input.title,
-          ...(input.parentId === null ? {} : { parentId: input.parentId }),
+          ...(!(input.parentId === null) && { parentId: input.parentId }),
           body: {
             representation: "atlas_doc_format",
             value: input.adf
@@ -245,7 +245,7 @@ export const makeConfluencePageClient = (
       api.v2.httpClient.execute(
         HttpClientRequest.get(`/spaces/${encodeURIComponent(spaceId)}/pages`).pipe(
           HttpClientRequest.setUrlParams({
-            ...(cursor === null ? {} : { cursor }),
+            ...(!(cursor === null) && { cursor }),
             "body-format": "atlas_doc_format",
             depth: "all",
             limit: 25,
@@ -263,7 +263,7 @@ export const makeConfluencePageClient = (
       "confluence-page-attachments",
       api.v2.getPageAttachments(pageId, {
         params: {
-          ...(cursor === null ? {} : { cursor }),
+          ...(!(cursor === null) && { cursor }),
           limit: 25,
           sort: "-modified-date",
           status: ["current"]
@@ -289,7 +289,7 @@ export const makeConfluencePageClient = (
       "confluence-page-versions",
       api.v2.getPageVersions(pageId, {
         params: {
-          ...(cursor === null ? {} : { cursor }),
+          ...(!(cursor === null) && { cursor }),
           limit: 100,
           sort: "-modified-date"
         }

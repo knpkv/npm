@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Cause, Effect, Exit, Layer, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
@@ -214,7 +214,7 @@ describe("PRService.refresh", () => {
         status: "error",
         error: "Symbol(hostile message)"
       })
-      expect(typeof finalState.error).toBe("string")
+      expect(Predicate.isString(finalState.error)).toBe(true)
     }))
 
   it.effect("preserves interruption without recording it as a refresh error", () =>

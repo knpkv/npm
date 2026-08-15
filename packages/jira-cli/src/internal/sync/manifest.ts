@@ -21,7 +21,7 @@ export const parseSyncManifest = (
 ): Effect.Effect<SyncManifest, SyncWorkspaceError | SyncValidationError> =>
   Effect.gen(function*() {
     const raw = yield* Effect.try({
-      try: (): unknown => JSON.parse(content),
+      try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(content),
       catch: (cause) => new SyncWorkspaceError({ message: "Failed to parse Sync Manifest JSON", path, cause })
     })
     return yield* Schema.decodeUnknownEffect(SyncManifestSchema)(raw).pipe(

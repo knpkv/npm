@@ -52,7 +52,7 @@ export class BlobStoreIoError extends Schema.TaggedError<BlobStoreIoError>()("Bl
 }) {}
 
 /** Redacts platform details before they cross the object-store boundary. */
-export const blobStoreIoError = (operation: string, _cause: unknown): BlobStoreIoError =>
+export const blobStoreIoError = <UnparsedInput>(operation: string, _cause: UnparsedInput): BlobStoreIoError =>
   new BlobStoreIoError({ operation, message: "platform storage operation failed" })
 
 /** Typed failures exposed by the blob-store boundary. */

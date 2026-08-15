@@ -26,7 +26,7 @@ const sixJiraItems = Array.from({ length: 6 }, (_, index) => ({
   state: index === 5 ? "Needs link" : "In progress",
   tone: index === 5 ? "caution" : "progress",
   href: `/jira/OPS-${428 + index}`,
-  ...(index === 0 ? { owner } : {})
+  ...(index === 0 && { owner })
 })) satisfies ReadonlyArray<RlyWorksetJiraItem>
 
 const pullRequestGroups = [

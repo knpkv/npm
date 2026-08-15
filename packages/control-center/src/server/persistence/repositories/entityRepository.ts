@@ -36,6 +36,7 @@ import {
 } from "./internal.js"
 import { ContentBlobDigest, EntityKind, EntityRecord, RecordRevision } from "./models.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const EntityKey = Schema.Struct({ workspaceId: WorkspaceId, entityId: EntityId })
 
@@ -111,27 +112,29 @@ const makeEntityRepository = Effect.gen(function*() {
   const database = yield* Database
   const quarantine = yield* QuarantineRepository
   const sql = database.sql
-  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
+  const run = (plan: RenderedSql) => sql.unsafe<SqlRow>(plan.sql, [...plan.params])
 
-  const digestPersistedRow = Effect.fn("EntityRepository.digestPersistedRow")(function*(row: unknown) {
-    const serialized = yield* Effect.try({
-      try: () => JSON.stringify(row),
-      catch: () => new PersistenceOperationError({ operation: "entity.quarantine-encode" })
-    })
-    const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(serialized))
-    ).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-encode" }))
-    )
-    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-digest" }))
-    )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
-  })
+  const digestPersistedRow = Effect.fn("EntityRepository.digestPersistedRow")(
+    function*<UnparsedInput>(row: UnparsedInput) {
+      const serialized = yield* Effect.try({
+        try: () => JSON.stringify(row),
+        catch: () => new PersistenceOperationError({ operation: "entity.quarantine-encode" })
+      })
+      const bytes = yield* Effect.fromResult(
+        Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+      ).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-encode" }))
+      )
+      const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-digest" }))
+      )
+      return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    }
+  )
 
-  const quarantineMalformedRevision = Effect.fn("EntityRepository.quarantineMalformed")(function*(
+  const quarantineMalformedRevision = Effect.fn("EntityRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
-    row: unknown,
+    row: UnparsedInput,
     identity: Result.Result<typeof EntityRevisionIdentity.Type, Schema.SchemaError>
   ) {
     const payloadDigest = yield* digestPersistedRow(row)
@@ -172,13 +175,13 @@ const makeEntityRepository = Effect.gen(function*() {
    AND revision.revision <= entity.current_revision`
 
   const findRows = ({ entityId, workspaceId }: typeof EntityKey.Type) =>
-    sql<Record<string, unknown>>`${selectColumns}
+    sql<SqlRow>`${selectColumns}
       WHERE entity.workspace_id = ${workspaceId}
         AND entity.entity_id = ${entityId}
       ORDER BY revision.revision DESC`
 
   const listRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`${selectColumns}
+    sql<SqlRow>`${selectColumns}
       WHERE entity.workspace_id = ${workspaceId}
       ORDER BY entity.updated_at DESC, entity.entity_id, revision.revision DESC`
 
@@ -279,7 +282,7 @@ const makeEntityRepository = Effect.gen(function*() {
   })
 
   const findIdentityHeadRows = ({ entityId, workspaceId }: typeof EntityKey.Type) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       entity_id AS entityId,
       current_revision AS recordRevision,
       plugin_connection_id AS pluginConnectionId,
@@ -290,7 +293,7 @@ const makeEntityRepository = Effect.gen(function*() {
       AND entity_id = ${entityId}`
 
   const listIdentityHeadRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`SELECT
+    sql<SqlRow>`SELECT
       entity_id AS entityId,
       current_revision AS recordRevision,
       plugin_connection_id AS pluginConnectionId,

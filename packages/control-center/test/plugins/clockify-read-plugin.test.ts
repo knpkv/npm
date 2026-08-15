@@ -69,7 +69,9 @@ const emptyCustomFieldValues: ReadonlyArray<{
   readonly value?: {}
 }> = []
 
-const timeEntry = (id: string, userId = "user-1", overrides: Readonly<Record<string, unknown>> = {}) => ({
+interface TimeEntryOverrides extends Readonly<Record<string, Schema.Json | undefined>> {}
+
+const timeEntry = (id: string, userId = "user-1", overrides: TimeEntryOverrides = {}) => ({
   id,
   workspaceId: "workspace-1",
   userId,
@@ -118,7 +120,7 @@ const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyRe
 const withConnection = <Value, Error>(
   provider: ClockifyReadProvider,
   use: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
-  configured: unknown = configuration,
+  configured: Schema.Json = configuration,
   cryptoLayer: Layer.Layer<Crypto.Crypto> = NodeCrypto.layer
 ): Effect.Effect<Value, Error | PluginFailure> => {
   const runtime = makeClockifyReadPluginRuntimeFromProvider(provider, configured)
@@ -128,7 +130,7 @@ const withConnection = <Value, Error>(
 const withActionRuntime = <Value, Error>(
   provider: ClockifyReadProvider,
   use: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
-  configured: unknown = configuration
+  configured: Schema.Json = configuration
 ): Effect.Effect<Value, Error | PluginFailure> => withConnection(provider, use, configured)
 
 const syncRequest = (checkpoint: string | null = null) =>
@@ -146,7 +148,7 @@ const entryReference = (entryId: string) =>
 const actionRequest = (
   actionKind: "correct-association" | "record-approval",
   expectedRevision: string,
-  payload: Readonly<Record<string, unknown>>
+  payload: Readonly<Record<string, Schema.Json>>
 ) =>
   Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
     actionKind,
@@ -159,7 +161,7 @@ const actionRequest = (
     evidenceIds: []
   })
 
-const authorize = (proposal: unknown, payloadDigest: string, suffix: string) =>
+const authorize = <UnparsedInput>(proposal: UnparsedInput, payloadDigest: string, suffix: string) =>
   Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
     proposal,
     idempotencyKey: `clockify-action-${suffix}`,
@@ -1080,7 +1082,7 @@ describe("ClockifyReadPlugin", () => {
                 customFieldValues: (request.customFields ?? []).map(
                   ({ customFieldId, value }) => ({
                     customFieldId,
-                    ...(value === undefined ? {} : { value })
+                    ...(!(value === undefined) && { value })
                   })
                 ),
                 description: request.description ?? "",

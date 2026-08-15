@@ -26,7 +26,7 @@ export interface InitWorkspaceInput {
   readonly siteUrl: string
 }
 
-export interface SyncWorkspaceShape {
+export interface SyncWorkspaceContract {
   readonly init: (input: InitWorkspaceInput) => Effect.Effect<SyncWorkspacePaths, SyncWorkspaceError>
   readonly paths: (root: string, config?: Pick<WorkspaceConfig, "documentsDir">) => Effect.Effect<SyncWorkspacePaths>
   readonly readConfig: (root: string) => Effect.Effect<WorkspaceConfig, SyncWorkspaceError>
@@ -43,7 +43,7 @@ export interface SyncWorkspaceShape {
 
 export class SyncWorkspace extends Context.Service<
   SyncWorkspace,
-  SyncWorkspaceShape
+  SyncWorkspaceContract
 >()("@knpkv/jira-cli/SyncWorkspace") {}
 
 const mapWorkspaceError = (message: string, path?: string | undefined) => (cause: unknown) =>
@@ -53,7 +53,8 @@ const make = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
-  const paths: SyncWorkspaceShape["paths"] = (root, config) => Effect.succeed(resolveWorkspacePaths(path, root, config))
+  const paths: SyncWorkspaceContract["paths"] = (root, config) =>
+    Effect.succeed(resolveWorkspacePaths(path, root, config))
 
   const ensureDir = (dir: string): Effect.Effect<void, SyncWorkspaceError> =>
     fs.makeDirectory(dir, { recursive: true }).pipe(
@@ -80,7 +81,7 @@ const make = Effect.gen(function*() {
       Effect.mapError(mapWorkspaceError("Failed to read sync workspace file", filePath))
     )
 
-  const init: SyncWorkspaceShape["init"] = ({ root, siteUrl }) =>
+  const init: SyncWorkspaceContract["init"] = ({ root, siteUrl }) =>
     Effect.gen(function*() {
       const config = makeDefaultWorkspaceConfig(siteUrl)
       const workspacePaths = resolveWorkspacePaths(path, root, config)
@@ -93,7 +94,7 @@ const make = Effect.gen(function*() {
       return workspacePaths
     })
 
-  const readConfig: SyncWorkspaceShape["readConfig"] = (root) =>
+  const readConfig: SyncWorkspaceContract["readConfig"] = (root) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root)
       const content = yield* readFile(workspacePaths.configFile)
@@ -108,14 +109,14 @@ const make = Effect.gen(function*() {
       )
     })
 
-  const writeConfig: SyncWorkspaceShape["writeConfig"] = (root, config) =>
+  const writeConfig: SyncWorkspaceContract["writeConfig"] = (root, config) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root, config)
       yield* ensureDir(workspacePaths.metadataDir)
       yield* writeFile(workspacePaths.configFile, serializeWorkspaceConfig(config))
     })
 
-  const readManifest: SyncWorkspaceShape["readManifest"] = (root) =>
+  const readManifest: SyncWorkspaceContract["readManifest"] = (root) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root)
       const content = yield* readFile(workspacePaths.manifestFile)
@@ -130,14 +131,14 @@ const make = Effect.gen(function*() {
       )
     })
 
-  const writeManifest: SyncWorkspaceShape["writeManifest"] = (root, manifest) =>
+  const writeManifest: SyncWorkspaceContract["writeManifest"] = (root, manifest) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root)
       yield* ensureDir(workspacePaths.metadataDir)
       yield* writeFile(workspacePaths.manifestFile, serializeSyncManifest(manifest))
     })
 
-  const readBaseline: SyncWorkspaceShape["readBaseline"] = (root, issueId) =>
+  const readBaseline: SyncWorkspaceContract["readBaseline"] = (root, issueId) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root)
       const filePath = baselineFilePath(path, workspacePaths, issueId)
@@ -153,7 +154,7 @@ const make = Effect.gen(function*() {
       )
     })
 
-  const writeBaseline: SyncWorkspaceShape["writeBaseline"] = (root, baseline) =>
+  const writeBaseline: SyncWorkspaceContract["writeBaseline"] = (root, baseline) =>
     Effect.gen(function*() {
       const workspacePaths = resolveWorkspacePaths(path, root)
       const filePath = baselineFilePath(path, workspacePaths, baseline.issueId)
@@ -161,7 +162,7 @@ const make = Effect.gen(function*() {
       yield* writeFile(filePath, serializeSyncBaseline(baseline))
     })
 
-  const getConventionDocumentPath: SyncWorkspaceShape["conventionDocumentPath"] = (root, issueKey) =>
+  const getConventionDocumentPath: SyncWorkspaceContract["conventionDocumentPath"] = (root, issueKey) =>
     Effect.gen(function*() {
       const config = yield* readConfig(root)
       const workspacePaths = resolveWorkspacePaths(path, root, config)

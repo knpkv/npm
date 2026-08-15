@@ -21,7 +21,7 @@ const runbookNodeId = uuid(4, 41)
 const releaseNodeId = uuid(4, 51)
 const missingPullRequestNodeId = uuid(4, 61)
 
-const projection = (value: object) => ({ projection: value, recordedAt })
+const projection = <Projection extends object>(value: Projection) => ({ projection: value, recordedAt })
 
 const entityNode = (nodeId: string, entityId: string, entityKind: string) => ({
   workspaceId: WORKSET_WORKSPACE_ID,
@@ -31,14 +31,14 @@ const entityNode = (nodeId: string, entityId: string, entityKind: string) => ({
   createdAt: recordedAt
 })
 
-const relationship = (
+const relationship = <Lifecycle extends object>(
   ordinal: number,
   kind: string,
   sourceNodeId: string,
   sourceNodeKind: string,
   targetNodeId: string,
   targetNodeKind: string,
-  lifecycle: object
+  lifecycle: Lifecycle
 ) => ({
   workspaceId: WORKSET_WORKSPACE_ID,
   relationshipId: uuid(5, ordinal),

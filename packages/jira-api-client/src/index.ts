@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-export { JiraApiClient, type JiraApiClientShape, layer, make, type UploadAttachmentInput } from "./JiraApiClient.js"
+export { JiraApiClient, type JiraApiClientContract, layer, make, type UploadAttachmentInput } from "./JiraApiClient.js"
 
-export { JiraApiConfig, type JiraApiConfigShape } from "./JiraApiConfig.js"
+export { JiraApiConfig, type JiraApiConfigContract } from "./JiraApiConfig.js"
 
 export * as JiraApi from "./generated/JiraApi.js"

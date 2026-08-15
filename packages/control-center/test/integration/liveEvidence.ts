@@ -47,10 +47,7 @@ export const opaqueProviderIdentityEvidence = (
 /** Reduce account/resource bindings to non-personal provider taxonomy. */
 export const opaqueProviderBindingEvidence = (
   binding: ProviderBinding
-): {
-  readonly providerFamily: string
-  readonly resources: ReadonlyArray<{ readonly providerId: string }>
-} => ({
+) => ({
   providerFamily: binding.providerFamily,
   resources: binding.resources.map(({ providerId }) => ({ providerId }))
 })

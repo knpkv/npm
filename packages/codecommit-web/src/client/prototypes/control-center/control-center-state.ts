@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { useEffect, useState } from "react"
 import type { WorkflowEvent } from "./control-center-foundation.js"
 
@@ -56,28 +58,30 @@ export const defaultControlCenterSettings: ControlCenterSettings = {
   writeJiraComments: true
 }
 
-const readStoredUnknown = (key: string): unknown => {
-  if (typeof window === "undefined") return undefined
+const decodeStoredJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const readStoredUnknown = (key: string): Schema.Json | undefined => {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(`${namespace}:${key}`) ?? "")
-    return parsed
+    return decodeStoredJson(window.localStorage.getItem(`${namespace}:${key}`) ?? "")
   } catch {
     return undefined
   }
 }
 
-const isUnknownRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
+const isUnknownRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> =>
+  value !== null && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
-  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+const isStringArray = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((entry) => Predicate.isString(entry))
 
-const isWorkflowEvent = (value: unknown): value is WorkflowEvent =>
+const isWorkflowEvent = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & WorkflowEvent =>
   isUnknownRecord(value)
   && (value.actor === "agent" || value.actor === "human" || value.actor === "system")
-  && typeof value.label === "string"
-  && (value.sequence === undefined || typeof value.sequence === "number")
-  && typeof value.time === "string"
+  && Predicate.isString(value.label)
+  && (value.sequence === undefined || Predicate.isNumber(value.sequence))
+  && Predicate.isString(value.time)
 
 const readWorkflowActivity = (): ReadonlyArray<WorkflowEvent> => {
   const stored = readStoredUnknown("audit")
@@ -88,7 +92,7 @@ const readBooleanRecord = (key: string): Readonly<Record<string, boolean>> => {
   const stored = readStoredUnknown(key)
   if (!isUnknownRecord(stored)) return {}
   return Object.entries(stored).reduce<Readonly<Record<string, boolean>>>(
-    (decoded, [entryKey, value]) => typeof value === "boolean" ? { ...decoded, [entryKey]: value } : decoded,
+    (decoded, [entryKey, value]) => Predicate.isBoolean(value) ? { ...decoded, [entryKey]: value } : decoded,
     {}
   )
 }
@@ -97,12 +101,12 @@ const readStringRecord = (key: string): Readonly<Record<string, string>> => {
   const stored = readStoredUnknown(key)
   if (!isUnknownRecord(stored)) return {}
   return Object.entries(stored).reduce<Readonly<Record<string, string>>>(
-    (decoded, [entryKey, value]) => typeof value === "string" ? { ...decoded, [entryKey]: value } : decoded,
+    (decoded, [entryKey, value]) => Predicate.isString(value) ? { ...decoded, [entryKey]: value } : decoded,
     {}
   )
 }
 
-const isReviewState = (value: unknown): value is ReviewState =>
+const isReviewState = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & ReviewState =>
   value === "not-requested" || value === "requested" || value === "reviewed"
 
 const readReviewStates = (): Readonly<Record<string, ReviewState>> => {
@@ -114,29 +118,29 @@ const readReviewStates = (): Readonly<Record<string, ReviewState>> => {
   )
 }
 
-const isControlCenterSettings = (value: unknown): value is ControlCenterSettings =>
+const isControlCenterSettings = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & ControlCenterSettings =>
   isUnknownRecord(value)
-  && typeof value.inferClockify === "boolean"
-  && typeof value.inferIssueKeys === "boolean"
-  && typeof value.inferRevisionAncestry === "boolean"
-  && typeof value.investigateFailures === "boolean"
+  && Predicate.isBoolean(value.inferClockify)
+  && Predicate.isBoolean(value.inferIssueKeys)
+  && Predicate.isBoolean(value.inferRevisionAncestry)
+  && Predicate.isBoolean(value.investigateFailures)
   && (value.refreshInterval === "live" || value.refreshInterval === "manual" ||
     value.refreshInterval === "quarter-hour")
-  && typeof value.retainEvidence === "boolean"
-  && typeof value.retryPipelines === "boolean"
-  && typeof value.writeJiraComments === "boolean"
+  && Predicate.isBoolean(value.retainEvidence)
+  && Predicate.isBoolean(value.retryPipelines)
+  && Predicate.isBoolean(value.writeJiraComments)
 
 const readSettings = (): ControlCenterSettings => {
   const stored = readStoredUnknown("settings")
   return isControlCenterSettings(stored) ? stored : defaultControlCenterSettings
 }
 
-const isAgentThreadEntry = (value: unknown): value is AgentThreadEntry => {
+const isAgentThreadEntry = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & AgentThreadEntry => {
   return isUnknownRecord(value)
     && (value.actor === "agent" || value.actor === "human" || value.actor === "system")
-    && typeof value.id === "string"
-    && typeof value.text === "string"
-    && typeof value.time === "string"
+    && Predicate.isString(value.id)
+    && Predicate.isString(value.text)
+    && Predicate.isString(value.time)
     && (value.action === undefined
       || value.action === "checks"
       || value.action === "description"
@@ -156,9 +160,9 @@ const readAgentThreads = (): Readonly<Record<string, ReadonlyArray<AgentThreadEn
   )
 }
 
-const isAgentCodeReview = (value: unknown): value is AgentCodeReview =>
+const isAgentCodeReview = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & AgentCodeReview =>
   isUnknownRecord(value)
-  && typeof value.sandbox === "string"
+  && Predicate.isString(value.sandbox)
   && (value.status === "checking-out" || value.status === "analyzing" || value.status === "completed"
     || value.status === "approved" || value.status === "changes-requested")
 
@@ -171,26 +175,31 @@ const readAgentCodeReviews = (): Readonly<Record<string, AgentCodeReview>> => {
   )
 }
 
-const isJiraIssueComment = (value: unknown): value is JiraIssueComment => {
+const isJiraIssueComment = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & JiraIssueComment => {
   return isUnknownRecord(value)
-    && typeof value.body === "string"
-    && typeof value.id === "string"
-    && typeof value.name === "string"
-    && typeof value.time === "string"
-    && (value.parentId === undefined || typeof value.parentId === "string")
+    && Predicate.isString(value.body)
+    && Predicate.isString(value.id)
+    && Predicate.isString(value.name)
+    && Predicate.isString(value.time)
+    && (value.parentId === undefined || Predicate.isString(value.parentId))
 }
 
-const isJiraIssueHistoryEvent = (value: unknown): value is JiraIssueHistoryEvent => {
+const isJiraIssueHistoryEvent = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & JiraIssueHistoryEvent => {
   return isUnknownRecord(value)
-    && typeof value.actor === "string"
-    && typeof value.label === "string"
-    && typeof value.time === "string"
+    && Predicate.isString(value.actor)
+    && Predicate.isString(value.label)
+    && Predicate.isString(value.time)
 }
 
-const isJiraIssueCommentArray = (value: unknown): value is ReadonlyArray<JiraIssueComment> =>
-  Array.isArray(value) && value.every(isJiraIssueComment)
+const isJiraIssueCommentArray = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & ReadonlyArray<JiraIssueComment> => Array.isArray(value) && value.every(isJiraIssueComment)
 
-const isJiraIssueHistory = (value: unknown): value is ReadonlyArray<JiraIssueHistoryEvent> =>
+const isJiraIssueHistory = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & ReadonlyArray<JiraIssueHistoryEvent> =>
   Array.isArray(value) && value.every(isJiraIssueHistoryEvent)
 
 const readJiraIssueStates = (): Readonly<Record<string, JiraIssueState>> => {
@@ -198,15 +207,15 @@ const readJiraIssueStates = (): Readonly<Record<string, JiraIssueState>> => {
   if (!isUnknownRecord(stored)) return {}
   return Object.entries(stored).reduce<Readonly<Record<string, JiraIssueState>>>((decoded, [entityId, issue]) => {
     if (!entityId.startsWith("jira:") || !isUnknownRecord(issue)) return decoded
-    if (issue.description !== undefined && typeof issue.description !== "string") return decoded
+    if (issue.description !== undefined && !Predicate.isString(issue.description)) return decoded
     if (issue.checkedCriteria !== undefined && !isStringArray(issue.checkedCriteria)) return decoded
     if (issue.comments !== undefined && !isJiraIssueCommentArray(issue.comments)) return decoded
     if (issue.history !== undefined && !isJiraIssueHistory(issue.history)) return decoded
     const jiraIssue: JiraIssueState = {
-      ...(typeof issue.description === "string" ? { description: issue.description } : {}),
-      ...(isStringArray(issue.checkedCriteria) ? { checkedCriteria: issue.checkedCriteria } : {}),
-      ...(isJiraIssueCommentArray(issue.comments) ? { comments: issue.comments } : {}),
-      ...(isJiraIssueHistory(issue.history) ? { history: issue.history } : {})
+      ...((Predicate.isString(issue.description)) && { description: issue.description }),
+      ...((isStringArray(issue.checkedCriteria)) && { checkedCriteria: issue.checkedCriteria }),
+      ...((isJiraIssueCommentArray(issue.comments)) && { comments: issue.comments }),
+      ...((isJiraIssueHistory(issue.history)) && { history: issue.history })
     }
     return { ...decoded, [entityId]: jiraIssue }
   }, {})

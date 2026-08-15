@@ -13,6 +13,7 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { parse } from "yaml"
+import * as Predicate from "effect/Predicate"
 
 const releaseTypes = new Set(["major", "minor", "patch"])
 const publicManifestFields = ["bin", "browser", "exports", "files", "main", "module", "types", "typesVersions"]
@@ -33,7 +34,7 @@ const parseChangesetFrontmatter = (content, changesetPath) => {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)
   if (match === null) throw new ChangesetCoverageError({ reason: `${changesetPath}: changeset frontmatter is missing` })
   const frontmatter = parse(match[1])
-  if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
+  if (frontmatter === null || !Predicate.isObjectOrArray(frontmatter) || Array.isArray(frontmatter)) {
     throw new ChangesetCoverageError({
       reason: `${changesetPath}: changeset frontmatter must be a package-to-release map`
     })

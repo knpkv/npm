@@ -30,7 +30,7 @@ export function useOptimistic<T>(serverValue: T): readonly [T, (value: T | null)
  * @param serverKey - A value that changes when server data refreshes (e.g., first item ID)
  * @returns [optimisticIds, addId, addAll] — the set + mutators
  */
-export function useOptimisticSet<T>(serverKey: unknown): readonly [
+export function useOptimisticSet<T, UnparsedInput = T | undefined>(serverKey: UnparsedInput): readonly [
   ReadonlySet<T>,
   (id: T) => void,
   (ids: Iterable<T>) => void,

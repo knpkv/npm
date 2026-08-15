@@ -87,7 +87,7 @@ export type RlyReleasePresentation = RlyReleaseFreshnessTime & {
   readonly version: string
 }
 
-const releaseStates: Readonly<Record<RlyReleaseState, true>> = {
+const releaseStates = {
   blocked: true,
   ready: true,
   deploying: true,
@@ -95,7 +95,7 @@ const releaseStates: Readonly<Record<RlyReleaseState, true>> = {
   shipped: true,
   held: true,
   unknown: true
-}
+} satisfies Readonly<Record<RlyReleaseState, true>>
 
 /** Validate visible release projection fields without deriving identity or readiness. */
 export const validateReleasePresentation = (release: RlyReleasePresentation): RlyReleasePresentation => {

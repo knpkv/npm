@@ -118,12 +118,12 @@ const RawToCommentLocation = RawCommentLocation.pipe(
 
 // Effectful decode — ParseError in error channel instead of thrown defect
 /** @internal Decodes one provider comment group without dropping its before/after side. */
-export const decodeCommentLocation = (raw: unknown) =>
+export const decodeCommentLocation = <UnparsedInput>(raw: UnparsedInput) =>
   Schema.decodeUnknownEffect(RawToCommentLocation)(raw).pipe(Effect.map((result): PRCommentLocation => ({
-    ...(result.filePath === undefined ? {} : { filePath: result.filePath }),
-    ...(result.beforeCommitId === undefined ? {} : { beforeCommitId: result.beforeCommitId }),
-    ...(result.afterCommitId === undefined ? {} : { afterCommitId: result.afterCommitId }),
-    ...(result.relativeFileVersion === undefined ? {} : { relativeFileVersion: result.relativeFileVersion }),
+    ...(!(result.filePath === undefined) && { filePath: result.filePath }),
+    ...(!(result.beforeCommitId === undefined) && { beforeCommitId: result.beforeCommitId }),
+    ...(!(result.afterCommitId === undefined) && { afterCommitId: result.afterCommitId }),
+    ...(!(result.relativeFileVersion === undefined) && { relativeFileVersion: result.relativeFileVersion }),
     comments: result.comments
   })))
 

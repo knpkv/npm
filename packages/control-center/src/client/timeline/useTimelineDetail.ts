@@ -50,7 +50,7 @@ export const useTimelineDetail = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: TimelineDetailTransport = browserTimelineDetailTransport
-): { readonly retry: () => void; readonly state: TimelineDetailState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<TimelineDetailState>({ _tag: "idle" })
 

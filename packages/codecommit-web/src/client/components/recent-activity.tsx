@@ -18,7 +18,14 @@ import styles from "./review-queue.module.css"
 
 type ActivityTone = "neutral" | "positive" | "caution" | "critical" | "progress"
 
-const iconMap: Readonly<Record<string, { readonly icon: LucideIcon; readonly tone: ActivityTone }>> = {
+interface ActivityPresentation {
+  readonly icon: LucideIcon
+  readonly tone: ActivityTone
+}
+
+interface ActivityPresentationLookup extends Readonly<Record<string, ActivityPresentation>> {}
+
+const iconMap: ActivityPresentationLookup = {
   new_comment: { icon: MessageSquareIcon, tone: "progress" },
   comment_edited: { icon: MessageSquareIcon, tone: "neutral" },
   comment_deleted: { icon: MessageSquareIcon, tone: "neutral" },
@@ -30,10 +37,10 @@ const iconMap: Readonly<Record<string, { readonly icon: LucideIcon; readonly ton
   merge_changed: { icon: GitBranchIcon, tone: "progress" }
 }
 
-const defaultIcon: { readonly icon: LucideIcon; readonly tone: ActivityTone } = {
+const defaultIcon = {
   icon: BellIcon,
   tone: "neutral"
-}
+} satisfies ActivityPresentation
 
 const toneClassName = (tone: ActivityTone): string => {
   switch (tone) {
@@ -75,7 +82,7 @@ export function RecentActivity({ notifications }: RecentActivityProps) {
         </Link>
       </div>
 
-      <Surface className={styles.activityList} padding="none" shape="grouped">
+      <Surface className={styles.activityList} padding="none" form="grouped">
         {prItems.map((notification) => {
           const presentation = iconMap[notification.type] ?? defaultIcon
           const Icon = presentation.icon

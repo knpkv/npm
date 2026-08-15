@@ -24,20 +24,12 @@ const makeDetail = (prId: string, durationMs: number) => ({
 type Detail = ReturnType<typeof makeDetail>
 const emptyHealth = { total: 0, withComments: 0, approved: 0 }
 const emptySize = { small: 0, medium: 0, large: 0, extraLarge: 0 }
-const emptyFilterOpts: { repos: Array<string>; authors: Array<string>; accounts: Array<string> } = {
+const emptyFilterOpts = {
   repos: [],
   authors: [],
   accounts: []
-}
-const emptyReviewer: {
-  topReviewers: Array<{ author: string; commentCount: number }>
-  topApprovers: Array<{ author: string; approvalCount: number }>
-  avgTimeToFirstReview: number | null
-  avgTimeToMerge: number | null
-  avgTimeToAddressFeedback: number | null
-  firstReviewDetails: Array<Detail>
-  feedbackDetails: Array<Detail>
-} = {
+} satisfies { repos: Array<string>; authors: Array<string>; accounts: Array<string> }
+const emptyReviewer = {
   topReviewers: [],
   topApprovers: [],
   avgTimeToFirstReview: null,
@@ -45,6 +37,14 @@ const emptyReviewer: {
   avgTimeToAddressFeedback: null,
   firstReviewDetails: [],
   feedbackDetails: []
+} satisfies {
+  topReviewers: Array<{ author: string; commentCount: number }>
+  topApprovers: Array<{ author: string; approvalCount: number }>
+  avgTimeToFirstReview: number | null
+  avgTimeToMerge: number | null
+  avgTimeToAddressFeedback: number | null
+  firstReviewDetails: Array<Detail>
+  feedbackDetails: Array<Detail>
 }
 
 /** Build a mock StatsRepo with overridable query results */

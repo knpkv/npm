@@ -27,7 +27,7 @@ const REPOSITORY_LOCAL_VARIABLES: ReadonlyArray<string> = [
 ]
 
 /** Environment tombstones that keep a child Git command out of its caller's repository context. */
-export const isolated = (): Record<string, string | undefined> => {
+export const isolated = () => {
   const environment: Record<string, string | undefined> = {}
   for (const name of REPOSITORY_LOCAL_VARIABLES) {
     environment[name] = undefined
@@ -36,7 +36,7 @@ export const isolated = (): Record<string, string | undefined> => {
 }
 
 /** Repository isolation plus fail-closed, non-interactive authentication. */
-export const nonInteractive = (): Record<string, string | undefined> => ({
+export const nonInteractive = () => ({
   ...isolated(),
   GCM_INTERACTIVE: "never",
   GIT_ASKPASS: "/bin/false",

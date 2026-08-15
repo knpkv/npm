@@ -113,7 +113,11 @@ const mountEntityLink = (href: string): HTMLAnchorElement => {
   return anchor
 }
 
-const restoreProperty = (target: object, key: PropertyKey, descriptor: PropertyDescriptor | undefined): void => {
+const restoreProperty = <Target extends object>(
+  target: Target,
+  key: PropertyKey,
+  descriptor: PropertyDescriptor | undefined
+): void => {
   if (descriptor === undefined) {
     Reflect.deleteProperty(target, key)
     return

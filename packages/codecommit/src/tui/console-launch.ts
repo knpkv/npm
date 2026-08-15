@@ -49,7 +49,7 @@ export interface OpenConsoleResult {
 const OPERATION = "open-codecommit"
 
 const launchFailure = (reason: ConsoleLaunchReason, message: string, cause?: unknown) =>
-  new ConsoleLaunchError({ operation: OPERATION, reason, message, ...(cause === undefined ? {} : { cause }) })
+  new ConsoleLaunchError({ operation: OPERATION, reason, message, ...(!(cause === undefined) && { cause }) })
 
 /**
  * Reports whether the spawner failed because no `assume` executable exists.

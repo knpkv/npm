@@ -1,5 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { Predicate } from "effect"
+import type * as Atom from "effect/unstable/reactivity/Atom"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -27,9 +28,22 @@ const DEFAULTS: SandboxSettings = {
   cloneDepth: 0
 }
 
+type ConfigState = Atom.Type<typeof configQueryAtom>
+type ConfigSaveInput = typeof configSaveAtom extends Atom.Writable<infer _Result, infer Input> ? Input : never
+
+export interface SettingsSandboxViewProps {
+  readonly config: ConfigState
+  readonly saveConfig: (input: ConfigSaveInput) => Promise<string>
+}
+
 export function SettingsSandbox() {
   const config = useAtomValue(configQueryAtom)
   const saveConfig = useAtomSet(configSaveAtom, { mode: "promise" })
+  return <SettingsSandboxView config={config} saveConfig={saveConfig} />
+}
+
+/** Sandbox settings editor with its query and mutation boundaries made explicit. */
+export function SettingsSandboxView({ config, saveConfig }: SettingsSandboxViewProps) {
   type ConfigValue = Extract<typeof config, { readonly _tag: "Success" }>["value"]
   const configRef = useRef<ConfigValue | null>(null)
   const [local, setLocal] = useState<SandboxSettings | null>(null)

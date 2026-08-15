@@ -39,13 +39,13 @@ export const RLY_STATE_PANEL_DEFAULT_VARIANTS = defineVariants({ tone: "neutral"
 export type RlyStatePanelTone = keyof typeof RLY_STATE_PANEL_VARIANTS.tone
 export type RlyStatePanelAnnouncement = "off" | "polite" | "assertive"
 
-const toneIcons: Readonly<Record<RlyStatePanelTone, RlyIconName>> = {
+const toneIcons = {
   neutral: "minus",
   positive: "check",
   critical: "alert",
   caution: "clock",
   progress: "loader"
-}
+} satisfies Readonly<Record<RlyStatePanelTone, RlyIconName>>
 
 export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live" | "children" | "title"> & {
   readonly action?: ReactNode

@@ -193,9 +193,7 @@ const program = Effect.scoped(
             Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000))
           )(configured.agentOpenAiApiUrl),
           model: yield* Schema.decodeUnknownEffect(AgentModelId)(configured.agentOpenAiModel),
-          ...(Redacted.value(configured.agentOpenAiApiKey).length === 0
-            ? {}
-            : { apiKey: configured.agentOpenAiApiKey })
+          ...(!(Redacted.value(configured.agentOpenAiApiKey).length === 0) && { apiKey: configured.agentOpenAiApiKey })
         }
         : undefined
       if (
@@ -235,18 +233,16 @@ const program = Effect.scoped(
         host: configured.host,
         port: configured.port,
         allowInsecureLan: configured.allowInsecureLan,
-        ...(configured.publicOrigin.length > 0 ? { publicOrigin: configured.publicOrigin } : {}),
-        ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
-        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-        ...(trustedProxyAddresses.length > 0 ? { trustedProxyAddresses } : {}),
-        ...(hasDirectTlsInput
-          ? {
-            directTls: {
-              certificateRef: configured.directTlsCertificateRef,
-              privateKeyRef: configured.directTlsPrivateKeyRef
-            }
+        ...((configured.publicOrigin.length > 0) && { publicOrigin: configured.publicOrigin }),
+        ...((allowedHosts.length > 0) && { allowedHosts }),
+        ...((allowedOrigins.length > 0) && { allowedOrigins }),
+        ...((trustedProxyAddresses.length > 0) && { trustedProxyAddresses }),
+        ...(hasDirectTlsInput && {
+          directTls: {
+            certificateRef: configured.directTlsCertificateRef,
+            privateKeyRef: configured.directTlsPrivateKeyRef
           }
-          : {})
+        })
       })
       const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
       const services = yield* Layer.build(
@@ -266,10 +262,10 @@ const program = Effect.scoped(
             ? {
               workspaceId: DEFAULT_WORKSPACE_ID,
               workspaceRoot: path.join(dataPaths.dataRoot, "pr-review-workspaces"),
-              ...(sbxExecutable === undefined ? {} : { sbxExecutable }),
-              ...(sbxTemplate === undefined ? {} : { sbxTemplate }),
-              ...(prReviewCodexExecutable === undefined ? {} : { codexExecutable: prReviewCodexExecutable }),
-              ...(prReviewClaudeExecutable === undefined ? {} : { claudeExecutable: prReviewClaudeExecutable }),
+              ...(!(sbxExecutable === undefined) && { sbxExecutable }),
+              ...(!(sbxTemplate === undefined) && { sbxTemplate }),
+              ...(!(prReviewCodexExecutable === undefined) && { codexExecutable: prReviewCodexExecutable }),
+              ...(!(prReviewClaudeExecutable === undefined) && { claudeExecutable: prReviewClaudeExecutable }),
               reviewBudgetMillis: prReviewTiming.budgetMillis,
               leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
               maximumSandboxDurationMillis: prReviewTiming.maximumSandboxDurationMillis
@@ -280,15 +276,12 @@ const program = Effect.scoped(
             : {
               cwd: agentCwd ?? ".",
               enabledProviders: agentProviders,
-              ...(configured.agentCodexExecutable.length > 0
-                ? { codexExecutable: configured.agentCodexExecutable }
-                : {}),
-              ...(codexModel === undefined ? {} : { codexModel }),
-              ...(configured.agentClaudeExecutable.length > 0
-                ? { claudeExecutable: configured.agentClaudeExecutable }
-                : {}),
-              ...(claudeModel === undefined ? {} : { claudeModel }),
-              ...(openAiCompatible === undefined ? {} : { openAiCompatible })
+              ...((configured.agentCodexExecutable.length > 0) && { codexExecutable: configured.agentCodexExecutable }),
+              ...(!(codexModel === undefined) && { codexModel }),
+              ...((configured.agentClaudeExecutable.length > 0) &&
+                { claudeExecutable: configured.agentClaudeExecutable }),
+              ...(!(claudeModel === undefined) && { claudeModel }),
+              ...(!(openAiCompatible === undefined) && { openAiCompatible })
             },
           secretRoot: dataPaths.secretRoot,
           staticAssets: { root: staticRoot }
@@ -328,8 +321,8 @@ const program = Effect.scoped(
   })
 )
 
-const findDatabaseInitializationError = (
-  value: unknown,
+const findDatabaseInitializationError = <UnparsedInput>(
+  value: UnparsedInput,
   remainingWrapperDepth = 2
 ): DatabaseInitializationError | null => {
   if (Schema.is(DatabaseInitializationError)(value)) return value
@@ -372,7 +365,7 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
   const errorTag = Option.flatMap(
     error,
     (value) =>
-      Predicate.hasProperty(value, "_tag") && typeof value._tag === "string"
+      Predicate.hasProperty(value, "_tag") && Predicate.isString(value._tag)
         ? Option.some(value._tag)
         : Option.none<string>()
   )

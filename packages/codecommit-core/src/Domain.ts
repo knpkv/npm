@@ -371,10 +371,10 @@ const serializeThread = (t: CommentThread): CommentThreadJsonEncoded => ({
     content: t.root.content,
     author: t.root.author,
     creationDate: t.root.creationDate.toISOString(),
-    ...(t.root.inReplyTo != null ? { inReplyTo: t.root.inReplyTo } : {}),
+    ...((t.root.inReplyTo != null) && { inReplyTo: t.root.inReplyTo }),
     deleted: t.root.deleted,
-    ...(t.root.filePath != null ? { filePath: t.root.filePath } : {}),
-    ...(t.root.lineNumber != null ? { lineNumber: t.root.lineNumber } : {})
+    ...((t.root.filePath != null) && { filePath: t.root.filePath }),
+    ...((t.root.lineNumber != null) && { lineNumber: t.root.lineNumber })
   },
   replies: t.root.deleted ? [] : t.replies.map(serializeThread)
 })
@@ -388,10 +388,10 @@ export const encodeCommentLocations = (
   locations: ReadonlyArray<PRCommentLocation>
 ): ReadonlyArray<typeof PRCommentLocationJson.Type> =>
   locations.map((loc) => ({
-    ...(loc.filePath != null ? { filePath: loc.filePath } : {}),
-    ...(loc.beforeCommitId != null ? { beforeCommitId: loc.beforeCommitId } : {}),
-    ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
-    ...(loc.relativeFileVersion != null ? { relativeFileVersion: loc.relativeFileVersion } : {}),
+    ...((loc.filePath != null) && { filePath: loc.filePath }),
+    ...((loc.beforeCommitId != null) && { beforeCommitId: loc.beforeCommitId }),
+    ...((loc.afterCommitId != null) && { afterCommitId: loc.afterCommitId }),
+    ...((loc.relativeFileVersion != null) && { relativeFileVersion: loc.relativeFileVersion }),
     comments: loc.comments.map(serializeThread)
   }))
 

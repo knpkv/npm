@@ -148,7 +148,7 @@ describe("release runbook hydration", () => {
       const reads = new Array<{ readonly entityId: string; readonly workspaceId: string }>()
       const persistence = {
         deliveryGraph: {
-          read: (workspaceId: WorkspaceId, input: unknown) =>
+          read: <UnparsedInput>(workspaceId: WorkspaceId, input: UnparsedInput) =>
             Effect.gen(function*() {
               const query = yield* Schema.decodeUnknownEffect(DeliveryGraphQuery)(input).pipe(
                 Effect.orDie
@@ -200,7 +200,7 @@ describe("release runbook hydration", () => {
       let reads = 0
       const persistence = {
         deliveryGraph: {
-          read: (_workspaceId: WorkspaceId, input: unknown) =>
+          read: <UnparsedInput>(_workspaceId: WorkspaceId, input: UnparsedInput) =>
             Effect.gen(function*() {
               const query = yield* Schema.decodeUnknownEffect(DeliveryGraphQuery)(input).pipe(Effect.orDie)
               if (query._tag !== "entityProjection") {
@@ -264,7 +264,7 @@ describe("release runbook hydration", () => {
       }
       const persistence = {
         deliveryGraph: {
-          read: (_workspaceId: WorkspaceId, _input: unknown) =>
+          read: <UnparsedInput>(_workspaceId: WorkspaceId, _input: UnparsedInput) =>
             Effect.die("Deleted release runbooks must not request an exact entity slice")
         }
       }

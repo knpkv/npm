@@ -144,9 +144,9 @@ interface ReviewThreadTarget {
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
-const decodeThreadPayload = <SchemaType, Encoded, Requirements>(
+const decodeThreadPayload = <SchemaType, Encoded, Requirements, UnparsedInput>(
   schema: Schema.Codec<SchemaType, Encoded, Requirements, never>,
-  payload: unknown
+  payload: UnparsedInput
 ): Effect.Effect<SchemaType, ApplicationServiceUnavailable, Requirements> =>
   Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(unavailable))
 
@@ -193,9 +193,7 @@ const mapReviewThreadEvent = Effect.fnUntraced(function*(
       return {
         _tag: "run-started",
         ...common,
-        ...(payload.runtimeMetadata === undefined
-          ? {}
-          : { runtimeMetadata: payload.runtimeMetadata })
+        ...(!(payload.runtimeMetadata === undefined) && { runtimeMetadata: payload.runtimeMetadata })
       }
     }
     case "progress": {
@@ -1329,8 +1327,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         jobId: input.jobId,
         suggestionId: selected.revision.suggestion.suggestionId,
         revisionId: selected.revision.revisionId,
-        ...(input.operation === undefined ? {} : { operation: input.operation }),
-        ...(input.commentId === undefined ? {} : { commentId: input.commentId }),
+        ...(!(input.operation === undefined) && { operation: input.operation }),
+        ...(!(input.commentId === undefined) && { commentId: input.commentId }),
         subject: target.subject,
         suggestionRevision: {
           jobId: input.jobId,
@@ -1410,7 +1408,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         revisionId: selected.revision.revisionId,
         contentDigest,
         operation,
-        ...(existingPublication === null ? {} : { commentId: existingPublication.commentId }),
+        ...(!(existingPublication === null) && { commentId: existingPublication.commentId }),
         reservationId: requestedReservationId,
         reservedAt
       }).pipe(

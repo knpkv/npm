@@ -24,7 +24,7 @@ import {
   deriveReleaseReadinessVerdict,
   readinessFactResult,
   readinessFindingKey,
-  readinessPolicyShapeIsV1,
+  readinessPolicyContractIsV1,
   readinessStagesAreEqual,
   sortedReadinessUnique
 } from "./policy.js"
@@ -482,7 +482,7 @@ export const EnvironmentReadinessEvaluationInput = Schema.Struct({
     const definitionsById = new Map(definitions.map((definition) => [definition.factId, definition]))
     return observations.every((observation) => definitionsById.get(observation.factId)?.kind === observation.state._tag)
   }, { expected: "readiness observations to match one policy fact of the same kind" }),
-  Schema.makeFilter(({ definitions, observations }) => readinessPolicyShapeIsV1(definitions, observations), {
+  Schema.makeFilter(({ definitions, observations }) => readinessPolicyContractIsV1(definitions, observations), {
     expected: "environment readiness input to contain the complete V1 policy shape"
   })
 )
@@ -579,7 +579,7 @@ export const EnvironmentReadinessAssessment = Schema.Struct({
   }),
   Schema.makeFilter(
     ({ facts }) =>
-      readinessPolicyShapeIsV1(
+      readinessPolicyContractIsV1(
         facts.map(({ definition }) => definition),
         facts.flatMap(({ observation }) => observation === null ? [] : [observation])
       ),
@@ -674,7 +674,7 @@ export const EnvironmentReadinessSummary = Schema.Struct({
   }),
   Schema.makeFilter(
     ({ facts }) =>
-      readinessPolicyShapeIsV1(
+      readinessPolicyContractIsV1(
         facts.map(({ definition }) => definition),
         facts.flatMap(({ observation }) => observation === null ? [] : [observation])
       ),

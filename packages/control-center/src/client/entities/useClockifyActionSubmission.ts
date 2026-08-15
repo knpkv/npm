@@ -48,10 +48,7 @@ export const useClockifyActionSubmission = (
   onSessionExpired: (sessionKey: string) => void,
   onSucceeded: () => void,
   transport: ClockifyActionSubmissionTransport = browserClockifyActionSubmissionTransport
-): {
-  readonly state: ClockifyActionSubmissionState
-  readonly submit: (request: SubmitClockifyActionRequest) => void
-} => {
+) => {
   const [state, setState] = useState<ClockifyActionSubmissionState>({ _tag: "idle" })
   const active = useRef<AbortController | null>(null)
   useEffect(() => {
@@ -65,7 +62,7 @@ export const useClockifyActionSubmission = (
   }, [entityId, sessionKey])
   return {
     state,
-    submit: useCallback((request) => {
+    submit: useCallback((request: SubmitClockifyActionRequest) => {
       if (sessionKey === null || active.current !== null) return
       const abort = new AbortController()
       active.current = abort

@@ -20,12 +20,12 @@ export const parseDiffFilePair = (item: RlyDiffCodeItem): FileDiffMetadata => {
   validateDiffCodeItem(item)
   return parseDiffFromFile(
     {
-      ...(item.before.cacheKey === undefined ? {} : { cacheKey: item.before.cacheKey }),
+      ...(!(item.before.cacheKey === undefined) && { cacheKey: item.before.cacheKey }),
       contents: item.before.contents,
       name: item.before.name
     },
     {
-      ...(item.after.cacheKey === undefined ? {} : { cacheKey: item.after.cacheKey }),
+      ...(!(item.after.cacheKey === undefined) && { cacheKey: item.after.cacheKey }),
       contents: item.after.contents,
       name: item.after.name
     },

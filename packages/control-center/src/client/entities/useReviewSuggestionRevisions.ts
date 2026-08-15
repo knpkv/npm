@@ -114,7 +114,7 @@ export const browserReviewSuggestionRevisionTransport: ReviewSuggestionRevisionT
             suggestionId: scope.suggestionId
           },
           query: {
-            ...(before === null ? {} : { before }),
+            ...(!(before === null) && { before }),
             limit: REVISION_PAGE_SIZE
           }
         })
@@ -268,7 +268,7 @@ export const useReviewSuggestionRevisions = (
           () => saveOutcome("accepted-refresh-failed", acceptedPage)
         )
       },
-      (failure: unknown) => {
+      <UnparsedInput>(failure: UnparsedInput) => {
         if (!conflictFailure(failure)) throw failure
         return transport.load(current, null, abort.signal).then((page) => {
           if (

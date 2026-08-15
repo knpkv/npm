@@ -5,6 +5,7 @@
  */
 import * as Data from "effect/Data"
 import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 
 /**
  * Error thrown when .confluence.json is not found.
@@ -120,7 +121,7 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
     const message = params?.retryAfter
       ? `Rate limited. Retry after ${params.retryAfter}s.`
       : "Rate limited. Please wait and try again."
-    super({ retryAfter: params?.retryAfter, message })
+    super({ ...((params?.retryAfter !== undefined) && { retryAfter: params.retryAfter }), message })
   }
 }
 
@@ -160,7 +161,7 @@ export interface AdfSchemaIssue {
   readonly schemaPath?: string
   readonly keyword?: string
   readonly message?: string
-  readonly params?: Record<string, unknown>
+  readonly params?: Record<string, Schema.Json>
 }
 
 /**
@@ -380,9 +381,9 @@ export type ConfluenceError =
  *
  * @category Utilities
  */
-export const isConfluenceError = (error: unknown): error is ConfluenceError =>
+export const isConfluenceError = <UnparsedInput>(error: UnparsedInput): error is UnparsedInput & ConfluenceError =>
   Predicate.hasProperty(error, "_tag") &&
-  typeof error._tag === "string" &&
+  Predicate.isString(error._tag) &&
   [
     "ConfigNotFoundError",
     "ConfigParseError",

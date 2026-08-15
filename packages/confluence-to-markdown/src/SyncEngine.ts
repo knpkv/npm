@@ -162,7 +162,11 @@ const hashBody = (markdown: string) => computeHash(markdown.trim()).pipe(Effect.
  * so the flag is visible in the file the user is about to edit rather than
  * only surfacing when their push is refused.
  */
-const roundTripFlag = (adfJson: string): { readonly roundTrip?: "unsafe" } => {
+interface RoundTripFlag {
+  readonly roundTrip?: "unsafe"
+}
+
+const roundTripFlag = (adfJson: string): RoundTripFlag => {
   try {
     return roundTripUnsafeNodeTypes(JSON.parse(adfJson)).length > 0 ? { roundTrip: "unsafe" } : {}
   } catch {
@@ -279,7 +283,7 @@ export const layer: Layer.Layer<
           Effect.mapError((cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause }))
         )
         const parsed = yield* Effect.try({
-          try: (): unknown => JSON.parse(raw),
+          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(raw),
           catch: (cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause })
         })
         return yield* Schema.decodeUnknownEffect(AdfMetadataSidecarSchema)(parsed).pipe(
@@ -512,13 +516,13 @@ export const layer: Layer.Layer<
           version: version.number,
           title,
           updated: new Date(version.createdAt),
-          ...(parentId ? { parentId: PageId(parentId) } : {}),
-          ...(position !== undefined ? { position } : {}),
+          ...(parentId && { parentId: PageId(parentId) }),
+          ...((position !== undefined) && { position }),
           contentHash,
           ...roundTripFlag(resolvedAdfJson),
-          ...(version.message ? { versionMessage: version.message } : {}),
-          ...(author?.displayName ? { authorName: author.displayName } : {}),
-          ...(author?.email ? { authorEmail: author.email } : {})
+          ...((version.message) && { versionMessage: version.message }),
+          ...((author?.displayName) && { authorName: author.displayName }),
+          ...((author?.email) && { authorEmail: author.email })
         }
 
         return { markdown, frontMatter, prepared }
@@ -703,13 +707,13 @@ export const layer: Layer.Layer<
             version: fullPage.version.number,
             title: fullPage.title,
             updated: updatedAt,
-            ...(effectiveParentId ? { parentId: PageId(effectiveParentId) } : {}),
-            ...(page.position !== undefined ? { position: page.position } : {}),
+            ...(effectiveParentId && { parentId: PageId(effectiveParentId) }),
+            ...((page.position !== undefined) && { position: page.position }),
             contentHash,
             ...roundTripFlag(adfJson),
-            ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
-            ...(author?.displayName ? { authorName: author.displayName } : {}),
-            ...(author?.email ? { authorEmail: author.email } : {})
+            ...((fullPage.version.message) && { versionMessage: fullPage.version.message }),
+            ...((author?.displayName) && { authorName: author.displayName }),
+            ...((author?.email) && { authorEmail: author.email })
           }
 
           yield* writePreparedMarkdownWithAdfMetadata(filePath, frontMatter, prepared)
@@ -829,7 +833,7 @@ export const layer: Layer.Layer<
         if (remoteAdf === undefined) return
 
         const remoteDoc = yield* Effect.try({
-          try: (): unknown => JSON.parse(remoteAdf),
+          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(remoteAdf),
           catch: () => null
         }).pipe(Effect.orElseSucceed(() => null))
         if (remoteDoc === null) return
@@ -842,7 +846,7 @@ export const layer: Layer.Layer<
         }
 
         const outgoingDoc = yield* Effect.try({
-          try: (): unknown => JSON.parse(params.outgoingAdf),
+          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(params.outgoingAdf),
           catch: () => null
         }).pipe(Effect.orElseSucceed(() => null))
         if (outgoingDoc === null) return

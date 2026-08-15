@@ -122,12 +122,12 @@ const pluginFailureTags = new Set([
   "PluginUnknownOutcomeFailure"
 ])
 
-const isPluginFailure = (failure: unknown): failure is PluginFailure =>
+const isPluginFailure = <UnparsedInput>(failure: UnparsedInput): failure is UnparsedInput & PluginFailure =>
   Predicate.hasProperty(failure, "_tag") &&
-  typeof failure._tag === "string" &&
+  Predicate.isString(failure._tag) &&
   pluginFailureTags.has(failure._tag)
 
-const sourceFailure = (failure: unknown): PluginFailure | null => {
+const sourceFailure = <UnparsedInput>(failure: UnparsedInput): PluginFailure | null => {
   if (isPluginFailure(failure)) return failure
   if (
     Predicate.hasProperty(failure, "_tag") &&

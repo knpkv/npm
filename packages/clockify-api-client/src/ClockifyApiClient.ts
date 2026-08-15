@@ -49,7 +49,7 @@ export interface GetTimeEntryParams {
   readonly hydrated?: boolean | undefined
 }
 
-export interface ClockifyApiClientShape {
+export interface ClockifyApiClientContract {
   readonly getUser: () => Effect.Effect<User, ClockifyClientError>
   readonly getWorkspaceUsers?: (
     workspaceId: string
@@ -127,7 +127,7 @@ export const make = (
   }
 }
 
-export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientShape>()(
+export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientContract>()(
   "@knpkv/clockify-api-client/ClockifyApiClient"
 ) {
   static readonly layer: Layer.Layer<ClockifyApiClient, never, ClockifyApiConfig | HttpClient.HttpClient> = Layer
@@ -187,11 +187,11 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
           getTimeEntries: (workspaceId, userId, params) =>
             api.getTimeEntries(workspaceId, userId, {
               params: {
-                ...(params?.start !== undefined ? { start: params.start } : {}),
-                ...(params?.end !== undefined ? { end: params.end } : {}),
-                ...(params?.hydrated === undefined ? {} : { hydrated: params.hydrated }),
-                ...(params?.page !== undefined ? { page: params.page } : {}),
-                ...(params?.pageSize !== undefined ? { "page-size": params.pageSize } : {})
+                ...((params?.start !== undefined) && { start: params.start }),
+                ...((params?.end !== undefined) && { end: params.end }),
+                ...(!(params?.hydrated === undefined) && { hydrated: params.hydrated }),
+                ...((params?.page !== undefined) && { page: params.page }),
+                ...((params?.pageSize !== undefined) && { "page-size": params.pageSize })
               }
             }),
           getRunningTimer: (workspaceId, userId) =>
@@ -212,7 +212,7 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
           getTimeEntry: (workspaceId, timeEntryId, params) =>
             api.getTimeEntry(workspaceId, timeEntryId, {
               params: {
-                ...(params?.hydrated === undefined ? {} : { hydrated: params.hydrated })
+                ...(!(params?.hydrated === undefined) && { hydrated: params.hydrated })
               }
             }),
           deleteTimeEntry: (workspaceId, timeEntryId) => api.deleteTimeEntry(workspaceId, timeEntryId, undefined),

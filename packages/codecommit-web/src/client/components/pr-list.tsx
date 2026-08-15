@@ -194,7 +194,7 @@ export function PRList() {
             </div>
           ) : null}
           {needsLogin ? (
-            <Surface className={styles.ssoPanel} padding="compact" shape="grouped">
+            <Surface className={styles.ssoPanel} padding="compact" form="grouped">
               <Text as="h3" variant="card-title">
                 Restore AWS sessions
               </Text>
@@ -223,7 +223,7 @@ export function PRList() {
 
     if (filterState.groupBy !== "account") {
       return (
-        <Surface className={styles.queueSurface} padding="none" shape="grouped">
+        <Surface className={styles.queueSurface} padding="none" form="grouped">
           {sorted.map((pr) => (
             <PRRow
               currentUser={appState.currentUser}
@@ -257,7 +257,7 @@ export function PRList() {
                 {accountPrs.length} {accountPrs.length === 1 ? "pull request" : "pull requests"}
               </Text>
             </div>
-            <Surface className={styles.queueSurface} padding="none" shape="grouped">
+            <Surface className={styles.queueSurface} padding="none" form="grouped">
               {accountPrs.map((pr) => (
                 <PRRow
                   currentUser={appState.currentUser}

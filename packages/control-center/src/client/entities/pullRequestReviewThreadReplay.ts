@@ -151,7 +151,7 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
             model: provider.model,
             profile: "read-only",
             reviewProfileId: provider.reviewProfile.profileId,
-            ...(prompt === undefined ? {} : { prompt })
+            ...(!(prompt === undefined) && { prompt })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -237,8 +237,8 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
           },
           query: {
             revisionId: selection.revisionId,
-            ...(operation === undefined ? {} : { operation }),
-            ...(commentId === undefined ? {} : { commentId })
+            ...(!(operation === undefined) && { operation }),
+            ...(!(commentId === undefined) && { commentId })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -262,8 +262,8 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
             ...selection,
             finalContent,
             authorityBinding,
-            ...(operation === undefined ? {} : { operation }),
-            ...(commentId === undefined ? {} : { commentId })
+            ...(!(operation === undefined) && { operation }),
+            ...(!(commentId === undefined) && { commentId })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -343,7 +343,7 @@ export const continuePullRequestReviewThread = async (
     historyLoaded,
     nextCursor: update.nextCursor,
     replayGeneration: previous?.replayGeneration ?? update.replayGeneration ?? 0,
-    ...(previous?.replacesRetainedWindow === true ? { replacesRetainedWindow: true } : {})
+    ...((previous?.replacesRetainedWindow === true) && { replacesRetainedWindow: true })
   }
 }
 
@@ -461,7 +461,7 @@ export const loadPullRequestReviewSnapshot = async (
   const catalogPromise = canEnqueue
     ? transport.providers(signal).then(
       (catalog) => ({ catalog, needsRetry: false }),
-      (failure: unknown) => {
+      <UnparsedInput>(failure: UnparsedInput) => {
         if (signal.aborted || !isRecoverablePullRequestReviewFailure(failure)) throw failure
         Effect.runFork(Effect.logWarning("Pull-request review provider catalog load failed", failure))
         return {

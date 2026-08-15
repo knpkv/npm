@@ -1,6 +1,7 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Schema, Sink, Stream } from "effect"
+import * as Predicate from "effect/Predicate"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -398,8 +399,8 @@ describe("model", () => {
         expect(() => Object.assign(command.args, { 0: "--dangerously-bypass-safety" })).toThrow()
         expect(() => Object.assign(command.options, { extendEnv: true })).toThrow()
         expect(() => Object.assign(environment ?? {}, { AWS_SECRET_ACCESS_KEY: "injected" })).toThrow()
-        expect(typeof stdin === "object" && stdin !== null && Object.isFrozen(stdin)).toBe(true)
-        if (typeof stdin === "object" && stdin !== null && "endOnDone" in stdin) {
+        expect(Predicate.isObjectOrArray(stdin) && stdin !== null && Object.isFrozen(stdin)).toBe(true)
+        if (Predicate.isObjectOrArray(stdin) && stdin !== null && "endOnDone" in stdin) {
           expect(stdin.endOnDone).toBe(true)
           expect(() => Object.assign(stdin, { endOnDone: false })).toThrow()
           expect(stdin.endOnDone).toBe(true)

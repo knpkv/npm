@@ -1,4 +1,4 @@
-import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
+import { Button, type RlyStateTone, StateLabel, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import type { ReactElement } from "react"
 
@@ -12,9 +12,12 @@ export type ConnectionSynchronizationViewState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly synchronization: PluginSynchronizationState }
 
-const resultPresentation = (
-  result: PluginSynchronizationState["result"]
-): { readonly label: string; readonly tone: "critical" | "neutral" | "positive" | "progress" } => {
+interface SynchronizationResultPresentation {
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
+const resultPresentation = (result: PluginSynchronizationState["result"]): SynchronizationResultPresentation => {
   switch (result) {
     case "never":
       return { label: "Never synchronized", tone: "neutral" }

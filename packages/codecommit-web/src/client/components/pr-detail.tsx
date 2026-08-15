@@ -358,7 +358,7 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <Surface as="section" className={styles.disclosure} padding="none" shape="grouped">
+    <Surface as="section" className={styles.disclosure} padding="none" form="grouped">
       <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
         <ChevronDownIcon aria-hidden="true" className={styles.disclosureIcon} data-open={open ? "true" : "false"} />
         <span>{title}</span>
@@ -467,7 +467,7 @@ function ApproversCard({
   const isSatisfied = approvalRules.length > 0 && approvalRules.every((r) => r.satisfied)
 
   return (
-    <Surface as="section" className={styles.approverCard} padding="default" shape="grouped" tone="secondary">
+    <Surface as="section" className={styles.approverCard} padding="default" form="grouped" tone="secondary">
       <header className={styles.approverHeading}>
         <div className={styles.approverTitle}>
           <Text as="h3" variant="card-title">
@@ -980,7 +980,7 @@ export function PRDetail() {
         </aside>
       </section>
 
-      <Surface as="section" className={styles.revisionCard} padding="spacious" shape="grouped" tone="secondary">
+      <Surface as="section" className={styles.revisionCard} padding="spacious" form="grouped" tone="secondary">
         <header className={styles.revisionHeading}>
           <div>
             <Text tone="secondary" variant="label">
@@ -1106,7 +1106,7 @@ export function PRDetail() {
       <div className={styles.reviewWorkspace}>
         <section aria-label="Pull request narrative and comments" className={styles.contentColumn}>
           {pr.description && (
-            <Surface as="section" className={styles.contentSection} padding="spacious" shape="grouped">
+            <Surface as="section" className={styles.contentSection} padding="spacious" form="grouped">
               <header className={styles.sectionHeading}>
                 <Text as="h2" variant="section-title">
                   Description

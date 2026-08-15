@@ -7,12 +7,12 @@ import { SettingsAccountsTab } from "./SettingsAccountsTab.js"
 import { SettingsConfigTab } from "./SettingsConfigTab.js"
 import { SettingsThemeTab } from "./SettingsThemeTab.js"
 
-const TabLabels: Record<string, string> = {
+const TabLabels = {
   accounts: "Accounts",
   theme: "Theme",
   config: "Config",
   about: "About"
-}
+} satisfies Record<string, string>
 
 interface SettingsViewProps {
   readonly items: ReadonlyArray<ListItem>

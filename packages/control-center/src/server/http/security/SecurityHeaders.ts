@@ -3,6 +3,10 @@ export interface SecurityHeaderPolicy {
   readonly isSecureTransport: boolean
 }
 
+interface SecurityHeaders {
+  [name: string]: string
+}
+
 const BASE_CSP = [
   "default-src 'none'",
   "base-uri 'none'",
@@ -22,9 +26,9 @@ const BASE_CSP = [
 ]
 
 /** Build the outer response headers applied to documents, APIs, errors, and static misses. */
-export const securityHeaders = (policy: SecurityHeaderPolicy): Readonly<Record<string, string>> => {
+export const securityHeaders = (policy: SecurityHeaderPolicy) => {
   const directives = policy.isSecureTransport ? [...BASE_CSP, "upgrade-insecure-requests"] : BASE_CSP
-  const headers: Record<string, string> = {
+  const headers: SecurityHeaders = {
     "content-security-policy": directives.join("; "),
     "cross-origin-opener-policy": "same-origin-allow-popups",
     "cross-origin-resource-policy": "same-origin",

@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import {
   Activity,
   Bot,
@@ -49,12 +50,13 @@ interface FocusTarget {
   focus(): void
 }
 
+const isFocusTarget = (candidate: Element | null): candidate is Element & FocusTarget =>
+  candidate !== null && "focus" in candidate && Predicate.isFunction(candidate.focus)
+
 const activeFocusTarget = (): FocusTarget | null => {
   const activeElement = document.activeElement
-  if (activeElement === null || !("focus" in activeElement)) return null
-  const focus = activeElement.focus
-  if (typeof focus !== "function") return null
-  return { focus: () => Reflect.apply(focus, activeElement, []) }
+  if (!isFocusTarget(activeElement)) return null
+  return { focus: () => activeElement.focus() }
 }
 
 const formatAuditTime = (sequence: number) => {

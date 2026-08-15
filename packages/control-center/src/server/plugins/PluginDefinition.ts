@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 
+import * as Predicate from "effect/Predicate"
 import { PluginHealth } from "../../domain/freshness.js"
 import {
   type DiffContentRangeRequestV1,
@@ -56,8 +57,8 @@ const PluginDefinitionRuntimeTypeId: unique symbol = Symbol.for(
 export interface DefinedPluginV1<R> extends PluginDefinitionV1 {
   readonly [PluginDefinitionRuntimeTypeId]: {
     readonly requirements: (requirements: R) => R
-    readonly build: (
-      configuration: unknown,
+    readonly build: <UnparsedInput>(
+      configuration: UnparsedInput,
       descriptor: NegotiatedPluginDescriptorV1
     ) => Layer.Layer<PluginServices, PluginFailure, R>
   }
@@ -114,11 +115,11 @@ const validateCapabilityCodecs = Effect.fn("PluginDefinition.validateCapabilityC
   }
 })
 
-const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   boundary: "input" | "output",
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(
@@ -130,8 +131,8 @@ const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>>(
     )
   )
 
-const normalizeLegacyDiscoveryOutput = (value: unknown): unknown =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && !Object.hasOwn(value, "resource")
+const normalizeLegacyDiscoveryOutput = <UnparsedInput>(value: UnparsedInput) =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value) && !Object.hasOwn(value, "resource")
     ? { ...value, resource: null }
     : value
 
@@ -264,23 +265,21 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
 
   const connection: PluginConnectionV1 = {
     descriptor,
-    ...(services.connection.actionActorIdentity === undefined
-      ? {}
-      : {
-        actionActorIdentity: retryPluginOperation({
-          operation: services.connection.actionActorIdentity,
-          safety: "safe-read"
-        }).pipe(
-          Effect.flatMap((value) =>
-            decodeBoundary(
-              "action-actor-identity",
-              "output",
-              PluginActionActorIdentityV1,
-              value
-            )
+    ...(!(services.connection.actionActorIdentity === undefined) && {
+      actionActorIdentity: retryPluginOperation({
+        operation: services.connection.actionActorIdentity,
+        safety: "safe-read"
+      }).pipe(
+        Effect.flatMap((value) =>
+          decodeBoundary(
+            "action-actor-identity",
+            "output",
+            PluginActionActorIdentityV1,
+            value
           )
         )
-      }),
+      )
+    }),
     discover: retryPluginOperation({
       operation: services.connection.discover,
       safety: "safe-read"
@@ -362,52 +361,46 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
                 )
               )
           ),
-        ...(diff.readInventoryPageV2 === undefined
-          ? {}
-          : {
-            readInventoryPageV2: (request) =>
-              withCapability(
-                descriptor,
-                "diff.inventory",
-                diffInventoryV2 === undefined
-                  ? Effect.fail(missingCapabilityCodec("diff.inventory"))
-                  : decodeBoundary("diff-inventory", "input", diffInventoryV2.input, request).pipe(
-                    Effect.flatMap((decoded) =>
-                      retryPluginOperation({
-                        operation: diff.readInventoryPageV2!(decoded),
-                        safety: "safe-read"
-                      })
-                    ),
-                    Effect.flatMap((page) => decodeBoundary("diff-inventory", "output", diffInventoryV2.output, page))
+        ...(!(diff.readInventoryPageV2 === undefined) && {
+          readInventoryPageV2: (request) =>
+            withCapability(
+              descriptor,
+              "diff.inventory",
+              diffInventoryV2 === undefined
+                ? Effect.fail(missingCapabilityCodec("diff.inventory"))
+                : decodeBoundary("diff-inventory", "input", diffInventoryV2.input, request).pipe(
+                  Effect.flatMap((decoded) =>
+                    retryPluginOperation({
+                      operation: diff.readInventoryPageV2!(decoded),
+                      safety: "safe-read"
+                    })
                   ),
-                2
-              )
-          }),
-        ...(diff.readContentRangeV2 === undefined
-          ? {}
-          : {
-            readContentRangeV2: (request) =>
-              withCapability(
-                descriptor,
-                "diff.content",
-                diffContentV2 === undefined
-                  ? Effect.fail(missingCapabilityCodec("diff.content"))
-                  : decodeBoundary("diff-content", "input", diffContentV2.input, request).pipe(
-                    Effect.flatMap((decodedRequest) =>
-                      retryPluginOperation({
-                        operation: diff.readContentRangeV2!(decodedRequest),
-                        safety: "safe-read"
-                      }).pipe(
-                        Effect.flatMap((range) =>
-                          decodeBoundary("diff-content", "output", diffContentV2.output, range)
-                        ),
-                        Effect.flatMap((range) => validateDiffContentRange(decodedRequest, range))
-                      )
+                  Effect.flatMap((page) => decodeBoundary("diff-inventory", "output", diffInventoryV2.output, page))
+                ),
+              2
+            )
+        }),
+        ...(!(diff.readContentRangeV2 === undefined) && {
+          readContentRangeV2: (request) =>
+            withCapability(
+              descriptor,
+              "diff.content",
+              diffContentV2 === undefined
+                ? Effect.fail(missingCapabilityCodec("diff.content"))
+                : decodeBoundary("diff-content", "input", diffContentV2.input, request).pipe(
+                  Effect.flatMap((decodedRequest) =>
+                    retryPluginOperation({
+                      operation: diff.readContentRangeV2!(decodedRequest),
+                      safety: "safe-read"
+                    }).pipe(
+                      Effect.flatMap((range) => decodeBoundary("diff-content", "output", diffContentV2.output, range)),
+                      Effect.flatMap((range) => validateDiffContentRange(decodedRequest, range))
                     )
-                  ),
-                2
-              )
-          })
+                  )
+                ),
+              2
+            )
+        })
       }))
       : Option.none(),
     pipeline: requiresPipeline
@@ -578,9 +571,9 @@ const hasDefinitionRuntime = (definition: PluginDefinitionV1): definition is Def
   PluginDefinitionRuntimeTypeId in definition
 
 /** Build a registered definition with a descriptor already authenticated by its owning runtime registry. @internal */
-export const buildPluginDefinitionLayerFromNegotiatedDescriptor = (
+export const buildPluginDefinitionLayerFromNegotiatedDescriptor = <UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown,
+  configuration: UnparsedInput,
   descriptor: NegotiatedPluginDescriptorV1
 ): Layer.Layer<PluginServices, PluginFailure> =>
   hasDefinitionRuntime(definition)
@@ -590,17 +583,17 @@ export const buildPluginDefinitionLayerFromNegotiatedDescriptor = (
     )
 
 /** Negotiate and decode before constructing the scoped adapter layer. @internal */
-export function buildPluginDefinitionLayer<R>(
+export function buildPluginDefinitionLayer<R, UnparsedInput>(
   definition: DefinedPluginV1<R>,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure, R>
-export function buildPluginDefinitionLayer(
+export function buildPluginDefinitionLayer<UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure>
-export function buildPluginDefinitionLayer(
+export function buildPluginDefinitionLayer<UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure> {
   if (!hasDefinitionRuntime(definition)) {
     return Layer.effectContext(

@@ -25,6 +25,10 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
+interface RevisionStateRef {
+  current: ReviewSuggestionRevisionState
+}
+
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000901")
 const OTHER_ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000902")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000903")
@@ -184,7 +188,7 @@ describe("useReviewSuggestionRevisions", () => {
       .mockResolvedValueOnce(page(original))
       .mockResolvedValueOnce(page(edited, [edited, original]))
     const edit = vi.fn(() => Promise.resolve(edited))
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), { load, edit }, (state) => {
@@ -218,7 +222,7 @@ describe("useReviewSuggestionRevisions", () => {
       .mockRejectedValueOnce(new Error("Refresh unavailable"))
       .mockResolvedValueOnce(page(accepted, [original]))
     const edit = vi.fn(() => Promise.resolve(accepted))
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), { load, edit }, (state) => {
@@ -259,7 +263,7 @@ describe("useReviewSuggestionRevisions", () => {
         .mockResolvedValueOnce(page(winner, [winner, original])),
       edit
     }
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), transport, (state) => {
@@ -290,7 +294,7 @@ describe("useReviewSuggestionRevisions", () => {
       load: vi.fn((currentScope) => (currentScope.entityId === ENTITY_ID ? stale.promise : Promise.resolve(fresh))),
       edit: () => Promise.reject(new Error("Unexpected edit"))
     }
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), transport, (state) => {
@@ -328,7 +332,7 @@ describe("useReviewSuggestionRevisions", () => {
         .mockResolvedValueOnce(page(third, [second, first])),
       edit: () => Promise.reject(new Error("Unexpected edit"))
     }
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), transport, (state) => {
@@ -357,7 +361,7 @@ describe("useReviewSuggestionRevisions", () => {
         .mockResolvedValueOnce(page(fourth, [second, first])),
       edit: () => Promise.reject(new Error("Unexpected edit"))
     }
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), transport, (state) => {
@@ -382,7 +386,7 @@ describe("useReviewSuggestionRevisions", () => {
       .fn()
       .mockResolvedValueOnce(page(third, [second], true))
       .mockReturnValueOnce(earlier.promise)
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(
@@ -421,7 +425,7 @@ describe("useReviewSuggestionRevisions", () => {
       load,
       edit: () => Promise.reject({ _tag: "ConflictApiError" })
     }
-    const latest: { current: ReviewSuggestionRevisionState } = {
+    const latest: RevisionStateRef = {
       current: { _tag: "idle" }
     }
     await mount(scope(), transport, (state) => {

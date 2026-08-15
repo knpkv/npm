@@ -18,9 +18,7 @@ const DescriptorEnvelope = Schema.Struct({
 })
 
 /** Capability versions implemented by this host contract major. */
-export const HOST_PLUGIN_CAPABILITY_VERSIONS: Readonly<
-  Record<PluginCapabilityIdType, ReadonlyArray<number>>
-> = {
+export const HOST_PLUGIN_CAPABILITY_VERSIONS = {
   "entity.read": [1],
   "sync.incremental": [1],
   "action.propose": [1],
@@ -31,7 +29,9 @@ export const HOST_PLUGIN_CAPABILITY_VERSIONS: Readonly<
   "diff.content": [1, 2],
   "pipeline.logs": [1],
   "pipeline.artifact": [1]
-}
+} satisfies Readonly<
+  Record<PluginCapabilityIdType, ReadonlyArray<number>>
+>
 
 const selectHighestCommonVersion = (
   capabilityId: PluginCapabilityIdType,
@@ -42,7 +42,7 @@ const selectHighestCommonVersion = (
   return common[0] ?? null
 }
 
-const decodeDescriptor = (raw: unknown) => {
+const decodeDescriptor = <UnparsedInput>(raw: UnparsedInput) => {
   const envelope = Schema.decodeUnknownResult(DescriptorEnvelope)(raw)
   if (Result.isFailure(envelope)) {
     return Effect.fail(
@@ -116,8 +116,8 @@ const negotiateCapabilities = Effect.fn("PluginContract.negotiateCapabilities")(
 })
 
 /** Decode and negotiate a descriptor before any plugin factory can be invoked. */
-export const negotiatePluginDescriptorV1 = Effect.fn("PluginContract.negotiateDescriptor")(function*(
-  raw: unknown
+export const negotiatePluginDescriptorV1 = Effect.fn("PluginContract.negotiateDescriptor")(function*<UnparsedInput>(
+  raw: UnparsedInput
 ) {
   const descriptor = yield* decodeDescriptor(raw)
   return yield* negotiateCapabilities(descriptor)

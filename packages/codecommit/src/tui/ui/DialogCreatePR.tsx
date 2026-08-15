@@ -327,14 +327,14 @@ export function DialogCreatePR() {
     }
   })
 
-  const stepTitles: Record<Step, string> = {
+  const stepTitles = {
     repo: "Select Repository",
     source: "Select Source Branch",
     dest: "Select Destination Branch",
     template: "Select Template",
     details: "Enter Details",
     preview: "Confirm"
-  }
+  } satisfies Record<Step, string>
 
   const stepNumber = { repo: 1, source: 2, dest: 3, template: 4, details: 5, preview: 6 }[step]
 

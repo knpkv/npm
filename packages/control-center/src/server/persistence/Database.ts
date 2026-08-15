@@ -18,14 +18,14 @@ interface LocalLibsqlConfig extends LibsqlClient.LibsqlClientConfig.Full {
 }
 
 /** Database operations shared by all workspace-scoped persistence services. */
-export interface DatabaseShape {
+export interface DatabaseContract {
   readonly sql: SqlClient.SqlClient
   readonly transaction: SqlClient.SqlClient["withTransaction"]
   readonly validateSchema: Effect.Effect<void, DatabaseInitializationError>
 }
 
 /** Scoped Control Center database service backed by one shared libSQL client. */
-export class Database extends Context.Service<Database, DatabaseShape>()(
+export class Database extends Context.Service<Database, DatabaseContract>()(
   "@knpkv/control-center/server/persistence/Database"
 ) {}
 
@@ -36,7 +36,7 @@ const schemaLock = Semaphore.makeUnsafe(1)
 const snakeToCamel = (value: string): string =>
   value.replace(/_([a-z])/gu, (_, character: string) => character.toUpperCase())
 
-const decodeRows = <SchemaType extends Schema.Top>(schema: SchemaType, rows: unknown) =>
+const decodeRows = <SchemaType extends Schema.Top, UnparsedInput>(schema: SchemaType, rows: UnparsedInput) =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows)
 
 const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas")(function*(
@@ -216,8 +216,8 @@ const databaseFromSql = () =>
 /** Verify that an existing local database has the exact current prototype schema. */
 export const validateExistingControlCenterDatabase = Effect.fn(
   "Database.validateExistingControlCenterDatabase"
-)(function*(
-  input: unknown
+)(function*<UnparsedInput>(
+  input: UnparsedInput
 ): Effect.fn.Return<void, PersistenceConfigError | DatabaseInitializationError> {
   const config = yield* decodePersistenceConfig(input)
   yield* Effect.scoped(
@@ -233,8 +233,8 @@ export const validateExistingControlCenterDatabase = Effect.fn(
 })
 
 /** Build a scoped database layer after decoding secret-free local configuration. */
-export const databaseLayer = (
-  input: unknown
+export const databaseLayer = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Database,
   DatabaseInitializationError | SchemaWriteBarrierError | PersistenceConfigError,

@@ -21,14 +21,14 @@ const makeGovernedActionRepository = Effect.gen(function*() {
   const transaction = yield* makeGovernedActionTransaction
   const writer = yield* makeGovernedActionWrite
 
-  const commit = Effect.fn("GovernedActionRepository.commit")(function*(input: unknown) {
+  const commit = Effect.fn("GovernedActionRepository.commit")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionCommitInput))(input).pipe(
       Effect.mapError(() => new GovernedActionInputError({ operation: "commit", reason: "invalid-request" }))
     )
     return yield* transaction.capture(writer.commit(request))
   })
 
-  const read = Effect.fn("GovernedActionRepository.read")(function*(input: unknown) {
+  const read = Effect.fn("GovernedActionRepository.read")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionReadInput))(input).pipe(
       Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
     )
@@ -37,7 +37,7 @@ const makeGovernedActionRepository = Effect.gen(function*() {
 
   const readByIdempotencyKey = Effect.fn(
     "GovernedActionRepository.readByIdempotencyKey"
-  )(function*(input: unknown) {
+  )(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionIdempotencyReadInput)
     )(input).pipe(
@@ -51,7 +51,7 @@ const makeGovernedActionRepository = Effect.gen(function*() {
 
   const readLatestTerminalByTarget = Effect.fn(
     "GovernedActionRepository.readLatestTerminalByTarget"
-  )(function*(input: unknown) {
+  )(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionTargetReadInput)
     )(input).pipe(
@@ -65,7 +65,7 @@ const makeGovernedActionRepository = Effect.gen(function*() {
 
   const readLatestTerminalReleasePublications = Effect.fn(
     "GovernedActionRepository.readLatestTerminalReleasePublications"
-  )(function*(input: unknown) {
+  )(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionReleasePublicationReadInput)
     )(input).pipe(

@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { ConfigError } from "../ConfluenceError.js"
 
 export interface PageInput {
@@ -104,11 +105,11 @@ export const baseUrlFromWorkspace = (
       if (exists) {
         const raw = yield* fs.readFileString(configPath).pipe(Effect.orElseSucceed(() => ""))
         const parsed = yield* Effect.try({
-          try: (): unknown => JSON.parse(raw),
+          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(raw),
           catch: () => null
         }).pipe(Effect.orElseSucceed(() => null))
         const candidate = Predicate.isObject(parsed) && "baseUrl" in parsed ? parsed["baseUrl"] : undefined
-        if (typeof candidate === "string" && candidate.trim().length > 0) {
+        if (Predicate.isString(candidate) && candidate.trim().length > 0) {
           return yield* validateBaseUrl(candidate).pipe(Effect.orElseSucceed(() => undefined))
         }
         return undefined

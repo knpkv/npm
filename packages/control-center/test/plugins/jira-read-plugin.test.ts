@@ -234,7 +234,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
 const withConnection = <Value, Error>(
   provider: JiraReadProvider,
   use: Effect.Effect<Value, Error, AuthorizedPluginExecutor | PluginConnection>,
-  configured: unknown = configuration,
+  configured: Schema.Json = configuration,
   includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
 ): Effect.Effect<Value, Error | PluginFailure> => {
   const runtime = makeJiraReadPluginRuntimeFromProvider(

@@ -59,7 +59,7 @@ const mkPR = (
     account: {
       profile: identity.profile ?? "dev",
       region: identity.region ?? "us-east-1",
-      ...(identity.repoAccountId === undefined ? {} : { repoAccountId: identity.repoAccountId })
+      ...(!(identity.repoAccountId === undefined) && { repoAccountId: identity.repoAccountId })
     },
     status: "OPEN",
     sourceBranch: "feat",

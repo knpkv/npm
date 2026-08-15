@@ -32,12 +32,12 @@ const timelineSources: ReadonlyArray<TimelineSourceKind> = ["action", "relations
 const actorFilter = (value: string): TimelineFilters["actorKind"] =>
   actorOptions.find((option) => option.value === value)?.value ?? "all"
 
-const sourcePresentation: Readonly<Record<TimelineSourceKind, { readonly label: string }>> = {
+const sourcePresentation = {
   action: { label: "Governed action" },
   "plugin-sync": { label: "Service sync" },
   relationship: { label: "Delivery link" },
   system: { label: "Control Center" }
-}
+} satisfies Readonly<Record<TimelineSourceKind, { readonly label: string }>>
 
 const TimelineRow = ({
   actor,
@@ -55,9 +55,9 @@ const TimelineRow = ({
       actorKind: event.actor.kind,
       dateTime: DateTime.formatIso(event.occurredAt),
       detail: sourcePresentation[event.sourceKind].label,
-      ...(event.href === null ? {} : { href: event.href }),
+      ...(!(event.href === null) && { href: event.href }),
       id: event.eventKey,
-      ...(event.service === null ? {} : { service: event.service }),
+      ...(!(event.service === null) && { service: event.service }),
       time: formatTimelineTimestamp(event.occurredAt),
       title: event.title
     }}

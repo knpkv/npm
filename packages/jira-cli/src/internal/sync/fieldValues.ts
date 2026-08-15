@@ -16,7 +16,7 @@ export interface CanonicalFieldValueOptions {
 
 export const explicitClear = null
 
-export const isExplicitClear = (value: unknown): value is null => value === null
+export const isExplicitClear = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & null => value === null
 
 export const userFieldValue = (accountId: string, displayName: string): UserFieldValue => ({
   accountId,
@@ -44,24 +44,26 @@ export const completeListValue = (
 
 export const makeCompleteListValue = completeListValue
 
-export const isUserFieldValue = (value: unknown): value is UserFieldValue => {
+export const isUserFieldValue = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & UserFieldValue => {
   if (!Predicate.isReadonlyObject(value)) return false
-  return typeof value["accountId"] === "string" && typeof value["displayName"] === "string"
+  return Predicate.isString(value["accountId"]) && Predicate.isString(value["displayName"])
 }
 
-export const isOptionFieldValue = (value: unknown): value is OptionFieldValue => {
-  if (!Predicate.isReadonlyObject(value) || typeof value["value"] !== "string") return false
+export const isOptionFieldValue = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & OptionFieldValue => {
+  if (!Predicate.isReadonlyObject(value) || !Predicate.isString(value["value"])) return false
   const id = value["id"]
-  return id === undefined || typeof id === "string"
+  return id === undefined || Predicate.isString(id)
 }
 
-export const isCascadingFieldValue = (value: unknown): value is CascadingFieldValue => {
+export const isCascadingFieldValue = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & CascadingFieldValue => {
   if (!Predicate.isReadonlyObject(value) || !isOptionFieldValue(value["parent"])) return false
   const child = value["child"]
   return child === undefined || isOptionFieldValue(child)
 }
 
-export const isCompleteListValue = (value: unknown): value is CompleteListValue =>
+export const isCompleteListValue = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & CompleteListValue =>
   Array.isArray(value) && value.every(isCompleteListItem)
 
 export const canonicalFieldOrder = <A extends CompleteListItem>(
@@ -104,7 +106,7 @@ const canonicalFieldValueKey = (
   options: CanonicalFieldValueOptions
 ): string => {
   if (value === null) return "clear:"
-  if (Array.isArray(value)) {
+  if (isCompleteListValue(value)) {
     return `list:${canonicalFieldOrder(value, options).map(completeListItemOrderKey).join("\u0000")}`
   }
   if (isCascadingFieldValue(value)) {
@@ -114,13 +116,13 @@ const canonicalFieldValueKey = (
   }
   if (isUserFieldValue(value)) return userOrderKey(value)
   if (isOptionFieldValue(value)) return optionOrderKey(value)
-  return `${typeof value}:${String(value)}`
+  return scalarOrderKey(value)
 }
 
 const completeListItemOrderKey = (value: CompleteListItem): string => {
   if (isUserFieldValue(value)) return userOrderKey(value)
   if (isOptionFieldValue(value)) return optionOrderKey(value)
-  return `${typeof value}:${String(value)}`
+  return scalarOrderKey(value)
 }
 
 const userOrderKey = (value: UserFieldValue): string =>
@@ -129,15 +131,12 @@ const userOrderKey = (value: UserFieldValue): string =>
 const optionOrderKey = (value: OptionFieldValue): string =>
   `option:${value.value.toLocaleLowerCase("en")}\u0000${value.id ?? ""}`
 
-const isCompleteListItem = (value: unknown): value is CompleteListItem => {
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return true
-    case "object":
-      return isUserFieldValue(value) || isOptionFieldValue(value)
-    default:
-      return false
-  }
+const scalarOrderKey = (value: string | number | boolean): string => {
+  const kind = Predicate.isString(value) ? "string" : Predicate.isNumber(value) ? "number" : "boolean"
+  return `${kind}:${String(value)}`
+}
+
+const isCompleteListItem = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & CompleteListItem => {
+  return Predicate.isString(value) || Predicate.isNumber(value) || Predicate.isBoolean(value) ||
+    isUserFieldValue(value) || isOptionFieldValue(value)
 }

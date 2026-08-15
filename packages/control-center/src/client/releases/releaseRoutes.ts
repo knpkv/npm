@@ -62,8 +62,8 @@ export const ReleaseRouteStateSchema = Schema.Struct({
 })
 
 /** Retain only safe state for the exact release target, dropping foreign or malformed history data. */
-export const retainReleaseRouteState = (
-  state: unknown,
+export const retainReleaseRouteState = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   releaseId: ReleaseIdType
 ): ReleaseRouteState | null => {
@@ -73,13 +73,13 @@ export const retainReleaseRouteState = (
 }
 
 /** Decode one workspace route segment at the browser boundary. */
-export const decodeWorkspaceRouteId = (value: unknown): WorkspaceIdType | null => {
+export const decodeWorkspaceRouteId = <UnparsedInput>(value: UnparsedInput): WorkspaceIdType | null => {
   const decoded = Schema.decodeUnknownOption(WorkspaceId)(value)
   return Option.isSome(decoded) ? decoded.value : null
 }
 
 /** Decode one release route segment at the browser boundary. */
-export const decodeReleaseRouteId = (value: unknown): ReleaseIdType | null => {
+export const decodeReleaseRouteId = <UnparsedInput>(value: UnparsedInput): ReleaseIdType | null => {
   const decoded = Schema.decodeUnknownOption(ReleaseId)(value)
   return Option.isSome(decoded) ? decoded.value : null
 }
@@ -113,8 +113,8 @@ export const makeReleaseRouteState = (
 ): ReleaseRouteState => ({ _tag: "release-origin/v1", origin, releaseId, workspaceId })
 
 /** Decode history state without permitting external or malformed navigation targets. */
-export const resolveReleaseOrigin = (
-  state: unknown,
+export const resolveReleaseOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   releaseId: ReleaseIdType
 ): ResolvedReleaseOrigin => {
@@ -130,8 +130,8 @@ export const resolveReleaseOrigin = (
 }
 
 /** Decode the exact safe origin or return the release's semantic parent. */
-export const readReleaseOrigin = (
-  state: unknown,
+export const readReleaseOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   releaseId: ReleaseIdType
 ): ReleaseOrigin => resolveReleaseOrigin(state, workspaceId, releaseId).origin

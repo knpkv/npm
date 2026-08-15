@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { validateComponentsRegistry } from "../registry/registry-validation.js"
 
 /** Registry files that must survive npm packing as explicit package exports. */
@@ -8,7 +10,7 @@ export const PACKED_REGISTRY_ARTIFACTS: ReadonlyArray<string> = [
   "package/registry/USAGE.md"
 ]
 
-const parseJson = (source: string, label: string): { readonly error?: string; readonly value?: unknown } => {
+const parseJson = (source: string, label: string) => {
   try {
     return { value: JSON.parse(source) }
   } catch {
@@ -16,17 +18,18 @@ const parseJson = (source: string, label: string): { readonly error?: string; re
   }
 }
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null
+const isRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> => Predicate.isObjectOrArray(value) && value !== null
 
-const readNames = (value: unknown, property: string): ReadonlyArray<string> | undefined => {
+const readNames = <UnparsedInput>(value: UnparsedInput, property: string): ReadonlyArray<string> | undefined => {
   if (!isRecord(value)) return undefined
   const records = value[property]
   if (!Array.isArray(records)) return undefined
   const unknownRecords: ReadonlyArray<unknown> = records
   const names: Array<string> = []
   for (const record of unknownRecords) {
-    if (!isRecord(record) || typeof record.name !== "string") return undefined
+    if (!isRecord(record) || !Predicate.isString(record.name)) return undefined
     names.push(record.name)
   }
   return names

@@ -43,9 +43,9 @@ const classify = (
   options: { readonly baseCatalog?: VisualCatalog; readonly componentLimit?: number } = {}
 ): VisualClassification =>
   classifyVisualChanges({
-    ...(options.baseCatalog === undefined ? {} : { baseCatalog: options.baseCatalog }),
+    ...(!(options.baseCatalog === undefined) && { baseCatalog: options.baseCatalog }),
     changes,
-    ...(options.componentLimit === undefined ? {} : { componentLimit: options.componentLimit }),
+    ...(!(options.componentLimit === undefined) && { componentLimit: options.componentLimit }),
     currentCatalog
   })
 

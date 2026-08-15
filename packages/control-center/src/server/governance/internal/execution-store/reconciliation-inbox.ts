@@ -63,9 +63,9 @@ const storeError = (
   reason: GovernedActionExecutionStoreError["reason"]
 ): GovernedActionExecutionStoreError => new GovernedActionExecutionStoreError({ operation, reason })
 
-const mapStoreFailure = (
+const mapStoreFailure = <UnparsedInput>(
   operation: ReconciliationInboxOperation,
-  failure: unknown
+  failure: UnparsedInput
 ): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) return storeError(operation, "not-found")
@@ -159,7 +159,7 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
   const recordOutcome = Effect.fn("GovernedActionExecutionReconciliationInbox.recordOutcome")(function*(
     input: ReconciliationInboxInput
   ) {
-    const mapFailure = (failure: unknown): GovernedActionExecutionStoreError =>
+    const mapFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError =>
       mapStoreFailure(input.operation, failure)
     const recoveryTokenDigest = yield* digestGovernedActionRecoveryToken(input.recoveryToken).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),

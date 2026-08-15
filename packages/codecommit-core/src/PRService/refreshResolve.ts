@@ -81,7 +81,7 @@ export const resolveAccounts = (state: PRState) =>
       refreshGeneration: (s.refreshGeneration ?? 0) + 1,
       status: loadingStatus,
       successfulRefreshScopes: [],
-      ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
+      ...((cachedPRs.length > 0) && { statusDetail: "loading from cache..." })
     }))
 
     const config = yield* configService.load.pipe(Effect.orDie)

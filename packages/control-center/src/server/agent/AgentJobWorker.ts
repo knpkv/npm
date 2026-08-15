@@ -90,25 +90,25 @@ const chunkOutputEvent = (event: AgentRuntimeEvent): ReadonlyArray<AgentRuntimeE
   return events
 }
 
-const isDurableBoundFailure = (
-  failure: unknown
-): failure is AgentJobInputError & {
+const isDurableBoundFailure = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & {
   readonly reason: "event-limit-exceeded" | "output-limit-exceeded"
 } =>
   isAgentJobInputError(failure) &&
   (failure.reason === "event-limit-exceeded" || failure.reason === "output-limit-exceeded")
 
-const isInvalidReviewResult = (
-  failure: unknown
-): failure is AgentJobInputError & {
+const isInvalidReviewResult = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & {
   readonly reason: "invalid-result" | "task-mismatch"
 } =>
   isAgentJobInputError(failure) &&
   (failure.reason === "invalid-result" || failure.reason === "task-mismatch")
 
-const isCancellationRequested = (
-  failure: unknown
-): failure is AgentJobInputError & { readonly reason: "cancellation-requested" } =>
+const isCancellationRequested = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & { readonly reason: "cancellation-requested" } =>
   isAgentJobInputError(failure) && failure.reason === "cancellation-requested"
 
 const normalizeRuntimeFailure = (
@@ -375,7 +375,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
             expectedRevisionId: target.selectedRevisionId,
             expectedSequence: target.history.current.sequence,
             edit: selected.success.report.edit,
-            ...(validation === undefined ? {} : { validation }),
+            ...(!(validation === undefined) && { validation }),
             author: PrReviewSuggestionAgentAuthor.make({
               jobId: claim.jobId,
               providerId: claim.providerId,

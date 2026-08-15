@@ -1,11 +1,14 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import { walk } from "../src/AdfWalker.js"
 
-const doc = (content: ReadonlyArray<unknown>): unknown => ({ version: 1, type: "doc", content })
+const doc = (content: ReadonlyArray<unknown>) => ({ version: 1, type: "doc", content })
 
-const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v)
+const isRecord = <UnparsedInput>(v: UnparsedInput): v is UnparsedInput & Record<string, Schema.Json> =>
+  v !== null && Predicate.isObjectOrArray(v) && !Array.isArray(v)
 
-const stableStringify = (v: unknown): string => {
+const stableStringify = <UnparsedInput>(v: UnparsedInput): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
   if (isRecord(v)) {
     return `{${

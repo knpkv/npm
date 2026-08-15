@@ -231,9 +231,8 @@ export const requestBoundaryLayer = HttpRouter.middleware(
               response,
               {
                 ...securityHeaders({ isSecureTransport: bindConfig.cookieSecure }),
-                ...(isApiRequest && !hasNoStoreDirective(response.headers["cache-control"])
-                  ? { "cache-control": "no-store" }
-                  : {})
+                ...((isApiRequest && !hasNoStoreDirective(response.headers["cache-control"])) &&
+                  { "cache-control": "no-store" })
               }
             ))
         )

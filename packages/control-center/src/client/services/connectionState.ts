@@ -1,3 +1,4 @@
+import type { RlyStateTone } from "@knpkv/rly/primitives"
 import type { PluginConnectionSummary, PluginConnectionTestResult } from "../../api/plugins.js"
 
 export type ConnectionTestState =
@@ -7,11 +8,16 @@ export type ConnectionTestState =
 
 export type ConnectionEnablementState = "changing" | "request-failed"
 
+export interface ConnectionStatusPresentation {
+  readonly label: string
+  readonly tone: RlyStateTone
+}
+
 /** Present durable and freshly tested connection state with one consistent vocabulary. */
 export const connectionStatus = (
   connection: PluginConnectionSummary,
   testState: ConnectionTestState | undefined
-): { readonly label: string; readonly tone: "neutral" | "positive" | "critical" | "caution" | "progress" } => {
+): ConnectionStatusPresentation => {
   if (!connection.isEnabled) return { label: "Disabled", tone: "neutral" }
   if (testState?._tag === "testing") return { label: "Checking", tone: "progress" }
   if (testState?._tag === "result") {

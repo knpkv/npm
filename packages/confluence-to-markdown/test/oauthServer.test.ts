@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/unstable/http"
 import { createServer } from "node:http"
@@ -52,7 +53,7 @@ describe("oauthServer", () => {
           const result = yield* startCallbackServer(expectedState)
 
           expect(result.port).toBeGreaterThan(0)
-          expect(typeof result.codePromise).toBe("object")
+          expect(Predicate.isObject(result.codePromise)).toBe(true)
         }).pipe(Effect.provide(EphemeralHttpServerFactoryLive))
       ))
 

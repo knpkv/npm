@@ -4,6 +4,7 @@ import * as AiError from "effect/unstable/ai/AiError"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 
+import * as Predicate from "effect/Predicate"
 import type { AgentProviderError, AgentRunRequest, AgentRuntimeEvent } from "./model.js"
 import { captureAgentRunRequest } from "./requestSnapshot.js"
 import { layerAgentRuntime } from "./runtime.js"
@@ -22,7 +23,7 @@ export const makeDeterministicAgent = (
     run: (request: AgentRunRequest): Stream.Stream<AgentRuntimeEvent, AgentProviderError> =>
       Stream.unwrap(Effect.sync(() => {
         const snapshot = captureAgentRunRequest(request)
-        const resolved = typeof script === "function" ? script(snapshot) : script
+        const resolved = Predicate.isFunction(script) ? script(snapshot) : script
         const events = Stream.fromIterable(resolved.events)
         requests.push(snapshot)
         return resolved.failure === undefined
@@ -72,7 +73,7 @@ export const makeDeterministicLanguageModel = (
   let index = 0
 
   const next = (request: LanguageModel.ProviderOptions): DeterministicLanguageModelTurn => {
-    const turn = typeof script === "function"
+    const turn = Predicate.isFunction(script)
       ? script(request, index)
       : script[index] ?? { _tag: "failure", failure: exhaustedModel() }
     index += 1

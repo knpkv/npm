@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Layer, Logger, Option, Ref, Result, Schema, Tracer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
+import * as Predicate from "effect/Predicate"
 import { AgentThreadId, JobId, ReviewCommandArtifactId } from "../../src/domain/identifiers.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
@@ -38,8 +39,8 @@ const SEARCH_QUERY_CANARY = "search-query-canary-f88d5d70"
 const PERSISTENCE_EXCLUDES_PRIVATE_ARTIFACTS: "reviewCommandArtifacts" extends keyof PersistenceService ? true
   : false = false
 
-const runWithPersistence = <Success, Failure>(
-  config: unknown,
+const runWithPersistence = <Success, Failure, UnparsedInput>(
+  config: UnparsedInput,
   use: Effect.Effect<Success, Failure, Database | Persistence | ReviewCommandArtifactRepository>
 ) => {
   const database = databaseLayer(config)
@@ -263,7 +264,7 @@ describe("ReviewCommandArtifactRepository", () => {
               status: span.status
             }))
           },
-          (_key, value) => typeof value === "bigint" ? value.toString() : value
+          (_key, value) => Predicate.isBigInt(value) ? value.toString() : value
         )
         for (
           const canary of [

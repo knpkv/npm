@@ -45,7 +45,7 @@ const makeTimelineExportAuditRepository = Effect.gen(function*() {
   const { sql } = yield* Database
 
   return {
-    record: Effect.fn("TimelineExportAuditRepository.record")(function*(input: unknown) {
+    record: Effect.fn("TimelineExportAuditRepository.record")(function*<UnparsedInput>(input: UnparsedInput) {
       const audit = yield* Schema.decodeUnknownEffect(Schema.toType(RecordTimelineExportAuditInput))(input).pipe(
         Effect.mapError(() => new TimelineExportAuditInputError())
       )

@@ -23,7 +23,7 @@ const manifestExports = (): ReadonlyArray<string> => {
 
 describe("@knpkv/jira-cli public API", () => {
   it("exports the related-work planner the changeset advertises", () => {
-    expect(typeof api.planRelatedWorkSync).toBe("function")
+    expect(Predicate.isFunction(api.planRelatedWorkSync)).toBe(true)
     expect(api.VersionService).toBeDefined()
     expect(api.VersionServiceLayer).toBeDefined()
   })

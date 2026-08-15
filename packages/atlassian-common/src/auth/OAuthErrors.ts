@@ -71,7 +71,7 @@ export class OAuthError extends Data.TaggedError("OAuthError")<{
   readonly errorCode?: string
 }> {
   override get message(): string {
-    if (typeof this.cause === "string") {
+    if (Predicate.isString(this.cause)) {
       return `OAuth ${this.step} failed: ${this.cause}`
     }
     if (Predicate.hasProperty(this.cause, "message")) {

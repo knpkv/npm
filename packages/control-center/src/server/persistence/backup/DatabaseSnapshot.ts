@@ -25,9 +25,9 @@ const mapSql = <Value, Requirements>(
 ): Effect.Effect<Value, BackupSqlError, Requirements> =>
   effect.pipe(Effect.mapError((cause) => new BackupSqlError({ cause, operation })))
 
-const decodeRows = <SchemaType extends Schema.Top>(
+const decodeRows = <SchemaType extends Schema.Top, UnparsedInput>(
   schema: SchemaType,
-  rows: unknown,
+  rows: UnparsedInput,
   operation: string
 ): Effect.Effect<ReadonlyArray<SchemaType["Type"]>, BackupSqlError, SchemaType["DecodingServices"]> =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows).pipe(

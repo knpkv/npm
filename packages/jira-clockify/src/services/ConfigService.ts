@@ -5,7 +5,7 @@
  *
  * - **File-backed with defaults**: Reads `~/.jcf/config.json`, merging stored values over
  *   {@link defaultConfig}. Missing or corrupt files silently fall back to defaults.
- * - **Partial updates**: {@link ConfigServiceShape.set} merges a patch over the current config.
+ * - **Partial updates**: {@link ConfigServiceContract.set} merges a patch over the current config.
  *
  * @module
  */
@@ -37,22 +37,22 @@ const defaultConfig: JcfConfig = {
   defaultBillable: true
 }
 
-export interface ConfigServiceShape {
+export interface ConfigServiceContract {
   readonly get: Effect.Effect<JcfConfig>
   readonly set: (patch: Partial<JcfConfig>) => Effect.Effect<void>
   readonly configDir: Effect.Effect<string>
 }
 
-export class ConfigService extends Context.Service<ConfigService, ConfigServiceShape>()("jcf/ConfigService") {}
+export class ConfigService extends Context.Service<ConfigService, ConfigServiceContract>()("jcf/ConfigService") {}
 
 const CONFIG_DIR = ".jcf"
 const CONFIG_FILE = "config.json"
 
-const stringRecord = (value: unknown): Record<string, string> | undefined => {
+const stringRecord = <UnparsedInput>(value: UnparsedInput): Record<string, string> | undefined => {
   if (!Predicate.isObject(value)) return undefined
   const result: Record<string, string> = {}
   for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry !== "string") return undefined
+    if (!Predicate.isString(entry)) return undefined
     result[key] = entry
   }
   return result
@@ -63,19 +63,15 @@ const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   if (!Predicate.isObject(parsed)) return {}
   const projectMap = stringRecord(parsed.projectMap)
   return {
-    ...(typeof parsed.defaultJql === "string" ? { defaultJql: parsed.defaultJql } : {}),
-    ...(typeof parsed.refreshInterval === "number" ? { refreshInterval: parsed.refreshInterval } : {}),
-    ...(projectMap !== undefined ? { projectMap } : {}),
-    ...(typeof parsed.workspaceId === "string" || parsed.workspaceId === null
-      ? { workspaceId: parsed.workspaceId }
-      : {}),
-    ...(typeof parsed.defaultProjectId === "string" || parsed.defaultProjectId === null
-      ? { defaultProjectId: parsed.defaultProjectId }
-      : {}),
-    ...(typeof parsed.defaultProjectName === "string" || parsed.defaultProjectName === null
-      ? { defaultProjectName: parsed.defaultProjectName }
-      : {}),
-    ...(typeof parsed.defaultBillable === "boolean" ? { defaultBillable: parsed.defaultBillable } : {})
+    ...((Predicate.isString(parsed.defaultJql)) && { defaultJql: parsed.defaultJql }),
+    ...((Predicate.isNumber(parsed.refreshInterval)) && { refreshInterval: parsed.refreshInterval }),
+    ...((projectMap !== undefined) && { projectMap }),
+    ...((Predicate.isString(parsed.workspaceId) || parsed.workspaceId === null) && { workspaceId: parsed.workspaceId }),
+    ...((Predicate.isString(parsed.defaultProjectId) || parsed.defaultProjectId === null) &&
+      { defaultProjectId: parsed.defaultProjectId }),
+    ...((Predicate.isString(parsed.defaultProjectName) || parsed.defaultProjectName === null) &&
+      { defaultProjectName: parsed.defaultProjectName }),
+    ...((Predicate.isBoolean(parsed.defaultBillable)) && { defaultBillable: parsed.defaultBillable })
   }
 }
 

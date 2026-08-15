@@ -549,19 +549,19 @@ export type CodePipelineArtifactRange = typeof CodePipelineArtifactRange.Type
 const malformed = (operation: string, diagnosticCode = "codepipeline-provider-response-invalid") =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
 
-const decodeProvider = <Codec extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <Codec extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: Codec,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<Codec["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(operation))
   )
 
-const decodeModel = <Codec extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeModel = <Codec extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: Codec,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<Codec["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(operation, "codepipeline-normalized-model-invalid"))

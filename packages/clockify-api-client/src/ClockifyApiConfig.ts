@@ -13,13 +13,13 @@
 import * as Context from "effect/Context"
 import type * as Redacted from "effect/Redacted"
 
-export interface ClockifyApiConfigShape {
+export interface ClockifyApiConfigContract {
   readonly apiKey: Redacted.Redacted<string>
   readonly workspaceId: string
   readonly userId: string
   readonly baseUrl: string
 }
 
-export class ClockifyApiConfig extends Context.Service<ClockifyApiConfig, ClockifyApiConfigShape>()(
+export class ClockifyApiConfig extends Context.Service<ClockifyApiConfig, ClockifyApiConfigContract>()(
   "@knpkv/clockify-api-client/ClockifyApiConfig"
 ) {}

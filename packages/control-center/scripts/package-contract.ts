@@ -12,7 +12,7 @@ const PackageManifestSchema = Schema.Struct({
   bin: Schema.Struct({ "control-center": Schema.String }),
   dependencies: Schema.Record(Schema.String, Schema.String),
   engines: Schema.Struct({ node: Schema.String }),
-  exports: Schema.Record(Schema.String, Schema.Unknown),
+  exports: Schema.Record(Schema.String, Schema.Json),
   main: Schema.String,
   name: Schema.String,
   scripts: Schema.Struct({ start: Schema.String }),
@@ -20,20 +20,20 @@ const PackageManifestSchema = Schema.Struct({
   version: Schema.String.check(Schema.isPattern(semverPattern))
 })
 
-const expectedExports: Readonly<Record<string, { readonly import: string; readonly types: string }>> = {
+const expectedExports = {
   ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
   "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },
   "./domain": { import: "./dist/server/domain/index.js", types: "./dist/server/domain/index.d.ts" },
   "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" }
-}
+} satisfies Readonly<Record<string, { readonly import: string; readonly types: string }>>
 
-const sameKeys = (record: Readonly<Record<string, unknown>>, expected: ReadonlyArray<string>): boolean => {
+const sameKeys = (record: Readonly<Record<string, Schema.Json>>, expected: ReadonlyArray<string>): boolean => {
   const actual = Object.keys(record).sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
 /** Return manifest violations that would weaken the package contract. */
-export const inspectPackageContract = (value: unknown): ReadonlyArray<string> => {
+export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<string> => {
   const decoded = Schema.decodeUnknownResult(PackageManifestSchema)(value)
   if (Result.isFailure(decoded)) return ["package manifest does not match its required structure"]
 

@@ -11,7 +11,7 @@ export const RLY_AVATAR_VARIANTS = defineVariants({
     large: { className: style("large"), purpose: "Prominent identity", tokens: ["space-40"] },
     hero: { className: style("hero"), purpose: "Page-level identity", tokens: ["space-48", "space-8"] }
   },
-  shape: {
+  form: {
     circle: { className: style("circle"), purpose: "Human or general identity", tokens: ["radius-round"] },
     "rounded-square": {
       className: style("roundedSquare"),
@@ -20,12 +20,12 @@ export const RLY_AVATAR_VARIANTS = defineVariants({
     }
   }
 })
-export const RLY_AVATAR_DEFAULT_VARIANTS = defineVariants({ size: "default", shape: "circle" })
+export const RLY_AVATAR_DEFAULT_VARIANTS = defineVariants({ size: "default", form: "circle" })
 export type RlyAvatarSize = keyof typeof RLY_AVATAR_VARIANTS.size
-export type RlyAvatarShape = keyof typeof RLY_AVATAR_VARIANTS.shape
+export type RlyAvatarForm = keyof typeof RLY_AVATAR_VARIANTS.form
 type AvatarBaseProps = Omit<ComponentPropsWithRef<"span">, "aria-label" | "children"> & {
   readonly fallback: string
-  readonly shape?: RlyAvatarShape
+  readonly form?: RlyAvatarForm
   readonly size?: RlyAvatarSize
   readonly src?: string
 }
@@ -37,8 +37,8 @@ export const Avatar = ({
   className,
   decorative,
   fallback,
+  form = "circle",
   label,
-  shape = "circle",
   size = "default",
   src,
   ...props
@@ -53,7 +53,7 @@ export const Avatar = ({
       className={classNames(
         style("root"),
         RLY_AVATAR_VARIANTS.size[size].className,
-        RLY_AVATAR_VARIANTS.shape[shape].className,
+        RLY_AVATAR_VARIANTS.form[form].className,
         className
       )}
       role={decorative ? undefined : "img"}

@@ -13,6 +13,7 @@ import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 
+import * as Predicate from "effect/Predicate"
 import {
   AgentModelId,
   DurableAgentProviderId,
@@ -201,7 +202,7 @@ const response = (
 ]
 
 const completeScript = (
-  report: unknown = {
+  report: Schema.Json = {
     schemaVersion: 3,
     completion: { status: "complete" },
     suggestions: [suggestion],
@@ -489,26 +490,22 @@ const makeSessionLayer = (
         })
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
-    ...(nativeReviewOutput === undefined || nativeReviewRunner !== "codex"
-      ? {}
-      : {
-        runNativeCodexReview: (request: unknown) =>
-          Effect.sync(() => {
-            observation.operations.push("runNativeCodexReview")
-            observation.requests.push(request)
-            return output(nativeReviewOutput)
-          })
-      }),
-    ...(nativeReviewOutput === undefined || nativeReviewRunner !== "claude"
-      ? {}
-      : {
-        runNativeClaudeReview: (request: unknown) =>
-          Effect.sync(() => {
-            observation.operations.push("runNativeClaudeReview")
-            observation.requests.push(request)
-            return output(nativeReviewOutput)
-          })
-      }),
+    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "codex") && {
+      runNativeCodexReview: <UnparsedInput>(request: UnparsedInput) =>
+        Effect.sync(() => {
+          observation.operations.push("runNativeCodexReview")
+          observation.requests.push(request)
+          return output(nativeReviewOutput)
+        })
+    }),
+    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "claude") && {
+      runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
+        Effect.sync(() => {
+          observation.operations.push("runNativeClaudeReview")
+          observation.requests.push(request)
+          return output(nativeReviewOutput)
+        })
+    }),
     close: Effect.void
   }
   return Layer.succeed(
@@ -663,7 +660,7 @@ describe("PR review task executor", () => {
           name: span.name,
           status: span.status
         })),
-        (_key, value) => typeof value === "bigint" ? value.toString() : value
+        (_key, value) => Predicate.isBigInt(value) ? value.toString() : value
       )
       for (
         const canary of [
@@ -1397,7 +1394,7 @@ describe("PR review task executor", () => {
         ].join("\n"),
         explanation: "Use the validated value."
       }
-      const execute = (draft: unknown) =>
+      const execute = <Draft extends Schema.Json>(draft: Draft) =>
         runExecutor(
           completeScript({
             schemaVersion: 3,

@@ -107,7 +107,7 @@ const isOverridingAwsVariable = (name: string): boolean => {
 export const profileScopedEnv = (
   inherited: Record<string, string | undefined>,
   overrides: Record<string, string | undefined>
-): Record<string, string | undefined> => {
+) => {
   const cleared: Record<string, string | undefined> = {}
   for (const name of OVERRIDING_AWS_VARIABLES) {
     cleared[name] = undefined
