@@ -17,6 +17,7 @@ const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
 const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
 const strictDiagnostics = ["strictBooleanExpressions", "strictEffectProvide"]
 const suppressedDiagnostics = ["overriddenSchemaConstructor"]
+const enabledDiagnosticSeverities = new Set(["error", "message", "suggestion", "warning"])
 
 class EffectTsconfigCoverageError extends Data.TaggedError("EffectTsconfigCoverageError") {
   get message() {
@@ -78,8 +79,11 @@ const validatePackageRecords = (records) => {
         )
       }
       for (const diagnostic of strictDiagnostics) {
-        if (config.diagnosticSeverity?.[diagnostic] === undefined || config.diagnosticSeverity[diagnostic] === "off") {
-          diagnostics.push(`${record.name}: ${config.path} must enable Effect diagnostic ${diagnostic}`)
+        const severity = config.diagnosticSeverity?.[diagnostic]
+        if (typeof severity !== "string" || !enabledDiagnosticSeverities.has(severity.toLowerCase())) {
+          diagnostics.push(
+            `${record.name}: ${config.path} must use a supported enabled severity for Effect diagnostic ${diagnostic}`
+          )
         }
       }
       for (const diagnostic of suppressedDiagnostics) {
@@ -120,6 +124,21 @@ const runSelfTest = () => {
         effectPackage: false,
         name: "@fixture/non-effect",
         sourceConfigs: []
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/case-normalized-enabled",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: {
+              ...coveredConfig.diagnosticSeverity,
+              strictBooleanExpressions: "WARNING",
+              strictEffectProvide: "MESSAGE"
+            }
+          }
+        ]
       }
     ]),
     []
@@ -168,7 +187,43 @@ const runSelfTest = () => {
         sourceConfigs: [
           {
             ...coveredConfig,
-            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "off" }
+            diagnosticSeverity: {
+              overriddenSchemaConstructor: "off",
+              strictBooleanExpressions: "suggestion"
+            }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/disabled-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "OFF" }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/invalid-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "typo" }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/null-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: null }
           }
         ]
       },
@@ -203,7 +258,10 @@ const runSelfTest = () => {
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
       "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
       "@fixture/non-blocking-suggestions: tsconfig.json must keep successful tsc output clean and never make surfaced suggestions non-blocking",
-      "@fixture/missing-strict-pattern: tsconfig.json must enable Effect diagnostic strictEffectProvide",
+      "@fixture/missing-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/disabled-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/invalid-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/null-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
       "@fixture/missing-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor",
       "@fixture/weakened-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor"
     ]
@@ -213,14 +271,14 @@ const runSelfTest = () => {
   assert.equal(checkCoversRootTsconfig("tsc -p scripts/tsconfig.json"), false)
 }
 
-const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function* (content, location) {
+const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function*(content, location) {
   return yield* Effect.try({
     try: () => JSON.parse(content),
     catch: (cause) => new EffectTsconfigCoverageError({ cause, reason: `${location}: invalid JSON` })
   })
 })
 
-const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function* (root) {
+const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function*(root) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const pending = [root]
@@ -244,7 +302,7 @@ const findTsconfigs = Effect.fn("EffectTsconfigCoverage.findTsconfigs")(function
   return configs.toSorted()
 })
 
-const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(function* (configPath, configDirectory) {
+const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(function*(configPath, configDirectory) {
   return yield* Effect.try({
     try: () => {
       const read = TypeScript.readConfigFile(configPath, TypeScript.sys.readFile)
@@ -276,8 +334,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
         ignoreSuggestions: plugin?.ignoreEffectSuggestionsInTscExitCode,
         ignoreWarnings: plugin?.ignoreEffectWarningsInTscExitCode,
         includeSuggestions: plugin?.includeSuggestionsInTsc,
-        includesEffectNamespaces:
-          Array.isArray(plugin?.namespaceImportPackages) &&
+        includesEffectNamespaces: Array.isArray(plugin?.namespaceImportPackages) &&
           plugin.namespaceImportPackages.includes("effect") &&
           plugin.namespaceImportPackages.includes("@effect/*")
       }
@@ -286,7 +343,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
   })
 })
 
-const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(function* (packagesRoot) {
+const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(function*(packagesRoot) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const records = []
@@ -331,7 +388,7 @@ const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(fu
   return records
 })
 
-const program = Effect.gen(function* () {
+const program = Effect.gen(function*() {
   yield* Effect.try({
     try: runSelfTest,
     catch: (cause) => new EffectTsconfigCoverageError({ cause, reason: "Effect tsconfig self-test failed" })
