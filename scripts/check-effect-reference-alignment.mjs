@@ -175,7 +175,7 @@ const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (reposit
 })
 
 const resolveSubtreeProvenance = Effect.fn("EffectReferenceAlignment.resolveSubtreeProvenance")(function* (git) {
-  const mergeParents = (yield* git(["log", "--first-parent", "--merges", "--format=%P"])).split("\n").filter(Boolean)
+  const mergeParents = (yield* git(["log", "--merges", "--format=%P"])).split("\n").filter(Boolean)
 
   for (const parents of mergeParents) {
     for (const candidate of parents.split(" ").slice(1)) {
