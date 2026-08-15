@@ -1,5 +1,108 @@
 # @knpkv/jira-cli
 
+## 1.3.0
+
+### Minor Changes
+
+- [#366](https://github.com/knpkv/npm/pull/366) [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd) Thanks [@konopkov](https://github.com/konopkov)! - Add `jira version create` and `jira issue edit`, closing the two gaps that forced release scaffolding out of the CLI.
+
+  `jira version create --project <KEY> --name <NAME>` opens a new unreleased version, optionally with `--description`, `--start-date` and `--release-date`. The project key is resolved to the numeric `projectId` the endpoint requires, and dates are validated as ISO 8601 locally so a bad one names its own flag instead of returning an unattributed 400.
+
+  `jira issue edit <KEY>` edits fix versions and labels. Both fields are sets, so the incremental flags — `--add-fix-version`, `--remove-fix-version`, `--add-label`, `--remove-label` — are the ones to reach for: they go through Jira's `update` verb, which applies server-side and cannot clobber a concurrent edit. The replacing forms (`--fix-version`, `--label`) are still available and say in their help that they drop anything not listed. Passing both forms for one field is refused up front, because Jira's own error for that case does not name the offending field.
+
+- [#354](https://github.com/knpkv/npm/pull/354) [`2e26e30`](https://github.com/knpkv/npm/commit/2e26e3032ce527260a4e4d9fca8af43039f762d6) Thanks [@konopkov](https://github.com/konopkov)! - Add `jira version related-work sync` — reconcile a version's related-work links
+  against the given set instead of blindly appending.
+
+  Repeated `related-work add` calls pile up duplicate "Release notes" links every
+  time a release is re-scaffolded. `sync` takes the desired set as repeatable
+  `--link title=url` flags and adds only what is missing, matching on URL (the
+  only stable identity a link has — Jira assigns the id and the title is
+  editable, so a link retitled by hand is still recognised). Scoped to one
+  `--category` so reconciling `Communication` cannot disturb `Testing` links.
+  `--prune` opts into removing extras, which is off by default because links
+  added by hand in the Jira UI are legitimate; it removes surplus copies of a
+  desired URL too, since an existing pile-up is the case it exists to clean up.
+  Repeated `--link` flags for one URL collapse to a single link.
+
+  The planning step is exposed as the pure `planRelatedWorkSync` and covered by
+  tests, including that a second run is a no-op.
+
+- [#370](https://github.com/knpkv/npm/pull/370) [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc) Thanks [@konopkov](https://github.com/konopkov)! - Enforce the complete anti-slop rule set with zero accepted diagnostics and update affected APIs and implementations to satisfy the required contracts.
+
+### Patch Changes
+
+- [#358](https://github.com/knpkv/npm/pull/358) [`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d) Thanks [@konopkov](https://github.com/konopkov)! - Make the OAuth refresh-token rotation atomic so an interrupted CLI cannot log
+  the user out.
+
+  Atlassian rotates refresh tokens: the refresh response carries a replacement and
+  the token that was sent is consumed server-side. `refreshTokenImpl` performed
+  the grant and then persisted the result in a separate, interruptible step, so a
+  fiber interrupt landing between the two destroyed the credential — the stored
+  refresh token was already spent, the replacement was never written, and the next
+  refresh failed with a 4xx. `getAccessToken` treats that failure as an expired
+  refresh token and deletes the token file, so the user was silently logged out
+  and had to run `jira auth login` again.
+
+  Nothing interrupted it before, which is why this had not surfaced. It becomes
+  reachable as soon as a caller kills the process: this runs during layer
+  construction on every CLI invocation, and `@knpkv/jira-clockify`'s nvim
+  statusline terminates the poll process when the editor closes. The grant and
+  the persist now share one `Effect.uninterruptible` region.
+
+  That region carries its own 30s deadline rather than relying on a caller's, for
+  two reasons. A caller's `Effect.timeout` would be inert — `timeout` is a race,
+  and racing an uninterruptible loser means waiting for it anyway. And an
+  uninterruptible region with no deadline of its own absorbs SIGINT/SIGTERM
+  entirely, since `NodeRuntime.runMain`'s signal handlers do nothing but interrupt
+  the main fiber — a hung `jira` command would stop responding to Ctrl-C. The
+  deadline forked inside the region is itself interruptible, so it does bound it.
+
+  Abandoning the round-trip still cannot prove the grant did not land — Atlassian
+  may consume and rotate the token after we stop listening, and no client-side
+  deadline changes that. So the deadline is paired with a second rule:
+  `getAccessToken` no longer deletes the stored token on any `step: "refresh"`
+  failure. It deletes only on the answers that actually mean the grant is dead —
+  the provider explicitly reporting `invalid_grant`, on a `400` or a `403` — using
+  the new `OAuthError.status` and `OAuthError.errorCode` from
+  `@knpkv/atlassian-common`. Previously a transport error or timeout deleted
+  the active profile outright, which turned a bad network window into an
+  unattended silent logout: `JiraApiConfigLive` builds on every CLI invocation,
+  and jcf's statusline runs one every 30 seconds.
+
+  The statuses deliberately left alone matter as much. `429` is the one this most
+  needs to survive — several `jira`/`jcf` processes on one expired token hit the
+  endpoint together, one wins the rotation and the rest are rate-limited. `408`
+  and `425` restate the timeout case. `407` and other middlebox replies never came
+  from Atlassian at all. `401` and `400 invalid_client` mean the client secret is
+  wrong, where the fix is `jira auth configure`, not a re-login that would fail
+  the same way. A bare `403` is left alone too: it is as likely to be a proxy or
+  WAF as Atlassian revoking anything. An unparseable body is no verdict at all.
+
+  Now an incomplete refresh normally costs a retry rather than the session. This
+  narrows the window rather than closing it: the atomicity is fiber-level, so a
+  SIGKILL after Atlassian has already rotated the token still loses the
+  replacement, and the next refresh then legitimately reports `invalid_grant`. No
+  client-side design can close that window against a hard kill.
+
+  Covered by tests: a refresh that never answers and one that is rate-limited both
+  leave the profile on disk, a `400` removes it, and an interrupt mid-rotation
+  still persists the replacement token.
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Update Effect and effect-qb, migrate schema-tagged errors to the current Effect API, and adopt the dialect-scoped SQLite function and type APIs introduced by effect-qb 0.22.
+
+- [#357](https://github.com/knpkv/npm/pull/357) [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79) Thanks [@konopkov](https://github.com/konopkov)! - Secure local control planes and CI credential boundaries. CodeCommit web now
+  uses a process-scoped owner session with CSRF protection and loopback-only
+  listeners; review sandboxes use authenticated loopback code-server instances,
+  digest-pinned images, constrained mounts, non-root execution, and dropped
+  capabilities. OAuth callback listeners validate state before accepting terminal
+  outcomes and bind explicitly to loopback. GitHub workflows pin external actions
+  to immutable commits and keep long-lived Atlassian credentials out of pull
+  request execution.
+- Updated dependencies [[`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc)]:
+  - @knpkv/atlassian-common@1.4.0
+  - @knpkv/agent-skills@0.3.0
+  - @knpkv/jira-api-client@1.1.0
+
 ## 1.2.3
 
 ### Patch Changes

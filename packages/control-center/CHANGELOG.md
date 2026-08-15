@@ -1,5 +1,37 @@
 # @knpkv/control-center
 
+## 0.6.0
+
+### Minor Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Update Effect and effect-qb, migrate schema-tagged errors to the current Effect API, and adopt the dialect-scoped SQLite function and type APIs introduced by effect-qb 0.22.
+
+- [#363](https://github.com/knpkv/npm/pull/363) [`316c383`](https://github.com/knpkv/npm/commit/316c3832c64ce159b7b18d9be3d58bf355c20b8a) Thanks [@konopkov](https://github.com/konopkov)! - Require Node.js 26 or newer and align the reproducible development, CI, release,
+  benchmark, and package-validation toolchains with Node.js 26.
+
+  Keep the CodeCommit CLI on the current Bun runtime, document that executable
+  prerequisite, and require its Bun-hosted process boundaries in CI.
+
+- [#370](https://github.com/knpkv/npm/pull/370) [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc) Thanks [@konopkov](https://github.com/konopkov)! - Enforce the complete anti-slop rule set with zero accepted diagnostics and update affected APIs and implementations to satisfy the required contracts.
+
+### Patch Changes
+
+- [#353](https://github.com/knpkv/npm/pull/353) [`d73b113`](https://github.com/knpkv/npm/commit/d73b113d6d49a9ffa9e553312c98d00e793af325) Thanks [@konopkov](https://github.com/konopkov)! - Add exact-head CodeCommit pull-request merging from the TUI with selectable squash, fast-forward, and three-way strategies.
+
+- [#364](https://github.com/knpkv/npm/pull/364) [`2012a4b`](https://github.com/knpkv/npm/commit/2012a4b1c6f0120d50343279f0f7c770df81dac5) Thanks [@konopkov](https://github.com/konopkov)! - Retry offline database snapshot capture when a closing SQLite sidecar disappears, while failing closed if sidecar churn continues.
+- Updated dependencies [[`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d), [`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d), [`b0ceb6e`](https://github.com/knpkv/npm/commit/b0ceb6ec9957c1be3de8700168e7767a3eb68203), [`d73b113`](https://github.com/knpkv/npm/commit/d73b113d6d49a9ffa9e553312c98d00e793af325), [`756ba26`](https://github.com/knpkv/npm/commit/756ba26b10c663b6768016c92ef7eab3da4f99d4), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2), [`316c383`](https://github.com/knpkv/npm/commit/316c3832c64ce159b7b18d9be3d58bf355c20b8a), [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79), [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc), [`2e26e30`](https://github.com/knpkv/npm/commit/2e26e3032ce527260a4e4d9fca8af43039f762d6)]:
+  - @knpkv/confluence-to-markdown@2.2.0
+  - @knpkv/atlassian-common@1.4.0
+  - @knpkv/codecommit-core@0.12.0
+  - @knpkv/confluence-api-client@1.1.0
+  - @knpkv/ai-claude@0.2.0
+  - @knpkv/ai-codex@0.3.0
+  - @knpkv/ai-runtime@0.3.0
+  - @knpkv/clockify-api-client@1.1.0
+  - @knpkv/control-center-sql@0.3.0
+  - @knpkv/jira-api-client@1.1.0
+  - @knpkv/rly@0.3.0
+
 ## 0.5.0
 
 ### Minor Changes
