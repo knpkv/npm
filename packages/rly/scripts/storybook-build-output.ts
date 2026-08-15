@@ -3,7 +3,7 @@ const ansiEscape = new RegExp(
   "gu"
 )
 
-const disallowedDiagnosticCodes: ReadonlyArray<string> = ["[PLUGIN_TIMINGS]"]
+const disallowedDiagnosticCodes: ReadonlyArray<string> = ["[DEP0205]", "[PLUGIN_TIMINGS]"]
 
 export const findDisallowedStorybookDiagnostics = (output: string): ReadonlyArray<string> => {
   const normalized = output.replaceAll(ansiEscape, "")

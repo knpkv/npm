@@ -54,6 +54,8 @@ jobs:
       - name: Configure canonical Effect remote
         run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
       - run: pnpm lint
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
   audit:
     name: Audit

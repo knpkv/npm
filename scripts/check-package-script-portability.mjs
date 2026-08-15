@@ -10,11 +10,39 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { parse } from "yaml"
 
-const directEnvironmentAssignment = /(?:^|&&|\|\||;)\s*[A-Za-z_][A-Za-z0-9_]*=/u
+const environmentAssignment = /^\s*[A-Za-z_][A-Za-z0-9_]*=/u
 const buildLifecycleNames = new Set(["build", "prebuild", "postbuild"])
 const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"])
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
+
+const hasDirectEnvironmentAssignment = (command) => {
+  let quote
+  let escaped = false
+  const boundaries = [0]
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character === ";" || character === "\n" || character === "|") boundaries.push(index + 1)
+    if (character === "&" && command[index + 1] === "&") boundaries.push(index + 2)
+  }
+  return boundaries.some((index) => environmentAssignment.test(command.slice(index)))
+}
 
 class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPortabilityError") {
   get message() {
@@ -47,8 +75,7 @@ const classifyWorkspacePattern = (pattern) => {
 export const findNonPortableBuildScripts = (manifestPath, scripts) =>
   Object.entries(scripts ?? {})
     .filter(
-      ([name, command]) =>
-        isBuildScript(name) && Predicate.isString(command) && directEnvironmentAssignment.test(command)
+      ([name, command]) => isBuildScript(name) && Predicate.isString(command) && hasDirectEnvironmentAssignment(command)
     )
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
 
@@ -64,6 +91,10 @@ assert.deepEqual(
     "scripts/package.json: scripts.storybook:build uses a POSIX-only environment assignment"
   ]
 )
+assert.equal(hasDirectEnvironmentAssignment("prepare | FOO=1 tool"), true)
+assert.equal(hasDirectEnvironmentAssignment("prepare\nFOO=1 tool"), true)
+assert.equal(hasDirectEnvironmentAssignment("prepare | cross-env FOO=1 tool"), false)
+assert.equal(hasDirectEnvironmentAssignment("printf 'prepare | FOO=1 tool'"), false)
 assert.deepEqual(
   findNonPortableBuildScripts("scratchpad/package.json", {
     "storybook:build": "tsx scripts/build-storybook.ts"

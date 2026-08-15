@@ -151,9 +151,11 @@ const gitOption = (git, args) => git(args).pipe(Effect.option, Effect.map(Option
 
 const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
   const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("EFFECT_DIAGNOSTICS_BASE")))
+  const pushBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_EVENT_BEFORE")))
   const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
   const candidates = [
     configuredBase,
+    pushBase === undefined || /^0+$/u.test(pushBase) ? undefined : pushBase,
     githubBase === undefined ? undefined : `origin/${githubBase}`,
     "origin/main",
     "main"
@@ -168,11 +170,11 @@ const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(
 
 const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (git, mergeBase) {
   const outputs = yield* Effect.all([
-    git(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}...HEAD`]),
-    git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]),
-    git(["diff", "--name-only", "--diff-filter=ACMR"])
+    git(["diff", "--name-only", "-z", "--diff-filter=ACMR", `${mergeBase}...HEAD`]),
+    git(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
+    git(["diff", "--name-only", "-z", "--diff-filter=ACMR"])
   ])
-  return [...new Set(outputs.flatMap((output) => output.split("\n")).filter(isCheckedSource))].toSorted()
+  return [...new Set(outputs.flatMap((output) => output.split("\0")).filter(isCheckedSource))].toSorted()
 })
 
 const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
