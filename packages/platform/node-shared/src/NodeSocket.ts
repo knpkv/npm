@@ -135,7 +135,7 @@ export const fromDuplex = <RO>(
           })
         )
         conn = yield* Scope.provide(open, scope).pipe(
-          options?.openTimeout !== undefined ?
+          options?.openTimeout ?
             Effect.timeoutOrElse({
               duration: options.openTimeout,
               orElse: () =>

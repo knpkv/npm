@@ -688,12 +688,10 @@ export const make = (
             }
             const redactedHeaderNames = fiber.getRef(Headers.CurrentRedactedNames)
             const headerFilter = fiber.getRef(TracerHeaderFilter)
-            for (const name in request.headers) {
+            const redactedHeaders = Headers.redact(request.headers, redactedHeaderNames)
+            for (const name in redactedHeaders) {
               if (!headerFilter(name, "request")) continue
-              span.attribute(
-                `http.request.header.${name}`,
-                Headers.isRedactedName(name, redactedHeaderNames) ? "<redacted>" : request.headers[name]
-              )
+              span.attribute(`http.request.header.${name}`, String(redactedHeaders[name]))
             }
             request = fiber.getRef(TracerPropagationEnabled)
               ? HttpClientRequest.setHeaders(request, TraceContext.toHeaders(span))
@@ -704,12 +702,10 @@ export const make = (
                 Effect.matchCauseEffect({
                   onSuccess: (response) => {
                     span.attribute("http.response.status_code", response.status)
-                    for (const name in response.headers) {
+                    const redactedHeaders = Headers.redact(response.headers, redactedHeaderNames)
+                    for (const name in redactedHeaders) {
                       if (!headerFilter(name, "response")) continue
-                      span.attribute(
-                        `http.response.header.${name}`,
-                        Headers.isRedactedName(name, redactedHeaderNames) ? "<redacted>" : response.headers[name]
-                      )
+                      span.attribute(`http.response.header.${name}`, String(redactedHeaders[name]))
                     }
 
                     if (scopedController) return Effect.succeed(response)

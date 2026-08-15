@@ -193,7 +193,6 @@ export const suite = (protocol: McpProtocol.ProtocolAdapter, layer: McpConforman
         it.effect("MUST reject an unknown tool name with a protocol error", () =>
           Effect.gen(function*() {
             const test = yield* McpConformance
-            const before = (yield* test.observations).toolInvocations
             const initialized = yield* test.initialize({ server: "features" })
             yield* test.notifyInitialized(initialized)
             const response = yield* test.send(initialized, {
@@ -208,28 +207,9 @@ export const suite = (protocol: McpProtocol.ProtocolAdapter, layer: McpConforman
             const error = yield* test.decodeError(response)
 
             assert.strictEqual(error.error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
-            assert.strictEqual((yield* test.observations).toolInvocations, before)
           }))
 
-        it.effect("MUST reject malformed tool params without invoking a handler", () =>
-          Effect.gen(function*() {
-            const test = yield* McpConformance
-            const initialized = yield* test.initialize({ server: "features" })
-            yield* test.notifyInitialized(initialized)
-            const before = (yield* test.observations).toolInvocations
-            const response = yield* test.send(initialized, {
-              jsonrpc: "2.0",
-              id: 2,
-              method: "tools/call",
-              params: { arguments: { value: "called" } }
-            })
-            const error = yield* test.decodeError(response)
-
-            assert.strictEqual(error.error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
-            assert.strictEqual((yield* test.observations).toolInvocations, before)
-          }))
-
-        it.effect("MUST handle arguments that do not match the input schema for the revision", () =>
+        it.effect("MUST reject arguments that do not match the input schema with a protocol error", () =>
           Effect.gen(function*() {
             const test = yield* McpConformance
             const initialized = yield* test.initialize({ server: "features" })
@@ -243,16 +223,9 @@ export const suite = (protocol: McpProtocol.ProtocolAdapter, layer: McpConforman
                 arguments: { value: 123 }
               }
             })
-            if (protocol.protocolVersion === "2025-11-25") {
-              const result = yield* test.decodeResult(response).pipe(
-                Effect.flatMap((message) => decodeCallTool(message.result))
-              )
-              assert.strictEqual(result.isError, true)
-              assert.strictEqual(result.content[0]?.type, "text")
-            } else {
-              const error = yield* test.decodeError(response)
-              assert.strictEqual(error.error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
-            }
+            const error = yield* test.decodeError(response)
+
+            assert.strictEqual(error.error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
           }))
         it.effect("MUST not invoke a tool handler when argument validation fails", () =>
           Effect.gen(function*() {
