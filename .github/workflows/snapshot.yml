@@ -1,11 +1,10 @@
 name: Snapshot
-
 on:
-  workflow_dispatch:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,21 +13,33 @@ concurrency:
 permissions: {}
 
 jobs:
-  snapshot:
-    if: github.repository_owner == 'knpkv'
-    name: Snapshot
+  approval-gate:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+    environment: fork
+    steps:
+      - run: echo "Fork PR approved by maintainer."
+
+  snapshot:
+    name: Snapshot
+    needs: [approval-gate]
+    if: >-
+      !cancelled()
+      && (needs.approval-gate.result == 'success' || needs.approval-gate.result == 'skipped')
+      && github.repository_owner == 'Effect-Ts'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
         uses: ./.github/actions/setup
-        with:
-          node-version: 24.10.0
-      - name: Build
+      - name: Set strip internals config
+        run: |
+          sed -i 's/"stripInternal": false/"stripInternal": true/' tsconfig.base.json
+      - name: Run codemods
+        run: pnpm codemod
+      - name: Build package
         run: pnpm build
-      - name: Publish
-        run: sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*
+      - name: Create snapshot
+        id: snapshot
+        run: pnpm exec pkg-pr-new publish --pnpm --comment=off ./packages/* ./packages/atom/* ./packages/ai/* ./packages/platform/* ./packages/sql/* ./packages/tools/*

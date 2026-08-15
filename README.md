@@ -1,189 +1,72 @@
-# @knpkv Package Collection
+<!-- Use a static Shields badge because pkg.pr.new's dynamic badge times out while counting this repository's releases. -->
 
-> **Warning**
-> This project is experimental and in early development. Code is primarily AI-generated and not yet publicly published. For preview, use snapshot releases.
+[![pkg.pr.new](https://img.shields.io/badge/pkg.pr.new-Effect--TS%2Feffect-black)](https://pkg.pr.new/~/Effect-TS/effect)
 
-A monorepo containing npm packages published under the **@knpkv** scope.
+# Effect
 
-This repository uses [Effect-TS](https://effect.website) for type-safe functional programming patterns and leverages modern tooling for package development and publishing.
+Effect is a library for building robust, maintainable, type-safe, and production grade applications in TypeScript. It helps you handle the hard problems at scale: typed errors, dependency injection, structured concurrency, scheduling, tracing, and unified schema validation.
+
+> **Effect V4 is currently a release candidate.** The `main` branch contains v4 development.
+
+## Install V4 RC
+
+```sh
+npm install effect@rc
+```
+
+## Requirements
+
+- **TypeScript 5.9 or newer.** TypeScript 7 is recommended for the best performance and compatibility with [Effect's TypeScript tooling](https://github.com/Effect-TS/tsgo#installation).
+- **Node.js 18 or newer** is the general minimum for running Effect on Node.js. Some integration packages require newer runtimes; for example, `@effect/sql-sqlite-node` requires Node.js 22.16 or newer.
+- **Strict type-checking:** the `strict` flag must be enabled in your `tsconfig.json`.
+
+## Effect v3
+
+The Effect v3 source code is available on the [`v3`](https://github.com/Effect-TS/effect/tree/v3) branch, which is also where issues and pull requests meant for Effect v3 should be targeted.
 
 ## Packages
 
-| Package                                                                      | Description                                             |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------- |
-| [@knpkv/agent-skills](./packages/agent-skills)                               | Installer for @knpkv Codex and Claude agent skills      |
-| [@knpkv/codecommit](./packages/codecommit)                                   | TUI for browsing AWS CodeCommit PRs                     |
-| [@knpkv/codecommit-core](./packages/codecommit-core)                         | Core logic for CodeCommit PR browser                    |
-| [@knpkv/codecommit-web](./packages/codecommit-web)                           | Web server and frontend for CodeCommit PR browser       |
-| [@knpkv/confluence-api-client](./packages/confluence-api-client)             | Effect-based Confluence Cloud REST API client (v1 + v2) |
-| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md) | Sync Confluence Cloud pages to local markdown           |
+This monorepo contains the core `effect` package alongside integration packages that extend it. All v4 packages are published under the `rc` tag on npm.
 
-### CodeCommit Package Stack
-
-```
-codecommit-core         — Domain, services, AWS client, local SQLite cache
-  ├── AwsClient         — AWS CodeCommit API (distilled-aws)
-  ├── CacheService      — Local SQLite via @effect/sql-libsql (Turso)
-  │   ├── PullRequestRepo, CommentRepo, NotificationRepo
-  │   ├── SubscriptionRepo, SyncMetadataRepo
-  │   └── EventsHub (PubSub-based change notifications)
-  ├── ConfigService     — User config (accounts, auto-refresh)
-  └── PRService         — Orchestration (refresh, subscriptions, diffs)
-
-codecommit              — TUI (Ink/React) → imports codecommit-core
-codecommit-web          — Web server (Bun + HttpApi) + React SPA → imports codecommit-core
-```
-
-Both `codecommit` (TUI) and `codecommit-web` share `codecommit-core` services. Client-side code uses deep subpath imports (`@knpkv/codecommit-core/Domain.js`) to avoid pulling in server-only deps.
-
-## Repository Structure
-
-```
-npm/
-├── packages/          # Published npm packages
-├── .github/          # CI/CD workflows for automated checks
-└── scripts/          # Build and maintenance scripts
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 24+
-- pnpm 9+
-- (Optional) Nix with direnv for reproducible dev environment
-
-### Installation
-
-```bash
-# Install dependencies
-pnpm install
-
-# Build all packages
-pnpm build
-
-# Run tests
-pnpm test
-
-# Type check
-pnpm check
-
-# Lint
-pnpm lint
-```
-
-### Development Environment
-
-This repository uses [Nix flakes](https://nixos.wiki/wiki/Flakes) with [direnv](https://direnv.net) for reproducible development environments:
-
-```bash
-# Allow direnv (first time only)
-direnv allow
-
-# Environment will auto-load when entering directory
-```
-
-## Agent Skills
-
-CLI packages ship Codex-compatible skills under each package's `skills/` directory:
-
-| Package                         | Skill path                                          | Skill name    |
-| ------------------------------- | --------------------------------------------------- | ------------- |
-| `@knpkv/codecommit`             | `packages/codecommit/skills/codecommit`             | `$codecommit` |
-| `@knpkv/confluence-to-markdown` | `packages/confluence-to-markdown/skills/confluence` | `$confluence` |
-| `@knpkv/jira-cli`               | `packages/jira-cli/skills/jira`                     | `$jira`       |
-| `@knpkv/jira-clockify`          | `packages/jira-clockify/skills/jcf`                 | `$jcf`        |
-
-Install all bundled skills with the installer package:
-
-```bash
-pnpm dlx @knpkv/agent-skills install --agent all
-pnpm dlx @knpkv/agent-skills install --agent codex
-pnpm dlx @knpkv/agent-skills install --agent claude
-```
-
-Preview writes first, or replace existing skill directories:
-
-```bash
-pnpm dlx @knpkv/agent-skills install --agent all --dry-run
-pnpm dlx @knpkv/agent-skills install --agent all --force
-```
-
-Each CLI can also install only its related skill:
-
-```bash
-codecommit skills install --agent codex
-confluence skills install --agent claude
-jira skills install --agent all
-jcf skills install --agent all
-```
-
-Install targets default to `${CODEX_HOME:-$HOME/.codex}/skills` for Codex and `${CLAUDE_HOME:-$HOME/.claude}/skills` for Claude. Override them with `--codex-dir <path>` or `--claude-dir <path>`. Start a new Codex or Claude session after installing so the skill metadata is loaded.
-
-When prompting an agent, name the skill and provide the smallest useful target context:
-
-```text
-Use $jira to export all issues in fixVersion 1.4.0 for project WEB as a single markdown file.
-Use $confluence to check sync status, summarize local changes, and dry-run a push.
-Use $codecommit to list PRs needing my review across configured accounts as JSON.
-Use $jcf to check auth and timer status before logging 45m to PROJ-123.
-```
-
-For efficient and predictable agent runs:
-
-- Ask for read-only inspection first: `status`, `diff`, `list`, `export`, or commands with `--json`.
-- Include IDs when known: Jira issue keys, Jira version ids, Confluence page ids, AWS profile/region, repository name, PR id, and Clockify project id.
-- Require confirmation before mutating commands such as `confluence sync push`, `confluence page delete`, `jira version update`, `jira version related-work add`, `codecommit pr create`, `codecommit pr update`, and timer writes through `jcf`.
-- Do not paste OAuth secrets or API keys into prompts. Let the CLI prompt for them or use the package-supported config files and environment variables.
-
-## Development Standards
-
-All packages in this repository follow:
-
-- **Effect-TS patterns** - Functional, type-safe error handling
-- **TypeScript strict mode** - Zero tolerance for `any` types
-- **Comprehensive testing** - @effect/vitest for Effect-based tests
-- **Changesets** - Semantic versioning and changelog generation
-- **CI/CD automation** - Automated checks, tests, and releases
-
-## Publishing
-
-Packages are published to npm under the [@knpkv scope](https://www.npmjs.com/org/knpkv).
-
-### Creating a Release
-
-1. Create changes with proper documentation and tests
-2. Add changeset: `pnpm changeset`
-3. Commit changes
-4. CI will create version PR automatically
-5. Merge version PR to publish
-
-## Available Commands
-
-```bash
-# Package management
-pnpm install             # Install dependencies
-pnpm build               # Build all packages
-pnpm test                # Run all tests
-pnpm check               # TypeScript type checking
-pnpm lint                # Lint code
-pnpm lint:fix            # Fix linting issues
-pnpm format              # Check formatting
-pnpm format:fix          # Fix formatting
-
-# Versioning
-pnpm changeset           # Create a changeset
-pnpm changeset version   # Update versions (CI only)
-
-# Agent Management
-npx @iannuttall/dotagents  # Sync agent commands
-```
+| Package                                                               | Description                                              | API Reference                                                      |
+| --------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`effect`](packages/effect)                                           | The core package                                         | [docs](https://effect.website/docs/v4/api/effect)                  |
+| [`@effect/platform-browser`](packages/platform/browser)               | Platform services for the browser                        | [docs](https://effect.website/docs/v4/api/platform-browser)        |
+| [`@effect/platform-bun`](packages/platform/bun)                       | Platform services for [Bun](https://bun.sh)              | [docs](https://effect.website/docs/v4/api/platform-bun)            |
+| [`@effect/platform-deno`](packages/platform/deno)                     | Platform services for [Deno](https://deno.com)           | [docs](https://effect.website/docs/v4/api/platform-deno)           |
+| [`@effect/platform-node`](packages/platform/node)                     | Platform services for [Node.js](https://nodejs.org)      | [docs](https://effect.website/docs/v4/api/platform-node)           |
+| [`@effect/platform-node-shared`](packages/platform/node-shared)       | Shared services for Node.js-compatible runtimes          | [docs](https://effect.website/docs/v4/api/platform-node-shared)    |
+| [`@effect/sql-clickhouse`](packages/sql/clickhouse)                   | SQL client for [ClickHouse](https://clickhouse.com)      | [docs](https://effect.website/docs/v4/api/sql-clickhouse)          |
+| [`@effect/sql-d1`](packages/sql/d1)                                   | SQL client for Cloudflare D1                             | [docs](https://effect.website/docs/v4/api/sql-d1)                  |
+| [`@effect/sql-libsql`](packages/sql/libsql)                           | SQL client for libSQL                                    | [docs](https://effect.website/docs/v4/api/sql-libsql)              |
+| [`@effect/sql-mssql`](packages/sql/mssql)                             | SQL client for Microsoft SQL Server                      | [docs](https://effect.website/docs/v4/api/sql-mssql)               |
+| [`@effect/sql-mysql2`](packages/sql/mysql2)                           | SQL client for MySQL                                     | [docs](https://effect.website/docs/v4/api/sql-mysql2)              |
+| [`@effect/sql-pg`](packages/sql/pg)                                   | SQL client for PostgreSQL                                | [docs](https://effect.website/docs/v4/api/sql-pg)                  |
+| [`@effect/sql-pglite`](packages/sql/pglite)                           | SQL client for [PGlite](https://pglite.dev)              | [docs](https://effect.website/docs/v4/api/sql-pglite)              |
+| [`@effect/sql-sqlite-bun`](packages/sql/sqlite-bun)                   | SQL client for SQLite via `bun:sqlite`                   | [docs](https://effect.website/docs/v4/api/sql-sqlite-bun)          |
+| [`@effect/sql-sqlite-do`](packages/sql/sqlite-do)                     | SQL client for Cloudflare Durable Objects SQLite         | [docs](https://effect.website/docs/v4/api/sql-sqlite-do)           |
+| [`@effect/sql-sqlite-node`](packages/sql/sqlite-node)                 | SQL client for SQLite via `node:sqlite`                  | [docs](https://effect.website/docs/v4/api/sql-sqlite-node)         |
+| [`@effect/sql-sqlite-react-native`](packages/sql/sqlite-react-native) | SQL client for SQLite in React Native                    | [docs](https://effect.website/docs/v4/api/sql-sqlite-react-native) |
+| [`@effect/sql-sqlite-wasm`](packages/sql/sqlite-wasm)                 | SQL client for SQLite compiled to WebAssembly            | [docs](https://effect.website/docs/v4/api/sql-sqlite-wasm)         |
+| [`@effect/ai-anthropic`](packages/ai/anthropic)                       | Anthropic provider for the Effect AI modules             | [docs](https://effect.website/docs/v4/api/ai-anthropic)            |
+| [`@effect/ai-openai`](packages/ai/openai)                             | OpenAI provider for the Effect AI modules                | [docs](https://effect.website/docs/v4/api/ai-openai)               |
+| [`@effect/ai-openai-compat`](packages/ai/openai-compat)               | OpenAI-compatible API provider for the Effect AI modules | [docs](https://effect.website/docs/v4/api/ai-openai-compat)        |
+| [`@effect/ai-openrouter`](packages/ai/openrouter)                     | OpenRouter provider for the Effect AI modules            | [docs](https://effect.website/docs/v4/api/ai-openrouter)           |
+| [`@effect/atom-react`](packages/atom/react)                           | React bindings for Effect Atom                           | [docs](https://effect.website/docs/v4/api/atom-react)              |
+| [`@effect/atom-solid`](packages/atom/solid)                           | SolidJS bindings for Effect Atom                         | [docs](https://effect.website/docs/v4/api/atom-solid)              |
+| [`@effect/atom-vue`](packages/atom/vue)                               | Vue bindings for Effect Atom                             | [docs](https://effect.website/docs/v4/api/atom-vue)                |
+| [`@effect/opentelemetry`](packages/opentelemetry)                     | [OpenTelemetry](https://opentelemetry.io) integration    | [docs](https://effect.website/docs/v4/api/opentelemetry)           |
+| [`@effect/vitest`](packages/vitest)                                   | Helpers for testing with [Vitest](https://vitest.dev)    | [docs](https://effect.website/docs/v4/api/vitest)                  |
+| [`@effect/docgen`](packages/tools/docgen)                             | Documentation generator for Effect projects              | [docs](https://effect.website/docs/v4/api/docgen)                  |
+| [`@effect/doctest`](packages/tools/doctest)                           | Runs JSDoc examples as Vitest tests                      | [docs](https://effect.website/docs/v4/api/doctest)                 |
+| [`@effect/openapi-generator`](packages/tools/openapi-generator)       | Generate Effect code from OpenAPI specifications         | [docs](https://effect.website/docs/v4/api/openapi-generator)       |
 
 ## Resources
 
-- [Dependency maintenance](docs/dependency-maintenance.md)
-- [Effect-TS Documentation](https://effect.website/docs/introduction)
-- [GitHub Actions Workflows](.github/workflows/README.md)
+- Documentation (https://effect.website)
+- Discord (https://discord.gg/effect-ts)
+- Effect v3 source (https://github.com/Effect-TS/effect/tree/v3)
+- Effect v4 source (https://github.com/Effect-TS/effect/tree/main)
 
 ## License
 
