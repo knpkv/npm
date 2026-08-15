@@ -4,6 +4,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
 const MAXIMUM_SKILL_FILES = 256
+const MAXIMUM_SKILL_DIRECTORIES = MAXIMUM_SKILL_FILES + 1
 const MAXIMUM_SKILL_BYTES = 64 * 1024
 const MAXIMUM_SKILL_DEPTH = 8
 
@@ -67,9 +68,6 @@ const frontMatterValue = (content: string, key: string): string | undefined => {
   )
 }
 
-const skillDepth = (relativePath: string, separator: string): number =>
-  relativePath.split(separator).filter((segment) => segment.length > 0).length
-
 const withinRoot = (path: Path.Path, root: string, candidate: string): boolean => {
   const relative = path.relative(root, candidate)
   return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
@@ -111,27 +109,71 @@ const readSkill = Effect.fn("ReviewSkillCatalog.readSkill")(function*(
   })
 })
 
+interface PendingSkillDirectory {
+  readonly directory: string
+  readonly depth: number
+}
+
+const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandidates")(function*(
+  canonicalRoot: string
+): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const pending: Array<PendingSkillDirectory> = [{ directory: canonicalRoot, depth: 0 }]
+  const visited = new Set<string>([canonicalRoot])
+  const candidates: Array<string> = []
+  for (let index = 0; index < pending.length && candidates.length < MAXIMUM_SKILL_FILES; index += 1) {
+    const current = pending[index]
+    if (current === undefined) break
+    const entries = yield* fileSystem.readDirectory(current.directory).pipe(
+      Effect.catch(() => Effect.succeed<Array<string>>([]))
+    )
+    for (const entry of [...entries].sort()) {
+      if (candidates.length >= MAXIMUM_SKILL_FILES) break
+      const unresolved = path.join(current.directory, entry)
+      const canonical = yield* fileSystem.realPath(unresolved).pipe(
+        Effect.map(Option.some),
+        Effect.catch(() => Effect.succeed(Option.none<string>()))
+      )
+      if (Option.isNone(canonical) || !withinRoot(path, canonicalRoot, canonical.value)) continue
+      const stat = yield* fileSystem.stat(canonical.value).pipe(
+        Effect.map(Option.some),
+        Effect.catch(() => Effect.succeed(Option.none<FileSystem.File.Info>()))
+      )
+      if (Option.isNone(stat)) continue
+      if (stat.value.type === "File" && path.basename(canonical.value) === "SKILL.md") {
+        candidates.push(canonical.value)
+        continue
+      }
+      const nextDepth = current.depth + 1
+      if (
+        stat.value.type === "Directory" &&
+        nextDepth < MAXIMUM_SKILL_DEPTH &&
+        visited.size < MAXIMUM_SKILL_DIRECTORIES &&
+        !visited.has(canonical.value)
+      ) {
+        visited.add(canonical.value)
+        pending.push({ directory: canonical.value, depth: nextDepth })
+      }
+    }
+  }
+  return candidates
+})
+
 const discoverRoot = Effect.fn("ReviewSkillCatalog.discoverRoot")(function*(
   root: SkillRoot
 ): Effect.fn.Return<ReadonlyArray<ReviewSkillDefinition>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
   if (!(yield* fileSystem.exists(root.path).pipe(Effect.catch(() => Effect.succeed(false))))) return []
   const canonicalRoot = yield* fileSystem.realPath(root.path).pipe(
     Effect.map(Option.some),
     Effect.catch(() => Effect.succeed(Option.none<string>()))
   )
   if (Option.isNone(canonicalRoot)) return []
-  const entries = yield* fileSystem.readDirectory(canonicalRoot.value, { recursive: true }).pipe(
-    Effect.catch(() => Effect.succeed<Array<string>>([]))
-  )
-  const candidates = entries
-    .filter((entry) => path.basename(entry) === "SKILL.md")
-    .filter((entry) => skillDepth(entry, path.sep) <= MAXIMUM_SKILL_DEPTH)
-    .slice(0, MAXIMUM_SKILL_FILES)
+  const candidates = yield* discoverSkillCandidates(canonicalRoot.value)
   const skills = yield* Effect.forEach(
     candidates,
-    (entry) => readSkill(root, canonicalRoot.value, path.join(canonicalRoot.value, entry)),
+    (candidate) => readSkill(root, canonicalRoot.value, candidate),
     { concurrency: 8 }
   )
   return skills.filter(Option.isSome).map((skill) => skill.value)

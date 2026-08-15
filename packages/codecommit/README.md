@@ -277,10 +277,12 @@ the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.
 
 Each pull-request page includes an exact-revision review workbench. It indexes
-the complete CodeCommit changed-file inventory, loads the selected before/after
-content through bounded `GetBlob` reads, and renders split or stacked text with
-the diffs.com-based `@knpkv/rly` adapter. Binary, non-UTF-8, and oversized files
-remain visible in the inventory with an explicit non-renderable state. File-mode
+the complete CodeCommit changed-file inventory into a compact, collapsible path
+tree, loads the selected before/after content through bounded `GetBlob` reads,
+and renders split or stacked text with the diffs.com-based `@knpkv/rly` adapter.
+File rows use change-state icons while preserving full accessible labels.
+Binary, non-UTF-8, and oversized files remain visible in the inventory with an
+explicit non-renderable state. File-mode
 changes are shown even when the text is unchanged. A selected file above the
 5,000-line combined input or 4,000,000-line-pair diff-complexity budget uses a
 bounded fallback instead of the synchronous renderer, and inactive selected-file
@@ -317,7 +319,20 @@ session decisions. A finding-specific conversation can revise or withdraw the
 complete deck, reopening changed decisions and marking an already posted but
 changed finding stale. If the source head moves, the retained deck is labeled
 stale and **Re-review latest** reconciles it against the new exact patch. Review
-sessions remain ephemeral and are not persisted across browser reloads.
+findings and conversation history scroll independently while the reply composer
+remains pinned. Finding evidence is collapsed behind an explicit disclosure,
+and the discussion tray can collapse to return the full pane to findings.
+Review sessions survive reloads in the authenticated tab's
+session storage. The
+Schema-validated record is keyed by account, pull request, revision ID, and
+immutable base/head commits, retains at most 40 conversation turns, and is not
+restored for a different revision or after the tab closes.
+
+CodeCommit line comments with complete coordinates for the exact revision also
+appear beside their diff line. **View in comments** opens and focuses the full
+thread; **View in diff** on a root comment selects its changed file and returns
+to the exact before- or after-side line. General, incomplete, or stale-revision
+comments remain readable without a misleading jump target.
 
 The development launcher advertises the Vite origin while proxying bootstrap
 and API traffic to the backend with its exact loopback origin. Sandbox iframes

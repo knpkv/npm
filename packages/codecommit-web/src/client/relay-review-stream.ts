@@ -46,11 +46,18 @@ export const runRelayReviewStream = async (
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffered = ""
+  let terminalSeen = false
   const consume = async (line: string): Promise<void> => {
     if (line.trim().length === 0) return
     try {
-      onEvent(await decodeEvent(line))
+      const event = await decodeEvent(line)
+      if (terminalSeen) {
+        throw new RelayReviewTransportError({ message: "Relay returned frames after the terminal event" })
+      }
+      terminalSeen = event.type === "complete" || event.type === "error"
+      onEvent(event)
     } catch (cause) {
+      if (Predicate.isTagged(cause, "RelayReviewTransportError")) throw cause
       throw new RelayReviewTransportError({
         message: Predicate.isError(cause) ? cause.message : "Relay returned malformed progress"
       })
@@ -65,4 +72,7 @@ export const runRelayReviewStream = async (
     if (next.done) break
   }
   await consume(buffered)
+  if (!terminalSeen) {
+    throw new RelayReviewTransportError({ message: "Relay progress stream ended before a terminal event" })
+  }
 }

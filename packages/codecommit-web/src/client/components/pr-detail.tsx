@@ -80,6 +80,11 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
+import {
+  type ReviewCommentNavigation,
+  type ReviewCommentNavigationTarget,
+  reviewCommentNavigationTarget
+} from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
 import { Badge } from "./ui/badge.js"
@@ -187,16 +192,55 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
   )
 }
 
-function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEncoded; readonly depth: number }) {
+interface CommentLocationCoordinates {
+  readonly afterCommitId?: string | undefined
+  readonly beforeCommitId?: string | undefined
+  readonly filePath?: string | undefined
+  readonly relativeFileVersion?: "AFTER" | "BEFORE" | undefined
+}
+
+function CommentThread({
+  depth,
+  location,
+  navigation,
+  onNavigateToDiff,
+  thread
+}: {
+  readonly thread: CommentThreadJsonEncoded
+  readonly depth: number
+  readonly location: CommentLocationCoordinates
+  readonly navigation: ReviewCommentNavigation | null
+  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
+}) {
+  const target = depth === 0 ? reviewCommentNavigationTarget(location, thread.root) : null
+  const active = navigation?.destination === "comment" && navigation.target.commentId === thread.root.id
+  const articleRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!active || articleRef.current === null) return
+    articleRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
+    articleRef.current.focus({ preventScroll: true })
+  }, [active])
+
   if (thread.root.deleted) return null
 
   return (
-    <article className={depth > 0 ? styles.commentReply : styles.comment}>
+    <article
+      className={depth > 0 ? styles.commentReply : styles.comment}
+      data-active={active ? "true" : undefined}
+      ref={articleRef}
+      tabIndex={active ? -1 : undefined}
+    >
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
           <strong>{thread.root.author}</strong>
           <span aria-hidden="true">·</span>
           <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          {target === null ? null : (
+            <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
+              <CodeIcon aria-hidden="true" /> View in diff
+            </button>
+          )}
         </div>
         <div
           className={`${styles.markdown ?? ""} prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto`}
@@ -207,13 +251,28 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
         </div>
       </div>
       {thread.replies.map((reply) => (
-        <CommentThread key={reply.root.id} thread={reply} depth={depth + 1} />
+        <CommentThread
+          depth={depth + 1}
+          key={reply.root.id}
+          location={location}
+          navigation={navigation}
+          onNavigateToDiff={onNavigateToDiff}
+          thread={reply}
+        />
       ))}
     </article>
   )
 }
 
-function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
+function CommentsSection({
+  navigation,
+  onNavigateToDiff,
+  pr
+}: {
+  readonly navigation: ReviewCommentNavigation | null
+  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
+  readonly pr: Domain.PullRequest
+}) {
   const commentsResult = useComments({
     pullRequestId: pr.id,
     repositoryName: pr.repositoryName,
@@ -264,7 +323,14 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
                   <section className={styles.commentLocation} key={loc.filePath ?? `loc-${i}`}>
                     {loc.filePath && <code className={styles.commentPath}>{loc.filePath}</code>}
                     {loc.comments.map((thread) => (
-                      <CommentThread key={thread.root.id} thread={thread} depth={0} />
+                      <CommentThread
+                        depth={0}
+                        key={thread.root.id}
+                        location={loc}
+                        navigation={navigation}
+                        onNavigateToDiff={onNavigateToDiff}
+                        thread={thread}
+                      />
                     ))}
                     {i < comments.length - 1 && <Separator className="my-2" />}
                   </section>
@@ -350,13 +416,18 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
 function CollapsibleSection({
   children,
   count,
+  openRequestKey,
   title
 }: {
   readonly title: string
   readonly count?: number
+  readonly openRequestKey?: string
   readonly children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (openRequestKey !== undefined) setOpen(true)
+  }, [openRequestKey])
   return (
     <Surface as="section" className={styles.disclosure} padding="none" form="grouped">
       <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
@@ -736,6 +807,7 @@ export function PRDetail() {
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
+  const [commentNavigation, setCommentNavigation] = useState<ReviewCommentNavigation | null>(null)
   const reviewedRevisionRef = useRef<string | null>(null)
   const invalidateReview = useCallback(
     (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
@@ -1098,6 +1170,8 @@ export function PRDetail() {
       >
         <PullRequestReviewWorkspace
           accountId={accountId ?? pr.account.profile}
+          commentNavigation={commentNavigation}
+          onNavigateToComment={(target) => setCommentNavigation({ destination: "comment", target })}
           pullRequest={pr}
           refreshGeneration={reviewRefreshGeneration}
         />
@@ -1123,8 +1197,19 @@ export function PRDetail() {
             </Surface>
           )}
 
-          <CollapsibleSection title="Comments" {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}>
-            <CommentsSection key={pr.id} pr={pr} />
+          <CollapsibleSection
+            {...(commentNavigation?.destination === "comment"
+              ? { openRequestKey: commentNavigation.target.commentId }
+              : {})}
+            title="Comments"
+            {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}
+          >
+            <CommentsSection
+              key={pr.id}
+              navigation={commentNavigation}
+              onNavigateToDiff={(target) => setCommentNavigation({ destination: "diff", target })}
+              pr={pr}
+            />
           </CollapsibleSection>
         </section>
 

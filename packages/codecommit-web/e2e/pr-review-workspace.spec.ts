@@ -71,6 +71,30 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
+  await page.route("**/api/prs/comments*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify([{
+        filePath: "src/retry.ts",
+        beforeCommitId: "a".repeat(40),
+        afterCommitId: "b".repeat(40),
+        relativeFileVersion: "AFTER",
+        comments: [{
+          root: {
+            id: "comment-1",
+            content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
+            author: "reviewer",
+            creationDate: "2026-08-12T10:00:00.000Z",
+            deleted: false,
+            filePath: "src/retry.ts",
+            lineNumber: 1
+          },
+          replies: []
+        }]
+      }]),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await page.route("**/api/prs/111111111111/42/diff", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
@@ -176,6 +200,28 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
+  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+    const payload = route.request().postDataJSON()
+    await route.fulfill({
+      body: [
+        JSON.stringify({ type: "progress", phase: "agent", message: "Relay is re-checking the finding" }),
+        JSON.stringify({
+          type: "complete",
+          review: {
+            pullRequestId: "42",
+            revisionId: "revision-1",
+            baseCommit: "a".repeat(40),
+            headCommit: "b".repeat(40),
+            kind: payload.kind,
+            result: payload.currentReview
+          },
+          reply: "Confirmed against the same exact revision."
+        })
+      ].join("\n") + "\n",
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
 }
 
 test("renders a substantive Relay explanation", async ({ page }) => {
@@ -196,14 +242,41 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
   await expect(page.getByText("export const retries = 3")).toBeVisible()
+  const srcDirectory = page.getByRole("button", { name: "src, directory, 1 changed file" })
+  await expect(srcDirectory).toHaveAttribute("aria-expanded", "true")
+  await srcDirectory.click()
+  await expect(page.getByRole("button", { name: /File 1 of 1/ })).toHaveCount(0)
+  await srcDirectory.click()
+  await expect(page.getByRole("button", { name: /File 1 of 1/ })).toBeVisible()
+  const directoryBox = await srcDirectory.locator("code").boundingBox()
+  const fileBox = await page.getByRole("button", { name: /File 1 of 1/ }).locator("code").boundingBox()
+  expect(directoryBox).not.toBeNull()
+  expect(fileBox).not.toBeNull()
+  expect(fileBox!.x).toBeGreaterThan(directoryBox!.x + 8)
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("button", { name: "Security" })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Tests" })).toBeDisabled()
+  await expect(page.getByRole("heading", { name: "Relay is reviewing" })).toBeVisible()
+  await expect(page.getByText("Live stages are updating above.")).toBeVisible()
   reviewGate.resolve()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeHidden()
+  await page.getByText("Evidence & recommendation").first().click()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
+  expect(
+    await page.getByRole("complementary", { name: "Relay findings" }).evaluate((element) =>
+      element.getBoundingClientRect().width
+    )
+  ).toBeGreaterThanOrEqual(340)
+  await page.getByRole("button", { name: /^Comments/ }).click()
+  await expect(page.getByText("Keep this retry path idempotent.").last()).toBeVisible()
+  await page.getByRole("button", { name: "View in diff" }).click()
+  await expect(page.getByLabel("CodeCommit comment by reviewer")).toBeInViewport()
+  await expect(page.getByLabel("CodeCommit comment by reviewer")).not.toContainText("###")
+  await page.getByRole("button", { name: "View in comments" }).click()
+  await expect(page.getByText("Keep this retry path idempotent.").last()).toBeInViewport()
   await expect(page.getByText("Static patch review only.").first()).toBeVisible()
   await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
@@ -214,6 +287,34 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("acknowledged")).toBeVisible()
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
+  await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
+  await expect(page.getByText("rejected")).toBeVisible()
+  await page.getByPlaceholder("Verify this against the latest change…").fill("Verify this again.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  for (let index = 1; index <= 4; index++) {
+    const message = `Follow-up ${String(index)}`
+    await page.getByPlaceholder("Verify this against the latest change…").fill(message)
+    await page.getByRole("button", { exact: true, name: "Send" }).click()
+    await expect(page.getByText(message)).toBeVisible()
+    await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(index + 1)
+  }
+  const findingDeck = page.getByRole("region", { name: "Findings" })
+  expect(await findingDeck.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  await findingDeck.evaluate((element) => element.scrollTo({ top: element.scrollHeight }))
+  const conversationHistory = page.getByRole("log", { name: "Conversation history about F1" })
+  expect(await conversationHistory.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  await conversationHistory.evaluate((element) => element.scrollTo({ top: 0 }))
+  await expect(page.getByLabel("Message Relay")).toBeInViewport()
+  await page.reload()
+  await page
+    .getByRole("region", { name: "Conversation about F1" })
+    .getByRole("button", { exact: true, name: "Open" })
+    .click()
+  await expect(page.getByText("Verify this again.")).toBeVisible()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
+  await expect(page.getByText("posted")).toBeVisible()
+  await expect(page.getByText("rejected")).toBeVisible()
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })

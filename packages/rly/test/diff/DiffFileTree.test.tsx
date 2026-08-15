@@ -53,8 +53,38 @@ describe("DiffFileTree", () => {
       expect(tree?.querySelector(`[data-rly-diff-content-state='${state}']`)).not.toBeNull()
     }
     expect(tree?.textContent).toContain("src/generated.ts")
-    expect(tree?.textContent).toContain("src/client.ts")
+    expect(tree?.textContent).toContain("client.ts")
+    expect(tree?.querySelector("[data-rly-diff-directory='src']")).not.toBeNull()
+    expect(tree?.querySelector("[data-rly-diff-file-id='added'] button")?.textContent).toBe("added.ts")
+    expect(tree?.querySelector("[data-rly-diff-file-id='added'] [title='added']")).not.toBeNull()
     expect(tree?.querySelector("[data-rly-diff-file-id='renamed'] button")?.getAttribute("aria-current")).toBe("true")
+  })
+
+  it("groups paths into collapsible directories and reopens the selected file's ancestors", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const renderTree = (selectedFileId: string) =>
+      root.render(
+        <DiffFileTree
+          data={{ files: stateFiles, state: "ready" }}
+          heading="Changed files"
+          onSelectedFileChange={() => undefined}
+          selectedFileId={selectedFileId}
+        />
+      )
+
+    await act(async () => renderTree("added"))
+    const directory = host.querySelector<HTMLButtonElement>("[data-rly-diff-directory='src'] > button")
+    expect(directory?.getAttribute("aria-expanded")).toBe("true")
+    await act(async () => directory?.click())
+    expect(directory?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector("[data-rly-diff-file-id='added']")).toBeNull()
+
+    await act(async () => renderTree("error"))
+    expect(directory?.getAttribute("aria-expanded")).toBe("true")
+    expect(host.querySelector("[data-rly-diff-file-id='error']")).not.toBeNull()
+    await act(async () => root.unmount())
   })
 
   it("renders a complete lightweight 500-file inventory without truncation", () => {

@@ -13,9 +13,12 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
   BotIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleCheckIcon,
   CircleXIcon,
   FileSearchIcon,
+  LoaderCircleIcon,
   MessageSquareMoreIcon,
   ShieldCheckIcon,
   TestTube2Icon
@@ -32,12 +35,27 @@ import type {
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
+import { useComments } from "../hooks/useComments.js"
 import {
+  appendReviewTurn,
   type FindingDispositions,
   initialFindingDispositions,
-  reconcileFindingDispositions
+  reconcileFindingDispositions,
+  settleFindingPublication
 } from "../review-session-state.js"
 import { runRelayReviewStream } from "../relay-review-stream.js"
+import {
+  readRelayReviewSession,
+  relayReviewSessionStorageKey,
+  writeRelayReviewSession
+} from "../review-session-storage.js"
+import {
+  fileIndexForComment,
+  isCommentOnExactRevision,
+  type ReviewCommentNavigation,
+  type ReviewCommentNavigationTarget,
+  reviewCommentNavigationTarget
+} from "../review-comment-navigation.js"
 import styles from "./pr-review-workspace.module.css"
 
 const reviewFocuses: ReadonlyArray<{
@@ -171,25 +189,101 @@ const annotationsFor = (
     ]
   })
 
+const commentPreview = (content: string): string => {
+  const compact = content
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+    .replace(/(^|\s)#{1,6}\s+/gu, "$1")
+    .replace(/[*`]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+  return compact.length <= 180 ? compact : `${compact.slice(0, 177)}…`
+}
+
+const CommentLineAnnotation = ({
+  active,
+  onNavigateToComment,
+  target
+}: {
+  readonly active: boolean
+  readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
+  readonly target: ReviewCommentNavigationTarget
+}): ReactElement => {
+  const annotationRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!active || annotationRef.current === null) return
+    annotationRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
+    annotationRef.current.focus({ preventScroll: true })
+  }, [active])
+
+  return (
+    <aside className={styles.lineComment} data-active={active ? "true" : undefined} ref={annotationRef} tabIndex={-1}>
+      <span className={styles.lineCommentMeta}>
+        <MessageSquareMoreIcon aria-hidden="true" />
+        <strong>{target.author}</strong>
+        <span>CodeCommit comment</span>
+      </span>
+      <span>{commentPreview(target.content)}</span>
+      <button onClick={() => onNavigateToComment(target)} type="button">
+        View in comments
+      </button>
+    </aside>
+  )
+}
+
+const commentAnnotationsFor = (
+  comments: ReadonlyArray<ReviewCommentNavigationTarget>,
+  file: PullRequestDiffResponse["files"][number],
+  activeCommentId: string | null,
+  onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
+): ReadonlyArray<RlyDiffCodeAnnotation> =>
+  comments.flatMap((target): ReadonlyArray<RlyDiffCodeAnnotation> => {
+    const expectedPath = target.side === "before" ? (file.previousPath ?? file.path) : file.path
+    if (target.filePath !== expectedPath) return []
+    return [
+      {
+        id: `comment:${target.commentId}`,
+        accessibilityLabel: `CodeCommit comment by ${target.author}`,
+        location: {
+          itemId: String(file.index),
+          lineNumber: target.lineNumber,
+          side: target.side === "after" ? "additions" : "deletions"
+        },
+        render: () => (
+          <CommentLineAnnotation
+            active={activeCommentId === target.commentId}
+            onNavigateToComment={onNavigateToComment}
+            target={target}
+          />
+        )
+      }
+    ]
+  })
+
 const LoadedFileDiff = ({
   accountId,
+  activeCommentId,
   baseCommit,
+  comments,
   file,
   findings,
   headCommit,
   layout,
   onContentStateChange,
+  onNavigateToComment,
   pullRequestId,
   revisionId,
   wrap
 }: {
+  readonly activeCommentId: string | null
   readonly accountId: string
   readonly baseCommit: string
+  readonly comments: ReadonlyArray<ReviewCommentNavigationTarget>
   readonly file: PullRequestDiffResponse["files"][number]
   readonly findings: ReadonlyArray<RelayReviewFinding>
   readonly headCommit: string
   readonly layout: "split" | "stacked"
   readonly onContentStateChange: (fileIndex: number, content: RlyDiffFileContent) => void
+  readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequestId: Domain.PullRequestId
   readonly revisionId: string
   readonly wrap: boolean
@@ -313,7 +407,10 @@ const LoadedFileDiff = ({
 
   return (
     <BoundedDiffCodeView
-      annotations={annotationsFor(findings, file)}
+      annotations={[
+        ...annotationsFor(findings, file),
+        ...commentAnnotationsFor(comments, file, activeCommentId, onNavigateToComment)
+      ]}
       className={styles.codeView ?? ""}
       initialItems={[item]}
       mode={layout}
@@ -325,6 +422,7 @@ const LoadedFileDiff = ({
 const ReviewFindings = ({
   canPost,
   dispositions,
+  isReviewing,
   onAcknowledge,
   onPost,
   onReject,
@@ -334,6 +432,7 @@ const ReviewFindings = ({
 }: {
   readonly canPost: boolean
   readonly dispositions: FindingDispositions
+  readonly isReviewing: boolean
   readonly onAcknowledge: (finding: RelayReviewFinding) => void
   readonly onPost: (finding: RelayReviewFinding) => void
   readonly onReject: (finding: RelayReviewFinding) => void
@@ -341,6 +440,17 @@ const ReviewFindings = ({
   readonly review: PullRequestRelayReviewResponse | null
   readonly selectedFindingId: string | null
 }): ReactElement => {
+  if (isReviewing) {
+    return (
+      <div aria-live="polite" className={styles.agentEmpty}>
+        <LoaderCircleIcon aria-hidden="true" className={styles.agentSpinner} />
+        <Text as="h3" variant="card-title">
+          Relay is reviewing
+        </Text>
+        <Text tone="secondary">Live stages are updating above. Findings will appear here when the run completes.</Text>
+      </div>
+    )
+  }
   if (review === null) {
     return (
       <div className={styles.agentEmpty}>
@@ -376,7 +486,7 @@ const ReviewFindings = ({
     )
   }
   return (
-    <div className={styles.findingDeck}>
+    <section aria-label="Findings" className={styles.findingDeck}>
       <Text as="p" className={styles.verdictCopy}>
         {review.result.verdict}
       </Text>
@@ -394,16 +504,24 @@ const ReviewFindings = ({
                 </span>
                 <strong>{finding.title}</strong>
                 <span>{finding.summary}</span>
-                <span>
-                  <b>Evidence:</b> {finding.details}
-                </span>
-                <small>
-                  <b>Recommendation:</b> {finding.recommendation}
-                </small>
-                <small>
-                  <b>Verification:</b> {finding.verification}
-                </small>
               </button>
+              <details className={styles.findingDetails}>
+                <summary>Evidence &amp; recommendation</summary>
+                <div>
+                  <span>
+                    <b>Evidence</b>
+                    {finding.details}
+                  </span>
+                  <span>
+                    <b>Recommendation</b>
+                    {finding.recommendation}
+                  </span>
+                  <span>
+                    <b>Verification</b>
+                    {finding.verification}
+                  </span>
+                </div>
+              </details>
               <div className={styles.findingActions}>
                 <Button
                   disabled={!canPost || dispositions[finding.id] === "posting" || dispositions[finding.id] === "posted"}
@@ -414,10 +532,18 @@ const ReviewFindings = ({
                 >
                   Accept · post
                 </Button>
-                <button onClick={() => onAcknowledge(finding)} type="button">
+                <button
+                  disabled={dispositions[finding.id] === "posting"}
+                  onClick={() => onAcknowledge(finding)}
+                  type="button"
+                >
                   <CircleCheckIcon /> Ack
                 </button>
-                <button onClick={() => onReject(finding)} type="button">
+                <button
+                  disabled={dispositions[finding.id] === "posting"}
+                  onClick={() => onReject(finding)}
+                  type="button"
+                >
                   <CircleXIcon /> Reject
                 </button>
                 <StateLabel
@@ -434,17 +560,23 @@ const ReviewFindings = ({
           </li>
         ))}
       </ol>
-    </div>
+    </section>
   )
 }
 
 const ReadyReviewWorkspace = ({
   accountId,
+  commentNavigation,
+  comments,
   diff,
+  onNavigateToComment,
   pullRequest
 }: {
   readonly accountId: string
+  readonly commentNavigation: ReviewCommentNavigation | null
+  readonly comments: ReadonlyArray<ReviewCommentNavigationTarget>
   readonly diff: PullRequestDiffResponse
+  readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
 }): ReactElement => {
   const [selectedFileIndex, setSelectedFileIndex] = useState(diff.files[0]?.index ?? null)
@@ -458,6 +590,7 @@ const ReadyReviewWorkspace = ({
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
   const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
+  const reviewSessionKey = relayReviewSessionStorageKey(accountId, pullRequest.id)
   const [completedReview, setCompletedReview] = useState<{
     readonly identity: string
     readonly value: PullRequestRelayReviewResponse
@@ -465,6 +598,7 @@ const ReadyReviewWorkspace = ({
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
   const [reviewFailure, setReviewFailure] = useState<string | null>(null)
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
   const [progress, setProgress] = useState<
     ReadonlyArray<Extract<RelayReviewStreamEvent, { readonly type: "progress" }>>
@@ -472,6 +606,7 @@ const ReadyReviewWorkspace = ({
   const [turns, setTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
   const [message, setMessage] = useState("")
   const [dispositions, setDispositions] = useState<FindingDispositions>({})
+  const [conversationCollapsed, setConversationCollapsed] = useState(true)
   const dispositionsRef = useRef(dispositions)
   dispositionsRef.current = dispositions
   const abortRef = useRef<AbortController | null>(null)
@@ -496,6 +631,52 @@ const ReadyReviewWorkspace = ({
   }, [config, selectedProfileId])
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  useEffect(() => {
+    if (commentNavigation?.destination !== "diff") return
+    if (!isCommentOnExactRevision(commentNavigation.target, diff)) {
+      setNavigationNotice(
+        "This comment belongs to an older CodeCommit revision and cannot be placed on the current diff."
+      )
+      return
+    }
+    const fileIndex = fileIndexForComment(diff.files, commentNavigation.target)
+    if (fileIndex === undefined) {
+      setNavigationNotice("The comment's file is not present in the current changed-file inventory.")
+      return
+    }
+    setNavigationNotice(null)
+    setSelectedFileIndex(fileIndex)
+    setSelectedFindingId(null)
+  }, [commentNavigation, diff])
+
+  useEffect(() => {
+    const stored = readRelayReviewSession(window.sessionStorage, reviewSessionKey, reviewIdentity)
+    if (stored === null) {
+      setCompletedReview(null)
+      setTurns([])
+      setDispositions({})
+      setSelectedFindingId(null)
+      return
+    }
+    const restored = { identity: stored.identity, value: stored.review }
+    completedReviewRef.current = restored
+    dispositionsRef.current = stored.dispositions
+    setCompletedReview(restored)
+    setTurns(stored.turns)
+    setDispositions(stored.dispositions)
+    setSelectedFindingId(stored.review.result.findings[0]?.id ?? null)
+  }, [reviewIdentity, reviewSessionKey])
+
+  useEffect(() => {
+    if (completedReview === null || completedReview.identity !== reviewIdentity) return
+    writeRelayReviewSession(window.sessionStorage, reviewSessionKey, {
+      identity: completedReview.identity,
+      review: completedReview.value,
+      turns,
+      dispositions
+    })
+  }, [completedReview, dispositions, reviewIdentity, reviewSessionKey, turns])
 
   useEffect(() => {
     if (selectedFileIndex !== null && diff.files.some(({ index }) => index === selectedFileIndex)) return
@@ -549,7 +730,9 @@ const ReadyReviewWorkspace = ({
             setCompletedReview(completed)
             if (event.reply !== undefined && assistantFindingId !== undefined) {
               const reply = event.reply
-              setTurns((current) => [...current, { findingId: assistantFindingId, role: "assistant", message: reply }])
+              setTurns((current) =>
+                appendReviewTurn(current, { findingId: assistantFindingId, role: "assistant", message: reply })
+              )
             }
             setSelectedFindingId((current) => current ?? event.review.result.findings[0]?.id ?? null)
           },
@@ -568,6 +751,7 @@ const ReadyReviewWorkspace = ({
 
   const executeReview = useCallback(async (): Promise<void> => {
     if (selectedProfile === undefined) return
+    setTurns([])
     await runStream(
       `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream`,
       {
@@ -584,7 +768,7 @@ const ReadyReviewWorkspace = ({
     async (findingId: string, nextMessage: string): Promise<void> => {
       if (review === null) return
       const userTurn: RelayReviewConversationTurn = { findingId, role: "user", message: nextMessage }
-      const nextTurns = [...turns, userTurn]
+      const nextTurns = appendReviewTurn(turns, userTurn)
       setTurns(nextTurns)
       setMessage("")
       await runStream(
@@ -633,9 +817,28 @@ const ReadyReviewWorkspace = ({
             finding: postedFinding
           }
         })
-        setDispositions((current) => ({ ...current, [finding.id]: "posted" }))
+        setDispositions((current) => {
+          const settlement = settleFindingPublication(
+            completedReviewRef.current?.value.result.findings ?? [],
+            finding,
+            current,
+            "posted"
+          )
+          if (settlement.stale) {
+            setReviewFailure("CodeCommit received an older finding snapshot. Re-review before relying on it.")
+          }
+          return settlement.dispositions
+        })
       } catch (cause) {
-        setDispositions((current) => ({ ...current, [finding.id]: "failed" }))
+        setDispositions(
+          (current) =>
+            settleFindingPublication(
+              completedReviewRef.current?.value.result.findings ?? [],
+              finding,
+              current,
+              "failed"
+            ).dispositions
+        )
         setReviewFailure(failureMessage(cause, "CodeCommit did not accept this finding."))
       }
     },
@@ -645,6 +848,7 @@ const ReadyReviewWorkspace = ({
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
       setSelectedFindingId(finding.id)
+      setConversationCollapsed(false)
       const fileIndex = fileIndexForFinding(diff.files, finding)
       if (fileIndex !== undefined) setSelectedFileIndex(fileIndex)
     },
@@ -653,6 +857,7 @@ const ReadyReviewWorkspace = ({
   const selectedFinding = review?.result.findings.find(({ id }) => id === selectedFindingId) ?? null
   const selectedTurns =
     selectedFinding === null ? [] : turns.filter(({ findingId }) => findingId === selectedFinding.id)
+  const visibleProgress = progress.slice(-4)
 
   return (
     <Surface as="section" className={styles.workspace} padding="none" form="grouped">
@@ -718,11 +923,11 @@ const ReadyReviewWorkspace = ({
         </div>
       </header>
 
-      {progress.length === 0 ? null : (
+      {visibleProgress.length === 0 ? null : (
         <ol aria-label="Relay progress" aria-live="polite" className={styles.progressRail}>
-          {progress.map((event, index) => (
+          {visibleProgress.map((event, index) => (
             <li
-              data-active={index === progress.length - 1 ? "true" : undefined}
+              aria-current={index === visibleProgress.length - 1 ? "step" : undefined}
               key={`${event.phase}:${String(index)}`}
             >
               <span aria-hidden="true" />
@@ -761,6 +966,17 @@ const ReadyReviewWorkspace = ({
       {reviewFailure === null ? null : (
         <div className={styles.reviewFailure}>
           <StatePanel announce="polite" description={reviewFailure} title="Relay review failed" tone="critical" />
+        </div>
+      )}
+
+      {navigationNotice === null ? null : (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            announce="polite"
+            description={navigationNotice}
+            title="Comment link unavailable"
+            tone="caution"
+          />
         </div>
       )}
 
@@ -803,14 +1019,17 @@ const ReadyReviewWorkspace = ({
               />
             ) : (
               <LoadedFileDiff
+                activeCommentId={commentNavigation?.destination === "diff" ? commentNavigation.target.commentId : null}
                 accountId={accountId}
                 baseCommit={diff.baseCommit}
+                comments={comments}
                 file={selectedFile}
                 findings={review?.result.findings ?? []}
                 headCommit={diff.headCommit}
                 key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
                 layout={layout}
                 onContentStateChange={updateContentState}
+                onNavigateToComment={onNavigateToComment}
                 pullRequestId={pullRequest.id}
                 revisionId={diff.revisionId}
                 wrap={wrap}
@@ -827,61 +1046,103 @@ const ReadyReviewWorkspace = ({
                 Relay
               </Text>
             </span>
-            {review === null ? null : <StateLabel label={review.kind} size="compact" tone="progress" />}
+            {isReviewing ? (
+              <StateLabel label="running" size="compact" tone="progress" />
+            ) : review === null ? null : (
+              <StateLabel label={review.kind} size="compact" tone="progress" />
+            )}
           </header>
           <ReviewFindings
             canPost={!reviewIsStale}
             dispositions={dispositions}
-            onAcknowledge={(finding) => setDispositions((current) => ({ ...current, [finding.id]: "acknowledged" }))}
+            isReviewing={isReviewing}
+            onAcknowledge={(finding) =>
+              setDispositions((current) =>
+                current[finding.id] === "posting" ? current : { ...current, [finding.id]: "acknowledged" }
+              )
+            }
             onPost={(finding) => void postFinding(finding)}
-            onReject={(finding) => setDispositions((current) => ({ ...current, [finding.id]: "rejected" }))}
+            onReject={(finding) =>
+              setDispositions((current) =>
+                current[finding.id] === "posting" ? current : { ...current, [finding.id]: "rejected" }
+              )
+            }
             onSelect={selectFinding}
             review={review}
             selectedFindingId={selectedFindingId}
           />
           {selectedFinding === null ? null : (
-            <section aria-label={`Conversation about ${selectedFinding.id}`} className={styles.conversation}>
+            <section
+              aria-label={`Conversation about ${selectedFinding.id}`}
+              className={styles.conversation}
+              data-collapsed={conversationCollapsed ? "true" : undefined}
+            >
               <header>
-                <MessageSquareMoreIcon aria-hidden="true" />
-                <strong>Discuss {selectedFinding.id}</strong>
-              </header>
-              {selectedTurns.length === 0 ? (
-                <small>Ask Relay to verify, refine, or withdraw this finding.</small>
-              ) : (
-                <ol>
-                  {selectedTurns.map((turn, index) => (
-                    <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
-                      <b>{turn.role === "user" ? "You" : "Relay"}</b>
-                      {turn.message}
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const submitted = message.trim()
-                  if (submitted.length > 0 && !isReviewing) void continueReview(selectedFinding.id, submitted)
-                }}
-              >
-                <textarea
-                  aria-label="Message Relay"
-                  disabled={isReviewing}
-                  maxLength={8_000}
-                  onChange={(event) => setMessage(event.target.value)}
-                  placeholder="Verify this against the latest change…"
-                  rows={3}
-                  value={message}
-                />
-                <Button
-                  disabled={isReviewing || message.trim().length === 0}
-                  size="compact"
-                  type="submit"
-                  variant="secondary"
+                <span>
+                  <MessageSquareMoreIcon aria-hidden="true" />
+                  <strong>Discuss {selectedFinding.id}</strong>
+                </span>
+                <button
+                  aria-expanded={!conversationCollapsed}
+                  onClick={() => setConversationCollapsed((current) => !current)}
+                  type="button"
                 >
-                  Send
-                </Button>
-              </form>
+                  {conversationCollapsed ? (
+                    <ChevronUpIcon aria-hidden="true" />
+                  ) : (
+                    <ChevronDownIcon aria-hidden="true" />
+                  )}
+                  {conversationCollapsed ? "Open" : "Collapse"}
+                </button>
+              </header>
+              {conversationCollapsed ? null : (
+                <>
+                  <div
+                    aria-label={`Conversation history about ${selectedFinding.id}`}
+                    aria-live="polite"
+                    className={styles.conversationHistory}
+                    role="log"
+                  >
+                    {selectedTurns.length === 0 ? (
+                      <small>Ask Relay to verify, refine, or withdraw this finding.</small>
+                    ) : (
+                      <ol>
+                        {selectedTurns.map((turn, index) => (
+                          <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
+                            <b>{turn.role === "user" ? "You" : "Relay"}</b>
+                            {turn.message}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const submitted = message.trim()
+                      if (submitted.length > 0 && !isReviewing) void continueReview(selectedFinding.id, submitted)
+                    }}
+                  >
+                    <textarea
+                      aria-label="Message Relay"
+                      disabled={isReviewing}
+                      maxLength={8_000}
+                      onChange={(event) => setMessage(event.target.value)}
+                      placeholder="Verify this against the latest change…"
+                      rows={2}
+                      value={message}
+                    />
+                    <Button
+                      disabled={isReviewing || message.trim().length === 0}
+                      size="compact"
+                      type="submit"
+                      variant="secondary"
+                    >
+                      Send
+                    </Button>
+                  </form>
+                </>
+              )}
             </section>
           )}
         </aside>
@@ -896,13 +1157,31 @@ const ReadyReviewWorkspace = ({
 /** CodeCommit web parity surface for complete diffs and ephemeral Relay reviews. */
 export const PullRequestReviewWorkspace = ({
   accountId,
+  commentNavigation,
+  onNavigateToComment,
   pullRequest,
   refreshGeneration
 }: {
   readonly accountId: string
+  readonly commentNavigation: ReviewCommentNavigation | null
+  readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
   readonly refreshGeneration: number
 }): ReactElement => {
+  const comments = useComments({
+    pullRequestId: pullRequest.id,
+    repositoryName: pullRequest.repositoryName,
+    profile: pullRequest.account.profile,
+    region: pullRequest.account.region
+  })
+  const commentTargets = AsyncResult.isSuccess(comments)
+    ? comments.value.flatMap((location) =>
+        location.comments.flatMap((thread) => {
+          const target = reviewCommentNavigationTarget(location, thread.root)
+          return target === null ? [] : [target]
+        })
+      )
+    : []
   const diffAtom = useMemo(
     () =>
       ApiClient.query("prs", "diff", {
@@ -937,8 +1216,11 @@ export const PullRequestReviewWorkspace = ({
   return AsyncResult.isSuccess(diff) ? (
     <ReadyReviewWorkspace
       accountId={accountId}
+      commentNavigation={commentNavigation}
+      comments={commentTargets.filter((target) => isCommentOnExactRevision(target, diff.value))}
       diff={diff.value}
       key={`${accountId}:${pullRequest.id}`}
+      onNavigateToComment={onNavigateToComment}
       pullRequest={pullRequest}
     />
   ) : (

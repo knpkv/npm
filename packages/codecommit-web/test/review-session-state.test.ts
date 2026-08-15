@@ -1,6 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { initialFindingDispositions, reconcileFindingDispositions } from "../src/client/review-session-state.js"
-import type { RelayReviewFinding } from "../src/server/Api.js"
+import {
+  appendReviewTurn,
+  initialFindingDispositions,
+  reconcileFindingDispositions,
+  settleFindingPublication
+} from "../src/client/review-session-state.js"
+import {
+  MAXIMUM_RELAY_REVIEW_TURNS,
+  type RelayReviewConversationTurn,
+  type RelayReviewFinding
+} from "../src/server/Api.js"
 
 const finding = (summary: string): RelayReviewFinding => ({
   id: "F1",
@@ -38,5 +47,39 @@ describe("Relay finding dispositions", () => {
       [finding("changed")],
       { F1: "rejected" }
     )).toEqual({ F1: "pending" })
+  })
+
+  it("binds publication receipts to the submitted finding snapshot", () => {
+    expect(settleFindingPublication(
+      [finding("first")],
+      finding("first"),
+      { F1: "posting" },
+      "posted"
+    )).toEqual({ dispositions: { F1: "posted" }, stale: false })
+    expect(settleFindingPublication(
+      [finding("changed")],
+      finding("first"),
+      { F1: "pending" },
+      "posted"
+    )).toEqual({ dispositions: { F1: "posted-stale" }, stale: true })
+    expect(settleFindingPublication(
+      [],
+      finding("first"),
+      {},
+      "posted"
+    )).toEqual({ dispositions: { F1: "posted-stale" }, stale: true })
+  })
+
+  it("retains the newest continuation turn within the API limit", () => {
+    const retained: ReadonlyArray<RelayReviewConversationTurn> = Array.from(
+      { length: MAXIMUM_RELAY_REVIEW_TURNS },
+      (_, index) => ({ findingId: "F1", role: "assistant", message: `turn-${String(index)}` })
+    )
+    const next = appendReviewTurn(retained, { findingId: "F1", role: "user", message: "newest" })
+    expect(next).toHaveLength(MAXIMUM_RELAY_REVIEW_TURNS)
+    expect(next[0]?.message).toBe("turn-1")
+    expect(next.at(-1)?.message).toBe("newest")
+    expect(appendReviewTurn([], { findingId: "F1", role: "user", message: "first" }))
+      .toEqual([{ findingId: "F1", role: "user", message: "first" }])
   })
 })

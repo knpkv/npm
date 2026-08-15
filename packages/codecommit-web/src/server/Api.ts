@@ -243,10 +243,12 @@ export const RelayReviewStreamRequest = Schema.Struct({
 })
 export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 
+export const MAXIMUM_RELAY_REVIEW_TURNS = 40
+
 export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
-  turns: Schema.Array(RelayReviewConversationTurn).check(Schema.isMaxLength(40)),
+  turns: Schema.Array(RelayReviewConversationTurn).check(Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS)),
   findingId: Schema.String,
   message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
 })

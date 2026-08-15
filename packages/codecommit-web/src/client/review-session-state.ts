@@ -1,14 +1,17 @@
 /** Pure state transitions for human finding dispositions. @module */
-import type { RelayReviewFinding } from "../server/Api.js"
+import * as Schema from "effect/Schema"
+import { MAXIMUM_RELAY_REVIEW_TURNS, type RelayReviewConversationTurn, type RelayReviewFinding } from "../server/Api.js"
 
-export type FindingDisposition =
-  | "pending"
-  | "posting"
-  | "posted"
-  | "posted-stale"
-  | "acknowledged"
-  | "rejected"
-  | "failed"
+export const FindingDisposition = Schema.Literals([
+  "pending",
+  "posting",
+  "posted",
+  "posted-stale",
+  "acknowledged",
+  "rejected",
+  "failed"
+])
+export type FindingDisposition = typeof FindingDisposition.Type
 
 export type FindingDispositions = Readonly<Record<string, FindingDisposition>>
 
@@ -20,6 +23,36 @@ export const initialFindingDispositions = (
   )
 
 const findingIdentity = (finding: RelayReviewFinding): string => JSON.stringify(finding)
+
+export interface FindingPublicationSettlement {
+  readonly dispositions: FindingDispositions
+  readonly stale: boolean
+}
+
+/** Bind a provider receipt to the exact finding snapshot that initiated publication. */
+export const settleFindingPublication = (
+  currentFindings: ReadonlyArray<RelayReviewFinding>,
+  submittedFinding: RelayReviewFinding,
+  dispositions: FindingDispositions,
+  outcome: "posted" | "failed"
+): FindingPublicationSettlement => {
+  const current = currentFindings.find(({ id }) => id === submittedFinding.id)
+  const stale = current === undefined || findingIdentity(current) !== findingIdentity(submittedFinding)
+  if (stale && outcome === "failed") return { dispositions, stale: false }
+  return {
+    dispositions: {
+      ...dispositions,
+      [submittedFinding.id]: stale ? "posted-stale" : outcome
+    },
+    stale
+  }
+}
+
+/** Retain the newest bounded conversation window accepted by the continuation API. */
+export const appendReviewTurn = (
+  turns: ReadonlyArray<RelayReviewConversationTurn>,
+  turn: RelayReviewConversationTurn
+): ReadonlyArray<RelayReviewConversationTurn> => [...turns, turn].slice(-MAXIMUM_RELAY_REVIEW_TURNS)
 
 /** Preserve human decisions only while the agent finding remains byte-for-byte equivalent. */
 export const reconcileFindingDispositions = (
