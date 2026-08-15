@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
@@ -22,6 +22,7 @@ import {
   requireLoopbackOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
+import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
   function*(active = true): Effect.fn.Return<OwnerSessionSecretsContract> {
@@ -124,6 +125,46 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
 })
 
 describe("CodeCommit web security boundary", () => {
+  it.effect("permission-gates and audits Relay publication before the provider write", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(0)
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.as(new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" }))
+          ),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("deny"))),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const result = yield* publisher.post({
+        _tag: "comment",
+        target: {
+          account: readAccount,
+          repositoryName: Domain.RepositoryName.make("payments"),
+          pullRequestId: Domain.PullRequestId.make("42"),
+          revisionId: "revision-1",
+          sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+          destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+          destinationReference: "refs/heads/main"
+        },
+        content: "Finding",
+        clientRequestToken: "relay-finding-1"
+      }).pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+      expect(yield* Ref.get(calls)).toBe(0)
+      expect(yield* Ref.get(auditEntries)).toEqual([
+        expect.objectContaining({ operation: "postPullRequestComment", permissionState: "denied" })
+      ])
+    }))
+
   it("attaches owner authentication to every API endpoint", () => {
     let checked = 0
     for (const group of Object.values(CodeCommitApi.groups)) {

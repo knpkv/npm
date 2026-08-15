@@ -50,6 +50,27 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
+        autoDetect: true,
+        autoRefresh: true,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [{
+            id: "thorough",
+            name: "Thorough review",
+            kind: "review",
+            skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+          }]
+        }
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await page.route("**/api/prs/111111111111/42/diff", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
@@ -88,55 +109,69 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
     await reviewGate
     expect(route.request().postDataJSON()).toEqual({
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
       headCommit: "b".repeat(40),
-      kind: expectedKind
+      kind: expectedKind,
+      skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
     })
+    const review = {
+      pullRequestId: "42",
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: expectedKind,
+      result: expectedKind === "explain"
+        ? {
+          verdict: "The retry budget changes one shared request path.",
+          explanation: "The patch raises the retry budget used by the payment request flow.",
+          findings: []
+        }
+        : {
+          verdict: "One retry regression needs attention.",
+          findings: [
+            {
+              id: "F1",
+              priority: "P2",
+              title: "Retry amplification",
+              summary: "The extra retry can duplicate a non-idempotent request.",
+              details: "The changed constant expands retries without an idempotency guard.",
+              recommendation: "Require an idempotency key before retrying.",
+              verification: "Static patch review only.",
+              publicationTarget: "line-comment",
+              location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+            },
+            {
+              id: "F2",
+              priority: "P3",
+              title: "Before-path evidence",
+              summary: "The removed line carries the old filename.",
+              details: "The before-side annotation must resolve the renamed file's previous path.",
+              recommendation: "Keep the previous path bound to deletion annotations.",
+              verification: "Static patch review only.",
+              publicationTarget: "line-comment",
+              location: { scope: "line", filePath: "src/old-retry.ts", line: 1, side: "before" }
+            }
+          ]
+        }
+    }
     await route.fulfill({
-      body: JSON.stringify({
-        pullRequestId: "42",
-        revisionId: "revision-1",
-        baseCommit: "a".repeat(40),
-        headCommit: "b".repeat(40),
-        kind: expectedKind,
-        result: expectedKind === "explain"
-          ? {
-            verdict: "The retry budget changes one shared request path.",
-            explanation: "The patch raises the retry budget used by the payment request flow.",
-            findings: []
-          }
-          : {
-            verdict: "One retry regression needs attention.",
-            findings: [
-              {
-                id: "F1",
-                priority: "P2",
-                title: "Retry amplification",
-                summary: "The extra retry can duplicate a non-idempotent request.",
-                details: "The changed constant expands retries without an idempotency guard.",
-                recommendation: "Require an idempotency key before retrying.",
-                verification: "Static patch review only.",
-                publicationTarget: "line-comment",
-                location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
-              },
-              {
-                id: "F2",
-                priority: "P3",
-                title: "Before-path evidence",
-                summary: "The removed line carries the old filename.",
-                details: "The before-side annotation must resolve the renamed file's previous path.",
-                recommendation: "Keep the previous path bound to deletion annotations.",
-                verification: "Static patch review only.",
-                publicationTarget: "line-comment",
-                location: { scope: "line", filePath: "src/old-retry.ts", line: 1, side: "before" }
-              }
-            ]
-          }
-      }),
+      body: [
+        JSON.stringify({ type: "progress", phase: "revision", message: "Checking exact revision" }),
+        JSON.stringify({ type: "progress", phase: "agent", message: "Relay is reviewing the exact patch" }),
+        JSON.stringify({ type: "complete", review })
+      ].join("\n") + "\n",
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+    const finding = route.request().postDataJSON().finding
+    await route.fulfill({
+      body: JSON.stringify({ findingId: finding.id, operationId: "comment:123", summary: "posted" }),
       contentType: "application/json",
       status: 200
     })
@@ -166,12 +201,19 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Tests" })).toBeDisabled()
   reviewGate.resolve()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
   await expect(page.getByText("Static patch review only.").first()).toBeVisible()
   await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
   await expect(page.getByLabel("P3 finding: Before-path evidence")).toBeVisible()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
+  await expect(page).toHaveURL(/\/accounts\/111111111111\/prs\/42$/)
+  await expect(page.getByText("acknowledged")).toBeVisible()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await expect(page.getByText("posted")).toBeVisible()
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })
@@ -497,6 +539,22 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
+        autoDetect: true,
+        autoRefresh: true,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [{ id: "thorough", name: "Thorough review", kind: "review", skillIds: [] }]
+        }
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await page.route("**/api/prs/111111111111/*/diff", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     await route.fulfill({
@@ -532,7 +590,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ message: "Relay failed for PR 42." }),
       contentType: "application/json",

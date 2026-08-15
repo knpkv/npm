@@ -90,6 +90,11 @@ export const configQueryAtom = ApiClient.query("config", "list", {
   timeToLive: "30 seconds"
 })
 
+export const reviewSkillsQueryAtom = ApiClient.query("config", "reviewSkills", {
+  reactivityKeys: ["config"],
+  timeToLive: "60 seconds"
+})
+
 /**
  * Accounts query atom
  */

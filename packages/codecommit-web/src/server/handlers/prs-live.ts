@@ -15,23 +15,33 @@ import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheServic
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
-import { HttpServerResponse } from "effect/unstable/http"
+import * as FileSystem from "effect/FileSystem"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   ApiError,
   CodeCommitApi,
   type PullRequestDiffContentResponse,
-  type PullRequestRefreshResponse
+  type PullRequestRefreshResponse,
+  RelayReviewContinueStreamRequest,
+  RelayReviewStreamEvent,
+  RelayReviewStreamRequest
 } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
   makePullRequestChangedFilesSource,
+  postPullRequestRelayFinding,
   runPullRequestRelayReview,
-  withRelayReviewPermit
+  streamPullRequestRelayConversation,
+  streamPullRequestRelayReview,
+  withRelayReviewPermit,
+  withRelayReviewStreamPermit
 } from "../review/PullRequestReview.js"
+import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
+import { discoverReviewSkills, selectedReviewSkillPrompt } from "../review/ReviewSkillCatalog.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -72,6 +82,23 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
       ApprovalPoolMembers: poolMembers
     }]
   })
+
+const relayEventEncoder = new TextEncoder()
+const encodeRelayStreamEvent = Schema.encodeSync(Schema.fromJsonString(RelayReviewStreamEvent))
+
+const relayStreamResponse = (stream: Stream.Stream<typeof RelayReviewStreamEvent.Type>) =>
+  HttpServerResponse.stream(
+    stream.pipe(
+      Stream.map((event) => relayEventEncoder.encode(`${encodeRelayStreamEvent(event)}\n`))
+    ),
+    {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  )
 
 export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
@@ -136,6 +163,9 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     // request-scoped one: acquiring it here keeps this group's layer closed over its
     // own requirements instead of leaking them into every consumer of HandlersLive.
     const host = yield* ChildEnv.HostEnvironment
+    const fileSystem = yield* FileSystem.FileSystem
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const relayFindingPublisher = yield* RelayFindingPublisher
 
     return handlers
       .handle("list", () =>
@@ -216,6 +246,79 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
+      .handleRaw("relayReviewStream", ({ params }) =>
+        Effect.gen(function*() {
+          const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const skills = yield* discoverReviewSkills()
+          const stream = withRelayReviewStreamPermit(
+            relaySemaphore,
+            streamPullRequestRelayReview(
+              readClient,
+              pullRequest,
+              payload,
+              payload.kind,
+              changedFiles,
+              selectedReviewSkillPrompt(skills, payload.skillIds)
+            )
+          ).pipe(
+            Stream.catch((error) => Stream.make({ type: "error", message: error.message }))
+          )
+          return relayStreamResponse(stream.pipe(
+            Stream.provideService(FileSystem.FileSystem, fileSystem),
+            Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
+          ))
+        }).pipe(Effect.mapError((error) =>
+          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+        )))
+      .handleRaw("relayReviewContinueStream", ({ params }) =>
+        Effect.gen(function*() {
+          const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const skills = yield* discoverReviewSkills()
+          const stream = withRelayReviewStreamPermit(
+            relaySemaphore,
+            streamPullRequestRelayConversation(
+              readClient,
+              pullRequest,
+              payload,
+              payload.kind,
+              payload.currentReview,
+              payload.turns,
+              payload.findingId,
+              payload.message,
+              changedFiles,
+              selectedReviewSkillPrompt(skills, payload.skillIds)
+            )
+          ).pipe(
+            Stream.catch((error) => Stream.make({ type: "error", message: error.message }))
+          )
+          return relayStreamResponse(stream.pipe(
+            Stream.provideService(FileSystem.FileSystem, fileSystem),
+            Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
+          ))
+        }).pipe(Effect.mapError((error) =>
+          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+        )))
+      .handle("postRelayFinding", ({ params, payload }) =>
+        Effect.gen(function*() {
+          if (payload.finding.id !== params.findingId) {
+            return yield* new ApiError({ message: "The finding route does not match the submitted finding" })
+          }
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          return yield* postPullRequestRelayFinding(
+            readClient,
+            relayFindingPublisher,
+            pullRequest,
+            payload,
+            payload.finding,
+            changedFiles
+          )
+        }).pipe(Effect.mapError((error) =>
+          Predicate.isTagged(error, "ApiError")
+            ? error
+            : new ApiError({ message: Predicate.hasProperty(error, "message") ? String(error.message) : String(error) })
+        )))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
           yield* copyToClipboard(payload.link).pipe(

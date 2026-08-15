@@ -4,6 +4,7 @@ import { Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effe
 import * as FileSystem from "effect/FileSystem"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
+import { discoverReviewSkills } from "../review/ReviewSkillCatalog.js"
 
 interface ConfigAccountFallback {
   readonly profile: string
@@ -27,12 +28,14 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
                   autoDetect: true,
                   autoRefresh: true,
                   refreshIntervalSeconds: 300,
+                  review: ConfigService.defaultReviewConfig,
                   sandbox: ConfigService.defaultSandboxConfig
                 } satisfies {
                   readonly accounts: ReadonlyArray<ConfigAccountFallback>
                   readonly autoDetect: boolean
                   readonly autoRefresh: boolean
                   readonly refreshIntervalSeconds: number
+                  readonly review: typeof ConfigService.defaultReviewConfig
                   readonly sandbox: typeof ConfigService.defaultSandboxConfig
                 }
               ))
@@ -48,6 +51,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             autoRefresh: config.autoRefresh,
             refreshIntervalSeconds: config.refreshIntervalSeconds,
             currentUser: state.currentUser,
+            review: config.review,
             sandbox: config.sandbox
           }
         }).pipe(Effect.orDie))
@@ -88,10 +92,21 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
           const result = yield* configService.validate
           return { status: result.status, path: result.path, errors: result.errors }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
+      .handle("reviewSkills", () =>
+        discoverReviewSkills().pipe(
+          Effect.map((skills) =>
+            skills.map(({ description, id, name, source }) => ({ id, name, description, source }))
+          ),
+          Effect.mapError((e) => new ApiError({ message: Predicate.isError(e) ? e.message : String(e) }))
+        ))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const existing = yield* configService.load.pipe(
-            Effect.catchIf(() => true, () => Effect.succeed({ sandbox: ConfigService.defaultSandboxConfig }))
+            Effect.catchIf(() => true, () =>
+              Effect.succeed({
+                review: ConfigService.defaultReviewConfig,
+                sandbox: ConfigService.defaultSandboxConfig
+              }))
           )
           const accounts = yield* Effect.forEach(payload.accounts, (a) =>
             Effect.all({
@@ -99,11 +114,13 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               regions: Effect.forEach(a.regions, (r) => Schema.decodeEffect(AwsRegion)(r)),
               enabled: Effect.succeed(a.enabled)
             }))
+          const review = yield* Schema.decodeEffect(ConfigService.ReviewConfig)(payload.review ?? existing.review)
           yield* configService.save({
             accounts,
             autoDetect: payload.autoDetect,
             autoRefresh: payload.autoRefresh,
             refreshIntervalSeconds: payload.refreshIntervalSeconds,
+            review,
             sandbox: payload.sandbox ?? existing.sandbox
           })
           yield* prService.refresh.pipe(
@@ -137,6 +154,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               autoRefresh: config.autoRefresh,
               refreshIntervalSeconds: config.refreshIntervalSeconds,
               currentUser: state.currentUser,
+              review: config.review,
               sandbox: config.sandbox
             }
           }

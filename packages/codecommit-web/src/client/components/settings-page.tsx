@@ -15,6 +15,7 @@ import {
   FileIcon,
   InfoIcon,
   PaletteIcon,
+  RadioTowerIcon,
   RefreshCwIcon,
   ScrollTextIcon,
   ShieldCheckIcon,
@@ -30,6 +31,7 @@ import { SettingsConfig } from "./settings-config.js"
 import { SettingsNotifications } from "./settings-notifications.js"
 import { SettingsPermissions } from "./settings-permissions.js"
 import { SettingsRefresh } from "./settings-refresh.js"
+import { SettingsRelay } from "./settings-relay.js"
 import { SettingsSandbox } from "./settings-sandbox.js"
 import { SettingsTheme } from "./settings-theme.js"
 import styles from "./settings-page.module.css"
@@ -38,6 +40,7 @@ import { Button } from "./ui/button.js"
 const TabIcons = {
   accounts: <UserIcon className="size-4" />,
   refresh: <RefreshCwIcon className="size-4" />,
+  relay: <RadioTowerIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
   notifications: <BellIcon className="size-4" />,
   permissions: <ShieldCheckIcon className="size-4" />,
@@ -50,6 +53,7 @@ const TabIcons = {
 const TabLabels = {
   accounts: "Accounts",
   refresh: "Refresh",
+  relay: "Relay",
   sandbox: "Sandbox",
   notifications: "Notifications",
   permissions: "Permissions",
@@ -91,6 +95,7 @@ export function SettingsPage() {
       <section aria-label={`${TabLabels[activeTab]} settings`} className={styles.content}>
         {activeTab === "accounts" && <SettingsAccounts />}
         {activeTab === "refresh" && <SettingsRefresh />}
+        {activeTab === "relay" && <SettingsRelay />}
         {activeTab === "sandbox" && <SettingsSandbox />}
         {activeTab === "notifications" && <SettingsNotifications />}
         {activeTab === "permissions" && <SettingsPermissions />}

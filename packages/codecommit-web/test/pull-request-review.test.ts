@@ -1,5 +1,6 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Fiber, Option, Semaphore, Stream } from "effect"
 import type { RelayReviewResult } from "../src/server/Api.js"
 
@@ -11,9 +12,11 @@ import {
   makePullRequestChangedFilesSource,
   makeRelayReviewPrompt,
   parseRelayReviewResult,
+  postPullRequestRelayFinding,
   validateRelayReviewAnchors,
   withRelayReviewPermit
 } from "../src/server/review/PullRequestReview.js"
+import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -99,6 +102,85 @@ const makeReadClient = (
 })
 
 describe("CodeCommit web review boundary", () => {
+  it.effect("posts an accepted line finding once against the exact reviewed head", () =>
+    Effect.gen(function*() {
+      const actions: Array<Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>> = []
+      const publisher = {
+        post: (action) => {
+          actions.push(action)
+          return Effect.succeed(
+            new ReviewClient.CodeCommitReviewReceipt({
+              operationId: "comment:123",
+              summary: "Comment posted to the pull request"
+            })
+          )
+        }
+      } satisfies RelayFindingPublisherService
+      const finding: RelayReviewResult["findings"][number] = {
+        id: "F1",
+        priority: "P2",
+        title: "Retry duplicates writes",
+        summary: "The new path retries a non-idempotent write.",
+        details: "The changed first line now invokes retryWrite().",
+        recommendation: "Retry only idempotent reads.",
+        verification: "Exercise a timeout after the provider accepts the write.",
+        publicationTarget: "line-comment",
+        location: { scope: "line", filePath: "src/index.ts", line: 1, side: "after" }
+      }
+      const receipt = yield* postPullRequestRelayFinding(
+        makeReadClient(),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        finding
+      ).pipe(Effect.provide(NodeServices.layer))
+
+      expect(receipt).toMatchObject({ findingId: "F1", operationId: "comment:123" })
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toMatchObject({
+        _tag: "comment",
+        target: {
+          revisionId: revision.revisionId,
+          sourceCommit: revision.sourceCommit,
+          destinationCommit: revision.destinationCommit
+        },
+        location: { filePath: "src/index.ts", filePosition: 1, relativeFileVersion: "AFTER" }
+      })
+      expect(actions[0]?.content).toContain("Retry duplicates writes")
+      expect(actions[0]?.clientRequestToken).toMatch(/^[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("does not publish when the provider revision changed", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const publisher = {
+        post: () => {
+          calls += 1
+          return Effect.die("must not post")
+        }
+      } satisfies RelayFindingPublisherService
+      const changed = new ReadClient.CodeCommitPullRequestRevision({ ...revision, revisionId: "revision-2" })
+      const failure = yield* postPullRequestRelayFinding(
+        makeReadClient(changed),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        {
+          id: "F1",
+          priority: "P2",
+          title: "Finding",
+          summary: "Summary",
+          details: "Details",
+          recommendation: "Recommendation",
+          verification: "Verification",
+          publicationTarget: "pr-comment",
+          location: { scope: "general" }
+        }
+      ).pipe(Effect.provide(NodeServices.layer), Effect.flip)
+      expect(failure.operation).toBe("revision-changed")
+      expect(calls).toBe(0)
+    }))
+
   it.effect("returns a complete diff inventory without exposing provider blob locators", () =>
     Effect.gen(function*() {
       const inventory = yield* loadPullRequestDiff(makeReadClient(), pullRequest)

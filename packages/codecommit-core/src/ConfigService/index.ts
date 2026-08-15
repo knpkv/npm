@@ -23,9 +23,14 @@ import { validate } from "./validate.js"
 export { discoverAwsProfiles } from "./detectProfiles.js"
 export {
   AccountConfig,
+  defaultReviewConfig,
+  defaultReviewProfiles,
   defaultSandboxConfig,
   defaultSandboxImage,
   DetectedProfile,
+  ReviewConfig,
+  ReviewKind,
+  ReviewProfileConfig,
   SandboxConfig,
   TuiConfig
 } from "./internal.js"

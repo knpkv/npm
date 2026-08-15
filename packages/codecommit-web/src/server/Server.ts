@@ -7,6 +7,7 @@ import {
   PermissionService,
   PRService,
   ReadClient,
+  ReviewClient,
   SandboxService,
   StatsService
 } from "@knpkv/codecommit-core"
@@ -57,6 +58,7 @@ import {
   requireLoopbackOrigin
 } from "./internal/OwnerSessionSecurity.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
+import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export {
   makeOwnerSessionSecrets,
@@ -245,6 +247,23 @@ const ReadClientLive = Layer.effect(
   Layer.provide(PermissionGateLive_)
 )
 
+// The full core review client stays private to this layer. HTTP handlers receive
+// only the permission-gated Relay comment capability, never approval or merge.
+const CoreReviewClientLive = ReviewClient.CodeCommitReviewClient.layer.pipe(
+  Layer.provide(ReviewClient.CodeCommitReviewProviderLive),
+  Layer.provide(ReadClientLive),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+const RelayFindingPublisherLive = Layer.effect(
+  RelayFindingPublisher,
+  makeRelayFindingPublisher()
+).pipe(
+  Layer.provide(CoreReviewClientLive),
+  Layer.provide(PermissionLive),
+  Layer.provide(PermissionGateLive_)
+)
+
 // Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
 const SandboxServicesLive = Layer.mergeAll(
@@ -288,7 +307,9 @@ const AuditPrune = Layer.effectDiscard(
 
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.mergeAll(
-  HttpApiBuilder.layer(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
+  HttpApiBuilder.layer(CodeCommitApi).pipe(
+    Layer.provide(HandlersLive.pipe(Layer.provide(RelayFindingPublisherLive)))
+  ),
   autoRefreshLayer,
   AuditPrune,
   sandboxStartupLayer

@@ -28,7 +28,8 @@ describe("SettingsPage", () => {
     )
 
     const links = Array.from(host.querySelectorAll<HTMLAnchorElement>("nav[aria-label=\"Settings\"] a"))
-    expect(links).toHaveLength(9)
+    expect(links).toHaveLength(10)
+    expect(links.some((link) => link.textContent?.includes("Relay"))).toBe(true)
     expect(links.find((link) => link.textContent?.includes("About"))?.getAttribute("aria-current")).toBe("page")
     expect(host.querySelector("[role=\"tablist\"], [role=\"tab\"], [role=\"tabpanel\"]")).toBeNull()
     expect(host.querySelector("section[aria-label=\"About settings\"]")?.textContent).toContain("Keyboard shortcuts")

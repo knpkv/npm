@@ -46,6 +46,7 @@ const BuiltinOperations = {
   createPullRequest: op("write", "Create a pull request"),
   updatePullRequestTitle: op("write", "Edit PR title"),
   updatePullRequestDescription: op("write", "Edit PR description"),
+  postPullRequestComment: op("write", "Post a comment to a pull request"),
   createApprovalRule: op("write", "Create approval rule"),
   updateApprovalRule: op("write", "Update approval rule"),
   deleteApprovalRule: op("write", "Delete approval rule")

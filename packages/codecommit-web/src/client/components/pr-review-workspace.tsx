@@ -10,16 +10,34 @@ import {
 import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import { BotIcon, CheckCircle2Icon, FileSearchIcon, ShieldCheckIcon, TestTube2Icon } from "lucide-react"
+import {
+  BotIcon,
+  CheckCircle2Icon,
+  CircleCheckIcon,
+  CircleXIcon,
+  FileSearchIcon,
+  MessageSquareMoreIcon,
+  ShieldCheckIcon,
+  TestTube2Icon
+} from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
   PullRequestDiffResponse,
   PullRequestRelayReviewResponse,
+  RelayReviewConversationTurn,
   RelayReviewFinding,
-  RelayReviewKind
+  RelayReviewKind,
+  RelayReviewStreamEvent
 } from "../../server/Api.js"
+import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
+import {
+  type FindingDispositions,
+  initialFindingDispositions,
+  reconcileFindingDispositions
+} from "../review-session-state.js"
+import { runRelayReviewStream } from "../relay-review-stream.js"
 import styles from "./pr-review-workspace.module.css"
 
 const reviewFocuses: ReadonlyArray<{
@@ -305,10 +323,20 @@ const LoadedFileDiff = ({
 }
 
 const ReviewFindings = ({
+  canPost,
+  dispositions,
+  onAcknowledge,
+  onPost,
+  onReject,
   onSelect,
   review,
   selectedFindingId
 }: {
+  readonly canPost: boolean
+  readonly dispositions: FindingDispositions
+  readonly onAcknowledge: (finding: RelayReviewFinding) => void
+  readonly onPost: (finding: RelayReviewFinding) => void
+  readonly onReject: (finding: RelayReviewFinding) => void
   readonly onSelect: (finding: RelayReviewFinding) => void
   readonly review: PullRequestRelayReviewResponse | null
   readonly selectedFindingId: string | null
@@ -355,28 +383,54 @@ const ReviewFindings = ({
       <ol>
         {review.result.findings.map((finding) => (
           <li key={finding.id}>
-            <button
-              aria-pressed={selectedFindingId === finding.id}
+            <article
               className={styles.findingCard}
-              onClick={() => onSelect(finding)}
-              type="button"
+              data-selected={selectedFindingId === finding.id ? "true" : undefined}
             >
-              <span className={styles.findingMeta}>
-                <StateLabel label={finding.priority} size="compact" tone={priorityTone(finding.priority)} />
-                <code>{locationLabel(finding)}</code>
-              </span>
-              <strong>{finding.title}</strong>
-              <span>{finding.summary}</span>
-              <span>
-                <b>Evidence:</b> {finding.details}
-              </span>
-              <small>
-                <b>Recommendation:</b> {finding.recommendation}
-              </small>
-              <small>
-                <b>Verification:</b> {finding.verification}
-              </small>
-            </button>
+              <button className={styles.findingBody} onClick={() => onSelect(finding)} type="button">
+                <span className={styles.findingMeta}>
+                  <StateLabel label={finding.priority} size="compact" tone={priorityTone(finding.priority)} />
+                  <code>{locationLabel(finding)}</code>
+                </span>
+                <strong>{finding.title}</strong>
+                <span>{finding.summary}</span>
+                <span>
+                  <b>Evidence:</b> {finding.details}
+                </span>
+                <small>
+                  <b>Recommendation:</b> {finding.recommendation}
+                </small>
+                <small>
+                  <b>Verification:</b> {finding.verification}
+                </small>
+              </button>
+              <div className={styles.findingActions}>
+                <Button
+                  disabled={!canPost || dispositions[finding.id] === "posting" || dispositions[finding.id] === "posted"}
+                  loading={dispositions[finding.id] === "posting"}
+                  onClick={() => onPost(finding)}
+                  size="compact"
+                  variant="primary"
+                >
+                  Accept · post
+                </Button>
+                <button onClick={() => onAcknowledge(finding)} type="button">
+                  <CircleCheckIcon /> Ack
+                </button>
+                <button onClick={() => onReject(finding)} type="button">
+                  <CircleXIcon /> Reject
+                </button>
+                <StateLabel
+                  label={dispositions[finding.id] ?? "pending"}
+                  size="compact"
+                  tone={
+                    dispositions[finding.id] === "failed" || dispositions[finding.id] === "posted-stale"
+                      ? "caution"
+                      : "neutral"
+                  }
+                />
+              </div>
+            </article>
           </li>
         ))}
       </ol>
@@ -399,24 +453,54 @@ const ReadyReviewWorkspace = ({
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
   const [contentStates, setContentStates] = useState<ReadonlyMap<number, RlyDiffFileContent>>(new Map())
-  const reviewAtom = useMemo(() => ApiClient.mutation("prs", "relayReview"), [])
-  const runReview = useAtomSet(reviewAtom, { mode: "promise" })
+  const config = useAtomValue(configQueryAtom)
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
+  const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
   const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
-  const currentReviewIdentity = useRef(reviewIdentity)
-  currentReviewIdentity.current = reviewIdentity
   const [completedReview, setCompletedReview] = useState<{
     readonly identity: string
     readonly value: PullRequestRelayReviewResponse
   } | null>(null)
-  const [failedReview, setFailedReview] = useState<{ readonly identity: string; readonly message: string } | null>(null)
-  const [reviewingIdentity, setReviewingIdentity] = useState<string | null>(null)
-  const review = completedReview?.identity === reviewIdentity ? completedReview.value : null
-  const reviewFailure = failedReview?.identity === reviewIdentity ? failedReview.message : null
-  const isReviewing = reviewingIdentity === reviewIdentity
+  const completedReviewRef = useRef(completedReview)
+  completedReviewRef.current = completedReview
+  const [reviewFailure, setReviewFailure] = useState<string | null>(null)
+  const [isReviewing, setIsReviewing] = useState(false)
+  const [progress, setProgress] = useState<
+    ReadonlyArray<Extract<RelayReviewStreamEvent, { readonly type: "progress" }>>
+  >([])
+  const [turns, setTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
+  const [message, setMessage] = useState("")
+  const [dispositions, setDispositions] = useState<FindingDispositions>({})
+  const dispositionsRef = useRef(dispositions)
+  dispositionsRef.current = dispositions
+  const abortRef = useRef<AbortController | null>(null)
+  const review = completedReview?.value ?? null
+  const reviewIsStale = completedReview !== null && completedReview.identity !== reviewIdentity
+  const profiles = AsyncResult.isSuccess(config) ? config.value.review.profiles : []
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
   const files = diff.files.map((file) => toRlyFile(file, contentStates.get(file.index) ?? { state: "ready" }))
   const inventory: RlyDiffInventory = { files, state: "ready" }
+
+  useEffect(() => {
+    if (!AsyncResult.isSuccess(config) || selectedProfileId !== null) return
+    const profile =
+      config.value.review.profiles.find(({ id }) => id === config.value.review.defaultProfileId) ??
+      config.value.review.profiles[0]
+    if (profile !== undefined) {
+      setSelectedProfileId(profile.id)
+      setKind(profile.kind)
+    }
+  }, [config, selectedProfileId])
+
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  useEffect(() => {
+    if (selectedFileIndex !== null && diff.files.some(({ index }) => index === selectedFileIndex)) return
+    setSelectedFileIndex(diff.files[0]?.index ?? null)
+  }, [diff.files, selectedFileIndex])
 
   const updateContentState = useCallback((fileIndex: number, content: RlyDiffFileContent): void => {
     setContentStates((current) => {
@@ -426,34 +510,137 @@ const ReadyReviewWorkspace = ({
     })
   }, [])
 
+  const runStream = useCallback(
+    async (
+      url: string,
+      payload: Parameters<typeof runRelayReviewStream>[1],
+      assistantFindingId?: string
+    ): Promise<void> => {
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+      setIsReviewing(true)
+      setReviewFailure(null)
+      setProgress([])
+      let terminalError: string | null = null
+      try {
+        await runRelayReviewStream(
+          url,
+          payload,
+          (event) => {
+            if (event.type === "progress") {
+              setProgress((current) => [...current, event].slice(-12))
+              return
+            }
+            if (event.type === "error") {
+              terminalError = event.message
+              setReviewFailure(event.message)
+              return
+            }
+            const prior = completedReviewRef.current?.value.result.findings ?? []
+            const nextDispositions =
+              prior.length === 0
+                ? initialFindingDispositions(event.review.result.findings)
+                : reconcileFindingDispositions(prior, event.review.result.findings, dispositionsRef.current)
+            dispositionsRef.current = nextDispositions
+            setDispositions(nextDispositions)
+            const completed = { identity: reviewIdentity, value: event.review }
+            completedReviewRef.current = completed
+            setCompletedReview(completed)
+            if (event.reply !== undefined && assistantFindingId !== undefined) {
+              const reply = event.reply
+              setTurns((current) => [...current, { findingId: assistantFindingId, role: "assistant", message: reply }])
+            }
+            setSelectedFindingId((current) => current ?? event.review.result.findings[0]?.id ?? null)
+          },
+          controller.signal
+        )
+        if (terminalError !== null) setReviewFailure(terminalError)
+      } catch (cause) {
+        if (!controller.signal.aborted) setReviewFailure(failureMessage(cause, "Relay could not complete this review."))
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null
+        setIsReviewing(false)
+      }
+    },
+    [reviewIdentity]
+  )
+
   const executeReview = useCallback(async (): Promise<void> => {
-    const submittedIdentity = reviewIdentity
-    setReviewingIdentity(submittedIdentity)
-    setFailedReview(null)
-    try {
-      const result = await runReview({
-        params: { awsAccountId: accountId, prId: pullRequest.id },
-        payload: {
+    if (selectedProfile === undefined) return
+    await runStream(
+      `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream`,
+      {
+        revisionId: diff.revisionId,
+        baseCommit: diff.baseCommit,
+        headCommit: diff.headCommit,
+        kind,
+        skillIds: selectedProfile.skillIds
+      }
+    )
+  }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, kind, pullRequest.id, runStream, selectedProfile])
+
+  const continueReview = useCallback(
+    async (findingId: string, nextMessage: string): Promise<void> => {
+      if (review === null) return
+      const userTurn: RelayReviewConversationTurn = { findingId, role: "user", message: nextMessage }
+      const nextTurns = [...turns, userTurn]
+      setTurns(nextTurns)
+      setMessage("")
+      await runStream(
+        `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
+        {
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
           headCommit: diff.headCommit,
-          kind
-        }
-      })
-      if (currentReviewIdentity.current === submittedIdentity) {
-        setCompletedReview({ identity: submittedIdentity, value: result })
-      }
-    } catch (cause) {
-      if (currentReviewIdentity.current === submittedIdentity) {
-        setFailedReview({
-          identity: submittedIdentity,
-          message: failureMessage(cause, "Relay could not complete this review.")
+          kind,
+          skillIds: selectedProfile?.skillIds ?? [],
+          currentReview: review.result,
+          turns: nextTurns,
+          findingId,
+          message: nextMessage
+        },
+        findingId
+      )
+    },
+    [
+      accountId,
+      diff.baseCommit,
+      diff.headCommit,
+      diff.revisionId,
+      kind,
+      pullRequest.id,
+      review,
+      runStream,
+      selectedProfile,
+      turns
+    ]
+  )
+
+  const postFinding = useCallback(
+    async (finding: RelayReviewFinding): Promise<void> => {
+      if (review === null || reviewIsStale) return
+      setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
+      try {
+        const postedFinding: RelayReviewFinding =
+          finding.publicationTarget === "line-comment" ? finding : { ...finding, publicationTarget: "pr-comment" }
+        await postFindingRequest({
+          params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
+          payload: {
+            revisionId: review.revisionId,
+            baseCommit: review.baseCommit,
+            headCommit: review.headCommit,
+            finding: postedFinding
+          }
         })
+        setDispositions((current) => ({ ...current, [finding.id]: "posted" }))
+      } catch (cause) {
+        setDispositions((current) => ({ ...current, [finding.id]: "failed" }))
+        setReviewFailure(failureMessage(cause, "CodeCommit did not accept this finding."))
       }
-    } finally {
-      setReviewingIdentity((current) => (current === submittedIdentity ? null : current))
-    }
-  }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, kind, pullRequest.id, reviewIdentity, runReview])
+    },
+    [accountId, postFindingRequest, pullRequest.id, review, reviewIsStale]
+  )
 
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
@@ -463,6 +650,9 @@ const ReadyReviewWorkspace = ({
     },
     [diff.files]
   )
+  const selectedFinding = review?.result.findings.find(({ id }) => id === selectedFindingId) ?? null
+  const selectedTurns =
+    selectedFinding === null ? [] : turns.filter(({ findingId }) => findingId === selectedFinding.id)
 
   return (
     <Surface as="section" className={styles.workspace} padding="none" form="grouped">
@@ -480,6 +670,24 @@ const ReadyReviewWorkspace = ({
           </Text>
         </div>
         <div className={styles.focusActions}>
+          <label className={styles.profileChoice}>
+            <span>Profile</span>
+            <select
+              disabled={isReviewing}
+              onChange={(event) => {
+                const profile = profiles.find(({ id }) => id === event.target.value)
+                setSelectedProfileId(event.target.value)
+                if (profile !== undefined) setKind(profile.kind)
+              }}
+              value={selectedProfile?.id ?? ""}
+            >
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
             {reviewFocuses.map((focus) => {
               const Icon = focus.icon
@@ -499,7 +707,7 @@ const ReadyReviewWorkspace = ({
             })}
           </div>
           <Button
-            disabled={isReviewing || diff.files.length === 0}
+            disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}
             loading={isReviewing}
             onClick={() => void executeReview()}
             size="compact"
@@ -509,6 +717,46 @@ const ReadyReviewWorkspace = ({
           </Button>
         </div>
       </header>
+
+      {progress.length === 0 ? null : (
+        <ol aria-label="Relay progress" aria-live="polite" className={styles.progressRail}>
+          {progress.map((event, index) => (
+            <li
+              data-active={index === progress.length - 1 ? "true" : undefined}
+              key={`${event.phase}:${String(index)}`}
+            >
+              <span aria-hidden="true" />
+              <small>{event.phase}</small>
+              <strong>{event.message}</strong>
+              {event.detail === undefined ? null : <em>{event.detail}</em>}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {reviewIsStale ? (
+        <div className={styles.staleReview}>
+          <span>
+            This finding deck reviewed {completedReview?.value.headCommit.slice(0, 12)}; current head is{" "}
+            {diff.headCommit.slice(0, 12)}.
+          </span>
+          <Button
+            disabled={isReviewing || review === null}
+            onClick={() =>
+              review === null
+                ? undefined
+                : void continueReview(
+                    selectedFinding?.id ?? review.result.findings[0]?.id ?? "F1",
+                    "Re-review the complete finding deck against the latest exact revision. Reconcile resolved, changed, and new findings."
+                  )
+            }
+            size="compact"
+            variant="secondary"
+          >
+            Re-review latest
+          </Button>
+        </div>
+      ) : null}
 
       {reviewFailure === null ? null : (
         <div className={styles.reviewFailure}>
@@ -581,11 +829,65 @@ const ReadyReviewWorkspace = ({
             </span>
             {review === null ? null : <StateLabel label={review.kind} size="compact" tone="progress" />}
           </header>
-          <ReviewFindings onSelect={selectFinding} review={review} selectedFindingId={selectedFindingId} />
+          <ReviewFindings
+            canPost={!reviewIsStale}
+            dispositions={dispositions}
+            onAcknowledge={(finding) => setDispositions((current) => ({ ...current, [finding.id]: "acknowledged" }))}
+            onPost={(finding) => void postFinding(finding)}
+            onReject={(finding) => setDispositions((current) => ({ ...current, [finding.id]: "rejected" }))}
+            onSelect={selectFinding}
+            review={review}
+            selectedFindingId={selectedFindingId}
+          />
+          {selectedFinding === null ? null : (
+            <section aria-label={`Conversation about ${selectedFinding.id}`} className={styles.conversation}>
+              <header>
+                <MessageSquareMoreIcon aria-hidden="true" />
+                <strong>Discuss {selectedFinding.id}</strong>
+              </header>
+              {selectedTurns.length === 0 ? (
+                <small>Ask Relay to verify, refine, or withdraw this finding.</small>
+              ) : (
+                <ol>
+                  {selectedTurns.map((turn, index) => (
+                    <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
+                      <b>{turn.role === "user" ? "You" : "Relay"}</b>
+                      {turn.message}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const submitted = message.trim()
+                  if (submitted.length > 0 && !isReviewing) void continueReview(selectedFinding.id, submitted)
+                }}
+              >
+                <textarea
+                  aria-label="Message Relay"
+                  disabled={isReviewing}
+                  maxLength={8_000}
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Verify this against the latest change…"
+                  rows={3}
+                  value={message}
+                />
+                <Button
+                  disabled={isReviewing || message.trim().length === 0}
+                  size="compact"
+                  type="submit"
+                  variant="secondary"
+                >
+                  Send
+                </Button>
+              </form>
+            </section>
+          )}
         </aside>
       </div>
       <footer className={styles.workspaceFooter}>
-        Relay is advisory and read-only. Findings stay local until a human chooses a provider action.
+        Relay is advisory. Accept posts immediately; acknowledge and reject stay local to this review session.
       </footer>
     </Surface>
   )
@@ -636,7 +938,7 @@ export const PullRequestReviewWorkspace = ({
     <ReadyReviewWorkspace
       accountId={accountId}
       diff={diff.value}
-      key={exactReviewIdentity(accountId, pullRequest.id, diff.value)}
+      key={`${accountId}:${pullRequest.id}`}
       pullRequest={pullRequest}
     />
   ) : (

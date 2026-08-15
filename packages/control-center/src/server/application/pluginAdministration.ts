@@ -1,5 +1,5 @@
 import { HomeDirectoryLive, isTokenExpired } from "@knpkv/atlassian-common/profile-storage"
-import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
+import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService/detectProfiles.js"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"

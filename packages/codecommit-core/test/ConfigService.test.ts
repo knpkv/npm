@@ -7,6 +7,7 @@ import { EventsHub } from "../src/CacheService/EventsHub.js"
 import {
   ConfigService,
   ConfigServiceLive,
+  defaultReviewConfig,
   defaultSandboxImage,
   discoverAwsProfiles
 } from "../src/ConfigService/index.js"
@@ -97,6 +98,7 @@ describe("ConfigService", () => {
         const config = yield* service.load
         expect(config.accounts).toEqual([])
         expect(config.autoDetect).toBe(true)
+        expect(config.review).toEqual(defaultReviewConfig)
       })
     ))
 
@@ -132,6 +134,51 @@ describe("ConfigService", () => {
         expect(config.accounts[0]!.regions).toEqual(["us-east-1"])
         expect(config.accounts[0]!.enabled).toBe(true)
         expect(config.autoDetect).toBe(true)
+        expect(config.review.defaultProfileId).toBe("thorough")
+      })
+    ))
+
+  it("persists selected prompt-only review skills", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "security",
+            profiles: [{
+              id: "security",
+              name: "Security",
+              kind: "security",
+              skillIds: ["builtin:pr-review-diff"]
+            }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.review.defaultProfileId).toBe("security")
+        expect(loaded.review.profiles[0]?.skillIds).toEqual(["builtin:pr-review-diff"])
+        yield* service.save(loaded)
+        expect((yield* service.load).review).toEqual(loaded.review)
+      })
+    ))
+
+  it("rejects review profiles whose default id is missing", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "missing",
+            profiles: [{ id: "security", name: "Security", kind: "security", skillIds: [] }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const validation = yield* service.validate
+        expect(validation.status).toBe("corrupted")
       })
     ))
 

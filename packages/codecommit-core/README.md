@@ -108,6 +108,11 @@ It reads the standard AWS config and credentials files, deduplicates profile
 names, and returns safe profile/region metadata only; credential values are
 never returned.
 
+`review` stores the default web Relay profile and the server-issued prompt-only
+skill IDs selected for each built-in review focus. Older config files decode to
+the built-in Thorough, Security, Tests, and Explain profiles. Skill contents and
+filesystem paths are not persisted in this shared config schema.
+
 Sandbox settings are validated before persistence. Images must use an immutable
 `sha256` digest; the former built-in `codercom/code-server:latest` default is
 migrated to the current pinned digest during load, while other mutable tags

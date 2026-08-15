@@ -291,15 +291,33 @@ rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
 revision after the server rechecks its revision ID and immutable base/head
-commits. Full, security, tests, and explanation focuses are available. The server constructs a bounded patch from
+commits. Full, security, tests, and explanation focuses are available. The
+Relay settings tab selects a default review profile and prompt-only methods
+from the built-in catalogue or bounded `SKILL.md` metadata discovered under the
+local agent, Codex, and installed-plugin skill roots. Only server-issued skill
+IDs and safe source labels cross the authenticated browser boundary; local
+filesystem paths do not. Tool and referenced-file steps remain unavailable in
+prompt-only mode. The server constructs a bounded patch from
 Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
 repository text as untrusted evidence, rejects text pairs above its 5,000-line
 or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
-no host tools or repository access. Findings are decoded into a bounded local
-deck and exact line findings appear beside the matching diff. Web Relay is advisory and read-only:
-it does not publish comments, approve, merge, or persist a review result, and a
-changed revision must be reloaded before another run.
+no host tools or repository access. Sanitized progress frames expose revision,
+file, patch, agent, and validation stages without returning hidden reasoning.
+
+Findings are decoded into a bounded local deck and exact line findings appear
+beside the matching diff. **Accept · post** immediately publishes the unchanged
+finding through the permission gate and audit log after revalidating the exact
+revision and changed-line evidence; it never grants web approval or merge
+authority. CodeCommit has no native file-comment target, so file-scoped findings
+are file-anchored PR comments, while valid line findings use the native exact
+before/after location. Publication uses a deterministic SHA-256 request token,
+making the same accepted finding idempotent. **Ack** and **Reject** remain local
+session decisions. A finding-specific conversation can revise or withdraw the
+complete deck, reopening changed decisions and marking an already posted but
+changed finding stale. If the source head moves, the retained deck is labeled
+stale and **Re-review latest** reconciles it against the new exact patch. Review
+sessions remain ephemeral and are not persisted across browser reloads.
 
 The development launcher advertises the Vite origin while proxying bootstrap
 and API traffic to the backend with its exact loopback origin. Sandbox iframes
