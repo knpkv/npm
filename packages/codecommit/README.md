@@ -314,7 +314,15 @@ revision and changed-line evidence; it never grants web approval or merge
 authority. CodeCommit has no native file-comment target, so file-scoped findings
 are file-anchored PR comments, while valid line findings use the native exact
 before/after location. Publication uses a deterministic SHA-256 request token,
-making the same accepted finding idempotent. **Ack** and **Reject** remain local
+making the same accepted finding idempotent. Its persisted provider representation
+is the 64-character hexadecimal digest of the UTF-8 JSON serialization of
+`["relay-web-finding-v1", region, repositoryName, pullRequestId, revisionId,
+destinationCommit, sourceCommit, completeFinding]`, in that exact order. The
+complete finding includes its ID, priority, title, summary, details,
+recommendation, verification, publication target, and location. Only the derived
+token is server-private and sent to/persisted by CodeCommit; neither the canonical
+preimage nor raw provider credentials cross the authenticated browser boundary.
+**Ack** and **Reject** remain local
 session decisions. A finding-specific conversation can revise or withdraw the
 complete deck, reopening changed decisions and marking an already posted but
 changed finding stale. If the source head moves, the retained deck is labeled

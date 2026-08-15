@@ -653,6 +653,7 @@ const ReadyReviewWorkspace = ({
   useEffect(() => {
     const stored = readRelayReviewSession(window.sessionStorage, reviewSessionKey, reviewIdentity)
     if (stored === null) {
+      if (completedReviewRef.current !== null) return
       setCompletedReview(null)
       setTurns([])
       setDispositions({})
@@ -1192,8 +1193,11 @@ export const PullRequestReviewWorkspace = ({
     [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
   )
   const diff = useAtomValue(diffAtom)
+  const retainedDiffRef = useRef<PullRequestDiffResponse | null>(null)
+  if (AsyncResult.isSuccess(diff)) retainedDiffRef.current = diff.value
+  const visibleDiff = AsyncResult.isSuccess(diff) ? diff.value : retainedDiffRef.current
 
-  if (AsyncResult.isInitial(diff) || AsyncResult.isWaiting(diff)) {
+  if ((AsyncResult.isInitial(diff) || AsyncResult.isWaiting(diff)) && visibleDiff === null) {
     return (
       <StatePanel
         announce="polite"
@@ -1213,12 +1217,12 @@ export const PullRequestReviewWorkspace = ({
       />
     )
   }
-  return AsyncResult.isSuccess(diff) ? (
+  return visibleDiff !== null ? (
     <ReadyReviewWorkspace
       accountId={accountId}
       commentNavigation={commentNavigation}
-      comments={commentTargets.filter((target) => isCommentOnExactRevision(target, diff.value))}
-      diff={diff.value}
+      comments={commentTargets.filter((target) => isCommentOnExactRevision(target, visibleDiff))}
+      diff={visibleDiff}
       key={`${accountId}:${pullRequest.id}`}
       onNavigateToComment={onNavigateToComment}
       pullRequest={pullRequest}

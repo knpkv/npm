@@ -315,6 +315,9 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("rejected")).toBeVisible()
+  await page.getByRole("button", { name: "Run again" }).click()
+  await expect(page.getByText("Verify this again.")).toHaveCount(0)
+  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(0)
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })
@@ -329,6 +332,53 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   let manualRefreshRequested = false
   let manualRefreshCount = 0
   const changedRevisionRefresh = Promise.withResolvers<void>()
+
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
+        autoDetect: true,
+        autoRefresh: true,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [{ id: "thorough", name: "Thorough review", kind: "review", skillIds: [] }]
+        }
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        type: "complete",
+        review: {
+          pullRequestId: "42",
+          revisionId: "revision-1",
+          baseCommit: "a".repeat(40),
+          headCommit: "b".repeat(40),
+          kind: "review",
+          result: {
+            verdict: "One retry regression needs attention.",
+            findings: [{
+              id: "F1",
+              priority: "P2",
+              title: "Retry amplification",
+              summary: "The extra retry can duplicate a non-idempotent request.",
+              details: "The changed constant expands retries without an idempotency guard.",
+              recommendation: "Require an idempotency key before retrying.",
+              verification: "Static patch review only.",
+              publicationTarget: "line-comment",
+              location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+            }]
+          }
+        }
+      }) + "\n",
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
 
   await page.route("**/api/events/", async (route) => {
     eventCount++
@@ -408,6 +458,8 @@ test("reloads after a completed manual refresh without refetching for ordinary S
 
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
   manualRefreshRequested = true
@@ -428,6 +480,9 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   changedRevisionRefresh.resolve()
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
+  const staleReviewMessage = `This finding deck reviewed ${"b".repeat(12)}; current head is ${"c".repeat(12)}.`
+  await expect(page.getByText(staleReviewMessage)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   expect(diffRequestCount).toBe(3)
 })
 

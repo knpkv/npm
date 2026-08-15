@@ -10,6 +10,7 @@ import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
   makePullRequestChangedFilesSource,
+  makeRelayConversationPrompt,
   makeRelayReviewPrompt,
   parseRelayReviewResult,
   postPullRequestRelayFinding,
@@ -384,6 +385,38 @@ describe("CodeCommit web review boundary", () => {
     expect(explain).not.toContain("Report only concrete, actionable defects")
     expect(review).toContain("Report only concrete, actionable defects")
     expect(review).not.toContain("\"explanation\":\"substantive architecture and risk explanation\"")
+  })
+
+  it("keeps the explanation contract when continuing or re-reviewing Explain mode", () => {
+    const scope = {
+      account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+      pullRequest,
+      revision
+    }
+    const currentReview = { findings: [], verdict: "Architecture overview.", explanation: "Uses a service boundary." }
+    const explain = makeRelayConversationPrompt(
+      scope,
+      "explain",
+      "diff --git a/a b/a",
+      "",
+      currentReview,
+      [],
+      "F1",
+      "Re-review latest"
+    )
+    const review = makeRelayConversationPrompt(
+      scope,
+      "review",
+      "diff --git a/a b/a",
+      "",
+      { findings: [], verdict: "No findings." },
+      [],
+      "F1",
+      "Re-review latest"
+    )
+
+    expect(explain).toContain("\"findings\":[],\"verdict\":\"updated short orientation\",\"explanation\"")
+    expect(review).not.toContain("\"explanation\"")
   })
 
   it.effect("builds a readable exact patch for renamed files", () =>
