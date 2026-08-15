@@ -15,6 +15,7 @@ import * as TypeScript from "typescript"
 const effectPluginName = "@effect/language-service"
 const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
 const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
+const strictDiagnostics = ["strictBooleanExpressions", "strictEffectProvide"]
 
 class EffectTsconfigCoverageError extends Data.TaggedError("EffectTsconfigCoverageError") {
   get message() {
@@ -70,10 +71,15 @@ const validatePackageRecords = (records) => {
       if (config.ignoreWarnings !== false || config.ignoreErrors !== false) {
         diagnostics.push(`${record.name}: ${config.path} must make Effect warnings and errors affect the tsc exit code`)
       }
-      if (config.includeSuggestions !== false) {
+      if (config.includeSuggestions !== true || config.ignoreSuggestions !== true) {
         diagnostics.push(
-          `${record.name}: ${config.path} must keep suggestion-level Effect diagnostics out of tsc output`
+          `${record.name}: ${config.path} must surface Effect suggestions in tsc without changing its exit code`
         )
+      }
+      for (const diagnostic of strictDiagnostics) {
+        if (config.diagnosticSeverity?.[diagnostic] === undefined || config.diagnosticSeverity[diagnostic] === "off") {
+          diagnostics.push(`${record.name}: ${config.path} must enable Effect diagnostic ${diagnostic}`)
+        }
       }
     }
   }
@@ -84,9 +90,14 @@ const runSelfTest = () => {
   const coveredConfig = {
     hasEffectPlugin: true,
     ignoreErrors: false,
+    ignoreSuggestions: true,
     ignoreWarnings: false,
-    includeSuggestions: false,
+    includeSuggestions: true,
     includesEffectNamespaces: true,
+    diagnosticSeverity: {
+      strictBooleanExpressions: "suggestion",
+      strictEffectProvide: "suggestion"
+    },
     path: "tsconfig.json"
   }
   assert.deepEqual(
@@ -140,15 +151,27 @@ const runSelfTest = () => {
       {
         checkCoversRoot: true,
         effectPackage: true,
-        name: "@fixture/noisy-build",
-        sourceConfigs: [{ ...coveredConfig, includeSuggestions: true }]
+        name: "@fixture/hidden-suggestions",
+        sourceConfigs: [{ ...coveredConfig, includeSuggestions: false }]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/missing-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "off" }
+          }
+        ]
       }
     ]),
     [
       "@fixture/missing-plugin: tsconfig.json does not load @effect/language-service",
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
       "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
-      "@fixture/noisy-build: tsconfig.json must keep suggestion-level Effect diagnostics out of tsc output"
+      "@fixture/hidden-suggestions: tsconfig.json must surface Effect suggestions in tsc without changing its exit code",
+      "@fixture/missing-strict-pattern: tsconfig.json must enable Effect diagnostic strictEffectProvide"
     ]
   )
   assert.equal(checkCoversRootTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
@@ -214,7 +237,9 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
       const plugin = parsed.options.plugins?.find(({ name }) => name === effectPluginName)
       return {
         hasEffectPlugin: plugin !== undefined,
+        diagnosticSeverity: plugin?.diagnosticSeverity,
         ignoreErrors: plugin?.ignoreEffectErrorsInTscExitCode,
+        ignoreSuggestions: plugin?.ignoreEffectSuggestionsInTscExitCode,
         ignoreWarnings: plugin?.ignoreEffectWarningsInTscExitCode,
         includeSuggestions: plugin?.includeSuggestionsInTsc,
         includesEffectNamespaces:

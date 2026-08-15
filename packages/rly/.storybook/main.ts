@@ -19,7 +19,13 @@ const config = {
     mergeConfig(viteConfig, {
       build: {
         // Storybook intentionally bundles its renderer and documentation tooling.
-        chunkSizeWarningLimit: 1200
+        chunkSizeWarningLimit: 1200,
+        rolldownOptions: {
+          checks: {
+            // This diagnostic is timing-dependent; the build-output gate still rejects known warning codes.
+            pluginTimings: false
+          }
+        }
       },
       css: {
         modules: {

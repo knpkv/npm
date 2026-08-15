@@ -74,7 +74,7 @@
     "prepack": "pnpm build",
     "scaffold": "tsx scripts/scaffold-component.ts",
     "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --no-version-updates",
-    "storybook:build": "NODE_OPTIONS=--disable-warning=DEP0205 storybook build --output-dir storybook-static --disable-telemetry && pnpm validate:storybook",
+    "storybook:build": "tsx scripts/build-storybook.ts && pnpm validate:storybook",
     "storybook:serve": "vite preview --outDir storybook-static --host 127.0.0.1 --port 6006 --strictPort",
     "test": "vitest run",
     "test:browser": "pnpm test:storybook && pnpm test:visual",

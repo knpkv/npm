@@ -31,11 +31,13 @@
         "name": "@effect/language-service",
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
-          "overriddenschemaconstructor": "off"
+          "overriddenschemaconstructor": "off",
+          // Opt in to the language service's stricter, non-default patterns.
+          "strictBooleanExpressions": "suggestion",
+          "strictEffectProvide": "suggestion"
         },
-        // Keep suggestion-level IDE guidance available without flooding successful builds.
-        // Warning- and error-level Effect diagnostics remain enabled in tsc.
-        "includeSuggestionsInTsc": false,
+        // Surface suggestion-level guidance in tsc so local and CI builds expose actionable cleanup.
+        "includeSuggestionsInTsc": true,
         "ignoreEffectSuggestionsInTscExitCode": true,
         "ignoreEffectWarningsInTscExitCode": false,
         "ignoreEffectErrorsInTscExitCode": false
