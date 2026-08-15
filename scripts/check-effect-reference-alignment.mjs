@@ -79,7 +79,32 @@ const validateUpstreamUrl = (url) =>
     ? []
     : [`effect-upstream resolves to ${url}; expected the canonical ${canonicalUpstreamUrl}`]
 
-const validateAlignment = ({ metadata, provenance, referenceVersions, tree, workspaceVersions }) => {
+const parseRemoteTagCommit = (tag, output) => {
+  const tagRef = `refs/tags/${tag}`
+  const peeledRef = `${tagRef}^{}`
+  const entries = output
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.split("\t"))
+    .filter((entry) => entry.length === 2 && (entry[1] === tagRef || entry[1] === peeledRef))
+  const base = entries.filter((entry) => entry[1] === tagRef)
+  const peeled = entries.filter((entry) => entry[1] === peeledRef)
+  const violations = []
+
+  if (base.length !== 1 || peeled.length > 1) {
+    violations.push(`Canonical Effect tag ${tag} did not resolve uniquely`)
+  }
+  const commit = peeled[0]?.[0] ?? base[0]?.[0]
+  if (commit === undefined || !/^[0-9a-f]{40}$/u.test(commit)) {
+    violations.push(`Canonical Effect tag ${tag} did not peel to a full commit ID`)
+  }
+  return { commit, violations }
+}
+
+const matchingSubtreeProvenance = (metadata, candidates) =>
+  candidates.filter((candidate) => candidate.split === metadata.upstreamCommit && candidate.tree === metadata.tree)
+
+const validateAlignment = ({ metadata, provenance, referenceVersions, tagCommit, tree, workspaceVersions }) => {
   const violations = []
 
   if (metadata.tag !== `effect@${metadata.version}`) {
@@ -87,6 +112,11 @@ const validateAlignment = ({ metadata, provenance, referenceVersions, tree, work
   }
   if (metadata.upstreamCommit.length !== 40 || metadata.tree.length !== 40) {
     violations.push("Effect reference commit and tree must use full Git object IDs")
+  }
+  if (tagCommit !== metadata.upstreamCommit) {
+    violations.push(
+      `Canonical Effect tag ${metadata.tag} resolves to ${tagCommit ?? "no commit"} instead of ${metadata.upstreamCommit}`
+    )
   }
   if (tree !== metadata.tree) {
     violations.push(`Effect reference tree ${tree} does not match pinned tree ${metadata.tree}`)
@@ -127,6 +157,7 @@ const runSelfTest = () => {
     metadata,
     provenance: { split: releaseCommit, tree: releaseTree },
     referenceVersions: [["effect", "4.0.0-rc.109"]],
+    tagCommit: releaseCommit,
     tree: releaseTree,
     workspaceVersions: [["package.json", "effect", "4.0.0-rc.109"]]
   }
@@ -144,10 +175,12 @@ const runSelfTest = () => {
   assert.match(
     validateAlignment({
       ...valid,
-      metadata: { ...metadata, upstreamCommit: "d".repeat(40) }
+      metadata: { ...metadata, upstreamCommit: "d".repeat(40), tree: "c".repeat(40) },
+      provenance: { split: "d".repeat(40), tree: "c".repeat(40) },
+      tree: "c".repeat(40)
     }).join("\n"),
-    /provenance resolves/u,
-    "an arbitrary recorded upstream commit must fail"
+    /Canonical Effect tag/u,
+    "a self-consistent post-release commit carrying the same version must fail"
   )
   assert.match(
     validateAlignment({
@@ -162,6 +195,40 @@ const runSelfTest = () => {
     validateUpstreamUrl("https://example.invalid/Effect-TS/effect.git").join("\n"),
     /expected the canonical/u,
     "a same-path remote on an untrusted host must fail"
+  )
+
+  const tagRef = `refs/tags/${metadata.tag}`
+  assert.deepEqual(
+    parseRemoteTagCommit(metadata.tag, `${releaseCommit}\t${tagRef}`),
+    { commit: releaseCommit, violations: [] },
+    "a lightweight release tag must resolve to its commit"
+  )
+  assert.deepEqual(
+    parseRemoteTagCommit(metadata.tag, `${"a".repeat(40)}\t${tagRef}\n${releaseCommit}\t${tagRef}^{}`),
+    { commit: releaseCommit, violations: [] },
+    "an annotated release tag must resolve to its peeled commit"
+  )
+  assert.match(
+    parseRemoteTagCommit(metadata.tag, "").violations.join("\n"),
+    /did not resolve uniquely/u,
+    "a missing release tag must fail closed"
+  )
+
+  const validProvenance = { commit: "1".repeat(40), split: releaseCommit, tree: releaseTree }
+  const unrelatedNewerProvenance = {
+    commit: "2".repeat(40),
+    split: "d".repeat(40),
+    tree: "c".repeat(40)
+  }
+  assert.deepEqual(
+    matchingSubtreeProvenance(metadata, [unrelatedNewerProvenance, validProvenance]),
+    [validProvenance],
+    "a newer unrelated subtree import must not hide the current provenance"
+  )
+  assert.equal(
+    matchingSubtreeProvenance(metadata, [validProvenance, { ...validProvenance, commit: "3".repeat(40) }]).length,
+    2,
+    "multiple matching imports must remain ambiguous"
   )
 }
 
@@ -187,30 +254,49 @@ const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (reposit
   })
 })
 
-const resolveSubtreeProvenance = Effect.fn("EffectReferenceAlignment.resolveSubtreeProvenance")(function* (git) {
-  const mergeParents = (yield* git(["log", "--merges", "--format=%P"])).split("\n").filter(Boolean)
+const resolveSubtreeProvenance = Effect.fn("EffectReferenceAlignment.resolveSubtreeProvenance")(
+  function* (git, metadata) {
+    const mergeParents = (yield* git(["log", "--merges", "--format=%P"])).split("\n").filter(Boolean)
+    const candidates = []
+    const inspected = new Set()
 
-  for (const parents of mergeParents) {
-    for (const candidate of parents.split(" ").slice(1)) {
-      const message = yield* git(["show", "-s", "--format=%B", candidate])
-      const directories = [...message.matchAll(/^git-subtree-dir: (.+)$/gmu)].map((match) => match[1])
-      if (!directories.includes("repos/effect")) continue
+    for (const parents of mergeParents) {
+      for (const candidate of parents.split(" ").slice(1)) {
+        if (inspected.has(candidate)) continue
+        inspected.add(candidate)
+        const message = yield* git(["show", "-s", "--format=%B", candidate])
+        const directories = [...message.matchAll(/^git-subtree-dir: (.+)$/gmu)].map((match) => match[1])
+        if (!directories.includes("repos/effect")) continue
 
-      const splits = [...message.matchAll(/^git-subtree-split: ([0-9a-f]{40})$/gmu)].map((match) => match[1])
-      if (directories.length !== 1 || splits.length !== 1) {
-        return yield* fail(`Effect subtree provenance commit ${candidate} has ambiguous trailers`)
-      }
-      return {
-        split: splits[0],
-        tree: yield* git(["rev-parse", `${candidate}^{tree}`])
+        const splits = [...message.matchAll(/^git-subtree-split: ([0-9a-f]{40})$/gmu)].map((match) => match[1])
+        const tree = yield* git(["rev-parse", `${candidate}^{tree}`])
+        if (directories.length !== 1 || splits.length !== 1) {
+          if (tree === metadata.tree) {
+            return yield* fail(`Effect subtree provenance commit ${candidate} has ambiguous trailers`)
+          }
+          continue
+        }
+        candidates.push({ commit: candidate, split: splits[0], tree })
       }
     }
-  }
 
-  return yield* fail(
-    "Effect subtree provenance is missing; retain the subtree merge parents and use a full-history checkout"
-  )
-})
+    const matching = matchingSubtreeProvenance(metadata, candidates)
+    if (matching.length === 1) return matching[0]
+    if (matching.length > 1) {
+      return yield* fail(
+        `Effect subtree provenance is ambiguous across matching commits ${matching.map((candidate) => candidate.commit).join(", ")}`
+      )
+    }
+    if (candidates.length > 0) {
+      return yield* fail(
+        `No Effect subtree provenance matches pinned commit ${metadata.upstreamCommit} and tree ${metadata.tree}`
+      )
+    }
+    return yield* fail(
+      "Effect subtree provenance is missing; retain the subtree merge parents and use a full-history checkout"
+    )
+  }
+)
 
 const readJson = Effect.fn("EffectReferenceAlignment.readJson")(function* (fileSystem, path, schema) {
   const source = yield* fileSystem
@@ -241,15 +327,26 @@ const program = Effect.gen(function* () {
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
   const metadataPath = path.join(repositoryRoot, "scripts", "effect-reference.json")
   const git = yield* makeGit(repositoryRoot)
+  const remoteUrl = yield* git(["remote", "get-url", "effect-upstream"])
+  const remoteViolations = validateUpstreamUrl(remoteUrl)
+  if (remoteViolations.length > 0) return yield* fail(remoteViolations.join("\n"))
   if (args.includes("--check-remote")) {
-    const remoteUrl = yield* git(["remote", "get-url", "effect-upstream"])
-    const violations = validateUpstreamUrl(remoteUrl)
-    if (violations.length > 0) return yield* fail(violations.join("\n"))
     yield* Console.log(`Effect upstream remote verified at ${canonicalUpstreamUrl}`)
     return
   }
   const metadata = yield* readJson(fileSystem, metadataPath, Metadata)
-  const provenance = yield* resolveSubtreeProvenance(git)
+  const remoteTag = parseRemoteTagCommit(
+    metadata.tag,
+    yield* git([
+      "ls-remote",
+      "--exit-code",
+      "effect-upstream",
+      `refs/tags/${metadata.tag}`,
+      `refs/tags/${metadata.tag}^{}`
+    ])
+  )
+  if (remoteTag.violations.length > 0) return yield* fail(remoteTag.violations.join("\n"))
+  const provenance = yield* resolveSubtreeProvenance(git, metadata)
 
   const worktreeStatus = yield* git(["status", "--porcelain=v1", "--untracked-files=all", "--", "repos/effect"])
   const unstagedReferenceChange = worktreeStatus
@@ -288,7 +385,14 @@ const program = Effect.gen(function* () {
     }
   }
 
-  const violations = validateAlignment({ metadata, provenance, referenceVersions, tree, workspaceVersions })
+  const violations = validateAlignment({
+    metadata,
+    provenance,
+    referenceVersions,
+    tagCommit: remoteTag.commit,
+    tree,
+    workspaceVersions
+  })
   if (violations.length > 0) {
     return yield* fail(violations.map((violation) => `- ${violation}`).join("\n"))
   }

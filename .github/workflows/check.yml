@@ -51,6 +51,8 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-version: 26.7.0
+      - name: Configure canonical Effect remote
+        run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
       - run: pnpm lint
 
   audit:

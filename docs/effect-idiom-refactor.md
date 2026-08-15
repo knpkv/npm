@@ -6,8 +6,8 @@ semantics used by the pinned `4.0.0-rc.109` release.
 ## Source of truth
 
 - The workspace dependencies are `4.0.0-rc.109`.
-- `repos/effect` follows the canonical Effect v4 `main` source and contains the
-  RC release commit.
+- `repos/effect` is pinned to the exact canonical `effect@4.0.0-rc.109` release
+  tag and must not follow `main`.
 - API availability was verified against the exact
   `effect@4.0.0-rc.109` upstream tag, not only a moving checkout.
 - A moving upstream checkout may inform forward-looking style, but this

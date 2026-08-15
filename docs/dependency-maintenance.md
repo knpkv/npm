@@ -96,8 +96,10 @@ Keep the subtree as reference material unless a task explicitly asks to update
 the vendored source. Do not make application fixes inside `repos/effect`.
 
 Update `scripts/effect-reference.json` with the release tag, upstream commit,
-and imported Git tree whenever the pinned release changes. Then run the focused
-alignment guard before the complete lint gate:
+and imported Git tree whenever the pinned release changes. The focused alignment
+guard resolves and peels that tag from the verified canonical remote, so an
+offline or missing upstream tag lookup fails closed instead of trusting the
+recorded commit. Run it before the complete lint gate:
 
 ```bash
 node scripts/check-effect-reference-alignment.mjs --self-test
