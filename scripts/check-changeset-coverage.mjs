@@ -137,14 +137,14 @@ const runSelfTest = () => {
   )
   assert.equal(
     manifestsDifferForRelease(
-      { dependencies: { effect: "4.0.0-beta.107" } },
+      { dependencies: { effect: "4.0.0-rc.109" } },
       { dependencies: { effect: "4.0.0-beta.98" } }
     ),
     true
   )
   assert.equal(
     manifestsDifferForRelease(
-      { devDependencies: { effect: "4.0.0-beta.107" } },
+      { devDependencies: { effect: "4.0.0-rc.109" } },
       { devDependencies: { effect: "4.0.0-beta.98" } }
     ),
     false

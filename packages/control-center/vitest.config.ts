@@ -24,6 +24,10 @@ export default defineConfig({
       "test/integration/live-aws-probe.test.ts"
     ],
     include: ["test/**/*.test.{ts,tsx}"],
+    // SQLite-heavy materialization suites exceed their test budgets when
+    // Vitest saturates larger runners with one worker per available core.
+    maxWorkers: 4,
+    sequence: { groupOrder: 1 },
     testTimeout: 10_000
   }
 })

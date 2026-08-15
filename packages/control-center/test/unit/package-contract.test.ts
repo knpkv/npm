@@ -12,10 +12,10 @@ const validManifest = {
   dependencies: {
     "@aws-sdk/client-codepipeline": "^3.1108.0",
     "@aws-sdk/credential-providers": "^3.1108.0",
-    "@effect/ai-openai-compat": "4.0.0-beta.107",
-    "@effect/platform-browser": "4.0.0-beta.107",
-    "@effect/platform-node": "4.0.0-beta.107",
-    "@effect/sql-libsql": "4.0.0-beta.107",
+    "@effect/ai-openai-compat": "4.0.0-rc.109",
+    "@effect/platform-browser": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/sql-libsql": "4.0.0-rc.109",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/ai-runtime": "workspace:^",
@@ -28,7 +28,7 @@ const validManifest = {
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@distilled.cloud/aws": "1.0.0-rc.4",
-    effect: "4.0.0-beta.107",
+    effect: "4.0.0-rc.109",
     react: "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -183,7 +183,7 @@ describe("package contract", () => {
         ...validManifest,
         dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.97" }
       })
-    ).toContain("@effect/sql-libsql must align with the pinned Effect beta")
+    ).toContain("@effect/sql-libsql must align with the pinned Effect RC")
   })
 
   it("rejects a browser platform adapter from a different Effect release", () => {
@@ -192,6 +192,6 @@ describe("package contract", () => {
         ...validManifest,
         dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.97" }
       })
-    ).toContain("@effect/platform-browser must align with the pinned Effect beta")
+    ).toContain("@effect/platform-browser must align with the pinned Effect RC")
   })
 })
