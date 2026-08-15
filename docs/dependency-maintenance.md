@@ -22,12 +22,12 @@ Upgrade normal dependencies to the latest registry versions:
 pnpm update -r --latest <package...>
 ```
 
-Effect v4 packages are published on beta versions while some package `latest`
+Effect v4 packages are published on RC versions while some package `latest`
 tags still point at Effect v3-compatible releases. Upgrade Effect packages by
-the beta tag or by the exact version from `repos/effect/packages/*/package.json`:
+the RC tag or by the exact version from `repos/effect/packages/*/package.json`:
 
 ```bash
-pnpm update -r @effect/atom-react@beta @effect/platform-bun@beta @effect/platform-node@beta @effect/sql-libsql@beta @effect/vitest@beta effect@beta
+pnpm update -r @effect/atom-react@rc @effect/platform-bun@rc @effect/platform-node@rc @effect/sql-libsql@rc @effect/vitest@rc effect@rc
 ```
 
 After changing manifests, regenerate the lockfile:
@@ -48,38 +48,64 @@ Use `pnpm audit` for a full security gate.
 
 ## Update the Effect Subtree
 
-`repos/effect` is a squash-imported git subtree from
-`https://github.com/Effect-TS/effect-smol.git`. The remote is named
-`effect-smol`.
+`repos/effect` is a squash-imported git subtree from the canonical
+`https://github.com/Effect-TS/effect.git` repository. The remote is named
+`effect-upstream`. The former `effect-smol` repository is archived and must not
+be used for current updates.
 
-Check the configured remote:
-
-```bash
-git remote -v | rg effect-smol
-```
-
-If the remote is missing, add it:
+Add the canonical remote if it is missing:
 
 ```bash
-git remote add effect-smol https://github.com/Effect-TS/effect-smol.git
+git remote add effect-upstream https://github.com/Effect-TS/effect.git
 ```
 
-Fetch and update the vendored source:
+Before every fetch, fail closed unless that remote still resolves to the exact
+canonical URL:
 
 ```bash
-git fetch effect-smol main
-git subtree pull --prefix=repos/effect effect-smol main --squash
+node scripts/check-effect-reference-alignment.mjs --check-remote
 ```
+
+Do not fetch when this check fails. Correct or remove a mismatched remote and
+add the canonical URL again before continuing.
+
+Choose the exact Effect release used by the workspace, then fetch and update the
+vendored source from that release tag. Do not pull `main`: it can contain APIs
+that have not reached the installed RC yet.
+
+```bash
+effect_version=4.0.0-rc.109
+effect_tag="effect@${effect_version}"
+git fetch effect-upstream "refs/tags/${effect_tag}"
+git subtree pull --prefix=repos/effect effect-upstream "${effect_tag}" --squash
+```
+
+Preserve the subtree merge commit and its squash parent when the change lands.
+Pull requests that update `repos/effect` must use GitHub's merge-commit method;
+squash or rebase merging discards the retained `git-subtree-split` provenance
+that the alignment guard verifies.
 
 Then align workspace Effect package versions to the versions in the updated
 subtree. The most common packages are:
 
 ```bash
-node -e "const fs=require('fs'); for (const p of ['repos/effect/packages/effect/package.json','repos/effect/packages/platform-node/package.json','repos/effect/packages/platform-bun/package.json','repos/effect/packages/sql/libsql/package.json','repos/effect/packages/atom/react/package.json','repos/effect/packages/vitest/package.json']) { const j=JSON.parse(fs.readFileSync(p,'utf8')); console.log(j.name, j.version) }"
+node -e "const fs=require('fs'); for (const p of ['repos/effect/packages/effect/package.json','repos/effect/packages/platform/node/package.json','repos/effect/packages/platform/bun/package.json','repos/effect/packages/sql/libsql/package.json','repos/effect/packages/atom/react/package.json','repos/effect/packages/vitest/package.json']) { const j=JSON.parse(fs.readFileSync(p,'utf8')); console.log(j.name, j.version) }"
 ```
 
 Keep the subtree as reference material unless a task explicitly asks to update
 the vendored source. Do not make application fixes inside `repos/effect`.
+
+Update `scripts/effect-reference.json` with the release tag, upstream commit,
+and imported Git tree whenever the pinned release changes. The focused alignment
+guard resolves and peels that tag from the verified canonical remote, so an
+offline or missing upstream tag lookup fails closed instead of trusting the
+recorded commit. Run it before the complete lint gate:
+
+```bash
+node scripts/check-effect-reference-alignment.mjs --self-test
+node scripts/check-effect-reference-alignment.mjs
+pnpm lint
+```
 
 ## Agent and Editor Notes
 

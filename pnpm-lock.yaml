@@ -8,11 +8,11 @@ overrides:
   '@distilled.cloud/aws>fast-xml-parser': ^5.10.1
   fast-uri@>=3.0.0 <3.1.5: 3.1.5
   vitest: ^4.1.10
-  '@effect/vitest': 4.0.0-beta.107
-  '@effect/platform-bun': 4.0.0-beta.107
-  '@effect/platform-node': 4.0.0-beta.107
+  '@effect/vitest': 4.0.0-rc.109
+  '@effect/platform-bun': 4.0.0-rc.109
+  '@effect/platform-node': 4.0.0-rc.109
   '@atlaskit/react-ufo': 7.1.0
-  effect: 4.0.0-beta.107
+  effect: 4.0.0-rc.109
   happy-dom: 20.11.2
   markdown-it@<=14.1.1: 14.2.0
   file-type@>=13.0.0 <21.3.1: 21.3.3
@@ -29,9 +29,6 @@ overrides:
   linkify-it@<=5.0.1: 5.0.2
   diff@>=6.0.0 <8.0.3: 8.0.3
   svgo@>=4.0.0 <4.0.2: 4.0.2
-
-patchedDependencies:
-  effect@4.0.0-beta.107: f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac
 
 importers:
 
@@ -56,14 +53,14 @@ importers:
         specifier: ^0.87.2
         version: 0.87.2
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/tsgo':
         specifier: ^0.36.4
         version: 0.36.4
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.1(jiti@2.7.0)(supports-color@7.2.0))
@@ -80,8 +77,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@vitest/browser@4.1.10)(vitest@4.1.10)
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       eslint:
         specifier: ^10.8.1
         version: 10.8.1(jiti@2.7.0)(supports-color@7.2.0)
@@ -140,11 +137,11 @@ importers:
   packages/agent-skills:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
     devDependencies:
       '@types/node':
         specifier: latest
@@ -159,17 +156,17 @@ importers:
   packages/ai-claude:
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -183,17 +180,17 @@ importers:
   packages/ai-codex:
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -207,11 +204,11 @@ importers:
   packages/ai-runtime:
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -225,8 +222,8 @@ importers:
   packages/atlassian-common:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1(supports-color@7.2.0)
@@ -241,14 +238,14 @@ importers:
         version: 11.0.5
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
@@ -259,20 +256,20 @@ importers:
   packages/clockify-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(@effect/platform-node@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0)))(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(@effect/platform-node@4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1)))(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
@@ -289,14 +286,14 @@ importers:
   packages/codecommit:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(react@19.2.8)(scheduler@0.27.0)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.8)(scheduler@0.27.0)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -319,8 +316,8 @@ importers:
         specifier: 9.0.0
         version: 9.0.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -329,8 +326,8 @@ importers:
         version: 2.8.1
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@storybook/react':
         specifier: ^10.5.7
         version: 10.5.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(storybook@10.5.7(@types/react@19.2.18)(prettier@3.9.6)(react@19.2.8))(supports-color@7.2.0)
@@ -357,20 +354,20 @@ importers:
         version: 3.1108.0
       '@distilled.cloud/aws':
         specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        version: 1.0.0-rc.4(effect@4.0.0-rc.109)
       '@effect/sql-libsql':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@types/node':
         specifier: 26.2.0
         version: 26.2.0
@@ -378,14 +375,14 @@ importers:
   packages/codecommit-web:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(react@19.2.8)(scheduler@0.27.0)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.8)(scheduler@0.27.0)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -423,8 +420,8 @@ importers:
         specifier: 9.0.0
         version: 9.0.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       lucide-react:
         specifier: ^1.31.0
         version: 1.31.0(react@19.2.8)
@@ -466,8 +463,8 @@ importers:
         version: 1.4.0
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -493,20 +490,20 @@ importers:
   packages/confluence-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(@effect/platform-node@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0)))(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(@effect/platform-node@4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1)))(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
@@ -532,8 +529,8 @@ importers:
         specifier: ^6.2.0
         version: 6.2.0(react@18.3.1)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -554,8 +551,8 @@ importers:
         version: 5.2.3
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -563,8 +560,8 @@ importers:
         specifier: ^26.2.0
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
@@ -582,19 +579,19 @@ importers:
         version: 3.1108.0
       '@distilled.cloud/aws':
         specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        version: 1.0.0-rc.4(effect@4.0.0-rc.109)
       '@effect/ai-openai-compat':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@effect/platform-browser':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/sql-libsql':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@knpkv/ai-claude':
         specifier: workspace:^
         version: link:../ai-claude
@@ -629,8 +626,8 @@ importers:
         specifier: workspace:^
         version: link:../rly
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -648,8 +645,8 @@ importers:
         version: 4.0.1(supports-color@7.2.0)
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -691,14 +688,14 @@ importers:
     dependencies:
       effect-qb:
         specifier: 0.22.0
-        version: 0.22.0(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        version: 0.22.0(effect@4.0.0-rc.109)
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -731,20 +728,20 @@ importers:
   packages/jira-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(@effect/platform-node@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0)))(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(@effect/platform-node@4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1)))(effect@4.0.0-rc.109)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
@@ -761,8 +758,8 @@ importers:
   packages/jira-cli:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -780,8 +777,8 @@ importers:
         version: 5.2.3
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -789,8 +786,8 @@ importers:
         specifier: latest
         version: 26.2.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'
@@ -801,11 +798,11 @@ importers:
   packages/jira-clockify:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(react@19.2.8)(scheduler@0.27.0)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.8)(scheduler@0.27.0)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -828,15 +825,15 @@ importers:
         specifier: 0.5.1
         version: 0.5.1(@typescript/typescript6@6.0.2)(react-devtools-core@7.0.1)(react@19.2.8)(web-tree-sitter@0.25.10)(ws@8.21.3)
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       react:
         specifier: ^19.2.8
         version: 19.2.8
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.2.0
@@ -869,11 +866,11 @@ importers:
         version: 1.6.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -911,8 +908,8 @@ importers:
         specifier: 8.20.0
         version: 8.20.0
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       happy-dom:
         specifier: 20.11.2
         version: 20.11.2
@@ -949,8 +946,8 @@ importers:
   scripts:
     dependencies:
       effect:
-        specifier: 4.0.0-beta.107
-        version: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
 
 packages:
 
@@ -1485,12 +1482,12 @@ packages:
   '@distilled.cloud/aws@1.0.0-rc.4':
     resolution: {integrity: sha512-0ebeFe4d+h73hmei4L+0dfe0WXrFEDo79ZpSR4sk1Q3yB0R+y+osV2BnPDlzKuNvb6Kb7Ucu8dd0qqN/3ezwvg==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
   '@distilled.cloud/core@1.0.0-rc.4':
     resolution: {integrity: sha512-g/5THnVZoBKO31hhdU1JJxqcI5aXAmMIJQpv2WUmutYeedbdX/kknnvwY5a75rc7MGSWsHnB4EAA/07FtdSSKg==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
   '@dprint/formatter@0.4.1':
     resolution: {integrity: sha512-IB/GXdlMOvi0UhQQ9mcY15Fxcrc2JPadmo6tqefCNV0bptFq7YBpggzpqYXldBXDa04CbKJ+rDwO2eNRPE2+/g==}
@@ -1506,15 +1503,15 @@ packages:
     resolution: {integrity: sha512-NKBGBSIKUG584qrS1tyxVpX/AKJKQw5HgjYEnPLC0QsTw79JrGn+qUr8CXFb955Iy7GUdiiUv1rJ6JBGvaKb6w==}
     engines: {node: '>=18'}
 
-  '@effect/ai-openai-compat@4.0.0-beta.107':
-    resolution: {integrity: sha512-2ttObV1HvRKZOAp2CUHXYaN2n0jTatTdTFOiTljhcKItsaVFNjM6mPVtCe/NeYIYS6BFdDLOdYPWSQ4QVOeEvA==}
+  '@effect/ai-openai-compat@4.0.0-rc.109':
+    resolution: {integrity: sha512-bA+1NOKJZvmNlLDFMWewTHNVW5fnEIJGyXtgQxT1LZs9l7MDCO9XIGj9Wuk9wRDuje0jkyP+kNyQLiUADuFwDQ==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
-  '@effect/atom-react@4.0.0-beta.107':
-    resolution: {integrity: sha512-dSx8Mmgge8oy3On8k95V3dyaRo9od8Eg0our56PIrTlRZBBRLXM2vc/X7GsxAYtHs2PMracVFUJqizXCcPsCyQ==}
+  '@effect/atom-react@4.0.0-rc.109':
+    resolution: {integrity: sha512-pMx01t0DnS9rPAR3aFOIoPUmuJjxflxw081ofTzXBlG81+hIaenJTdVJ+X+miRCGbcf00XEn15dHGoM3UjpIZQ==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
       react: '>=19.2.7 <20.0.0'
       scheduler: '>=0.27.0 <0.28.0'
 
@@ -1530,40 +1527,40 @@ packages:
     resolution: {integrity: sha512-CfiSoaVQO8pZgaMZGw5VvMvRGybsJ2LaSDoLYaqiVGvo/YYPYVR2GzUKY0h1NtIweq/+SQ5XLrvtzPIttWQ0GQ==}
     hasBin: true
 
-  '@effect/openapi-generator@4.0.0-beta.107':
-    resolution: {integrity: sha512-qw3h8mUxtgjppJRq28HFO1YWbWUFJ4j6XaCk7n3AyARuV+1EGQRy7yWuWko/ZwGYzPUd4o8mUtG3APjyl7EOfg==}
+  '@effect/openapi-generator@4.0.0-rc.109':
+    resolution: {integrity: sha512-CCnzH1uubdg7UCl9EFxfKxLH6eX/bzTdBtmVJSGqcShgkomXTxl36IqNMo5TK6FErFJQi+6nvBZA2YES07Uk/g==}
     hasBin: true
     peerDependencies:
-      '@effect/platform-node': 4.0.0-beta.107
-      effect: 4.0.0-beta.107
+      '@effect/platform-node': 4.0.0-rc.109
+      effect: 4.0.0-rc.109
 
-  '@effect/platform-browser@4.0.0-beta.107':
-    resolution: {integrity: sha512-PGNHndbY0tRyqWfZZJWQMdQdh8Q1D9qfOnlI2EV2claAmNG7iGs+qWSUTBoCQo7MBgfJOYIC8M/AKq1ZfFWJuw==}
+  '@effect/platform-browser@4.0.0-rc.109':
+    resolution: {integrity: sha512-63/hM2dCh0HQb7sRkAhAoZjO4swjRD2vT/eUrs8nXA0LzJMz52ChPsxdnL1D0yg+ZeXtMHQM0MFJxITJXjv+EA==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
-  '@effect/platform-bun@4.0.0-beta.107':
-    resolution: {integrity: sha512-nDKutCpgr+xHQX7tgN8Cq6JXtj96GqiElKaJ7AwAkZYl2q9f6onc/3aJgl6CyH/DlUoidw6YaxeU+UaTRmMN1g==}
+  '@effect/platform-bun@4.0.0-rc.109':
+    resolution: {integrity: sha512-fOOGilEBTKOYjRrOcblSiX5GdQOmR46ETTyMmkQoqYhmx+iAMKImM5YoCm10QDMWtbzerT4oeDKUJivXvOC20w==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
-  '@effect/platform-node-shared@4.0.0-beta.107':
-    resolution: {integrity: sha512-y6BqcRi86BfTJv+tvDrob4ozYVHxxlHYcn/zIQqZjXI9CvKnkgD6ng+38G1o45c4f2ucU+6HRI9POCmFdMoVGA==}
+  '@effect/platform-node-shared@4.0.0-rc.109':
+    resolution: {integrity: sha512-jhZJnf81N7Z5+Z41Qr0cKT75WzGu6M1W05xrSdu/V8PK0kSFtU5hJMBxSGDWNlgWhBwK0WRZtnMHY8HLdONg1w==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
-  '@effect/platform-node@4.0.0-beta.107':
-    resolution: {integrity: sha512-k+6YNbV4Ck0L6YXtlgkvEnuP5tlxWD8EeWOrpn46PDqbGEwt4ONpRltTwm3tn2cyBXD0i+2P11cUH/6sdFagTA==}
+  '@effect/platform-node@4.0.0-rc.109':
+    resolution: {integrity: sha512-LE/GTh6MCZ0uzbEFH9WmxQkC9snjWuFyh8vW04AAgbKKxSHXsepHSK9RcE/2oYKr6RhrOTD0C2wC0i+J9qoe2g==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.107
-      ioredis: '>=5.7.0 <6.0.0'
+      effect: 4.0.0-rc.109
+      redis: '>=5.0.0 <7.0.0'
 
-  '@effect/sql-libsql@4.0.0-beta.107':
-    resolution: {integrity: sha512-cThVDlmgb4F0B0wSHljlw6gWNd4IxT0pvGGiGsBy2HZ/YzexdrMwVg/fi/gctdVkW4a3WrIlDcy6crB19w+XzQ==}
+  '@effect/sql-libsql@4.0.0-rc.109':
+    resolution: {integrity: sha512-qRtiT37LW53TOjF2BHBpvj3I0L1oKZuUCB7+9H9GBdkwRALEDM8kJX89qT2izTNDFnbszagsD2yajb1CxVmKkA==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
   '@effect/tsgo-darwin-arm64@0.36.4':
     resolution: {integrity: sha512-oOcWdKQucNch6G4CvidHEzmfgeKEPMvFcz+DXuKGonBLwVHX+i1VYGbZwccEOoiitOg7eWVl4e8S0qKMXg3/gg==}
@@ -1604,10 +1601,10 @@ packages:
     resolution: {integrity: sha512-fNmdUV6FgXnvIcG18AVS1SRXt7z9jsyBh5CKuJYmTsE+DgbLaWF0CevKHx7hQPcidDWRVmdJYfU66Jvc/ZEt6w==}
     hasBin: true
 
-  '@effect/vitest@4.0.0-beta.107':
-    resolution: {integrity: sha512-n4/qsx4DnT4dEI/wNgMivxyUeJoeiU1TCSz0WnoHWk/dny40Oxjip2P9IXGQDgPb9fsYVnerF0QRA6nPUuExQA==}
+  '@effect/vitest@4.0.0-rc.109':
+    resolution: {integrity: sha512-vu5ZkidJ/gM/+a0M07Jnq1PV4duFlYc+4Vj9TsJysK4Us7LL5bwV6uXiT7mi1/IM/3HgfAwc7Q9ROj8M65G4pA==}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
       vitest: ^4.1.10
 
   '@emmetio/abbreviation@2.3.3':
@@ -3425,6 +3422,42 @@ packages:
   '@radix-ui/rect@1.1.3':
     resolution: {integrity: sha512-JtyZR+mqgBibTo8xea3B6ZRmzZiM/YeVBtUkas6zMuXjAlfIFIW2FgqeM9eLyvEaYX66vr6DJMK+4U6LV0KhNw==}
 
+  '@redis/bloom@6.2.1':
+    resolution: {integrity: sha512-huQgNLaCIZfQ9SeLn4q9124uOUd8HbZDYHwwUzNcRgHqCHiHKl2dDxMqJCeWh8cMqZAoWuHR8XnWbDMIf+o7ag==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.2.1
+
+  '@redis/client@6.2.1':
+    resolution: {integrity: sha512-LzxBY7SIBvvJiyCgcaJZZakE3fJrZZ++i24+EDW9fKpCl68D35uJcKFpZZwCfOoG9WZTbyZlMzMeM0gtOAMU9Q==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@node-rs/xxhash': ^1.1.0
+      '@opentelemetry/api': '>=1 <2'
+    peerDependenciesMeta:
+      '@node-rs/xxhash':
+        optional: true
+      '@opentelemetry/api':
+        optional: true
+
+  '@redis/json@6.2.1':
+    resolution: {integrity: sha512-AFIUJ8Gj0DaaSBHYuSt8+O0oYWM+50OK1c0OmodB7XERIA8+BbyV3O4v76f9iccWasd1/7qjfZTpuzexUaZtrQ==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.2.1
+
+  '@redis/search@6.2.1':
+    resolution: {integrity: sha512-2vfOAOyYFE7UUw3sBBlkqqruBtOUS4HRY5MtW4hp83llrwvtrTE4r22CEqXddlV+54zkLxBE4nmsIJ/dpezQrQ==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.2.1
+
+  '@redis/time-series@6.2.1':
+    resolution: {integrity: sha512-kiYniph04dJOole+L359B6C9E+jYS2uDP7hca6Onj0xF38ZIpyxARO0Iq0W4ZRn1e8Q6vqW00QFZVSMRA/2Ijw==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.2.1
+
   '@rolldown/binding-android-arm64@1.2.3':
     resolution: {integrity: sha512-zrJtHDcaZJ1Fp7xf4hNl+7seH9Cn/N5TwLYkhgXREtBwAd/jaqW3uqeHxpDugJLVICWg4eW44kOQEGJ1r6jCGw==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -4618,6 +4651,10 @@ packages:
     resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
     engines: {node: '>=0.10.0'}
 
+  cluster-key-slot@1.1.2:
+    resolution: {integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==}
+    engines: {node: '>=0.10.0'}
+
   cmdk@1.1.1:
     resolution: {integrity: sha512-Vsv7kFaXm+ptHDMZ7izaRsP70GgrW9NBNGswt9OZaVBLlE0SNpDq8eu/VGXyF9r7M0azK3Wy7OlYXsuyYLFzHg==}
     peerDependencies:
@@ -4822,10 +4859,10 @@ packages:
     resolution: {integrity: sha512-WfTEKlvydJLGgccaP6dBLB74jn/Cu41PcETDftzmRGXxtAqIzn7pP9FXyH4+Ng/CHKVQ4UX6yIPI2yuIDixeDQ==}
     engines: {node: '>=22'}
     peerDependencies:
-      effect: 4.0.0-beta.107
+      effect: 4.0.0-rc.109
 
-  effect@4.0.0-beta.107:
-    resolution: {integrity: sha512-OoBAv8eF+yanc+C6xhgEUnWeXUSHA6ynnscYqpkAY9GSnzZWystsIjBowVqCkLpHGlnRtdIqYT3wHwpOY6JDnQ==}
+  effect@4.0.0-rc.109:
+    resolution: {integrity: sha512-6ubcOCtfdbmFO5+vgcT2HsTw5s+n3aMUj4eAIbVpUxP7+VYCwXxxcBHgiWgizOrGO1eGmuOBFek3mM0dFcwaWA==}
 
   electron-to-chromium@1.5.405:
     resolution: {integrity: sha512-bNglH7lPH5l+yHOes7Zr4VqxhOy4BQ9ZBUX4VdoFgxMpzJk7W1ZoO3Vgd9Pxa9PyjQ76sfm2aKH/nzEcCNRlew==}
@@ -5463,9 +5500,6 @@ packages:
   klona@2.0.6:
     resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
     engines: {node: '>= 8'}
-
-  kubernetes-types@1.30.0:
-    resolution: {integrity: sha512-Dew1okvhM/SQcIa2rcgujNndZwU8VnSapDgdxlYoB84ZlpAD43U6KLAFqYo17ykSFGHNPrg0qry0bP+GJd9v7Q==}
 
   launch-editor@2.14.1:
     resolution: {integrity: sha512-QWBrQsMpH7gPr965dsKD/3cKWiNoTjpATQf++Xq63N6sKRGMwlVXz41O1IZTMfZQgBctD/K5Zt06+/I6pP6+HA==}
@@ -6403,6 +6437,10 @@ packages:
     resolution: {integrity: sha512-DJnGAeenTdpMEH6uAJRK/uiyEIH9WVsUmoLwzudwGJUwZPp80PDBWPHXSAGNPwNvIXAbe7MSUB1zQFugFml66A==}
     engines: {node: '>=4'}
 
+  redis@6.2.1:
+    resolution: {integrity: sha512-Z9VHtgYs48PiQC77X9O2Er8Hj4T+5BtFjT91/vi5Is1D04N72cA946ZslM1ImJw8ZctFBZWAVjM7S5wJNeHMpg==}
+    engines: {node: '>= 20.0.0'}
+
   reftools@1.1.9:
     resolution: {integrity: sha512-OVede/NQE13xBQ+ob5CKd5KyeJYU2YInb1bmV4nRoOfquZPkAkxuOXicSe1PvqIuZZ4kD13sPKBbR7UFDmli6w==}
 
@@ -7019,10 +7057,6 @@ packages:
 
   uuid@11.1.1:
     resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
-    hasBin: true
-
-  uuid@14.0.1:
-    resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
     hasBin: true
 
   vfile-location@5.0.3:
@@ -8194,23 +8228,23 @@ snapshots:
 
   '@date-fns/tz@1.5.0': {}
 
-  '@distilled.cloud/aws@1.0.0-rc.4(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@distilled.cloud/aws@1.0.0-rc.4(effect@4.0.0-rc.109)':
     dependencies:
       '@aws-crypto/crc32': 5.2.0
       '@aws-crypto/util': 5.2.0
       '@aws-sdk/credential-providers': 3.1108.0
       '@aws-sdk/types': 3.974.3
-      '@distilled.cloud/core': 1.0.0-rc.4(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
+      '@distilled.cloud/core': 1.0.0-rc.4(effect@4.0.0-rc.109)
       '@smithy/shared-ini-file-loader': 4.7.0
       '@smithy/types': 4.17.0
       '@smithy/util-base64': 4.6.0
       aws4fetch: 1.0.20
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
       fast-xml-parser: 5.10.1
 
-  '@distilled.cloud/core@1.0.0-rc.4(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@distilled.cloud/core@1.0.0-rc.4(effect@4.0.0-rc.109)':
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
 
   '@dprint/formatter@0.4.1': {}
 
@@ -8224,13 +8258,13 @@ snapshots:
       '@edge-runtime/primitives': 6.0.0
     optional: true
 
-  '@effect/ai-openai-compat@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/ai-openai-compat@4.0.0-rc.109(effect@4.0.0-rc.109)':
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
 
-  '@effect/atom-react@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(react@19.2.8)(scheduler@0.27.0)':
+  '@effect/atom-react@4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.8)(scheduler@0.27.0)':
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
       react: 19.2.8
       scheduler: 0.27.0
 
@@ -8247,50 +8281,50 @@ snapshots:
 
   '@effect/language-service@0.87.2': {}
 
-  '@effect/openapi-generator@4.0.0-beta.107(@effect/platform-node@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0)))(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/openapi-generator@4.0.0-rc.109(@effect/platform-node@4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1)))(effect@4.0.0-rc.109)':
     dependencies:
-      '@effect/platform-node': 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      '@effect/platform-node': 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      effect: 4.0.0-rc.109
       swagger2openapi: 7.0.8
     transitivePeerDependencies:
       - encoding
 
-  '@effect/platform-browser@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/platform-browser@4.0.0-rc.109(effect@4.0.0-rc.109)':
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
 
-  '@effect/platform-bun@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/platform-bun@4.0.0-rc.109(effect@4.0.0-rc.109)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      '@effect/platform-node-shared': 4.0.0-rc.109(effect@4.0.0-rc.109)
+      effect: 4.0.0-rc.109
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node-shared@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/platform-node-shared@4.0.0-rc.109(effect@4.0.0-rc.109)':
     dependencies:
       '@types/ws': 8.18.1
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
       ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(ioredis@5.11.1(supports-color@7.2.0))':
+  '@effect/platform-node@4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
-      ioredis: 5.11.1(supports-color@7.2.0)
+      '@effect/platform-node-shared': 4.0.0-rc.109(effect@4.0.0-rc.109)
+      effect: 4.0.0-rc.109
       mime: 4.1.0
+      redis: 6.2.1(@opentelemetry/api@1.9.1)
       undici: 8.9.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/sql-libsql@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))':
+  '@effect/sql-libsql@4.0.0-rc.109(effect@4.0.0-rc.109)':
     dependencies:
       '@libsql/client': 0.17.4
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8326,9 +8360,9 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.36.4
       '@effect/tsgo-win32-x64': 0.36.4
 
-  '@effect/vitest@4.0.0-beta.107(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac))(vitest@4.1.10)':
+  '@effect/vitest@4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)':
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
       vitest: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.11.2)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.12)(yaml@2.9.0))
 
   '@emmetio/abbreviation@2.3.3':
@@ -8698,7 +8732,8 @@ snapshots:
   '@img/sharp-win32-x64@0.35.3':
     optional: true
 
-  '@ioredis/commands@1.10.0': {}
+  '@ioredis/commands@1.10.0':
+    optional: true
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(@typescript/typescript6@6.0.2)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
@@ -9948,6 +9983,28 @@ snapshots:
 
   '@radix-ui/rect@1.1.3': {}
 
+  '@redis/bloom@6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))':
+    dependencies:
+      '@redis/client': 6.2.1(@opentelemetry/api@1.9.1)
+
+  '@redis/client@6.2.1(@opentelemetry/api@1.9.1)':
+    dependencies:
+      cluster-key-slot: 1.1.2
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+
+  '@redis/json@6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))':
+    dependencies:
+      '@redis/client': 6.2.1(@opentelemetry/api@1.9.1)
+
+  '@redis/search@6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))':
+    dependencies:
+      '@redis/client': 6.2.1(@opentelemetry/api@1.9.1)
+
+  '@redis/time-series@6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))':
+    dependencies:
+      '@redis/client': 6.2.1(@opentelemetry/api@1.9.1)
+
   '@rolldown/binding-android-arm64@1.2.3':
     optional: true
 
@@ -11130,7 +11187,10 @@ snapshots:
 
   clsx@2.1.1: {}
 
-  cluster-key-slot@1.1.1: {}
+  cluster-key-slot@1.1.1:
+    optional: true
+
+  cluster-key-slot@1.1.2: {}
 
   cmdk@1.1.1(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
@@ -11243,7 +11303,8 @@ snapshots:
 
   defu@6.1.7: {}
 
-  denque@2.1.0: {}
+  denque@2.1.0:
+    optional: true
 
   dequal@2.0.3: {}
 
@@ -11297,18 +11358,16 @@ snapshots:
 
   dset@3.1.4: {}
 
-  effect-qb@0.22.0(effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)):
+  effect-qb@0.22.0(effect@4.0.0-rc.109):
     dependencies:
-      effect: 4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac)
+      effect: 4.0.0-rc.109
       pgsql-ast-parser: 12.0.2
 
-  effect@4.0.0-beta.107(patch_hash=f4c023f86b0fa68c66c3f45346d7ff582af323c63c94eaa3bcd24f04db6bcdac):
+  effect@4.0.0-rc.109:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      kubernetes-types: 1.30.0
       msgpackr: 2.0.5
-      uuid: 14.0.1
 
   electron-to-chromium@1.5.405: {}
 
@@ -11957,6 +12016,7 @@ snapshots:
       standard-as-callback: 2.1.0
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   iron-webcrypto@1.2.1: {}
 
@@ -12065,8 +12125,6 @@ snapshots:
   kleur@4.1.5: {}
 
   klona@2.0.6: {}
-
-  kubernetes-types@1.30.0: {}
 
   launch-editor@2.14.1:
     dependencies:
@@ -13397,11 +13455,24 @@ snapshots:
       indent-string: 4.0.0
       strip-indent: 3.0.0
 
-  redis-errors@1.2.0: {}
+  redis-errors@1.2.0:
+    optional: true
 
   redis-parser@3.0.0:
     dependencies:
       redis-errors: 1.2.0
+    optional: true
+
+  redis@6.2.1(@opentelemetry/api@1.9.1):
+    dependencies:
+      '@redis/bloom': 6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))
+      '@redis/client': 6.2.1(@opentelemetry/api@1.9.1)
+      '@redis/json': 6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))
+      '@redis/search': 6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))
+      '@redis/time-series': 6.2.1(@redis/client@6.2.1(@opentelemetry/api@1.9.1))
+    transitivePeerDependencies:
+      - '@node-rs/xxhash'
+      - '@opentelemetry/api'
 
   reftools@1.1.9: {}
 
@@ -13749,7 +13820,8 @@ snapshots:
 
   stackback@0.0.2: {}
 
-  standard-as-callback@2.1.0: {}
+  standard-as-callback@2.1.0:
+    optional: true
 
   std-env@4.2.0: {}
 
@@ -14143,8 +14215,6 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   uuid@11.1.1: {}
-
-  uuid@14.0.1: {}
 
   vfile-location@5.0.3:
     dependencies:

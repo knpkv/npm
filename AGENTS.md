@@ -203,9 +203,9 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 
 ## Effect Source Reference
 
-The Effect beta source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current beta APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
+The Effect RC source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current RC APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
 
-Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current beta APIs.
+Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current RC APIs.
 
 Recommended checks:
 
@@ -213,7 +213,7 @@ Recommended checks:
 - `rg "NodeHttpServer" repos/effect/packages`
 - `rg "Clock.currentTimeMillis" repos/effect/packages`
 
-The subtree is maintained from the `effect-smol` remote. See `docs/dependency-maintenance.md` for the exact `git subtree pull --prefix=repos/effect effect-smol main --squash` workflow and version-alignment steps.
+The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. Before fetching, fail closed unless `effect-upstream` resolves to the exact canonical HTTPS URL. Preserve subtree update merge commits: PRs that update `repos/effect` must use GitHub's merge-commit method because squash or rebase merging discards the provenance checked by CI. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
 
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 

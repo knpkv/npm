@@ -12,7 +12,7 @@ import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, IntegrityCheckPragmaRow, Jo
 export const BUSY_TIMEOUT_MILLISECONDS = 5_000
 
 // The pinned libSQL client applies this option to every local connection, while
-// the current Effect beta has not yet surfaced it in LibsqlClientConfig.Full.
+// the current Effect RC has not yet surfaced it in LibsqlClientConfig.Full.
 interface LocalLibsqlConfig extends LibsqlClient.LibsqlClientConfig.Full {
   readonly timeout: number
 }

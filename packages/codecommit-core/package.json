@@ -41,12 +41,12 @@
   "dependencies": {
     "@aws-sdk/credential-providers": "^3.1108.0",
     "@distilled.cloud/aws": "1.0.0-rc.4",
-    "@effect/sql-libsql": "4.0.0-beta.107",
+    "@effect/sql-libsql": "4.0.0-rc.109",
     "@libsql/client": "^0.17.4",
-    "effect": "4.0.0-beta.107"
+    "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.107",
+    "@effect/platform-node": "4.0.0-rc.109",
     "@types/node": "26.2.0"
   }
 }

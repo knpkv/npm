@@ -120,20 +120,20 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
   if (manifest.dependencies["@knpkv/control-center-sql"] !== "workspace:^") {
     violations.push("@knpkv/control-center-sql must use workspace:^")
   }
-  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.107") {
-    violations.push("@effect/sql-libsql must align with the pinned Effect beta")
+  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-rc.109") {
+    violations.push("@effect/sql-libsql must align with the pinned Effect RC")
   }
-  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-beta.107") {
-    violations.push("@effect/ai-openai-compat must align with the pinned Effect beta")
+  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-rc.109") {
+    violations.push("@effect/ai-openai-compat must align with the pinned Effect RC")
   }
-  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.107") {
-    violations.push("@effect/platform-node must align with the pinned Effect beta")
+  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-rc.109") {
+    violations.push("@effect/platform-node must align with the pinned Effect RC")
   }
-  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.107") {
-    violations.push("@effect/platform-browser must align with the pinned Effect beta")
+  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-rc.109") {
+    violations.push("@effect/platform-browser must align with the pinned Effect RC")
   }
-  if (manifest.dependencies.effect !== "4.0.0-beta.107") {
-    violations.push("effect must align with the pinned Effect beta")
+  if (manifest.dependencies.effect !== "4.0.0-rc.109") {
+    violations.push("effect must align with the pinned Effect RC")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()
