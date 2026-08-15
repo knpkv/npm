@@ -80,7 +80,7 @@ const validatePackageRecords = (records) => {
       }
       for (const diagnostic of strictDiagnostics) {
         const severity = config.diagnosticSeverity?.[diagnostic]
-        if (typeof severity !== "string" || !enabledDiagnosticSeverities.has(severity.toLowerCase())) {
+        if (!Predicate.isString(severity) || !enabledDiagnosticSeverities.has(severity.toLowerCase())) {
           diagnostics.push(
             `${record.name}: ${config.path} must use a supported enabled severity for Effect diagnostic ${diagnostic}`
           )
