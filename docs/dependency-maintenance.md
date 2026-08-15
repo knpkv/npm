@@ -76,6 +76,11 @@ git fetch effect-upstream "refs/tags/${effect_tag}"
 git subtree pull --prefix=repos/effect effect-upstream "${effect_tag}" --squash
 ```
 
+Preserve the subtree merge commit and its squash parent when the change lands.
+Pull requests that update `repos/effect` must use GitHub's merge-commit method;
+squash or rebase merging discards the retained `git-subtree-split` provenance
+that the alignment guard verifies.
+
 Then align workspace Effect package versions to the versions in the updated
 subtree. The most common packages are:
 

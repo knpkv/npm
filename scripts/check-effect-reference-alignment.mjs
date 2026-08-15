@@ -72,7 +72,7 @@ class EffectReferenceAlignmentError extends Data.TaggedError("EffectReferenceAli
 
 const fail = (reason, cause) => Effect.fail(new EffectReferenceAlignmentError({ cause, reason }))
 
-const validateAlignment = ({ metadata, referenceVersions, tree, workspaceVersions }) => {
+const validateAlignment = ({ metadata, provenance, referenceVersions, tree, workspaceVersions }) => {
   const violations = []
 
   if (metadata.tag !== `effect@${metadata.version}`) {
@@ -83,6 +83,14 @@ const validateAlignment = ({ metadata, referenceVersions, tree, workspaceVersion
   }
   if (tree !== metadata.tree) {
     violations.push(`Effect reference tree ${tree} does not match pinned tree ${metadata.tree}`)
+  }
+  if (provenance.split !== metadata.upstreamCommit) {
+    violations.push(`Effect subtree provenance resolves to ${provenance.split} instead of ${metadata.upstreamCommit}`)
+  }
+  if (provenance.tree !== metadata.tree || provenance.tree !== tree) {
+    violations.push(
+      `Effect subtree provenance tree ${provenance.tree} does not match the pinned and staged tree ${metadata.tree}`
+    )
   }
 
   for (const [name, version] of referenceVersions) {
@@ -100,24 +108,39 @@ const validateAlignment = ({ metadata, referenceVersions, tree, workspaceVersion
 }
 
 const runSelfTest = () => {
+  const releaseCommit = "b5946ece2b33a4468ef927a39821d7c3db463af3"
+  const releaseTree = "d0308e864242aab0c8b03a0e8811e99a3e7919b7"
   const metadata = {
     tag: "effect@4.0.0-rc.109",
-    upstreamCommit: "b".repeat(40),
-    tree: "a".repeat(40),
+    upstreamCommit: releaseCommit,
+    tree: releaseTree,
     version: "4.0.0-rc.109"
   }
   const valid = {
     metadata,
+    provenance: { split: releaseCommit, tree: releaseTree },
     referenceVersions: [["effect", "4.0.0-rc.109"]],
-    tree: "a".repeat(40),
+    tree: releaseTree,
     workspaceVersions: [["package.json", "effect", "4.0.0-rc.109"]]
   }
 
   assert.deepEqual(validateAlignment(valid), [], "a shared RC export such as Effect.succeed must remain valid")
   assert.match(
-    validateAlignment({ ...valid, tree: "c".repeat(40) }).join("\n"),
-    /does not match pinned tree/u,
+    validateAlignment({
+      ...valid,
+      metadata: { ...metadata, tree: "c".repeat(40) },
+      tree: "c".repeat(40)
+    }).join("\n"),
+    /provenance tree/u,
     "a post-release reference change such as restoring Effect.head must fail"
+  )
+  assert.match(
+    validateAlignment({
+      ...valid,
+      metadata: { ...metadata, upstreamCommit: "d".repeat(40) }
+    }).join("\n"),
+    /provenance resolves/u,
+    "an arbitrary recorded upstream commit must fail"
   )
   assert.match(
     validateAlignment({
@@ -151,6 +174,31 @@ const makeGit = Effect.fn("EffectReferenceAlignment.makeGit")(function* (reposit
   })
 })
 
+const resolveSubtreeProvenance = Effect.fn("EffectReferenceAlignment.resolveSubtreeProvenance")(function* (git) {
+  const mergeParents = (yield* git(["log", "--first-parent", "--merges", "--format=%P"])).split("\n").filter(Boolean)
+
+  for (const parents of mergeParents) {
+    for (const candidate of parents.split(" ").slice(1)) {
+      const message = yield* git(["show", "-s", "--format=%B", candidate])
+      const directories = [...message.matchAll(/^git-subtree-dir: (.+)$/gmu)].map((match) => match[1])
+      if (!directories.includes("repos/effect")) continue
+
+      const splits = [...message.matchAll(/^git-subtree-split: ([0-9a-f]{40})$/gmu)].map((match) => match[1])
+      if (directories.length !== 1 || splits.length !== 1) {
+        return yield* fail(`Effect subtree provenance commit ${candidate} has ambiguous trailers`)
+      }
+      return {
+        split: splits[0],
+        tree: yield* git(["rev-parse", `${candidate}^{tree}`])
+      }
+    }
+  }
+
+  return yield* fail(
+    "Effect subtree provenance is missing; retain the subtree merge parents and use a full-history checkout"
+  )
+})
+
 const readJson = Effect.fn("EffectReferenceAlignment.readJson")(function* (fileSystem, path, schema) {
   const source = yield* fileSystem
     .readFileString(path)
@@ -181,6 +229,7 @@ const program = Effect.gen(function* () {
   const metadataPath = path.join(repositoryRoot, "scripts", "effect-reference.json")
   const git = yield* makeGit(repositoryRoot)
   const metadata = yield* readJson(fileSystem, metadataPath, Metadata)
+  const provenance = yield* resolveSubtreeProvenance(git)
 
   const worktreeStatus = yield* git(["status", "--porcelain=v1", "--untracked-files=all", "--", "repos/effect"])
   const unstagedReferenceChange = worktreeStatus
@@ -219,7 +268,7 @@ const program = Effect.gen(function* () {
     }
   }
 
-  const violations = validateAlignment({ metadata, referenceVersions, tree, workspaceVersions })
+  const violations = validateAlignment({ metadata, provenance, referenceVersions, tree, workspaceVersions })
   if (violations.length > 0) {
     return yield* fail(violations.map((violation) => `- ${violation}`).join("\n"))
   }

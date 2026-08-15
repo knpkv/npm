@@ -213,7 +213,7 @@ Recommended checks:
 - `rg "NodeHttpServer" repos/effect/packages`
 - `rg "Clock.currentTimeMillis" repos/effect/packages`
 
-The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
+The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. Preserve subtree update merge commits: PRs that update `repos/effect` must use GitHub's merge-commit method because squash or rebase merging discards the provenance checked by CI. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
 
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 
