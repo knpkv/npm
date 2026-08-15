@@ -1,15 +1,16 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import assert from "node:assert/strict"
+import { URL } from "node:url"
 
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Stdio from "effect/Stdio"
 import * as TypeScript from "typescript"
-import * as Predicate from "effect/Predicate"
 
 const effectPluginName = "@effect/language-service"
 const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
@@ -69,6 +70,11 @@ const validatePackageRecords = (records) => {
       if (config.ignoreWarnings !== false || config.ignoreErrors !== false) {
         diagnostics.push(`${record.name}: ${config.path} must make Effect warnings and errors affect the tsc exit code`)
       }
+      if (config.includeSuggestions !== false) {
+        diagnostics.push(
+          `${record.name}: ${config.path} must keep suggestion-level Effect diagnostics out of tsc output`
+        )
+      }
     }
   }
   return diagnostics
@@ -79,6 +85,7 @@ const runSelfTest = () => {
     hasEffectPlugin: true,
     ignoreErrors: false,
     ignoreWarnings: false,
+    includeSuggestions: false,
     includesEffectNamespaces: true,
     path: "tsconfig.json"
   }
@@ -129,12 +136,19 @@ const runSelfTest = () => {
         effectPackage: true,
         name: "@fixture/incomplete-policy",
         sourceConfigs: [{ ...coveredConfig, includesEffectNamespaces: false }]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/noisy-build",
+        sourceConfigs: [{ ...coveredConfig, includeSuggestions: true }]
       }
     ]),
     [
       "@fixture/missing-plugin: tsconfig.json does not load @effect/language-service",
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
-      "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces"
+      "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
+      "@fixture/noisy-build: tsconfig.json must keep suggestion-level Effect diagnostics out of tsc output"
     ]
   )
   assert.equal(checkCoversRootTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
@@ -202,6 +216,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
         hasEffectPlugin: plugin !== undefined,
         ignoreErrors: plugin?.ignoreEffectErrorsInTscExitCode,
         ignoreWarnings: plugin?.ignoreEffectWarningsInTscExitCode,
+        includeSuggestions: plugin?.includeSuggestionsInTsc,
         includesEffectNamespaces:
           Array.isArray(plugin?.namespaceImportPackages) &&
           plugin.namespaceImportPackages.includes("effect") &&

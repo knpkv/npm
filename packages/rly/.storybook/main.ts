@@ -17,6 +17,10 @@ const config = {
   stories: ["../stories/**/*.stories.@(ts|tsx)"],
   viteFinal: (viteConfig) =>
     mergeConfig(viteConfig, {
+      build: {
+        // Storybook intentionally bundles its renderer and documentation tooling.
+        chunkSizeWarningLimit: 1200
+      },
       css: {
         modules: {
           generateScopedName: "rly_[name]__[local]"

@@ -33,7 +33,9 @@
         "diagnosticSeverity": {
           "overriddenschemaconstructor": "off"
         },
-        "includeSuggestionsInTsc": true,
+        // Keep suggestion-level IDE guidance available without flooding successful builds.
+        // Warning- and error-level Effect diagnostics remain enabled in tsc.
+        "includeSuggestionsInTsc": false,
         "ignoreEffectSuggestionsInTscExitCode": true,
         "ignoreEffectWarningsInTscExitCode": false,
         "ignoreEffectErrorsInTscExitCode": false

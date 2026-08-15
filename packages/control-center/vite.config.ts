@@ -28,6 +28,8 @@ export default defineConfig(({ mode }) => {
         ssr: true
       }
       : {
+        // Large lazy syntax-language chunks are bounded below this explicit application budget.
+        chunkSizeWarningLimit: 800,
         emptyOutDir: true,
         manifest: true,
         outDir: "dist/client",
