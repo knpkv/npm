@@ -16,6 +16,7 @@ const effectPluginName = "@effect/language-service"
 const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
 const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
 const strictDiagnostics = ["strictBooleanExpressions", "strictEffectProvide"]
+const suppressedDiagnostics = ["overriddenSchemaConstructor"]
 
 class EffectTsconfigCoverageError extends Data.TaggedError("EffectTsconfigCoverageError") {
   get message() {
@@ -81,6 +82,11 @@ const validatePackageRecords = (records) => {
           diagnostics.push(`${record.name}: ${config.path} must enable Effect diagnostic ${diagnostic}`)
         }
       }
+      for (const diagnostic of suppressedDiagnostics) {
+        if (config.diagnosticSeverity?.[diagnostic] !== "off") {
+          diagnostics.push(`${record.name}: ${config.path} must explicitly disable Effect diagnostic ${diagnostic}`)
+        }
+      }
     }
   }
   return diagnostics
@@ -95,6 +101,7 @@ const runSelfTest = () => {
     includeSuggestions: false,
     includesEffectNamespaces: true,
     diagnosticSeverity: {
+      overriddenSchemaConstructor: "off",
       strictBooleanExpressions: "suggestion",
       strictEffectProvide: "suggestion"
     },
@@ -164,6 +171,31 @@ const runSelfTest = () => {
             diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "off" }
           }
         ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/missing-suppression",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: {
+              strictBooleanExpressions: "suggestion",
+              strictEffectProvide: "suggestion"
+            }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/weakened-suppression",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, overriddenSchemaConstructor: "warning" }
+          }
+        ]
       }
     ]),
     [
@@ -171,7 +203,9 @@ const runSelfTest = () => {
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
       "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
       "@fixture/non-blocking-suggestions: tsconfig.json must keep successful tsc output clean and never make surfaced suggestions non-blocking",
-      "@fixture/missing-strict-pattern: tsconfig.json must enable Effect diagnostic strictEffectProvide"
+      "@fixture/missing-strict-pattern: tsconfig.json must enable Effect diagnostic strictEffectProvide",
+      "@fixture/missing-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor",
+      "@fixture/weakened-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor"
     ]
   )
   assert.equal(checkCoversRootTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)

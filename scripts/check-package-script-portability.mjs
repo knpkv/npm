@@ -8,9 +8,13 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import { parse } from "yaml"
 
 const directEnvironmentAssignment = /(?:^|&&|\|\||;)\s*[A-Za-z_][A-Za-z0-9_]*=/u
-const isBuildScript = (name) => name.split(":").includes("build")
+const buildLifecycleNames = new Set(["build", "prebuild", "postbuild"])
+const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"])
+const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
+const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
 
 class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPortabilityError") {
   get message() {
@@ -21,6 +25,24 @@ class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPorta
 const PackageManifest = Schema.fromJsonString(
   Schema.Struct({ scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)) })
 )
+const WorkspaceConfig = Schema.Struct({ packages: Schema.Array(Schema.String) })
+
+const classifyWorkspacePattern = (pattern) => {
+  const segments = pattern.split("/")
+  if (
+    pattern.startsWith("!") ||
+    segments.length === 0 ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    return undefined
+  }
+  const wildcard = segments.at(-1) === "*"
+  const directories = wildcard ? segments.slice(0, -1) : segments
+  if (directories.length === 0 || directories.some((segment) => !safeWorkspaceSegment.test(segment))) {
+    return undefined
+  }
+  return { directories, wildcard }
+}
 
 export const findNonPortableBuildScripts = (manifestPath, scripts) =>
   Object.entries(scripts ?? {})
@@ -31,16 +53,54 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
 
 assert.deepEqual(
-  findNonPortableBuildScripts("invalid/package.json", {
+  findNonPortableBuildScripts("scripts/package.json", {
+    postbuild: "OUTPUT=dist publish",
+    prebuild: "CACHE=warm prepare",
     "storybook:build": "NODE_OPTIONS=--disable-warning=DEP0205 storybook build"
   }),
-  ["invalid/package.json: scripts.storybook:build uses a POSIX-only environment assignment"]
+  [
+    "scripts/package.json: scripts.postbuild uses a POSIX-only environment assignment",
+    "scripts/package.json: scripts.prebuild uses a POSIX-only environment assignment",
+    "scripts/package.json: scripts.storybook:build uses a POSIX-only environment assignment"
+  ]
 )
 assert.deepEqual(
-  findNonPortableBuildScripts("valid/package.json", {
+  findNonPortableBuildScripts("scratchpad/package.json", {
     "storybook:build": "tsx scripts/build-storybook.ts"
   }),
   []
+)
+assert.deepEqual(classifyWorkspacePattern("packages/*"), { directories: ["packages"], wildcard: true })
+assert.deepEqual(classifyWorkspacePattern("scripts"), { directories: ["scripts"], wildcard: false })
+assert.equal(classifyWorkspacePattern("!packages/legacy"), undefined)
+assert.equal(classifyWorkspacePattern("packages/**"), undefined)
+
+const workspaceManifestPaths = Effect.fn("PackageScriptPortability.workspaceManifestPaths")(
+  function* (fileSystem, path, repositoryRoot, patterns) {
+    const manifests = [path.join(repositoryRoot, "package.json")]
+    for (const pattern of patterns) {
+      const classified = classifyWorkspacePattern(pattern)
+      if (classified === undefined) {
+        return yield* Effect.fail(
+          new PackageScriptPortabilityError({
+            reason: `pnpm-workspace.yaml: unsupported workspace pattern ${JSON.stringify(pattern)}`
+          })
+        )
+      }
+      if (classified.directories.some((segment) => ignoredWorkspaceSegments.has(segment))) continue
+      const directory = path.join(repositoryRoot, ...classified.directories)
+      if (!classified.wildcard) {
+        manifests.push(path.join(directory, "package.json"))
+        continue
+      }
+      for (const entry of (yield* fileSystem.readDirectory(directory)).toSorted()) {
+        if (ignoredWorkspaceSegments.has(entry)) continue
+        const child = path.join(directory, entry)
+        if ((yield* fileSystem.stat(child)).type === "Directory") manifests.push(path.join(child, "package.json"))
+      }
+    }
+    return [...new Set(manifests)].toSorted()
+  }
 )
 
 const program = Effect.gen(function* () {
@@ -48,14 +108,18 @@ const program = Effect.gen(function* () {
   const path = yield* Path.Path
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
-  const packagesRoot = path.join(repositoryRoot, "packages")
-  const manifestPaths = [path.join(repositoryRoot, "package.json")]
-
-  for (const entry of (yield* fileSystem.readDirectory(packagesRoot)).toSorted()) {
-    const packageDirectory = path.join(packagesRoot, entry)
-    if ((yield* fileSystem.stat(packageDirectory)).type !== "Directory") continue
-    manifestPaths.push(path.join(packageDirectory, "package.json"))
-  }
+  const workspacePath = path.join(repositoryRoot, "pnpm-workspace.yaml")
+  const workspaceSource = yield* fileSystem.readFileString(workspacePath)
+  const workspace = yield* Effect.try({
+    try: () => parse(workspaceSource),
+    catch: (cause) => new PackageScriptPortabilityError({ cause, reason: "pnpm-workspace.yaml: invalid YAML" })
+  }).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(WorkspaceConfig)),
+    Effect.mapError(
+      (cause) => new PackageScriptPortabilityError({ cause, reason: "pnpm-workspace.yaml: invalid workspace list" })
+    )
+  )
+  const manifestPaths = yield* workspaceManifestPaths(fileSystem, path, repositoryRoot, workspace.packages)
 
   const diagnostics = []
   let checked = 0
@@ -79,4 +143,4 @@ const program = Effect.gen(function* () {
   yield* Console.log(`Package-script portability checked ${checked} manifests`)
 })
 
-NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)), { disableErrorReporting: true })
+NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)))

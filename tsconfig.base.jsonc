@@ -31,7 +31,7 @@
         "name": "@effect/language-service",
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
-          "overriddenschemaconstructor": "off",
+          "overriddenSchemaConstructor": "off",
           // Opt in to the language service's stricter, non-default patterns.
           "strictBooleanExpressions": "suggestion",
           "strictEffectProvide": "suggestion"
