@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
         ssr: true
       }
       : {
-        // Large lazy syntax-language chunks are bounded below this explicit application budget.
+        // Vite warns when a large lazy syntax-language chunk exceeds this threshold.
         chunkSizeWarningLimit: 800,
         emptyOutDir: true,
         manifest: true,
