@@ -213,7 +213,7 @@ Recommended checks:
 - `rg "NodeHttpServer" repos/effect/packages`
 - `rg "Clock.currentTimeMillis" repos/effect/packages`
 
-The subtree is maintained from the canonical `effect-upstream` remote. See `docs/dependency-maintenance.md` for the exact `git subtree pull --prefix=repos/effect effect-upstream main --squash` workflow and version-alignment steps.
+The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
 
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 

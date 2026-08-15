@@ -49,6 +49,14 @@ const validManifest = {
   version: "0.0.0"
 }
 
+const effectAlignmentCases: ReadonlyArray<readonly [keyof typeof validManifest.dependencies, string]> = [
+  ["@effect/ai-openai-compat", "@effect/ai-openai-compat must align with the pinned Effect RC"],
+  ["@effect/platform-browser", "@effect/platform-browser must align with the pinned Effect RC"],
+  ["@effect/platform-node", "@effect/platform-node must align with the pinned Effect RC"],
+  ["@effect/sql-libsql", "@effect/sql-libsql must align with the pinned Effect RC"],
+  ["effect", "effect must align with the pinned Effect RC"]
+]
+
 describe("package contract", () => {
   it("accepts the reviewed T01 manifest surface", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
@@ -177,21 +185,12 @@ describe("package contract", () => {
     ).toContain("start must forward arguments to the built server CLI")
   })
 
-  it("rejects a libSQL adapter from a different Effect release", () => {
+  it.each(effectAlignmentCases)("rejects %s from a different Effect release", (dependency, violation) => {
     expect(
       inspectPackageContract({
         ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.97" }
+        dependencies: { ...validManifest.dependencies, [dependency]: "4.0.0-rc.108" }
       })
-    ).toContain("@effect/sql-libsql must align with the pinned Effect RC")
-  })
-
-  it("rejects a browser platform adapter from a different Effect release", () => {
-    expect(
-      inspectPackageContract({
-        ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.97" }
-      })
-    ).toContain("@effect/platform-browser must align with the pinned Effect RC")
+    ).toContain(violation)
   })
 })

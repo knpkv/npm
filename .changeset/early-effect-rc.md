@@ -18,4 +18,4 @@
 "@knpkv/rly": patch
 ---
 
-Upgrade the workspace to Effect 4.0.0-rc.109, align the vendored Effect reference with the canonical upstream repository, and bound Control Center test concurrency for reliable CI execution.
+Upgrade the workspace to Effect 4.0.0-rc.109, pin the vendored Effect reference to that exact upstream release, guard source/package alignment, and bound Control Center test concurrency for reliable CI execution.

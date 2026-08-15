@@ -65,11 +65,15 @@ If the remote is missing, add it:
 git remote add effect-upstream https://github.com/Effect-TS/effect.git
 ```
 
-Fetch and update the vendored source:
+Choose the exact Effect release used by the workspace, then fetch and update the
+vendored source from that release tag. Do not pull `main`: it can contain APIs
+that have not reached the installed RC yet.
 
 ```bash
-git fetch effect-upstream main
-git subtree pull --prefix=repos/effect effect-upstream main --squash
+effect_version=4.0.0-rc.109
+effect_tag="effect@${effect_version}"
+git fetch effect-upstream "refs/tags/${effect_tag}"
+git subtree pull --prefix=repos/effect effect-upstream "${effect_tag}" --squash
 ```
 
 Then align workspace Effect package versions to the versions in the updated
@@ -81,6 +85,16 @@ node -e "const fs=require('fs'); for (const p of ['repos/effect/packages/effect/
 
 Keep the subtree as reference material unless a task explicitly asks to update
 the vendored source. Do not make application fixes inside `repos/effect`.
+
+Update `scripts/effect-reference.json` with the release tag, upstream commit,
+and imported Git tree whenever the pinned release changes. Then run the focused
+alignment guard before the complete lint gate:
+
+```bash
+node scripts/check-effect-reference-alignment.mjs --self-test
+node scripts/check-effect-reference-alignment.mjs
+pnpm lint
+```
 
 ## Agent and Editor Notes
 
