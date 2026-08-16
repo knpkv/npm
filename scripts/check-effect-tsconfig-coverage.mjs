@@ -318,6 +318,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
         undefined,
         configPath
       )
+      if (parsed.fileNames.length === 0 && parsed.errors.every(({ code }) => code === 18003)) return undefined
       if (parsed.errors.length > 0) {
         throw new EffectTsconfigCoverageError({
           reason: parsed.errors
@@ -402,7 +403,28 @@ const program = Effect.gen(function* () {
   const path = yield* Path.Path
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
-  const records = yield* inspectWorkspace(path.join(repositoryRoot, "packages"))
+  const packageRecords = yield* inspectWorkspace(path.join(repositoryRoot, "packages"))
+  const toolingConfigs = []
+  for (const { configPath, required } of [
+    { configPath: path.join(repositoryRoot, "tsconfig.json"), required: true },
+    { configPath: path.join(repositoryRoot, "scripts", "tsconfig.json"), required: false }
+  ]) {
+    const inspected = yield* inspectTsconfig(configPath, path.dirname(configPath))
+    if (inspected === undefined) {
+      if (required) return yield* fail(`${path.relative(repositoryRoot, configPath)} must own its TypeScript sources`)
+      continue
+    }
+    toolingConfigs.push({ ...inspected, path: path.relative(repositoryRoot, configPath) })
+  }
+  const records = [
+    ...packageRecords,
+    {
+      checkCoversRoot: true,
+      effectPackage: true,
+      name: "@workspace/tooling",
+      sourceConfigs: toolingConfigs
+    }
+  ]
   const diagnostics = validatePackageRecords(records)
   if (diagnostics.length > 0) {
     return yield* fail(`Effect TypeScript coverage failed:\n- ${diagnostics.join("\n- ")}`)
@@ -410,7 +432,7 @@ const program = Effect.gen(function* () {
   const effectPackages = records.filter(({ effectPackage }) => effectPackage)
   const configCount = effectPackages.reduce((total, { sourceConfigs }) => total + sourceConfigs.length, 0)
   yield* Console.log(
-    `Effect TypeScript coverage checked ${configCount} source configs across ${effectPackages.length} packages`
+    `Effect TypeScript coverage checked ${configCount} source configs across ${effectPackages.length} projects`
   )
 })
 

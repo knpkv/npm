@@ -35,9 +35,11 @@ const DiagnosticsOutput = Schema.fromJsonString(
 )
 
 const diagnosticConcurrency = 4
+const rootEffectSources = new Set(["vitest.setup.ts"])
 
 const isCheckedSource = (file) =>
   /\.(?:ts|tsx)$/u.test(file) &&
+  (file.startsWith("packages/") || file.startsWith("scripts/") || rootEffectSources.has(file)) &&
   !file.split("/").some((segment) => segment === "generated" || segment === "node_modules") &&
   !file.startsWith("repos/effect/")
 
@@ -71,6 +73,8 @@ const decodeInspectionOutput = (file, stdout, stderr, exitCode) => {
 }
 
 assert.equal(isCheckedSource("packages/rly/src/Button.tsx"), true)
+assert.equal(isCheckedSource("vitest.setup.ts"), true)
+assert.equal(isCheckedSource("vitest.config.ts"), false)
 assert.equal(isCheckedSource("packages/client/src/generated/Api.ts"), false)
 assert.deepEqual(validateDiagnostics([{ diagnostics: [], file: "valid.ts" }]), [])
 assert.deepEqual(
@@ -149,17 +153,34 @@ const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function* (reposit
 
 const gitOption = (git, args) => git(args).pipe(Effect.option, Effect.map(Option.getOrUndefined))
 
+const baseCandidates = ({ configuredBase, eventName, githubBase, pushBase }) => [
+  configuredBase,
+  eventName === "push" && pushBase !== undefined && !/^0+$/u.test(pushBase) ? pushBase : undefined,
+  githubBase === undefined ? undefined : `origin/${githubBase}`,
+  "origin/main",
+  "main"
+]
+
+assert.deepEqual(
+  baseCandidates({ eventName: "push", pushBase: "abc", githubBase: undefined, configuredBase: undefined }),
+  [undefined, "abc", undefined, "origin/main", "main"]
+)
+assert.deepEqual(
+  baseCandidates({
+    eventName: "pull_request",
+    pushBase: "previous-head",
+    githubBase: "main",
+    configuredBase: undefined
+  }),
+  [undefined, undefined, "origin/main", "origin/main", "main"]
+)
+
 const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
   const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("EFFECT_DIAGNOSTICS_BASE")))
+  const eventName = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_EVENT_NAME")))
   const pushBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_EVENT_BEFORE")))
   const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
-  const candidates = [
-    configuredBase,
-    pushBase === undefined || /^0+$/u.test(pushBase) ? undefined : pushBase,
-    githubBase === undefined ? undefined : `origin/${githubBase}`,
-    "origin/main",
-    "main"
-  ]
+  const candidates = baseCandidates({ configuredBase, eventName, githubBase, pushBase })
   for (const candidate of candidates) {
     if (candidate === undefined) continue
     const mergeBase = yield* gitOption(git, ["merge-base", "HEAD", candidate])
