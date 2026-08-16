@@ -37,11 +37,13 @@ describe("Relay review session storage", () => {
     writeRelayReviewSession(window.sessionStorage, key, {
       identity: "exact-head-1",
       review,
+      skillIds: ["builtin:pr-review"],
       turns: [{ findingId: "F1", role: "user", message: "Verify this again." }],
       dispositions: { F1: "rejected" }
     })
 
     expect(readRelayReviewSession(window.sessionStorage, key, "exact-head-1")).toMatchObject({
+      skillIds: ["builtin:pr-review"],
       turns: [{ message: "Verify this again." }],
       dispositions: { F1: "rejected" }
     })

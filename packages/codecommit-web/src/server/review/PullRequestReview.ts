@@ -18,6 +18,7 @@ import {
   type RelayReviewConversationTurn,
   type RelayReviewFinding,
   type RelayReviewKind,
+  RelayReviewMessage,
   type RelayReviewProgressPhase,
   RelayReviewResult,
   type RelayReviewStreamEvent
@@ -795,7 +796,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
 })
 
 const RelayReviewConversationResult = Schema.Struct({
-  reply: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
+  reply: RelayReviewMessage,
   review: RelayReviewResult
 })
 

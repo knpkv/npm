@@ -25,13 +25,13 @@ import {
 } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import type {
-  PullRequestDiffResponse,
-  PullRequestRelayReviewResponse,
+import {
+  type PullRequestDiffResponse,
+  type PullRequestRelayReviewResponse,
   RelayReviewConversationTurn,
-  RelayReviewFinding,
-  RelayReviewKind,
-  RelayReviewStreamEvent
+  type RelayReviewFinding,
+  type RelayReviewKind,
+  type RelayReviewStreamEvent
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
@@ -616,6 +616,7 @@ const ReadyReviewWorkspace = ({
   const reviewSessionKey = relayReviewSessionStorageKey(accountId, pullRequest.id)
   const [completedReview, setCompletedReview] = useState<{
     readonly identity: string
+    readonly skillIds: ReadonlyArray<string>
     readonly value: PullRequestRelayReviewResponse
   } | null>(null)
   const completedReviewRef = useRef(completedReview)
@@ -688,7 +689,7 @@ const ReadyReviewWorkspace = ({
       setSelectedFindingId(null)
       return
     }
-    const restored = { identity: stored.identity, value: stored.review }
+    const restored = { identity: stored.identity, skillIds: stored.skillIds, value: stored.review }
     completedReviewRef.current = restored
     dispositionsRef.current = stored.dispositions
     setCompletedReview(restored)
@@ -702,6 +703,7 @@ const ReadyReviewWorkspace = ({
     writeRelayReviewSession(window.sessionStorage, reviewSessionKey, {
       identity: completedReview.identity,
       review: completedReview.value,
+      skillIds: completedReview.skillIds,
       turns,
       dispositions
     })
@@ -758,7 +760,7 @@ const ReadyReviewWorkspace = ({
                 : reconcileFindingDispositions(prior, event.review.result.findings, dispositionsRef.current)
             dispositionsRef.current = nextDispositions
             setDispositions(nextDispositions)
-            const completed = { identity: reviewIdentity, value: event.review }
+            const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: event.review }
             completedReviewRef.current = completed
             setCompletedReview(completed)
             if (event.reply !== undefined && assistantFindingId !== undefined) {
@@ -808,6 +810,13 @@ const ReadyReviewWorkspace = ({
     async (findingId: string, nextMessage: string): Promise<void> => {
       if (review === null) return
       const userTurn: RelayReviewConversationTurn = { findingId, role: "user", message: nextMessage }
+      if (!Schema.is(RelayReviewConversationTurn)(userTurn)) {
+        setReviewFailure({
+          description: "Shorten the message so it can be retained in this review conversation.",
+          title: "Message is too large"
+        })
+        return
+      }
       const nextTurns = appendReviewTurn(turns, userTurn)
       setTurns(nextTurns)
       setMessage("")
@@ -818,7 +827,7 @@ const ReadyReviewWorkspace = ({
           baseCommit: diff.baseCommit,
           headCommit: diff.headCommit,
           kind: review.kind,
-          skillIds: selectedProfile?.skillIds ?? [],
+          skillIds: completedReview?.skillIds ?? [],
           currentReview: review.result,
           turns,
           findingId,
@@ -835,7 +844,7 @@ const ReadyReviewWorkspace = ({
       pullRequest.id,
       review,
       runStream,
-      selectedProfile,
+      completedReview,
       turns
     ]
   )

@@ -1,12 +1,13 @@
 /** Schema-validated tab storage for exact-revision Relay conversations. @module */
 import { Option, Schema } from "effect"
 
-import { PullRequestRelayReviewResponse, RelayReviewConversationTurns } from "../server/Api.js"
+import { PullRequestRelayReviewResponse, RelayReviewConversationTurns, RelayReviewSkillIds } from "../server/Api.js"
 import { FindingDisposition } from "./review-session-state.js"
 
 const StoredRelayReviewSession = Schema.Struct({
   identity: Schema.String,
   review: PullRequestRelayReviewResponse,
+  skillIds: RelayReviewSkillIds,
   turns: RelayReviewConversationTurns,
   dispositions: Schema.Record(Schema.String, FindingDisposition)
 })

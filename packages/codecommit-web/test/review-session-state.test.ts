@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
 import {
   appendReviewTurn,
   applyFindingDecision,
@@ -6,11 +7,7 @@ import {
   reconcileFindingDispositions,
   settleFindingPublication
 } from "../src/client/review-session-state.js"
-import {
-  MAXIMUM_RELAY_REVIEW_TURNS,
-  type RelayReviewConversationTurn,
-  type RelayReviewFinding
-} from "../src/server/Api.js"
+import { MAXIMUM_RELAY_REVIEW_TURNS, RelayReviewConversationTurn, type RelayReviewFinding } from "../src/server/Api.js"
 import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 
 const finding = (summary: string): RelayReviewFinding => ({
@@ -118,5 +115,14 @@ describe("Relay finding dispositions", () => {
     )
     expect(next.at(-1)?.message.startsWith("5")).toBe(true)
     expect(next.length).toBeLessThan(turns.length + 1)
+  })
+
+  it("rejects a single message that cannot be retained as a conversation turn", () => {
+    const invalid = { findingId: "F1", role: "user", message: "\0".repeat(8_000) }
+    const valid = { findingId: "F1", role: "user", message: `5${"é".repeat(3_900)}` }
+
+    expect(Schema.is(RelayReviewConversationTurn)(invalid)).toBe(false)
+    expect(Schema.is(RelayReviewConversationTurn)(valid)).toBe(true)
+    expect(appendReviewTurn([], valid).at(-1)).toEqual(valid)
   })
 })

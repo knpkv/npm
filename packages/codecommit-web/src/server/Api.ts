@@ -124,10 +124,14 @@ export const RelayReviewKind = Schema.Literals(["review", "security", "tests", "
 export type RelayReviewKind = typeof RelayReviewKind.Type
 
 const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
-const RelayReviewSkillId = Schema.String.check(
+export const RelayReviewSkillId = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
   Schema.isMaxLength(256)
+)
+export const RelayReviewSkillIds = Schema.Array(RelayReviewSkillId).check(
+  Schema.isMaxLength(reviewProfileSkillLimit),
+  Schema.isUnique()
 )
 
 const RelayReviewLocation = Schema.Union([
@@ -207,10 +211,20 @@ export const PullRequestRelayReviewResponse = Schema.Struct({
 )
 export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
 
+export const RelayReviewMessage = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(8_000),
+  Schema.makeFilter(
+    (message) => jsonByteEncoder.encode(JSON.stringify(message)).byteLength <= MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128,
+    { expected: "a Relay conversation message retainable within the conversation byte budget" }
+  )
+)
+
 export const RelayReviewConversationTurn = Schema.Struct({
   findingId: RelayReviewFindingId,
   role: Schema.Literals(["user", "assistant"]),
-  message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
+  message: RelayReviewMessage
 })
 export type RelayReviewConversationTurn = typeof RelayReviewConversationTurn.Type
 
@@ -234,7 +248,7 @@ export const RelayReviewStreamEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("complete"),
     review: PullRequestRelayReviewResponse,
-    reply: Schema.optional(Schema.String)
+    reply: Schema.optional(RelayReviewMessage)
   }),
   Schema.Struct({
     type: Schema.Literal("error"),
@@ -255,7 +269,7 @@ export const RelayReviewStreamRequest = Schema.Struct({
   baseCommit: Schema.String,
   headCommit: Schema.String,
   kind: RelayReviewKind,
-  skillIds: Schema.Array(RelayReviewSkillId).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
+  skillIds: RelayReviewSkillIds
 })
 export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 
@@ -274,8 +288,13 @@ export const RelayReviewContinueStreamRequest = Schema.Struct({
   currentReview: RelayReviewResult,
   turns: RelayReviewConversationTurns,
   findingId: RelayReviewFindingId,
-  message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
-})
+  message: RelayReviewMessage
+}).check(
+  Schema.makeFilter(
+    ({ findingId, message }) => Schema.is(RelayReviewConversationTurn)({ findingId, role: "user", message }),
+    { expected: "a continuation message retainable as its user conversation turn" }
+  )
+)
 export type RelayReviewContinueStreamRequest = typeof RelayReviewContinueStreamRequest.Type
 
 // Notification schema (unified)

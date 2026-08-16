@@ -34,16 +34,41 @@ const RelayContinuePayload = Schema.Struct({
   currentReview: Schema.Unknown,
   kind: Schema.String,
   message: Schema.String,
+  skillIds: Schema.Array(Schema.String),
   turns: Schema.Array(Schema.Struct({ message: Schema.String, role: Schema.String }))
 })
 type RelayContinuePayload = typeof RelayContinuePayload.Type
 const decodeRelayContinuePayload = Schema.decodeUnknownSync(RelayContinuePayload)
 
+const RelayRunPayload = Schema.Struct({
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  kind: Schema.String,
+  skillIds: Schema.Array(Schema.String)
+})
+type RelayRunPayload = typeof RelayRunPayload.Type
+const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
+
+interface ReviewWorkspaceOptions {
+  readonly onRun?: (payload: RelayRunPayload) => void
+  readonly review?: () => {
+    readonly defaultProfileId: string
+    readonly profiles: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly kind: "explain" | "review" | "security" | "tests"
+      readonly skillIds: ReadonlyArray<string>
+    }>
+  }
+}
+
 const routeReviewWorkspace = async (
   page: Page,
   expectedKind: "explain" | "review" | "security" | "tests" = "review",
   reviewGate?: Promise<void>,
-  onContinue?: (payload: RelayContinuePayload) => void
+  onContinue?: (payload: RelayContinuePayload) => void,
+  options?: ReviewWorkspaceOptions
 ) => {
   let findingPosted = false
   const appState = JSON.stringify({
@@ -69,7 +94,7 @@ const routeReviewWorkspace = async (
         autoDetect: true,
         autoRefresh: true,
         refreshIntervalSeconds: 300,
-        review: {
+        review: options?.review?.() ?? {
           defaultProfileId: "thorough",
           profiles: [{
             id: "thorough",
@@ -175,20 +200,25 @@ const routeReviewWorkspace = async (
   })
   await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
     await reviewGate
-    expect(route.request().postDataJSON()).toEqual({
-      revisionId: "revision-1",
-      baseCommit: "a".repeat(40),
-      headCommit: "b".repeat(40),
-      kind: expectedKind,
-      skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
-    })
+    const payload = decodeRelayRunPayload(route.request().postDataJSON())
+    if (options?.onRun === undefined) {
+      expect(payload).toEqual({
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        kind: expectedKind,
+        skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+      })
+    } else {
+      options.onRun(payload)
+    }
     const review = {
       pullRequestId: "42",
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
       headCommit: "b".repeat(40),
-      kind: expectedKind,
-      result: expectedKind === "explain"
+      kind: payload.kind,
+      result: payload.kind === "explain"
         ? {
           verdict: "The retry budget changes one shared request path.",
           explanation: "The patch raises the retry budget used by the payment request flow.",
@@ -276,20 +306,48 @@ test("renders a substantive Relay explanation", async ({ page }) => {
   await expect(page.getByText("The patch raises the retry budget used by the payment request flow.")).toBeVisible()
 })
 
-test("continues a completed review with its original focus", async ({ page }) => {
+test("continues a completed review with its original focus and skills", async ({ page }) => {
   const continuations: Array<RelayContinuePayload> = []
-  await routeReviewWorkspace(page, "security", undefined, (payload) => continuations.push(payload))
+  const runs: Array<RelayRunPayload> = []
+  let defaultProfileId = "thorough"
+  await routeReviewWorkspace(page, "security", undefined, (payload) => continuations.push(payload), {
+    onRun: (payload) => runs.push(payload),
+    review: () => ({
+      defaultProfileId,
+      profiles: [
+        {
+          id: "thorough",
+          name: "Thorough review",
+          kind: "review",
+          skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        },
+        { id: "quick", name: "Quick review", kind: "tests", skillIds: [] }
+      ]
+    })
+  })
   await page.goto("/accounts/111111111111/prs/42")
 
   await page.getByRole("button", { name: "Security" }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
-  await page.getByRole("button", { name: "Tests" }).click()
+  expect(runs[0]).toMatchObject({
+    kind: "security",
+    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+  })
+  defaultProfileId = "quick"
+  await page.reload()
+  await expect(page.getByLabel("Profile")).toHaveValue("quick")
+  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Verify this against the latest change…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(1)
-  expect(continuations[0]).toMatchObject({ kind: "security", message: "Continue this security review.", turns: [] })
+  expect(continuations[0]).toMatchObject({
+    kind: "security",
+    message: "Continue this security review.",
+    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"],
+    turns: []
+  })
   await page.getByPlaceholder("Verify this against the latest change…").fill("Check the evidence once more.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(2)
@@ -301,6 +359,9 @@ test("continues a completed review with its original focus", async ({ page }) =>
       { message: "Confirmed against the same exact revision.", role: "assistant" }
     ]
   })
+  await page.getByRole("button", { name: "Run again" }).click()
+  await expect.poll(() => runs.length).toBe(2)
+  expect(runs[1]).toMatchObject({ kind: "tests", skillIds: [] })
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {

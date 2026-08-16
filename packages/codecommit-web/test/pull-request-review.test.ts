@@ -151,6 +151,12 @@ describe("CodeCommit web review boundary", () => {
     expect(Exit.isFailure(
       Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
         ...continueRequest,
+        message: "\0".repeat(8_000)
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
         findingId: "finding-1"
       })
     )).toBe(true)
