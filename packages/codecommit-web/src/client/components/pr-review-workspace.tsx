@@ -803,8 +803,7 @@ const ReadyReviewWorkspace = ({
 
   const executeReview = useCallback(async (): Promise<void> => {
     if (selectedProfile === undefined) return
-    setTurns([])
-    await runStream(
+    const outcome = await runStream(
       `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream`,
       {
         revisionId: diff.revisionId,
@@ -814,6 +813,10 @@ const ReadyReviewWorkspace = ({
         skillIds: selectedProfile.skillIds
       }
     )
+    if (outcome.completed) {
+      setTurns([])
+      setMessage("")
+    }
   }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, kind, pullRequest.id, runStream, selectedProfile])
 
   const continueReview = useCallback(

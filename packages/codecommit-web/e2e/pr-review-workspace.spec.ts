@@ -397,6 +397,33 @@ test("continues a completed review with its original focus and skills", async ({
   await page.getByRole("button", { name: "Run again" }).click()
   await expect.poll(() => runs.length).toBe(2)
   expect(runs[1]).toMatchObject({ kind: "tests", skillIds: [] })
+  await expect(page.getByRole("log").locator("li")).toHaveCount(0)
+})
+
+test("preserves completed conversations when a rerun fails", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Keep this verified conversation.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+
+  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+    await route.fulfill({ body: "Relay rerun unavailable", contentType: "text/plain", status: 500 })
+  })
+  await page.getByRole("button", { name: "Run again" }).click()
+  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(page.getByText("Keep this verified conversation.")).toBeVisible()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+
+  await page.reload()
+  await page
+    .getByRole("region", { name: "Conversation about F1" })
+    .getByRole("button", { exact: true, name: "Open" })
+    .click()
+  await expect(page.getByText("Keep this verified conversation.")).toBeVisible()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
 })
 
 test("retries a failed continuation without persisting the failed turn", async ({ page }) => {
