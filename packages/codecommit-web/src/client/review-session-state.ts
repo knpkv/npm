@@ -93,6 +93,6 @@ export const reconcileFindingDispositions = (
     if (prior === undefined || findingIdentity(prior) !== findingIdentity(finding)) {
       return [finding.id, disposition === "posted" || disposition === "posted-stale" ? "posted-stale" : "pending"]
     }
-    return [finding.id, disposition === "posting" ? "failed" : disposition]
+    return [finding.id, disposition]
   }))
 }

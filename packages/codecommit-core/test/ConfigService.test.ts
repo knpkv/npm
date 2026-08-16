@@ -95,6 +95,20 @@ describe("ConfigService", () => {
     expect(profiles.find(({ name }) => name === "personal")?.region).toBeUndefined()
   })
 
+  it("omits blank detected regions while preserving configured regions", () =>
+    run(
+      {
+        [`${TEST_HOME}/.aws/config`]: "[profile blank]\nregion =   \n[profile configured]\nregion = eu-west-1"
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const config = yield* service.load
+
+        expect(config.accounts.find(({ profile }) => profile === "blank")?.regions).toEqual([])
+        expect(config.accounts.find(({ profile }) => profile === "configured")?.regions).toEqual(["eu-west-1"])
+      })
+    ))
+
   it("returns empty accounts when no file exists", () =>
     run(
       {},

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { ConfigService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
@@ -8,6 +8,7 @@ import { Deferred, Duration, Effect, Exit, Fiber, Redacted, Ref, Result, Stream 
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
+import { commitConfigMutation } from "../src/server/handlers/config-live.js"
 import { encodeClientVisibleCommentLocations, makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
@@ -125,6 +126,40 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
 })
 
 describe("CodeCommit web security boundary", () => {
+  it.effect("keeps a committed config mutation successful when its refresh fails", () =>
+    Effect.gen(function*() {
+      const originalReview = ConfigService.defaultReviewConfig
+      const updatedReview = {
+        defaultProfileId: "quick",
+        profiles: [{ id: "quick", name: "Quick review", kind: "review", skillIds: [] }]
+      } satisfies ConfigService.ReviewConfig
+      const persisted = yield* Ref.make(originalReview)
+      const refreshCalls = yield* Ref.make(0)
+      const refreshFailure = Ref.update(refreshCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.fail("expired credentials"))
+      )
+
+      const committed = yield* commitConfigMutation(
+        Ref.set(persisted, updatedReview),
+        refreshFailure,
+        "save"
+      ).pipe(Effect.result)
+
+      expect(Result.isSuccess(committed)).toBe(true)
+      expect(yield* Ref.get(persisted)).toEqual(updatedReview)
+      expect(yield* Ref.get(refreshCalls)).toBe(1)
+
+      const rejected = yield* commitConfigMutation(
+        Effect.fail("write rejected"),
+        Ref.update(refreshCalls, (count) => count + 1),
+        "save"
+      ).pipe(Effect.result)
+
+      expect(Result.isFailure(rejected)).toBe(true)
+      expect(yield* Ref.get(persisted)).toEqual(updatedReview)
+      expect(yield* Ref.get(refreshCalls)).toBe(1)
+    }))
+
   it("removes only owned Relay reconciliation markers from client-visible comments", () => {
     const token = "a".repeat(64)
     const encoded = encodeClientVisibleCommentLocations([

@@ -48,6 +48,14 @@ describe("Relay finding dispositions", () => {
     )).toEqual({ F1: "pending" })
   })
 
+  it("preserves an active publication while an unchanged finding is reconciled", () => {
+    expect(reconcileFindingDispositions(
+      [finding("first")],
+      [finding("first")],
+      { F1: "posting" }
+    )).toEqual({ F1: "posting" })
+  })
+
   it("preserves a publication receipt across later local decisions", () => {
     for (
       const decision of ["acknowledged", "rejected"] satisfies ReadonlyArray<"acknowledged" | "rejected">

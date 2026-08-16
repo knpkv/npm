@@ -12,6 +12,24 @@ interface ConfigAccountFallback {
   readonly enabled: boolean
 }
 
+export const commitConfigMutation = Effect.fn("ConfigLive.commitConfigMutation")(function*<
+  Value,
+  MutationError,
+  MutationRequirements,
+  RefreshError,
+  RefreshRequirements
+>(
+  mutation: Effect.Effect<Value, MutationError, MutationRequirements>,
+  refresh: Effect.Effect<void, RefreshError, RefreshRequirements>,
+  operation: "reset" | "save"
+): Effect.fn.Return<Value, MutationError, MutationRequirements | RefreshRequirements> {
+  const value = yield* mutation
+  yield* refresh.pipe(
+    Effect.catch((error) => Effect.logWarning(`refresh after config ${operation} failed`, error))
+  )
+  return value
+})
+
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
   Effect.gen(function*() {
     const configService = yield* ConfigService.ConfigService
@@ -117,15 +135,18 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               enabled: Effect.succeed(a.enabled)
             }))
           const review = yield* Schema.decodeEffect(ConfigService.ReviewConfig)(payload.review ?? existing.review)
-          yield* configService.save({
-            accounts,
-            autoDetect: payload.autoDetect,
-            autoRefresh: payload.autoRefresh,
-            refreshIntervalSeconds: payload.refreshIntervalSeconds,
-            review,
-            sandbox: payload.sandbox ?? existing.sandbox
-          })
-          yield* prService.refresh
+          yield* commitConfigMutation(
+            configService.save({
+              accounts,
+              autoDetect: payload.autoDetect,
+              autoRefresh: payload.autoRefresh,
+              refreshIntervalSeconds: payload.refreshIntervalSeconds,
+              review,
+              sandbox: payload.sandbox ?? existing.sandbox
+            }),
+            prService.refresh,
+            "save"
+          )
           return "ok"
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("reset", () =>
@@ -137,8 +158,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               return Effect.succeed(backupPath)
             })
           )
-          const config = yield* configService.reset
-          yield* prService.refresh
+          const config = yield* commitConfigMutation(configService.reset, prService.refresh, "reset")
           const state = yield* SubscriptionRef.get(prService.state)
           return {
             backupPath,

@@ -172,7 +172,7 @@ export const migrateLegacySandboxImage = (config: TuiConfig): TuiConfig =>
 export const accountsFromDetected = (detected: ReadonlyArray<DetectedProfile>): TuiConfig["accounts"] =>
   detected.map((profile) => ({
     profile: profile.name,
-    regions: profile.region !== undefined ? [profile.region] : [],
+    regions: profile.region !== undefined && profile.region.length > 0 ? [profile.region] : [],
     enabled: false
   }))
 
@@ -212,7 +212,9 @@ const parseIniSections = (content: string): Array<RawSection> => {
     } else if (current !== null && trimmed.includes("=")) {
       const [key, ...valueParts] = trimmed.split("=")
       if (key?.trim().toLowerCase() === "region") {
-        current.region = valueParts.join("=").trim()
+        const region = valueParts.join("=").trim()
+        if (region.length === 0) delete current.region
+        else current.region = region
       }
     }
   }

@@ -65,6 +65,8 @@ interface ReviewWorkspaceOptions {
   readonly deleteOriginalCommentAfterPost?: boolean
   readonly emptyCommentsInitially?: boolean
   readonly onRun?: (payload: RelayRunPayload) => void
+  readonly onPost?: (findingPostCount: number) => void
+  readonly postGate?: (findingPostCount: number) => Promise<void>
   readonly review?: () => {
     readonly defaultProfileId: string
     readonly profiles: ReadonlyArray<{
@@ -286,6 +288,8 @@ const routeReviewWorkspace = async (
   await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
     const finding = route.request().postDataJSON().finding
     findingPostCount += 1
+    options?.onPost?.(findingPostCount)
+    await options?.postGate?.(findingPostCount)
     await route.fulfill({
       body: JSON.stringify({
         findingId: finding.id,
@@ -682,6 +686,37 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await expect(page.getByRole("button", { exact: true, name: "Ack" }).first()).toBeEnabled()
   await expect(page.getByRole("button", { exact: true, name: "Reject" }).first()).toBeEnabled()
   await expect(page.getByRole("button", { name: "Accept · post" }).nth(1)).toBeDisabled()
+})
+
+test("preserves an active finding publication across live reconciliation", async ({ page }) => {
+  const postStarted = Promise.withResolvers<void>()
+  const postRelease = Promise.withResolvers<void>()
+  let postAttempts = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    onPost: (count) => {
+      postAttempts = count
+      postStarted.resolve()
+    },
+    postGate: () => postRelease.promise
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+
+  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  await post.click()
+  await postStarted.promise
+  await expect(post).toBeDisabled()
+
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Re-check while publication is active.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await expect(post).toBeDisabled()
+  expect(postAttempts).toBe(1)
+
+  postRelease.resolve()
+  await expect(page.getByText("posted", { exact: true })).toBeVisible()
+  expect(postAttempts).toBe(1)
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
