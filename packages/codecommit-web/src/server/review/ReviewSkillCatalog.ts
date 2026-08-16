@@ -244,12 +244,21 @@ export const discoverReviewSkillsFromRoots = Effect.fn(
   return Array.from(byId.values())
 })
 
-/** Resolve only catalog-owned prompt text; unknown or duplicated client ids are ignored. */
+/** Resolve only catalog-owned prompt text; fail when a selected skill is no longer available. */
 export const selectedReviewSkillPrompt = (
   skills: ReadonlyArray<ReviewSkillDefinition>,
   selectedIds: ReadonlyArray<string>
 ): Effect.Effect<string, ReviewSkillSelectionError> => {
   const selected = new Set(selectedIds)
+  const available = new Set(skills.map(({ id }) => id))
+  const unavailable = Array.from(selected).filter((id) => !available.has(id))
+  if (unavailable.length > 0) {
+    return Effect.fail(
+      new ReviewSkillSelectionError({
+        message: `Selected review skill is unavailable: ${unavailable[0] ?? "unknown"}`
+      })
+    )
+  }
   const prompt = skills.filter((skill) => selected.has(skill.id)).map((skill) => skill.prompt).join("\n\n")
   const bytes = new TextEncoder().encode(prompt).byteLength
   return bytes <= MAXIMUM_RELAY_SKILL_PROMPT_BYTES

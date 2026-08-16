@@ -48,9 +48,10 @@ describe("Relay review skill catalog", () => {
       const local = skills.find(({ id }) => id === "env:test:reviewer")
       expect(local).toMatchObject({ name: "Strict reviewer", description: "Trace typed error paths." })
       expect(skills.some(({ id }) => id.includes("escaped"))).toBe(false)
-      expect(yield* selectedReviewSkillPrompt(skills, ["env:test:reviewer", "env:test:../../external"]))
+      expect(yield* selectedReviewSkillPrompt(skills, ["env:test:reviewer"]))
         .toContain("Review typed failures.")
-      expect(yield* selectedReviewSkillPrompt(skills, ["env:test:../../external"])).toBe("")
+      const unavailable = yield* selectedReviewSkillPrompt(skills, ["env:test:../../external"]).pipe(Effect.flip)
+      expect(unavailable._tag).toBe("ReviewSkillSelectionError")
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("bounds client-visible skill metadata by UTF-8 bytes", () =>
@@ -264,5 +265,26 @@ describe("Relay review skill catalog", () => {
       }]
       const selected = yield* selectedReviewSkillPrompt(valid, ["env:test:utf8"])
       expect(new TextEncoder().encode(selected).byteLength).toBe(MAXIMUM_RELAY_SKILL_PROMPT_BYTES)
+    }))
+
+  it.effect("rejects selected skills that are no longer available", () =>
+    Effect.gen(function*() {
+      const available: ReadonlyArray<ReviewSkillDefinition> = [{
+        id: "env:test:reviewer",
+        name: "Strict reviewer",
+        description: "Trace typed error paths.",
+        source: "test",
+        prompt: "Review typed failures."
+      }]
+
+      const failure = yield* selectedReviewSkillPrompt(
+        available,
+        ["env:test:reviewer", "env:test:removed"]
+      ).pipe(Effect.flip)
+      expect(failure._tag).toBe("ReviewSkillSelectionError")
+      expect(failure.message).toContain("env:test:removed")
+      expect(yield* selectedReviewSkillPrompt(available, ["env:test:reviewer"]))
+        .toBe("Review typed failures.")
+      expect(yield* selectedReviewSkillPrompt(available, [])).toBe("")
     }))
 })
