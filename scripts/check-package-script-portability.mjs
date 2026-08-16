@@ -38,7 +38,9 @@ const hasDirectEnvironmentAssignment = (command) => {
       quote = character
       continue
     }
-    if (character === ";" || character === "\n" || character === "|") boundaries.push(index + 1)
+    if (character === ";" || character === "\n" || character === "|" || character === "(" || character === "{") {
+      boundaries.push(index + 1)
+    }
     if (character === "&") boundaries.push(index + (command[index + 1] === "&" ? 2 : 1))
   }
   return boundaries.some((index) => environmentAssignment.test(command.slice(index)))
@@ -98,6 +100,11 @@ assert.equal(hasDirectEnvironmentAssignment("printf 'prepare | FOO=1 tool'"), fa
 assert.equal(hasDirectEnvironmentAssignment("prepare & FOO=1 tool"), true)
 assert.equal(hasDirectEnvironmentAssignment("prepare & cross-env FOO=1 tool"), false)
 assert.equal(hasDirectEnvironmentAssignment("printf 'prepare & FOO=1 tool'"), false)
+assert.equal(hasDirectEnvironmentAssignment("(FOO=1 tool)"), true)
+assert.equal(hasDirectEnvironmentAssignment("(cross-env FOO=1 tool)"), false)
+assert.equal(hasDirectEnvironmentAssignment("{ FOO=1 tool; }"), true)
+assert.equal(hasDirectEnvironmentAssignment("'(FOO=1 tool)'"), false)
+assert.equal(hasDirectEnvironmentAssignment("\\(FOO=1 tool\\)"), false)
 assert.deepEqual(
   findNonPortableBuildScripts("scratchpad/package.json", {
     "storybook:build": "tsx scripts/build-storybook.ts"
