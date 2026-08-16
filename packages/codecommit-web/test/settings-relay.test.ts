@@ -33,14 +33,20 @@ const config = {
   review: defaultReviewConfig
 }
 
-const renderRelaySettings = async (configState: Parameters<typeof SettingsRelayView>[0]["config"]) => {
+const renderRelaySettings = async (
+  configState: Parameters<typeof SettingsRelayView>[0]["config"],
+  options?: {
+    readonly saveConfig?: Parameters<typeof SettingsRelayView>[0]["saveConfig"]
+    readonly skills?: Parameters<typeof SettingsRelayView>[0]["skills"]
+  }
+) => {
   const host = document.createElement("div")
   const root = createRoot(host)
   await act(async () =>
     root.render(createElement(SettingsRelayView, {
       config: configState,
-      saveConfig: vi.fn().mockResolvedValue("saved"),
-      skills: AsyncResult.success([])
+      saveConfig: options?.saveConfig ?? vi.fn().mockResolvedValue("saved"),
+      skills: options?.skills ?? AsyncResult.success([])
     }))
   )
   return { host, root }
@@ -69,6 +75,45 @@ describe("Relay review profile skill selection", () => {
     const skill = { name: "Boundary skill", description: "Boundary fixture", source: "environment" }
     expect(Schema.is(ReviewSkillResponse)({ ...skill, id: "x".repeat(256) })).toBe(true)
     expect(Schema.is(ReviewSkillResponse)({ ...skill, id: "x".repeat(257) })).toBe(false)
+  })
+
+  it("locks profile editing until an in-flight save settles", async () => {
+    const save = Promise.withResolvers<string>()
+    const saveConfig = vi.fn<Parameters<typeof SettingsRelayView>[0]["saveConfig"]>(() => save.promise)
+    const rendered = await renderRelaySettings(AsyncResult.success(config), {
+      saveConfig,
+      skills: AsyncResult.success([{
+        id: "env:test:extra",
+        name: "Extra review",
+        description: "Deferred save fixture",
+        source: "environment"
+      }])
+    })
+    const checkbox = rendered.host.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    const saveButton = Array.from(rendered.host.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(checkbox).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (checkbox === null || saveButton === undefined) return
+
+    await act(async () => checkbox.click())
+    expect(checkbox.checked).toBe(true)
+    expect(saveButton.disabled).toBe(false)
+    await act(async () => saveButton.click())
+    expect(saveConfig).toHaveBeenCalledOnce()
+    expect(checkbox.disabled).toBe(true)
+    expect(rendered.host.querySelector<HTMLSelectElement>("select")?.disabled).toBe(true)
+    checkbox.click()
+    expect(checkbox.checked).toBe(true)
+
+    await act(async () => {
+      save.resolve("saved")
+      await save.promise
+    })
+    expect(saveButton.textContent).toContain("Saved")
+    expect(saveButton.disabled).toBe(true)
+    await act(async () => rendered.root.unmount())
   })
 
   it("keeps the editor payload within the persisted skill limit", () => {

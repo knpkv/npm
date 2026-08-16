@@ -125,6 +125,8 @@ const locationLabel = (finding: RelayReviewFinding): string => {
 const FailureWithMessage = Schema.Struct({ message: Schema.String })
 const isFailureWithMessage = Schema.is(FailureWithMessage)
 
+type RelayStreamOutcome = { readonly completed: false } | { readonly completed: true; readonly reply?: string }
+
 function failureMessage<Failure>(failure: Failure, fallback: string): string {
   return isFailureWithMessage(failure) ? failure.message : fallback
 }
@@ -728,11 +730,7 @@ const ReadyReviewWorkspace = ({
   )
 
   const runStream = useCallback(
-    async (
-      url: string,
-      payload: Parameters<typeof runRelayReviewStream>[1],
-      assistantFindingId?: string
-    ): Promise<void> => {
+    async (url: string, payload: Parameters<typeof runRelayReviewStream>[1]): Promise<RelayStreamOutcome> => {
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
@@ -740,6 +738,7 @@ const ReadyReviewWorkspace = ({
       setReviewFailure(null)
       setProgress([])
       let terminalError: string | null = null
+      let outcome: RelayStreamOutcome = { completed: false }
       try {
         await runRelayReviewStream(
           url,
@@ -764,20 +763,17 @@ const ReadyReviewWorkspace = ({
             const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: event.review }
             completedReviewRef.current = completed
             setCompletedReview(completed)
-            if (event.reply !== undefined && assistantFindingId !== undefined) {
-              const reply = event.reply
-              setTurns((current) =>
-                appendReviewTurn(current, { findingId: assistantFindingId, role: "assistant", message: reply })
-              )
-            }
+            outcome = event.reply === undefined ? { completed: true } : { completed: true, reply: event.reply }
             setSelectedFindingId((current) => current ?? event.review.result.findings[0]?.id ?? null)
           },
           controller.signal
         )
         if (terminalError !== null) {
+          outcome = { completed: false }
           setReviewFailure({ description: terminalError, title: "Relay review failed" })
         }
       } catch (cause) {
+        outcome = { completed: false }
         if (!controller.signal.aborted) {
           setReviewFailure({
             description: failureMessage(cause, "Relay could not complete this review."),
@@ -788,6 +784,7 @@ const ReadyReviewWorkspace = ({
         if (abortRef.current === controller) abortRef.current = null
         setIsReviewing(false)
       }
+      return outcome
     },
     [reviewIdentity]
   )
@@ -819,9 +816,7 @@ const ReadyReviewWorkspace = ({
         return
       }
       const nextTurns = appendReviewTurn(turns, userTurn)
-      setTurns(nextTurns)
-      setMessage("")
-      await runStream(
+      const outcome = await runStream(
         `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
         {
           revisionId: diff.revisionId,
@@ -833,9 +828,15 @@ const ReadyReviewWorkspace = ({
           turns,
           findingId,
           message: nextMessage
-        },
-        findingId
+        }
       )
+      if (!outcome.completed) return
+      setTurns(
+        outcome.reply === undefined
+          ? nextTurns
+          : appendReviewTurn(nextTurns, { findingId, role: "assistant", message: outcome.reply })
+      )
+      setMessage("")
     },
     [
       accountId,

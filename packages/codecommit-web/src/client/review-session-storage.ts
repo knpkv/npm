@@ -16,6 +16,17 @@ export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 
 const decodeStoredSession = Schema.decodeUnknownOption(Schema.fromJsonString(StoredRelayReviewSession))
 
+const recoverInterruptedPublications = (
+  dispositions: StoredRelayReviewSession["dispositions"]
+): StoredRelayReviewSession["dispositions"] =>
+  Object.entries(dispositions).reduce<StoredRelayReviewSession["dispositions"]>(
+    (recovered, [findingId, disposition]) => ({
+      ...recovered,
+      [findingId]: disposition === "posting" ? "failed" : disposition
+    }),
+    {}
+  )
+
 /** Keep one review session per pull request; the decoded exact identity prevents cross-head restoration. */
 export const relayReviewSessionStorageKey = (accountId: string, pullRequestId: string): string =>
   `codecommit:relay-review-session:${encodeURIComponent(accountId)}:${encodeURIComponent(pullRequestId)}`
@@ -29,7 +40,8 @@ export const readRelayReviewSession = (
     const encoded = storage.getItem(key)
     if (encoded === null) return null
     const decoded = decodeStoredSession(encoded)
-    return Option.isSome(decoded) && decoded.value.identity === expectedIdentity ? decoded.value : null
+    if (Option.isNone(decoded) || decoded.value.identity !== expectedIdentity) return null
+    return { ...decoded.value, dispositions: recoverInterruptedPublications(decoded.value.dispositions) }
   } catch {
     return null
   }

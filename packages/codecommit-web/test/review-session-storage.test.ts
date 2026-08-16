@@ -56,4 +56,21 @@ describe("Relay review session storage", () => {
 
     expect(readRelayReviewSession(window.sessionStorage, key, "exact-head-1")).toBeNull()
   })
+
+  it("recovers interrupted publications without changing settled dispositions", () => {
+    const key = relayReviewSessionStorageKey("111111111111", "42")
+    writeRelayReviewSession(window.sessionStorage, key, {
+      identity: "exact-head-1",
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: { interrupted: "posting", pending: "pending", posted: "posted" }
+    })
+
+    expect(readRelayReviewSession(window.sessionStorage, key, "exact-head-1")?.dispositions).toEqual({
+      interrupted: "failed",
+      pending: "pending",
+      posted: "posted"
+    })
+  })
 })

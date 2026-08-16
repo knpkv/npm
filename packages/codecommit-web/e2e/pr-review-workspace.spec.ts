@@ -398,6 +398,80 @@ test("continues a completed review with its original focus and skills", async ({
   expect(runs[1]).toMatchObject({ kind: "tests", skillIds: [] })
 })
 
+test("retries a failed continuation without persisting the failed turn", async ({ page }) => {
+  const continuations: Array<RelayContinuePayload> = []
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+    const payload = decodeRelayContinuePayload(route.request().postDataJSON())
+    continuations.push(payload)
+    if (continuations.length === 1) {
+      await route.fulfill({ body: "Relay unavailable", contentType: "text/plain", status: 500 })
+      return
+    }
+    await route.fulfill({
+      body: `${
+        JSON.stringify({
+          type: "complete",
+          review: {
+            pullRequestId: "42",
+            revisionId: "revision-1",
+            baseCommit: "a".repeat(40),
+            headCommit: "b".repeat(40),
+            kind: payload.kind,
+            result: payload.currentReview
+          },
+          reply: "Confirmed after retry."
+        })
+      }\n`,
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  const message = "Retry this failed follow-up."
+  const composer = page.getByPlaceholder("Verify this against the latest change…")
+  await composer.fill(message)
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(composer).toHaveValue(message)
+  expect(continuations[0]?.turns).toEqual([])
+
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed after retry.")).toBeVisible()
+  expect(continuations[1]?.turns).toEqual([])
+  await expect(page.getByRole("log").locator("li[data-role=\"user\"]").filter({ hasText: message })).toHaveCount(1)
+  await expect(
+    page.getByRole("log").locator("li[data-role=\"assistant\"]").filter({ hasText: "Confirmed after retry." })
+  ).toHaveCount(1)
+})
+
+test("recovers an interrupted finding publication after reload", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.sessionStorage.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    const key = Object.keys(window.sessionStorage).find((candidate) =>
+      candidate.startsWith("codecommit:relay-review-session:")
+    )
+    if (key === undefined) throw new Error("Relay session was not stored")
+    const session = JSON.parse(window.sessionStorage.getItem(key) ?? "null")
+    session.dispositions = { ...session.dispositions, F1: "posting", F2: "posted" }
+    window.sessionStorage.setItem(key, JSON.stringify(session))
+  })
+
+  await page.reload()
+  await expect(page.getByText("failed", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Accept · post" }).first()).toBeEnabled()
+  await expect(page.getByRole("button", { exact: true, name: "Ack" }).first()).toBeEnabled()
+  await expect(page.getByRole("button", { exact: true, name: "Reject" }).first()).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Accept · post" }).nth(1)).toBeDisabled()
+})
+
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   const reviewGate = Promise.withResolvers<void>()
   await page.setViewportSize({ height: 900, width: 1440 })

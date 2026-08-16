@@ -54,10 +54,12 @@ export const reviewProfileSkillOptions = (
 }
 
 export function ReviewProfileSkillPicker({
+  disabled = false,
   onSkillChange,
   profile,
   skills
 }: {
+  readonly disabled?: boolean
   readonly onSkillChange: (skillId: string, enabled: boolean) => void
   readonly profile: ReviewProfileConfig
   readonly skills: ReadonlyArray<ReviewSkillResponse>
@@ -68,7 +70,7 @@ export function ReviewProfileSkillPicker({
         <label className="flex items-start gap-2 rounded-md border p-3 text-sm" key={skill.id}>
           <input
             checked={profile.skillIds.includes(skill.id)}
-            disabled={isReviewProfileSkillSelectionDisabled(profile, skill.id)}
+            disabled={disabled || isReviewProfileSkillSelectionDisabled(profile, skill.id)}
             onChange={(event) => onSkillChange(skill.id, event.target.checked)}
             type="checkbox"
           />
@@ -206,6 +208,7 @@ export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayV
             Default profile
             <select
               className="h-9 rounded-md border bg-transparent px-3 text-sm"
+              disabled={saving}
               onChange={(event) => {
                 setSavedNow(false)
                 setReview((current) => (current === null ? null : { ...current, defaultProfileId: event.target.value }))
@@ -237,6 +240,7 @@ export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayV
               </div>
               {AsyncResult.isSuccess(skills) ? (
                 <ReviewProfileSkillPicker
+                  disabled={saving}
                   onSkillChange={(skillId, enabled) => updateProfileSkills(profile.id, skillId, enabled)}
                   profile={profile}
                   skills={skills.value}
