@@ -1,6 +1,6 @@
 import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
+import { Cause, Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -16,18 +16,33 @@ export const commitConfigMutation = Effect.fn("ConfigLive.commitConfigMutation")
   Value,
   MutationError,
   MutationRequirements,
-  RefreshError,
-  RefreshRequirements
+  RefreshRequirements,
+  RefreshState extends { readonly status: string; readonly error?: string | undefined }
 >(
   mutation: Effect.Effect<Value, MutationError, MutationRequirements>,
-  refresh: Effect.Effect<void, RefreshError, RefreshRequirements>,
+  refresh: Effect.Effect<void, never, RefreshRequirements>,
+  refreshState: SubscriptionRef.SubscriptionRef<RefreshState>,
   operation: "reset" | "save"
-): Effect.fn.Return<Value, MutationError, MutationRequirements | RefreshRequirements> {
+): Effect.fn.Return<
+  { readonly value: Value; readonly refreshStatus: "failed" | "refreshed" },
+  MutationError,
+  MutationRequirements | RefreshRequirements
+> {
   const value = yield* mutation
-  yield* refresh.pipe(
-    Effect.catch((error) => Effect.logWarning(`refresh after config ${operation} failed`, error))
+  const refreshed = (): "refreshed" => "refreshed"
+  const failed = (): "failed" => "failed"
+  const refreshStatus = yield* refresh.pipe(
+    Effect.map(refreshed),
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterrupts(cause),
+      (cause) => Effect.logWarning(`refresh after config ${operation} failed`, cause).pipe(Effect.map(failed))
+    )
   )
-  return value
+  if (refreshStatus === "failed") return { value, refreshStatus }
+  const state = yield* SubscriptionRef.get(refreshState)
+  if (state.status !== "error") return { value, refreshStatus }
+  yield* Effect.logWarning(`refresh after config ${operation} completed in error state`, state.error)
+  return { value, refreshStatus: "failed" }
 })
 
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
@@ -135,7 +150,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               enabled: Effect.succeed(a.enabled)
             }))
           const review = yield* Schema.decodeEffect(ConfigService.ReviewConfig)(payload.review ?? existing.review)
-          yield* commitConfigMutation(
+          const outcome = yield* commitConfigMutation(
             configService.save({
               accounts,
               autoDetect: payload.autoDetect,
@@ -145,9 +160,10 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               sandbox: payload.sandbox ?? existing.sandbox
             }),
             prService.refresh,
+            prService.state,
             "save"
           )
-          return "ok"
+          return outcome.refreshStatus === "failed" ? "saved-refresh-failed" : "saved"
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("reset", () =>
         Effect.gen(function*() {
@@ -158,10 +174,17 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               return Effect.succeed(backupPath)
             })
           )
-          const config = yield* commitConfigMutation(configService.reset, prService.refresh, "reset")
+          const outcome = yield* commitConfigMutation(
+            configService.reset,
+            prService.refresh,
+            prService.state,
+            "reset"
+          )
+          const config = outcome.value
           const state = yield* SubscriptionRef.get(prService.state)
           return {
             backupPath,
+            refreshStatus: outcome.refreshStatus,
             config: {
               accounts: config.accounts.map((a) => ({
                 profile: a.profile,

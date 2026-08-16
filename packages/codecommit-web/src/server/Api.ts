@@ -589,9 +589,12 @@ const ConfigSavePayload = Schema.Struct({
   sandbox: Schema.optional(SandboxSettingsResponse)
 })
 
+const ConfigRefreshStatus = Schema.Literals(["refreshed", "failed"])
+
 const ConfigResetResponse = Schema.Struct({
   backupPath: Schema.optional(Schema.String),
-  config: ConfigResponse
+  config: ConfigResponse,
+  refreshStatus: ConfigRefreshStatus
 })
 
 export class ConfigGroup extends HttpApiGroup.make("config")
@@ -603,7 +606,11 @@ export class ConfigGroup extends HttpApiGroup.make("config")
     success: Schema.Array(ReviewSkillResponse),
     error: ApiError
   }))
-  .add(HttpApiEndpoint.post("save", "/save", { payload: ConfigSavePayload, success: Schema.String, error: ApiError }))
+  .add(HttpApiEndpoint.post("save", "/save", {
+    payload: ConfigSavePayload,
+    success: Schema.Literals(["saved", "saved-refresh-failed"]),
+    error: ApiError
+  }))
   .add(HttpApiEndpoint.post("reset", "/reset", { success: ConfigResetResponse, error: ApiError }))
   .prefix("/api/config")
 {}

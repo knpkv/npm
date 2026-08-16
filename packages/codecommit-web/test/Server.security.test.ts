@@ -4,7 +4,7 @@ import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Error
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import { Deferred, Duration, Effect, Exit, Fiber, Redacted, Ref, Result, Stream } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Redacted, Ref, Result, Stream, SubscriptionRef } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
@@ -135,29 +135,62 @@ describe("CodeCommit web security boundary", () => {
       } satisfies ConfigService.ReviewConfig
       const persisted = yield* Ref.make(originalReview)
       const refreshCalls = yield* Ref.make(0)
+      const refreshState = yield* SubscriptionRef.make<
+        { readonly status: string; readonly error?: string | undefined }
+      >(
+        { status: "idle" }
+      )
       const refreshFailure = Ref.update(refreshCalls, (count) => count + 1).pipe(
-        Effect.andThen(Effect.fail("expired credentials"))
+        Effect.andThen(Effect.die("refresh defect"))
       )
 
       const committed = yield* commitConfigMutation(
         Ref.set(persisted, updatedReview),
         refreshFailure,
+        refreshState,
         "save"
       ).pipe(Effect.result)
 
       expect(Result.isSuccess(committed)).toBe(true)
+      if (Result.isSuccess(committed)) expect(committed.success.refreshStatus).toBe("failed")
       expect(yield* Ref.get(persisted)).toEqual(updatedReview)
       expect(yield* Ref.get(refreshCalls)).toBe(1)
 
       const rejected = yield* commitConfigMutation(
         Effect.fail("write rejected"),
         Ref.update(refreshCalls, (count) => count + 1),
+        refreshState,
         "save"
       ).pipe(Effect.result)
 
       expect(Result.isFailure(rejected)).toBe(true)
       expect(yield* Ref.get(persisted)).toEqual(updatedReview)
       expect(yield* Ref.get(refreshCalls)).toBe(1)
+
+      const stateFailure = yield* commitConfigMutation(
+        Effect.void,
+        SubscriptionRef.set(refreshState, { status: "error", error: "provider timeout" }),
+        refreshState,
+        "reset"
+      )
+      expect(stateFailure.refreshStatus).toBe("failed")
+
+      const refreshed = yield* commitConfigMutation(
+        Effect.void,
+        SubscriptionRef.set(refreshState, { status: "idle" }),
+        refreshState,
+        "save"
+      )
+      expect(refreshed.refreshStatus).toBe("refreshed")
+
+      const interrupted = yield* commitConfigMutation(
+        Effect.void,
+        Effect.interrupt,
+        refreshState,
+        "save"
+      ).pipe(Effect.exit)
+      expect(Exit.isFailure(interrupted)).toBe(true)
+      if (Exit.isFailure(interrupted)) expect(Cause.hasInterruptsOnly(interrupted.cause)).toBe(true)
     }))
 
   it("removes only owned Relay reconciliation markers from client-visible comments", () => {

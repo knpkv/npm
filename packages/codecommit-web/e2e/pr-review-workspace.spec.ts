@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
+import { RelayReviewResult } from "../src/server/Api.js"
 
 declare global {
   interface Window {
@@ -37,7 +38,7 @@ const pullRequest = {
 }
 
 const RelayContinuePayload = Schema.Struct({
-  currentReview: Schema.Unknown,
+  currentReview: RelayReviewResult,
   kind: Schema.String,
   message: Schema.String,
   skillIds: Schema.Array(Schema.String),
@@ -59,7 +60,9 @@ const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
   readonly commentFindingCount?: () => number
+  readonly commentUnrelatedCount?: () => number
   readonly commentsGate?: (findingPostCount: number) => Promise<void>
+  readonly continueReview?: (payload: RelayContinuePayload) => RelayReviewResult
   readonly configGate?: Promise<void>
   readonly configStatus?: number
   readonly deleteOriginalCommentAfterPost?: boolean
@@ -67,6 +70,7 @@ interface ReviewWorkspaceOptions {
   readonly onRun?: (payload: RelayRunPayload) => void
   readonly onPost?: (findingPostCount: number) => void
   readonly postGate?: (findingPostCount: number) => Promise<void>
+  readonly pullRequest?: () => typeof pullRequest
   readonly review?: () => {
     readonly defaultProfileId: string
     readonly profiles: ReadonlyArray<{
@@ -87,12 +91,16 @@ const routeReviewWorkspace = async (
 ) => {
   let findingPostCount = 0
   await page.route("**/api/events/", async (route) => {
+    const activePullRequest = options?.pullRequest?.() ?? pullRequest
     const appState = JSON.stringify({
-      accounts: [{ ...pullRequest.account, enabled: true }],
+      accounts: [{ ...activePullRequest.account, enabled: true }],
       currentUser: "reviewer",
       lastUpdated: "2026-08-12T09:30:00.000Z",
       pendingReviewCount: 1,
-      pullRequests: [{ ...pullRequest, commentCount: options?.commentCount?.() ?? pullRequest.commentCount }],
+      pullRequests: [{
+        ...activePullRequest,
+        commentCount: options?.commentCount?.() ?? activePullRequest.commentCount
+      }],
       sandboxes: [],
       status: "idle"
     })
@@ -171,6 +179,18 @@ const routeReviewWorkspace = async (
               content: index === 0 ? "P2: Retry amplification" : "P3: Before-path evidence",
               author: "relay",
               creationDate: "2026-08-12T10:01:00.000Z",
+              deleted: false,
+              filePath: "src/retry.ts",
+              lineNumber: 1
+            },
+            replies: []
+          })),
+          ...Array.from({ length: options?.commentUnrelatedCount?.() ?? 0 }, (_, index) => ({
+            root: {
+              id: `unrelated-comment-${String(index + 1)}`,
+              content: "Unrelated provider comment",
+              author: "reviewer",
+              creationDate: "2026-08-12T10:02:00.000Z",
               deleted: false,
               filePath: "src/retry.ts",
               lineNumber: 1
@@ -314,7 +334,7 @@ const routeReviewWorkspace = async (
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
             kind: payload.kind,
-            result: payload.currentReview
+            result: options?.continueReview?.(payload) ?? payload.currentReview
           },
           reply: "Confirmed against the same exact revision."
         })
@@ -688,11 +708,25 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await expect(page.getByRole("button", { name: "Accept · post" }).nth(1)).toBeDisabled()
 })
 
-test("preserves an active finding publication across live reconciliation", async ({ page }) => {
+test("preserves an active finding publication across changed live reconciliation", async ({ page }) => {
   const postStarted = Promise.withResolvers<void>()
   const postRelease = Promise.withResolvers<void>()
   let postAttempts = 0
   await routeReviewWorkspace(page, "review", undefined, undefined, {
+    continueReview: () => ({
+      verdict: "The retry finding changed after re-review.",
+      findings: [{
+        id: "F1",
+        priority: "P2",
+        title: "Retry amplification",
+        summary: "The changed retry can duplicate a non-idempotent request.",
+        details: "The changed constant still expands retries without an idempotency guard.",
+        recommendation: "Require an idempotency key before retrying.",
+        verification: "Re-reviewed while publication remained active.",
+        publicationTarget: "line-comment",
+        location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+      }]
+    }),
     onPost: (count) => {
       postAttempts = count
       postStarted.resolve()
@@ -715,8 +749,13 @@ test("preserves an active finding publication across live reconciliation", async
   expect(postAttempts).toBe(1)
 
   postRelease.resolve()
-  await expect(page.getByText("posted", { exact: true })).toBeVisible()
+  await expect(page.getByText("posted-stale", { exact: true })).toBeVisible()
   expect(postAttempts).toBe(1)
+  await expect(post).toBeEnabled()
+
+  await post.click()
+  await expect(page.getByText("posted", { exact: true })).toBeVisible()
+  expect(postAttempts).toBe(2)
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
@@ -969,6 +1008,81 @@ test("preserves unobserved optimistic comment increments across partial provider
   authoritativeCount = 2
   await settledObserved.promise
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
+test("preserves a pending Relay comment across unrelated SSE growth", async ({ page }) => {
+  const responsesEnabled = Promise.withResolvers<void>()
+  const unrelatedObserved = Promise.withResolvers<void>()
+  const relayObserved = Promise.withResolvers<void>()
+  let authoritativeCount = 0
+  let providerFindingCount = 0
+  let unrelatedCount = 0
+  let unrelatedReads = 0
+  let relayReads = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => authoritativeCount,
+    commentFindingCount: () => {
+      if (providerFindingCount === 1 && ++relayReads >= 1) relayObserved.resolve()
+      return providerFindingCount
+    },
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentUnrelatedCount: () => {
+      if (unrelatedCount === 1 && ++unrelatedReads >= 2) unrelatedObserved.resolve()
+      return unrelatedCount
+    },
+    emptyCommentsInitially: true
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: /^Comments/ }).click()
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+
+  unrelatedCount = 1
+  authoritativeCount = 1
+  responsesEnabled.resolve()
+  await unrelatedObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  providerFindingCount = 1
+  await relayObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
+test("opens the generated console URL with the O shortcut", async ({ page }) => {
+  const opened = Promise.withResolvers<{ readonly link: string; readonly profile: string }>()
+  await page.addInitScript(() => localStorage.setItem("codecommit-granted-dismissed", "true"))
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    pullRequest: () => ({ ...pullRequest, link: "" })
+  })
+  await page.route("**/api/prs/open", async (route) => {
+    opened.resolve(route.request().postDataJSON())
+    await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByRole("button", { name: "Open in Console" })).toBeVisible()
+
+  await page.keyboard.press("o")
+
+  await expect.poll(async () => (await opened.promise).link).toBe(
+    "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/42?region=eu-west-1"
+  )
+})
+
+test("preserves manual approver input when the repository account is unavailable", async ({ page }) => {
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    pullRequest: () => ({ ...pullRequest, account: { ...pullRequest.account, repoAccountId: "" } })
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Add required approvers" }).click()
+  const input = page.getByRole("textbox", { name: "Approver" })
+  await input.fill("reviewer")
+
+  await input.press("Enter")
+
+  await expect(input).toHaveValue("reviewer")
+  await expect(page.getByRole("button", { name: "Add", exact: true })).toBeDisabled()
 })
 
 test("clears a failed publication error after a successful retry", async ({ page }) => {

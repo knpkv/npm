@@ -48,10 +48,15 @@ describe("Relay finding dispositions", () => {
     )).toEqual({ F1: "pending" })
   })
 
-  it("preserves an active publication while an unchanged finding is reconciled", () => {
+  it("preserves an active publication while its finding is reconciled", () => {
     expect(reconcileFindingDispositions(
       [finding("first")],
       [finding("first")],
+      { F1: "posting" }
+    )).toEqual({ F1: "posting" })
+    expect(reconcileFindingDispositions(
+      [finding("first")],
+      [finding("changed")],
       { F1: "posting" }
     )).toEqual({ F1: "posting" })
   })

@@ -636,7 +636,7 @@ function ApproversCard({
                     className={`${controlProps.className} ${styles.approverInput ?? ""}`}
                     onChange={(event) => setManualArn(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && manualArn.trim().length > 0) {
+                      if (event.key === "Enter" && manualArn.trim().length > 0 && prefix.length > 0) {
                         handleAdd(manualArn.trim())
                         setManualArn("")
                       }
@@ -909,6 +909,13 @@ export function PRDetail() {
     setCommentCountState((current) => {
       if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount)
         return current
+      if (current.pendingCommentIds.length > 0) {
+        return {
+          ...current,
+          baseCount: authoritativeCommentCount,
+          count: Math.max(current.count, authoritativeCommentCount + current.pendingCommentIds.length)
+        }
+      }
       return authoritativeCommentCount < current.count ? { ...current, baseCount: authoritativeCommentCount } : null
     })
   }, [authoritativeCommentCount, commentNavigationIdentity])
@@ -1078,7 +1085,7 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "Enter" || e.key === "o") && pr?.link !== undefined && pr.link.length > 0) {
+      } else if ((e.key === "Enter" || e.key === "o") && consoleUrl.length > 0) {
         handleOpen()
       } else if (e.key === "." && pr !== null) {
         e.preventDefault()
@@ -1087,7 +1094,7 @@ export function PRDetail() {
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleOpen, handleSandbox, navigate, pr])
+  }, [consoleUrl, handleOpen, handleSandbox, navigate, pr])
 
   if (pr === null) {
     return (

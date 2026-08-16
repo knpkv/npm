@@ -91,6 +91,7 @@ export const reconcileFindingDispositions = (
     const prior = previousById.get(finding.id)
     const disposition = dispositions[finding.id] ?? "pending"
     if (prior === undefined || findingIdentity(prior) !== findingIdentity(finding)) {
+      if (disposition === "posting") return [finding.id, disposition]
       return [finding.id, disposition === "posted" || disposition === "posted-stale" ? "posted-stale" : "pending"]
     }
     return [finding.id, disposition]
