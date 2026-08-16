@@ -813,7 +813,7 @@ const ReadyReviewWorkspace = ({
           kind: review.kind,
           skillIds: selectedProfile?.skillIds ?? [],
           currentReview: review.result,
-          turns: nextTurns,
+          turns,
           findingId,
           message: nextMessage
         },
@@ -1230,6 +1230,7 @@ export const PullRequestReviewWorkspace = ({
   const commentTargets = AsyncResult.isSuccess(comments)
     ? comments.value.flatMap((location) =>
         location.comments.flatMap((thread) => {
+          if (thread.root.deleted) return []
           const target = reviewCommentNavigationTarget(location, thread.root)
           return target === null ? [] : [target]
         })

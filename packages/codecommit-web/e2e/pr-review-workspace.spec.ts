@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test"
+import { Schema } from "effect"
 
 const pullRequest = {
   account: {
@@ -29,11 +30,20 @@ const pullRequest = {
   title: "feat(payments): make retry handling idempotent"
 }
 
+const RelayContinuePayload = Schema.Struct({
+  currentReview: Schema.Unknown,
+  kind: Schema.String,
+  message: Schema.String,
+  turns: Schema.Array(Schema.Struct({ message: Schema.String, role: Schema.String }))
+})
+type RelayContinuePayload = typeof RelayContinuePayload.Type
+const decodeRelayContinuePayload = Schema.decodeUnknownSync(RelayContinuePayload)
+
 const routeReviewWorkspace = async (
   page: Page,
   expectedKind: "explain" | "review" | "security" | "tests" = "review",
   reviewGate?: Promise<void>,
-  onContinueKind?: (kind: string) => void
+  onContinue?: (payload: RelayContinuePayload) => void
 ) => {
   let findingPosted = false
   const appState = JSON.stringify({
@@ -88,6 +98,18 @@ const routeReviewWorkspace = async (
               author: "reviewer",
               creationDate: "2026-08-12T10:00:00.000Z",
               deleted: false,
+              filePath: "src/retry.ts",
+              lineNumber: 1
+            },
+            replies: []
+          },
+          {
+            root: {
+              id: "comment-deleted",
+              content: "Deleted provider comment",
+              author: "deleted-reviewer",
+              creationDate: "2026-08-12T10:00:00.000Z",
+              deleted: true,
               filePath: "src/retry.ts",
               lineNumber: 1
             },
@@ -220,8 +242,8 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
-    const payload = route.request().postDataJSON()
-    onContinueKind?.(payload.kind)
+    const payload = decodeRelayContinuePayload(route.request().postDataJSON())
+    onContinue?.(payload)
     await route.fulfill({
       body: [
         JSON.stringify({ type: "progress", phase: "agent", message: "Relay is re-checking the finding" }),
@@ -255,10 +277,8 @@ test("renders a substantive Relay explanation", async ({ page }) => {
 })
 
 test("continues a completed review with its original focus", async ({ page }) => {
-  let continuedKind: string | null = null
-  await routeReviewWorkspace(page, "security", undefined, (kind) => {
-    continuedKind = kind
-  })
+  const continuations: Array<RelayContinuePayload> = []
+  await routeReviewWorkspace(page, "security", undefined, (payload) => continuations.push(payload))
   await page.goto("/accounts/111111111111/prs/42")
 
   await page.getByRole("button", { name: "Security" }).click()
@@ -268,8 +288,19 @@ test("continues a completed review with its original focus", async ({ page }) =>
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Verify this against the latest change…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
-
-  await expect.poll(() => continuedKind).toBe("security")
+  await expect.poll(() => continuations.length).toBe(1)
+  expect(continuations[0]).toMatchObject({ kind: "security", message: "Continue this security review.", turns: [] })
+  await page.getByPlaceholder("Verify this against the latest change…").fill("Check the evidence once more.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect.poll(() => continuations.length).toBe(2)
+  expect(continuations[1]).toMatchObject({
+    kind: "security",
+    message: "Check the evidence once more.",
+    turns: [
+      { message: "Continue this security review.", role: "user" },
+      { message: "Confirmed against the same exact revision.", role: "assistant" }
+    ]
+  })
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
@@ -315,6 +346,14 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByLabel("CodeCommit comment by reviewer")).not.toContainText("###")
   await page.getByRole("button", { name: "View in comments" }).click()
   await expect(page.getByText("Keep this retry path idempotent.").last()).toBeInViewport()
+  const commentsTrigger = page.getByRole("button", { name: /^Comments/ })
+  await commentsTrigger.click()
+  await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
+  await page.getByLabel("CodeCommit comment by reviewer").getByRole("button", { name: "View in comments" }).click()
+  await expect(commentsTrigger).toHaveAttribute("aria-expanded", "true")
+  await expect(page.getByText("Keep this retry path idempotent.").last()).toBeInViewport()
+  await expect(page.getByLabel("CodeCommit comment by deleted-reviewer")).toHaveCount(0)
+  await expect(page.getByText("Deleted provider comment")).toHaveCount(0)
   await expect(page.getByText("Static patch review only.").first()).toBeVisible()
   await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()

@@ -30,6 +30,9 @@ import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
+import { MAXIMUM_RELAY_REVIEW_RESULT_BYTES, MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "./review/ReviewPromptBudget.js"
+
+const jsonByteEncoder = new TextEncoder()
 
 // API error returned to clients for AWS failures
 export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
@@ -170,7 +173,12 @@ export const RelayReviewResult = Schema.Struct({
   explanation: Schema.optional(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(12_000))
   )
-})
+}).check(
+  Schema.makeFilter(
+    (result) => jsonByteEncoder.encode(JSON.stringify(result)).byteLength <= MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+    { expected: `a Relay review result no larger than ${String(MAXIMUM_RELAY_REVIEW_RESULT_BYTES)} UTF-8 bytes` }
+  )
+)
 export type RelayReviewResult = typeof RelayReviewResult.Type
 
 /** Explain-mode results must be explanatory rather than a hidden findings response. */
@@ -253,10 +261,18 @@ export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 
 export const MAXIMUM_RELAY_REVIEW_TURNS = 40
 
+export const RelayReviewConversationTurns = Schema.Array(RelayReviewConversationTurn).check(
+  Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS),
+  Schema.makeFilter(
+    (turns) => jsonByteEncoder.encode(JSON.stringify(turns)).byteLength <= MAXIMUM_RELAY_REVIEW_TURNS_BYTES,
+    { expected: `Relay conversation turns no larger than ${String(MAXIMUM_RELAY_REVIEW_TURNS_BYTES)} UTF-8 bytes` }
+  )
+)
+
 export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
-  turns: Schema.Array(RelayReviewConversationTurn).check(Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS)),
+  turns: RelayReviewConversationTurns,
   findingId: RelayReviewFindingId,
   message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
 })

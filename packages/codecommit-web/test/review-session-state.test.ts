@@ -11,6 +11,7 @@ import {
   type RelayReviewConversationTurn,
   type RelayReviewFinding
 } from "../src/server/Api.js"
+import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 
 const finding = (summary: string): RelayReviewFinding => ({
   id: "F1",
@@ -103,5 +104,19 @@ describe("Relay finding dispositions", () => {
     expect(next.at(-1)?.message).toBe("newest")
     expect(appendReviewTurn([], { findingId: "F1", role: "user", message: "first" }))
       .toEqual([{ findingId: "F1", role: "user", message: "first" }])
+  })
+
+  it("retains the newest turns within the aggregate UTF-8 budget", () => {
+    const turns: ReadonlyArray<RelayReviewConversationTurn> = Array.from(
+      { length: 5 },
+      (_, index) => ({ findingId: "F1", role: "assistant", message: `${String(index)}${"é".repeat(3_900)}` })
+    )
+    const next = appendReviewTurn(turns, { findingId: "F1", role: "user", message: `5${"é".repeat(3_900)}` })
+
+    expect(new TextEncoder().encode(JSON.stringify(next)).byteLength).toBeLessThanOrEqual(
+      MAXIMUM_RELAY_REVIEW_TURNS_BYTES
+    )
+    expect(next.at(-1)?.message.startsWith("5")).toBe(true)
+    expect(next.length).toBeLessThan(turns.length + 1)
   })
 })

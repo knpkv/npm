@@ -27,6 +27,8 @@ import type { RelayFindingPublisherService } from "../src/server/review/RelayFin
 import {
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
+  MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+  MAXIMUM_RELAY_REVIEW_TURNS_BYTES,
   MAXIMUM_RELAY_SKILL_PROMPT_BYTES,
   MINIMUM_RELAY_HOST_ENVELOPE_BYTES
 } from "../src/server/review/ReviewPromptBudget.js"
@@ -151,6 +153,33 @@ describe("CodeCommit web review boundary", () => {
         findingId: "finding-1"
       })
     )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        turns: Array.from({ length: 5 }, () => ({ findingId: "F1", role: "user", message: "x".repeat(8_000) }))
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        currentReview: {
+          findings: Array.from({ length: 10 }, (_, index) => ({
+            id: `F${String(index + 1)}`,
+            priority: "P2",
+            title: "Bounded finding",
+            summary: "x".repeat(500),
+            details: "x".repeat(4_000),
+            recommendation: "x".repeat(2_000),
+            verification: "x".repeat(1_000),
+            publicationTarget: "pr-comment",
+            location: { scope: "general" }
+          })),
+          verdict: "No findings."
+        }
+      })
+    )).toBe(true)
+    expect(MAXIMUM_RELAY_REVIEW_RESULT_BYTES + MAXIMUM_RELAY_REVIEW_TURNS_BYTES + 8_000)
+      .toBeLessThan(MINIMUM_RELAY_HOST_ENVELOPE_BYTES)
   })
 
   it.effect("posts an accepted line finding once against the exact reviewed head", () =>

@@ -13,6 +13,7 @@ export interface ReviewCommentNavigationTarget {
 
 export interface ReviewCommentNavigation {
   readonly destination: "comment" | "diff"
+  readonly requestId: number
   readonly target: ReviewCommentNavigationTarget
 }
 

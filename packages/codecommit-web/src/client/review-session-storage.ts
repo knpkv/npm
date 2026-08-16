@@ -1,17 +1,13 @@
 /** Schema-validated tab storage for exact-revision Relay conversations. @module */
 import { Option, Schema } from "effect"
 
-import {
-  MAXIMUM_RELAY_REVIEW_TURNS,
-  PullRequestRelayReviewResponse,
-  RelayReviewConversationTurn
-} from "../server/Api.js"
+import { PullRequestRelayReviewResponse, RelayReviewConversationTurns } from "../server/Api.js"
 import { FindingDisposition } from "./review-session-state.js"
 
 const StoredRelayReviewSession = Schema.Struct({
   identity: Schema.String,
   review: PullRequestRelayReviewResponse,
-  turns: Schema.Array(RelayReviewConversationTurn).check(Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS)),
+  turns: RelayReviewConversationTurns,
   dispositions: Schema.Record(Schema.String, FindingDisposition)
 })
 

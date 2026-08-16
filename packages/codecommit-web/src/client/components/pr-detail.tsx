@@ -819,6 +819,17 @@ export function PRDetail() {
   } | null>(null)
   const commentNavigation =
     commentNavigationState?.identity === commentNavigationIdentity ? commentNavigationState.navigation : null
+  const commentNavigationRequestRef = useRef(0)
+  const requestCommentNavigation = useCallback(
+    (destination: ReviewCommentNavigation["destination"], target: ReviewCommentNavigationTarget) => {
+      commentNavigationRequestRef.current += 1
+      setCommentNavigationState({
+        identity: commentNavigationIdentity,
+        navigation: { destination, requestId: commentNavigationRequestRef.current, target }
+      })
+    },
+    [commentNavigationIdentity]
+  )
   const reviewedRevisionRef = useRef<string | null>(null)
   const invalidateReview = useCallback(
     (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
@@ -1201,12 +1212,7 @@ export function PRDetail() {
           commentsRefreshGeneration={commentsRefreshGeneration}
           commentNavigation={commentNavigation}
           onFindingPosted={refreshCommentsAfterPublication}
-          onNavigateToComment={(target) =>
-            setCommentNavigationState({
-              identity: commentNavigationIdentity,
-              navigation: { destination: "comment", target }
-            })
-          }
+          onNavigateToComment={(target) => requestCommentNavigation("comment", target)}
           pullRequest={pr}
           refreshGeneration={reviewRefreshGeneration}
         />
@@ -1234,7 +1240,7 @@ export function PRDetail() {
 
           <CollapsibleSection
             {...(commentNavigation?.destination === "comment"
-              ? { openRequestKey: commentNavigation.target.commentId }
+              ? { openRequestKey: `${commentNavigation.target.commentId}:${String(commentNavigation.requestId)}` }
               : {})}
             title="Comments"
             {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}
@@ -1243,12 +1249,7 @@ export function PRDetail() {
               commentsRefreshGeneration={commentsRefreshGeneration}
               key={pr.id}
               navigation={commentNavigation}
-              onNavigateToDiff={(target) =>
-                setCommentNavigationState({
-                  identity: commentNavigationIdentity,
-                  navigation: { destination: "diff", target }
-                })
-              }
+              onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
               pr={pr}
             />
           </CollapsibleSection>

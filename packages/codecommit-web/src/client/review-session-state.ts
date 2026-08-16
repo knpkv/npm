@@ -1,6 +1,7 @@
 /** Pure state transitions for human finding dispositions. @module */
 import * as Schema from "effect/Schema"
 import { MAXIMUM_RELAY_REVIEW_TURNS, type RelayReviewConversationTurn, type RelayReviewFinding } from "../server/Api.js"
+import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../server/review/ReviewPromptBudget.js"
 
 export const FindingDisposition = Schema.Literals([
   "pending",
@@ -63,7 +64,21 @@ export const settleFindingPublication = (
 export const appendReviewTurn = (
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   turn: RelayReviewConversationTurn
-): ReadonlyArray<RelayReviewConversationTurn> => [...turns, turn].slice(-MAXIMUM_RELAY_REVIEW_TURNS)
+): ReadonlyArray<RelayReviewConversationTurn> => {
+  const candidates = [...turns, turn].slice(-MAXIMUM_RELAY_REVIEW_TURNS)
+  const retained: Array<RelayReviewConversationTurn> = []
+  const encoder = new TextEncoder()
+  let bytes = 2
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = candidates[index]
+    if (candidate === undefined) continue
+    const candidateBytes = encoder.encode(JSON.stringify(candidate)).byteLength + (retained.length === 0 ? 0 : 1)
+    if (bytes + candidateBytes > MAXIMUM_RELAY_REVIEW_TURNS_BYTES) break
+    retained.push(candidate)
+    bytes += candidateBytes
+  }
+  return retained.reverse()
+}
 
 /** Preserve human decisions only while the agent finding remains byte-for-byte equivalent. */
 export const reconcileFindingDispositions = (
