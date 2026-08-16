@@ -30,7 +30,11 @@ import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
-import { MAXIMUM_RELAY_REVIEW_RESULT_BYTES, MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "./review/ReviewPromptBudget.js"
+import {
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+  MAXIMUM_RELAY_REVIEW_TURNS_BYTES
+} from "./review/ReviewPromptBudget.js"
 
 const jsonByteEncoder = new TextEncoder()
 
@@ -215,6 +219,12 @@ export const RelayReviewMessage = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
   Schema.isMaxLength(8_000),
+  Schema.makeFilter(
+    (message) => jsonByteEncoder.encode(message).byteLength <= MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+    {
+      expected: `a Relay conversation message no larger than ${String(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)} UTF-8 bytes`
+    }
+  ),
   Schema.makeFilter(
     (message) => jsonByteEncoder.encode(JSON.stringify(message)).byteLength <= MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128,
     { expected: "a Relay conversation message retainable within the conversation byte budget" }
@@ -522,7 +532,7 @@ const ReviewSettingsResponse = Schema.Struct({
 })
 
 export const ReviewSkillResponse = Schema.Struct({
-  id: Schema.String,
+  id: RelayReviewSkillId,
   name: Schema.String,
   description: Schema.String,
   source: Schema.String

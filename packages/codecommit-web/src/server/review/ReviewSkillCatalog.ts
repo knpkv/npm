@@ -3,6 +3,7 @@ import { Config, Effect, Option, Predicate, Ref, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
+import { RelayReviewSkillId } from "../Api.js"
 import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "./ReviewPromptBudget.js"
 
 const MAXIMUM_SKILL_FILES = 256
@@ -43,7 +44,7 @@ const builtinSkills: ReadonlyArray<ReviewSkillDefinition> = [
 ]
 
 export const ReviewSkillMetadata = Schema.Struct({
-  id: Schema.String,
+  id: RelayReviewSkillId,
   name: Schema.String,
   description: Schema.String,
   source: Schema.String
@@ -108,8 +109,10 @@ const readSkill = Effect.fn("ReviewSkillCatalog.readSkill")(function*(
   const directory = path.dirname(path.relative(canonicalRoot, canonicalFile.value)).split(path.sep).join("/")
   const name = frontMatterValue(content.value, "name") ?? path.basename(directory)
   const description = frontMatterValue(content.value, "description") ?? "Local prompt-only review skill."
+  const id = `env:${root.label}:${directory}`
+  if (!Schema.is(RelayReviewSkillId)(id)) return Option.none()
   return Option.some({
-    id: `env:${root.label}:${directory}`,
+    id,
     name,
     description,
     source: `${root.label}/${directory}`,
@@ -139,7 +142,7 @@ const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandi
     )
     const remainingEntries = MAXIMUM_SKILL_INSPECTED_ENTRIES - (yield* Ref.get(inspectedEntries))
     if (remainingEntries <= 0) break
-    const boundedEntries = entries.slice(0, remainingEntries).sort()
+    const boundedEntries = entries.sort().slice(0, remainingEntries)
     yield* Ref.update(inspectedEntries, (count) => count + boundedEntries.length)
     for (const entry of boundedEntries) {
       if (candidates.length >= MAXIMUM_SKILL_FILES) break

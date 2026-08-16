@@ -3,6 +3,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
 import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
+import * as Schema from "effect/Schema"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import {
@@ -10,6 +11,7 @@ import {
   ReviewProfileSkillPicker,
   updateReviewProfileSkills
 } from "../src/client/components/settings-relay.js"
+import { ReviewSkillResponse } from "../src/server/Api.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -21,6 +23,12 @@ const profileWith = (skillIds: ReadonlyArray<string>): ReviewProfileConfig => ({
 })
 
 describe("Relay review profile skill selection", () => {
+  it("accepts only skill ids that a persisted profile can store", () => {
+    const skill = { name: "Boundary skill", description: "Boundary fixture", source: "environment" }
+    expect(Schema.is(ReviewSkillResponse)({ ...skill, id: "x".repeat(256) })).toBe(true)
+    expect(Schema.is(ReviewSkillResponse)({ ...skill, id: "x".repeat(257) })).toBe(false)
+  })
+
   it("keeps the editor payload within the persisted skill limit", () => {
     const selected = Array.from({ length: reviewProfileSkillLimit }, (_, index) => `skill-${String(index + 1)}`)
     const full = profileWith(selected)

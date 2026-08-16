@@ -142,6 +142,61 @@ describe("Relay review skill catalog", () => {
       expect(validSkills.filter(({ id }) => id.startsWith("env:valid:"))).toHaveLength(2)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
+  it.effect("selects the same bounded skill prefix across directory permutations", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "review-skill-order-" })
+      const root = path.join(temporary, "root")
+      yield* fileSystem.makeDirectory(root, { recursive: true })
+      yield* fileSystem.writeFileString(path.join(root, "SKILL.md"), "Deterministic skill.")
+      const canonicalRoot = yield* fileSystem.realPath(root)
+      const ordinary = Array.from(
+        { length: MAXIMUM_SKILL_INSPECTED_ENTRIES },
+        (_, index) => `ordinary-${String(index).padStart(5, "0")}`
+      )
+      const discoverWith = (entries: ReadonlyArray<string>) =>
+        discoverReviewSkillsFromRoots([{ label: "order", path: root }]).pipe(
+          Effect.provideService(
+            FileSystem.FileSystem,
+            FileSystem.make({
+              ...fileSystem,
+              readDirectory: (directory, options) =>
+                directory === canonicalRoot
+                  ? Effect.succeed([...entries])
+                  : fileSystem.readDirectory(directory, options)
+            })
+          )
+        )
+
+      const first = yield* discoverWith(["SKILL.md", ...ordinary])
+      const second = yield* discoverWith([...ordinary.toReversed(), "SKILL.md"])
+      expect(first.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
+      expect(second.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("exposes only environment skill ids accepted by review profiles", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "review-skill-id-" })
+      const root = path.join(temporary, "root")
+      const first = "a".repeat(120)
+      const boundary = path.join(first, "b".repeat(124))
+      const overlong = path.join(first, "c".repeat(125))
+      yield* fileSystem.makeDirectory(path.join(root, boundary), { recursive: true })
+      yield* fileSystem.makeDirectory(path.join(root, overlong), { recursive: true })
+      yield* fileSystem.writeFileString(path.join(root, boundary, "SKILL.md"), "Boundary skill.")
+      yield* fileSystem.writeFileString(path.join(root, overlong, "SKILL.md"), "Overlong skill.")
+
+      const skills = yield* discoverReviewSkillsFromRoots([{ label: "length", path: root }])
+      const boundaryId = `env:length:${boundary.split(path.sep).join("/")}`
+      expect(boundaryId).toHaveLength(256)
+      expect(skills.find(({ id }) => id === boundaryId)?.prompt).toBe("Boundary skill.")
+      expect(skills.some(({ prompt }) => prompt === "Overlong skill.")).toBe(false)
+      expect(skills.every(({ id }) => id.length <= 256)).toBe(true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
   it.effect("rejects selected skill prompts above the aggregate UTF-8 budget", () =>
     Effect.gen(function*() {
       const skills: ReadonlyArray<ReviewSkillDefinition> = Array.from({ length: 16 }, (_, index) => ({

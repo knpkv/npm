@@ -28,6 +28,7 @@ import type { RelayFindingPublisherService } from "../src/server/review/RelayFin
 import {
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
   MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
   MAXIMUM_RELAY_REVIEW_TURNS_BYTES,
   MAXIMUM_RELAY_SKILL_PROMPT_BYTES,
@@ -148,6 +149,18 @@ describe("CodeCommit web review boundary", () => {
       message: "Review again."
     }
     expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)(continueRequest))).toBe(true)
+    expect(Exit.isSuccess(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        message: "x".repeat(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        message: "é".repeat(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
+      })
+    )).toBe(true)
     expect(Exit.isFailure(
       Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
         ...continueRequest,
@@ -185,7 +198,7 @@ describe("CodeCommit web review boundary", () => {
         }
       })
     )).toBe(true)
-    expect(MAXIMUM_RELAY_REVIEW_RESULT_BYTES + MAXIMUM_RELAY_REVIEW_TURNS_BYTES + 8_000)
+    expect(MAXIMUM_RELAY_REVIEW_RESULT_BYTES + MAXIMUM_RELAY_REVIEW_TURNS_BYTES + MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
       .toBeLessThan(MINIMUM_RELAY_HOST_ENVELOPE_BYTES)
   })
 
