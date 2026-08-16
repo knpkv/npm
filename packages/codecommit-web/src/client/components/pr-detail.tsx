@@ -139,14 +139,30 @@ const countThread = (thread: CommentThreadJsonEncoded): number =>
 const countVisibleThread = (thread: CommentThreadJsonEncoded): number =>
   thread.root.deleted ? 0 : 1 + thread.replies.reduce((sum, reply) => sum + countVisibleThread(reply), 0)
 
-function CommentsCountReporter({
-  count,
-  onCountChange
-}: {
+const commentIdsInThread = (thread: CommentThreadJsonEncoded): ReadonlyArray<string> => [
+  thread.root.id,
+  ...thread.replies.flatMap(commentIdsInThread)
+]
+
+interface CommentCountSnapshot {
+  readonly commentIds: ReadonlyArray<string>
   readonly count: number
-  readonly onCountChange: (count: number) => void
+}
+
+function CommentsCountReporter({
+  onCountChange,
+  snapshot
+}: {
+  readonly snapshot: CommentCountSnapshot
+  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
 }) {
-  useEffect(() => onCountChange(count), [count, onCountChange])
+  const lastSnapshotKeyRef = useRef("")
+  useEffect(() => {
+    const snapshotKey = `${String(snapshot.count)}:${snapshot.commentIds.join("\u0000")}`
+    if (lastSnapshotKeyRef.current === snapshotKey) return
+    lastSnapshotKeyRef.current = snapshotKey
+    onCountChange(snapshot)
+  })
   return null
 }
 
@@ -288,7 +304,7 @@ function CommentsSection({
 }: {
   readonly commentsRefreshGeneration: number
   readonly navigation: ReviewCommentNavigation | null
-  readonly onCountChange: (count: number) => void
+  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
   readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
   readonly pr: Domain.PullRequest
 }) {
@@ -327,6 +343,7 @@ function CommentsSection({
     ))
     .onSuccess((comments) => {
       const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
+      const commentIds = comments.flatMap((location) => location.comments.flatMap(commentIdsInThread)).sort()
       const visibleCount = comments.reduce(
         (sum, loc) => sum + loc.comments.reduce((locationSum, thread) => locationSum + countVisibleThread(thread), 0),
         0
@@ -334,7 +351,7 @@ function CommentsSection({
 
       return (
         <div className={styles.comments}>
-          <CommentsCountReporter count={totalCount} onCountChange={onCountChange} />
+          <CommentsCountReporter onCountChange={onCountChange} snapshot={{ commentIds, count: totalCount }} />
           {comments.length === 0 && (
             <Text tone="secondary" variant="meta">
               No comments
@@ -709,6 +726,7 @@ interface OptimisticCommentCount {
   readonly baseCount: number
   readonly count: number
   readonly identity: string
+  readonly pendingCommentIds: ReadonlyArray<string>
 }
 
 const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
@@ -895,34 +913,50 @@ export function PRDetail() {
     })
   }, [authoritativeCommentCount, commentNavigationIdentity])
   const reconcileCommentCount = useCallback(
-    (count: number) => {
+    (snapshot: CommentCountSnapshot) => {
       const baseCount = pr?.commentCount ?? 0
-      setCommentCountState((current) =>
-        current?.identity === commentNavigationIdentity ? { ...current, baseCount, count } : current
-      )
+      setCommentCountState((current) => {
+        if (current?.identity !== commentNavigationIdentity) return current
+        const observedCommentIds = new Set(snapshot.commentIds)
+        const pendingCommentIds = current.pendingCommentIds.filter((commentId) => !observedCommentIds.has(commentId))
+        const count = snapshot.count + pendingCommentIds.length
+        return pendingCommentIds.length === 0 && count <= baseCount
+          ? null
+          : { ...current, baseCount, count: Math.max(baseCount, count), pendingCommentIds }
+      })
     },
     [commentNavigationIdentity, pr?.commentCount]
   )
-  const refreshCommentsAfterPublication = useCallback(() => {
-    setCommentCountState((current) => {
-      const baseCount = pr?.commentCount ?? 0
-      return current?.identity === commentNavigationIdentity
-        ? { ...current, baseCount, count: Math.max(current.count, baseCount) + 1 }
-        : {
-            baseCount,
-            count: baseCount + 1,
-            identity: commentNavigationIdentity
-          }
-    })
-    setCommentsRefreshGeneration((current) => current + 1)
-    for (const delay of [1_500, 5_000]) {
-      const timer = window.setTimeout(() => {
-        commentRefreshTimersRef.current.delete(timer)
-        setCommentsRefreshGeneration((current) => current + 1)
-      }, delay)
-      commentRefreshTimersRef.current.add(timer)
-    }
-  }, [commentNavigationIdentity, pr?.commentCount])
+  const refreshCommentsAfterPublication = useCallback(
+    (operationId: string) => {
+      const commentId = operationId.startsWith("comment:") ? operationId.slice("comment:".length) : operationId
+      setCommentCountState((current) => {
+        const baseCount = pr?.commentCount ?? 0
+        return current?.identity === commentNavigationIdentity
+          ? {
+              ...current,
+              baseCount,
+              count: Math.max(current.count, baseCount) + 1,
+              pendingCommentIds: [...current.pendingCommentIds, commentId]
+            }
+          : {
+              baseCount,
+              count: baseCount + 1,
+              identity: commentNavigationIdentity,
+              pendingCommentIds: [commentId]
+            }
+      })
+      setCommentsRefreshGeneration((current) => current + 1)
+      for (const delay of [1_500, 5_000]) {
+        const timer = window.setTimeout(() => {
+          commentRefreshTimersRef.current.delete(timer)
+          setCommentsRefreshGeneration((current) => current + 1)
+        }, delay)
+        commentRefreshTimersRef.current.add(timer)
+      }
+    },
+    [commentNavigationIdentity, pr?.commentCount]
+  )
   const refreshAfterApprovalMutation = useCallback(() => {
     if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(

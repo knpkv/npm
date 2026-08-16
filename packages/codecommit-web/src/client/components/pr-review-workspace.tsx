@@ -604,7 +604,7 @@ const ReadyReviewWorkspace = ({
   readonly comments: ReadonlyArray<ReviewCommentNavigationTarget>
   readonly diff: PullRequestDiffResponse
   readonly diffFailure: string | null
-  readonly onFindingPosted: () => void
+  readonly onFindingPosted: (operationId: string) => void
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
 }): ReactElement => {
@@ -872,7 +872,7 @@ const ReadyReviewWorkspace = ({
       setReviewFailure(null)
       setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
       try {
-        await postFindingRequest({
+        const receipt = await postFindingRequest({
           params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
           payload: {
             revisionId: review.revisionId,
@@ -881,7 +881,7 @@ const ReadyReviewWorkspace = ({
             finding
           }
         })
-        onFindingPosted()
+        onFindingPosted(receipt.operationId)
         setDispositions((current) => {
           const settlement = settleFindingPublication(
             completedReviewRef.current?.value.result.findings ?? [],
@@ -1305,7 +1305,7 @@ export const PullRequestReviewWorkspace = ({
   readonly commentsRefreshGeneration: number
   readonly commentNavigation: ReviewCommentNavigation | null
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
-  readonly onFindingPosted: () => void
+  readonly onFindingPosted: (operationId: string) => void
   readonly pullRequest: Domain.PullRequest
   readonly refreshGeneration: number
 }): ReactElement => {

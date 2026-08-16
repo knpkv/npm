@@ -58,6 +58,7 @@ const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
+  readonly commentFindingCount?: () => number
   readonly commentsGate?: (findingPostCount: number) => Promise<void>
   readonly configGate?: Promise<void>
   readonly configStatus?: number
@@ -162,7 +163,7 @@ const routeReviewWorkspace = async (
             },
             replies: []
           }]),
-          ...Array.from({ length: findingPostCount }, (_, index) => ({
+          ...Array.from({ length: options?.commentFindingCount?.() ?? findingPostCount }, (_, index) => ({
             root: {
               id: `relay-comment-${String(index + 1)}`,
               content: index === 0 ? "P2: Retry amplification" : "P3: Before-path evidence",
@@ -286,7 +287,11 @@ const routeReviewWorkspace = async (
     const finding = route.request().postDataJSON().finding
     findingPostCount += 1
     await route.fulfill({
-      body: JSON.stringify({ findingId: finding.id, operationId: "comment:123", summary: "posted" }),
+      body: JSON.stringify({
+        findingId: finding.id,
+        operationId: `comment:relay-comment-${String(findingPostCount)}`,
+        summary: "posted"
+      }),
       contentType: "application/json",
       status: 200
     })
@@ -886,22 +891,27 @@ test("settles an optimistic comment count when the provider total is unchanged",
 })
 
 test("preserves unobserved optimistic comment increments across partial provider updates", async ({ page }) => {
-  const settlement = Promise.withResolvers<void>()
+  const responsesEnabled = Promise.withResolvers<void>()
   const partialObserved = Promise.withResolvers<void>()
   const settledObserved = Promise.withResolvers<void>()
   let authoritativeCount = 0
+  let providerFindingCount = 0
   let partialReads = 0
   let settledReads = 0
   await routeReviewWorkspace(page, "review", undefined, undefined, {
     commentCount: () => {
-      if (authoritativeCount === 1 && ++partialReads >= 2) partialObserved.resolve()
-      if (authoritativeCount === 2 && ++settledReads >= 2) settledObserved.resolve()
       return authoritativeCount
     },
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve(),
+    commentFindingCount: () => {
+      if (providerFindingCount === 1 && ++partialReads >= 2) partialObserved.resolve()
+      if (providerFindingCount === 2 && ++settledReads >= 2) settledObserved.resolve()
+      return providerFindingCount
+    },
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
     emptyCommentsInitially: true
   })
   await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: /^Comments/ }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
 
   await page.getByRole("button", { name: /Retry amplification/ }).click()
@@ -912,15 +922,17 @@ test("preserves unobserved optimistic comment increments across partial provider
   await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
-  authoritativeCount = 1
+  providerFindingCount = 1
+  responsesEnabled.resolve()
   await partialObserved.promise
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
-  authoritativeCount = 2
-  await settledObserved.promise
+  authoritativeCount = 1
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
-  settlement.resolve()
+  providerFindingCount = 2
+  authoritativeCount = 2
+  await settledObserved.promise
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 })
 
@@ -1465,7 +1477,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
   expect(contentRequests.get("43:0")).toBe(1)
 
   await navigateTo("42")
-  await expect(page.getByText("PR 42")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "PR 42" })).toBeVisible()
   await page.getByRole("button", { name: /^Comments/ }).click()
   await expect(page.getByText("Comment for PR 42").last()).toBeVisible()
   await page.getByRole("button", { name: "View in diff" }).click()
