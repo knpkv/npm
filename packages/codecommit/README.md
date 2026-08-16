@@ -207,8 +207,9 @@ the selected file in VS Code.
 
 The human must explicitly choose `p` to publish one finding to CodeCommit, `a`
 to acknowledge it locally, or `x` to reject it locally. CodeCommit does not offer
-a conditional description update, so description suggestions fail closed and
-must be copied manually; this prevents overwriting concurrent author edits.
+a conditional description update, so the TUI keeps description suggestions
+local for manual copying while web Relay requests comment targets only; this
+prevents overwriting concurrent author edits.
 File-scoped findings publish as PR comments with their file anchor in the body,
 while exact changed-side line findings use provider line coordinates. Comment targets use a hexadecimal
 SHA-256 digest as their deterministic idempotency token. The canonical identity
@@ -277,10 +278,12 @@ the same-origin CSRF proof shared across tabs for that loopback origin. Do not
 publish or proxy this local HTTP listener onto another network.
 
 Each pull-request page includes an exact-revision review workbench. It indexes
-the complete CodeCommit changed-file inventory, loads the selected before/after
-content through bounded `GetBlob` reads, and renders split or stacked text with
-the diffs.com-based `@knpkv/rly` adapter. Binary, non-UTF-8, and oversized files
-remain visible in the inventory with an explicit non-renderable state. File-mode
+the complete CodeCommit changed-file inventory into a compact, collapsible path
+tree, loads the selected before/after content through bounded `GetBlob` reads,
+and renders split or stacked text with the diffs.com-based `@knpkv/rly` adapter.
+File rows use change-state icons while preserving full accessible labels.
+Binary, non-UTF-8, and oversized files remain visible in the inventory with an
+explicit non-renderable state. File-mode
 changes are shown even when the text is unchanged. A selected file above the
 5,000-line combined input or 4,000,000-line-pair diff-complexity budget uses a
 bounded fallback instead of the synchronous renderer, and inactive selected-file
@@ -291,15 +294,55 @@ rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
 revision after the server rechecks its revision ID and immutable base/head
-commits. Full, security, tests, and explanation focuses are available. The server constructs a bounded patch from
+commits. Full, security, tests, and explanation focuses are available. The
+Relay settings tab selects a default review profile and prompt-only methods
+from the built-in catalogue or bounded `SKILL.md` metadata discovered under the
+local agent, Codex, and installed-plugin skill roots. Only server-issued skill
+IDs and safe source labels cross the authenticated browser boundary; local
+filesystem paths do not. Tool and referenced-file steps remain unavailable in
+prompt-only mode. The server constructs a bounded patch from
 Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
 repository text as untrusted evidence, rejects text pairs above its 5,000-line
 or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
-no host tools or repository access. Findings are decoded into a bounded local
-deck and exact line findings appear beside the matching diff. Web Relay is advisory and read-only:
-it does not publish comments, approve, merge, or persist a review result, and a
-changed revision must be reloaded before another run.
+no host tools or repository access. Sanitized progress frames expose revision,
+file, patch, agent, and validation stages without returning hidden reasoning.
+
+Findings are decoded into a bounded local deck and exact line findings appear
+beside the matching diff. **Accept · post** immediately publishes the unchanged
+finding through the permission gate and audit log after revalidating the exact
+revision and changed-line evidence; it never grants web approval or merge
+authority. CodeCommit has no native file-comment target, so file-scoped findings
+are file-anchored PR comments, while valid line findings use the native exact
+before/after location. Publication uses a deterministic SHA-256 request token,
+making the same accepted finding idempotent. Its persisted provider representation
+is the 64-character hexadecimal digest of the UTF-8 JSON serialization of
+`["relay-web-finding-v1", region, repositoryName, pullRequestId, revisionId,
+destinationCommit, sourceCommit, findingId, priority, title, summary, details,
+recommendation, verification, publicationTarget, locationScope, filePath,
+line, side]`, in that exact order. General and file anchors use the fixed
+sentinels `""`, `-1`, and `""` for fields they do not own. Only the derived
+token is server-private and sent to/persisted by CodeCommit; neither the canonical
+preimage nor raw provider credentials cross the authenticated browser boundary.
+**Ack** and **Reject** remain local
+session decisions. A finding-specific conversation can revise or withdraw the
+complete deck, reopening changed decisions and marking an already posted but
+changed finding stale. If the source head moves, the retained deck is labeled
+stale and **Re-review latest** reconciles it against the new exact patch. Review
+findings and conversation history scroll independently while the reply composer
+remains pinned. Finding evidence is collapsed behind an explicit disclosure,
+and the discussion tray can collapse to return the full pane to findings.
+Review sessions survive reloads in the authenticated tab's
+session storage. The
+Schema-validated record is keyed by account, pull request, revision ID, and
+immutable base/head commits, retains at most 40 conversation turns, and is not
+restored for a different revision or after the tab closes.
+
+CodeCommit line comments with complete coordinates for the exact revision also
+appear beside their diff line. **View in comments** opens and focuses the full
+thread; **View in diff** on a root comment selects its changed file and returns
+to the exact before- or after-side line. General, incomplete, or stale-revision
+comments remain readable without a misleading jump target.
 
 The development launcher advertises the Vite origin while proxying bootstrap
 and API traffic to the backend with its exact loopback origin. Sandbox iframes

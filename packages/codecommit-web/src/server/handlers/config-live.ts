@@ -1,15 +1,49 @@
 import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
+import { Cause, Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
+import { discoverReviewSkills } from "../review/ReviewSkillCatalog.js"
 
 interface ConfigAccountFallback {
   readonly profile: string
   readonly regions: ReadonlyArray<string>
   readonly enabled: boolean
 }
+
+export const commitConfigMutation = Effect.fn("ConfigLive.commitConfigMutation")(function*<
+  Value,
+  MutationError,
+  MutationRequirements,
+  RefreshRequirements,
+  RefreshState extends { readonly status: string; readonly error?: string | undefined }
+>(
+  mutation: Effect.Effect<Value, MutationError, MutationRequirements>,
+  refresh: Effect.Effect<void, never, RefreshRequirements>,
+  refreshState: SubscriptionRef.SubscriptionRef<RefreshState>,
+  operation: "reset" | "save"
+): Effect.fn.Return<
+  { readonly value: Value; readonly refreshStatus: "failed" | "refreshed" },
+  MutationError,
+  MutationRequirements | RefreshRequirements
+> {
+  const value = yield* mutation
+  const refreshed = (): "refreshed" => "refreshed"
+  const failed = (): "failed" => "failed"
+  const refreshStatus = yield* refresh.pipe(
+    Effect.map(refreshed),
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterrupts(cause),
+      (cause) => Effect.logWarning(`refresh after config ${operation} failed`, cause).pipe(Effect.map(failed))
+    )
+  )
+  if (refreshStatus === "failed") return { value, refreshStatus }
+  const state = yield* SubscriptionRef.get(refreshState)
+  if (state.status !== "error") return { value, refreshStatus }
+  yield* Effect.logWarning(`refresh after config ${operation} completed in error state`, state.error)
+  return { value, refreshStatus: "failed" }
+})
 
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
   Effect.gen(function*() {
@@ -27,12 +61,14 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
                   autoDetect: true,
                   autoRefresh: true,
                   refreshIntervalSeconds: 300,
+                  review: ConfigService.defaultReviewConfig,
                   sandbox: ConfigService.defaultSandboxConfig
                 } satisfies {
                   readonly accounts: ReadonlyArray<ConfigAccountFallback>
                   readonly autoDetect: boolean
                   readonly autoRefresh: boolean
                   readonly refreshIntervalSeconds: number
+                  readonly review: typeof ConfigService.defaultReviewConfig
                   readonly sandbox: typeof ConfigService.defaultSandboxConfig
                 }
               ))
@@ -48,6 +84,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             autoRefresh: config.autoRefresh,
             refreshIntervalSeconds: config.refreshIntervalSeconds,
             currentUser: state.currentUser,
+            review: config.review,
             sandbox: config.sandbox
           }
         }).pipe(Effect.orDie))
@@ -61,7 +98,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               Effect.map((s) =>
                 Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               ),
-              Effect.catchIf(() => true, () => Effect.succeed(undefined))
+              Effect.option,
+              Effect.map(Option.getOrUndefined)
             )
             : undefined
           return { path, exists, modifiedAt }
@@ -78,7 +116,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
                 size: Number(s.size),
                 modifiedAt: Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               })),
-              Effect.catchIf(() => true, () => Effect.succeed(undefined))
+              Effect.option,
+              Effect.map(Option.getOrUndefined)
             )
             : undefined
           return { path, sizeBytes: stat?.size ?? 0, exists, modifiedAt: stat?.modifiedAt }
@@ -88,10 +127,21 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
           const result = yield* configService.validate
           return { status: result.status, path: result.path, errors: result.errors }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
+      .handle("reviewSkills", () =>
+        discoverReviewSkills().pipe(
+          Effect.map((skills) =>
+            skills.map(({ description, id, name, source }) => ({ id, name, description, source }))
+          ),
+          Effect.mapError((e) => new ApiError({ message: Predicate.isError(e) ? e.message : String(e) }))
+        ))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const existing = yield* configService.load.pipe(
-            Effect.catchIf(() => true, () => Effect.succeed({ sandbox: ConfigService.defaultSandboxConfig }))
+            Effect.catchIf(() => true, () =>
+              Effect.succeed({
+                review: ConfigService.defaultReviewConfig,
+                sandbox: ConfigService.defaultSandboxConfig
+              }))
           )
           const accounts = yield* Effect.forEach(payload.accounts, (a) =>
             Effect.all({
@@ -99,17 +149,21 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               regions: Effect.forEach(a.regions, (r) => Schema.decodeEffect(AwsRegion)(r)),
               enabled: Effect.succeed(a.enabled)
             }))
-          yield* configService.save({
-            accounts,
-            autoDetect: payload.autoDetect,
-            autoRefresh: payload.autoRefresh,
-            refreshIntervalSeconds: payload.refreshIntervalSeconds,
-            sandbox: payload.sandbox ?? existing.sandbox
-          })
-          yield* prService.refresh.pipe(
-            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config save failed", e))
+          const review = yield* Schema.decodeEffect(ConfigService.ReviewConfig)(payload.review ?? existing.review)
+          const outcome = yield* commitConfigMutation(
+            configService.save({
+              accounts,
+              autoDetect: payload.autoDetect,
+              autoRefresh: payload.autoRefresh,
+              refreshIntervalSeconds: payload.refreshIntervalSeconds,
+              review,
+              sandbox: payload.sandbox ?? existing.sandbox
+            }),
+            prService.refresh,
+            prService.state,
+            "save"
           )
-          return "ok"
+          return outcome.refreshStatus === "failed" ? "saved-refresh-failed" : "saved"
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("reset", () =>
         Effect.gen(function*() {
@@ -120,13 +174,17 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               return Effect.succeed(backupPath)
             })
           )
-          const config = yield* configService.reset
-          yield* prService.refresh.pipe(
-            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config reset failed", e))
+          const outcome = yield* commitConfigMutation(
+            configService.reset,
+            prService.refresh,
+            prService.state,
+            "reset"
           )
+          const config = outcome.value
           const state = yield* SubscriptionRef.get(prService.state)
           return {
             backupPath,
+            refreshStatus: outcome.refreshStatus,
             config: {
               accounts: config.accounts.map((a) => ({
                 profile: a.profile,
@@ -137,6 +195,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               autoRefresh: config.autoRefresh,
               refreshIntervalSeconds: config.refreshIntervalSeconds,
               currentUser: state.currentUser,
+              review: config.review,
               sandbox: config.sandbox
             }
           }

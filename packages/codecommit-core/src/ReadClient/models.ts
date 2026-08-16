@@ -10,6 +10,7 @@ import { Schema } from "effect"
 import { AwsProfileName, AwsRegion, PullRequestId, RepositoryName } from "../Domain.js"
 
 const NonEmptyString = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+const NonEmptyPath = Schema.String.check(Schema.isNonEmpty())
 
 /** Maximum blob content retained by one CodeCommit read. */
 export const CODECOMMIT_BLOB_MAXIMUM_BYTES = 1_048_576
@@ -125,7 +126,7 @@ export class CodeCommitBlobMetadata extends Schema.Class<CodeCommitBlobMetadata>
   "CodeCommitBlobMetadata"
 )({
   blobId: CodeCommitBlobId,
-  path: NonEmptyString,
+  path: NonEmptyPath,
   mode: NonEmptyString
 }) {}
 

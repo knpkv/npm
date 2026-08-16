@@ -1,14 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
+import { ConfigService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import { Deferred, Duration, Effect, Fiber, Redacted, Ref, Result, Stream } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Redacted, Ref, Result, Stream, SubscriptionRef } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
-import { makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
+import { commitConfigMutation } from "../src/server/handlers/config-live.js"
+import { encodeClientVisibleCommentLocations, makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
   activateOwnerSessionBootstrap,
@@ -22,9 +23,10 @@ import {
   requireLoopbackOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
+import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
-  function*(active = true): Effect.fn.Return<OwnerSessionSecretsContract> {
+  function*(active: boolean = true): Effect.fn.Return<OwnerSessionSecretsContract> {
     return {
       ownerToken: Redacted.make("owner-secret"),
       csrfToken: Redacted.make("csrf-secret"),
@@ -124,6 +126,255 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
 })
 
 describe("CodeCommit web security boundary", () => {
+  it.effect("keeps a committed config mutation successful when its refresh fails", () =>
+    Effect.gen(function*() {
+      const originalReview = ConfigService.defaultReviewConfig
+      const updatedReview = {
+        defaultProfileId: "quick",
+        profiles: [{ id: "quick", name: "Quick review", kind: "review", skillIds: [] }]
+      } satisfies ConfigService.ReviewConfig
+      const persisted = yield* Ref.make(originalReview)
+      const refreshCalls = yield* Ref.make(0)
+      const refreshState = yield* SubscriptionRef.make<
+        { readonly status: string; readonly error?: string | undefined }
+      >(
+        { status: "idle" }
+      )
+      const refreshFailure = Ref.update(refreshCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.die("refresh defect"))
+      )
+
+      const committed = yield* commitConfigMutation(
+        Ref.set(persisted, updatedReview),
+        refreshFailure,
+        refreshState,
+        "save"
+      ).pipe(Effect.result)
+
+      expect(Result.isSuccess(committed)).toBe(true)
+      if (Result.isSuccess(committed)) expect(committed.success.refreshStatus).toBe("failed")
+      expect(yield* Ref.get(persisted)).toEqual(updatedReview)
+      expect(yield* Ref.get(refreshCalls)).toBe(1)
+
+      const rejected = yield* commitConfigMutation(
+        Effect.fail("write rejected"),
+        Ref.update(refreshCalls, (count) => count + 1),
+        refreshState,
+        "save"
+      ).pipe(Effect.result)
+
+      expect(Result.isFailure(rejected)).toBe(true)
+      expect(yield* Ref.get(persisted)).toEqual(updatedReview)
+      expect(yield* Ref.get(refreshCalls)).toBe(1)
+
+      const stateFailure = yield* commitConfigMutation(
+        Effect.void,
+        SubscriptionRef.set(refreshState, { status: "error", error: "provider timeout" }),
+        refreshState,
+        "reset"
+      )
+      expect(stateFailure.refreshStatus).toBe("failed")
+
+      const refreshed = yield* commitConfigMutation(
+        Effect.void,
+        SubscriptionRef.set(refreshState, { status: "idle" }),
+        refreshState,
+        "save"
+      )
+      expect(refreshed.refreshStatus).toBe("refreshed")
+
+      const interrupted = yield* commitConfigMutation(
+        Effect.void,
+        Effect.interrupt,
+        refreshState,
+        "save"
+      ).pipe(Effect.exit)
+      expect(Exit.isFailure(interrupted)).toBe(true)
+      if (Exit.isFailure(interrupted)) expect(Cause.hasInterruptsOnly(interrupted.cause)).toBe(true)
+    }))
+
+  it("removes only owned Relay reconciliation markers from client-visible comments", () => {
+    const token = "a".repeat(64)
+    const encoded = encodeClientVisibleCommentLocations([
+      {
+        comments: [
+          {
+            root: new Domain.PRComment({
+              id: Domain.CommentId.make("comment-1"),
+              content: `Finding\n\n<!-- knpkv-codecommit-review:${token} -->`,
+              author: "relay",
+              creationDate: new Date("2026-08-12T10:00:00.000Z"),
+              deleted: false
+            }),
+            replies: [
+              {
+                root: new Domain.PRComment({
+                  id: Domain.CommentId.make("comment-2"),
+                  content: "Keep unrelated <!-- review:markup --> unchanged",
+                  author: "reviewer",
+                  creationDate: new Date("2026-08-12T10:01:00.000Z"),
+                  deleted: false
+                }),
+                replies: []
+              }
+            ]
+          }
+        ]
+      }
+    ])
+
+    const serialized = JSON.stringify(encoded)
+    expect(serialized).not.toContain(token)
+    expect(encoded[0]?.comments[0]?.root.content).toBe("Finding")
+    expect(encoded[0]?.comments[0]?.replies[0]?.root.content).toBe(
+      "Keep unrelated <!-- review:markup --> unchanged"
+    )
+  })
+
+  it.effect("permission-gates and audits Relay publication before the provider write", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(0)
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.as(new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" }))
+          ),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("deny"))),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const result = yield* publisher.post({
+        _tag: "comment",
+        target: {
+          account: readAccount,
+          repositoryName: Domain.RepositoryName.make("payments"),
+          pullRequestId: Domain.PullRequestId.make("42"),
+          revisionId: "revision-1",
+          sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+          destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+          destinationReference: "refs/heads/main"
+        },
+        content: "Finding",
+        clientRequestToken: "relay-finding-1"
+      }).pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+      expect(yield* Ref.get(calls)).toBe(0)
+      expect(yield* Ref.get(auditEntries)).toEqual([
+        expect.objectContaining({ operation: "postPullRequestComment", permissionState: "denied" })
+      ])
+    }))
+
+  it.effect("identifies the exact AWS target in Relay publication prompts", () =>
+    Effect.gen(function*() {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Effect.succeed(new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" })),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("allow"))),
+        Effect.provideService(
+          PermissionGate,
+          PermissionGate.of({
+            request: ({ context }) =>
+              Ref.update(prompts, (current) => [...current, context]).pipe(Effect.as("allow_once"))
+          })
+        ),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const action = (profile: string, region: string, repositoryName: string) =>
+        ({
+          _tag: "comment",
+          target: {
+            account: {
+              profile: Domain.AwsProfileName.make(profile),
+              region: Domain.AwsRegion.make(region)
+            },
+            repositoryName: Domain.RepositoryName.make(repositoryName),
+            pullRequestId: Domain.PullRequestId.make("42"),
+            revisionId: "revision-1",
+            sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+            destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+            destinationReference: "refs/heads/main"
+          },
+          content: "Finding",
+          clientRequestToken: `relay-${profile}-${repositoryName}`
+        }) satisfies Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>
+
+      yield* publisher.post(action("production", "eu-west-1", "payments"))
+      yield* publisher.post(action("staging", "us-east-1", "ledger"))
+
+      expect(yield* Ref.get(prompts)).toEqual([
+        "Post Relay finding to production/eu-west-1/payments PR #42",
+        "Post Relay finding to staging/us-east-1/ledger PR #42"
+      ])
+    }))
+
+  it.effect("records provider success and failure outcomes for Relay publication", () =>
+    Effect.gen(function*() {
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const attempts = yield* Ref.make(0)
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Ref.getAndUpdate(attempts, (attempt) => attempt + 1).pipe(
+            Effect.flatMap((attempt) =>
+              attempt === 0
+                ? Effect.succeed(
+                  new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" })
+                )
+                : Effect.fail(
+                  new AwsApiError({
+                    operation: "postPullRequestComment",
+                    profile: readAccount.profile,
+                    region: readAccount.region,
+                    cause: new Error("provider unavailable")
+                  })
+                )
+            )
+          ),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("always_allow"))),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const action = {
+        _tag: "comment",
+        target: {
+          account: readAccount,
+          repositoryName: Domain.RepositoryName.make("payments"),
+          pullRequestId: Domain.PullRequestId.make("42"),
+          revisionId: "revision-1",
+          sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+          destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+          destinationReference: "refs/heads/main"
+        },
+        content: "Finding",
+        clientRequestToken: "relay-finding-1"
+      } satisfies Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>
+
+      yield* publisher.post(action)
+      expect(Exit.isFailure(yield* Effect.exit(publisher.post(action)))).toBe(true)
+      expect((yield* Ref.get(auditEntries)).map(({ context }) => context)).toEqual([
+        "Post Relay finding to production/eu-west-1/payments PR #42 · provider succeeded",
+        "Post Relay finding to production/eu-west-1/payments PR #42 · provider failed"
+      ])
+    }))
+
   it("attaches owner authentication to every API endpoint", () => {
     let checked = 0
     for (const group of Object.values(CodeCommitApi.groups)) {

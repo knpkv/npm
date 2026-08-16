@@ -1,5 +1,5 @@
 import { HomeDirectoryLive, isTokenExpired } from "@knpkv/atlassian-common/profile-storage"
-import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
+import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService/detectProfiles.js"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -542,11 +542,11 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
   pluginConnections: PluginConnectionMapV1 | null,
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
-  allowTransactionallyEnabled = false
+  allowTransactionallyEnabled: boolean = false
 ) {
   const record = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
   const startedAt = yield* Clock.currentTimeNanos
-  if (!record.isEnabled && !allowTransactionallyEnabled) {
+  if (record.isEnabled !== true && !allowTransactionallyEnabled) {
     return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,

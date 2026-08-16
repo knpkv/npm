@@ -5,6 +5,7 @@ import type * as PlatformError from "effect/PlatformError"
 import { inspectRlyCssTokens, type RlyCssTokenViolation } from "./rlyCssTokens.js"
 
 export const RLY_CSS_TOKEN_SOURCE_ROOTS: ReadonlyArray<string> = [
+  "packages/codecommit-web/src",
   "packages/control-center/src",
   "packages/rly/src"
 ]
@@ -34,7 +35,7 @@ export interface RlyCssTokenWorkspaceInspection {
   readonly violations: ReadonlyArray<RlyCssTokenViolation>
 }
 
-/** Inspect every rly and Control Center production stylesheet against one generated token contract. */
+/** Inspect every Rly stylesheet and application consumer against one generated token contract. */
 export const inspectRlyCssTokenWorkspace = Effect.fn("workspace.inspectRlyCssTokenWorkspace")(
   function*(
     workspaceRoot: string,

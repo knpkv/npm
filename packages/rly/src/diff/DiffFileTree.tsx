@@ -1,4 +1,5 @@
-import { type ComponentPropsWithRef, type ReactElement, useId } from "react"
+import { CircleAlert, FilePenLine, FilePlus2, FileSymlink, FileX2, LoaderCircle } from "lucide-react"
+import { type ComponentPropsWithRef, type ReactElement, useEffect, useId, useMemo, useState } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import styles from "./DiffFileTree.module.css"
 
@@ -60,15 +61,33 @@ const contentLabel = (content: RlyDiffFileContent): string => {
   return `${content.state}: ${requireText(content.reason, `DiffFileTree ${content.state} reason`)}`
 }
 
+const visibleGitPath = (path: string): string =>
+  path
+    .split("/")
+    .map((segment) => (segment !== segment.trim() || /[\t\n\v\f\r]/u.test(segment) ? JSON.stringify(segment) : segment))
+    .join("/")
+
+const requireGitPath = (path: string, label: string): string => {
+  if (path.length === 0) throw new Error(`${label} must not be empty`)
+  return path
+}
+
+const changeIcons = {
+  added: FilePlus2,
+  deleted: FileX2,
+  modified: FilePenLine,
+  renamed: FileSymlink
+} satisfies Record<RlyDiffFileChange, typeof FilePlus2>
+
 const validateInventory = (data: RlyDiffInventory): void => {
   const ids = new Set<string>()
   for (const file of data.files) {
     const id = requireText(file.id, "DiffFileTree file id")
     if (ids.has(id)) throw new Error(`DiffFileTree file ids must be unique: ${id}`)
     ids.add(id)
-    const path = requireText(file.path, `DiffFileTree path for ${id}`)
+    const path = requireGitPath(file.path, `DiffFileTree path for ${id}`)
     if (file.change === "renamed") {
-      const previousPath = requireText(file.previousPath, `DiffFileTree previousPath for ${id}`)
+      const previousPath = requireGitPath(file.previousPath, `DiffFileTree previousPath for ${id}`)
       if (previousPath === path) throw new Error(`DiffFileTree renamed paths must differ: ${id}`)
     }
     contentLabel(file.content)
@@ -89,6 +108,65 @@ const validateInventory = (data: RlyDiffInventory): void => {
   }
 }
 
+interface TreeFile {
+  readonly file: RlyDiffFile
+  readonly segments: ReadonlyArray<string>
+}
+
+type FileTreeNode =
+  | {
+      readonly children: ReadonlyArray<FileTreeNode>
+      readonly fileCount: number
+      readonly kind: "directory"
+      readonly name: string
+      readonly path: string
+    }
+  | {
+      readonly file: RlyDiffFile
+      readonly kind: "file"
+      readonly name: string
+    }
+
+const compactDirectory = (node: Extract<FileTreeNode, { readonly kind: "directory" }>): FileTreeNode => {
+  if (node.children.length !== 1 || node.children[0]?.kind !== "directory") return node
+  const child = node.children[0]
+  return compactDirectory({
+    ...child,
+    name: `${node.name}/${child.name}`
+  })
+}
+
+const buildFileTree = (files: ReadonlyArray<TreeFile>, depth = 0): ReadonlyArray<FileTreeNode> => {
+  const leaves: Array<FileTreeNode> = []
+  const directories = new Map<string, Array<TreeFile>>()
+  for (const treeFile of files) {
+    const segment = treeFile.segments[depth]
+    if (segment === undefined) continue
+    if (depth === treeFile.segments.length - 1) {
+      leaves.push({ file: treeFile.file, kind: "file", name: segment })
+      continue
+    }
+    const grouped = directories.get(segment) ?? []
+    grouped.push(treeFile)
+    directories.set(segment, grouped)
+  }
+  const branches = Array.from(directories, ([name, grouped]) =>
+    compactDirectory({
+      children: buildFileTree(grouped, depth + 1),
+      fileCount: grouped.length,
+      kind: "directory",
+      name,
+      path: grouped[0]!.segments.slice(0, depth + 1).join("/")
+    })
+  )
+  return [...branches, ...leaves]
+}
+
+const directoryAncestors = (path: string): ReadonlySet<string> => {
+  const segments = path.split("/")
+  return new Set(segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join("/")))
+}
+
 /** Render every indexed path as a lightweight row without instantiating file content renderers. */
 export const DiffFileTree = ({
   className,
@@ -106,6 +184,100 @@ export const DiffFileTree = ({
   const headingId = `rly-diff-file-tree-${useId()}`
   const indexedCount = data.state === "ready" ? data.files.length : data.indexedCount
   const totalCount = data.state === "ready" ? data.files.length : data.totalCount
+  const tree = useMemo(
+    () =>
+      buildFileTree(
+        data.files.map((file) => ({
+          file,
+          segments: file.path.split("/")
+        }))
+      ),
+    [data.files]
+  )
+  const [collapsedDirectories, setCollapsedDirectories] = useState<ReadonlySet<string>>(() => new Set())
+  const selectedPath = data.files.find(({ id }) => id === selectedFileId)?.path
+
+  useEffect(() => {
+    if (selectedPath === undefined) return
+    const ancestors = directoryAncestors(selectedPath)
+    setCollapsedDirectories((current) => {
+      if (![...current].some((path) => ancestors.has(path))) return current
+      return new Set([...current].filter((path) => !ancestors.has(path)))
+    })
+  }, [selectedPath])
+
+  const renderNodes = (nodes: ReadonlyArray<FileTreeNode>): ReadonlyArray<ReactElement> =>
+    nodes.map((node) => {
+      if (node.kind === "file") {
+        const isSelected = selectedFileId === node.file.id
+        const ChangeIcon = changeIcons[node.file.change]
+        const exceptionalContent = node.file.content.state === "ready" ? null : contentLabel(node.file.content)
+        return (
+          <li data-rly-diff-file-id={node.file.id} key={node.file.id}>
+            <button
+              aria-current={isSelected ? "true" : undefined}
+              aria-label={`${visibleGitPath(node.file.path)}, ${node.file.change}, ${contentLabel(node.file.content)}`}
+              className={style("file")}
+              data-rly-diff-content-state={node.file.content.state}
+              data-rly-diff-file-change={node.file.change}
+              onClick={() => onSelectedFileChange(node.file.id)}
+              type="button"
+            >
+              <span className={style("pathBlock")} style={{ paddingInlineStart: "var(--rly-space-20)" }}>
+                {node.file.change === "renamed" ? (
+                  <span className={style("previousPath")}>{visibleGitPath(node.file.previousPath)}</span>
+                ) : null}
+                <code className={style("path")}>{visibleGitPath(node.name)}</code>
+              </span>
+              <span className={style("statusIcons")}>
+                <span aria-hidden="true" className={style("statusIcon")} title={node.file.change}>
+                  <ChangeIcon />
+                </span>
+                {exceptionalContent === null ? null : (
+                  <span aria-hidden="true" className={style("statusIcon")} title={exceptionalContent}>
+                    {node.file.content.state === "loading" ? (
+                      <LoaderCircle className={style("loadingIcon")} />
+                    ) : (
+                      <CircleAlert />
+                    )}
+                  </span>
+                )}
+              </span>
+            </button>
+          </li>
+        )
+      }
+      const expanded = !collapsedDirectories.has(node.path)
+      return (
+        <li className={style("directory")} data-rly-diff-directory={node.path} key={`directory:${node.path}`}>
+          <button
+            aria-expanded={expanded}
+            aria-label={`${visibleGitPath(node.name)}, directory, ${node.fileCount} changed ${
+              node.fileCount === 1 ? "file" : "files"
+            }`}
+            className={style("directoryButton")}
+            onClick={() =>
+              setCollapsedDirectories((current) => {
+                const next = new Set(current)
+                if (expanded) next.add(node.path)
+                else next.delete(node.path)
+                return next
+              })
+            }
+            type="button"
+          >
+            <span aria-hidden="true" className={style("chevron")} />
+            <code className={style("directoryName")}>{visibleGitPath(node.name)}</code>
+            <span className={style("directoryCount")}>{node.fileCount}</span>
+          </button>
+          {expanded ? (
+            <ol className={style("group")} style={{ marginInlineStart: "var(--rly-space-16)" }}>
+              {renderNodes(node.children)}
+            </ol>
+          ) : null}
+        </li>
+      )
+    })
 
   return (
     <nav
@@ -140,38 +312,7 @@ export const DiffFileTree = ({
       {data.files.length === 0 ? (
         <p className={style("empty")}>No changed files.</p>
       ) : (
-        <ol className={style("list")}>
-          {data.files.map((file, index) => {
-            const isSelected = selectedFileId === file.id
-            return (
-              <li data-rly-diff-file-id={file.id} key={file.id}>
-                <button
-                  aria-current={isSelected ? "true" : undefined}
-                  aria-label={`File ${index + 1} of ${totalCount}: ${file.path}, ${file.change}, ${contentLabel(file.content)}`}
-                  className={style("file")}
-                  data-rly-diff-content-state={file.content.state}
-                  data-rly-diff-file-change={file.change}
-                  onClick={() => onSelectedFileChange(file.id)}
-                  type="button"
-                >
-                  <span aria-hidden="true" className={style("index")}>
-                    {index + 1}
-                  </span>
-                  <span className={style("pathBlock")}>
-                    {file.change === "renamed" ? (
-                      <span className={style("previousPath")}>{file.previousPath}</span>
-                    ) : null}
-                    <code className={style("path")}>{file.path}</code>
-                  </span>
-                  <span className={style("badges")}>
-                    <span className={style("change")}>{file.change}</span>
-                    <span className={style("content")}>{contentLabel(file.content)}</span>
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ol>
+        <ol className={style("list")}>{renderNodes(tree)}</ol>
       )}
     </nav>
   )

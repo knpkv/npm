@@ -80,6 +80,11 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
+import {
+  type ReviewCommentNavigation,
+  type ReviewCommentNavigationTarget,
+  reviewCommentNavigationTarget
+} from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
 import { Badge } from "./ui/badge.js"
@@ -128,17 +133,48 @@ const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonE
   return Math.min(...loc.comments.map((t) => new Date(t.root.creationDate).getTime()))
 }
 
-const countThread = (t: CommentThreadJsonEncoded): number => 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
+const countThread = (thread: CommentThreadJsonEncoded): number =>
+  1 + thread.replies.reduce((sum, reply) => sum + countThread(reply), 0)
+
+const countVisibleThread = (thread: CommentThreadJsonEncoded): number =>
+  thread.root.deleted ? 0 : 1 + thread.replies.reduce((sum, reply) => sum + countVisibleThread(reply), 0)
+
+const commentIdsInThread = (thread: CommentThreadJsonEncoded): ReadonlyArray<string> => [
+  thread.root.id,
+  ...thread.replies.flatMap(commentIdsInThread)
+]
+
+interface CommentCountSnapshot {
+  readonly commentIds: ReadonlyArray<string>
+  readonly count: number
+}
+
+function CommentsCountReporter({
+  onCountChange,
+  snapshot
+}: {
+  readonly snapshot: CommentCountSnapshot
+  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
+}) {
+  const lastSnapshotKeyRef = useRef("")
+  useEffect(() => {
+    const snapshotKey = `${String(snapshot.count)}:${snapshot.commentIds.join("\u0000")}`
+    if (lastSnapshotKeyRef.current === snapshotKey) return
+    lastSnapshotKeyRef.current = snapshotKey
+    onCountChange(snapshot)
+  })
+  return null
+}
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  if (!score) return null
+  if (score === undefined) return null
   const tier = getScoreTier(score.total)
 
   return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
 function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
-  if (!score) {
+  if (score === undefined) {
     return (
       <Text tone="secondary" variant="meta">
         Waiting for comment count…
@@ -187,16 +223,57 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
   )
 }
 
-function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEncoded; readonly depth: number }) {
+interface CommentLocationCoordinates {
+  readonly afterCommitId?: string | undefined
+  readonly beforeCommitId?: string | undefined
+  readonly filePath?: string | undefined
+  readonly relativeFileVersion?: "AFTER" | "BEFORE" | undefined
+}
+
+function CommentThread({
+  depth,
+  location,
+  navigation,
+  onNavigateToDiff,
+  thread,
+  visible
+}: {
+  readonly thread: CommentThreadJsonEncoded
+  readonly depth: number
+  readonly location: CommentLocationCoordinates
+  readonly navigation: ReviewCommentNavigation | null
+  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
+  readonly visible: boolean
+}) {
+  const target = depth === 0 ? reviewCommentNavigationTarget(location, thread.root) : null
+  const active = navigation?.destination === "comment" && navigation.target.commentId === thread.root.id
+  const articleRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!active || !visible || articleRef.current === null) return
+    articleRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
+    articleRef.current.focus({ preventScroll: true })
+  }, [active, visible])
+
   if (thread.root.deleted) return null
 
   return (
-    <article className={depth > 0 ? styles.commentReply : styles.comment}>
+    <article
+      className={depth > 0 ? styles.commentReply : styles.comment}
+      data-active={active ? "true" : undefined}
+      ref={articleRef}
+      tabIndex={active ? -1 : undefined}
+    >
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
           <strong>{thread.root.author}</strong>
           <span aria-hidden="true">·</span>
           <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          {target === null ? null : (
+            <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
+              <CodeIcon aria-hidden="true" /> View in diff
+            </button>
+          )}
         </div>
         <div
           className={`${styles.markdown ?? ""} prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto`}
@@ -207,18 +284,41 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
         </div>
       </div>
       {thread.replies.map((reply) => (
-        <CommentThread key={reply.root.id} thread={reply} depth={depth + 1} />
+        <CommentThread
+          depth={depth + 1}
+          key={reply.root.id}
+          location={location}
+          navigation={navigation}
+          onNavigateToDiff={onNavigateToDiff}
+          thread={reply}
+          visible={visible}
+        />
       ))}
     </article>
   )
 }
 
-function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
+function CommentsSection({
+  commentsRefreshGeneration,
+  navigation,
+  onCountChange,
+  onNavigateToDiff,
+  pr,
+  visible
+}: {
+  readonly commentsRefreshGeneration: number
+  readonly navigation: ReviewCommentNavigation | null
+  readonly onCountChange: (snapshot: CommentCountSnapshot) => void
+  readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
+  readonly pr: Domain.PullRequest
+  readonly visible: boolean
+}) {
   const commentsResult = useComments({
     pullRequestId: pr.id,
     repositoryName: pr.repositoryName,
     profile: pr.account.profile,
-    region: pr.account.region
+    region: pr.account.region,
+    refreshGeneration: commentsRefreshGeneration
   })
 
   return AsyncResult.builder(commentsResult)
@@ -248,15 +348,21 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
     ))
     .onSuccess((comments) => {
       const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
+      const commentIds = comments.flatMap((location) => location.comments.flatMap(commentIdsInThread)).sort()
+      const visibleCount = comments.reduce(
+        (sum, loc) => sum + loc.comments.reduce((locationSum, thread) => locationSum + countVisibleThread(thread), 0),
+        0
+      )
 
       return (
         <div className={styles.comments}>
+          <CommentsCountReporter onCountChange={onCountChange} snapshot={{ commentIds, count: totalCount }} />
           {comments.length === 0 && (
             <Text tone="secondary" variant="meta">
               No comments
             </Text>
           )}
-          {totalCount > 0 && (
+          {visibleCount > 0 && (
             <div className={styles.commentLocations}>
               {[...comments]
                 .sort((a, b) => earliestDate(b) - earliestDate(a))
@@ -264,7 +370,15 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
                   <section className={styles.commentLocation} key={loc.filePath ?? `loc-${i}`}>
                     {loc.filePath && <code className={styles.commentPath}>{loc.filePath}</code>}
                     {loc.comments.map((thread) => (
-                      <CommentThread key={thread.root.id} thread={thread} depth={0} />
+                      <CommentThread
+                        depth={0}
+                        key={thread.root.id}
+                        location={loc}
+                        navigation={navigation}
+                        onNavigateToDiff={onNavigateToDiff}
+                        thread={thread}
+                        visible={visible}
+                      />
                     ))}
                     {i < comments.length - 1 && <Separator className="my-2" />}
                   </section>
@@ -302,7 +416,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     allComments.sort((a, b) => a.date.getTime() - b.date.getTime())
 
     const firstComment = allComments.find((c) => c.author !== pr.author)
-    const commentMs = firstComment ? firstComment.date.getTime() - pr.creationDate.getTime() : null
+    const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
     const hasNonAuthorApproval = pr.isApproved && pr.approvedBy.some((a) => a !== pr.author)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
@@ -312,7 +426,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     for (let i = 0; i < allComments.length; i++) {
       if (allComments[i]!.author !== pr.author) {
         const reply = allComments.slice(i + 1).find((c) => c.author === pr.author)
-        if (reply) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
+        if (reply !== undefined) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
       }
     }
     const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
@@ -350,13 +464,21 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
 function CollapsibleSection({
   children,
   count,
+  keepMounted = false,
+  openRequestKey,
   title
 }: {
   readonly title: string
   readonly count?: number
-  readonly children: React.ReactNode
+  readonly keepMounted?: boolean
+  readonly openRequestKey?: string
+  readonly children: (open: boolean) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (openRequestKey !== undefined) setOpen(true)
+  }, [openRequestKey])
+  const content = children(open)
   return (
     <Surface as="section" className={styles.disclosure} padding="none" form="grouped">
       <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
@@ -364,7 +486,11 @@ function CollapsibleSection({
         <span>{title}</span>
         {count !== undefined && <small>{count}</small>}
       </button>
-      {open && <div className={styles.disclosureContent}>{children}</div>}
+      {(open || keepMounted) && (
+        <div className={styles.disclosureContent} hidden={!open}>
+          {content}
+        </div>
+      )}
     </Surface>
   )
 }
@@ -374,7 +500,7 @@ const OPTIONAL_RULE_NAME = "Optional approvers"
 
 export const normalizeApproverIdentity = (input: string, repoAccountId: string): string | undefined => {
   const trimmed = input.trim()
-  if (!trimmed || !repoAccountId) return undefined
+  if (trimmed.length === 0 || repoAccountId.length === 0) return undefined
   return trimmed.startsWith("CodeCommitApprovers:") ? trimmed : `CodeCommitApprovers:${repoAccountId}:${trimmed}`
 }
 
@@ -427,7 +553,7 @@ function ApproversCard({
   const allPoolMembers = useMemo(() => {
     const set = new Set<string>()
     for (const rule of approvalRules) {
-      if (rule.fromTemplate || rule.ruleName === ruleName) {
+      if (rule.fromTemplate !== undefined || rule.ruleName === ruleName) {
         for (const m of rule.poolMembers) set.add(m)
       }
     }
@@ -435,7 +561,7 @@ function ApproversCard({
   }, [approvalRules, ruleName])
 
   // Find the managed rule by name (non-template rule we can edit)
-  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && !r.fromTemplate)
+  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
 
@@ -445,13 +571,13 @@ function ApproversCard({
     [knownUserArns, allPoolMembers, pendingAdd]
   )
 
-  const prefix = repoAccountId ? `CodeCommitApprovers:${repoAccountId}:` : ""
+  const prefix = repoAccountId.length > 0 ? `CodeCommitApprovers:${repoAccountId}:` : ""
 
   const handleAdd = (input: string) => {
     const value = normalizeApproverIdentity(input, repoAccountId)
-    if (!value) return
+    if (value === undefined) return
     const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(value)
-    optimistic.add(nameMatch ? nameMatch[1]! : input)
+    optimistic.add(nameMatch !== null ? nameMatch[1]! : input)
     onSetApprovers([...managedArns, value])
     setShowPicker(false)
   }
@@ -523,18 +649,18 @@ function ApproversCard({
                     className={`${controlProps.className} ${styles.approverInput ?? ""}`}
                     onChange={(event) => setManualArn(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && manualArn.trim()) {
+                      if (event.key === "Enter" && manualArn.trim().length > 0 && prefix.length > 0) {
                         handleAdd(manualArn.trim())
                         setManualArn("")
                       }
                     }}
-                    placeholder={prefix ? `${prefix}USERNAME` : "username"}
+                    placeholder={prefix.length > 0 ? `${prefix}USERNAME` : "username"}
                     value={manualArn}
                   />
                 )}
               </Field>
               <RlyButton
-                disabled={!manualArn.trim() || !prefix}
+                disabled={manualArn.trim().length === 0 || prefix.length === 0}
                 onClick={() => {
                   handleAdd(manualArn.trim())
                   setManualArn("")
@@ -547,7 +673,7 @@ function ApproversCard({
             </div>
           </div>
         )}
-        {!showPicker && prefix && addable.length > 0 && (
+        {!showPicker && prefix.length > 0 && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
             <Text tone="tertiary" variant="meta">
               Suggested
@@ -609,6 +735,13 @@ interface PullRequestDecisionPresentation {
   readonly verdict: string
 }
 
+interface OptimisticCommentCount {
+  readonly baseCount: number
+  readonly count: number
+  readonly identity: string
+  readonly pendingCommentIds: ReadonlyArray<string>
+}
+
 const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
   switch (pr.status) {
     case "MERGED":
@@ -659,7 +792,7 @@ export function PRDetail() {
   const fetchedRef = useRef<string | null>(null)
   const pr = useMemo(
     () =>
-      prId
+      prId !== undefined && prId.length > 0
         ? (state.pullRequests.find(
             (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
           ) ?? null)
@@ -675,9 +808,9 @@ export function PRDetail() {
     // All users stamped with currentAcct — approval pools reference the PR's repo account.
     // If same username exists across accounts, first-seen wins (acceptable for single-org use).
     const addUser = (name: string) => {
-      if (!name || name === "*") return
+      if (name.length === 0 || name === "*") return
       if (!map.has(name)) {
-        map.set(name, currentAcct ? `CodeCommitApprovers:${currentAcct}:${name}` : name)
+        map.set(name, currentAcct.length > 0 ? `CodeCommitApprovers:${currentAcct}:${name}` : name)
       }
     }
     for (const p of state.pullRequests) {
@@ -693,7 +826,8 @@ export function PRDetail() {
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
-    if (pr || !accountId || !prId) return
+    if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
+      return
     const key = `${accountId}:${prId}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
@@ -701,7 +835,7 @@ export function PRDetail() {
   }, [pr, accountId, prId, refreshSingle])
 
   const score: HealthScore | undefined = useMemo(
-    () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
+    () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
   const navigate = useNavigate()
@@ -716,14 +850,14 @@ export function PRDetail() {
   const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
   const serverSubscribed = useMemo(
     () =>
-      AsyncResult.isSuccess(subscriptionsResult) && accountKey
+      AsyncResult.isSuccess(subscriptionsResult) && accountKey !== undefined && accountKey.length > 0
         ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
         : false,
     [subscriptionsResult, accountKey, prId]
   )
   const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
   const handleSubscriptionToggle = useCallback(() => {
-    if (!accountKey || !pr) return
+    if (accountKey === undefined || accountKey.length === 0 || pr === null) return
     const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
     setOptimistic(!isSubscribed)
     if (isSubscribed) {
@@ -736,6 +870,34 @@ export function PRDetail() {
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
+  const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
+  const commentRefreshTimersRef = useRef<Set<number>>(new Set())
+  const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
+  const [commentCountState, setCommentCountState] = useState<OptimisticCommentCount | null>(null)
+  const authoritativeCommentCount = pr?.commentCount
+  const commentCount = (() => {
+    if (authoritativeCommentCount === undefined || commentCountState?.identity !== commentNavigationIdentity) {
+      return authoritativeCommentCount
+    }
+    return Math.max(authoritativeCommentCount, commentCountState.count)
+  })()
+  const [commentNavigationState, setCommentNavigationState] = useState<{
+    readonly identity: string
+    readonly navigation: ReviewCommentNavigation
+  } | null>(null)
+  const commentNavigation =
+    commentNavigationState?.identity === commentNavigationIdentity ? commentNavigationState.navigation : null
+  const commentNavigationRequestRef = useRef(0)
+  const requestCommentNavigation = useCallback(
+    (destination: ReviewCommentNavigation["destination"], target: ReviewCommentNavigationTarget) => {
+      commentNavigationRequestRef.current += 1
+      setCommentNavigationState({
+        identity: commentNavigationIdentity,
+        navigation: { destination, requestId: commentNavigationRequestRef.current, target }
+      })
+    },
+    [commentNavigationIdentity]
+  )
   const reviewedRevisionRef = useRef<string | null>(null)
   const invalidateReview = useCallback(
     (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
@@ -748,15 +910,83 @@ export function PRDetail() {
     },
     [accountKey, prId]
   )
+  useEffect(
+    () => () => {
+      for (const timer of commentRefreshTimersRef.current) window.clearTimeout(timer)
+      commentRefreshTimersRef.current.clear()
+    },
+    []
+  )
+  useEffect(() => {
+    if (authoritativeCommentCount === undefined) return
+    setCommentCountState((current) => {
+      if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount)
+        return current
+      if (current.pendingCommentIds.length > 0) {
+        return {
+          ...current,
+          baseCount: authoritativeCommentCount,
+          count: Math.max(current.count, authoritativeCommentCount)
+        }
+      }
+      return authoritativeCommentCount < current.count ? { ...current, baseCount: authoritativeCommentCount } : null
+    })
+  }, [authoritativeCommentCount, commentNavigationIdentity])
+  const reconcileCommentCount = useCallback(
+    (snapshot: CommentCountSnapshot) => {
+      const baseCount = pr?.commentCount ?? 0
+      setCommentCountState((current) => {
+        if (current?.identity !== commentNavigationIdentity) return current
+        const observedCommentIds = new Set(snapshot.commentIds)
+        const pendingCommentIds = current.pendingCommentIds.filter((commentId) => !observedCommentIds.has(commentId))
+        const count = snapshot.count + pendingCommentIds.length
+        return pendingCommentIds.length === 0 && count <= baseCount
+          ? null
+          : { ...current, baseCount, count: Math.max(baseCount, count), pendingCommentIds }
+      })
+    },
+    [commentNavigationIdentity, pr?.commentCount]
+  )
+  const refreshCommentsAfterPublication = useCallback(
+    (operationId: string) => {
+      const commentId = operationId.startsWith("comment:") ? operationId.slice("comment:".length) : operationId
+      setCommentCountState((current) => {
+        const baseCount = pr?.commentCount ?? 0
+        return current?.identity === commentNavigationIdentity
+          ? {
+              ...current,
+              baseCount,
+              count: Math.max(current.count, baseCount) + 1,
+              pendingCommentIds: [...current.pendingCommentIds, commentId]
+            }
+          : {
+              baseCount,
+              count: baseCount + 1,
+              identity: commentNavigationIdentity,
+              pendingCommentIds: [commentId]
+            }
+      })
+      setCommentsRefreshGeneration((current) => current + 1)
+      for (const delay of [1_500, 5_000]) {
+        const timer = window.setTimeout(() => {
+          commentRefreshTimersRef.current.delete(timer)
+          setCommentsRefreshGeneration((current) => current + 1)
+        }, delay)
+        commentRefreshTimersRef.current.add(timer)
+      }
+    },
+    [commentNavigationIdentity, pr?.commentCount]
+  )
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (!accountKey || !prId) return
+    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
   }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (!accountKey || !prId || isRefreshing) return
+    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+      return
     setIsRefreshing(true)
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
       (refreshed) => {
@@ -773,13 +1003,15 @@ export function PRDetail() {
   }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
 
   // Copy console URL
-  const consoleUrl = pr
-    ? pr.link ||
-      `https://${pr.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${pr.repositoryName}/pull-requests/${pr.id}?region=${pr.account.region}`
-    : ""
+  const consoleUrl =
+    pr !== null
+      ? pr.link.length > 0
+        ? pr.link
+        : `https://${pr.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${pr.repositoryName}/pull-requests/${pr.id}?region=${pr.account.region}`
+      : ""
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(() => {
-    if (!consoleUrl) return
+    if (consoleUrl.length === 0) return
     navigator.clipboard.writeText(consoleUrl).then(
       () => {
         setCopied(true)
@@ -805,14 +1037,14 @@ export function PRDetail() {
   const [sandboxCreating, setSandboxCreating] = useState(false)
 
   useEffect(() => {
-    if (sandboxCreating && existingSandbox) {
+    if (sandboxCreating && existingSandbox !== undefined) {
       setSandboxCreating(false)
       navigate(`/sandbox/${existingSandbox.id}`)
     }
   }, [sandboxCreating, existingSandbox, navigate])
 
   const proceedSandbox = useCallback(() => {
-    if (!pr) return
+    if (pr === null) return
     const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
     createSandbox({
       payload: {
@@ -828,8 +1060,8 @@ export function PRDetail() {
   }, [pr, createSandbox])
 
   const handleSandbox = useCallback(() => {
-    if (!pr) return
-    if (existingSandbox) {
+    if (pr === null) return
+    if (existingSandbox !== undefined) {
       navigate(`/sandbox/${existingSandbox.id}`)
       return
     }
@@ -844,12 +1076,12 @@ export function PRDetail() {
   }
 
   const proceedOpen = useCallback(() => {
-    if (!pr || !consoleUrl) return
+    if (pr === null || consoleUrl.length === 0) return
     openPr({ payload: { profile: pr.account.profile, link: consoleUrl } })
   }, [consoleUrl, openPr, pr])
 
   const handleOpen = useCallback(() => {
-    if (!pr) return
+    if (pr === null) return
     if (!granted.show()) {
       proceedOpen()
     }
@@ -866,18 +1098,18 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "Enter" || e.key === "o") && pr?.link) {
+      } else if ((e.key === "Enter" || e.key === "o") && consoleUrl.length > 0) {
         handleOpen()
-      } else if (e.key === "." && pr) {
+      } else if (e.key === "." && pr !== null) {
         e.preventDefault()
         handleSandbox()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleOpen, handleSandbox, navigate, pr])
+  }, [consoleUrl, handleOpen, handleSandbox, navigate, pr])
 
-  if (!pr) {
+  if (pr === null) {
     return (
       <section className={styles.loadingState}>
         <StatePanel
@@ -953,7 +1185,7 @@ export function PRDetail() {
             </Button>
             <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
               <CodeIcon className="size-3.5" />
-              {existingSandbox ? "Open Sandbox" : "Sandbox"}
+              {existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
             </Button>
             <RlyButton
               className={styles.actionButton}
@@ -1098,6 +1330,10 @@ export function PRDetail() {
       >
         <PullRequestReviewWorkspace
           accountId={accountId ?? pr.account.profile}
+          commentsRefreshGeneration={commentsRefreshGeneration}
+          commentNavigation={commentNavigation}
+          onFindingPosted={refreshCommentsAfterPublication}
+          onNavigateToComment={(target) => requestCommentNavigation("comment", target)}
           pullRequest={pr}
           refreshGeneration={reviewRefreshGeneration}
         />
@@ -1123,8 +1359,25 @@ export function PRDetail() {
             </Surface>
           )}
 
-          <CollapsibleSection title="Comments" {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}>
-            <CommentsSection key={pr.id} pr={pr} />
+          <CollapsibleSection
+            {...(commentNavigation?.destination === "comment"
+              ? { openRequestKey: `${commentNavigation.target.commentId}:${String(commentNavigation.requestId)}` }
+              : {})}
+            keepMounted
+            title="Comments"
+            {...(commentCount !== undefined ? { count: commentCount } : {})}
+          >
+            {(commentsVisible) => (
+              <CommentsSection
+                commentsRefreshGeneration={commentsRefreshGeneration}
+                key={pr.id}
+                navigation={commentNavigation}
+                onCountChange={reconcileCommentCount}
+                onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
+                pr={pr}
+                visible={commentsVisible}
+              />
+            )}
           </CollapsibleSection>
         </section>
 
@@ -1151,9 +1404,9 @@ export function PRDetail() {
                 onRefresh={refreshAfterApprovalMutation}
                 onSetApprovers={(arns) => {
                   const existing = pr.approvalRules.find(
-                    (rule) => rule.ruleName === card.ruleName && !rule.fromTemplate
+                    (rule) => rule.ruleName === card.ruleName && rule.fromTemplate === undefined
                   )
-                  if (existing) {
+                  if (existing !== undefined) {
                     updateRule({
                       payload: {
                         account: pr.account,
@@ -1175,7 +1428,7 @@ export function PRDetail() {
                     })
                   }
                 }}
-                permissionPrompt={!!state.permissionPrompt}
+                permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}
                 ruleName={card.ruleName}
@@ -1185,7 +1438,7 @@ export function PRDetail() {
           </section>
 
           <CollapsibleSection title="Health Score Breakdown">
-            <ScoreBreakdown score={score} />
+            {() => <ScoreBreakdown score={score} />}
           </CollapsibleSection>
         </aside>
       </div>

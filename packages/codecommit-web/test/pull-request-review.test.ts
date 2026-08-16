@@ -1,7 +1,8 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Fiber, Option, Semaphore, Stream } from "effect"
-import type { RelayReviewResult } from "../src/server/Api.js"
+import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { Deferred, Effect, Exit, Fiber, Option, Schema, Semaphore, Stream } from "effect"
+import { RelayReviewContinueStreamRequest, RelayReviewResult, RelayReviewStreamRequest } from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
@@ -9,11 +10,26 @@ import {
   loadPullRequestDiff,
   loadPullRequestDiffContent,
   makePullRequestChangedFilesSource,
+  makeRelayConversationPrompt,
   makeRelayReviewPrompt,
   parseRelayReviewResult,
+  postPullRequestRelayFinding,
+  PullRequestReviewError,
+  streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
-  withRelayReviewPermit
+  withRelayReviewPermit,
+  withRelayReviewStreamPermit
 } from "../src/server/review/PullRequestReview.js"
+import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
+import {
+  MAXIMUM_RELAY_PATCH_BYTES,
+  MAXIMUM_RELAY_PROMPT_BYTES,
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+  MAXIMUM_RELAY_REVIEW_TURNS_BYTES,
+  MAXIMUM_RELAY_SKILL_PROMPT_BYTES,
+  MINIMUM_RELAY_HOST_ENVELOPE_BYTES
+} from "../src/server/review/ReviewPromptBudget.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -78,14 +94,15 @@ const changedFile = new ReadClient.CodeCommitChangedFile({
 const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
 
 const makeReadClient = (
-  currentRevision = revision
+  currentRevision = revision,
+  currentChangedFile = changedFile
 ): ReadClient.CodeCommitReadClientService => ({
   discoverAccount: () => unused(),
   getBlob: ({ blobId }) =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({
         blobId,
-        bytes: new TextEncoder().encode(blobId === changedFile.before?.blobId ? "before\n" : "after\n")
+        bytes: new TextEncoder().encode(blobId === currentChangedFile.before?.blobId ? "before\n" : "after\n")
       })
     ),
   getChangedFilesPage: () => unused(),
@@ -94,11 +111,253 @@ const makeReadClient = (
   listPullRequestIdsPage: () => unused(),
   listPullRequestsPage: () => unused(),
   listRepositoriesPage: () => unused(),
-  streamChangedFiles: () => Stream.make(changedFile),
+  streamChangedFiles: () => Stream.make(currentChangedFile),
   streamPullRequests: () => Stream.empty
 })
 
 describe("CodeCommit web review boundary", () => {
+  it("rejects unbounded skill and finding identifiers at the HTTP schema boundary", () => {
+    const streamRequest = {
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: "review",
+      skillIds: ["builtin:pr-review"]
+    }
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewStreamRequest)(streamRequest))).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewStreamRequest)({
+        ...streamRequest,
+        skillIds: [" "]
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewStreamRequest)({
+        ...streamRequest,
+        skillIds: ["x".repeat(257)]
+      })
+    )).toBe(true)
+
+    const continueRequest = {
+      ...streamRequest,
+      currentReview: { findings: [], verdict: "No findings." },
+      turns: [],
+      findingId: "F1",
+      message: "Review again."
+    }
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)(continueRequest))).toBe(true)
+    expect(Exit.isSuccess(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        message: "x".repeat(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        message: "é".repeat(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        message: "\0".repeat(8_000)
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        findingId: "finding-1"
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        turns: Array.from({ length: 5 }, () => ({ findingId: "F1", role: "user", message: "x".repeat(8_000) }))
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        currentReview: {
+          findings: Array.from({ length: 10 }, (_, index) => ({
+            id: `F${String(index + 1)}`,
+            priority: "P2",
+            title: "Bounded finding",
+            summary: "x".repeat(500),
+            details: "x".repeat(4_000),
+            recommendation: "x".repeat(2_000),
+            verification: "x".repeat(1_000),
+            publicationTarget: "pr-comment",
+            location: { scope: "general" }
+          })),
+          verdict: "No findings."
+        }
+      })
+    )).toBe(true)
+    expect(MAXIMUM_RELAY_REVIEW_RESULT_BYTES + MAXIMUM_RELAY_REVIEW_TURNS_BYTES + MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)
+      .toBeLessThan(MINIMUM_RELAY_HOST_ENVELOPE_BYTES)
+  })
+
+  it.effect("posts an accepted line finding once against the exact reviewed head", () =>
+    Effect.gen(function*() {
+      const exactPath = " leading.ts "
+      const exactChangedFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: exactPath
+        }),
+        status: "added"
+      })
+      const actions: Array<Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>> = []
+      const publisher = {
+        post: (action) => {
+          actions.push(action)
+          return Effect.succeed(
+            new ReviewClient.CodeCommitReviewReceipt({
+              operationId: "comment:123",
+              summary: "Comment posted to the pull request"
+            })
+          )
+        }
+      } satisfies RelayFindingPublisherService
+      const finding: RelayReviewResult["findings"][number] = {
+        id: "F1",
+        priority: "P2",
+        title: "Retry duplicates writes",
+        summary: "The new path retries a non-idempotent write.",
+        details: "The changed first line now invokes retryWrite().",
+        recommendation: "Retry only idempotent reads.",
+        verification: "Exercise a timeout after the provider accepts the write.",
+        publicationTarget: "line-comment",
+        location: { scope: "line", filePath: exactPath, line: 1, side: "after" }
+      }
+      const receipt = yield* postPullRequestRelayFinding(
+        makeReadClient(revision, exactChangedFile),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        finding
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
+
+      expect(receipt).toMatchObject({ findingId: "F1", operationId: "comment:123" })
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toMatchObject({
+        _tag: "comment",
+        target: {
+          revisionId: revision.revisionId,
+          sourceCommit: revision.sourceCommit,
+          destinationCommit: revision.destinationCommit
+        },
+        location: { filePath: exactPath, filePosition: 1, relativeFileVersion: "AFTER" }
+      })
+      expect(actions[0]?.content).toContain("Retry duplicates writes")
+      expect(actions[0]?.clientRequestToken).toMatch(/^[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("derives the same publication token regardless of finding property order", () =>
+    Effect.gen(function*() {
+      const tokens: Array<string> = []
+      const publisher = {
+        post: (action) => {
+          tokens.push(action.clientRequestToken)
+          return Effect.succeed(
+            new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:stable", summary: "posted" })
+          )
+        }
+      } satisfies RelayFindingPublisherService
+      const finding: RelayReviewResult["findings"][number] = {
+        id: "F1",
+        priority: "P2",
+        title: "Stable identity",
+        summary: "Retries must reuse their token.",
+        details: "Equivalent JSON may use a different property order.",
+        recommendation: "Hash named fields in a fixed order.",
+        verification: "Submit the same finding twice.",
+        publicationTarget: "pr-comment",
+        location: { scope: "general" }
+      }
+      const reordered = {
+        location: finding.location,
+        publicationTarget: finding.publicationTarget,
+        verification: finding.verification,
+        recommendation: finding.recommendation,
+        details: finding.details,
+        summary: finding.summary,
+        title: finding.title,
+        priority: finding.priority,
+        id: finding.id
+      } satisfies RelayReviewResult["findings"][number]
+
+      yield* postPullRequestRelayFinding(
+        makeReadClient(),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        finding
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
+      yield* postPullRequestRelayFinding(
+        makeReadClient(),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        reordered
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
+
+      expect(tokens).toHaveLength(2)
+      expect(tokens[0]).toBe(tokens[1])
+    }))
+
+  it.effect("does not publish when the provider revision changed", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const publisher = {
+        post: () => {
+          calls += 1
+          return Effect.die("must not post")
+        }
+      } satisfies RelayFindingPublisherService
+      const changed = new ReadClient.CodeCommitPullRequestRevision({ ...revision, revisionId: "revision-2" })
+      const failure = yield* postPullRequestRelayFinding(
+        makeReadClient(changed),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        {
+          id: "F1",
+          priority: "P2",
+          title: "Finding",
+          summary: "Summary",
+          details: "Details",
+          recommendation: "Recommendation",
+          verification: "Verification",
+          publicationTarget: "pr-comment",
+          location: { scope: "general" }
+        }
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer),
+        Effect.flip
+      )
+      expect(failure.operation).toBe("revision-changed")
+      expect(calls).toBe(0)
+    }))
+
   it.effect("returns a complete diff inventory without exposing provider blob locators", () =>
     Effect.gen(function*() {
       const inventory = yield* loadPullRequestDiff(makeReadClient(), pullRequest)
@@ -302,6 +561,54 @@ describe("CodeCommit web review boundary", () => {
     expect(explain).not.toContain("Report only concrete, actionable defects")
     expect(review).toContain("Report only concrete, actionable defects")
     expect(review).not.toContain("\"explanation\":\"substantive architecture and risk explanation\"")
+  })
+
+  it("reserves prompt capacity outside the maximum patch and selected skills", () => {
+    const prompt = makeRelayReviewPrompt(
+      {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      },
+      "review",
+      "x".repeat(MAXIMUM_RELAY_PATCH_BYTES),
+      "é".repeat(MAXIMUM_RELAY_SKILL_PROMPT_BYTES / 2)
+    )
+    const encodedBytes = new TextEncoder().encode(prompt).byteLength
+    expect(MINIMUM_RELAY_HOST_ENVELOPE_BYTES).toBe(128 * 1024)
+    expect(encodedBytes).toBeLessThanOrEqual(MAXIMUM_RELAY_PROMPT_BYTES)
+  })
+
+  it("keeps the explanation contract when continuing or re-reviewing Explain mode", () => {
+    const scope = {
+      account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+      pullRequest,
+      revision
+    }
+    const currentReview = { findings: [], verdict: "Architecture overview.", explanation: "Uses a service boundary." }
+    const explain = makeRelayConversationPrompt(
+      scope,
+      "explain",
+      "diff --git a/a b/a",
+      "",
+      currentReview,
+      [],
+      "F1",
+      "Re-review latest"
+    )
+    const review = makeRelayConversationPrompt(
+      scope,
+      "review",
+      "diff --git a/a b/a",
+      "",
+      { findings: [], verdict: "No findings." },
+      [],
+      "F1",
+      "Re-review latest"
+    )
+
+    expect(explain).toContain("\"findings\":[],\"verdict\":\"updated short orientation\",\"explanation\"")
+    expect(review).not.toContain("\"explanation\"")
   })
 
   it.effect("builds a readable exact patch for renamed files", () =>
@@ -756,6 +1063,39 @@ describe("CodeCommit web review boundary", () => {
       yield* Fiber.join(first)
     }))
 
+  it.effect("releases a streamed Relay permit when its consumer disconnects", () =>
+    Effect.gen(function*() {
+      const semaphore = yield* Semaphore.make(1)
+      const entered = yield* Deferred.make<void>()
+      const running = yield* withRelayReviewStreamPermit(
+        semaphore,
+        Stream.fromEffect(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)))
+      ).pipe(Stream.runDrain, Effect.forkChild)
+      yield* Deferred.await(entered)
+
+      const busy = yield* withRelayReviewPermit(semaphore, Effect.void).pipe(Effect.flip)
+      expect(busy.operation).toBe("relay-review-busy")
+
+      yield* Fiber.interrupt(running)
+      yield* withRelayReviewPermit(semaphore, Effect.void)
+    }))
+
+  it.effect("turns worker defects into a terminal Relay error event", () =>
+    Effect.gen(function*() {
+      const events = yield* streamRelayReviewEventsFrom(() => Effect.die(new Error("server-private-token=secret")))
+        .pipe(
+          Stream.runCollect
+        )
+      expect(events).toEqual([{ type: "error", message: "Relay review failed" }])
+      expect(JSON.stringify(events)).not.toContain("server-private-token")
+      expect(JSON.stringify(events)).not.toContain("secret")
+
+      const publicFailure = yield* streamRelayReviewEventsFrom(() =>
+        Effect.fail(new PullRequestReviewError({ operation: "relay-review", message: "Exact revision changed" }))
+      ).pipe(Stream.runCollect)
+      expect(publicFailure).toEqual([{ type: "error", message: "Exact revision changed" }])
+    }))
+
   it("accepts strict bounded Relay JSON and rejects duplicate finding identities", () => {
     const finding = {
       id: "F1",
@@ -791,6 +1131,37 @@ describe("CodeCommit web review boundary", () => {
       "review"
     )
     expect(Option.isNone(invalidLineTarget)).toBe(true)
+
+    const invalidPrLineTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{ ...finding, publicationTarget: "pr-comment" }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isNone(invalidPrLineTarget)).toBe(true)
+
+    const fileTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{
+          ...finding,
+          publicationTarget: "pr-comment",
+          location: { scope: "file", filePath: "src/index.ts" }
+        }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isSome(fileTarget)).toBe(true)
+
+    const descriptionTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{ ...finding, publicationTarget: "description", location: { scope: "general" } }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isNone(descriptionTarget)).toBe(true)
 
     const missingExplanation = parseRelayReviewResult(
       JSON.stringify({ findings: [], verdict: "Architecture overview." }),
@@ -863,5 +1234,68 @@ describe("CodeCommit web review boundary", () => {
         }, evidence).pipe(Effect.flip)
         expect(failure.operation).toBe("relay-review-anchor")
       }
+    }))
+
+  it.effect("preserves edge whitespace in exact repository paths", () =>
+    Effect.gen(function*() {
+      const exactPath = " leading.ts "
+      const exactFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: exactPath
+        }),
+        status: "added"
+      })
+      const evidence = yield* collectRelayPatchEvidence(
+        makeReadClient(),
+        {
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          pullRequest,
+          revision
+        },
+        [exactFile]
+      )
+      const decoded = Schema.decodeUnknownSync(RelayReviewResult)({
+        findings: [
+          {
+            id: "F1",
+            priority: "P2",
+            title: "Exact file path",
+            summary: "The finding keeps the provider path.",
+            details: "Edge whitespace is part of the repository path.",
+            recommendation: "Compare exact provider paths.",
+            verification: "Validate against exact patch evidence.",
+            publicationTarget: "pr-comment",
+            location: { scope: "file", filePath: exactPath }
+          },
+          {
+            id: "F2",
+            priority: "P2",
+            title: "Exact line path",
+            summary: "The line finding keeps the provider path.",
+            details: "Trimming would detach the line from its evidence.",
+            recommendation: "Keep the path byte-for-byte exact.",
+            verification: "Validate line one against the exact patch.",
+            publicationTarget: "line-comment",
+            location: { scope: "line", filePath: exactPath, line: 1, side: "after" }
+          }
+        ],
+        verdict: "Two exact-path findings."
+      })
+
+      yield* validateRelayReviewAnchors(decoded, evidence)
+      expect(decoded.findings.map(({ location }) => location.scope === "general" ? null : location.filePath))
+        .toEqual([exactPath, exactPath])
+      expect(Exit.isFailure(
+        Schema.decodeUnknownExit(RelayReviewResult)({
+          findings: [{
+            ...decoded.findings[0],
+            location: { scope: "file", filePath: "" }
+          }],
+          verdict: "Invalid empty path."
+        })
+      )).toBe(true)
     }))
 })

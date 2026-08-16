@@ -599,6 +599,15 @@
   min-inline-size: var(--rly-space-0);
 }
 
+.comment[data-active="true"],
+.commentReply[data-active="true"] {
+  background: color-mix(in srgb, var(--rly-color-action-background) 8%, var(--rly-color-surface-2));
+  border-radius: var(--rly-radius-control);
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-4);
+  padding-inline: var(--rly-space-12);
+}
+
 .commentReply {
   border-inline-start: 2px solid var(--rly-color-border-1);
   margin-inline-start: var(--rly-space-16);
@@ -619,6 +628,29 @@
 
 .commentMeta strong {
   color: var(--rly-color-text-1);
+}
+
+.commentJump {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--rly-color-action-background);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: var(--rly-space-4);
+  margin-inline-start: auto;
+  padding: var(--rly-space-4);
+}
+
+.commentJump svg {
+  block-size: var(--rly-space-16);
+  inline-size: var(--rly-space-16);
+}
+
+.commentJump:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
 }
 
 @media (max-width: 64rem) {

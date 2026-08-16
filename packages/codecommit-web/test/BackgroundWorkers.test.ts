@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, PRService, SandboxService } from "@knpkv/codecommit-core"
 import type { Duration } from "effect"
@@ -48,7 +49,8 @@ describe("background workers", () => {
         Layer.mock(ConfigService.ConfigService, {
           load: Effect.succeed({
             autoRefresh: true,
-            refreshIntervalSeconds: 1
+            refreshIntervalSeconds: 1,
+            review: ConfigService.defaultReviewConfig
           })
         })
       )
@@ -59,6 +61,8 @@ describe("background workers", () => {
           yield* advanceClockUntil(secondPass, "1 second", 15)
           yield* Deferred.await(secondPass)
         }).pipe(
+          // The scoped test case owns the worker layer lifetime.
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(autoRefreshLayer.pipe(Layer.provide(dependencies)))
         )
       )
@@ -94,7 +98,8 @@ describe("background workers", () => {
                 )
                 : Effect.succeed({
                   autoRefresh: true,
-                  refreshIntervalSeconds: 1
+                  refreshIntervalSeconds: 1,
+                  review: ConfigService.defaultReviewConfig
                 })
             )
           )
@@ -108,6 +113,8 @@ describe("background workers", () => {
           yield* advanceClockUntil(refreshAfterRecovery, "1 second", 15)
           yield* Deferred.await(refreshAfterRecovery)
         }).pipe(
+          // The scoped test case owns the worker layer lifetime.
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(autoRefreshLayer.pipe(Layer.provide(dependencies)))
         )
       )
@@ -143,6 +150,8 @@ describe("background workers", () => {
           yield* advanceClockUntil(defaultIntervalRefresh, "1 minute", 7)
           yield* Deferred.await(defaultIntervalRefresh)
         }).pipe(
+          // The scoped test case owns the worker layer lifetime.
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(autoRefreshLayer.pipe(Layer.provide(dependencies)))
         )
       )
@@ -175,7 +184,9 @@ describe("background workers", () => {
         })
       )
       const startup = Deferred.succeed(ready, undefined).pipe(
-        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+        // The test case is the worker entry point and owns the complete runtime layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(Layer.mergeAll(dependencies, NodeServices.layer))))
       )
       const fiber = yield* Effect.forkChild(startup)
 
@@ -220,7 +231,9 @@ describe("background workers", () => {
         })
       )
       const startup = Deferred.succeed(ready, undefined).pipe(
-        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+        // The test case is the worker entry point and owns the complete runtime layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(Layer.mergeAll(dependencies, NodeServices.layer))))
       )
       const fiber = yield* Effect.forkChild(startup)
 
@@ -254,7 +267,9 @@ describe("background workers", () => {
       )
 
       const startup = Deferred.succeed(ready, undefined).pipe(
-        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+        // The test case is the worker entry point and owns the complete runtime layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(sandboxStartupLayer.pipe(Layer.provide(Layer.mergeAll(dependencies, NodeServices.layer))))
       )
       const fiber = yield* Effect.forkChild(startup)
 
@@ -281,7 +296,9 @@ describe("background workers", () => {
 
       yield* Effect.scoped(
         Effect.void.pipe(
-          Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+          // The scoped test case owns the complete runtime layer.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(sandboxStartupLayer.pipe(Layer.provide(Layer.mergeAll(dependencies, NodeServices.layer))))
         )
       )
 
@@ -325,7 +342,9 @@ describe("background workers", () => {
           yield* advanceClockUntil(secondPass, "1 minute", 7)
           yield* Deferred.await(secondPass)
         }).pipe(
-          Effect.provide(sandboxStartupLayer.pipe(Layer.provide(dependencies)))
+          // The scoped test case owns the complete runtime layer.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(sandboxStartupLayer.pipe(Layer.provide(Layer.mergeAll(dependencies, NodeServices.layer))))
         )
       )
 

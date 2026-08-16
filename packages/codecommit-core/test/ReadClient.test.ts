@@ -54,6 +54,8 @@ const runWithProvider = <A, E>(
   effect: Effect.Effect<A, E, CodeCommitReadClient>
 ) =>
   effect.pipe(
+    // The helper is the application boundary for each isolated provider test runtime.
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(CodeCommitReadClient.layer.pipe(Layer.provide(providerLayer(provider))))
   )
 
@@ -215,9 +217,9 @@ describe("CodeCommitReadClient", () => {
       // Blob content is raw repository file data; a schema-decode failure must not
       // leak the rejected value into logs, unlike diagnostic metadata operations.
       const secret = "AKIA-super-secret-blob-payload"
-      const messages = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const messages: Array<unknown> = []
       const logger = Logger.make<unknown, void>((entry) => {
-        Effect.runSync(Ref.update(messages, (items) => [...items, entry.message]))
+        messages.push(entry.message)
       })
       const result = yield* runWithProvider(
         baseProvider({ getBlob: () => Effect.succeed({ content: secret }) }),
@@ -230,7 +232,7 @@ describe("CodeCommitReadClient", () => {
       ).pipe(Effect.withLogger(logger))
 
       assert.isTrue(Result.isFailure(result))
-      const logged = (yield* Ref.get(messages)).map((message) => String(message)).join("\n")
+      const logged = messages.map((message) => String(message)).join("\n")
       assert.notInclude(logged, secret)
       assert.include(logged, "get-blob")
     }))
@@ -333,7 +335,7 @@ describe("CodeCommitReadClient", () => {
                   differences: [
                     {
                       changeType: "A",
-                      afterBlob: { blobId: "blob-added", path: "src/added.ts", mode: "100644" }
+                      afterBlob: { blobId: "blob-added", path: " src/added.ts ", mode: "100644" }
                     },
                     {
                       changeType: "M",
@@ -369,6 +371,7 @@ describe("CodeCommitReadClient", () => {
       assert.deepStrictEqual(yield* Ref.get(requestedTokens), [null, "diff-page-2"])
       assert.deepStrictEqual(yield* Ref.get(requestedPageLimits), [100, 100])
       assert.deepStrictEqual(files.map(({ status }) => status), ["added", "renamed", "deleted"])
+      assert.strictEqual(files[0]?.after?.path, " src/added.ts ")
       assert.strictEqual(files[1]?.before?.path, "src/old-name.ts")
       assert.strictEqual(files[1]?.after?.path, "src/new-name.ts")
       assert.strictEqual(files[1]?.before?.blobId, "blob-old")
