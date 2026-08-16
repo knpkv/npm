@@ -51,6 +51,7 @@ type RelayRunPayload = typeof RelayRunPayload.Type
 const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
 interface ReviewWorkspaceOptions {
+  readonly commentCount?: () => number
   readonly configGate?: Promise<void>
   readonly configStatus?: number
   readonly onRun?: (payload: RelayRunPayload) => void
@@ -73,18 +74,18 @@ const routeReviewWorkspace = async (
   options?: ReviewWorkspaceOptions
 ) => {
   let findingPosted = false
-  const appState = JSON.stringify({
-    accounts: [{ ...pullRequest.account, enabled: true }],
-    currentUser: "reviewer",
-    lastUpdated: "2026-08-12T09:30:00.000Z",
-    pendingReviewCount: 1,
-    pullRequests: [pullRequest],
-    sandboxes: [],
-    status: "idle"
-  })
   await page.route("**/api/events/", async (route) => {
+    const appState = JSON.stringify({
+      accounts: [{ ...pullRequest.account, enabled: true }],
+      currentUser: "reviewer",
+      lastUpdated: "2026-08-12T09:30:00.000Z",
+      pendingReviewCount: 1,
+      pullRequests: [{ ...pullRequest, commentCount: options?.commentCount?.() ?? pullRequest.commentCount }],
+      sandboxes: [],
+      status: "idle"
+    })
     await route.fulfill({
-      body: `data: ${appState}\n\n`,
+      body: `${options?.commentCount === undefined ? "" : "retry: 50\n"}data: ${appState}\n\n`,
       contentType: "text/event-stream",
       status: 200
     })
@@ -641,8 +642,11 @@ test("recovers an interrupted finding publication after reload", async ({ page }
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   const reviewGate = Promise.withResolvers<void>()
+  let authoritativeCommentCount = 0
   await page.setViewportSize({ height: 900, width: 1440 })
-  await routeReviewWorkspace(page, "review", reviewGate.promise)
+  await routeReviewWorkspace(page, "review", reviewGate.promise, undefined, {
+    commentCount: () => authoritativeCommentCount
+  })
   await page.goto("/accounts/111111111111/prs/42")
 
   await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
@@ -703,6 +707,8 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  authoritativeCommentCount = 2
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Verify this again.")

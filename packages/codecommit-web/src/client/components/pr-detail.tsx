@@ -683,6 +683,12 @@ interface PullRequestDecisionPresentation {
   readonly verdict: string
 }
 
+interface OptimisticCommentCount {
+  readonly baseCount: number
+  readonly identity: string
+  readonly pendingIncrement: number
+}
+
 const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
   switch (pr.status) {
     case "MERGED":
@@ -813,12 +819,15 @@ export function PRDetail() {
   const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
   const commentRefreshTimersRef = useRef<Set<number>>(new Set())
   const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
-  const [commentCountState, setCommentCountState] = useState<{
-    readonly count: number
-    readonly identity: string
-  } | null>(null)
-  const commentCount =
-    commentCountState?.identity === commentNavigationIdentity ? commentCountState.count : pr?.commentCount
+  const [commentCountState, setCommentCountState] = useState<OptimisticCommentCount | null>(null)
+  const authoritativeCommentCount = pr?.commentCount
+  const commentCount = (() => {
+    if (authoritativeCommentCount === undefined || commentCountState?.identity !== commentNavigationIdentity) {
+      return authoritativeCommentCount
+    }
+    if (authoritativeCommentCount < commentCountState.baseCount) return authoritativeCommentCount
+    return Math.max(authoritativeCommentCount, commentCountState.baseCount + commentCountState.pendingIncrement)
+  })()
   const [commentNavigationState, setCommentNavigationState] = useState<{
     readonly identity: string
     readonly navigation: ReviewCommentNavigation
@@ -855,11 +864,30 @@ export function PRDetail() {
     },
     []
   )
+  useEffect(() => {
+    if (authoritativeCommentCount === undefined) return
+    setCommentCountState((current) => {
+      if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount) {
+        return current
+      }
+      if (authoritativeCommentCount < current.baseCount) return null
+      const pendingIncrement = Math.max(0, current.baseCount + current.pendingIncrement - authoritativeCommentCount)
+      return pendingIncrement === 0
+        ? null
+        : {
+            baseCount: authoritativeCommentCount,
+            identity: commentNavigationIdentity,
+            pendingIncrement
+          }
+    })
+  }, [authoritativeCommentCount, commentNavigationIdentity])
   const refreshCommentsAfterPublication = useCallback(() => {
-    setCommentCountState((current) => ({
-      count: (current?.identity === commentNavigationIdentity ? current.count : (pr?.commentCount ?? 0)) + 1,
-      identity: commentNavigationIdentity
-    }))
+    setCommentCountState((current) => {
+      const baseCount = pr?.commentCount ?? 0
+      return current?.identity === commentNavigationIdentity && current.baseCount === baseCount
+        ? { ...current, pendingIncrement: current.pendingIncrement + 1 }
+        : { baseCount, identity: commentNavigationIdentity, pendingIncrement: 1 }
+    })
     setCommentsRefreshGeneration((current) => current + 1)
     for (const delay of [1_500, 5_000]) {
       const timer = window.setTimeout(() => {
