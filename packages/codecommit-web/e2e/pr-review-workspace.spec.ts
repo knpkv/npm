@@ -373,7 +373,7 @@ test("continues a completed review with its original focus and skills", async ({
   await expect(page.getByLabel("Profile")).toHaveValue("quick")
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByPlaceholder("Verify this against the latest change…").fill("Continue this security review.")
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(1)
   expect(continuations[0]).toMatchObject({
@@ -382,7 +382,7 @@ test("continues a completed review with its original focus and skills", async ({
     skillIds: ["builtin:pr-review", "builtin:pr-review-diff"],
     turns: []
   })
-  await page.getByPlaceholder("Verify this against the latest change…").fill("Check the evidence once more.")
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Check the evidence once more.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(2)
   expect(continuations[1]).toMatchObject({
@@ -432,7 +432,7 @@ test("retries a failed continuation without persisting the failed turn", async (
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   const message = "Retry this failed follow-up."
-  const composer = page.getByPlaceholder("Verify this against the latest change…")
+  const composer = page.getByPlaceholder("Ask Relay about this finding…")
   await composer.fill(message)
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Relay review failed")).toBeVisible()
@@ -446,6 +446,76 @@ test("retries a failed continuation without persisting the failed turn", async (
   await expect(
     page.getByRole("log").locator("li[data-role=\"assistant\"]").filter({ hasText: "Confirmed after retry." })
   ).toHaveCount(1)
+})
+
+test("keeps the prior review session atomic when frames follow completion", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+    const payload = decodeRelayContinuePayload(route.request().postDataJSON())
+    await route.fulfill({
+      body: [
+        JSON.stringify({
+          type: "complete",
+          review: {
+            pullRequestId: "42",
+            revisionId: "revision-1",
+            baseCommit: "a".repeat(40),
+            headCommit: "b".repeat(40),
+            kind: payload.kind,
+            result: {
+              verdict: "This invalid terminal frame must not replace the prior deck.",
+              findings: [{
+                id: "F3",
+                priority: "P1",
+                title: "Uncommitted terminal finding",
+                summary: "The transport has not reached a clean EOF.",
+                details: "A frame follows this complete event.",
+                recommendation: "Stage terminal state until EOF.",
+                verification: "Malformed transport fixture.",
+                publicationTarget: "file-comment",
+                location: { scope: "file", filePath: "src/retry.ts" }
+              }]
+            }
+          },
+          reply: "This reply must not be retained."
+        }),
+        JSON.stringify({ type: "progress", phase: "agent", message: "Invalid frame after completion" })
+      ].join("\n") + "\n",
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
+  await expect(page.getByText("acknowledged")).toBeVisible()
+  const persistedBefore = await page.evaluate(() => {
+    const key = Object.keys(window.sessionStorage).find((candidate) =>
+      candidate.startsWith("codecommit:relay-review-session:")
+    )
+    return key === undefined ? null : window.sessionStorage.getItem(key)
+  })
+  expect(persistedBefore).not.toBeNull()
+
+  const composer = page.getByPlaceholder("Ask Relay about this finding…")
+  await composer.fill("Try an invalid continuation.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+
+  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(composer).toHaveValue("Try an invalid continuation.")
+  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(page.getByText("Uncommitted terminal finding")).toHaveCount(0)
+  await expect(page.getByText("acknowledged")).toBeVisible()
+  expect(
+    await page.evaluate(() => {
+      const key = Object.keys(window.sessionStorage).find((candidate) =>
+        candidate.startsWith("codecommit:relay-review-session:")
+      )
+      return key === undefined ? null : window.sessionStorage.getItem(key)
+    })
+  ).toBe(persistedBefore)
 })
 
 test("recovers an interrupted finding publication after reload", async ({ page }) => {
@@ -500,6 +570,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("2 actionable findings")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeHidden()
   await page.getByText("Evidence & recommendation").first().click()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
@@ -507,7 +578,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
     await page.getByRole("complementary", { name: "Relay findings" }).evaluate((element) =>
       element.getBoundingClientRect().width
     )
-  ).toBeGreaterThanOrEqual(340)
+  ).toBeGreaterThanOrEqual(480)
   await page.getByRole("button", { name: /^Comments/ }).click()
   await expect(page.getByText("Keep this retry path idempotent.").last()).toBeVisible()
   await page.getByRole("button", { name: "View in diff" }).click()
@@ -536,12 +607,12 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
-  await page.getByPlaceholder("Verify this against the latest change…").fill("Verify this again.")
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Verify this again.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
   for (let index = 1; index <= 4; index++) {
     const message = `Follow-up ${String(index)}`
-    await page.getByPlaceholder("Verify this against the latest change…").fill(message)
+    await page.getByPlaceholder("Ask Relay about this finding…").fill(message)
     await page.getByRole("button", { exact: true, name: "Send" }).click()
     await expect(page.getByText(message)).toBeVisible()
     await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(index + 1)

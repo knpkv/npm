@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { defaultReviewConfig, type ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
 import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import * as Cause from "effect/Cause"
+import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { act, createElement } from "react"
@@ -12,6 +13,7 @@ import {
   isReviewProfileSkillSelectionDisabled,
   ReviewProfileSkillPicker,
   SettingsRelayView,
+  type SettingsRelayViewProps,
   updateReviewProfileSkills
 } from "../src/client/components/settings-relay.js"
 import { ReviewSkillResponse } from "../src/server/Api.js"
@@ -45,7 +47,7 @@ const renderRelaySettings = async (
   await act(async () =>
     root.render(createElement(SettingsRelayView, {
       config: configState,
-      saveConfig: options?.saveConfig ?? vi.fn().mockResolvedValue("saved"),
+      saveConfig: options?.saveConfig ?? vi.fn().mockResolvedValue(Exit.succeed("saved")),
       skills: options?.skills ?? AsyncResult.success([])
     }))
   )
@@ -78,7 +80,7 @@ describe("Relay review profile skill selection", () => {
   })
 
   it("locks profile editing until an in-flight save settles", async () => {
-    const save = Promise.withResolvers<string>()
+    const save = Promise.withResolvers<Awaited<ReturnType<SettingsRelayViewProps["saveConfig"]>>>()
     const saveConfig = vi.fn<Parameters<typeof SettingsRelayView>[0]["saveConfig"]>(() => save.promise)
     const rendered = await renderRelaySettings(AsyncResult.success(config), {
       saveConfig,
@@ -108,11 +110,49 @@ describe("Relay review profile skill selection", () => {
     expect(checkbox.checked).toBe(true)
 
     await act(async () => {
-      save.resolve("saved")
+      save.resolve(Exit.succeed("saved"))
       await save.promise
     })
     expect(saveButton.textContent).toContain("Saved")
     expect(saveButton.disabled).toBe(true)
+    await act(async () => rendered.root.unmount())
+  })
+
+  it("shows a typed save failure and unlocks profile editing", async () => {
+    const save = Promise.withResolvers<Awaited<ReturnType<SettingsRelayViewProps["saveConfig"]>>>()
+    const saveConfig = vi.fn<SettingsRelayViewProps["saveConfig"]>(() => save.promise)
+    const rendered = await renderRelaySettings(AsyncResult.success(config), {
+      saveConfig,
+      skills: AsyncResult.success([{
+        id: "env:test:extra",
+        name: "Extra review",
+        description: "Typed failure fixture",
+        source: "environment"
+      }])
+    })
+    const checkbox = rendered.host.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    const select = rendered.host.querySelector<HTMLSelectElement>("select")
+    const saveButton = Array.from(rendered.host.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(checkbox).not.toBeNull()
+    expect(select).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (checkbox === null || select === null || saveButton === undefined) return
+
+    await act(async () => checkbox.click())
+    await act(async () => saveButton.click())
+    expect(checkbox.disabled).toBe(true)
+    expect(select.disabled).toBe(true)
+
+    await act(async () => {
+      save.resolve(Exit.fail({ _tag: "ApiError", message: "Config write rejected" }))
+      await save.promise
+    })
+    expect(rendered.host.querySelector("[role=\"alert\"]")?.textContent).toContain("Config write rejected")
+    expect(checkbox.disabled).toBe(false)
+    expect(select.disabled).toBe(false)
+    expect(saveButton.disabled).toBe(false)
     await act(async () => rendered.root.unmount())
   })
 

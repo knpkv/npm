@@ -119,7 +119,11 @@ describe("Relay finding dispositions", () => {
 
   it("rejects a single message that cannot be retained as a conversation turn", () => {
     const invalid = { findingId: "F1", role: "user", message: "\0".repeat(8_000) }
-    const valid = { findingId: "F1", role: "user", message: `5${"é".repeat(3_900)}` }
+    const valid = {
+      findingId: "F1",
+      role: "user",
+      message: `5${"é".repeat(3_900)}`
+    } satisfies RelayReviewConversationTurn
 
     expect(Schema.is(RelayReviewConversationTurn)(invalid)).toBe(false)
     expect(Schema.is(RelayReviewConversationTurn)(valid)).toBe(true)

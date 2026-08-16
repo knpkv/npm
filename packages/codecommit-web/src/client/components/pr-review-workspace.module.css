@@ -90,7 +90,7 @@
 .workbench {
   block-size: clamp(40rem, calc(100vh - 8rem), 56rem);
   display: grid;
-  grid-template-columns: minmax(13rem, 0.25fr) minmax(28rem, 1fr) minmax(25rem, 0.64fr);
+  grid-template-columns: minmax(10rem, 0.2fr) minmax(28rem, 1fr) minmax(31rem, 0.84fr);
   min-block-size: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
 }
@@ -245,11 +245,31 @@
 .agentPane > header {
   border-block-end: 1px solid var(--rly-color-border-1);
   justify-content: space-between;
-  padding: var(--rly-space-16);
+  padding: var(--rly-space-12) var(--rly-space-16);
 }
 
-.agentPane > header > span {
+.agentTitle,
+.agentTitle > span {
+  display: flex;
+}
+
+.agentTitle {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--rly-space-2);
+  min-inline-size: var(--rly-space-0);
+}
+
+.agentTitle > span {
+  align-items: center;
   gap: var(--rly-space-8);
+}
+
+.agentTitle > small {
+  color: var(--rly-color-text-3);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  padding-inline-start: calc(var(--rly-space-16) + var(--rly-space-8));
 }
 
 .agentEmpty {
@@ -475,9 +495,9 @@
 .findingActions {
   align-items: center;
   border-block-start: 1px solid var(--rly-color-border-1);
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: var(--rly-space-6);
+  grid-template-columns: minmax(8rem, 1fr) auto auto;
   padding-block-start: var(--rly-space-8);
 }
 
@@ -493,10 +513,6 @@
   padding: var(--rly-space-4);
 }
 
-.findingActions > :last-child {
-  margin-inline-start: auto;
-}
-
 .findingActions svg {
   block-size: var(--rly-space-16);
   inline-size: var(--rly-space-16);
@@ -505,7 +521,7 @@
 .conversation {
   background: var(--rly-color-surface-1);
   border-block-start: 1px solid var(--rly-color-border-1);
-  block-size: clamp(11rem, 36%, 16rem);
+  block-size: clamp(13rem, 40%, 18rem);
   display: grid;
   gap: var(--rly-space-8);
   grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
@@ -529,6 +545,24 @@
   align-items: center;
   display: inline-flex;
   gap: var(--rly-space-6);
+}
+
+.conversationTitle {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-2);
+  min-inline-size: var(--rly-space-0);
+}
+
+.conversationTitle small {
+  color: var(--rly-color-text-3);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  max-inline-size: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation > header > button {
@@ -601,6 +635,13 @@
   min-inline-size: var(--rly-space-0);
 }
 
+.findingMeta > span {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-8);
+  min-inline-size: var(--rly-space-0);
+}
+
 .findingMeta code {
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-font-mono);
@@ -618,7 +659,7 @@
   padding: var(--rly-space-12) var(--rly-space-20);
 }
 
-@media (max-width: 72rem) {
+@media (max-width: 82rem) {
   .workbench {
     block-size: auto;
     grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);

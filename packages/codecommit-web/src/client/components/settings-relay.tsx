@@ -2,11 +2,12 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { ReviewConfig as ReviewSettings, ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
 import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
-import { Predicate } from "effect"
+import { Exit, Option } from "effect"
 import type * as Atom from "effect/unstable/reactivity/Atom"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { CheckIcon } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router"
 
 import { configQueryAtom, configSaveAtom, reviewSkillsQueryAtom } from "../atoms/app.js"
 import type { ReviewSkillResponse } from "../../server/Api.js"
@@ -89,22 +90,33 @@ export function ReviewProfileSkillPicker({
 export function SettingsRelay() {
   const config = useAtomValue(configQueryAtom)
   const skills = useAtomValue(reviewSkillsQueryAtom)
-  const saveConfig = useAtomSet(configSaveAtom, { mode: "promise" })
-  return <SettingsRelayView config={config} saveConfig={saveConfig} skills={skills} />
+  const saveConfig = useAtomSet(configSaveAtom, { mode: "promiseExit" })
+  const navigate = useNavigate()
+  return <SettingsRelayView config={config} onReload={() => void navigate(0)} saveConfig={saveConfig} skills={skills} />
 }
 
 type ConfigState = Atom.Type<typeof configQueryAtom>
 type ReviewSkillsState = Atom.Type<typeof reviewSkillsQueryAtom>
+type ConfigSaveState = Atom.Type<typeof configSaveAtom>
 type ConfigSaveInput = typeof configSaveAtom extends Atom.Writable<infer _Result, infer Input> ? Input : never
+type ConfigSaveExit =
+  ConfigSaveState extends AsyncResult.AsyncResult<infer Success, infer Failure> ? Exit.Exit<Success, Failure> : never
 
 export interface SettingsRelayViewProps {
   readonly config: ConfigState
-  readonly saveConfig: (input: ConfigSaveInput) => Promise<string>
+  readonly onReload?: () => void
+  readonly saveConfig: (input: ConfigSaveInput) => Promise<ConfigSaveExit>
   readonly skills: ReviewSkillsState
 }
 
+const configSaveFailureMessage = (exit: ConfigSaveExit): string =>
+  Option.match(Exit.findErrorOption(exit), {
+    onNone: () => "Failed to save Relay profiles",
+    onSome: (failure) => failure.message
+  })
+
 /** Relay profile editor with explicit query states for component-level verification. */
-export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayViewProps) {
+export function SettingsRelayView({ config, onReload = () => undefined, saveConfig, skills }: SettingsRelayViewProps) {
   type ConfigValue = Extract<typeof config, { readonly _tag: "Success" }>["value"]
   const configRef = useRef<ConfigValue | null>(null)
   const [review, setReview] = useState<ReviewSettings | null>(null)
@@ -142,25 +154,22 @@ export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayV
     setSaving(true)
     setSaveError(null)
     setSavedNow(false)
-    try {
-      const basePayload = {
-        accounts: data.accounts.map(({ enabled, profile, regions }) => ({ enabled, profile, regions: [...regions] })),
-        autoDetect: data.autoDetect,
-        autoRefresh: data.autoRefresh,
-        refreshIntervalSeconds: data.refreshIntervalSeconds,
-        review
-      }
-      const payload = data.sandbox === undefined ? basePayload : { ...basePayload, sandbox: data.sandbox }
-      await saveConfig({
-        payload
-      })
+    const basePayload = {
+      accounts: data.accounts.map(({ enabled, profile, regions }) => ({ enabled, profile, regions: [...regions] })),
+      autoDetect: data.autoDetect,
+      autoRefresh: data.autoRefresh,
+      refreshIntervalSeconds: data.refreshIntervalSeconds,
+      review
+    }
+    const payload = data.sandbox === undefined ? basePayload : { ...basePayload, sandbox: data.sandbox }
+    const exit = await saveConfig({ payload })
+    if (Exit.isSuccess(exit)) {
       setSaved(review)
       setSavedNow(true)
-    } catch (cause) {
-      setSaveError(Predicate.isError(cause) ? cause.message : "Failed to save Relay profiles")
-    } finally {
-      setSaving(false)
+    } else {
+      setSaveError(configSaveFailureMessage(exit))
     }
+    setSaving(false)
   }, [review, saveConfig])
 
   const dirty = review !== null && saved !== null && JSON.stringify(review) !== JSON.stringify(saved)
@@ -196,7 +205,7 @@ export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayV
         <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
           <p className="text-sm font-medium text-destructive">Could not load Relay profiles</p>
           <p className="text-xs text-muted-foreground">Check the server connection, then reload this page to retry.</p>
-          <Button onClick={() => window.location.reload()} size="sm" variant="outline">
+          <Button onClick={onReload} size="sm" variant="outline">
             Reload
           </Button>
         </div>

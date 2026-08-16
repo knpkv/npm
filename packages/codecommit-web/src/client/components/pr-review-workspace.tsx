@@ -24,6 +24,7 @@ import {
   TestTube2Icon
 } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router"
 
 import {
   type PullRequestDiffResponse,
@@ -126,6 +127,10 @@ const FailureWithMessage = Schema.Struct({ message: Schema.String })
 const isFailureWithMessage = Schema.is(FailureWithMessage)
 
 type RelayStreamOutcome = { readonly completed: false } | { readonly completed: true; readonly reply?: string }
+
+interface RelayStreamTerminal {
+  event?: Extract<RelayReviewStreamEvent, { readonly type: "complete" }>
+}
 
 function failureMessage<Failure>(failure: Failure, fallback: string): string {
   return isFailureWithMessage(failure) ? failure.message : fallback
@@ -509,8 +514,19 @@ const ReviewFindings = ({
             >
               <button className={styles.findingBody} onClick={() => onSelect(finding)} type="button">
                 <span className={styles.findingMeta}>
-                  <StateLabel label={finding.priority} size="compact" tone={priorityTone(finding.priority)} />
-                  <code>{locationLabel(finding)}</code>
+                  <span>
+                    <StateLabel label={finding.priority} size="compact" tone={priorityTone(finding.priority)} />
+                    <code>{locationLabel(finding)}</code>
+                  </span>
+                  <StateLabel
+                    label={dispositions[finding.id] ?? "pending"}
+                    size="compact"
+                    tone={
+                      dispositions[finding.id] === "failed" || dispositions[finding.id] === "posted-stale"
+                        ? "caution"
+                        : "neutral"
+                    }
+                  />
                 </span>
                 <strong>{finding.title}</strong>
                 <span>{finding.summary}</span>
@@ -564,15 +580,6 @@ const ReviewFindings = ({
                 >
                   <CircleXIcon /> Reject
                 </button>
-                <StateLabel
-                  label={dispositions[finding.id] ?? "pending"}
-                  size="compact"
-                  tone={
-                    dispositions[finding.id] === "failed" || dispositions[finding.id] === "posted-stale"
-                      ? "caution"
-                      : "neutral"
-                  }
-                />
               </div>
             </article>
           </li>
@@ -601,6 +608,7 @@ const ReadyReviewWorkspace = ({
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
 }): ReactElement => {
+  const navigate = useNavigate()
   const [selectedFileIndex, setSelectedFileIndex] = useState(diff.files[0]?.index ?? null)
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null)
   const [kind, setKind] = useState<RelayReviewKind>("review")
@@ -738,7 +746,7 @@ const ReadyReviewWorkspace = ({
       setReviewFailure(null)
       setProgress([])
       let terminalError: string | null = null
-      let outcome: RelayStreamOutcome = { completed: false }
+      const terminal: RelayStreamTerminal = {}
       try {
         await runRelayReviewStream(
           url,
@@ -753,38 +761,42 @@ const ReadyReviewWorkspace = ({
               setReviewFailure({ description: event.message, title: "Relay review failed" })
               return
             }
-            const prior = completedReviewRef.current?.value.result.findings ?? []
-            const nextDispositions =
-              prior.length === 0
-                ? initialFindingDispositions(event.review.result.findings)
-                : reconcileFindingDispositions(prior, event.review.result.findings, dispositionsRef.current)
-            dispositionsRef.current = nextDispositions
-            setDispositions(nextDispositions)
-            const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: event.review }
-            completedReviewRef.current = completed
-            setCompletedReview(completed)
-            outcome = event.reply === undefined ? { completed: true } : { completed: true, reply: event.reply }
-            setSelectedFindingId((current) => current ?? event.review.result.findings[0]?.id ?? null)
+            terminal.event = event
           },
           controller.signal
         )
         if (terminalError !== null) {
-          outcome = { completed: false }
           setReviewFailure({ description: terminalError, title: "Relay review failed" })
+          return { completed: false }
         }
+        const completedEvent = terminal.event
+        if (completedEvent === undefined) return { completed: false }
+        const prior = completedReviewRef.current?.value.result.findings ?? []
+        const nextDispositions =
+          prior.length === 0
+            ? initialFindingDispositions(completedEvent.review.result.findings)
+            : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
+        dispositionsRef.current = nextDispositions
+        setDispositions(nextDispositions)
+        const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: completedEvent.review }
+        completedReviewRef.current = completed
+        setCompletedReview(completed)
+        setSelectedFindingId((current) => current ?? completedEvent.review.result.findings[0]?.id ?? null)
+        return completedEvent.reply === undefined
+          ? { completed: true }
+          : { completed: true, reply: completedEvent.reply }
       } catch (cause) {
-        outcome = { completed: false }
         if (!controller.signal.aborted) {
           setReviewFailure({
             description: failureMessage(cause, "Relay could not complete this review."),
             title: "Relay review failed"
           })
         }
+        return { completed: false }
       } finally {
         if (abortRef.current === controller) abortRef.current = null
         setIsReviewing(false)
       }
-      return outcome
     },
     [reviewIdentity]
   )
@@ -986,7 +998,7 @@ const ReadyReviewWorkspace = ({
         <div className={styles.reviewFailure}>
           <StatePanel
             action={
-              <Button onClick={() => window.location.reload()} size="compact" variant="secondary">
+              <Button onClick={() => void navigate(0)} size="compact" variant="secondary">
                 Reload
               </Button>
             }
@@ -1140,12 +1152,23 @@ const ReadyReviewWorkspace = ({
 
         <aside aria-label="Relay findings" className={styles.agentPane}>
           <header>
-            <span>
-              <BotIcon aria-hidden="true" />
-              <Text as="h2" variant="section-title">
-                Relay
-              </Text>
-            </span>
+            <div className={styles.agentTitle}>
+              <span>
+                <BotIcon aria-hidden="true" />
+                <Text as="h2" variant="section-title">
+                  Relay
+                </Text>
+              </span>
+              <small>
+                {isReviewing
+                  ? "Reviewing the exact revision"
+                  : review === null
+                    ? "Review findings and discuss evidence"
+                    : `${String(review.result.findings.length)} actionable ${
+                        review.result.findings.length === 1 ? "finding" : "findings"
+                      }`}
+              </small>
+            </div>
             {isReviewing ? (
               <StateLabel label="running" size="compact" tone="progress" />
             ) : review === null ? null : (
@@ -1174,7 +1197,10 @@ const ReadyReviewWorkspace = ({
               <header>
                 <span>
                   <MessageSquareMoreIcon aria-hidden="true" />
-                  <strong>Discuss {selectedFinding.id}</strong>
+                  <span className={styles.conversationTitle}>
+                    <strong>Discuss finding</strong>
+                    <small>{selectedFinding.title}</small>
+                  </span>
                 </span>
                 <button
                   aria-expanded={!conversationCollapsed}
@@ -1222,7 +1248,7 @@ const ReadyReviewWorkspace = ({
                       disabled={isReviewing}
                       maxLength={8_000}
                       onChange={(event) => setMessage(event.target.value)}
-                      placeholder="Verify this against the latest change…"
+                      placeholder="Ask Relay about this finding…"
                       rows={2}
                       value={message}
                     />
