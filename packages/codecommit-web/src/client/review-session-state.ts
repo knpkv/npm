@@ -15,6 +15,17 @@ export type FindingDisposition = typeof FindingDisposition.Type
 
 export type FindingDispositions = Readonly<Record<string, FindingDisposition>>
 
+/** Record a local decision without discarding an existing provider publication receipt. */
+export const applyFindingDecision = (
+  dispositions: FindingDispositions,
+  findingId: string,
+  decision: "acknowledged" | "rejected"
+) => {
+  const current = dispositions[findingId]
+  if (current === "posting" || current === "posted" || current === "posted-stale") return dispositions
+  return { ...dispositions, [findingId]: decision } satisfies FindingDispositions
+}
+
 export const initialFindingDispositions = (
   findings: ReadonlyArray<RelayReviewFinding>
 ): FindingDispositions =>

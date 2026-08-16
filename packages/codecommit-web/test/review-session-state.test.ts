@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   appendReviewTurn,
+  applyFindingDecision,
   initialFindingDispositions,
   reconcileFindingDispositions,
   settleFindingPublication
@@ -47,6 +48,27 @@ describe("Relay finding dispositions", () => {
       [finding("changed")],
       { F1: "rejected" }
     )).toEqual({ F1: "pending" })
+  })
+
+  it("preserves a publication receipt across later local decisions", () => {
+    for (
+      const decision of ["acknowledged", "rejected"] satisfies ReadonlyArray<"acknowledged" | "rejected">
+    ) {
+      const posted = settleFindingPublication(
+        [finding("first")],
+        finding("first"),
+        { F1: "posting" },
+        "posted"
+      ).dispositions
+      const afterDecision = applyFindingDecision(posted, "F1", decision)
+
+      expect(afterDecision).toEqual({ F1: "posted" })
+      expect(reconcileFindingDispositions(
+        [finding("first")],
+        [finding("changed")],
+        afterDecision
+      )).toEqual({ F1: "posted-stale" })
+    }
   })
 
   it("binds publication receipts to the submitted finding snapshot", () => {

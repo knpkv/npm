@@ -364,6 +364,34 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
 
+test("clears a failed publication error after a successful retry", async ({ page }) => {
+  let attempts = 0
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+    attempts++
+    if (attempts === 1) {
+      await route.fulfill({ body: JSON.stringify({ message: "Provider rejected the comment." }), status: 500 })
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({ findingId: "F1", operationId: "comment:retry", summary: "posted" }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  await post.click()
+  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(post).toBeEnabled()
+
+  await post.click()
+  await expect(page.getByText("posted")).toBeVisible()
+  await expect(page.getByText("Relay review failed")).toHaveCount(0)
+})
+
 test("reloads after a completed manual refresh without refetching for ordinary SSE churn", async ({ page }) => {
   let eventCount = 0
   let diffRequestCount = 0

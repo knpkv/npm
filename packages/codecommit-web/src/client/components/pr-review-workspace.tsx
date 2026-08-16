@@ -37,6 +37,7 @@ import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
 import { useComments } from "../hooks/useComments.js"
 import {
+  applyFindingDecision,
   appendReviewTurn,
   type FindingDispositions,
   initialFindingDispositions,
@@ -533,14 +534,22 @@ const ReviewFindings = ({
                   Accept · post
                 </Button>
                 <button
-                  disabled={dispositions[finding.id] === "posting"}
+                  disabled={
+                    dispositions[finding.id] === "posting" ||
+                    dispositions[finding.id] === "posted" ||
+                    dispositions[finding.id] === "posted-stale"
+                  }
                   onClick={() => onAcknowledge(finding)}
                   type="button"
                 >
                   <CircleCheckIcon /> Ack
                 </button>
                 <button
-                  disabled={dispositions[finding.id] === "posting"}
+                  disabled={
+                    dispositions[finding.id] === "posting" ||
+                    dispositions[finding.id] === "posted" ||
+                    dispositions[finding.id] === "posted-stale"
+                  }
                   onClick={() => onReject(finding)}
                   type="button"
                 >
@@ -815,6 +824,7 @@ const ReadyReviewWorkspace = ({
   const postFinding = useCallback(
     async (finding: RelayReviewFinding): Promise<void> => {
       if (review === null || reviewIsStale) return
+      setReviewFailure(null)
       setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
       try {
         const postedFinding: RelayReviewFinding =
@@ -1069,16 +1079,10 @@ const ReadyReviewWorkspace = ({
             dispositions={dispositions}
             isReviewing={isReviewing}
             onAcknowledge={(finding) =>
-              setDispositions((current) =>
-                current[finding.id] === "posting" ? current : { ...current, [finding.id]: "acknowledged" }
-              )
+              setDispositions((current) => applyFindingDecision(current, finding.id, "acknowledged"))
             }
             onPost={(finding) => void postFinding(finding)}
-            onReject={(finding) =>
-              setDispositions((current) =>
-                current[finding.id] === "posting" ? current : { ...current, [finding.id]: "rejected" }
-              )
-            }
+            onReject={(finding) => setDispositions((current) => applyFindingDecision(current, finding.id, "rejected"))}
             onSelect={selectFinding}
             review={review}
             selectedFindingId={selectedFindingId}
