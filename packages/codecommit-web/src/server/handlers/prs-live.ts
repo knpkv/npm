@@ -60,7 +60,7 @@ const extractAwsMessage = <Failure>(e: Failure): string => {
   if (Predicate.hasProperty(cause, "message")) {
     return String(cause.message)
   }
-  if (Predicate.hasProperty(e, "message") && Predicate.isString(e.message) && e.message) return e.message
+  if (Predicate.hasProperty(e, "message") && Predicate.isString(e.message) && e.message.length > 0) return e.message
   // PermissionDeniedError or other tagged errors
   if (Predicate.hasProperty(e, "reason")) {
     const operation = Predicate.hasProperty(e, "operation") ? e.operation : "unknown operation"

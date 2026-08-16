@@ -136,7 +136,7 @@ const routeReviewWorkspace = async (
         comments: [
           ...(options?.emptyCommentsInitially === true ?
             [] :
-            (!findingPostCount || options?.deleteOriginalCommentAfterPost !== true ?
+            (findingPostCount === 0 || options?.deleteOriginalCommentAfterPost !== true ?
               [{
                 root: {
                   id: "comment-1",
@@ -847,7 +847,7 @@ test("settles an optimistic comment count from refreshed provider comments", asy
   const settlement = Promise.withResolvers<void>()
   await routeReviewWorkspace(page, "review", undefined, undefined, {
     commentCount: () => 2,
-    commentsGate: (findingPosted) => findingPosted ? settlement.promise : Promise.resolve()
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve()
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
@@ -869,7 +869,7 @@ test("settles an optimistic comment count when the provider total is unchanged",
   const settlement = Promise.withResolvers<void>()
   await routeReviewWorkspace(page, "review", undefined, undefined, {
     commentCount: () => 2,
-    commentsGate: (findingPosted) => findingPosted ? settlement.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve(),
     deleteOriginalCommentAfterPost: true
   })
   await page.goto("/accounts/111111111111/prs/42")

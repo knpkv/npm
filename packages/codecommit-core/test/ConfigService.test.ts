@@ -26,7 +26,8 @@ const makeMockFS = (files: Record<string, string>) => {
   const store = { ...files }
   const partial: Partial<FileSystem.FileSystem> = {
     exists: (path) => Effect.succeed(path in store),
-    readFileString: (path) => path in store ? Effect.succeed(store[path]!) : fsError("readFileString"),
+    readFileString: (path): Effect.Effect<string, SystemError> =>
+      path in store ? Effect.succeed(store[path]!) : fsError("readFileString"),
     writeFileString: (path: string, content: string) => {
       store[path] = content
       return Effect.void
@@ -67,6 +68,8 @@ const makeTestLayer = (files: Record<string, string>) => {
 
 const run = <A>(files: Record<string, string>, effect: Effect.Effect<A, unknown, ConfigService>) => {
   const { layer } = makeTestLayer(files)
+  // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+  // @effect-diagnostics-next-line strictEffectProvide:off
   return Effect.runPromise(Effect.provide(effect, layer))
 }
 
@@ -78,6 +81,8 @@ describe("ConfigService", () => {
         "[production]\naws_access_key_id = redacted\n[shared]\nregion = eu-central-1\n[personal]\naws_access_key_id = redacted"
     })
     const profiles = await Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       discoverAwsProfiles(TEST_HOME).pipe(Effect.provide(Layer.mergeAll(mock.layer, MockPath)))
     )
 
@@ -266,6 +271,8 @@ describe("ConfigService", () => {
       [configPath]: JSON.stringify({ accounts: [] })
     })
     return Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService
@@ -304,6 +311,8 @@ describe("ConfigService", () => {
       [configPath]: JSON.stringify({ accounts: [{ profile: "old" }] })
     })
     return Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService

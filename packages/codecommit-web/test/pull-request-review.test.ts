@@ -233,7 +233,11 @@ describe("CodeCommit web review boundary", () => {
         pullRequest,
         expectedRevision,
         finding
-      ).pipe(Effect.provide(NodeServices.layer))
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
 
       expect(receipt).toMatchObject({ findingId: "F1", operationId: "comment:123" })
       expect(actions).toHaveLength(1)
@@ -290,14 +294,22 @@ describe("CodeCommit web review boundary", () => {
         pullRequest,
         expectedRevision,
         finding
-      ).pipe(Effect.provide(NodeServices.layer))
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
       yield* postPullRequestRelayFinding(
         makeReadClient(),
         publisher,
         pullRequest,
         expectedRevision,
         reordered
-      ).pipe(Effect.provide(NodeServices.layer))
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
 
       expect(tokens).toHaveLength(2)
       expect(tokens[0]).toBe(tokens[1])
@@ -329,7 +341,12 @@ describe("CodeCommit web review boundary", () => {
           publicationTarget: "pr-comment",
           location: { scope: "general" }
         }
-      ).pipe(Effect.provide(NodeServices.layer), Effect.flip)
+      ).pipe(
+        // The test case is the resource-lifetime boundary for the Node service layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer),
+        Effect.flip
+      )
       expect(failure.operation).toBe("revision-changed")
       expect(calls).toBe(0)
     }))

@@ -25,7 +25,7 @@ import { makePermissionedReadClient } from "../src/server/internal/PermissionedR
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
-  function*(active = true): Effect.fn.Return<OwnerSessionSecretsContract> {
+  function*(active: boolean = true): Effect.fn.Return<OwnerSessionSecretsContract> {
     return {
       ownerToken: Redacted.make("owner-secret"),
       csrfToken: Redacted.make("csrf-secret"),

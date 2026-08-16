@@ -10,6 +10,7 @@ BunRuntime.runMain(
     // The executable boundary is the only place permitted to read the host process;
     // profile-scoped spawns need the environment they will actually inherit so the
     // ambient AWS variables can be tombstoned under whatever casing they carry.
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(
       Layer.mergeAll(
         Layer.succeed(RuntimeContextMarker, undefined),

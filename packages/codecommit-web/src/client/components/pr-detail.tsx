@@ -151,14 +151,14 @@ function CommentsCountReporter({
 }
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  if (!score) return null
+  if (score === undefined) return null
   const tier = getScoreTier(score.total)
 
   return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
 function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
-  if (!score) {
+  if (score === undefined) {
     return (
       <Text tone="secondary" variant="meta">
         Waiting for comment count…
@@ -393,7 +393,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     allComments.sort((a, b) => a.date.getTime() - b.date.getTime())
 
     const firstComment = allComments.find((c) => c.author !== pr.author)
-    const commentMs = firstComment ? firstComment.date.getTime() - pr.creationDate.getTime() : null
+    const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
     const hasNonAuthorApproval = pr.isApproved && pr.approvedBy.some((a) => a !== pr.author)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
@@ -403,7 +403,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     for (let i = 0; i < allComments.length; i++) {
       if (allComments[i]!.author !== pr.author) {
         const reply = allComments.slice(i + 1).find((c) => c.author === pr.author)
-        if (reply) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
+        if (reply !== undefined) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
       }
     }
     const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
@@ -470,7 +470,7 @@ const OPTIONAL_RULE_NAME = "Optional approvers"
 
 export const normalizeApproverIdentity = (input: string, repoAccountId: string): string | undefined => {
   const trimmed = input.trim()
-  if (!trimmed || !repoAccountId) return undefined
+  if (trimmed.length === 0 || repoAccountId.length === 0) return undefined
   return trimmed.startsWith("CodeCommitApprovers:") ? trimmed : `CodeCommitApprovers:${repoAccountId}:${trimmed}`
 }
 
@@ -523,7 +523,7 @@ function ApproversCard({
   const allPoolMembers = useMemo(() => {
     const set = new Set<string>()
     for (const rule of approvalRules) {
-      if (rule.fromTemplate || rule.ruleName === ruleName) {
+      if (rule.fromTemplate !== undefined || rule.ruleName === ruleName) {
         for (const m of rule.poolMembers) set.add(m)
       }
     }
@@ -531,7 +531,7 @@ function ApproversCard({
   }, [approvalRules, ruleName])
 
   // Find the managed rule by name (non-template rule we can edit)
-  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && !r.fromTemplate)
+  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
 
@@ -541,13 +541,13 @@ function ApproversCard({
     [knownUserArns, allPoolMembers, pendingAdd]
   )
 
-  const prefix = repoAccountId ? `CodeCommitApprovers:${repoAccountId}:` : ""
+  const prefix = repoAccountId.length > 0 ? `CodeCommitApprovers:${repoAccountId}:` : ""
 
   const handleAdd = (input: string) => {
     const value = normalizeApproverIdentity(input, repoAccountId)
-    if (!value) return
+    if (value === undefined) return
     const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(value)
-    optimistic.add(nameMatch ? nameMatch[1]! : input)
+    optimistic.add(nameMatch !== null ? nameMatch[1]! : input)
     onSetApprovers([...managedArns, value])
     setShowPicker(false)
   }
@@ -619,18 +619,18 @@ function ApproversCard({
                     className={`${controlProps.className} ${styles.approverInput ?? ""}`}
                     onChange={(event) => setManualArn(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && manualArn.trim()) {
+                      if (event.key === "Enter" && manualArn.trim().length > 0) {
                         handleAdd(manualArn.trim())
                         setManualArn("")
                       }
                     }}
-                    placeholder={prefix ? `${prefix}USERNAME` : "username"}
+                    placeholder={prefix.length > 0 ? `${prefix}USERNAME` : "username"}
                     value={manualArn}
                   />
                 )}
               </Field>
               <RlyButton
-                disabled={!manualArn.trim() || !prefix}
+                disabled={manualArn.trim().length === 0 || prefix.length === 0}
                 onClick={() => {
                   handleAdd(manualArn.trim())
                   setManualArn("")
@@ -643,7 +643,7 @@ function ApproversCard({
             </div>
           </div>
         )}
-        {!showPicker && prefix && addable.length > 0 && (
+        {!showPicker && prefix.length > 0 && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
             <Text tone="tertiary" variant="meta">
               Suggested
@@ -761,7 +761,7 @@ export function PRDetail() {
   const fetchedRef = useRef<string | null>(null)
   const pr = useMemo(
     () =>
-      prId
+      prId !== undefined && prId.length > 0
         ? (state.pullRequests.find(
             (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
           ) ?? null)
@@ -777,9 +777,9 @@ export function PRDetail() {
     // All users stamped with currentAcct — approval pools reference the PR's repo account.
     // If same username exists across accounts, first-seen wins (acceptable for single-org use).
     const addUser = (name: string) => {
-      if (!name || name === "*") return
+      if (name.length === 0 || name === "*") return
       if (!map.has(name)) {
-        map.set(name, currentAcct ? `CodeCommitApprovers:${currentAcct}:${name}` : name)
+        map.set(name, currentAcct.length > 0 ? `CodeCommitApprovers:${currentAcct}:${name}` : name)
       }
     }
     for (const p of state.pullRequests) {
@@ -795,7 +795,8 @@ export function PRDetail() {
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
-    if (pr || !accountId || !prId) return
+    if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
+      return
     const key = `${accountId}:${prId}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
@@ -803,7 +804,7 @@ export function PRDetail() {
   }, [pr, accountId, prId, refreshSingle])
 
   const score: HealthScore | undefined = useMemo(
-    () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
+    () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
   const navigate = useNavigate()
@@ -818,14 +819,14 @@ export function PRDetail() {
   const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
   const serverSubscribed = useMemo(
     () =>
-      AsyncResult.isSuccess(subscriptionsResult) && accountKey
+      AsyncResult.isSuccess(subscriptionsResult) && accountKey !== undefined && accountKey.length > 0
         ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
         : false,
     [subscriptionsResult, accountKey, prId]
   )
   const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
   const handleSubscriptionToggle = useCallback(() => {
-    if (!accountKey || !pr) return
+    if (accountKey === undefined || accountKey.length === 0 || pr === null) return
     const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
     setOptimistic(!isSubscribed)
     if (isSubscribed) {
@@ -923,14 +924,15 @@ export function PRDetail() {
     }
   }, [commentNavigationIdentity, pr?.commentCount])
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (!accountKey || !prId) return
+    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
   }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (!accountKey || !prId || isRefreshing) return
+    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+      return
     setIsRefreshing(true)
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
       (refreshed) => {
@@ -947,13 +949,15 @@ export function PRDetail() {
   }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
 
   // Copy console URL
-  const consoleUrl = pr
-    ? pr.link ||
-      `https://${pr.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${pr.repositoryName}/pull-requests/${pr.id}?region=${pr.account.region}`
-    : ""
+  const consoleUrl =
+    pr !== null
+      ? pr.link.length > 0
+        ? pr.link
+        : `https://${pr.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${pr.repositoryName}/pull-requests/${pr.id}?region=${pr.account.region}`
+      : ""
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(() => {
-    if (!consoleUrl) return
+    if (consoleUrl.length === 0) return
     navigator.clipboard.writeText(consoleUrl).then(
       () => {
         setCopied(true)
@@ -979,14 +983,14 @@ export function PRDetail() {
   const [sandboxCreating, setSandboxCreating] = useState(false)
 
   useEffect(() => {
-    if (sandboxCreating && existingSandbox) {
+    if (sandboxCreating && existingSandbox !== undefined) {
       setSandboxCreating(false)
       navigate(`/sandbox/${existingSandbox.id}`)
     }
   }, [sandboxCreating, existingSandbox, navigate])
 
   const proceedSandbox = useCallback(() => {
-    if (!pr) return
+    if (pr === null) return
     const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
     createSandbox({
       payload: {
@@ -1002,8 +1006,8 @@ export function PRDetail() {
   }, [pr, createSandbox])
 
   const handleSandbox = useCallback(() => {
-    if (!pr) return
-    if (existingSandbox) {
+    if (pr === null) return
+    if (existingSandbox !== undefined) {
       navigate(`/sandbox/${existingSandbox.id}`)
       return
     }
@@ -1018,12 +1022,12 @@ export function PRDetail() {
   }
 
   const proceedOpen = useCallback(() => {
-    if (!pr || !consoleUrl) return
+    if (pr === null || consoleUrl.length === 0) return
     openPr({ payload: { profile: pr.account.profile, link: consoleUrl } })
   }, [consoleUrl, openPr, pr])
 
   const handleOpen = useCallback(() => {
-    if (!pr) return
+    if (pr === null) return
     if (!granted.show()) {
       proceedOpen()
     }
@@ -1040,9 +1044,9 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "Enter" || e.key === "o") && pr?.link) {
+      } else if ((e.key === "Enter" || e.key === "o") && pr?.link !== undefined && pr.link.length > 0) {
         handleOpen()
-      } else if (e.key === "." && pr) {
+      } else if (e.key === "." && pr !== null) {
         e.preventDefault()
         handleSandbox()
       }
@@ -1051,7 +1055,7 @@ export function PRDetail() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [handleOpen, handleSandbox, navigate, pr])
 
-  if (!pr) {
+  if (pr === null) {
     return (
       <section className={styles.loadingState}>
         <StatePanel
@@ -1127,7 +1131,7 @@ export function PRDetail() {
             </Button>
             <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
               <CodeIcon className="size-3.5" />
-              {existingSandbox ? "Open Sandbox" : "Sandbox"}
+              {existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
             </Button>
             <RlyButton
               className={styles.actionButton}
@@ -1342,9 +1346,9 @@ export function PRDetail() {
                 onRefresh={refreshAfterApprovalMutation}
                 onSetApprovers={(arns) => {
                   const existing = pr.approvalRules.find(
-                    (rule) => rule.ruleName === card.ruleName && !rule.fromTemplate
+                    (rule) => rule.ruleName === card.ruleName && rule.fromTemplate === undefined
                   )
-                  if (existing) {
+                  if (existing !== undefined) {
                     updateRule({
                       payload: {
                         account: pr.account,
@@ -1366,7 +1370,7 @@ export function PRDetail() {
                     })
                   }
                 }}
-                permissionPrompt={!!state.permissionPrompt}
+                permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}
                 ruleName={card.ruleName}

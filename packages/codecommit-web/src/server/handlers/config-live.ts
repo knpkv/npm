@@ -65,7 +65,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               Effect.map((s) =>
                 Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               ),
-              Effect.catchIf(() => true, () => Effect.succeed(undefined))
+              Effect.option,
+              Effect.map(Option.getOrUndefined)
             )
             : undefined
           return { path, exists, modifiedAt }
@@ -82,7 +83,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
                 size: Number(s.size),
                 modifiedAt: Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               })),
-              Effect.catchIf(() => true, () => Effect.succeed(undefined))
+              Effect.option,
+              Effect.map(Option.getOrUndefined)
             )
             : undefined
           return { path, sizeBytes: stat?.size ?? 0, exists, modifiedAt: stat?.modifiedAt }
@@ -123,9 +125,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             review,
             sandbox: payload.sandbox ?? existing.sandbox
           })
-          yield* prService.refresh.pipe(
-            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config save failed", e))
-          )
+          yield* prService.refresh
           return "ok"
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("reset", () =>
@@ -138,9 +138,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             })
           )
           const config = yield* configService.reset
-          yield* prService.refresh.pipe(
-            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config reset failed", e))
-          )
+          yield* prService.refresh
           const state = yield* SubscriptionRef.get(prService.state)
           return {
             backupPath,

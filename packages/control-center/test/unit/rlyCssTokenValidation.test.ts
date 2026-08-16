@@ -55,5 +55,10 @@ describe("workspace rly CSS token validation", () => {
           }
         ]
       )
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // The test runner is the resource-lifetime boundary for the temporary workspace.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 })

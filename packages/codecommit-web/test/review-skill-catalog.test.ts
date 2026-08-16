@@ -52,7 +52,12 @@ describe("Relay review skill catalog", () => {
         .toContain("Review typed failures.")
       const unavailable = yield* selectedReviewSkillPrompt(skills, ["env:test:../../external"]).pipe(Effect.flip)
       expect(unavailable._tag).toBe("ReviewSkillSelectionError")
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("bounds client-visible skill metadata by UTF-8 bytes", () =>
     Effect.gen(function*() {
@@ -94,7 +99,12 @@ describe("Relay review skill catalog", () => {
       expect(large.name.endsWith("…")).toBe(true)
       expect(large.description.endsWith("…")).toBe(true)
       expect(normal).toMatchObject({ name: "Strict reviewer", description: "Trace typed error paths." })
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("stops directory traversal at the file and depth bounds", () =>
     Effect.gen(function*() {
@@ -143,7 +153,12 @@ describe("Relay review skill catalog", () => {
       expect(deepSkills.some(({ id }) => id.startsWith("env:deep:"))).toBe(false)
       const deepReads = (yield* Ref.get(reads)).slice(readsBeforeDeep)
       expect(deepReads).toHaveLength(8)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("bounds inspected entries across a dense skill root", () =>
     Effect.gen(function*() {
@@ -185,7 +200,12 @@ describe("Relay review skill catalog", () => {
       yield* fileSystem.writeFileString(path.join(valid, "two", "nested", "SKILL.md"), "Second.")
       const validSkills = yield* discoverReviewSkillsFromRoots([{ label: "valid", path: valid }])
       expect(validSkills.filter(({ id }) => id.startsWith("env:valid:"))).toHaveLength(2)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("selects the same bounded skill prefix across directory permutations", () =>
     Effect.gen(function*() {
@@ -218,7 +238,12 @@ describe("Relay review skill catalog", () => {
       const second = yield* discoverWith([...ordinary.toReversed(), "SKILL.md"])
       expect(first.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
       expect(second.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("exposes only environment skill ids accepted by review profiles", () =>
     Effect.gen(function*() {
@@ -240,7 +265,12 @@ describe("Relay review skill catalog", () => {
       expect(skills.find(({ id }) => id === boundaryId)?.prompt).toBe("Boundary skill.")
       expect(skills.some(({ prompt }) => prompt === "Overlong skill.")).toBe(false)
       expect(skills.every(({ id }) => id.length <= 256)).toBe(true)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // The test case is the resource-lifetime boundary for temporary directories.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("rejects selected skill prompts above the aggregate UTF-8 budget", () =>
     Effect.gen(function*() {
