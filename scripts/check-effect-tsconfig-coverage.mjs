@@ -1,19 +1,23 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import assert from "node:assert/strict"
+import { URL } from "node:url"
 
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Stdio from "effect/Stdio"
 import * as TypeScript from "typescript"
-import * as Predicate from "effect/Predicate"
 
 const effectPluginName = "@effect/language-service"
 const ignoredDirectories = new Set(["dist", "generated", "node_modules"])
 const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
+const strictDiagnostics = ["strictBooleanExpressions", "strictEffectProvide"]
+const suppressedDiagnostics = ["overriddenSchemaConstructor"]
+const enabledDiagnosticSeverities = new Set(["error", "message", "suggestion", "warning"])
 
 class EffectTsconfigCoverageError extends Data.TaggedError("EffectTsconfigCoverageError") {
   get message() {
@@ -28,21 +32,27 @@ const declaresEffect = (manifest) =>
     Object.keys(manifest[section] ?? {}).some((name) => name === "effect" || name.startsWith("@effect/"))
   )
 
-const checkCoversRootTsconfig = (checkScript) => {
+const checkCoversTsconfig = (checkScript, expectedProject = "tsconfig.json") => {
   if (!Predicate.isString(checkScript)) return false
+  const normalizedExpectedProject = expectedProject.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
   for (const segment of checkScript.split(/&&|\|\||;/u)) {
     const executable = segment.match(/(?:^|\s)(?:tsc|tspc|tsgo)(?:\s|$)/u)
     if (executable === null) continue
     const command = segment.slice(executable.index).trim()
     const project = command.match(/(?:^|\s)(?:-p|--project)\s+([^\s]+)/u)?.[1]
     if (project !== undefined) {
-      if (project.replaceAll(/["']/gu, "").replace(/^\.\//u, "") === "tsconfig.json") return true
+      if (project.replaceAll(/["']/gu, "").replace(/^\.\//u, "") === normalizedExpectedProject) return true
       continue
     }
     const build = command.match(/(?:^|\s)(?:-b|--build)(?:\s+([^\s-][^\s]*))?/u)
-    if (build === null) return true
+    if (build === null) return normalizedExpectedProject === "tsconfig.json"
     const target = build[1]?.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
-    if (target === undefined || target === "tsconfig.json" || target === ".") return true
+    if (
+      target === normalizedExpectedProject ||
+      (normalizedExpectedProject === "tsconfig.json" && (target === undefined || target === "."))
+    ) {
+      return true
+    }
   }
   return false
 }
@@ -69,6 +79,24 @@ const validatePackageRecords = (records) => {
       if (config.ignoreWarnings !== false || config.ignoreErrors !== false) {
         diagnostics.push(`${record.name}: ${config.path} must make Effect warnings and errors affect the tsc exit code`)
       }
+      if (config.includeSuggestions !== false || config.ignoreSuggestions !== false) {
+        diagnostics.push(
+          `${record.name}: ${config.path} must keep successful tsc output clean and never make surfaced suggestions non-blocking`
+        )
+      }
+      for (const diagnostic of strictDiagnostics) {
+        const severity = config.diagnosticSeverity?.[diagnostic]
+        if (!Predicate.isString(severity) || !enabledDiagnosticSeverities.has(severity.toLowerCase())) {
+          diagnostics.push(
+            `${record.name}: ${config.path} must use a supported enabled severity for Effect diagnostic ${diagnostic}`
+          )
+        }
+      }
+      for (const diagnostic of suppressedDiagnostics) {
+        if (config.diagnosticSeverity?.[diagnostic] !== "off") {
+          diagnostics.push(`${record.name}: ${config.path} must explicitly disable Effect diagnostic ${diagnostic}`)
+        }
+      }
     }
   }
   return diagnostics
@@ -78,8 +106,15 @@ const runSelfTest = () => {
   const coveredConfig = {
     hasEffectPlugin: true,
     ignoreErrors: false,
+    ignoreSuggestions: false,
     ignoreWarnings: false,
+    includeSuggestions: false,
     includesEffectNamespaces: true,
+    diagnosticSeverity: {
+      overriddenSchemaConstructor: "off",
+      strictBooleanExpressions: "suggestion",
+      strictEffectProvide: "suggestion"
+    },
     path: "tsconfig.json"
   }
   assert.deepEqual(
@@ -95,6 +130,21 @@ const runSelfTest = () => {
         effectPackage: false,
         name: "@fixture/non-effect",
         sourceConfigs: []
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/case-normalized-enabled",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: {
+              ...coveredConfig.diagnosticSeverity,
+              strictBooleanExpressions: "WARNING",
+              strictEffectProvide: "MESSAGE"
+            }
+          }
+        ]
       }
     ]),
     []
@@ -129,17 +179,104 @@ const runSelfTest = () => {
         effectPackage: true,
         name: "@fixture/incomplete-policy",
         sourceConfigs: [{ ...coveredConfig, includesEffectNamespaces: false }]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/non-blocking-suggestions",
+        sourceConfigs: [{ ...coveredConfig, includeSuggestions: true, ignoreSuggestions: true }]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/missing-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: {
+              overriddenSchemaConstructor: "off",
+              strictBooleanExpressions: "suggestion"
+            }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/disabled-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "OFF" }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/invalid-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: "typo" }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/null-strict-pattern",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, strictEffectProvide: null }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/missing-suppression",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: {
+              strictBooleanExpressions: "suggestion",
+              strictEffectProvide: "suggestion"
+            }
+          }
+        ]
+      },
+      {
+        checkCoversRoot: true,
+        effectPackage: true,
+        name: "@fixture/weakened-suppression",
+        sourceConfigs: [
+          {
+            ...coveredConfig,
+            diagnosticSeverity: { ...coveredConfig.diagnosticSeverity, overriddenSchemaConstructor: "warning" }
+          }
+        ]
       }
     ]),
     [
       "@fixture/missing-plugin: tsconfig.json does not load @effect/language-service",
       "@fixture/ignored-warning: tsconfig.json must make Effect warnings and errors affect the tsc exit code",
-      "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces"
+      "@fixture/incomplete-policy: tsconfig.json does not configure Effect package namespaces",
+      "@fixture/non-blocking-suggestions: tsconfig.json must keep successful tsc output clean and never make surfaced suggestions non-blocking",
+      "@fixture/missing-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/disabled-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/invalid-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/null-strict-pattern: tsconfig.json must use a supported enabled severity for Effect diagnostic strictEffectProvide",
+      "@fixture/missing-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor",
+      "@fixture/weakened-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor"
     ]
   )
-  assert.equal(checkCoversRootTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
-  assert.equal(checkCoversRootTsconfig("tsc -b tsconfig.json"), true)
-  assert.equal(checkCoversRootTsconfig("tsc -p scripts/tsconfig.json"), false)
+  assert.equal(checkCoversTsconfig("pnpm build"), false)
+  assert.equal(checkCoversTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
+  assert.equal(checkCoversTsconfig("tsc -b tsconfig.json"), true)
+  assert.equal(checkCoversTsconfig("tsc -p scripts/tsconfig.json"), false)
+  assert.equal(checkCoversTsconfig("tsc -p scripts/tsconfig.json", "scripts/tsconfig.json"), true)
 }
 
 const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function* (content, location) {
@@ -189,6 +326,7 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
         undefined,
         configPath
       )
+      if (parsed.fileNames.length === 0 && parsed.errors.every(({ code }) => code === 18003)) return undefined
       if (parsed.errors.length > 0) {
         throw new EffectTsconfigCoverageError({
           reason: parsed.errors
@@ -200,8 +338,11 @@ const inspectTsconfig = Effect.fn("EffectTsconfigCoverage.inspectTsconfig")(func
       const plugin = parsed.options.plugins?.find(({ name }) => name === effectPluginName)
       return {
         hasEffectPlugin: plugin !== undefined,
+        diagnosticSeverity: plugin?.diagnosticSeverity,
         ignoreErrors: plugin?.ignoreEffectErrorsInTscExitCode,
+        ignoreSuggestions: plugin?.ignoreEffectSuggestionsInTscExitCode,
         ignoreWarnings: plugin?.ignoreEffectWarningsInTscExitCode,
+        includeSuggestions: plugin?.includeSuggestionsInTsc,
         includesEffectNamespaces:
           Array.isArray(plugin?.namespaceImportPackages) &&
           plugin.namespaceImportPackages.includes("effect") &&
@@ -247,7 +388,7 @@ const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(fu
       }
     }
     records.push({
-      checkCoversRoot: checkCoversRootTsconfig(manifest.scripts?.check),
+      checkCoversRoot: checkCoversTsconfig(manifest.scripts?.check),
       effectPackage: declaresEffect(manifest),
       name: manifest.name ?? `packages/${entry}`,
       sourceConfigs
@@ -267,10 +408,38 @@ const program = Effect.gen(function* () {
   const args = yield* stdio.args
   if (args.includes("--self-test")) return
 
+  const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
-  const records = yield* inspectWorkspace(path.join(repositoryRoot, "packages"))
+  const packageRecords = yield* inspectWorkspace(path.join(repositoryRoot, "packages"))
+  const rootManifest = yield* decodeJson(
+    yield* fileSystem.readFileString(path.join(repositoryRoot, "package.json")),
+    "package.json"
+  )
+  const toolingConfigs = []
+  for (const { configPath, required } of [
+    { configPath: path.join(repositoryRoot, "tsconfig.json"), required: true },
+    { configPath: path.join(repositoryRoot, "scripts", "tsconfig.json"), required: false }
+  ]) {
+    const inspected = yield* inspectTsconfig(configPath, path.dirname(configPath))
+    if (inspected === undefined) {
+      if (required) return yield* fail(`${path.relative(repositoryRoot, configPath)} must own its TypeScript sources`)
+      continue
+    }
+    toolingConfigs.push({ ...inspected, path: path.relative(repositoryRoot, configPath) })
+  }
+  const records = [
+    ...packageRecords,
+    {
+      checkCoversRoot: toolingConfigs.every(({ path: configPath }) =>
+        checkCoversTsconfig(rootManifest.scripts?.check, configPath)
+      ),
+      effectPackage: true,
+      name: "@workspace/tooling",
+      sourceConfigs: toolingConfigs
+    }
+  ]
   const diagnostics = validatePackageRecords(records)
   if (diagnostics.length > 0) {
     return yield* fail(`Effect TypeScript coverage failed:\n- ${diagnostics.join("\n- ")}`)
@@ -278,7 +447,7 @@ const program = Effect.gen(function* () {
   const effectPackages = records.filter(({ effectPackage }) => effectPackage)
   const configCount = effectPackages.reduce((total, { sourceConfigs }) => total + sourceConfigs.length, 0)
   yield* Console.log(
-    `Effect TypeScript coverage checked ${configCount} source configs across ${effectPackages.length} packages`
+    `Effect TypeScript coverage checked ${configCount} source configs across ${effectPackages.length} projects`
   )
 })
 

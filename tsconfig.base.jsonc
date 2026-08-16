@@ -31,10 +31,14 @@
         "name": "@effect/language-service",
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
-          "overriddenschemaconstructor": "off"
+          "overriddenSchemaConstructor": "off",
+          // Opt in to the language service's stricter, non-default patterns.
+          "strictBooleanExpressions": "suggestion",
+          "strictEffectProvide": "suggestion"
         },
-        "includeSuggestionsInTsc": true,
-        "ignoreEffectSuggestionsInTscExitCode": true,
+        // Keep regular builds clean; lint checks changed TypeScript files and blocks on these suggestions.
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
         "ignoreEffectWarningsInTscExitCode": false,
         "ignoreEffectErrorsInTscExitCode": false
       }
