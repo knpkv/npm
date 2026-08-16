@@ -1,5 +1,5 @@
 /** Bounded discovery of prompt-only review skills from the local Codex environment. @module */
-import { Config, Effect, Option, Predicate, Schema } from "effect"
+import { Config, Effect, Option, Predicate, Ref, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
@@ -7,6 +7,7 @@ import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "./ReviewPromptBudget.js"
 
 const MAXIMUM_SKILL_FILES = 256
 const MAXIMUM_SKILL_DIRECTORIES = MAXIMUM_SKILL_FILES + 1
+export const MAXIMUM_SKILL_INSPECTED_ENTRIES = MAXIMUM_SKILL_FILES * 4
 const MAXIMUM_SKILL_BYTES = 64 * 1024
 const MAXIMUM_SKILL_DEPTH = 8
 
@@ -122,7 +123,8 @@ interface PendingSkillDirectory {
 }
 
 const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandidates")(function*(
-  canonicalRoot: string
+  canonicalRoot: string,
+  inspectedEntries: Ref.Ref<number>
 ): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -135,7 +137,11 @@ const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandi
     const entries = yield* fileSystem.readDirectory(current.directory).pipe(
       Effect.catch(() => Effect.succeed<Array<string>>([]))
     )
-    for (const entry of [...entries].sort()) {
+    const remainingEntries = MAXIMUM_SKILL_INSPECTED_ENTRIES - (yield* Ref.get(inspectedEntries))
+    if (remainingEntries <= 0) break
+    const boundedEntries = entries.slice(0, remainingEntries).sort()
+    yield* Ref.update(inspectedEntries, (count) => count + boundedEntries.length)
+    for (const entry of boundedEntries) {
       if (candidates.length >= MAXIMUM_SKILL_FILES) break
       const unresolved = path.join(current.directory, entry)
       const canonical = yield* fileSystem.realPath(unresolved).pipe(
@@ -168,7 +174,8 @@ const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandi
 })
 
 const discoverRoot = Effect.fn("ReviewSkillCatalog.discoverRoot")(function*(
-  root: SkillRoot
+  root: SkillRoot,
+  inspectedEntries: Ref.Ref<number>
 ): Effect.fn.Return<ReadonlyArray<ReviewSkillDefinition>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem
   if (!(yield* fileSystem.exists(root.path).pipe(Effect.catch(() => Effect.succeed(false))))) return []
@@ -177,7 +184,7 @@ const discoverRoot = Effect.fn("ReviewSkillCatalog.discoverRoot")(function*(
     Effect.catch(() => Effect.succeed(Option.none<string>()))
   )
   if (Option.isNone(canonicalRoot)) return []
-  const candidates = yield* discoverSkillCandidates(canonicalRoot.value)
+  const candidates = yield* discoverSkillCandidates(canonicalRoot.value, inspectedEntries)
   const skills = yield* Effect.forEach(
     candidates,
     (candidate) => readSkill(root, canonicalRoot.value, candidate),
@@ -204,7 +211,8 @@ export const discoverReviewSkills = Effect.fn("ReviewSkillCatalog.discoverReview
 export const discoverReviewSkillsFromRoots = Effect.fn(
   "ReviewSkillCatalog.discoverReviewSkillsFromRoots"
 )(function*(roots: ReadonlyArray<SkillRoot>) {
-  const discovered = yield* Effect.forEach(roots, discoverRoot, { concurrency: 3 })
+  const inspectedEntries = yield* Ref.make(0)
+  const discovered = yield* Effect.forEach(roots, (root) => discoverRoot(root, inspectedEntries))
   const byId = new Map<string, ReviewSkillDefinition>()
   for (const skill of [...builtinSkills, ...discovered.flat()]) byId.set(skill.id, skill)
   return Array.from(byId.values())

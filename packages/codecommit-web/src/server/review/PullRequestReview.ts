@@ -949,10 +949,9 @@ export const continuePullRequestRelayReview = Effect.fn(
 })
 
 const relayWorkerErrorMessage = (cause: Cause.Cause<unknown>): string => {
-  const squashed = Cause.squash(cause)
-  return Predicate.hasProperty(squashed, "message") && Predicate.isString(squashed.message)
-    ? squashed.message
-    : "Relay review failed"
+  if (cause.reasons.some((reason) => !Cause.isFailReason(reason))) return "Relay review failed"
+  const failure = cause.reasons.find(Cause.isFailReason)?.error
+  return Schema.is(PullRequestReviewError)(failure) ? failure.message : "Relay review failed"
 }
 
 /** Convert one Relay worker into a stream with exactly one terminal event. */

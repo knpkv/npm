@@ -1196,9 +1196,13 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
   )
 })
 
-test("uses a bounded fallback for newline-dense files", async ({ page }) => {
+test("uses a bounded fallback for newline- and byte-dense files", async ({ page }) => {
   const denseBefore = Array.from({ length: 2_499 }, (_, index) => `before ${index}`).join("\n")
   const denseAfter = Array.from({ length: 2_499 }, (_, index) => `after ${index}`).join("\n")
+  const minifiedBefore = "a".repeat(300 * 1024)
+  const minifiedAfter = "b".repeat(300 * 1024)
+  const moderateBefore = "a".repeat(16 * 1024)
+  const moderateAfter = "b".repeat(16 * 1024)
   await page.route("**/api/events/", async (route) => {
     await route.fulfill({
       body: `data: ${
@@ -1223,27 +1227,28 @@ test("uses a bounded fallback for newline-dense files", async ({ page }) => {
         revisionId: "revision-1",
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{
-          index: 0,
+        files: ["dense", "minified", "moderate"].map((name, index) => ({
+          index,
           status: "modified",
-          path: "src/dense.ts",
+          path: `src/${name}.ts`,
           previousPath: null,
           beforeMode: "100644",
           afterMode: "100644"
-        }]
+        }))
       }),
       contentType: "application/json",
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+    const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     await route.fulfill({
       body: JSON.stringify({
-        fileIndex: 0,
+        fileIndex,
         revisionId: "revision-1",
         state: "text",
-        before: denseBefore,
-        after: denseAfter
+        before: fileIndex === 0 ? denseBefore : fileIndex === 1 ? minifiedBefore : moderateBefore,
+        after: fileIndex === 0 ? denseAfter : fileIndex === 1 ? minifiedAfter : moderateAfter
       }),
       contentType: "application/json",
       status: 200
@@ -1260,9 +1265,15 @@ test("uses a bounded fallback for newline-dense files", async ({ page }) => {
   )
   await expect(
     page.getByRole("button", {
-      name: /File 1 of 1: src\/dense\.ts, modified, oversized: Browser diff complexity safety limit exceeded\./
+      name: /File 1 of 3: src\/dense\.ts, modified, oversized: Browser diff complexity safety limit exceeded\./
     })
   ).toBeVisible()
+  await page.getByRole("button", { name: /File 2 of 3: src\/minified\.ts/ }).click()
+  await expect(page.getByText("Diff too large to render")).toBeVisible()
+  await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(0)
+  await page.getByRole("button", { name: /File 3 of 3: src\/moderate\.ts/ }).click()
+  await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
+  await expect(page.getByText("Diff too large to render")).toHaveCount(0)
 })
 
 test("renders small disjoint and large append-only changes within the complexity budget", async ({ page }) => {

@@ -6,6 +6,7 @@ import * as Path from "effect/Path"
 import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 import {
   discoverReviewSkillsFromRoots,
+  MAXIMUM_SKILL_INSPECTED_ENTRIES,
   type ReviewSkillDefinition,
   selectedReviewSkillPrompt
 } from "../src/server/review/ReviewSkillCatalog.js"
@@ -97,6 +98,48 @@ describe("Relay review skill catalog", () => {
       expect(deepSkills.some(({ id }) => id.startsWith("env:deep:"))).toBe(false)
       const deepReads = (yield* Ref.get(reads)).slice(readsBeforeDeep)
       expect(deepReads).toHaveLength(8)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("bounds inspected entries across a dense skill root", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "review-skill-entry-bounds-" })
+      const dense = path.join(temporary, "dense")
+      yield* fileSystem.makeDirectory(dense, { recursive: true })
+      const canonicalDense = yield* fileSystem.realPath(dense)
+      const entries = Array.from(
+        { length: MAXIMUM_SKILL_INSPECTED_ENTRIES + 64 },
+        (_, index) => `ordinary-${String(index).padStart(5, "0")}`
+      )
+      entries.push("zz-skill")
+      const realPaths = yield* Ref.make(0)
+      const stats = yield* Ref.make(0)
+      const recording = FileSystem.make({
+        ...fileSystem,
+        readDirectory: (directory, options) =>
+          directory === canonicalDense ? Effect.succeed(entries) : fileSystem.readDirectory(directory, options),
+        realPath: (candidate) =>
+          candidate === dense || candidate === canonicalDense
+            ? fileSystem.realPath(candidate)
+            : Ref.update(realPaths, (count) => count + 1).pipe(Effect.andThen(Effect.succeed(candidate))),
+        stat: (candidate) => Ref.update(stats, (count) => count + 1).pipe(Effect.andThen(fileSystem.stat(candidate)))
+      })
+
+      const skills = yield* discoverReviewSkillsFromRoots([{ label: "dense", path: dense }]).pipe(
+        Effect.provideService(FileSystem.FileSystem, recording)
+      )
+      expect(skills.some(({ id }) => id.startsWith("env:dense:"))).toBe(false)
+      expect(yield* Ref.get(realPaths)).toBe(MAXIMUM_SKILL_INSPECTED_ENTRIES)
+      expect(yield* Ref.get(stats)).toBe(MAXIMUM_SKILL_INSPECTED_ENTRIES)
+
+      const valid = path.join(temporary, "valid")
+      yield* fileSystem.makeDirectory(path.join(valid, "one"), { recursive: true })
+      yield* fileSystem.makeDirectory(path.join(valid, "two", "nested"), { recursive: true })
+      yield* fileSystem.writeFileString(path.join(valid, "one", "SKILL.md"), "First.")
+      yield* fileSystem.writeFileString(path.join(valid, "two", "nested", "SKILL.md"), "Second.")
+      const validSkills = yield* discoverReviewSkillsFromRoots([{ label: "valid", path: valid }])
+      expect(validSkills.filter(({ id }) => id.startsWith("env:valid:"))).toHaveLength(2)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("rejects selected skill prompts above the aggregate UTF-8 budget", () =>

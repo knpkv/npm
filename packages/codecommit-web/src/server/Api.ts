@@ -156,8 +156,8 @@ export const RelayReviewFinding = Schema.Struct({
   location: RelayReviewLocation
 }).check(
   Schema.makeFilter(
-    (finding) => finding.publicationTarget !== "line-comment" || finding.location.scope === "line",
-    { expected: "line-comment publication target paired with a line location" }
+    (finding) => (finding.location.scope === "line") === (finding.publicationTarget === "line-comment"),
+    { expected: "line-comment paired with a line location and pr-comment paired with a general or file location" }
   )
 )
 export type RelayReviewFinding = typeof RelayReviewFinding.Type

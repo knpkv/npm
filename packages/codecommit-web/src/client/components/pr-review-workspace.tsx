@@ -73,6 +73,8 @@ const reviewFocuses: ReadonlyArray<{
 
 const MAXIMUM_RENDERABLE_DIFF_INPUT_LINES = 5_000
 const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
+const MAXIMUM_RENDERABLE_DIFF_INPUT_BYTES = 512 * 1024
+const diffTextEncoder = new TextEncoder()
 
 const lineCount = (text: string): number => {
   if (text.length === 0) return 0
@@ -84,6 +86,11 @@ const lineCount = (text: string): number => {
 }
 
 const exceedsRenderableDiffComplexity = (before: string, after: string): boolean => {
+  if (
+    diffTextEncoder.encode(before).byteLength + diffTextEncoder.encode(after).byteLength >
+    MAXIMUM_RENDERABLE_DIFF_INPUT_BYTES
+  )
+    return true
   const beforeLines = lineCount(before)
   const afterLines = lineCount(after)
   return (

@@ -18,6 +18,7 @@ import {
   makeRelayReviewPrompt,
   parseRelayReviewResult,
   postPullRequestRelayFinding,
+  PullRequestReviewError,
   streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
   withRelayReviewPermit,
@@ -1038,10 +1039,18 @@ describe("CodeCommit web review boundary", () => {
 
   it.effect("turns worker defects into a terminal Relay error event", () =>
     Effect.gen(function*() {
-      const events = yield* streamRelayReviewEventsFrom(() => Effect.die(new Error("worker exploded"))).pipe(
-        Stream.runCollect
-      )
-      expect(events).toEqual([{ type: "error", message: "worker exploded" }])
+      const events = yield* streamRelayReviewEventsFrom(() => Effect.die(new Error("server-private-token=secret")))
+        .pipe(
+          Stream.runCollect
+        )
+      expect(events).toEqual([{ type: "error", message: "Relay review failed" }])
+      expect(JSON.stringify(events)).not.toContain("server-private-token")
+      expect(JSON.stringify(events)).not.toContain("secret")
+
+      const publicFailure = yield* streamRelayReviewEventsFrom(() =>
+        Effect.fail(new PullRequestReviewError({ operation: "relay-review", message: "Exact revision changed" }))
+      ).pipe(Stream.runCollect)
+      expect(publicFailure).toEqual([{ type: "error", message: "Exact revision changed" }])
     }))
 
   it("accepts strict bounded Relay JSON and rejects duplicate finding identities", () => {
@@ -1079,6 +1088,28 @@ describe("CodeCommit web review boundary", () => {
       "review"
     )
     expect(Option.isNone(invalidLineTarget)).toBe(true)
+
+    const invalidPrLineTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{ ...finding, publicationTarget: "pr-comment" }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isNone(invalidPrLineTarget)).toBe(true)
+
+    const fileTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{
+          ...finding,
+          publicationTarget: "pr-comment",
+          location: { scope: "file", filePath: "src/index.ts" }
+        }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isSome(fileTarget)).toBe(true)
 
     const descriptionTarget = parseRelayReviewResult(
       JSON.stringify({
