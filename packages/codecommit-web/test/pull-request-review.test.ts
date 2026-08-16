@@ -1,8 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Fiber, Option, Semaphore, Stream } from "effect"
-import type { RelayReviewResult } from "../src/server/Api.js"
+import { Deferred, Effect, Exit, Fiber, Option, Schema, Semaphore, Stream } from "effect"
+import {
+  RelayReviewContinueStreamRequest,
+  type RelayReviewResult,
+  RelayReviewStreamRequest
+} from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
@@ -14,8 +18,10 @@ import {
   makeRelayReviewPrompt,
   parseRelayReviewResult,
   postPullRequestRelayFinding,
+  streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
-  withRelayReviewPermit
+  withRelayReviewPermit,
+  withRelayReviewStreamPermit
 } from "../src/server/review/PullRequestReview.js"
 import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
 import {
@@ -109,6 +115,44 @@ const makeReadClient = (
 })
 
 describe("CodeCommit web review boundary", () => {
+  it("rejects unbounded skill and finding identifiers at the HTTP schema boundary", () => {
+    const streamRequest = {
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: "review",
+      skillIds: ["builtin:pr-review"]
+    }
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewStreamRequest)(streamRequest))).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewStreamRequest)({
+        ...streamRequest,
+        skillIds: [" "]
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewStreamRequest)({
+        ...streamRequest,
+        skillIds: ["x".repeat(257)]
+      })
+    )).toBe(true)
+
+    const continueRequest = {
+      ...streamRequest,
+      currentReview: { findings: [], verdict: "No findings." },
+      turns: [],
+      findingId: "F1",
+      message: "Review again."
+    }
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)(continueRequest))).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewContinueStreamRequest)({
+        ...continueRequest,
+        findingId: "finding-1"
+      })
+    )).toBe(true)
+  })
+
   it.effect("posts an accepted line finding once against the exact reviewed head", () =>
     Effect.gen(function*() {
       const actions: Array<Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>> = []
@@ -155,6 +199,59 @@ describe("CodeCommit web review boundary", () => {
       })
       expect(actions[0]?.content).toContain("Retry duplicates writes")
       expect(actions[0]?.clientRequestToken).toMatch(/^[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("derives the same publication token regardless of finding property order", () =>
+    Effect.gen(function*() {
+      const tokens: Array<string> = []
+      const publisher = {
+        post: (action) => {
+          tokens.push(action.clientRequestToken)
+          return Effect.succeed(
+            new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:stable", summary: "posted" })
+          )
+        }
+      } satisfies RelayFindingPublisherService
+      const finding: RelayReviewResult["findings"][number] = {
+        id: "F1",
+        priority: "P2",
+        title: "Stable identity",
+        summary: "Retries must reuse their token.",
+        details: "Equivalent JSON may use a different property order.",
+        recommendation: "Hash named fields in a fixed order.",
+        verification: "Submit the same finding twice.",
+        publicationTarget: "pr-comment",
+        location: { scope: "general" }
+      }
+      const reordered = {
+        location: finding.location,
+        publicationTarget: finding.publicationTarget,
+        verification: finding.verification,
+        recommendation: finding.recommendation,
+        details: finding.details,
+        summary: finding.summary,
+        title: finding.title,
+        priority: finding.priority,
+        id: finding.id
+      } satisfies RelayReviewResult["findings"][number]
+
+      yield* postPullRequestRelayFinding(
+        makeReadClient(),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        finding
+      ).pipe(Effect.provide(NodeServices.layer))
+      yield* postPullRequestRelayFinding(
+        makeReadClient(),
+        publisher,
+        pullRequest,
+        expectedRevision,
+        reordered
+      ).pipe(Effect.provide(NodeServices.layer))
+
+      expect(tokens).toHaveLength(2)
+      expect(tokens[0]).toBe(tokens[1])
     }))
 
   it.effect("does not publish when the provider revision changed", () =>
@@ -891,6 +988,31 @@ describe("CodeCommit web review boundary", () => {
 
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(first)
+    }))
+
+  it.effect("releases a streamed Relay permit when its consumer disconnects", () =>
+    Effect.gen(function*() {
+      const semaphore = yield* Semaphore.make(1)
+      const entered = yield* Deferred.make<void>()
+      const running = yield* withRelayReviewStreamPermit(
+        semaphore,
+        Stream.fromEffect(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)))
+      ).pipe(Stream.runDrain, Effect.forkChild)
+      yield* Deferred.await(entered)
+
+      const busy = yield* withRelayReviewPermit(semaphore, Effect.void).pipe(Effect.flip)
+      expect(busy.operation).toBe("relay-review-busy")
+
+      yield* Fiber.interrupt(running)
+      yield* withRelayReviewPermit(semaphore, Effect.void)
+    }))
+
+  it.effect("turns worker defects into a terminal Relay error event", () =>
+    Effect.gen(function*() {
+      const events = yield* streamRelayReviewEventsFrom(() => Effect.die(new Error("worker exploded"))).pipe(
+        Stream.runCollect
+      )
+      expect(events).toEqual([{ type: "error", message: "worker exploded" }])
     }))
 
   it("accepts strict bounded Relay JSON and rejects duplicate finding identities", () => {

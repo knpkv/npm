@@ -63,16 +63,21 @@ export const runRelayReviewStream = async (
       })
     }
   }
-  while (true) {
-    const next = await reader.read()
-    buffered += decoder.decode(next.value, { stream: !next.done })
-    const lines = buffered.split("\n")
-    buffered = lines.pop() ?? ""
-    for (const line of lines) await consume(line)
-    if (next.done) break
-  }
-  await consume(buffered)
-  if (!terminalSeen) {
-    throw new RelayReviewTransportError({ message: "Relay progress stream ended before a terminal event" })
+  try {
+    while (true) {
+      const next = await reader.read()
+      buffered += decoder.decode(next.value, { stream: !next.done })
+      const lines = buffered.split("\n")
+      buffered = lines.pop() ?? ""
+      for (const line of lines) await consume(line)
+      if (next.done) break
+    }
+    await consume(buffered)
+    if (!terminalSeen) {
+      throw new RelayReviewTransportError({ message: "Relay progress stream ended before a terminal event" })
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
 }

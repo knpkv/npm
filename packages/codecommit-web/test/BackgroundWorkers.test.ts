@@ -48,7 +48,8 @@ describe("background workers", () => {
         Layer.mock(ConfigService.ConfigService, {
           load: Effect.succeed({
             autoRefresh: true,
-            refreshIntervalSeconds: 1
+            refreshIntervalSeconds: 1,
+            review: ConfigService.defaultReviewConfig
           })
         })
       )
@@ -94,7 +95,8 @@ describe("background workers", () => {
                 )
                 : Effect.succeed({
                   autoRefresh: true,
-                  refreshIntervalSeconds: 1
+                  refreshIntervalSeconds: 1,
+                  review: ConfigService.defaultReviewConfig
                 })
             )
           )

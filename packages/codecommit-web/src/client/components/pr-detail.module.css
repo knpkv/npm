@@ -599,7 +599,8 @@
   min-inline-size: var(--rly-space-0);
 }
 
-.comment[data-active="true"] {
+.comment[data-active="true"],
+.commentReply[data-active="true"] {
   background: color-mix(in srgb, var(--rly-color-action-background) 8%, var(--rly-color-surface-2));
   border-radius: var(--rly-radius-control);
   outline: 2px solid var(--rly-color-focus);

@@ -4,8 +4,7 @@ import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import { createTwoFilesPatch, parsePatch } from "diff"
-import type { Cause } from "effect"
-import { Cache, Data, Effect, Exit, Option, Predicate, Queue, Schema, Stream } from "effect"
+import { Cache, Cause, Data, Effect, Exit, Option, Predicate, Queue, Schema, Stream } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
 import type * as Semaphore from "effect/Semaphore"
@@ -607,20 +606,22 @@ export const withRelayReviewStreamPermit = <A, E, R>(
   semaphore: Semaphore.Semaphore,
   stream: Stream.Stream<A, E, R>
 ): Stream.Stream<A, E | PullRequestReviewError, R> =>
-  Stream.unwrap(Effect.gen(function*() {
-    const acquired = yield* semaphore.takeIfAvailable(1)
-    if (!acquired) {
-      const unavailable: Stream.Stream<A, E | PullRequestReviewError, R> = Stream.fail(reviewError(
-        "relay-review-busy",
-        "Another Relay review is already running. Wait for it to finish before starting another."
-      ))
-      return unavailable
-    }
-    yield* Effect.addFinalizer(() => semaphore.release(1).pipe(Effect.asVoid))
-    return stream.pipe(
-      Stream.mapError((error): E | PullRequestReviewError => error)
-    )
-  }))
+  Stream.unwrap(
+    Effect.uninterruptible(Effect.gen(function*() {
+      const acquired = yield* semaphore.takeIfAvailable(1)
+      if (!acquired) {
+        const unavailable: Stream.Stream<A, E | PullRequestReviewError, R> = Stream.fail(reviewError(
+          "relay-review-busy",
+          "Another Relay review is already running. Wait for it to finish before starting another."
+        ))
+        return unavailable
+      }
+      yield* Effect.addFinalizer(() => semaphore.release(1).pipe(Effect.asVoid))
+      return stream.pipe(
+        Stream.mapError((error): E | PullRequestReviewError => error)
+      )
+    }))
+  )
 
 const focusByKind = {
   review: "Find correctness, security, reliability, and maintainability defects. Prioritize actionable findings.",
@@ -947,7 +948,15 @@ export const continuePullRequestRelayReview = Effect.fn(
   )
 })
 
-const streamEventsFrom = <E, R>(
+const relayWorkerErrorMessage = (cause: Cause.Cause<unknown>): string => {
+  const squashed = Cause.squash(cause)
+  return Predicate.hasProperty(squashed, "message") && Predicate.isString(squashed.message)
+    ? squashed.message
+    : "Relay review failed"
+}
+
+/** Convert one Relay worker into a stream with exactly one terminal event. */
+export const streamRelayReviewEventsFrom = <E, R>(
   run: (report: RelayReviewProgressReporter) => Effect.Effect<
     { readonly review: PullRequestRelayReviewResponse; readonly reply?: string },
     E,
@@ -965,13 +974,10 @@ const streamEventsFrom = <E, R>(
           : { type: "complete", review, reply }
         return Queue.offer(queue, event)
       }),
-      Effect.catch((cause) =>
-        Queue.offer(queue, {
-          type: "error",
-          message: Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
-            ? cause.message
-            : "Relay review failed"
-        })
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? Queue.offer(queue, { type: "error", message: relayWorkerErrorMessage(exit.cause) }).pipe(Effect.asVoid)
+          : Effect.void
       ),
       Effect.ensuring(Queue.end(queue))
     )
@@ -988,7 +994,7 @@ export const streamPullRequestRelayReview = (
   changedFiles: PullRequestChangedFilesSource | undefined,
   skillPrompt: string
 ) =>
-  streamEventsFrom((report) =>
+  streamRelayReviewEventsFrom((report) =>
     runPullRequestRelayReview(
       client,
       pullRequest,
@@ -1013,7 +1019,7 @@ export const streamPullRequestRelayConversation = (
   changedFiles: PullRequestChangedFilesSource | undefined,
   skillPrompt: string
 ) =>
-  streamEventsFrom((report) =>
+  streamRelayReviewEventsFrom((report) =>
     continuePullRequestRelayReview(
       client,
       pullRequest,
@@ -1059,7 +1065,18 @@ const relayFindingCanonicalIdentity = (
     scope.revision.revisionId,
     scope.revision.destinationCommit,
     scope.revision.sourceCommit,
-    finding
+    finding.id,
+    finding.priority,
+    finding.title,
+    finding.summary,
+    finding.details,
+    finding.recommendation,
+    finding.verification,
+    finding.publicationTarget,
+    finding.location.scope,
+    finding.location.scope === "general" ? "" : finding.location.filePath,
+    finding.location.scope === "line" ? finding.location.line : -1,
+    finding.location.scope === "line" ? finding.location.side : ""
   ])
 
 /** Accept and immediately post one unchanged finding through the exact-revision review client. */

@@ -146,8 +146,8 @@
 
   .chevron {
     block-size: var(--rly-space-8);
-    border-block-end: 1.5px solid currentColor;
-    border-inline-end: 1.5px solid currentColor;
+    border-block-end: 1.5px solid currentcolor;
+    border-inline-end: 1.5px solid currentcolor;
     inline-size: var(--rly-space-8);
     justify-self: center;
     transform: rotate(45deg) translate(-1px, -1px);

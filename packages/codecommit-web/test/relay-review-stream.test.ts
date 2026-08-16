@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "@effect/vitest"
 import { runRelayReviewStream } from "../src/client/relay-review-stream.js"
-import type { RelayReviewResult, RelayReviewStreamEvent, RelayReviewStreamRequest } from "../src/server/Api.js"
+import type {
+  PullRequestRelayReviewResponse,
+  RelayReviewStreamEvent,
+  RelayReviewStreamRequest
+} from "../src/server/Api.js"
 
 const request: RelayReviewStreamRequest = {
   revisionId: "revision-1",
@@ -12,7 +16,7 @@ const request: RelayReviewStreamRequest = {
   skillIds: []
 }
 
-const completedReview: RelayReviewResult = {
+const completedReview: PullRequestRelayReviewResponse = {
   pullRequestId: "42",
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
@@ -79,10 +83,11 @@ describe("Relay review NDJSON transport", () => {
   it("rejects duplicate terminal frames", async () => {
     const encoder = new TextEncoder()
     const terminal = `${JSON.stringify({ type: "error", message: "stopped" })}\n`
+    const cancel = vi.fn()
     const body = new ReadableStream<Uint8Array>({
+      cancel,
       start: (controller) => {
         controller.enqueue(encoder.encode(terminal + terminal))
-        controller.close()
       }
     })
     const originalFetch = window.fetch
@@ -92,6 +97,7 @@ describe("Relay review NDJSON transport", () => {
         _tag: "RelayReviewTransportError",
         message: "Relay returned frames after the terminal event"
       })
+      expect(cancel).toHaveBeenCalledOnce()
     } finally {
       window.fetch = originalFetch
     }

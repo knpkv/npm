@@ -120,6 +120,13 @@ export type PullRequestDiffContentResponse = typeof PullRequestDiffContentRespon
 export const RelayReviewKind = Schema.Literals(["review", "security", "tests", "explain"])
 export type RelayReviewKind = typeof RelayReviewKind.Type
 
+const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
+const RelayReviewSkillId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256)
+)
+
 const RelayReviewLocation = Schema.Union([
   Schema.Struct({ scope: Schema.Literal("general") }),
   Schema.Struct({
@@ -135,7 +142,7 @@ const RelayReviewLocation = Schema.Union([
 ])
 
 export const RelayReviewFinding = Schema.Struct({
-  id: Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u)),
+  id: RelayReviewFindingId,
   priority: Schema.Literals(["P1", "P2", "P3", "P4"]),
   title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
@@ -193,7 +200,7 @@ export const PullRequestRelayReviewResponse = Schema.Struct({
 export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
 
 export const RelayReviewConversationTurn = Schema.Struct({
-  findingId: Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u)),
+  findingId: RelayReviewFindingId,
   role: Schema.Literals(["user", "assistant"]),
   message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
 })
@@ -229,7 +236,7 @@ export const RelayReviewStreamEvent = Schema.Union([
 export type RelayReviewStreamEvent = typeof RelayReviewStreamEvent.Type
 
 export const RelayFindingPostResponse = Schema.Struct({
-  findingId: Schema.String,
+  findingId: RelayReviewFindingId,
   operationId: Schema.String,
   summary: Schema.String
 })
@@ -240,7 +247,7 @@ export const RelayReviewStreamRequest = Schema.Struct({
   baseCommit: Schema.String,
   headCommit: Schema.String,
   kind: RelayReviewKind,
-  skillIds: Schema.Array(Schema.String).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
+  skillIds: Schema.Array(RelayReviewSkillId).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
 })
 export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 
@@ -250,7 +257,7 @@ export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
   turns: Schema.Array(RelayReviewConversationTurn).check(Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS)),
-  findingId: Schema.String,
+  findingId: RelayReviewFindingId,
   message: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
 })
 export type RelayReviewContinueStreamRequest = typeof RelayReviewContinueStreamRequest.Type
@@ -394,7 +401,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   )
   .add(
     HttpApiEndpoint.post("postRelayFinding", "/:awsAccountId/:prId/relay-review/findings/:findingId/post", {
-      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, findingId: Schema.String }),
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, findingId: RelayReviewFindingId }),
       payload: Schema.Struct({
         revisionId: Schema.String,
         baseCommit: Schema.String,

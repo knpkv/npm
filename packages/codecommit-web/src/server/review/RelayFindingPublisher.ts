@@ -5,7 +5,7 @@ import { PermissionService } from "@knpkv/codecommit-core/PermissionService/inde
 import { getOperationMeta } from "@knpkv/codecommit-core/PermissionService/operations.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
-import { Clock, Context, Effect, Random } from "effect"
+import { Clock, Context, Effect, Exit, Random } from "effect"
 
 type FindingCommentAction = Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>
 
@@ -42,7 +42,8 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
   const audit = (
     action: FindingCommentAction,
     permissionState: NewAuditLogEntry["permissionState"],
-    durationMs: number | null
+    durationMs: number | null,
+    providerOutcome: "failed" | "succeeded" | null = null
   ): Effect.Effect<void> =>
     permissions.isAuditEnabled().pipe(
       Effect.flatMap((enabled) =>
@@ -55,14 +56,16 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
                 accountProfile: action.target.account.profile,
                 region: action.target.account.region,
                 permissionState,
-                context: `Post Relay finding to PR #${action.target.pullRequestId}`,
+                context: `Post Relay finding to PR #${action.target.pullRequestId}${
+                  providerOutcome === null ? "" : ` · provider ${providerOutcome}`
+                }`,
                 durationMs
               })
             )
           )
           : Effect.void
       ),
-      Effect.ignore
+      Effect.catch((cause) => Effect.logError("Failed to record Relay finding audit", cause))
     )
 
   const check = (
@@ -109,9 +112,16 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
         const permissionState = yield* check(action)
         const startedAt = yield* Clock.currentTimeMillis
         return yield* client.execute(action).pipe(
-          Effect.ensuring(
+          Effect.onExit((exit) =>
             Clock.currentTimeMillis.pipe(
-              Effect.flatMap((completedAt) => audit(action, permissionState, completedAt - startedAt))
+              Effect.flatMap((completedAt) =>
+                audit(
+                  action,
+                  permissionState,
+                  completedAt - startedAt,
+                  Exit.isSuccess(exit) ? "succeeded" : "failed"
+                )
+              )
             )
           )
         )

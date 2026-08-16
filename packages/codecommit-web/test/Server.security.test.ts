@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
-import { PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
+import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import { Deferred, Duration, Effect, Fiber, Redacted, Ref, Result, Stream } from "effect"
+import { Deferred, Duration, Effect, Exit, Fiber, Redacted, Ref, Result, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
@@ -200,6 +200,60 @@ describe("CodeCommit web security boundary", () => {
       expect(yield* Ref.get(calls)).toBe(0)
       expect(yield* Ref.get(auditEntries)).toEqual([
         expect.objectContaining({ operation: "postPullRequestComment", permissionState: "denied" })
+      ])
+    }))
+
+  it.effect("records provider success and failure outcomes for Relay publication", () =>
+    Effect.gen(function*() {
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const attempts = yield* Ref.make(0)
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Ref.getAndUpdate(attempts, (attempt) => attempt + 1).pipe(
+            Effect.flatMap((attempt) =>
+              attempt === 0
+                ? Effect.succeed(
+                  new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" })
+                )
+                : Effect.fail(
+                  new AwsApiError({
+                    operation: "postPullRequestComment",
+                    profile: readAccount.profile,
+                    region: readAccount.region,
+                    cause: new Error("provider unavailable")
+                  })
+                )
+            )
+          ),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("always_allow"))),
+        Effect.provideService(PermissionGate, PermissionGate.of({ request: () => unused() })),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const action = {
+        _tag: "comment",
+        target: {
+          account: readAccount,
+          repositoryName: Domain.RepositoryName.make("payments"),
+          pullRequestId: Domain.PullRequestId.make("42"),
+          revisionId: "revision-1",
+          sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+          destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+          destinationReference: "refs/heads/main"
+        },
+        content: "Finding",
+        clientRequestToken: "relay-finding-1"
+      } satisfies Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>
+
+      yield* publisher.post(action)
+      expect(Exit.isFailure(yield* Effect.exit(publisher.post(action)))).toBe(true)
+      expect((yield* Ref.get(auditEntries)).map(({ context }) => context)).toEqual([
+        "Post Relay finding to PR #42 · provider succeeded",
+        "Post Relay finding to PR #42 · provider failed"
       ])
     }))
 

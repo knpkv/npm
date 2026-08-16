@@ -5,9 +5,10 @@ import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js
 import { Predicate } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { CheckIcon } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
 
 import { configQueryAtom, configSaveAtom, reviewSkillsQueryAtom } from "../atoms/app.js"
+import type { ReviewSkillResponse } from "../../server/Api.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
 
@@ -26,6 +27,61 @@ export const updateReviewProfileSkills = (
 
 export const isReviewProfileSkillSelectionDisabled = (profile: ReviewProfileConfig, skillId: string): boolean =>
   !profile.skillIds.includes(skillId) && profile.skillIds.length >= reviewProfileSkillLimit
+
+interface ReviewProfileSkillOption extends ReviewSkillResponse {
+  readonly available: boolean
+}
+
+/** Keep persisted selections visible when an environment skill disappears. */
+export const reviewProfileSkillOptions = (
+  profile: ReviewProfileConfig,
+  skills: ReadonlyArray<ReviewSkillResponse>
+): ReadonlyArray<ReviewProfileSkillOption> => {
+  const availableIds = new Set(skills.map(({ id }) => id))
+  return [
+    ...skills.map((skill) => ({ ...skill, available: true })),
+    ...profile.skillIds
+      .filter((skillId) => !availableIds.has(skillId))
+      .map((skillId) => ({
+        id: skillId,
+        name: skillId,
+        description: "No longer available in this environment; deselect it to repair the profile",
+        source: "unavailable",
+        available: false
+      }))
+  ]
+}
+
+export function ReviewProfileSkillPicker({
+  onSkillChange,
+  profile,
+  skills
+}: {
+  readonly onSkillChange: (skillId: string, enabled: boolean) => void
+  readonly profile: ReviewProfileConfig
+  readonly skills: ReadonlyArray<ReviewSkillResponse>
+}): ReactElement {
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {reviewProfileSkillOptions(profile, skills).map((skill) => (
+        <label className="flex items-start gap-2 rounded-md border p-3 text-sm" key={skill.id}>
+          <input
+            checked={profile.skillIds.includes(skill.id)}
+            disabled={isReviewProfileSkillSelectionDisabled(profile, skill.id)}
+            onChange={(event) => onSkillChange(skill.id, event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <b>{skill.name}</b>
+            <small className="block text-muted-foreground">
+              {skill.description} · {skill.source}
+            </small>
+          </span>
+        </label>
+      ))}
+    </div>
+  )
+}
 
 export function SettingsRelay() {
   const config = useAtomValue(configQueryAtom)
@@ -146,24 +202,11 @@ export function SettingsRelay() {
                 </p>
               </div>
               {AsyncResult.isSuccess(skills) ? (
-                <div className="grid gap-2 md:grid-cols-2">
-                  {skills.value.map((skill) => (
-                    <label className="flex items-start gap-2 rounded-md border p-3 text-sm" key={skill.id}>
-                      <input
-                        checked={profile.skillIds.includes(skill.id)}
-                        disabled={isReviewProfileSkillSelectionDisabled(profile, skill.id)}
-                        onChange={(event) => updateProfileSkills(profile.id, skill.id, event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>
-                        <b>{skill.name}</b>
-                        <small className="block text-muted-foreground">
-                          {skill.description} · {skill.source}
-                        </small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                <ReviewProfileSkillPicker
+                  onSkillChange={(skillId, enabled) => updateProfileSkills(profile.id, skillId, enabled)}
+                  profile={profile}
+                  skills={skills.value}
+                />
               ) : (
                 <p className="text-xs text-muted-foreground">Loading environment skills…</p>
               )}

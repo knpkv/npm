@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it } from "@effect/vitest"
+import { defaultReviewConfig } from "@knpkv/codecommit-core/ConfigService.js"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
@@ -15,6 +16,7 @@ const config = {
   autoDetect: false,
   autoRefresh: true,
   refreshIntervalSeconds: 300,
+  review: defaultReviewConfig,
   sandbox: {
     image: digestImage,
     extensions: [],

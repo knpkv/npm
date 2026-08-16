@@ -384,12 +384,12 @@ test("clears a failed publication error after a successful retry", async ({ page
   await page.getByRole("button", { name: "Run Relay" }).click()
   const post = page.getByRole("button", { name: "Accept · post" }).first()
   await post.click()
-  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(page.getByText("Finding post failed")).toBeVisible()
   await expect(post).toBeEnabled()
 
   await post.click()
   await expect(page.getByText("posted")).toBeVisible()
-  await expect(page.getByText("Relay review failed")).toHaveCount(0)
+  await expect(page.getByText("Finding post failed")).toHaveCount(0)
 })
 
 test("keeps an initial diff failure blocking when no exact workspace was retained", async ({ page }) => {

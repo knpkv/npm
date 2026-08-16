@@ -318,9 +318,10 @@ before/after location. Publication uses a deterministic SHA-256 request token,
 making the same accepted finding idempotent. Its persisted provider representation
 is the 64-character hexadecimal digest of the UTF-8 JSON serialization of
 `["relay-web-finding-v1", region, repositoryName, pullRequestId, revisionId,
-destinationCommit, sourceCommit, completeFinding]`, in that exact order. The
-complete finding includes its ID, priority, title, summary, details,
-recommendation, verification, publication target, and location. Only the derived
+destinationCommit, sourceCommit, findingId, priority, title, summary, details,
+recommendation, verification, publicationTarget, locationScope, filePath,
+line, side]`, in that exact order. General and file anchors use the fixed
+sentinels `""`, `-1`, and `""` for fields they do not own. Only the derived
 token is server-private and sent to/persisted by CodeCommit; neither the canonical
 preimage nor raw provider credentials cross the authenticated browser boundary.
 **Ack** and **Reject** remain local

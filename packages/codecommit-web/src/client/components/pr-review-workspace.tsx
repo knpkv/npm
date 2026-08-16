@@ -613,7 +613,10 @@ const ReadyReviewWorkspace = ({
   } | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
-  const [reviewFailure, setReviewFailure] = useState<string | null>(null)
+  const [reviewFailure, setReviewFailure] = useState<{
+    readonly description: string
+    readonly title: string
+  } | null>(null)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
   const [progress, setProgress] = useState<
@@ -738,7 +741,7 @@ const ReadyReviewWorkspace = ({
             }
             if (event.type === "error") {
               terminalError = event.message
-              setReviewFailure(event.message)
+              setReviewFailure({ description: event.message, title: "Relay review failed" })
               return
             }
             const prior = completedReviewRef.current?.value.result.findings ?? []
@@ -761,9 +764,16 @@ const ReadyReviewWorkspace = ({
           },
           controller.signal
         )
-        if (terminalError !== null) setReviewFailure(terminalError)
+        if (terminalError !== null) {
+          setReviewFailure({ description: terminalError, title: "Relay review failed" })
+        }
       } catch (cause) {
-        if (!controller.signal.aborted) setReviewFailure(failureMessage(cause, "Relay could not complete this review."))
+        if (!controller.signal.aborted) {
+          setReviewFailure({
+            description: failureMessage(cause, "Relay could not complete this review."),
+            title: "Relay review failed"
+          })
+        }
       } finally {
         if (abortRef.current === controller) abortRef.current = null
         setIsReviewing(false)
@@ -847,7 +857,10 @@ const ReadyReviewWorkspace = ({
             "posted"
           )
           if (settlement.stale) {
-            setReviewFailure("CodeCommit received an older finding snapshot. Re-review before relying on it.")
+            setReviewFailure({
+              description: "CodeCommit received an older finding snapshot. Re-review before relying on it.",
+              title: "Finding post needs review"
+            })
           }
           return settlement.dispositions
         })
@@ -861,7 +874,10 @@ const ReadyReviewWorkspace = ({
               "failed"
             ).dispositions
         )
-        setReviewFailure(failureMessage(cause, "CodeCommit did not accept this finding."))
+        setReviewFailure({
+          description: failureMessage(cause, "CodeCommit did not accept this finding."),
+          title: "Finding post failed"
+        })
       }
     },
     [accountId, onFindingPosted, postFindingRequest, pullRequest.id, review, reviewIsStale]
@@ -998,7 +1014,12 @@ const ReadyReviewWorkspace = ({
 
       {reviewFailure === null ? null : (
         <div className={styles.reviewFailure}>
-          <StatePanel announce="polite" description={reviewFailure} title="Relay review failed" tone="critical" />
+          <StatePanel
+            announce="polite"
+            description={reviewFailure.description}
+            title={reviewFailure.title}
+            tone="critical"
+          />
         </div>
       )}
 
