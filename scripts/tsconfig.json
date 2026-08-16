@@ -11,7 +11,16 @@
     "plugins": [
       {
         "name": "@effect/language-service",
-        "namespaceImportPackages": []
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "overriddenSchemaConstructor": "off",
+          "strictBooleanExpressions": "suggestion",
+          "strictEffectProvide": "suggestion"
+        },
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
       }
     ]
   }

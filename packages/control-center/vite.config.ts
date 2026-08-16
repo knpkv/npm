@@ -28,6 +28,8 @@ export default defineConfig(({ mode }) => {
         ssr: true
       }
       : {
+        // Vite warns when a large lazy syntax-language chunk exceeds this threshold.
+        chunkSizeWarningLimit: 800,
         emptyOutDir: true,
         manifest: true,
         outDir: "dist/client",
