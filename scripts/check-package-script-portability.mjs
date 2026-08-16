@@ -38,7 +38,14 @@ const hasDirectEnvironmentAssignment = (command) => {
       quote = character
       continue
     }
-    if (character === ";" || character === "\n" || character === "|" || character === "(" || character === "{") {
+    if (character === ";" || character === "\n" || character === "|" || character === "(") {
+      boundaries.push(index + 1)
+    }
+    if (
+      character === "{" &&
+      /\s/u.test(command[index + 1] ?? "") &&
+      boundaries.some((boundary) => command.slice(boundary, index).trim() === "")
+    ) {
       boundaries.push(index + 1)
     }
     if (character === "&") boundaries.push(index + (command[index + 1] === "&" ? 2 : 1))
@@ -103,6 +110,8 @@ assert.equal(hasDirectEnvironmentAssignment("printf 'prepare & FOO=1 tool'"), fa
 assert.equal(hasDirectEnvironmentAssignment("(FOO=1 tool)"), true)
 assert.equal(hasDirectEnvironmentAssignment("(cross-env FOO=1 tool)"), false)
 assert.equal(hasDirectEnvironmentAssignment("{ FOO=1 tool; }"), true)
+assert.equal(hasDirectEnvironmentAssignment("tool {FOO=1}"), false)
+assert.equal(hasDirectEnvironmentAssignment("tool { FOO=1 }"), false)
 assert.equal(hasDirectEnvironmentAssignment("'(FOO=1 tool)'"), false)
 assert.equal(hasDirectEnvironmentAssignment("\\(FOO=1 tool\\)"), false)
 assert.deepEqual(
