@@ -32,21 +32,27 @@ const declaresEffect = (manifest) =>
     Object.keys(manifest[section] ?? {}).some((name) => name === "effect" || name.startsWith("@effect/"))
   )
 
-const checkCoversRootTsconfig = (checkScript) => {
+const checkCoversTsconfig = (checkScript, expectedProject = "tsconfig.json") => {
   if (!Predicate.isString(checkScript)) return false
+  const normalizedExpectedProject = expectedProject.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
   for (const segment of checkScript.split(/&&|\|\||;/u)) {
     const executable = segment.match(/(?:^|\s)(?:tsc|tspc|tsgo)(?:\s|$)/u)
     if (executable === null) continue
     const command = segment.slice(executable.index).trim()
     const project = command.match(/(?:^|\s)(?:-p|--project)\s+([^\s]+)/u)?.[1]
     if (project !== undefined) {
-      if (project.replaceAll(/["']/gu, "").replace(/^\.\//u, "") === "tsconfig.json") return true
+      if (project.replaceAll(/["']/gu, "").replace(/^\.\//u, "") === normalizedExpectedProject) return true
       continue
     }
     const build = command.match(/(?:^|\s)(?:-b|--build)(?:\s+([^\s-][^\s]*))?/u)
-    if (build === null) return true
+    if (build === null) return normalizedExpectedProject === "tsconfig.json"
     const target = build[1]?.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
-    if (target === undefined || target === "tsconfig.json" || target === ".") return true
+    if (
+      target === normalizedExpectedProject ||
+      (normalizedExpectedProject === "tsconfig.json" && (target === undefined || target === "."))
+    ) {
+      return true
+    }
   }
   return false
 }
@@ -266,9 +272,11 @@ const runSelfTest = () => {
       "@fixture/weakened-suppression: tsconfig.json must explicitly disable Effect diagnostic overriddenSchemaConstructor"
     ]
   )
-  assert.equal(checkCoversRootTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
-  assert.equal(checkCoversRootTsconfig("tsc -b tsconfig.json"), true)
-  assert.equal(checkCoversRootTsconfig("tsc -p scripts/tsconfig.json"), false)
+  assert.equal(checkCoversTsconfig("pnpm build"), false)
+  assert.equal(checkCoversTsconfig("tsc --noEmit && tsc -p scripts/tsconfig.json"), true)
+  assert.equal(checkCoversTsconfig("tsc -b tsconfig.json"), true)
+  assert.equal(checkCoversTsconfig("tsc -p scripts/tsconfig.json"), false)
+  assert.equal(checkCoversTsconfig("tsc -p scripts/tsconfig.json", "scripts/tsconfig.json"), true)
 }
 
 const decodeJson = Effect.fn("EffectTsconfigCoverage.decodeJson")(function* (content, location) {
@@ -380,7 +388,7 @@ const inspectWorkspace = Effect.fn("EffectTsconfigCoverage.inspectWorkspace")(fu
       }
     }
     records.push({
-      checkCoversRoot: checkCoversRootTsconfig(manifest.scripts?.check),
+      checkCoversRoot: checkCoversTsconfig(manifest.scripts?.check),
       effectPackage: declaresEffect(manifest),
       name: manifest.name ?? `packages/${entry}`,
       sourceConfigs
@@ -400,10 +408,15 @@ const program = Effect.gen(function* () {
   const args = yield* stdio.args
   if (args.includes("--self-test")) return
 
+  const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url))
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
   const packageRecords = yield* inspectWorkspace(path.join(repositoryRoot, "packages"))
+  const rootManifest = yield* decodeJson(
+    yield* fileSystem.readFileString(path.join(repositoryRoot, "package.json")),
+    "package.json"
+  )
   const toolingConfigs = []
   for (const { configPath, required } of [
     { configPath: path.join(repositoryRoot, "tsconfig.json"), required: true },
@@ -419,7 +432,9 @@ const program = Effect.gen(function* () {
   const records = [
     ...packageRecords,
     {
-      checkCoversRoot: true,
+      checkCoversRoot: toolingConfigs.every(({ path: configPath }) =>
+        checkCoversTsconfig(rootManifest.scripts?.check, configPath)
+      ),
       effectPackage: true,
       name: "@workspace/tooling",
       sourceConfigs: toolingConfigs
