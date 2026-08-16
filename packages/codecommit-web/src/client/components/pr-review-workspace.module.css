@@ -6,7 +6,6 @@
 }
 
 .workspaceHeader,
-.focusActions,
 .focusChoices,
 .diffToolbar,
 .diffToolbar > div,
@@ -31,11 +30,22 @@
   gap: var(--rly-space-4);
 }
 
-.focusActions {
-  flex-wrap: wrap;
-  gap: var(--rly-space-12);
-  justify-content: flex-end;
-  max-inline-size: 58rem;
+.relayControls {
+  background: var(--rly-color-surface-3);
+  border-block-end: 1px solid var(--rly-color-border-1);
+  display: grid;
+  gap: var(--rly-space-8);
+  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+  padding: var(--rly-space-12) var(--rly-space-16);
+}
+
+.relayControls .focusChoices {
+  grid-column: 1 / -1;
+}
+
+.relayControls .focusChoices button {
+  flex: 1;
+  justify-content: center;
 }
 
 .focusChoices {
@@ -234,9 +244,9 @@
 
 .agentPane {
   background: var(--rly-color-surface-2);
-  border-inline-start: 1px solid var(--rly-color-border-1);
-  display: grid;
-  grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2);
+  display: flex;
+  flex-direction: column;
   min-block-size: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
   overflow: hidden;
@@ -303,6 +313,7 @@
 }
 
 .findingDeck {
+  flex: 1;
   min-block-size: var(--rly-space-0);
   overscroll-behavior: contain;
   overflow: auto;
@@ -423,7 +434,8 @@
   border-radius: var(--rly-radius-control);
   color: var(--rly-color-text-1);
   min-block-size: var(--rly-space-32);
-  min-inline-size: 10rem;
+  flex: 1;
+  min-inline-size: var(--rly-space-0);
   padding-inline: var(--rly-space-8);
 }
 
@@ -479,6 +491,11 @@
   gap: var(--rly-space-12);
   justify-content: space-between;
   padding: var(--rly-space-8) var(--rly-space-24);
+}
+
+.agentPane .staleReview {
+  flex-wrap: wrap;
+  padding-inline: var(--rly-space-16);
 }
 
 .findingBody {
@@ -667,7 +684,7 @@
   }
 
   .agentPane {
-    border-block-start: 1px solid var(--rly-color-border-1);
+    border-block-start: var(--rly-space-4) solid var(--rly-color-border-2);
     border-inline-start: 0;
     grid-column: 1 / -1;
     block-size: min(42rem, 75vh);
@@ -681,14 +698,13 @@
     flex-direction: column;
   }
 
-  .focusActions {
-    align-items: stretch;
-    justify-content: stretch;
+  .focusChoices {
+    display: flex;
+    overflow-x: auto;
   }
 
-  .focusChoices {
-    flex: 1 1 100%;
-    overflow-x: auto;
+  .relayControls {
+    align-items: end;
   }
 
   .workbench {

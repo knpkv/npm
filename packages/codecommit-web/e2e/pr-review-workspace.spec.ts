@@ -739,7 +739,11 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
     )
   expect(await emitAppState(0)).toBeGreaterThan(0)
 
-  await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
+  await expect(page.getByRole("heading", { exact: true, name: "Diff" })).toBeVisible()
+  const relayPane = page.getByRole("complementary", { name: "Relay findings" })
+  await expect(relayPane.getByRole("region", { name: "Relay controls" })).toBeVisible()
+  await expect(relayPane.getByLabel("Profile")).toBeVisible()
+  await expect(relayPane.getByRole("button", { name: "Run Relay" })).toBeVisible()
   await expect(page.getByText("export const retries = 3")).toBeVisible()
   const srcDirectory = page.getByRole("button", { name: "src, directory, 1 changed file" })
   await expect(srcDirectory).toHaveAttribute("aria-expanded", "true")
@@ -834,7 +838,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })
-  await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
+  await expect(page.getByRole("heading", { exact: true, name: "Diff" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
 
@@ -897,7 +901,7 @@ test("keeps an initial diff failure blocking when no exact workspace was retaine
   await page.goto("/accounts/111111111111/prs/42")
 
   await expect(page.getByText("Exact diff unavailable")).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Diff & Relay" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { exact: true, name: "Diff" })).toHaveCount(0)
 })
 
 test("rejects description-target findings before presenting a post action", async ({ page }) => {
