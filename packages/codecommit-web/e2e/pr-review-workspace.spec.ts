@@ -1117,9 +1117,11 @@ test("preserves unobserved optimistic comment increments across partial provider
 })
 
 test("does not double-count pending comments after partial authoritative growth", async ({ page }) => {
+  const responsesEnabled = Promise.withResolvers<void>()
   const partialObserved = Promise.withResolvers<void>()
   const settledObserved = Promise.withResolvers<void>()
   let authoritativeCount = 0
+  let providerFindingCount = 0
   let partialReads = 0
   let settledReads = 0
   await routeReviewWorkspace(page, "review", undefined, undefined, {
@@ -1128,6 +1130,8 @@ test("does not double-count pending comments after partial authoritative growth"
       if (authoritativeCount === 2 && ++settledReads >= 2) settledObserved.resolve()
       return authoritativeCount
     },
+    commentFindingCount: () => providerFindingCount,
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
     emptyCommentsInitially: true
   })
   await page.goto("/accounts/111111111111/prs/42")
@@ -1146,9 +1150,57 @@ test("does not double-count pending comments after partial authoritative growth"
   await partialObserved.promise
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
+  providerFindingCount = 1
+  responsesEnabled.resolve()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  providerFindingCount = 2
   authoritativeCount = 2
   await settledObserved.promise
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
+test("reconciles unrelated comment growth while Comments remains collapsed", async ({ page }) => {
+  const responsesEnabled = Promise.withResolvers<void>()
+  const authoritativeObserved = Promise.withResolvers<void>()
+  const identitiesObserved = Promise.withResolvers<void>()
+  let authoritativeCount = 0
+  let authoritativeReads = 0
+  let providerFindingCount = 0
+  let unrelatedCount = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => {
+      if (authoritativeCount === 1 && ++authoritativeReads >= 2) authoritativeObserved.resolve()
+      return authoritativeCount
+    },
+    commentFindingCount: () => providerFindingCount,
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentUnrelatedCount: () => {
+      if (unrelatedCount === 1) identitiesObserved.resolve()
+      return unrelatedCount
+    },
+    emptyCommentsInitially: true
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  const commentsTrigger = page.getByRole("button", { name: /^Comments/ })
+  await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: /Before-path evidence/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  authoritativeCount = 1
+  await authoritativeObserved.promise
+  providerFindingCount = 2
+  unrelatedCount = 1
+  responsesEnabled.resolve()
+  await identitiesObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
+  await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
 })
 
 test("preserves a pending Relay comment across unrelated SSE growth", async ({ page }) => {

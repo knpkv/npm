@@ -235,23 +235,25 @@ function CommentThread({
   location,
   navigation,
   onNavigateToDiff,
-  thread
+  thread,
+  visible
 }: {
   readonly thread: CommentThreadJsonEncoded
   readonly depth: number
   readonly location: CommentLocationCoordinates
   readonly navigation: ReviewCommentNavigation | null
   readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
+  readonly visible: boolean
 }) {
   const target = depth === 0 ? reviewCommentNavigationTarget(location, thread.root) : null
   const active = navigation?.destination === "comment" && navigation.target.commentId === thread.root.id
   const articleRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    if (!active || articleRef.current === null) return
+    if (!active || !visible || articleRef.current === null) return
     articleRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
     articleRef.current.focus({ preventScroll: true })
-  }, [active])
+  }, [active, visible])
 
   if (thread.root.deleted) return null
 
@@ -289,6 +291,7 @@ function CommentThread({
           navigation={navigation}
           onNavigateToDiff={onNavigateToDiff}
           thread={reply}
+          visible={visible}
         />
       ))}
     </article>
@@ -300,13 +303,15 @@ function CommentsSection({
   navigation,
   onCountChange,
   onNavigateToDiff,
-  pr
+  pr,
+  visible
 }: {
   readonly commentsRefreshGeneration: number
   readonly navigation: ReviewCommentNavigation | null
   readonly onCountChange: (snapshot: CommentCountSnapshot) => void
   readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
   readonly pr: Domain.PullRequest
+  readonly visible: boolean
 }) {
   const commentsResult = useComments({
     pullRequestId: pr.id,
@@ -372,6 +377,7 @@ function CommentsSection({
                         navigation={navigation}
                         onNavigateToDiff={onNavigateToDiff}
                         thread={thread}
+                        visible={visible}
                       />
                     ))}
                     {i < comments.length - 1 && <Separator className="my-2" />}
@@ -458,18 +464,21 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
 function CollapsibleSection({
   children,
   count,
+  keepMounted = false,
   openRequestKey,
   title
 }: {
   readonly title: string
   readonly count?: number
+  readonly keepMounted?: boolean
   readonly openRequestKey?: string
-  readonly children: React.ReactNode
+  readonly children: (open: boolean) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (openRequestKey !== undefined) setOpen(true)
   }, [openRequestKey])
+  const content = children(open)
   return (
     <Surface as="section" className={styles.disclosure} padding="none" form="grouped">
       <button aria-expanded={open} className={styles.disclosureTrigger} onClick={() => setOpen(!open)} type="button">
@@ -477,7 +486,11 @@ function CollapsibleSection({
         <span>{title}</span>
         {count !== undefined && <small>{count}</small>}
       </button>
-      {open && <div className={styles.disclosureContent}>{children}</div>}
+      {(open || keepMounted) && (
+        <div className={styles.disclosureContent} hidden={!open}>
+          {content}
+        </div>
+      )}
     </Surface>
   )
 }
@@ -1350,17 +1363,21 @@ export function PRDetail() {
             {...(commentNavigation?.destination === "comment"
               ? { openRequestKey: `${commentNavigation.target.commentId}:${String(commentNavigation.requestId)}` }
               : {})}
+            keepMounted
             title="Comments"
             {...(commentCount !== undefined ? { count: commentCount } : {})}
           >
-            <CommentsSection
-              commentsRefreshGeneration={commentsRefreshGeneration}
-              key={pr.id}
-              navigation={commentNavigation}
-              onCountChange={reconcileCommentCount}
-              onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
-              pr={pr}
-            />
+            {(commentsVisible) => (
+              <CommentsSection
+                commentsRefreshGeneration={commentsRefreshGeneration}
+                key={pr.id}
+                navigation={commentNavigation}
+                onCountChange={reconcileCommentCount}
+                onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
+                pr={pr}
+                visible={commentsVisible}
+              />
+            )}
           </CollapsibleSection>
         </section>
 
@@ -1421,7 +1438,7 @@ export function PRDetail() {
           </section>
 
           <CollapsibleSection title="Health Score Breakdown">
-            <ScoreBreakdown score={score} />
+            {() => <ScoreBreakdown score={score} />}
           </CollapsibleSection>
         </aside>
       </div>
