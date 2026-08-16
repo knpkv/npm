@@ -97,9 +97,8 @@ const validateInventory = (data: RlyDiffInventory): void => {
   }
 }
 
-interface IndexedFile {
+interface TreeFile {
   readonly file: RlyDiffFile
-  readonly index: number
   readonly segments: ReadonlyArray<string>
 }
 
@@ -113,7 +112,6 @@ type FileTreeNode =
     }
   | {
       readonly file: RlyDiffFile
-      readonly index: number
       readonly kind: "file"
       readonly name: string
     }
@@ -127,18 +125,18 @@ const compactDirectory = (node: Extract<FileTreeNode, { readonly kind: "director
   })
 }
 
-const buildFileTree = (files: ReadonlyArray<IndexedFile>, depth = 0): ReadonlyArray<FileTreeNode> => {
+const buildFileTree = (files: ReadonlyArray<TreeFile>, depth = 0): ReadonlyArray<FileTreeNode> => {
   const leaves: Array<FileTreeNode> = []
-  const directories = new Map<string, Array<IndexedFile>>()
-  for (const indexedFile of files) {
-    const segment = indexedFile.segments[depth]
+  const directories = new Map<string, Array<TreeFile>>()
+  for (const treeFile of files) {
+    const segment = treeFile.segments[depth]
     if (segment === undefined) continue
-    if (depth === indexedFile.segments.length - 1) {
-      leaves.push({ file: indexedFile.file, index: indexedFile.index, kind: "file", name: segment })
+    if (depth === treeFile.segments.length - 1) {
+      leaves.push({ file: treeFile.file, kind: "file", name: segment })
       continue
     }
     const grouped = directories.get(segment) ?? []
-    grouped.push(indexedFile)
+    grouped.push(treeFile)
     directories.set(segment, grouped)
   }
   const branches = Array.from(directories, ([name, grouped]) =>
@@ -178,9 +176,8 @@ export const DiffFileTree = ({
   const tree = useMemo(
     () =>
       buildFileTree(
-        data.files.map((file, index) => ({
+        data.files.map((file) => ({
           file,
-          index,
           segments: file.path.split("/")
         }))
       ),
@@ -208,7 +205,7 @@ export const DiffFileTree = ({
           <li data-rly-diff-file-id={node.file.id} key={node.file.id}>
             <button
               aria-current={isSelected ? "true" : undefined}
-              aria-label={`File ${node.index + 1} of ${totalCount}: ${node.file.path}, ${node.file.change}, ${contentLabel(node.file.content)}`}
+              aria-label={`${node.file.path}, ${node.file.change}, ${contentLabel(node.file.content)}`}
               className={style("file")}
               data-rly-diff-content-state={node.file.content.state}
               data-rly-diff-file-change={node.file.change}

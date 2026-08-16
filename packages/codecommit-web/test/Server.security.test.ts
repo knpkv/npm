@@ -271,6 +271,56 @@ describe("CodeCommit web security boundary", () => {
       ])
     }))
 
+  it.effect("identifies the exact AWS target in Relay publication prompts", () =>
+    Effect.gen(function*() {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
+      const reviewClient = ReviewClient.CodeCommitReviewClient.of({
+        execute: () =>
+          Effect.succeed(new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:1", summary: "posted" })),
+        preflight: () => unused(),
+        reconcile: () => unused()
+      })
+      const publisher = yield* makeRelayFindingPublisher().pipe(
+        Effect.provideService(ReviewClient.CodeCommitReviewClient, reviewClient),
+        Effect.provideService(PermissionService, makePermissionService(fixedPermissionState("allow"))),
+        Effect.provideService(
+          PermissionGate,
+          PermissionGate.of({
+            request: ({ context }) =>
+              Ref.update(prompts, (current) => [...current, context]).pipe(Effect.as("allow_once"))
+          })
+        ),
+        Effect.provideService(AuditLogRepo, makeAuditLog(auditEntries))
+      )
+      const action = (profile: string, region: string, repositoryName: string) =>
+        ({
+          _tag: "comment",
+          target: {
+            account: {
+              profile: Domain.AwsProfileName.make(profile),
+              region: Domain.AwsRegion.make(region)
+            },
+            repositoryName: Domain.RepositoryName.make(repositoryName),
+            pullRequestId: Domain.PullRequestId.make("42"),
+            revisionId: "revision-1",
+            sourceCommit: ReadClient.CodeCommitCommitId.make("head"),
+            destinationCommit: ReadClient.CodeCommitCommitId.make("base"),
+            destinationReference: "refs/heads/main"
+          },
+          content: "Finding",
+          clientRequestToken: `relay-${profile}-${repositoryName}`
+        }) satisfies Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>
+
+      yield* publisher.post(action("production", "eu-west-1", "payments"))
+      yield* publisher.post(action("staging", "us-east-1", "ledger"))
+
+      expect(yield* Ref.get(prompts)).toEqual([
+        "Post Relay finding to production/eu-west-1/payments PR #42",
+        "Post Relay finding to staging/us-east-1/ledger PR #42"
+      ])
+    }))
+
   it.effect("records provider success and failure outcomes for Relay publication", () =>
     Effect.gen(function*() {
       const auditEntries = yield* Ref.make<ReadonlyArray<NewAuditLogEntry>>([])
@@ -320,8 +370,8 @@ describe("CodeCommit web security boundary", () => {
       yield* publisher.post(action)
       expect(Exit.isFailure(yield* Effect.exit(publisher.post(action)))).toBe(true)
       expect((yield* Ref.get(auditEntries)).map(({ context }) => context)).toEqual([
-        "Post Relay finding to PR #42 · provider succeeded",
-        "Post Relay finding to PR #42 · provider failed"
+        "Post Relay finding to production/eu-west-1/payments PR #42 · provider succeeded",
+        "Post Relay finding to production/eu-west-1/payments PR #42 · provider failed"
       ])
     }))
 

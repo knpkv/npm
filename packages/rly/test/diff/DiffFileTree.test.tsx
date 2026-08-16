@@ -58,6 +58,13 @@ describe("DiffFileTree", () => {
     expect(tree?.querySelector("[data-rly-diff-file-id='added'] button")?.textContent).toBe("added.ts")
     expect(tree?.querySelector("[data-rly-diff-file-id='added'] [title='added']")).not.toBeNull()
     expect(tree?.querySelector("[data-rly-diff-file-id='renamed'] button")?.getAttribute("aria-current")).toBe("true")
+    const fileLabels = Array.from(
+      tree?.querySelectorAll<HTMLButtonElement>("[data-rly-diff-file-id] button") ?? []
+    ).map((button) => button.getAttribute("aria-label"))
+    expect(fileLabels).not.toEqual(expect.arrayContaining([expect.stringMatching(/^File \d+ of \d+:/)]))
+    expect(fileLabels).toEqual(
+      expect.arrayContaining(["src/added.ts, added, Ready", "assets/old.png, deleted, binary: Image content"])
+    )
   })
 
   it("groups paths into collapsible directories and reopens the selected file's ancestors", async () => {

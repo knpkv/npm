@@ -24,6 +24,9 @@ export class RelayFindingPublisher extends Context.Service<
 
 const operation = "postPullRequestComment"
 
+const publicationContext = (action: FindingCommentAction): string =>
+  `Post Relay finding to ${action.target.account.profile}/${action.target.account.region}/${action.target.repositoryName} PR #${action.target.pullRequestId}`
+
 const deniedError = (action: FindingCommentAction, reason: "denied" | "timeout") =>
   new AwsApiError({
     operation,
@@ -56,7 +59,7 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
                 accountProfile: action.target.account.profile,
                 region: action.target.account.region,
                 permissionState,
-                context: `Post Relay finding to PR #${action.target.pullRequestId}${
+                context: `${publicationContext(action)}${
                   providerOutcome === null ? "" : ` · provider ${providerOutcome}`
                 }`,
                 durationMs
@@ -84,7 +87,7 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
         id: `gate-${now}-${nonce}`,
         operation,
         category: getOperationMeta(operation).category,
-        context: `Post Relay finding to PR #${action.target.pullRequestId}`
+        context: publicationContext(action)
       }).pipe(
         Effect.catchTag("PermissionDeniedError", (error) =>
           Effect.gen(function*() {
