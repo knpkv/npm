@@ -176,6 +176,41 @@ describe("DiffFileTree", () => {
     await act(async () => root.unmount())
   })
 
+  it("renders whitespace-only Git paths visibly without changing their identity", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const onSelectedFileChange = vi.fn()
+    const files = [
+      { change: "modified", content: { state: "ready" }, id: "spaces", path: "   " },
+      {
+        change: "renamed",
+        content: { state: "ready" },
+        id: "renamed",
+        path: "visible.ts",
+        previousPath: "\t\t"
+      }
+    ] satisfies ReadonlyArray<RlyDiffFile>
+    await act(async () =>
+      root.render(
+        <DiffFileTree
+          data={{ files, state: "ready" }}
+          heading="Changed files"
+          onSelectedFileChange={onSelectedFileChange}
+        />
+      )
+    )
+
+    const spaces = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='spaces'] button")
+    expect(spaces?.getAttribute("aria-label")).toBe('"   ", modified, Ready')
+    expect(spaces?.textContent).toContain('"   "')
+    expect(host.querySelector("[data-rly-diff-file-id='renamed']")?.textContent).toContain('"\\t\\t"')
+    await act(async () => spaces?.click())
+    expect(onSelectedFileChange).toHaveBeenCalledWith("spaces")
+    expect(files.map(({ path }) => path)).toEqual(["   ", "visible.ts"])
+    await act(async () => root.unmount())
+  })
+
   it("rejects incomplete counts, invalid renames, and invisible selection", () => {
     expect(() =>
       renderToStaticMarkup(

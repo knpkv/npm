@@ -61,6 +61,17 @@ const contentLabel = (content: RlyDiffFileContent): string => {
   return `${content.state}: ${requireText(content.reason, `DiffFileTree ${content.state} reason`)}`
 }
 
+const visibleGitPath = (path: string): string =>
+  path
+    .split("/")
+    .map((segment) => (segment.trim().length === 0 ? JSON.stringify(segment) : segment))
+    .join("/")
+
+const requireGitPath = (path: string, label: string): string => {
+  if (path.length === 0) throw new Error(`${label} must not be empty`)
+  return path
+}
+
 const changeIcons = {
   added: FilePlus2,
   deleted: FileX2,
@@ -74,9 +85,9 @@ const validateInventory = (data: RlyDiffInventory): void => {
     const id = requireText(file.id, "DiffFileTree file id")
     if (ids.has(id)) throw new Error(`DiffFileTree file ids must be unique: ${id}`)
     ids.add(id)
-    const path = requireText(file.path, `DiffFileTree path for ${id}`)
+    const path = requireGitPath(file.path, `DiffFileTree path for ${id}`)
     if (file.change === "renamed") {
-      const previousPath = requireText(file.previousPath, `DiffFileTree previousPath for ${id}`)
+      const previousPath = requireGitPath(file.previousPath, `DiffFileTree previousPath for ${id}`)
       if (previousPath === path) throw new Error(`DiffFileTree renamed paths must differ: ${id}`)
     }
     contentLabel(file.content)
@@ -205,7 +216,7 @@ export const DiffFileTree = ({
           <li data-rly-diff-file-id={node.file.id} key={node.file.id}>
             <button
               aria-current={isSelected ? "true" : undefined}
-              aria-label={`${node.file.path}, ${node.file.change}, ${contentLabel(node.file.content)}`}
+              aria-label={`${visibleGitPath(node.file.path)}, ${node.file.change}, ${contentLabel(node.file.content)}`}
               className={style("file")}
               data-rly-diff-content-state={node.file.content.state}
               data-rly-diff-file-change={node.file.change}
@@ -214,9 +225,9 @@ export const DiffFileTree = ({
             >
               <span className={style("pathBlock")} style={{ paddingInlineStart: "var(--rly-space-20)" }}>
                 {node.file.change === "renamed" ? (
-                  <span className={style("previousPath")}>{node.file.previousPath}</span>
+                  <span className={style("previousPath")}>{visibleGitPath(node.file.previousPath)}</span>
                 ) : null}
-                <code className={style("path")}>{node.name}</code>
+                <code className={style("path")}>{visibleGitPath(node.name)}</code>
               </span>
               <span className={style("statusIcons")}>
                 <span aria-hidden="true" className={style("statusIcon")} title={node.file.change}>
@@ -241,7 +252,9 @@ export const DiffFileTree = ({
         <li className={style("directory")} data-rly-diff-directory={node.path} key={`directory:${node.path}`}>
           <button
             aria-expanded={expanded}
-            aria-label={`${node.name}, directory, ${node.fileCount} changed ${node.fileCount === 1 ? "file" : "files"}`}
+            aria-label={`${visibleGitPath(node.name)}, directory, ${node.fileCount} changed ${
+              node.fileCount === 1 ? "file" : "files"
+            }`}
             className={style("directoryButton")}
             onClick={() =>
               setCollapsedDirectories((current) => {
@@ -254,7 +267,7 @@ export const DiffFileTree = ({
             type="button"
           >
             <span aria-hidden="true" className={style("chevron")} />
-            <code className={style("directoryName")}>{node.name}</code>
+            <code className={style("directoryName")}>{visibleGitPath(node.name)}</code>
             <span className={style("directoryCount")}>{node.fileCount}</span>
           </button>
           {expanded ? (

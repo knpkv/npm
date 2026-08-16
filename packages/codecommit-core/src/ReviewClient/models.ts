@@ -15,7 +15,7 @@ const ClientRequestToken = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewRevision = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewCommitId = CodeCommitCommitId.check(Schema.isMaxLength(64))
 const ReviewReference = NonEmptyString.check(Schema.isMaxLength(256))
-const ReviewFilePath = NonEmptyString.check(Schema.isMaxLength(1_024))
+const ReviewFilePath = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))
 const ReviewFilePosition = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
 )

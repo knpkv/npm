@@ -176,4 +176,19 @@ describe("Relay finding dispositions", () => {
     expect(Schema.is(RelayReviewConversationTurn)(valid)).toBe(true)
     expect(appendReviewTurn([], valid).at(-1)).toEqual(valid)
   })
+
+  it("accepts only messages whose completed exchange remains atomic", () => {
+    const escapeHeavy = { findingId: "F1", role: "user", message: "\0".repeat(5_430) }
+    const user = { findingId: "F1", role: "user", message: "u".repeat(8_000) } satisfies RelayReviewConversationTurn
+    const assistant = {
+      findingId: "F1",
+      role: "assistant",
+      message: "a".repeat(8_000)
+    } satisfies RelayReviewConversationTurn
+
+    expect(Schema.is(RelayReviewConversationTurn)(escapeHeavy)).toBe(false)
+    expect(Schema.is(RelayReviewConversationTurn)(user)).toBe(true)
+    expect(Schema.is(RelayReviewConversationTurn)(assistant)).toBe(true)
+    expect(appendReviewTurn([user], assistant)).toEqual([user, assistant])
+  })
 })

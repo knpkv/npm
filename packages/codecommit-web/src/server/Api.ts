@@ -226,8 +226,10 @@ export const RelayReviewMessage = Schema.String.check(
     }
   ),
   Schema.makeFilter(
-    (message) => jsonByteEncoder.encode(JSON.stringify(message)).byteLength <= MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128,
-    { expected: "a Relay conversation message retainable within the conversation byte budget" }
+    (message) =>
+      jsonByteEncoder.encode(JSON.stringify(message)).byteLength <=
+        Math.floor((MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128) / 2),
+    { expected: "a Relay conversation message retainable as one half of a completed exchange" }
   )
 )
 

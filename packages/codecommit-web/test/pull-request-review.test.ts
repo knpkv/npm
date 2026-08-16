@@ -94,14 +94,15 @@ const changedFile = new ReadClient.CodeCommitChangedFile({
 const unused = <A>(): Effect.Effect<A> => Effect.die("unused read-client operation")
 
 const makeReadClient = (
-  currentRevision = revision
+  currentRevision = revision,
+  currentChangedFile = changedFile
 ): ReadClient.CodeCommitReadClientService => ({
   discoverAccount: () => unused(),
   getBlob: ({ blobId }) =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({
         blobId,
-        bytes: new TextEncoder().encode(blobId === changedFile.before?.blobId ? "before\n" : "after\n")
+        bytes: new TextEncoder().encode(blobId === currentChangedFile.before?.blobId ? "before\n" : "after\n")
       })
     ),
   getChangedFilesPage: () => unused(),
@@ -110,7 +111,7 @@ const makeReadClient = (
   listPullRequestIdsPage: () => unused(),
   listPullRequestsPage: () => unused(),
   listRepositoriesPage: () => unused(),
-  streamChangedFiles: () => Stream.make(changedFile),
+  streamChangedFiles: () => Stream.make(currentChangedFile),
   streamPullRequests: () => Stream.empty
 })
 
@@ -200,6 +201,16 @@ describe("CodeCommit web review boundary", () => {
 
   it.effect("posts an accepted line finding once against the exact reviewed head", () =>
     Effect.gen(function*() {
+      const exactPath = " leading.ts "
+      const exactChangedFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: exactPath
+        }),
+        status: "added"
+      })
       const actions: Array<Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>> = []
       const publisher = {
         post: (action) => {
@@ -221,10 +232,10 @@ describe("CodeCommit web review boundary", () => {
         recommendation: "Retry only idempotent reads.",
         verification: "Exercise a timeout after the provider accepts the write.",
         publicationTarget: "line-comment",
-        location: { scope: "line", filePath: "src/index.ts", line: 1, side: "after" }
+        location: { scope: "line", filePath: exactPath, line: 1, side: "after" }
       }
       const receipt = yield* postPullRequestRelayFinding(
-        makeReadClient(),
+        makeReadClient(revision, exactChangedFile),
         publisher,
         pullRequest,
         expectedRevision,
@@ -244,7 +255,7 @@ describe("CodeCommit web review boundary", () => {
           sourceCommit: revision.sourceCommit,
           destinationCommit: revision.destinationCommit
         },
-        location: { filePath: "src/index.ts", filePosition: 1, relativeFileVersion: "AFTER" }
+        location: { filePath: exactPath, filePosition: 1, relativeFileVersion: "AFTER" }
       })
       expect(actions[0]?.content).toContain("Retry duplicates writes")
       expect(actions[0]?.clientRequestToken).toMatch(/^[0-9a-f]{64}$/u)
