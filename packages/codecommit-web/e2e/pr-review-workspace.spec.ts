@@ -472,7 +472,7 @@ test("keeps the prior review session atomic when frames follow completion", asyn
                 details: "A frame follows this complete event.",
                 recommendation: "Stage terminal state until EOF.",
                 verification: "Malformed transport fixture.",
-                publicationTarget: "file-comment",
+                publicationTarget: "pr-comment",
                 location: { scope: "file", filePath: "src/retry.ts" }
               }]
             }
@@ -516,6 +516,103 @@ test("keeps the prior review session atomic when frames follow completion", asyn
       return key === undefined ? null : window.sessionStorage.getItem(key)
     })
   ).toBe(persistedBefore)
+})
+
+test("commits a staged continuation after clean EOF", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+    const payload = decodeRelayContinuePayload(route.request().postDataJSON())
+    await route.fulfill({
+      body: `${
+        JSON.stringify({
+          type: "complete",
+          review: {
+            pullRequestId: "42",
+            revisionId: "revision-1",
+            baseCommit: "a".repeat(40),
+            headCommit: "b".repeat(40),
+            kind: payload.kind,
+            result: {
+              verdict: "The staged terminal review is committed after clean EOF.",
+              findings: [{
+                id: "F3",
+                priority: "P1",
+                title: "Committed terminal finding",
+                summary: "The transport reached a clean EOF.",
+                details: "No frame follows this complete event.",
+                recommendation: "Commit the staged terminal state.",
+                verification: "Clean transport fixture.",
+                publicationTarget: "pr-comment",
+                location: { scope: "file", filePath: "src/retry.ts" }
+              }]
+            }
+          },
+          reply: "This reply is retained after clean EOF."
+        })
+      }\n`,
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Apply the valid continuation.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+
+  await expect(page.getByRole("button", { name: /Committed terminal finding/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
+  await expect(page.getByText("This reply is retained after clean EOF.")).toBeVisible()
+})
+
+test("keeps a continuation reply visible when its finding is withdrawn", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+    const payload = decodeRelayContinuePayload(route.request().postDataJSON())
+    await route.fulfill({
+      body: `${
+        JSON.stringify({
+          type: "complete",
+          review: {
+            pullRequestId: "42",
+            revisionId: "revision-1",
+            baseCommit: "a".repeat(40),
+            headCommit: "b".repeat(40),
+            kind: payload.kind,
+            result: {
+              verdict: "The retry finding was withdrawn after verification.",
+              findings: [{
+                id: "F2",
+                priority: "P3",
+                title: "Before-path evidence",
+                summary: "The removed line carries the old filename.",
+                details: "The before-side annotation resolves the renamed file's previous path.",
+                recommendation: "Keep the previous path bound to deletion annotations.",
+                verification: "Static patch review only.",
+                publicationTarget: "line-comment",
+                location: { scope: "line", filePath: "src/old-retry.ts", line: 1, side: "before" }
+              }]
+            }
+          },
+          reply: "F1 is withdrawn because the retry path is now verified idempotent."
+        })
+      }\n`,
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Withdraw this if it is resolved.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+
+  await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
+  await expect(page.getByText("Discuss withdrawn finding")).toBeVisible()
+  await expect(page.getByText("F1 is no longer in the current deck")).toBeVisible()
+  await expect(page.getByText("F1 is withdrawn because the retry path is now verified idempotent.")).toBeVisible()
 })
 
 test("recovers an interrupted finding publication after reload", async ({ page }) => {

@@ -6,6 +6,8 @@ import * as Path from "effect/Path"
 import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 import {
   discoverReviewSkillsFromRoots,
+  MAXIMUM_REVIEW_SKILL_DESCRIPTION_BYTES,
+  MAXIMUM_REVIEW_SKILL_NAME_BYTES,
   MAXIMUM_SKILL_INSPECTED_ENTRIES,
   type ReviewSkillDefinition,
   selectedReviewSkillPrompt
@@ -49,6 +51,48 @@ describe("Relay review skill catalog", () => {
       expect(yield* selectedReviewSkillPrompt(skills, ["env:test:reviewer", "env:test:../../external"]))
         .toContain("Review typed failures.")
       expect(yield* selectedReviewSkillPrompt(skills, ["env:test:../../external"])).toBe("")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("bounds client-visible skill metadata by UTF-8 bytes", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "review-skill-metadata-" })
+      const root = path.join(temporary, "root")
+      const oversized = path.join(root, "oversized")
+      const ordinary = path.join(root, "ordinary")
+      yield* fileSystem.makeDirectory(oversized, { recursive: true })
+      yield* fileSystem.makeDirectory(ordinary, { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(oversized, "SKILL.md"),
+        [
+          "---",
+          `name: ${"é".repeat(10_000)}`,
+          `description: ${"界".repeat(12_000)}`,
+          "---",
+          "Large metadata must not reach the client unchanged."
+        ].join("\n")
+      )
+      yield* fileSystem.writeFileString(
+        path.join(ordinary, "SKILL.md"),
+        ["---", "name: Strict reviewer", "description: Trace typed error paths.", "---", "Ordinary skill."].join(
+          "\n"
+        )
+      )
+
+      const skills = yield* discoverReviewSkillsFromRoots([{ label: "test", path: root }])
+      const large = skills.find(({ id }) => id === "env:test:oversized")
+      const normal = skills.find(({ id }) => id === "env:test:ordinary")
+      const encoder = new TextEncoder()
+      expect(large).not.toBeUndefined()
+      if (large === undefined) return
+      expect(encoder.encode(large.name).byteLength).toBeLessThanOrEqual(MAXIMUM_REVIEW_SKILL_NAME_BYTES)
+      expect(encoder.encode(large.description).byteLength).toBeLessThanOrEqual(
+        MAXIMUM_REVIEW_SKILL_DESCRIPTION_BYTES
+      )
+      expect(large.name.endsWith("…")).toBe(true)
+      expect(large.description.endsWith("…")).toBe(true)
+      expect(normal).toMatchObject({ name: "Strict reviewer", description: "Trace typed error paths." })
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("stops directory traversal at the file and depth bounds", () =>

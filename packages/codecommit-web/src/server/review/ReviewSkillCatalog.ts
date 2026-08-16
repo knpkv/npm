@@ -11,6 +11,29 @@ const MAXIMUM_SKILL_DIRECTORIES = MAXIMUM_SKILL_FILES + 1
 export const MAXIMUM_SKILL_INSPECTED_ENTRIES = MAXIMUM_SKILL_FILES * 4
 const MAXIMUM_SKILL_BYTES = 64 * 1024
 const MAXIMUM_SKILL_DEPTH = 8
+export const MAXIMUM_REVIEW_SKILL_NAME_BYTES = 160
+export const MAXIMUM_REVIEW_SKILL_DESCRIPTION_BYTES = 512
+const MAXIMUM_REVIEW_SKILL_SOURCE_BYTES = 512
+
+const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).byteLength
+
+const boundedMetadataField = (maximumBytes: number) =>
+  Schema.String.pipe(Schema.check(Schema.makeFilter((value) => utf8ByteLength(value) <= maximumBytes)))
+
+const truncateUtf8 = (value: string, maximumBytes: number): string => {
+  if (utf8ByteLength(value) <= maximumBytes) return value
+  const suffix = "…"
+  const contentBudget = maximumBytes - utf8ByteLength(suffix)
+  let bytes = 0
+  let truncated = ""
+  for (const character of value) {
+    const characterBytes = utf8ByteLength(character)
+    if (bytes + characterBytes > contentBudget) break
+    truncated += character
+    bytes += characterBytes
+  }
+  return `${truncated.trimEnd()}${suffix}`
+}
 
 const builtinSkills: ReadonlyArray<ReviewSkillDefinition> = [
   {
@@ -45,9 +68,9 @@ const builtinSkills: ReadonlyArray<ReviewSkillDefinition> = [
 
 export const ReviewSkillMetadata = Schema.Struct({
   id: RelayReviewSkillId,
-  name: Schema.String,
-  description: Schema.String,
-  source: Schema.String
+  name: boundedMetadataField(MAXIMUM_REVIEW_SKILL_NAME_BYTES),
+  description: boundedMetadataField(MAXIMUM_REVIEW_SKILL_DESCRIPTION_BYTES),
+  source: boundedMetadataField(MAXIMUM_REVIEW_SKILL_SOURCE_BYTES)
 })
 
 export type ReviewSkillMetadata = typeof ReviewSkillMetadata.Type
@@ -113,9 +136,9 @@ const readSkill = Effect.fn("ReviewSkillCatalog.readSkill")(function*(
   if (!Schema.is(RelayReviewSkillId)(id)) return Option.none()
   return Option.some({
     id,
-    name,
-    description,
-    source: `${root.label}/${directory}`,
+    name: truncateUtf8(name, MAXIMUM_REVIEW_SKILL_NAME_BYTES),
+    description: truncateUtf8(description, MAXIMUM_REVIEW_SKILL_DESCRIPTION_BYTES),
+    source: truncateUtf8(`${root.label}/${directory}`, MAXIMUM_REVIEW_SKILL_SOURCE_BYTES),
     prompt: content.value
   })
 })

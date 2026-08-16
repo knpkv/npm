@@ -706,7 +706,7 @@ const ReadyReviewWorkspace = ({
     setCompletedReview(restored)
     setTurns(stored.turns)
     setDispositions(stored.dispositions)
-    setSelectedFindingId(stored.review.result.findings[0]?.id ?? null)
+    setSelectedFindingId(stored.turns.at(-1)?.findingId ?? stored.review.result.findings[0]?.id ?? null)
   }, [reviewIdentity, reviewSessionKey])
 
   useEffect(() => {
@@ -923,8 +923,13 @@ const ReadyReviewWorkspace = ({
     [diff.files]
   )
   const selectedFinding = review?.result.findings.find(({ id }) => id === selectedFindingId) ?? null
+  const conversationFindingId =
+    selectedFinding?.id ??
+    (selectedFindingId !== null && turns.some(({ findingId }) => findingId === selectedFindingId)
+      ? selectedFindingId
+      : null)
   const selectedTurns =
-    selectedFinding === null ? [] : turns.filter(({ findingId }) => findingId === selectedFinding.id)
+    conversationFindingId === null ? [] : turns.filter(({ findingId }) => findingId === conversationFindingId)
   const visibleProgress = progress.slice(-4)
 
   return (
@@ -1188,9 +1193,9 @@ const ReadyReviewWorkspace = ({
             review={review}
             selectedFindingId={selectedFindingId}
           />
-          {selectedFinding === null ? null : (
+          {conversationFindingId === null ? null : (
             <section
-              aria-label={`Conversation about ${selectedFinding.id}`}
+              aria-label={`Conversation about ${conversationFindingId}`}
               className={styles.conversation}
               data-collapsed={conversationCollapsed ? "true" : undefined}
             >
@@ -1198,8 +1203,12 @@ const ReadyReviewWorkspace = ({
                 <span>
                   <MessageSquareMoreIcon aria-hidden="true" />
                   <span className={styles.conversationTitle}>
-                    <strong>Discuss finding</strong>
-                    <small>{selectedFinding.title}</small>
+                    <strong>{selectedFinding === null ? "Discuss withdrawn finding" : "Discuss finding"}</strong>
+                    <small>
+                      {selectedFinding === null
+                        ? `${conversationFindingId} is no longer in the current deck`
+                        : selectedFinding.title}
+                    </small>
                   </span>
                 </span>
                 <button
@@ -1218,7 +1227,7 @@ const ReadyReviewWorkspace = ({
               {conversationCollapsed ? null : (
                 <>
                   <div
-                    aria-label={`Conversation history about ${selectedFinding.id}`}
+                    aria-label={`Conversation history about ${conversationFindingId}`}
                     aria-live="polite"
                     className={styles.conversationHistory}
                     role="log"
@@ -1240,7 +1249,7 @@ const ReadyReviewWorkspace = ({
                     onSubmit={(event) => {
                       event.preventDefault()
                       const submitted = message.trim()
-                      if (submitted.length > 0 && !isReviewing) void continueReview(selectedFinding.id, submitted)
+                      if (submitted.length > 0 && !isReviewing) void continueReview(conversationFindingId, submitted)
                     }}
                   >
                     <textarea
