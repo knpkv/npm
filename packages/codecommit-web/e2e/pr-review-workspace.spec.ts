@@ -800,7 +800,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
   expect(await emitAppState(3)).toBeGreaterThan(0)
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
@@ -845,24 +845,43 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
 test("settles an optimistic comment count from refreshed provider comments", async ({ page }) => {
   const settlement = Promise.withResolvers<void>()
   await routeReviewWorkspace(page, "review", undefined, undefined, {
-    commentCount: () => 1,
+    commentCount: () => 2,
+    commentsGate: (findingPosted) => findingPosted ? settlement.promise : Promise.resolve()
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: /^Comments/ }).click()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await expect(page.getByText("posted")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
+
+  settlement.resolve()
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
+  await page.goto("/")
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
+test("settles an optimistic comment count when the provider total is unchanged", async ({ page }) => {
+  const settlement = Promise.withResolvers<void>()
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => 2,
     commentsGate: (findingPosted) => findingPosted ? settlement.promise : Promise.resolve(),
     deleteOriginalCommentAfterPost: true
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
-  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
 
   settlement.resolve()
-  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
-  await page.goto("/")
-  await page.goto("/accounts/111111111111/prs/42")
-  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 })
 
 test("clears a failed publication error after a successful retry", async ({ page }) => {

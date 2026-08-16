@@ -133,8 +133,11 @@ const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonE
   return Math.min(...loc.comments.map((t) => new Date(t.root.creationDate).getTime()))
 }
 
-const countThread = (t: CommentThreadJsonEncoded): number =>
-  t.root.deleted ? 0 : 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
+const countThread = (thread: CommentThreadJsonEncoded): number =>
+  1 + thread.replies.reduce((sum, reply) => sum + countThread(reply), 0)
+
+const countVisibleThread = (thread: CommentThreadJsonEncoded): number =>
+  thread.root.deleted ? 0 : 1 + thread.replies.reduce((sum, reply) => sum + countVisibleThread(reply), 0)
 
 function CommentsCountReporter({
   count,
@@ -324,6 +327,10 @@ function CommentsSection({
     ))
     .onSuccess((comments) => {
       const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
+      const visibleCount = comments.reduce(
+        (sum, loc) => sum + loc.comments.reduce((locationSum, thread) => locationSum + countVisibleThread(thread), 0),
+        0
+      )
 
       return (
         <div className={styles.comments}>
@@ -333,7 +340,7 @@ function CommentsSection({
               No comments
             </Text>
           )}
-          {totalCount > 0 && (
+          {visibleCount > 0 && (
             <div className={styles.commentLocations}>
               {[...comments]
                 .sort((a, b) => earliestDate(b) - earliestDate(a))
