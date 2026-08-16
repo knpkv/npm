@@ -8,7 +8,7 @@ import { Deferred, Duration, Effect, Fiber, Redacted, Ref, Result, Stream } from
 import * as TestClock from "effect/testing/TestClock"
 import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
-import { makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
+import { encodeClientVisibleCommentLocations, makeDiffContentResponse } from "../src/server/handlers/prs-live.js"
 import { encodeSandbox } from "../src/server/handlers/sandbox-live.js"
 import {
   activateOwnerSessionBootstrap,
@@ -125,6 +125,44 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
 })
 
 describe("CodeCommit web security boundary", () => {
+  it("removes only owned Relay reconciliation markers from client-visible comments", () => {
+    const token = "a".repeat(64)
+    const encoded = encodeClientVisibleCommentLocations([
+      {
+        comments: [
+          {
+            root: new Domain.PRComment({
+              id: Domain.CommentId.make("comment-1"),
+              content: `Finding\n\n<!-- knpkv-codecommit-review:${token} -->`,
+              author: "relay",
+              creationDate: new Date("2026-08-12T10:00:00.000Z"),
+              deleted: false
+            }),
+            replies: [
+              {
+                root: new Domain.PRComment({
+                  id: Domain.CommentId.make("comment-2"),
+                  content: "Keep unrelated <!-- review:markup --> unchanged",
+                  author: "reviewer",
+                  creationDate: new Date("2026-08-12T10:01:00.000Z"),
+                  deleted: false
+                }),
+                replies: []
+              }
+            ]
+          }
+        ]
+      }
+    ])
+
+    const serialized = JSON.stringify(encoded)
+    expect(serialized).not.toContain(token)
+    expect(encoded[0]?.comments[0]?.root.content).toBe("Finding")
+    expect(encoded[0]?.comments[0]?.replies[0]?.root.content).toBe(
+      "Keep unrelated <!-- review:markup --> unchanged"
+    )
+  })
+
   it.effect("permission-gates and audits Relay publication before the provider write", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make(0)

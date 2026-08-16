@@ -26,6 +26,7 @@ import {
   SandboxId,
   SandboxStatus
 } from "@knpkv/codecommit-core/Domain.js"
+import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
@@ -239,7 +240,7 @@ export const RelayReviewStreamRequest = Schema.Struct({
   baseCommit: Schema.String,
   headCommit: Schema.String,
   kind: RelayReviewKind,
-  skillIds: Schema.Array(Schema.String).check(Schema.isMaxLength(24), Schema.isUnique())
+  skillIds: Schema.Array(Schema.String).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
 })
 export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 

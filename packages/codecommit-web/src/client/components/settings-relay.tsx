@@ -1,6 +1,7 @@
 /** Relay review profiles and environment skill selection. @module */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { ReviewConfig as ReviewSettings } from "@knpkv/codecommit-core/ConfigService.js"
+import type { ReviewConfig as ReviewSettings, ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
+import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { Predicate } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { CheckIcon } from "lucide-react"
@@ -9,6 +10,22 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom, reviewSkillsQueryAtom } from "../atoms/app.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
+
+export const updateReviewProfileSkills = (
+  profile: ReviewProfileConfig,
+  skillId: string,
+  enabled: boolean
+): ReviewProfileConfig => {
+  const selected = profile.skillIds.includes(skillId)
+  if (enabled) {
+    if (selected || profile.skillIds.length >= reviewProfileSkillLimit) return profile
+    return { ...profile, skillIds: [...profile.skillIds, skillId] }
+  }
+  return selected ? { ...profile, skillIds: profile.skillIds.filter((candidate) => candidate !== skillId) } : profile
+}
+
+export const isReviewProfileSkillSelectionDisabled = (profile: ReviewProfileConfig, skillId: string): boolean =>
+  !profile.skillIds.includes(skillId) && profile.skillIds.length >= reviewProfileSkillLimit
 
 export function SettingsRelay() {
   const config = useAtomValue(configQueryAtom)
@@ -39,14 +56,7 @@ export function SettingsRelay() {
         : {
             ...current,
             profiles: current.profiles.map((profile) =>
-              profile.id !== profileId
-                ? profile
-                : {
-                    ...profile,
-                    skillIds: enabled
-                      ? [...new Set([...profile.skillIds, skillId])]
-                      : profile.skillIds.filter((candidate) => candidate !== skillId)
-                  }
+              profile.id !== profileId ? profile : updateReviewProfileSkills(profile, skillId, enabled)
             )
           }
     )
@@ -132,7 +142,7 @@ export function SettingsRelay() {
               <div>
                 <h3 className="text-sm font-semibold">{profile.name}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {profile.kind} · {profile.skillIds.length} selected
+                  {profile.kind} · {profile.skillIds.length}/{reviewProfileSkillLimit} selected
                 </p>
               </div>
               {AsyncResult.isSuccess(skills) ? (
@@ -141,6 +151,7 @@ export function SettingsRelay() {
                     <label className="flex items-start gap-2 rounded-md border p-3 text-sm" key={skill.id}>
                       <input
                         checked={profile.skillIds.includes(skill.id)}
+                        disabled={isReviewProfileSkillSelectionDisabled(profile, skill.id)}
                         onChange={(event) => updateProfileSkills(profile.id, skill.id, event.target.checked)}
                         type="checkbox"
                       />

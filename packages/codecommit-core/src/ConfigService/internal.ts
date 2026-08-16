@@ -4,6 +4,7 @@
 import { Array as Arr, Context, Effect, Option, pipe, Schema } from "effect"
 import { AwsProfileName, AwsRegion } from "../Domain.js"
 import type { ConfigError, ProfileDetectionError } from "../Errors.js"
+import { reviewProfileSkillLimit } from "../ReviewProfile.js"
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -84,7 +85,7 @@ export const ReviewProfileConfig = Schema.Struct({
   kind: ReviewKind,
   skillIds: Schema.Array(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
-  ).check(Schema.isMaxLength(24), Schema.isUnique())
+  ).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
 })
 
 export type ReviewProfileConfig = typeof ReviewProfileConfig.Type

@@ -569,6 +569,7 @@ const ReadyReviewWorkspace = ({
   commentNavigation,
   comments,
   diff,
+  onFindingPosted,
   onNavigateToComment,
   pullRequest
 }: {
@@ -576,6 +577,7 @@ const ReadyReviewWorkspace = ({
   readonly commentNavigation: ReviewCommentNavigation | null
   readonly comments: ReadonlyArray<ReviewCommentNavigationTarget>
   readonly diff: PullRequestDiffResponse
+  readonly onFindingPosted: () => void
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
 }): ReactElement => {
@@ -584,12 +586,15 @@ const ReadyReviewWorkspace = ({
   const [kind, setKind] = useState<RelayReviewKind>("review")
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
-  const [contentStates, setContentStates] = useState<ReadonlyMap<number, RlyDiffFileContent>>(new Map())
   const config = useAtomValue(configQueryAtom)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
   const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
+  const [contentStateCache, setContentStateCache] = useState<{
+    readonly identity: string
+    readonly values: ReadonlyMap<number, RlyDiffFileContent>
+  }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = relayReviewSessionStorageKey(accountId, pullRequest.id)
   const [completedReview, setCompletedReview] = useState<{
     readonly identity: string
@@ -616,6 +621,8 @@ const ReadyReviewWorkspace = ({
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
+  const contentStates =
+    contentStateCache.identity === reviewIdentity ? contentStateCache.values : new Map<number, RlyDiffFileContent>()
   const files = diff.files.map((file) => toRlyFile(file, contentStates.get(file.index) ?? { state: "ready" }))
   const inventory: RlyDiffInventory = { files, state: "ready" }
 
@@ -684,13 +691,17 @@ const ReadyReviewWorkspace = ({
     setSelectedFileIndex(diff.files[0]?.index ?? null)
   }, [diff.files, selectedFileIndex])
 
-  const updateContentState = useCallback((fileIndex: number, content: RlyDiffFileContent): void => {
-    setContentStates((current) => {
-      const previous = current.get(fileIndex)
-      if (previous?.state === content.state) return current
-      return new Map(current).set(fileIndex, content)
-    })
-  }, [])
+  const updateContentState = useCallback(
+    (fileIndex: number, content: RlyDiffFileContent): void => {
+      setContentStateCache((current) => {
+        const values = current.identity === reviewIdentity ? current.values : new Map<number, RlyDiffFileContent>()
+        const previous = values.get(fileIndex)
+        if (current.identity === reviewIdentity && previous?.state === content.state) return current
+        return { identity: reviewIdentity, values: new Map(values).set(fileIndex, content) }
+      })
+    },
+    [reviewIdentity]
+  )
 
   const runStream = useCallback(
     async (
@@ -778,7 +789,7 @@ const ReadyReviewWorkspace = ({
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
           headCommit: diff.headCommit,
-          kind,
+          kind: review.kind,
           skillIds: selectedProfile?.skillIds ?? [],
           currentReview: review.result,
           turns: nextTurns,
@@ -793,7 +804,6 @@ const ReadyReviewWorkspace = ({
       diff.baseCommit,
       diff.headCommit,
       diff.revisionId,
-      kind,
       pullRequest.id,
       review,
       runStream,
@@ -818,6 +828,7 @@ const ReadyReviewWorkspace = ({
             finding: postedFinding
           }
         })
+        onFindingPosted()
         setDispositions((current) => {
           const settlement = settleFindingPublication(
             completedReviewRef.current?.value.result.findings ?? [],
@@ -843,7 +854,7 @@ const ReadyReviewWorkspace = ({
         setReviewFailure(failureMessage(cause, "CodeCommit did not accept this finding."))
       }
     },
-    [accountId, postFindingRequest, pullRequest.id, review, reviewIsStale]
+    [accountId, onFindingPosted, postFindingRequest, pullRequest.id, review, reviewIsStale]
   )
 
   const selectFinding = useCallback(
@@ -1025,7 +1036,7 @@ const ReadyReviewWorkspace = ({
                 baseCommit={diff.baseCommit}
                 comments={comments}
                 file={selectedFile}
-                findings={review?.result.findings ?? []}
+                findings={reviewIsStale ? [] : (review?.result.findings ?? [])}
                 headCommit={diff.headCommit}
                 key={`${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}:${String(selectedFile.index)}:${layout}:${String(wrap)}`}
                 layout={layout}
@@ -1159,13 +1170,17 @@ const ReadyReviewWorkspace = ({
 export const PullRequestReviewWorkspace = ({
   accountId,
   commentNavigation,
+  commentsRefreshGeneration,
+  onFindingPosted,
   onNavigateToComment,
   pullRequest,
   refreshGeneration
 }: {
   readonly accountId: string
+  readonly commentsRefreshGeneration: number
   readonly commentNavigation: ReviewCommentNavigation | null
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
+  readonly onFindingPosted: () => void
   readonly pullRequest: Domain.PullRequest
   readonly refreshGeneration: number
 }): ReactElement => {
@@ -1173,7 +1188,8 @@ export const PullRequestReviewWorkspace = ({
     pullRequestId: pullRequest.id,
     repositoryName: pullRequest.repositoryName,
     profile: pullRequest.account.profile,
-    region: pullRequest.account.region
+    region: pullRequest.account.region,
+    refreshGeneration: commentsRefreshGeneration
   })
   const commentTargets = AsyncResult.isSuccess(comments)
     ? comments.value.flatMap((location) =>
@@ -1193,9 +1209,11 @@ export const PullRequestReviewWorkspace = ({
     [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
   )
   const diff = useAtomValue(diffAtom)
-  const retainedDiffRef = useRef<PullRequestDiffResponse | null>(null)
-  if (AsyncResult.isSuccess(diff)) retainedDiffRef.current = diff.value
-  const visibleDiff = AsyncResult.isSuccess(diff) ? diff.value : retainedDiffRef.current
+  const pullRequestIdentity = `${accountId}:${pullRequest.id}`
+  const retainedDiffRef = useRef<{ readonly identity: string; readonly value: PullRequestDiffResponse } | null>(null)
+  if (AsyncResult.isSuccess(diff)) retainedDiffRef.current = { identity: pullRequestIdentity, value: diff.value }
+  const retainedDiff = retainedDiffRef.current?.identity === pullRequestIdentity ? retainedDiffRef.current.value : null
+  const visibleDiff = AsyncResult.isSuccess(diff) ? diff.value : retainedDiff
 
   if ((AsyncResult.isInitial(diff) || AsyncResult.isWaiting(diff)) && visibleDiff === null) {
     return (
@@ -1224,6 +1242,7 @@ export const PullRequestReviewWorkspace = ({
       comments={commentTargets.filter((target) => isCommentOnExactRevision(target, visibleDiff))}
       diff={visibleDiff}
       key={`${accountId}:${pullRequest.id}`}
+      onFindingPosted={onFindingPosted}
       onNavigateToComment={onNavigateToComment}
       pullRequest={pullRequest}
     />

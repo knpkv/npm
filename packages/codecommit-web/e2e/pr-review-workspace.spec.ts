@@ -31,9 +31,11 @@ const pullRequest = {
 
 const routeReviewWorkspace = async (
   page: Page,
-  expectedKind: "explain" | "review" = "review",
-  reviewGate?: Promise<void>
+  expectedKind: "explain" | "review" | "security" | "tests" = "review",
+  reviewGate?: Promise<void>,
+  onContinueKind?: (kind: string) => void
 ) => {
+  let findingPosted = false
   const appState = JSON.stringify({
     accounts: [{ ...pullRequest.account, enabled: true }],
     currentUser: "reviewer",
@@ -78,18 +80,34 @@ const routeReviewWorkspace = async (
         beforeCommitId: "a".repeat(40),
         afterCommitId: "b".repeat(40),
         relativeFileVersion: "AFTER",
-        comments: [{
-          root: {
-            id: "comment-1",
-            content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
-            author: "reviewer",
-            creationDate: "2026-08-12T10:00:00.000Z",
-            deleted: false,
-            filePath: "src/retry.ts",
-            lineNumber: 1
+        comments: [
+          {
+            root: {
+              id: "comment-1",
+              content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
+              author: "reviewer",
+              creationDate: "2026-08-12T10:00:00.000Z",
+              deleted: false,
+              filePath: "src/retry.ts",
+              lineNumber: 1
+            },
+            replies: []
           },
-          replies: []
-        }]
+          ...(findingPosted
+            ? [{
+              root: {
+                id: "relay-comment-1",
+                content: "P2: Retry amplification",
+                author: "relay",
+                creationDate: "2026-08-12T10:01:00.000Z",
+                deleted: false,
+                filePath: "src/retry.ts",
+                lineNumber: 1
+              },
+              replies: []
+            }]
+            : [])
+        ]
       }]),
       contentType: "application/json",
       status: 200
@@ -194,6 +212,7 @@ const routeReviewWorkspace = async (
   })
   await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
     const finding = route.request().postDataJSON().finding
+    findingPosted = true
     await route.fulfill({
       body: JSON.stringify({ findingId: finding.id, operationId: "comment:123", summary: "posted" }),
       contentType: "application/json",
@@ -202,6 +221,7 @@ const routeReviewWorkspace = async (
   })
   await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
     const payload = route.request().postDataJSON()
+    onContinueKind?.(payload.kind)
     await route.fulfill({
       body: [
         JSON.stringify({ type: "progress", phase: "agent", message: "Relay is re-checking the finding" }),
@@ -232,6 +252,24 @@ test("renders a substantive Relay explanation", async ({ page }) => {
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("heading", { name: "Change explanation" })).toBeVisible()
   await expect(page.getByText("The patch raises the retry budget used by the payment request flow.")).toBeVisible()
+})
+
+test("continues a completed review with its original focus", async ({ page }) => {
+  let continuedKind: string | null = null
+  await routeReviewWorkspace(page, "security", undefined, (kind) => {
+    continuedKind = kind
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  await page.getByRole("button", { name: "Security" }).click()
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await page.getByRole("button", { name: "Tests" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByPlaceholder("Verify this against the latest change…").fill("Continue this security review.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+
+  await expect.poll(() => continuedKind).toBe("security")
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
@@ -287,6 +325,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("acknowledged")).toBeVisible()
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByPlaceholder("Verify this against the latest change…").fill("Verify this again.")
@@ -460,6 +499,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
   manualRefreshRequested = true
@@ -483,7 +523,93 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   const staleReviewMessage = `This finding deck reviewed ${"b".repeat(12)}; current head is ${"c".repeat(12)}.`
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
+  await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
   expect(diffRequestCount).toBe(3)
+})
+
+test("drops exceptional file state when the exact revision changes", async ({ page }) => {
+  let currentRevision = "revision-1"
+  let manualRefreshRequested = false
+  const replacementContent = Promise.withResolvers<void>()
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    const replacement = currentRevision === "revision-2"
+    await route.fulfill({
+      body: JSON.stringify({
+        pullRequestId: "42",
+        revisionId: currentRevision,
+        baseCommit: "a".repeat(40),
+        headCommit: (replacement ? "c" : "b").repeat(40),
+        files: [
+          {
+            index: 0,
+            status: "modified",
+            path: "src/retry.ts",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100644"
+          },
+          {
+            index: 1,
+            status: "modified",
+            path: replacement ? "src/replacement.ts" : "src/legacy.bin",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100644"
+          }
+        ]
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+    const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
+    if (fileIndex === 1 && currentRevision === "revision-1") {
+      await route.fulfill({
+        body: JSON.stringify({
+          fileIndex,
+          revisionId: currentRevision,
+          state: "binary",
+          before: null,
+          after: null
+        }),
+        contentType: "application/json",
+        status: 200
+      })
+      return
+    }
+    if (fileIndex === 1) await replacementContent.promise
+    await route.fulfill({
+      body: JSON.stringify({
+        fileIndex,
+        revisionId: currentRevision,
+        state: "text",
+        before: "export const value = 1\n",
+        after: "export const value = 2\n"
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+    if (manualRefreshRequested) currentRevision = "revision-2"
+    await route.fulfill({
+      body: JSON.stringify({ revisionId: currentRevision, headCommit: "c".repeat(40) }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: /File 2 of 2: src\/legacy\.bin/ }).click()
+  await expect(page.getByRole("button", { name: /File 2 of 2: src\/legacy\.bin, modified, binary:/ })).toBeVisible()
+
+  manualRefreshRequested = true
+  await page.getByRole("button", { exact: true, name: "Refresh" }).click()
+  await expect(page.getByRole("button", { name: /File 2 of 2: src\/replacement\.ts, modified, Ready/ })).toBeVisible()
+  replacementContent.resolve()
+  await expect(page.getByText("export const value = 2")).toBeVisible()
 })
 
 test("invalidates approver refreshes once per observed head without polling churn", async ({ page }) => {
@@ -584,6 +710,8 @@ test("scopes file selection to the exact pull request while preserving same-revi
     title: "fix(payments): keep the retry budget bounded"
   }
   const contentRequests = new Map<string, number>()
+  const heldSecondPullRequestDiff = Promise.withResolvers<void>()
+  let holdSecondPullRequestDiff = false
   await page.clock.install()
   await page.route("**/api/events/", async (route) => {
     await route.fulfill({
@@ -604,6 +732,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
   })
   await page.route("**/api/prs/111111111111/*/diff", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
+    if (pullRequestId === "43" && holdSecondPullRequestDiff) await heldSecondPullRequestDiff.promise
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId,
@@ -657,9 +786,14 @@ test("scopes file selection to the exact pull request while preserving same-revi
   await expect(page.getByText("PR 42")).toBeVisible()
   await page.getByRole("button", { name: /File 6 of 6: src\/pr-42-5\.ts/ }).click()
   await expect(page.getByText("export const value = \"42:5:after\"")).toBeVisible()
-  await page.clock.fastForward(11_000)
+  await page.clock.fastForward(31_000)
 
+  holdSecondPullRequestDiff = true
   await navigateTo("43")
+  await expect(page.getByText("Loading exact diff")).toBeVisible()
+  await expect(page.getByText("export const value = \"42:5:after\"")).toHaveCount(0)
+  expect(contentRequests.get("43:5")).toBeUndefined()
+  heldSecondPullRequestDiff.resolve()
   await expect(page.getByText("export const value = \"43:0:after\"")).toBeVisible()
   expect(contentRequests.get("43:5")).toBeUndefined()
 

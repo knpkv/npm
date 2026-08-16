@@ -85,6 +85,23 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
 
 const relayEventEncoder = new TextEncoder()
 const encodeRelayStreamEvent = Schema.encodeSync(Schema.fromJsonString(RelayReviewStreamEvent))
+const relayReviewMarker = /\n\n<!-- knpkv-codecommit-review:[0-9a-f]{64} -->$/u
+
+const stripRelayReviewMarker = (content: string): string => content.replace(relayReviewMarker, "")
+
+const sanitizeCommentThread = (thread: Domain.CommentThreadJsonEncoded): Domain.CommentThreadJsonEncoded => ({
+  root: { ...thread.root, content: stripRelayReviewMarker(thread.root.content) },
+  replies: thread.replies.map(sanitizeCommentThread)
+})
+
+/** Encode provider comments without server-private Relay reconciliation markers. */
+export const encodeClientVisibleCommentLocations = (
+  locations: ReadonlyArray<Domain.PRCommentLocation>
+): ReturnType<typeof encodeCommentLocations> =>
+  encodeCommentLocations(locations).map((location) => ({
+    ...location,
+    comments: location.comments.map(sanitizeCommentThread)
+  }))
 
 const relayStreamResponse = (stream: Stream.Stream<typeof RelayReviewStreamEvent.Type>) =>
   HttpServerResponse.stream(
@@ -212,7 +229,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           pullRequestId: query.pullRequestId,
           repositoryName: query.repositoryName
         }).pipe(
-          Effect.map(encodeCommentLocations),
+          Effect.map(encodeClientVisibleCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
       .handle("diff", ({ params }) =>

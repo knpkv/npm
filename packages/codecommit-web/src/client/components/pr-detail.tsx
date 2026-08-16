@@ -265,10 +265,12 @@ function CommentThread({
 }
 
 function CommentsSection({
+  commentsRefreshGeneration,
   navigation,
   onNavigateToDiff,
   pr
 }: {
+  readonly commentsRefreshGeneration: number
   readonly navigation: ReviewCommentNavigation | null
   readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
   readonly pr: Domain.PullRequest
@@ -277,7 +279,8 @@ function CommentsSection({
     pullRequestId: pr.id,
     repositoryName: pr.repositoryName,
     profile: pr.account.profile,
-    region: pr.account.region
+    region: pr.account.region,
+    refreshGeneration: commentsRefreshGeneration
   })
 
   return AsyncResult.builder(commentsResult)
@@ -807,6 +810,8 @@ export function PRDetail() {
   // Refresh single PR
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
+  const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
+  const commentRefreshTimersRef = useRef<Set<number>>(new Set())
   const [commentNavigation, setCommentNavigation] = useState<ReviewCommentNavigation | null>(null)
   const reviewedRevisionRef = useRef<string | null>(null)
   const invalidateReview = useCallback(
@@ -820,6 +825,23 @@ export function PRDetail() {
     },
     [accountKey, prId]
   )
+  useEffect(
+    () => () => {
+      for (const timer of commentRefreshTimersRef.current) window.clearTimeout(timer)
+      commentRefreshTimersRef.current.clear()
+    },
+    []
+  )
+  const refreshCommentsAfterPublication = useCallback(() => {
+    setCommentsRefreshGeneration((current) => current + 1)
+    for (const delay of [1_500, 5_000]) {
+      const timer = window.setTimeout(() => {
+        commentRefreshTimersRef.current.delete(timer)
+        setCommentsRefreshGeneration((current) => current + 1)
+      }, delay)
+      commentRefreshTimersRef.current.add(timer)
+    }
+  }, [])
   const refreshAfterApprovalMutation = useCallback(() => {
     if (!accountKey || !prId) return
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
@@ -1170,7 +1192,9 @@ export function PRDetail() {
       >
         <PullRequestReviewWorkspace
           accountId={accountId ?? pr.account.profile}
+          commentsRefreshGeneration={commentsRefreshGeneration}
           commentNavigation={commentNavigation}
+          onFindingPosted={refreshCommentsAfterPublication}
           onNavigateToComment={(target) => setCommentNavigation({ destination: "comment", target })}
           pullRequest={pr}
           refreshGeneration={reviewRefreshGeneration}
@@ -1205,6 +1229,7 @@ export function PRDetail() {
             {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}
           >
             <CommentsSection
+              commentsRefreshGeneration={commentsRefreshGeneration}
               key={pr.id}
               navigation={commentNavigation}
               onNavigateToDiff={(target) => setCommentNavigation({ destination: "diff", target })}
