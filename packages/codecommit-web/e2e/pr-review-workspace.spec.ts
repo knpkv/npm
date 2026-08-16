@@ -1116,6 +1116,41 @@ test("preserves unobserved optimistic comment increments across partial provider
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 })
 
+test("does not double-count pending comments after partial authoritative growth", async ({ page }) => {
+  const partialObserved = Promise.withResolvers<void>()
+  const settledObserved = Promise.withResolvers<void>()
+  let authoritativeCount = 0
+  let partialReads = 0
+  let settledReads = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => {
+      if (authoritativeCount === 1 && ++partialReads >= 2) partialObserved.resolve()
+      if (authoritativeCount === 2 && ++settledReads >= 2) settledObserved.resolve()
+      return authoritativeCount
+    },
+    emptyCommentsInitially: true
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  const commentsTrigger = page.getByRole("button", { name: /^Comments/ })
+  await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: /Before-path evidence/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  authoritativeCount = 1
+  await partialObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  authoritativeCount = 2
+  await settledObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
 test("preserves a pending Relay comment across unrelated SSE growth", async ({ page }) => {
   const responsesEnabled = Promise.withResolvers<void>()
   const unrelatedObserved = Promise.withResolvers<void>()

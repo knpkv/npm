@@ -913,7 +913,7 @@ export function PRDetail() {
         return {
           ...current,
           baseCount: authoritativeCommentCount,
-          count: Math.max(current.count, authoritativeCommentCount + current.pendingCommentIds.length)
+          count: Math.max(current.count, authoritativeCommentCount)
         }
       }
       return authoritativeCommentCount < current.count ? { ...current, baseCount: authoritativeCommentCount } : null
