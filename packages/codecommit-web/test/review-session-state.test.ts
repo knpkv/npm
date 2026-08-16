@@ -101,6 +101,18 @@ describe("Relay finding dispositions", () => {
       {},
       "posted"
     )).toEqual({ dispositions: { F1: "posted-stale" }, stale: true })
+    expect(settleFindingPublication(
+      [finding("changed")],
+      finding("first"),
+      { F1: "posting" },
+      "failed"
+    )).toEqual({ dispositions: { F1: "failed" }, stale: true })
+    expect(settleFindingPublication(
+      [],
+      finding("first"),
+      { F1: "posting" },
+      "failed"
+    )).toEqual({ dispositions: { F1: "posting" }, stale: false })
   })
 
   it("retains the newest continuation turn within the API limit", () => {

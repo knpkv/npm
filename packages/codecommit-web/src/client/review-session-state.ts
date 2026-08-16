@@ -50,11 +50,11 @@ export const settleFindingPublication = (
 ): FindingPublicationSettlement => {
   const current = currentFindings.find(({ id }) => id === submittedFinding.id)
   const stale = current === undefined || findingIdentity(current) !== findingIdentity(submittedFinding)
-  if (stale && outcome === "failed") return { dispositions, stale: false }
+  if (stale && outcome === "failed" && current === undefined) return { dispositions, stale: false }
   return {
     dispositions: {
       ...dispositions,
-      [submittedFinding.id]: stale ? "posted-stale" : outcome
+      [submittedFinding.id]: stale && outcome === "posted" ? "posted-stale" : outcome
     },
     stale
   }

@@ -37,6 +37,21 @@ const pullRequest = {
   title: "feat(payments): make retry handling idempotent"
 }
 
+const changedReviewResult: RelayReviewResult = {
+  verdict: "The retry finding changed after re-review.",
+  findings: [{
+    id: "F1",
+    priority: "P2",
+    title: "Retry amplification",
+    summary: "The changed retry can duplicate a non-idempotent request.",
+    details: "The changed constant still expands retries without an idempotency guard.",
+    recommendation: "Require an idempotency key before retrying.",
+    verification: "Re-reviewed while publication remained active.",
+    publicationTarget: "line-comment",
+    location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+  }]
+}
+
 const RelayContinuePayload = Schema.Struct({
   currentReview: RelayReviewResult,
   kind: Schema.String,
@@ -70,6 +85,7 @@ interface ReviewWorkspaceOptions {
   readonly onRun?: (payload: RelayRunPayload) => void
   readonly onPost?: (findingPostCount: number) => void
   readonly postGate?: (findingPostCount: number) => Promise<void>
+  readonly postStatus?: number
   readonly pullRequest?: () => typeof pullRequest
   readonly review?: () => {
     readonly defaultProfileId: string
@@ -310,6 +326,10 @@ const routeReviewWorkspace = async (
     findingPostCount += 1
     options?.onPost?.(findingPostCount)
     await options?.postGate?.(findingPostCount)
+    if (options?.postStatus !== undefined && options.postStatus !== 200) {
+      await route.fulfill({ body: "provider post failed", contentType: "text/plain", status: options.postStatus })
+      return
+    }
     await route.fulfill({
       body: JSON.stringify({
         findingId: finding.id,
@@ -713,20 +733,7 @@ test("preserves an active finding publication across changed live reconciliation
   const postRelease = Promise.withResolvers<void>()
   let postAttempts = 0
   await routeReviewWorkspace(page, "review", undefined, undefined, {
-    continueReview: () => ({
-      verdict: "The retry finding changed after re-review.",
-      findings: [{
-        id: "F1",
-        priority: "P2",
-        title: "Retry amplification",
-        summary: "The changed retry can duplicate a non-idempotent request.",
-        details: "The changed constant still expands retries without an idempotency guard.",
-        recommendation: "Require an idempotency key before retrying.",
-        verification: "Re-reviewed while publication remained active.",
-        publicationTarget: "line-comment",
-        location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
-      }]
-    }),
+    continueReview: () => changedReviewResult,
     onPost: (count) => {
       postAttempts = count
       postStarted.resolve()
@@ -756,6 +763,37 @@ test("preserves an active finding publication across changed live reconciliation
   await post.click()
   await expect(page.getByText("posted", { exact: true })).toBeVisible()
   expect(postAttempts).toBe(2)
+})
+
+test("releases a changed finding after its active publication fails", async ({ page }) => {
+  const postStarted = Promise.withResolvers<void>()
+  const postRelease = Promise.withResolvers<void>()
+  let postAttempts = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    continueReview: () => changedReviewResult,
+    onPost: (count) => {
+      postAttempts = count
+      postStarted.resolve()
+    },
+    postGate: () => postRelease.promise,
+    postStatus: 500
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+
+  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  await post.click()
+  await postStarted.promise
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Re-check while publication is active.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await expect(post).toBeDisabled()
+
+  postRelease.resolve()
+  await expect(page.getByText("failed", { exact: true })).toBeVisible()
+  await expect(post).toBeEnabled()
+  expect(postAttempts).toBe(1)
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
