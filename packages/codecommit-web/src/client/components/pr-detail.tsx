@@ -813,6 +813,12 @@ export function PRDetail() {
   const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
   const commentRefreshTimersRef = useRef<Set<number>>(new Set())
   const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
+  const [commentCountState, setCommentCountState] = useState<{
+    readonly count: number
+    readonly identity: string
+  } | null>(null)
+  const commentCount =
+    commentCountState?.identity === commentNavigationIdentity ? commentCountState.count : pr?.commentCount
   const [commentNavigationState, setCommentNavigationState] = useState<{
     readonly identity: string
     readonly navigation: ReviewCommentNavigation
@@ -850,6 +856,10 @@ export function PRDetail() {
     []
   )
   const refreshCommentsAfterPublication = useCallback(() => {
+    setCommentCountState((current) => ({
+      count: (current?.identity === commentNavigationIdentity ? current.count : (pr?.commentCount ?? 0)) + 1,
+      identity: commentNavigationIdentity
+    }))
     setCommentsRefreshGeneration((current) => current + 1)
     for (const delay of [1_500, 5_000]) {
       const timer = window.setTimeout(() => {
@@ -858,7 +868,7 @@ export function PRDetail() {
       }, delay)
       commentRefreshTimersRef.current.add(timer)
     }
-  }, [])
+  }, [commentNavigationIdentity, pr?.commentCount])
   const refreshAfterApprovalMutation = useCallback(() => {
     if (!accountKey || !prId) return
     void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
@@ -1243,7 +1253,7 @@ export function PRDetail() {
               ? { openRequestKey: `${commentNavigation.target.commentId}:${String(commentNavigation.requestId)}` }
               : {})}
             title="Comments"
-            {...(pr.commentCount !== undefined ? { count: pr.commentCount } : {})}
+            {...(commentCount !== undefined ? { count: commentCount } : {})}
           >
             <CommentsSection
               commentsRefreshGeneration={commentsRefreshGeneration}

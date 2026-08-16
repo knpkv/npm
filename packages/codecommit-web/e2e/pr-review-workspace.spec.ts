@@ -605,6 +605,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Verify this again.")
