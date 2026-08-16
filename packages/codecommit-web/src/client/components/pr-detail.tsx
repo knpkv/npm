@@ -133,7 +133,19 @@ const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonE
   return Math.min(...loc.comments.map((t) => new Date(t.root.creationDate).getTime()))
 }
 
-const countThread = (t: CommentThreadJsonEncoded): number => 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
+const countThread = (t: CommentThreadJsonEncoded): number =>
+  t.root.deleted ? 0 : 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
+
+function CommentsCountReporter({
+  count,
+  onCountChange
+}: {
+  readonly count: number
+  readonly onCountChange: (count: number) => void
+}) {
+  useEffect(() => onCountChange(count), [count, onCountChange])
+  return null
+}
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
   if (!score) return null
@@ -267,11 +279,13 @@ function CommentThread({
 function CommentsSection({
   commentsRefreshGeneration,
   navigation,
+  onCountChange,
   onNavigateToDiff,
   pr
 }: {
   readonly commentsRefreshGeneration: number
   readonly navigation: ReviewCommentNavigation | null
+  readonly onCountChange: (count: number) => void
   readonly onNavigateToDiff: (target: ReviewCommentNavigationTarget) => void
   readonly pr: Domain.PullRequest
 }) {
@@ -313,6 +327,7 @@ function CommentsSection({
 
       return (
         <div className={styles.comments}>
+          <CommentsCountReporter count={totalCount} onCountChange={onCountChange} />
           {comments.length === 0 && (
             <Text tone="secondary" variant="meta">
               No comments
@@ -685,8 +700,8 @@ interface PullRequestDecisionPresentation {
 
 interface OptimisticCommentCount {
   readonly baseCount: number
+  readonly count: number
   readonly identity: string
-  readonly pendingIncrement: number
 }
 
 const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresentation => {
@@ -825,8 +840,9 @@ export function PRDetail() {
     if (authoritativeCommentCount === undefined || commentCountState?.identity !== commentNavigationIdentity) {
       return authoritativeCommentCount
     }
-    if (authoritativeCommentCount < commentCountState.baseCount) return authoritativeCommentCount
-    return Math.max(authoritativeCommentCount, commentCountState.baseCount + commentCountState.pendingIncrement)
+    return authoritativeCommentCount === commentCountState.baseCount
+      ? commentCountState.count
+      : authoritativeCommentCount
   })()
   const [commentNavigationState, setCommentNavigationState] = useState<{
     readonly identity: string
@@ -867,26 +883,32 @@ export function PRDetail() {
   useEffect(() => {
     if (authoritativeCommentCount === undefined) return
     setCommentCountState((current) => {
-      if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount) {
+      if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount)
         return current
-      }
-      if (authoritativeCommentCount < current.baseCount) return null
-      const pendingIncrement = Math.max(0, current.baseCount + current.pendingIncrement - authoritativeCommentCount)
-      return pendingIncrement === 0
-        ? null
-        : {
-            baseCount: authoritativeCommentCount,
-            identity: commentNavigationIdentity,
-            pendingIncrement
-          }
+      return null
     })
   }, [authoritativeCommentCount, commentNavigationIdentity])
+  const reconcileCommentCount = useCallback(
+    (count: number) => {
+      const baseCount = pr?.commentCount ?? 0
+      setCommentCountState((current) =>
+        current?.identity === commentNavigationIdentity && current.baseCount === baseCount
+          ? { ...current, count }
+          : current
+      )
+    },
+    [commentNavigationIdentity, pr?.commentCount]
+  )
   const refreshCommentsAfterPublication = useCallback(() => {
     setCommentCountState((current) => {
       const baseCount = pr?.commentCount ?? 0
       return current?.identity === commentNavigationIdentity && current.baseCount === baseCount
-        ? { ...current, pendingIncrement: current.pendingIncrement + 1 }
-        : { baseCount, identity: commentNavigationIdentity, pendingIncrement: 1 }
+        ? { ...current, count: current.count + 1 }
+        : {
+            baseCount,
+            count: baseCount + 1,
+            identity: commentNavigationIdentity
+          }
     })
     setCommentsRefreshGeneration((current) => current + 1)
     for (const delay of [1_500, 5_000]) {
@@ -1287,6 +1309,7 @@ export function PRDetail() {
               commentsRefreshGeneration={commentsRefreshGeneration}
               key={pr.id}
               navigation={commentNavigation}
+              onCountChange={reconcileCommentCount}
               onNavigateToDiff={(target) => requestCommentNavigation("diff", target)}
               pr={pr}
             />

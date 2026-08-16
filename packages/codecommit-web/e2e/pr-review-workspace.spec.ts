@@ -1,6 +1,12 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 
+declare global {
+  interface Window {
+    emitReviewWorkspaceEvent?: (data: string) => number
+  }
+}
+
 const pullRequest = {
   account: {
     awsAccountId: "111111111111",
@@ -52,8 +58,10 @@ const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
+  readonly commentsGate?: (findingPosted: boolean) => Promise<void>
   readonly configGate?: Promise<void>
   readonly configStatus?: number
+  readonly deleteOriginalCommentAfterPost?: boolean
   readonly onRun?: (payload: RelayRunPayload) => void
   readonly review?: () => {
     readonly defaultProfileId: string
@@ -117,6 +125,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/comments*", async (route) => {
+    await options?.commentsGate?.(findingPosted)
     await route.fulfill({
       body: JSON.stringify([{
         filePath: "src/retry.ts",
@@ -124,18 +133,20 @@ const routeReviewWorkspace = async (
         afterCommitId: "b".repeat(40),
         relativeFileVersion: "AFTER",
         comments: [
-          {
-            root: {
-              id: "comment-1",
-              content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
-              author: "reviewer",
-              creationDate: "2026-08-12T10:00:00.000Z",
-              deleted: false,
-              filePath: "src/retry.ts",
-              lineNumber: 1
-            },
-            replies: []
-          },
+          ...(!findingPosted || options?.deleteOriginalCommentAfterPost !== true ?
+            [{
+              root: {
+                id: "comment-1",
+                content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
+                author: "reviewer",
+                creationDate: "2026-08-12T10:00:00.000Z",
+                deleted: false,
+                filePath: "src/retry.ts",
+                lineNumber: 1
+              },
+              replies: []
+            }] :
+            []),
           {
             root: {
               id: "comment-deleted",
@@ -668,13 +679,65 @@ test("recovers an interrupted finding publication after reload", async ({ page }
 })
 
 test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
+  test.setTimeout(30_000)
   const reviewGate = Promise.withResolvers<void>()
-  let authoritativeCommentCount = 0
+  await page.addInitScript(() => {
+    class ReviewEventSource extends EventTarget {
+      onerror: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent<string>) => void) | null = null
+      onopen: ((event: Event) => void) | null = null
+      readyState = 1
+      readonly url: string
+      readonly withCredentials = false
+
+      constructor(url: string | URL) {
+        super()
+        this.url = String(url)
+        sources.push(this)
+        window.setTimeout(() => this.onopen?.(new Event("open")), 0)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+    }
+    const sources: Array<ReviewEventSource> = []
+    Object.defineProperty(window, "EventSource", { configurable: true, value: ReviewEventSource })
+    window.emitReviewWorkspaceEvent = (data) => {
+      const event = new MessageEvent<string>("message", { data })
+      let delivered = 0
+      for (const source of sources) {
+        if (source.onmessage === null || source.readyState === 2) continue
+        source.onmessage(event)
+        delivered++
+      }
+      return delivered
+    }
+  })
   await page.setViewportSize({ height: 900, width: 1440 })
   await routeReviewWorkspace(page, "review", reviewGate.promise, undefined, {
-    commentCount: () => authoritativeCommentCount
+    commentCount: () => 0
   })
   await page.goto("/accounts/111111111111/prs/42")
+
+  const emitAppState = (commentCount: number) =>
+    page.evaluate(
+      (data) => {
+        const emit = window.emitReviewWorkspaceEvent
+        if (emit === undefined) throw new Error("Review workspace event bridge is unavailable")
+        return emit(data)
+      },
+      JSON.stringify({
+        accounts: [{ ...pullRequest.account, enabled: true }],
+        currentUser: "reviewer",
+        lastUpdated: "2026-08-12T09:31:00.000Z",
+        pendingReviewCount: 1,
+        pullRequests: [{ ...pullRequest, commentCount }],
+        sandboxes: [],
+        status: "idle"
+      })
+    )
+  expect(await emitAppState(0)).toBeGreaterThan(0)
 
   await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
   await expect(page.getByText("export const retries = 3")).toBeVisible()
@@ -733,9 +796,9 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
-  authoritativeCommentCount = 2
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+  expect(await emitAppState(3)).toBeGreaterThan(0)
+  await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Verify this again.")
@@ -756,6 +819,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await conversationHistory.evaluate((element) => element.scrollTo({ top: 0 }))
   await expect(page.getByLabel("Message Relay")).toBeInViewport()
   await page.reload()
+  expect(await emitAppState(3)).toBeGreaterThan(0)
   await page
     .getByRole("region", { name: "Conversation about F1" })
     .getByRole("button", { exact: true, name: "Open" })
@@ -772,6 +836,29 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await page.setViewportSize({ height: 844, width: 390 })
   await expect(page.getByRole("heading", { name: "Diff & Relay" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+})
+
+test("settles an optimistic comment count from refreshed provider comments", async ({ page }) => {
+  const settlement = Promise.withResolvers<void>()
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => 1,
+    commentsGate: (findingPosted) => findingPosted ? settlement.promise : Promise.resolve(),
+    deleteOriginalCommentAfterPost: true
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: /^Comments/ }).click()
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await expect(page.getByText("posted")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  settlement.resolve()
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  await page.goto("/")
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
 })
 
 test("clears a failed publication error after a successful retry", async ({ page }) => {
