@@ -64,7 +64,7 @@ const contentLabel = (content: RlyDiffFileContent): string => {
 const visibleGitPath = (path: string): string =>
   path
     .split("/")
-    .map((segment) => (segment.trim().length === 0 ? JSON.stringify(segment) : segment))
+    .map((segment) => (segment !== segment.trim() || /[\t\n\v\f\r]/u.test(segment) ? JSON.stringify(segment) : segment))
     .join("/")
 
 const requireGitPath = (path: string, label: string): string => {

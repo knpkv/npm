@@ -176,7 +176,7 @@ describe("DiffFileTree", () => {
     await act(async () => root.unmount())
   })
 
-  it("renders whitespace-only Git paths visibly without changing their identity", async () => {
+  it("renders significant Git-path whitespace visibly without changing identity", async () => {
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -189,7 +189,11 @@ describe("DiffFileTree", () => {
         id: "renamed",
         path: "visible.ts",
         previousPath: "\t\t"
-      }
+      },
+      { change: "modified", content: { state: "ready" }, id: "plain", path: "file.ts" },
+      { change: "modified", content: { state: "ready" }, id: "edge", path: " file.ts " },
+      { change: "modified", content: { state: "ready" }, id: "tab", path: "file\tname.ts" },
+      { change: "modified", content: { state: "ready" }, id: "internal", path: "src/file name.ts" }
     ] satisfies ReadonlyArray<RlyDiffFile>
     await act(async () =>
       root.render(
@@ -205,9 +209,24 @@ describe("DiffFileTree", () => {
     expect(spaces?.getAttribute("aria-label")).toBe('"   ", modified, Ready')
     expect(spaces?.textContent).toContain('"   "')
     expect(host.querySelector("[data-rly-diff-file-id='renamed']")?.textContent).toContain('"\\t\\t"')
-    await act(async () => spaces?.click())
-    expect(onSelectedFileChange).toHaveBeenCalledWith("spaces")
-    expect(files.map(({ path }) => path)).toEqual(["   ", "visible.ts"])
+    expect(host.querySelector("[data-rly-diff-file-id='plain'] button")?.textContent).toContain("file.ts")
+    expect(host.querySelector("[data-rly-diff-file-id='edge'] button")?.textContent).toContain('" file.ts "')
+    expect(host.querySelector("[data-rly-diff-file-id='tab'] button")?.textContent).toContain('"file\\tname.ts"')
+    expect(host.querySelector("[data-rly-diff-file-id='internal'] button")?.textContent).toContain("file name.ts")
+    expect(host.querySelector("[data-rly-diff-file-id='internal'] button")?.textContent).not.toContain('"')
+    const edge = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='edge'] button")
+    const tab = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='tab'] button")
+    await act(async () => edge?.click())
+    await act(async () => tab?.click())
+    expect(onSelectedFileChange.mock.calls).toEqual([["edge"], ["tab"]])
+    expect(files.map(({ path }) => path)).toEqual([
+      "   ",
+      "visible.ts",
+      "file.ts",
+      " file.ts ",
+      "file\tname.ts",
+      "src/file name.ts"
+    ])
     await act(async () => root.unmount())
   })
 
