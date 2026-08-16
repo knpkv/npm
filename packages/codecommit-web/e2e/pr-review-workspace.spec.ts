@@ -392,12 +392,69 @@ test("clears a failed publication error after a successful retry", async ({ page
   await expect(page.getByText("Relay review failed")).toHaveCount(0)
 })
 
+test("keeps an initial diff failure blocking when no exact workspace was retained", async ({ page }) => {
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+    await route.fulfill({ body: "diff unavailable", contentType: "text/plain", status: 500 })
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  await expect(page.getByText("Exact diff unavailable")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Diff & Relay" })).toHaveCount(0)
+})
+
+test("rejects description-target findings before presenting a post action", async ({ page }) => {
+  let postAttempts = 0
+  await routeReviewWorkspace(page)
+  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        type: "complete",
+        review: {
+          pullRequestId: "42",
+          revisionId: "revision-1",
+          baseCommit: "a".repeat(40),
+          headCommit: "b".repeat(40),
+          kind: "review",
+          result: {
+            verdict: "Description suggestion.",
+            findings: [{
+              id: "F1",
+              priority: "P2",
+              title: "Rewrite the description",
+              summary: "The description is incomplete.",
+              details: "The patch changes behavior not mentioned in the description.",
+              recommendation: "Update the pull-request description.",
+              verification: "Static patch review only.",
+              publicationTarget: "description",
+              location: { scope: "general" }
+            }]
+          }
+        }
+      }) + "\n",
+      contentType: "application/x-ndjson",
+      status: 200
+    })
+  })
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+    postAttempts++
+    await route.abort()
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Accept · post" })).toHaveCount(0)
+  expect(postAttempts).toBe(0)
+})
+
 test("reloads after a completed manual refresh without refetching for ordinary SSE churn", async ({ page }) => {
   let eventCount = 0
   let diffRequestCount = 0
   let currentRevision = "revision-1"
   let manualRefreshRequested = false
   let manualRefreshCount = 0
+  let changedDiffFailures = 0
   const changedRevisionRefresh = Promise.withResolvers<void>()
 
   await page.route("**/api/config", async (route) => {
@@ -468,6 +525,11 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   })
   await page.route("**/api/prs/111111111111/42/diff", async (route) => {
     diffRequestCount++
+    if (currentRevision === "revision-2" && changedDiffFailures === 0) {
+      changedDiffFailures++
+      await route.fulfill({ body: "diff unavailable", contentType: "text/plain", status: 500 })
+      return
+    }
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -546,13 +608,20 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(refreshButton).toBeDisabled()
   expect(diffRequestCount).toBe(2)
   changedRevisionRefresh.resolve()
+  await expect(page.getByText("Latest diff unavailable")).toBeVisible()
+  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
+  expect(diffRequestCount).toBe(3)
+
+  await expect(refreshButton).toBeEnabled()
+  await refreshButton.click()
   await expect(page.getByText(`head ${"c".repeat(12)}`)).toBeVisible()
   await expect(page.getByText("export const retries = 4")).toBeVisible()
   const staleReviewMessage = `This finding deck reviewed ${"b".repeat(12)}; current head is ${"c".repeat(12)}.`
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
-  expect(diffRequestCount).toBe(3)
+  expect(diffRequestCount).toBe(4)
 })
 
 test("drops exceptional file state when the exact revision changes", async ({ page }) => {
@@ -798,6 +867,31 @@ test("scopes file selection to the exact pull request while preserving same-revi
       status: 200
     })
   })
+  await page.route("**/api/prs/comments*", async (route) => {
+    const pullRequestId = new URL(route.request().url()).searchParams.get("pullRequestId") ?? ""
+    await route.fulfill({
+      body: JSON.stringify([{
+        filePath: `src/pr-${pullRequestId}-0.ts`,
+        beforeCommitId: "a".repeat(40),
+        afterCommitId: "b".repeat(40),
+        relativeFileVersion: "AFTER",
+        comments: [{
+          root: {
+            id: `comment-${pullRequestId}`,
+            content: `Comment for PR ${pullRequestId}`,
+            author: "reviewer",
+            creationDate: "2026-08-12T10:00:00.000Z",
+            deleted: false,
+            filePath: `src/pr-${pullRequestId}-0.ts`,
+            lineNumber: 1
+          },
+          replies: []
+        }]
+      }]),
+      contentType: "application/json",
+      status: 200
+    })
+  })
 
   const navigateTo = async (pullRequestId: string): Promise<void> => {
     await page.evaluate((nextPullRequestId) => {
@@ -812,6 +906,10 @@ test("scopes file selection to the exact pull request while preserving same-revi
 
   await navigateTo("42")
   await expect(page.getByText("PR 42")).toBeVisible()
+  await page.getByRole("button", { name: /^Comments/ }).click()
+  await expect(page.getByText("Comment for PR 42").last()).toBeVisible()
+  await page.getByRole("button", { name: "View in diff" }).click()
+  await expect(page.getByLabel("CodeCommit comment by reviewer")).toBeVisible()
   await page.getByRole("button", { name: /File 6 of 6: src\/pr-42-5\.ts/ }).click()
   await expect(page.getByText("export const value = \"42:5:after\"")).toBeVisible()
   await page.clock.fastForward(31_000)
@@ -819,6 +917,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
   holdSecondPullRequestDiff = true
   await navigateTo("43")
   await expect(page.getByText("Loading exact diff")).toBeVisible()
+  await expect(page.getByText("Comment link unavailable")).toHaveCount(0)
   await expect(page.getByText("export const value = \"42:5:after\"")).toHaveCount(0)
   expect(contentRequests.get("43:5")).toBeUndefined()
   heldSecondPullRequestDiff.resolve()

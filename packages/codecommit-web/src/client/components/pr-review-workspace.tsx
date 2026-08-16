@@ -578,6 +578,7 @@ const ReadyReviewWorkspace = ({
   commentNavigation,
   comments,
   diff,
+  diffFailure,
   onFindingPosted,
   onNavigateToComment,
   pullRequest
@@ -586,6 +587,7 @@ const ReadyReviewWorkspace = ({
   readonly commentNavigation: ReviewCommentNavigation | null
   readonly comments: ReadonlyArray<ReviewCommentNavigationTarget>
   readonly diff: PullRequestDiffResponse
+  readonly diffFailure: string | null
   readonly onFindingPosted: () => void
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequest: Domain.PullRequest
@@ -827,15 +829,13 @@ const ReadyReviewWorkspace = ({
       setReviewFailure(null)
       setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
       try {
-        const postedFinding: RelayReviewFinding =
-          finding.publicationTarget === "line-comment" ? finding : { ...finding, publicationTarget: "pr-comment" }
         await postFindingRequest({
           params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
           payload: {
             revisionId: review.revisionId,
             baseCommit: review.baseCommit,
             headCommit: review.headCommit,
-            finding: postedFinding
+            finding
           }
         })
         onFindingPosted()
@@ -959,6 +959,17 @@ const ReadyReviewWorkspace = ({
             </li>
           ))}
         </ol>
+      )}
+
+      {diffFailure === null ? null : (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            announce="polite"
+            description={`${diffFailure} Showing the last successfully loaded exact revision.`}
+            title="Latest diff unavailable"
+            tone="caution"
+          />
+        </div>
       )}
 
       {reviewIsStale ? (
@@ -1229,7 +1240,10 @@ export const PullRequestReviewWorkspace = ({
       />
     )
   }
-  if (AsyncResult.isFailure(diff)) {
+  const diffFailure = AsyncResult.isFailure(diff)
+    ? failureMessage(diff.cause, "Refresh this pull request to retry the CodeCommit diff read.")
+    : null
+  if (AsyncResult.isFailure(diff) && visibleDiff === null) {
     return (
       <StatePanel
         announce="polite"
@@ -1245,6 +1259,7 @@ export const PullRequestReviewWorkspace = ({
       commentNavigation={commentNavigation}
       comments={commentTargets.filter((target) => isCommentOnExactRevision(target, visibleDiff))}
       diff={visibleDiff}
+      diffFailure={diffFailure}
       key={`${accountId}:${pullRequest.id}`}
       onFindingPosted={onFindingPosted}
       onNavigateToComment={onNavigateToComment}

@@ -3,7 +3,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { discoverReviewSkillsFromRoots, selectedReviewSkillPrompt } from "../src/server/review/ReviewSkillCatalog.js"
+import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "../src/server/review/ReviewPromptBudget.js"
+import {
+  discoverReviewSkillsFromRoots,
+  type ReviewSkillDefinition,
+  selectedReviewSkillPrompt
+} from "../src/server/review/ReviewSkillCatalog.js"
 
 describe("Relay review skill catalog", () => {
   it.effect("discovers only bounded SKILL.md files inside trusted roots", () =>
@@ -40,9 +45,9 @@ describe("Relay review skill catalog", () => {
       const local = skills.find(({ id }) => id === "env:test:reviewer")
       expect(local).toMatchObject({ name: "Strict reviewer", description: "Trace typed error paths." })
       expect(skills.some(({ id }) => id.includes("escaped"))).toBe(false)
-      expect(selectedReviewSkillPrompt(skills, ["env:test:reviewer", "env:test:../../external"]))
+      expect(yield* selectedReviewSkillPrompt(skills, ["env:test:reviewer", "env:test:../../external"]))
         .toContain("Review typed failures.")
-      expect(selectedReviewSkillPrompt(skills, ["env:test:../../external"])).toBe("")
+      expect(yield* selectedReviewSkillPrompt(skills, ["env:test:../../external"])).toBe("")
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("stops directory traversal at the file and depth bounds", () =>
@@ -93,4 +98,29 @@ describe("Relay review skill catalog", () => {
       const deepReads = (yield* Ref.get(reads)).slice(readsBeforeDeep)
       expect(deepReads).toHaveLength(8)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("rejects selected skill prompts above the aggregate UTF-8 budget", () =>
+    Effect.gen(function*() {
+      const skills: ReadonlyArray<ReviewSkillDefinition> = Array.from({ length: 16 }, (_, index) => ({
+        id: `env:test:${String(index)}`,
+        name: `Skill ${String(index)}`,
+        description: "Large fixture.",
+        source: "test",
+        prompt: "x".repeat(64 * 1024)
+      }))
+      const failure = yield* selectedReviewSkillPrompt(skills, skills.map(({ id }) => id)).pipe(Effect.flip)
+      expect(failure._tag).toBe("ReviewSkillSelectionError")
+      expect(failure.message).toContain(String(MAXIMUM_RELAY_SKILL_PROMPT_BYTES))
+
+      const utf8Prompt = "é".repeat(MAXIMUM_RELAY_SKILL_PROMPT_BYTES / 2)
+      const valid: ReadonlyArray<ReviewSkillDefinition> = [{
+        id: "env:test:utf8",
+        name: "UTF-8 fixture",
+        description: "Counts encoded bytes.",
+        source: "test",
+        prompt: utf8Prompt
+      }]
+      const selected = yield* selectedReviewSkillPrompt(valid, ["env:test:utf8"])
+      expect(new TextEncoder().encode(selected).byteLength).toBe(MAXIMUM_RELAY_SKILL_PROMPT_BYTES)
+    }))
 })

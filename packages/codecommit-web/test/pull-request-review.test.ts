@@ -18,6 +18,12 @@ import {
   withRelayReviewPermit
 } from "../src/server/review/PullRequestReview.js"
 import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
+import {
+  MAXIMUM_RELAY_PATCH_BYTES,
+  MAXIMUM_RELAY_PROMPT_BYTES,
+  MAXIMUM_RELAY_SKILL_PROMPT_BYTES,
+  MINIMUM_RELAY_HOST_ENVELOPE_BYTES
+} from "../src/server/review/ReviewPromptBudget.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -385,6 +391,22 @@ describe("CodeCommit web review boundary", () => {
     expect(explain).not.toContain("Report only concrete, actionable defects")
     expect(review).toContain("Report only concrete, actionable defects")
     expect(review).not.toContain("\"explanation\":\"substantive architecture and risk explanation\"")
+  })
+
+  it("reserves prompt capacity outside the maximum patch and selected skills", () => {
+    const prompt = makeRelayReviewPrompt(
+      {
+        account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+        pullRequest,
+        revision
+      },
+      "review",
+      "x".repeat(MAXIMUM_RELAY_PATCH_BYTES),
+      "é".repeat(MAXIMUM_RELAY_SKILL_PROMPT_BYTES / 2)
+    )
+    const encodedBytes = new TextEncoder().encode(prompt).byteLength
+    expect(MINIMUM_RELAY_HOST_ENVELOPE_BYTES).toBe(128 * 1024)
+    expect(encodedBytes).toBeLessThanOrEqual(MAXIMUM_RELAY_PROMPT_BYTES)
   })
 
   it("keeps the explanation contract when continuing or re-reviewing Explain mode", () => {
@@ -906,6 +928,15 @@ describe("CodeCommit web review boundary", () => {
       "review"
     )
     expect(Option.isNone(invalidLineTarget)).toBe(true)
+
+    const descriptionTarget = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{ ...finding, publicationTarget: "description", location: { scope: "general" } }],
+        verdict: "One issue."
+      }),
+      "review"
+    )
+    expect(Option.isNone(descriptionTarget)).toBe(true)
 
     const missingExplanation = parseRelayReviewResult(
       JSON.stringify({ findings: [], verdict: "Architecture overview." }),

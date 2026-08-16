@@ -3,6 +3,8 @@ import { Config, Effect, Option, Predicate, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
+import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "./ReviewPromptBudget.js"
+
 const MAXIMUM_SKILL_FILES = 256
 const MAXIMUM_SKILL_DIRECTORIES = MAXIMUM_SKILL_FILES + 1
 const MAXIMUM_SKILL_BYTES = 64 * 1024
@@ -56,6 +58,11 @@ export interface SkillRoot {
   readonly label: string
   readonly path: string
 }
+
+export class ReviewSkillSelectionError extends Schema.TaggedError<ReviewSkillSelectionError>()(
+  "ReviewSkillSelectionError",
+  { message: Schema.String }
+) {}
 
 const frontMatterValue = (content: string, key: string): string | undefined => {
   const frontMatter = /^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/u.exec(content)?.[1]
@@ -207,7 +214,17 @@ export const discoverReviewSkillsFromRoots = Effect.fn(
 export const selectedReviewSkillPrompt = (
   skills: ReadonlyArray<ReviewSkillDefinition>,
   selectedIds: ReadonlyArray<string>
-): string => {
+): Effect.Effect<string, ReviewSkillSelectionError> => {
   const selected = new Set(selectedIds)
-  return skills.filter((skill) => selected.has(skill.id)).map((skill) => skill.prompt).join("\n\n")
+  const prompt = skills.filter((skill) => selected.has(skill.id)).map((skill) => skill.prompt).join("\n\n")
+  const bytes = new TextEncoder().encode(prompt).byteLength
+  return bytes <= MAXIMUM_RELAY_SKILL_PROMPT_BYTES
+    ? Effect.succeed(prompt)
+    : Effect.fail(
+      new ReviewSkillSelectionError({
+        message: `Selected review skills use ${String(bytes)} UTF-8 bytes; the maximum is ${
+          String(MAXIMUM_RELAY_SKILL_PROMPT_BYTES)
+        }`
+      })
+    )
 }

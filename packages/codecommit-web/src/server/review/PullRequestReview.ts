@@ -24,10 +24,9 @@ import {
   type RelayReviewStreamEvent
 } from "../Api.js"
 import type { RelayFindingPublisherService } from "./RelayFindingPublisher.js"
+import { MAXIMUM_RELAY_PATCH_BYTES, MAXIMUM_RELAY_PROMPT_BYTES } from "./ReviewPromptBudget.js"
 
 const MAXIMUM_DIFF_FILES = 1_000
-const MAXIMUM_RELAY_PATCH_BYTES = 786_432
-const MAXIMUM_RELAY_PROMPT_BYTES = 1_048_576
 const MAXIMUM_RELAY_DIFF_INPUT_LINES = 5_000
 const MAXIMUM_RELAY_DIFF_LINE_PAIRS = 4_000_000
 const RELAY_PATCH_SEPARATOR = "\n"
@@ -654,7 +653,7 @@ export const makeRelayReviewPrompt = (
     : [
       focusByKind[kind],
       "Apply a broad PR review and a high-confidence diff review. Report only concrete, actionable defects introduced by the supplied patch and distinguish observed evidence from inference.",
-      "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"description|pr-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
+      "Return one JSON object and no prose or Markdown. Shape: {\"findings\":[{\"id\":\"F1\",\"priority\":\"P1|P2|P3|P4\",\"title\":\"short issue title\",\"summary\":\"one-line impact summary\",\"details\":\"evidence and failure mode\",\"recommendation\":\"specific fix\",\"verification\":\"evidence checked; say Static patch review only when no check ran\",\"publicationTarget\":\"pr-comment|line-comment\",\"location\":{\"scope\":\"general\"}|{\"scope\":\"file\",\"filePath\":\"path\"}|{\"scope\":\"line\",\"filePath\":\"path\",\"line\":1,\"side\":\"before|after\"}}],\"verdict\":\"short verdict\"}.",
       "Assign stable unique IDs F1, F2, and so on. Use a line location only when the exact changed line is visible; otherwise use file or general. Return an empty findings array when there are no actionable defects."
     ]
   return [
@@ -1072,12 +1071,6 @@ export const postPullRequestRelayFinding = Effect.fn("PullRequestReview.postPull
   finding: RelayReviewFinding,
   changedFiles?: PullRequestChangedFilesSource
 ) {
-  if (finding.publicationTarget === "description") {
-    return yield* reviewError(
-      "post-finding",
-      "CodeCommit has no conditional description update; choose a pull-request or line comment"
-    )
-  }
   const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevision)
   const files = yield* loadChangedFiles(client, scope, changedFiles)
   const evidence = yield* collectRelayPatchEvidence(client, scope, files)

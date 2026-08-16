@@ -207,8 +207,9 @@ the selected file in VS Code.
 
 The human must explicitly choose `p` to publish one finding to CodeCommit, `a`
 to acknowledge it locally, or `x` to reject it locally. CodeCommit does not offer
-a conditional description update, so description suggestions fail closed and
-must be copied manually; this prevents overwriting concurrent author edits.
+a conditional description update, so the TUI keeps description suggestions
+local for manual copying while web Relay requests comment targets only; this
+prevents overwriting concurrent author edits.
 File-scoped findings publish as PR comments with their file anchor in the body,
 while exact changed-side line findings use provider line coordinates. Comment targets use a hexadecimal
 SHA-256 digest as their deterministic idempotency token. The canonical identity

@@ -142,7 +142,7 @@ export const RelayReviewFinding = Schema.Struct({
   details: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_000)),
   recommendation: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
   verification: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
-  publicationTarget: Schema.Literals(["description", "pr-comment", "line-comment"]),
+  publicationTarget: Schema.Literals(["pr-comment", "line-comment"]),
   location: RelayReviewLocation
 }).check(
   Schema.makeFilter(

@@ -268,6 +268,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
+          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayReview(
@@ -276,7 +277,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               payload,
               payload.kind,
               changedFiles,
-              selectedReviewSkillPrompt(skills, payload.skillIds)
+              skillPrompt
             )
           ).pipe(
             Stream.catch((error) => Stream.make({ type: "error", message: error.message }))
@@ -293,6 +294,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
+          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayConversation(
@@ -305,7 +307,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               payload.findingId,
               payload.message,
               changedFiles,
-              selectedReviewSkillPrompt(skills, payload.skillIds)
+              skillPrompt
             )
           ).pipe(
             Stream.catch((error) => Stream.make({ type: "error", message: error.message }))

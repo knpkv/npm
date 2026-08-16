@@ -812,7 +812,13 @@ export function PRDetail() {
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
   const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
   const commentRefreshTimersRef = useRef<Set<number>>(new Set())
-  const [commentNavigation, setCommentNavigation] = useState<ReviewCommentNavigation | null>(null)
+  const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
+  const [commentNavigationState, setCommentNavigationState] = useState<{
+    readonly identity: string
+    readonly navigation: ReviewCommentNavigation
+  } | null>(null)
+  const commentNavigation =
+    commentNavigationState?.identity === commentNavigationIdentity ? commentNavigationState.navigation : null
   const reviewedRevisionRef = useRef<string | null>(null)
   const invalidateReview = useCallback(
     (refreshed: { readonly revisionId: string; readonly headCommit: string }, force: boolean) => {
@@ -1195,7 +1201,12 @@ export function PRDetail() {
           commentsRefreshGeneration={commentsRefreshGeneration}
           commentNavigation={commentNavigation}
           onFindingPosted={refreshCommentsAfterPublication}
-          onNavigateToComment={(target) => setCommentNavigation({ destination: "comment", target })}
+          onNavigateToComment={(target) =>
+            setCommentNavigationState({
+              identity: commentNavigationIdentity,
+              navigation: { destination: "comment", target }
+            })
+          }
           pullRequest={pr}
           refreshGeneration={reviewRefreshGeneration}
         />
@@ -1232,7 +1243,12 @@ export function PRDetail() {
               commentsRefreshGeneration={commentsRefreshGeneration}
               key={pr.id}
               navigation={commentNavigation}
-              onNavigateToDiff={(target) => setCommentNavigation({ destination: "diff", target })}
+              onNavigateToDiff={(target) =>
+                setCommentNavigationState({
+                  identity: commentNavigationIdentity,
+                  navigation: { destination: "diff", target }
+                })
+              }
               pr={pr}
             />
           </CollapsibleSection>
