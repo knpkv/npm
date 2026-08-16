@@ -380,20 +380,47 @@ test("shows an actionable error when Relay profiles cannot load", async ({ page 
   await expect(page.getByRole("button", { name: "Run Relay" })).toBeDisabled()
 })
 
-test("enables Relay after delayed profiles finish loading", async ({ page }) => {
-  let releaseConfig: () => void = () => undefined
-  const configGate = new Promise<void>((resolve) => {
-    releaseConfig = resolve
+test("submits the configured default profile as soon as delayed profiles load", async ({ page }) => {
+  const configGate = Promise.withResolvers<void>()
+  const runs: Array<RelayRunPayload> = []
+  await routeReviewWorkspace(page, "security", undefined, undefined, {
+    configGate: configGate.promise,
+    onRun: (payload) => runs.push(payload),
+    review: () => ({
+      defaultProfileId: "thorough",
+      profiles: [
+        { id: "quick", name: "Quick review", kind: "tests", skillIds: [] },
+        {
+          id: "thorough",
+          name: "Thorough review",
+          kind: "security",
+          skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        }
+      ]
+    })
   })
-  await routeReviewWorkspace(page, "review", undefined, undefined, { configGate })
 
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText("Loading Relay profiles")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Run Relay" })).toBeDisabled()
+  const run = page.getByRole("button", { name: "Run Relay" })
+  await expect(run).toBeDisabled()
+  await run.evaluate((button) => {
+    const observer = new MutationObserver(() => {
+      if (button.disabled === true) return
+      observer.disconnect()
+      button.click()
+    })
+    observer.observe(button, { attributeFilter: ["disabled"], attributes: true })
+  })
 
-  releaseConfig()
-  await expect(page.getByText("Loading Relay profiles")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Run Relay" })).toBeEnabled()
+  configGate.resolve()
+  await expect.poll(() => runs).toEqual([{
+    revisionId: "revision-1",
+    baseCommit: "a".repeat(40),
+    headCommit: "b".repeat(40),
+    kind: "security",
+    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+  }])
 })
 
 test("keeps a replacement Relay stream visibly active after aborting its predecessor", async ({ page }) => {
@@ -1499,12 +1526,12 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
   })
 
   await page.goto("/accounts/111111111111/prs/42")
-  await page.getByRole("button", { name: /File 2 of 2: src\/legacy\.bin/ }).click()
-  await expect(page.getByRole("button", { name: /File 2 of 2: src\/legacy\.bin, modified, binary:/ })).toBeVisible()
+  await page.getByRole("button", { name: /src\/legacy\.bin, modified, Ready/ }).click()
+  await expect(page.getByRole("button", { name: /src\/legacy\.bin, modified, binary:/ })).toBeVisible()
 
   manualRefreshRequested = true
   await page.getByRole("button", { exact: true, name: "Refresh" }).click()
-  await expect(page.getByRole("button", { name: /File 2 of 2: src\/replacement\.ts, modified, Ready/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /src\/replacement\.ts, modified, Ready/ })).toBeVisible()
   replacementContent.resolve()
   await expect(page.getByText("export const value = 2")).toBeVisible()
 })
@@ -1710,7 +1737,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
   await expect(page.getByText("Comment for PR 42").last()).toBeVisible()
   await page.getByRole("button", { name: "View in diff" }).click()
   await expect(page.getByLabel("CodeCommit comment by reviewer")).toBeVisible()
-  await page.getByRole("button", { name: /File 6 of 6: src\/pr-42-5\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/pr-42-5\.ts, modified, Ready/ }).click()
   await expect(page.getByText("export const value = \"42:5:after\"")).toBeVisible()
   await page.clock.fastForward(31_000)
 
@@ -1724,7 +1751,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
   await expect(page.getByText("export const value = \"43:0:after\"")).toBeVisible()
   expect(contentRequests.get("43:5")).toBeUndefined()
 
-  await page.getByRole("button", { name: /File 2 of 6: src\/pr-43-1\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/pr-43-1\.ts, modified, Ready/ }).click()
   await expect(page.getByText("export const value = \"43:1:after\"")).toBeVisible()
   await page.getByRole("button", { name: "Stacked" }).click()
   await page.getByRole("button", { name: "Wrap" }).click()
@@ -1943,13 +1970,13 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
     "data-rly-diff-content-state",
     "ready"
   )
-  await page.getByRole("button", { name: /File 2 of 3: src\/binary\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/binary\.ts, modified, Ready/ }).click()
   await expect(page.getByText("Binary change")).toBeVisible()
   await expect(page.locator("[data-rly-diff-file-id=\"1\"] button")).toHaveAttribute(
     "data-rly-diff-content-state",
     "binary"
   )
-  await page.getByRole("button", { name: /File 3 of 3: src\/oversized\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/oversized\.ts, modified, Ready/ }).click()
   await expect(page.getByText("File too large")).toBeVisible()
   await expect(page.locator("[data-rly-diff-file-id=\"2\"] button")).toHaveAttribute(
     "data-rly-diff-content-state",
@@ -2026,13 +2053,13 @@ test("uses a bounded fallback for newline- and byte-dense files", async ({ page 
   )
   await expect(
     page.getByRole("button", {
-      name: /File 1 of 3: src\/dense\.ts, modified, oversized: Browser diff complexity safety limit exceeded\./
+      name: /src\/dense\.ts, modified, oversized: Browser diff complexity safety limit exceeded\./
     })
   ).toBeVisible()
-  await page.getByRole("button", { name: /File 2 of 3: src\/minified\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/minified\.ts, modified, Ready/ }).click()
   await expect(page.getByText("Diff too large to render")).toBeVisible()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(0)
-  await page.getByRole("button", { name: /File 3 of 3: src\/moderate\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/moderate\.ts, modified, Ready/ }).click()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
   await expect(page.getByText("Diff too large to render")).toHaveCount(0)
 })
@@ -2096,7 +2123,7 @@ test("renders small disjoint and large append-only changes within the complexity
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText("after 0")).toBeVisible()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
-  await page.getByRole("button", { name: /File 2 of 2: src\/append\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/append\.ts, modified, Ready/ }).click()
   await expect(page.getByText("append 0")).toBeVisible()
   await expect(page.locator("[data-rly-diff-code-view]")).toHaveCount(1)
   await expect(page.getByText("Diff too large to render")).toHaveCount(0)
@@ -2164,10 +2191,10 @@ test("evicts inactive file content while retaining same-file rerenders", async (
   await expect(page.getByText("export const value = 1")).toBeVisible()
   expect(contentRequests.get(0)).toBe(1)
 
-  await page.getByRole("button", { name: /File 2 of 2: src\/two\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/two\.ts, modified, Ready/ }).click()
   await expect(page.getByText("export const value = 2")).toBeVisible()
   expect(contentRequests.get(1)).toBe(1)
   await page.clock.fastForward(11_000)
-  await page.getByRole("button", { name: /File 1 of 2: src\/one\.ts/ }).click()
+  await page.getByRole("button", { name: /src\/one\.ts, modified, Ready/ }).click()
   await expect.poll(() => contentRequests.get(0)).toBe(2)
 })

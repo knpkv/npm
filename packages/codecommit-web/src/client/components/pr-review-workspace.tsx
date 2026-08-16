@@ -611,7 +611,7 @@ const ReadyReviewWorkspace = ({
   const navigate = useNavigate()
   const [selectedFileIndex, setSelectedFileIndex] = useState(diff.files[0]?.index ?? null)
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null)
-  const [kind, setKind] = useState<RelayReviewKind>("review")
+  const [kind, setKind] = useState<RelayReviewKind | null>(null)
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
   const config = useAtomValue(configQueryAtom)
@@ -651,7 +651,11 @@ const ReadyReviewWorkspace = ({
   const reviewIsStale = completedReview !== null && completedReview.identity !== reviewIdentity
   const profiles = AsyncResult.isSuccess(config) ? config.value.review.profiles : []
   const profilesLoading = !AsyncResult.isSuccess(config) && !AsyncResult.isFailure(config)
-  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
+  const defaultProfile = AsyncResult.isSuccess(config)
+    ? (profiles.find((profile) => profile.id === config.value.review.defaultProfileId) ?? profiles[0])
+    : undefined
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? defaultProfile
+  const selectedKind = kind ?? selectedProfile?.kind ?? "review"
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
   const contentStates =
@@ -666,7 +670,6 @@ const ReadyReviewWorkspace = ({
       config.value.review.profiles[0]
     if (profile !== undefined) {
       setSelectedProfileId(profile.id)
-      setKind(profile.kind)
     }
   }, [config, selectedProfileId])
 
@@ -811,7 +814,7 @@ const ReadyReviewWorkspace = ({
         revisionId: diff.revisionId,
         baseCommit: diff.baseCommit,
         headCommit: diff.headCommit,
-        kind,
+        kind: selectedKind,
         skillIds: selectedProfile.skillIds
       }
     )
@@ -819,7 +822,16 @@ const ReadyReviewWorkspace = ({
       setTurns([])
       setMessage("")
     }
-  }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, kind, pullRequest.id, runStream, selectedProfile])
+  }, [
+    accountId,
+    diff.baseCommit,
+    diff.headCommit,
+    diff.revisionId,
+    pullRequest.id,
+    runStream,
+    selectedKind,
+    selectedProfile
+  ])
 
   const continueReview = useCallback(
     async (findingId: string, nextMessage: string): Promise<void> => {
@@ -1086,7 +1098,7 @@ const ReadyReviewWorkspace = ({
                 const Icon = focus.icon
                 return (
                   <button
-                    aria-pressed={kind === focus.kind}
+                    aria-pressed={selectedKind === focus.kind}
                     disabled={isReviewing}
                     key={focus.kind}
                     onClick={() => setKind(focus.kind)}

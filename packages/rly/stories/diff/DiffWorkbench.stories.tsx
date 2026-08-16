@@ -271,7 +271,7 @@ export const BirdEyeReview: Story = {
     await expect(canvasElement.querySelectorAll("[data-rly-diff-finding-source]")).toHaveLength(3)
     await expect(canvasElement.querySelector("[data-rly-diff-finding-anchor='stale']")).not.toBeNull()
     await expect(canvas.getByRole("group", { name: "Renderable source changes" })).toBeVisible()
-    await userEvent.click(canvas.getByRole("button", { name: /File 2 of 6/ }))
+    await userEvent.click(canvas.getByRole("button", { name: "src/payments/idempotency.ts, added, Ready" }))
     await expect(workbench).toHaveAttribute("data-rly-diff-scope", "selected-file")
     await expect(workbench).toHaveTextContent("src/payments/idempotency.ts")
     await userEvent.click(canvas.getByRole("button", { name: "Show all files" }))
