@@ -794,8 +794,10 @@ const ReadyReviewWorkspace = ({
         }
         return { completed: false }
       } finally {
-        if (abortRef.current === controller) abortRef.current = null
-        setIsReviewing(false)
+        if (abortRef.current === controller) {
+          abortRef.current = null
+          setIsReviewing(false)
+        }
       }
     },
     [reviewIdentity]

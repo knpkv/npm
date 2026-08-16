@@ -104,7 +104,7 @@ const RawPullRequestPage = Schema.Struct({
 
 const RawBlob = Schema.Struct({
   blobId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
-  path: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  path: Schema.String.check(Schema.isNonEmpty()),
   mode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
 

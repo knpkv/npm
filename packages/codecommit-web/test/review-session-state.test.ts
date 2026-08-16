@@ -118,14 +118,36 @@ describe("Relay finding dispositions", () => {
   it("retains the newest continuation turn within the API limit", () => {
     const retained: ReadonlyArray<RelayReviewConversationTurn> = Array.from(
       { length: MAXIMUM_RELAY_REVIEW_TURNS },
-      (_, index) => ({ findingId: "F1", role: "assistant", message: `turn-${String(index)}` })
+      (_, index) => ({
+        findingId: "F1",
+        role: index % 2 === 0 ? "user" : "assistant",
+        message: `turn-${String(index)}`
+      })
     )
     const next = appendReviewTurn(retained, { findingId: "F1", role: "user", message: "newest" })
-    expect(next).toHaveLength(MAXIMUM_RELAY_REVIEW_TURNS)
-    expect(next[0]?.message).toBe("turn-1")
+    expect(next).toHaveLength(MAXIMUM_RELAY_REVIEW_TURNS - 1)
+    expect(next[0]?.message).toBe("turn-2")
     expect(next.at(-1)?.message).toBe("newest")
     expect(appendReviewTurn([], { findingId: "F1", role: "user", message: "first" }))
       .toEqual([{ findingId: "F1", role: "user", message: "first" }])
+  })
+
+  it("trims completed conversation exchanges as atomic user and assistant pairs", () => {
+    const turns: ReadonlyArray<RelayReviewConversationTurn> = [
+      { findingId: "F1", role: "user", message: `old-question:${"x".repeat(7_800)}` },
+      { findingId: "F1", role: "assistant", message: "old-answer" },
+      { findingId: "F1", role: "user", message: `kept-question:${"x".repeat(7_800)}` },
+      { findingId: "F1", role: "assistant", message: `kept-answer:${"x".repeat(3_800)}` },
+      { findingId: "F1", role: "user", message: `newest-question:${"x".repeat(7_800)}` },
+      { findingId: "F1", role: "assistant", message: `newest-answer:${"x".repeat(7_800)}` }
+    ]
+    const next = appendReviewTurn(turns.slice(0, -1), turns.at(-1)!)
+
+    expect(new TextEncoder().encode(JSON.stringify(next)).byteLength).toBeLessThanOrEqual(
+      MAXIMUM_RELAY_REVIEW_TURNS_BYTES
+    )
+    expect(next.map(({ role }) => role)).toEqual(["user", "assistant", "user", "assistant"])
+    expect(next[0]?.message.startsWith("kept-question:")).toBe(true)
   })
 
   it("retains the newest turns within the aggregate UTF-8 budget", () => {

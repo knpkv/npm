@@ -2,11 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Exit, Fiber, Option, Schema, Semaphore, Stream } from "effect"
-import {
-  RelayReviewContinueStreamRequest,
-  type RelayReviewResult,
-  RelayReviewStreamRequest
-} from "../src/server/Api.js"
+import { RelayReviewContinueStreamRequest, RelayReviewResult, RelayReviewStreamRequest } from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
@@ -1227,5 +1223,68 @@ describe("CodeCommit web review boundary", () => {
         }, evidence).pipe(Effect.flip)
         expect(failure.operation).toBe("relay-review-anchor")
       }
+    }))
+
+  it.effect("preserves edge whitespace in exact repository paths", () =>
+    Effect.gen(function*() {
+      const exactPath = " leading.ts "
+      const exactFile = new ReadClient.CodeCommitChangedFile({
+        before: null,
+        after: new ReadClient.CodeCommitBlobMetadata({
+          blobId: ReadClient.CodeCommitBlobId.make("c".repeat(40)),
+          mode: "100644",
+          path: exactPath
+        }),
+        status: "added"
+      })
+      const evidence = yield* collectRelayPatchEvidence(
+        makeReadClient(),
+        {
+          account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
+          pullRequest,
+          revision
+        },
+        [exactFile]
+      )
+      const decoded = Schema.decodeUnknownSync(RelayReviewResult)({
+        findings: [
+          {
+            id: "F1",
+            priority: "P2",
+            title: "Exact file path",
+            summary: "The finding keeps the provider path.",
+            details: "Edge whitespace is part of the repository path.",
+            recommendation: "Compare exact provider paths.",
+            verification: "Validate against exact patch evidence.",
+            publicationTarget: "pr-comment",
+            location: { scope: "file", filePath: exactPath }
+          },
+          {
+            id: "F2",
+            priority: "P2",
+            title: "Exact line path",
+            summary: "The line finding keeps the provider path.",
+            details: "Trimming would detach the line from its evidence.",
+            recommendation: "Keep the path byte-for-byte exact.",
+            verification: "Validate line one against the exact patch.",
+            publicationTarget: "line-comment",
+            location: { scope: "line", filePath: exactPath, line: 1, side: "after" }
+          }
+        ],
+        verdict: "Two exact-path findings."
+      })
+
+      yield* validateRelayReviewAnchors(decoded, evidence)
+      expect(decoded.findings.map(({ location }) => location.scope === "general" ? null : location.filePath))
+        .toEqual([exactPath, exactPath])
+      expect(Exit.isFailure(
+        Schema.decodeUnknownExit(RelayReviewResult)({
+          findings: [{
+            ...decoded.findings[0],
+            location: { scope: "file", filePath: "" }
+          }],
+          verdict: "Invalid empty path."
+        })
+      )).toBe(true)
     }))
 })

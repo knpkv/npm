@@ -65,19 +65,45 @@ export const appendReviewTurn = (
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   turn: RelayReviewConversationTurn
 ): ReadonlyArray<RelayReviewConversationTurn> => {
-  const candidates = [...turns, turn].slice(-MAXIMUM_RELAY_REVIEW_TURNS)
-  const retained: Array<RelayReviewConversationTurn> = []
+  const candidates = [...turns, turn]
+  const retained: Array<ReadonlyArray<RelayReviewConversationTurn>> = []
   const encoder = new TextEncoder()
   let bytes = 2
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+  let count = 0
+  for (let index = candidates.length - 1; index >= 0;) {
     const candidate = candidates[index]
-    if (candidate === undefined) continue
-    const candidateBytes = encoder.encode(JSON.stringify(candidate)).byteLength + (retained.length === 0 ? 0 : 1)
-    if (bytes + candidateBytes > MAXIMUM_RELAY_REVIEW_TURNS_BYTES) break
-    retained.push(candidate)
-    bytes += candidateBytes
+    if (candidate === undefined) {
+      index -= 1
+      continue
+    }
+    let exchange: ReadonlyArray<RelayReviewConversationTurn>
+    if (candidate.role === "assistant") {
+      const user = candidates[index - 1]
+      if (user?.role !== "user" || user.findingId !== candidate.findingId) {
+        index -= 1
+        continue
+      }
+      exchange = [user, candidate]
+      index -= 2
+    } else {
+      exchange = [candidate]
+      index -= 1
+    }
+    const exchangeBytes = exchange.reduce(
+      (total, item, exchangeIndex) =>
+        total + encoder.encode(JSON.stringify(item)).byteLength + (count === 0 && exchangeIndex === 0 ? 0 : 1),
+      0
+    )
+    if (
+      count + exchange.length > MAXIMUM_RELAY_REVIEW_TURNS || bytes + exchangeBytes > MAXIMUM_RELAY_REVIEW_TURNS_BYTES
+    ) {
+      break
+    }
+    retained.push(exchange)
+    count += exchange.length
+    bytes += exchangeBytes
   }
-  return retained.reverse()
+  return retained.reverse().flat()
 }
 
 /** Preserve human decisions only while the agent finding remains byte-for-byte equivalent. */

@@ -96,6 +96,7 @@ interface ReviewWorkspaceOptions {
       readonly skillIds: ReadonlyArray<string>
     }>
   }
+  readonly runGate?: (runCount: number) => Promise<void>
 }
 
 const routeReviewWorkspace = async (
@@ -106,6 +107,7 @@ const routeReviewWorkspace = async (
   options?: ReviewWorkspaceOptions
 ) => {
   let findingPostCount = 0
+  let reviewRunCount = 0
   await page.route("**/api/events/", async (route) => {
     const activePullRequest = options?.pullRequest?.() ?? pullRequest
     const appState = JSON.stringify({
@@ -258,6 +260,8 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+    reviewRunCount += 1
+    await options?.runGate?.(reviewRunCount)
     await reviewGate
     const payload = decodeRelayRunPayload(route.request().postDataJSON())
     if (options?.onRun === undefined) {
@@ -390,6 +394,40 @@ test("enables Relay after delayed profiles finish loading", async ({ page }) => 
   releaseConfig()
   await expect(page.getByText("Loading Relay profiles")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Run Relay" })).toBeEnabled()
+})
+
+test("keeps a replacement Relay stream visibly active after aborting its predecessor", async ({ page }) => {
+  const firstRun = Promise.withResolvers<void>()
+  const replacementRun = Promise.withResolvers<void>()
+  let runCount = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    runGate: (count) => {
+      runCount = count
+      return count === 1 ? firstRun.promise : replacementRun.promise
+    }
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  const run = page.getByRole("button", { name: /^(Run Relay|Run again|Relay reviewing…)/ })
+  await run.click()
+  await expect.poll(() => runCount).toBe(1)
+  await run.evaluate((button) => {
+    const propsKey = Object.keys(button).find((key) => key.startsWith("__reactProps$"))
+    if (propsKey === undefined) throw new Error("mounted button has no React props")
+    const descriptor = Object.getOwnPropertyDescriptor(button, propsKey)
+    if (descriptor === undefined) throw new Error("mounted button has invalid React props")
+    descriptor.value.onClick()
+  })
+  await expect.poll(() => runCount).toBe(2)
+  await expect(run).toBeDisabled()
+
+  firstRun.resolve()
+  await expect(run).toBeDisabled()
+  expect(runCount).toBe(2)
+
+  replacementRun.resolve()
+  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(run).toBeEnabled()
 })
 
 test("renders a substantive Relay explanation", async ({ page }) => {
@@ -866,11 +904,14 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   const srcDirectory = page.getByRole("button", { name: "src, directory, 1 changed file" })
   await expect(srcDirectory).toHaveAttribute("aria-expanded", "true")
   await srcDirectory.click()
-  await expect(page.getByRole("button", { name: /File 1 of 1/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "src/retry.ts, renamed, Ready" })).toHaveCount(0)
   await srcDirectory.click()
-  await expect(page.getByRole("button", { name: /File 1 of 1/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "src/retry.ts, renamed, Ready" })).toBeVisible()
   const directoryBox = await srcDirectory.locator("code").boundingBox()
-  const fileBox = await page.getByRole("button", { name: /File 1 of 1/ }).locator("code").boundingBox()
+  const fileBox = await page
+    .getByRole("button", { name: "src/retry.ts, renamed, Ready" })
+    .locator("code")
+    .boundingBox()
   expect(directoryBox).not.toBeNull()
   expect(fileBox).not.toBeNull()
   expect(fileBox!.x).toBeGreaterThan(directoryBox!.x + 8)

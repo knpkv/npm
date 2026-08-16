@@ -142,11 +142,11 @@ const RelayReviewLocation = Schema.Union([
   Schema.Struct({ scope: Schema.Literal("general") }),
   Schema.Struct({
     scope: Schema.Literal("file"),
-    filePath: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024))
+    filePath: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))
   }),
   Schema.Struct({
     scope: Schema.Literal("line"),
-    filePath: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+    filePath: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
     line: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
     side: Schema.Literals(["before", "after"])
   })
