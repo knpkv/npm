@@ -58,10 +58,11 @@ const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
-  readonly commentsGate?: (findingPosted: boolean) => Promise<void>
+  readonly commentsGate?: (findingPostCount: number) => Promise<void>
   readonly configGate?: Promise<void>
   readonly configStatus?: number
   readonly deleteOriginalCommentAfterPost?: boolean
+  readonly emptyCommentsInitially?: boolean
   readonly onRun?: (payload: RelayRunPayload) => void
   readonly review?: () => {
     readonly defaultProfileId: string
@@ -81,7 +82,7 @@ const routeReviewWorkspace = async (
   onContinue?: (payload: RelayContinuePayload) => void,
   options?: ReviewWorkspaceOptions
 ) => {
-  let findingPosted = false
+  let findingPostCount = 0
   await page.route("**/api/events/", async (route) => {
     const appState = JSON.stringify({
       accounts: [{ ...pullRequest.account, enabled: true }],
@@ -125,7 +126,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/comments*", async (route) => {
-    await options?.commentsGate?.(findingPosted)
+    await options?.commentsGate?.(findingPostCount)
     await route.fulfill({
       body: JSON.stringify([{
         filePath: "src/retry.ts",
@@ -133,21 +134,23 @@ const routeReviewWorkspace = async (
         afterCommitId: "b".repeat(40),
         relativeFileVersion: "AFTER",
         comments: [
-          ...(!findingPosted || options?.deleteOriginalCommentAfterPost !== true ?
-            [{
-              root: {
-                id: "comment-1",
-                content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
-                author: "reviewer",
-                creationDate: "2026-08-12T10:00:00.000Z",
-                deleted: false,
-                filePath: "src/retry.ts",
-                lineNumber: 1
-              },
-              replies: []
-            }] :
-            []),
-          {
+          ...(options?.emptyCommentsInitially === true ?
+            [] :
+            (!findingPostCount || options?.deleteOriginalCommentAfterPost !== true ?
+              [{
+                root: {
+                  id: "comment-1",
+                  content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
+                  author: "reviewer",
+                  creationDate: "2026-08-12T10:00:00.000Z",
+                  deleted: false,
+                  filePath: "src/retry.ts",
+                  lineNumber: 1
+                },
+                replies: []
+              }] :
+              [])),
+          ...(options?.emptyCommentsInitially === true ? [] : [{
             root: {
               id: "comment-deleted",
               content: "Deleted provider comment",
@@ -158,21 +161,19 @@ const routeReviewWorkspace = async (
               lineNumber: 1
             },
             replies: []
-          },
-          ...(findingPosted
-            ? [{
-              root: {
-                id: "relay-comment-1",
-                content: "P2: Retry amplification",
-                author: "relay",
-                creationDate: "2026-08-12T10:01:00.000Z",
-                deleted: false,
-                filePath: "src/retry.ts",
-                lineNumber: 1
-              },
-              replies: []
-            }]
-            : [])
+          }]),
+          ...Array.from({ length: findingPostCount }, (_, index) => ({
+            root: {
+              id: `relay-comment-${String(index + 1)}`,
+              content: index === 0 ? "P2: Retry amplification" : "P3: Before-path evidence",
+              author: "relay",
+              creationDate: "2026-08-12T10:01:00.000Z",
+              deleted: false,
+              filePath: "src/retry.ts",
+              lineNumber: 1
+            },
+            replies: []
+          }))
         ]
       }]),
       contentType: "application/json",
@@ -283,7 +284,7 @@ const routeReviewWorkspace = async (
   })
   await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
     const finding = route.request().postDataJSON().finding
-    findingPosted = true
+    findingPostCount += 1
     await route.fulfill({
       body: JSON.stringify({ findingId: finding.id, operationId: "comment:123", summary: "posted" }),
       contentType: "application/json",
@@ -879,6 +880,45 @@ test("settles an optimistic comment count when the provider total is unchanged",
   await page.getByRole("button", { name: "Accept · post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
+
+  settlement.resolve()
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+})
+
+test("preserves unobserved optimistic comment increments across partial provider updates", async ({ page }) => {
+  const settlement = Promise.withResolvers<void>()
+  const partialObserved = Promise.withResolvers<void>()
+  const settledObserved = Promise.withResolvers<void>()
+  let authoritativeCount = 0
+  let partialReads = 0
+  let settledReads = 0
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    commentCount: () => {
+      if (authoritativeCount === 1 && ++partialReads >= 2) partialObserved.resolve()
+      if (authoritativeCount === 2 && ++settledReads >= 2) settledObserved.resolve()
+      return authoritativeCount
+    },
+    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve(),
+    emptyCommentsInitially: true
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
+  await page.getByRole("button", { name: /Before-path evidence/ }).click()
+  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  authoritativeCount = 1
+  await partialObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
+
+  authoritativeCount = 2
+  await settledObserved.promise
+  await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
   settlement.resolve()
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()

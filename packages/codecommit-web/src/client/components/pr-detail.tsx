@@ -847,9 +847,7 @@ export function PRDetail() {
     if (authoritativeCommentCount === undefined || commentCountState?.identity !== commentNavigationIdentity) {
       return authoritativeCommentCount
     }
-    return authoritativeCommentCount === commentCountState.baseCount
-      ? commentCountState.count
-      : authoritativeCommentCount
+    return Math.max(authoritativeCommentCount, commentCountState.count)
   })()
   const [commentNavigationState, setCommentNavigationState] = useState<{
     readonly identity: string
@@ -892,16 +890,14 @@ export function PRDetail() {
     setCommentCountState((current) => {
       if (current?.identity !== commentNavigationIdentity || authoritativeCommentCount === current.baseCount)
         return current
-      return null
+      return authoritativeCommentCount < current.count ? { ...current, baseCount: authoritativeCommentCount } : null
     })
   }, [authoritativeCommentCount, commentNavigationIdentity])
   const reconcileCommentCount = useCallback(
     (count: number) => {
       const baseCount = pr?.commentCount ?? 0
       setCommentCountState((current) =>
-        current?.identity === commentNavigationIdentity && current.baseCount === baseCount
-          ? { ...current, count }
-          : current
+        current?.identity === commentNavigationIdentity ? { ...current, baseCount, count } : current
       )
     },
     [commentNavigationIdentity, pr?.commentCount]
@@ -909,8 +905,8 @@ export function PRDetail() {
   const refreshCommentsAfterPublication = useCallback(() => {
     setCommentCountState((current) => {
       const baseCount = pr?.commentCount ?? 0
-      return current?.identity === commentNavigationIdentity && current.baseCount === baseCount
-        ? { ...current, count: current.count + 1 }
+      return current?.identity === commentNavigationIdentity
+        ? { ...current, baseCount, count: Math.max(current.count, baseCount) + 1 }
         : {
             baseCount,
             count: baseCount + 1,
