@@ -51,6 +51,8 @@ type RelayRunPayload = typeof RelayRunPayload.Type
 const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
 interface ReviewWorkspaceOptions {
+  readonly configGate?: Promise<void>
+  readonly configStatus?: number
   readonly onRun?: (payload: RelayRunPayload) => void
   readonly review?: () => {
     readonly defaultProfileId: string
@@ -88,6 +90,11 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/config", async (route) => {
+    await options?.configGate
+    if (options?.configStatus !== undefined && options.configStatus !== 200) {
+      await route.fulfill({ body: "config unavailable", contentType: "text/plain", status: options.configStatus })
+      return
+    }
     await route.fulfill({
       body: JSON.stringify({
         accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
@@ -295,6 +302,33 @@ const routeReviewWorkspace = async (
     })
   })
 }
+
+test("shows an actionable error when Relay profiles cannot load", async ({ page }) => {
+  await routeReviewWorkspace(page, "review", undefined, undefined, { configStatus: 500 })
+
+  await page.goto("/accounts/111111111111/prs/42")
+
+  await expect(page.getByRole("alert").filter({ hasText: "Relay profiles unavailable" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible()
+  await expect(page.getByText("Loading Relay profiles")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Run Relay" })).toBeDisabled()
+})
+
+test("enables Relay after delayed profiles finish loading", async ({ page }) => {
+  let releaseConfig: () => void = () => undefined
+  const configGate = new Promise<void>((resolve) => {
+    releaseConfig = resolve
+  })
+  await routeReviewWorkspace(page, "review", undefined, undefined, { configGate })
+
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect(page.getByText("Loading Relay profiles")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Run Relay" })).toBeDisabled()
+
+  releaseConfig()
+  await expect(page.getByText("Loading Relay profiles")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Run Relay" })).toBeEnabled()
+})
 
 test("renders a substantive Relay explanation", async ({ page }) => {
   await routeReviewWorkspace(page, "explain")

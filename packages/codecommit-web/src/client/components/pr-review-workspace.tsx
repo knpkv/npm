@@ -640,6 +640,7 @@ const ReadyReviewWorkspace = ({
   const review = completedReview?.value ?? null
   const reviewIsStale = completedReview !== null && completedReview.identity !== reviewIdentity
   const profiles = AsyncResult.isSuccess(config) ? config.value.review.profiles : []
+  const profilesLoading = !AsyncResult.isSuccess(config) && !AsyncResult.isFailure(config)
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
@@ -932,7 +933,7 @@ const ReadyReviewWorkspace = ({
           <label className={styles.profileChoice}>
             <span>Profile</span>
             <select
-              disabled={isReviewing}
+              disabled={isReviewing || !AsyncResult.isSuccess(config)}
               onChange={(event) => {
                 const profile = profiles.find(({ id }) => id === event.target.value)
                 setSelectedProfileId(event.target.value)
@@ -940,6 +941,9 @@ const ReadyReviewWorkspace = ({
               }}
               value={selectedProfile?.id ?? ""}
             >
+              {AsyncResult.isSuccess(config) ? null : (
+                <option value="">{AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}</option>
+              )}
               {profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.name}
@@ -976,6 +980,31 @@ const ReadyReviewWorkspace = ({
           </Button>
         </div>
       </header>
+
+      {AsyncResult.isFailure(config) ? (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            action={
+              <Button onClick={() => window.location.reload()} size="compact" variant="secondary">
+                Reload
+              </Button>
+            }
+            announce="assertive"
+            description={failureMessage(config.cause, "Check the server connection, then reload this page to retry.")}
+            title="Relay profiles unavailable"
+            tone="critical"
+          />
+        </div>
+      ) : profilesLoading ? (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            announce="polite"
+            description="Loading the configured review methodology before Relay can run."
+            title="Loading Relay profiles"
+            tone="progress"
+          />
+        </div>
+      ) : null}
 
       {visibleProgress.length === 0 ? null : (
         <ol aria-label="Relay progress" aria-live="polite" className={styles.progressRail}>
