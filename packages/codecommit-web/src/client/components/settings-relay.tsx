@@ -3,6 +3,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { ReviewConfig as ReviewSettings, ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
 import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { Predicate } from "effect"
+import type * as Atom from "effect/unstable/reactivity/Atom"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { CheckIcon } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
@@ -87,6 +88,21 @@ export function SettingsRelay() {
   const config = useAtomValue(configQueryAtom)
   const skills = useAtomValue(reviewSkillsQueryAtom)
   const saveConfig = useAtomSet(configSaveAtom, { mode: "promise" })
+  return <SettingsRelayView config={config} saveConfig={saveConfig} skills={skills} />
+}
+
+type ConfigState = Atom.Type<typeof configQueryAtom>
+type ReviewSkillsState = Atom.Type<typeof reviewSkillsQueryAtom>
+type ConfigSaveInput = typeof configSaveAtom extends Atom.Writable<infer _Result, infer Input> ? Input : never
+
+export interface SettingsRelayViewProps {
+  readonly config: ConfigState
+  readonly saveConfig: (input: ConfigSaveInput) => Promise<string>
+  readonly skills: ReviewSkillsState
+}
+
+/** Relay profile editor with explicit query states for component-level verification. */
+export function SettingsRelayView({ config, saveConfig, skills }: SettingsRelayViewProps) {
   type ConfigValue = Extract<typeof config, { readonly _tag: "Success" }>["value"]
   const configRef = useRef<ConfigValue | null>(null)
   const [review, setReview] = useState<ReviewSettings | null>(null)
@@ -154,17 +170,19 @@ export function SettingsRelay() {
           <h2 className="text-lg font-semibold">Relay review profiles</h2>
           <p className="text-sm text-muted-foreground">Default focus and prompt-only skills for Diff &amp; Relay</p>
         </div>
-        <Button disabled={!dirty || saving} onClick={() => void save()} size="sm">
-          {saving ? (
-            "Saving…"
-          ) : savedNow ? (
-            <>
-              <CheckIcon className="size-3.5" /> Saved
-            </>
-          ) : (
-            "Save"
-          )}
-        </Button>
+        {AsyncResult.isSuccess(config) && review !== null ? (
+          <Button disabled={!dirty || saving} onClick={() => void save()} size="sm">
+            {saving ? (
+              "Saving…"
+            ) : savedNow ? (
+              <>
+                <CheckIcon className="size-3.5" /> Saved
+              </>
+            ) : (
+              "Save"
+            )}
+          </Button>
+        ) : null}
       </div>
       {saveError === null ? null : (
         <p className="text-sm text-destructive" role="alert">
@@ -172,7 +190,15 @@ export function SettingsRelay() {
         </p>
       )}
       <Separator />
-      {!AsyncResult.isSuccess(config) || review === null ? (
+      {AsyncResult.isFailure(config) ? (
+        <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+          <p className="text-sm font-medium text-destructive">Could not load Relay profiles</p>
+          <p className="text-xs text-muted-foreground">Check the server connection, then reload this page to retry.</p>
+          <Button onClick={() => window.location.reload()} size="sm" variant="outline">
+            Reload
+          </Button>
+        </div>
+      ) : !AsyncResult.isSuccess(config) || review === null ? (
         <p className="text-sm text-muted-foreground">Loading profiles…</p>
       ) : (
         <div className="space-y-5">
@@ -193,6 +219,14 @@ export function SettingsRelay() {
               ))}
             </select>
           </label>
+          {AsyncResult.isFailure(skills) ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive"
+              role="alert"
+            >
+              Environment skills could not be loaded. Reload this page to retry.
+            </p>
+          ) : null}
           {review.profiles.map((profile) => (
             <section className="space-y-3 rounded-lg border p-4" key={profile.id}>
               <div>
@@ -207,6 +241,8 @@ export function SettingsRelay() {
                   profile={profile}
                   skills={skills.value}
                 />
+              ) : AsyncResult.isFailure(skills) ? (
+                <p className="text-xs text-muted-foreground">Skill selection unavailable.</p>
               ) : (
                 <p className="text-xs text-muted-foreground">Loading environment skills…</p>
               )}
