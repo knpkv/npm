@@ -1,5 +1,11 @@
 # @knpkv/ai-claude
 
+## 0.2.1
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-rc.109, pin the vendored Effect reference to that exact upstream release, guard source/package alignment, and bound Control Center test concurrency for reliable CI execution.
+
 ## 0.2.0
 
 ### Minor Changes

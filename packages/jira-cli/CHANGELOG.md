@@ -1,5 +1,15 @@
 # @knpkv/jira-cli
 
+## 1.3.1
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-rc.109, pin the vendored Effect reference to that exact upstream release, guard source/package alignment, and bound Control Center test concurrency for reliable CI execution.
+- Updated dependencies [[`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2)]:
+  - @knpkv/agent-skills@0.3.1
+  - @knpkv/atlassian-common@1.4.1
+  - @knpkv/jira-api-client@1.1.1
+
 ## 1.3.0
 
 ### Minor Changes
