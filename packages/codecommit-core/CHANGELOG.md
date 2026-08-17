@@ -1,5 +1,78 @@
 # @knpkv/codecommit-core
 
+## 0.12.0
+
+### Minor Changes
+
+- [#367](https://github.com/knpkv/npm/pull/367) [`b0ceb6e`](https://github.com/knpkv/npm/commit/b0ceb6ec9957c1be3de8700168e7767a3eb68203) Thanks [@konopkov](https://github.com/konopkov)! - Add an exact-revision CodeCommit diff workbench backed by the diffs.com renderer, including bounded text rendering and file-mode changes, plus permission-gated ephemeral prompt-only Relay reviews with full, security, tests, and explanation focuses.
+
+- [#353](https://github.com/knpkv/npm/pull/353) [`d73b113`](https://github.com/knpkv/npm/commit/d73b113d6d49a9ffa9e553312c98d00e793af325) Thanks [@konopkov](https://github.com/konopkov)! - Add exact-head CodeCommit pull-request merging from the TUI with selectable squash, fast-forward, and three-way strategies.
+
+- [#359](https://github.com/knpkv/npm/pull/359) [`756ba26`](https://github.com/knpkv/npm/commit/756ba26b10c663b6768016c92ef7eab3da4f99d4) Thanks [@konopkov](https://github.com/konopkov)! - Add an "Open in CodeCommit" action to the TUI Changes tab, next to the Neovim
+  and VS Code shortcuts. Uppercase `C` opens the selected file in the AWS
+  CodeCommit console.
+
+  The link always names an exact commit, so the opened page cannot drift to a
+  newer head: a surviving file resolves to the reviewed source commit, and a
+  deleted file resolves to the destination commit, the only revision in the review
+  where the console can still render it. Unlike the editor shortcuts the action
+  reads the provider directly, so it needs no local checkout. The console hostname
+  comes from the region's AWS partition, so China and GovCloud accounts reach their
+  own console domain, and an isolated-partition region is reported as unsupported
+  instead of being sent to a commercial URL that cannot resolve.
+
+  The link is copied to the clipboard when a clipboard tool exists and is then
+  handed to Granted's `assume`, which
+  is what turns the profile into a federated console session; the TUI yields the
+  terminal for the run so an expired SSO prompt stays visible and answerable. A
+  missing `assume` executable is reported as its own case — a dialog naming the
+  install and showing the link — rather than as one more failed
+  attempt, because there is nothing to retry until it is installed and an
+  unauthenticated console link only reaches a sign-in page.
+
+  Ctrl-C during a terminal handover now ends the child instead of the session. A
+  suspended renderer leaves the tty in cooked mode with `ISIG` enabled, so the
+  keystroke raised `SIGINT` on this process, where `runMain` interrupted the main
+  fiber and exited — discarding findings, dispositions and conversations, which are
+  component state. The session's interrupt teardown is now bracketed across
+  suspend/resume and `assume` runs in the terminal's foreground process group, so the
+  signal reaches the child. `SIGTERM` is deliberately left unbracketed so another
+  shell can still end the process, and Neovim is unaffected because raw mode makes
+  Ctrl-C a keypress rather than a signal.
+
+  `ChildEnv.profileScopedEnv` now takes the environment the child will inherit and
+  tombstones the spellings actually present, not only the canonical names. Windows
+  environment names are case-insensitive, so an ambient `Aws_Access_Key_Id` used to
+  survive beside the `AWS_ACCESS_KEY_ID` tombstone and outrank the requested profile.
+  The spawn stays `extendEnv: true`, so `PATH` and every other inherited variable are
+  untouched. `ChildEnv.HostEnvironment` is the service that supplies the inherited
+  environment at a runtime call site.
+
+  `@knpkv/codecommit-web` takes a minor bump rather than a patch: it re-exports
+  `makeServer`, `makeCodeCommitServer` and `CodeCommitServerLive`, and their emitted
+  declarations now carry the `ChildEnv.HostEnvironment` requirement, so a downstream
+  layer composition that satisfied them before will no longer compile without it.
+
+  All five profile-scoped spawns now supply it — both `assume` paths, the sandbox
+  clone, and the exact-head Git commands — with the layer bound at each executable
+  boundary (the CLI, the TUI program, and the web server), since that is the only place
+  permitted to read the host process.
+
+- [#357](https://github.com/knpkv/npm/pull/357) [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79) Thanks [@konopkov](https://github.com/konopkov)! - Secure local control planes and CI credential boundaries. CodeCommit web now
+  uses a process-scoped owner session with CSRF protection and loopback-only
+  listeners; review sandboxes use authenticated loopback code-server instances,
+  digest-pinned images, constrained mounts, non-root execution, and dropped
+  capabilities. OAuth callback listeners validate state before accepting terminal
+  outcomes and bind explicitly to loopback. GitHub workflows pin external actions
+  to immutable commits and keep long-lived Atlassian credentials out of pull
+  request execution.
+
+- [#370](https://github.com/knpkv/npm/pull/370) [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc) Thanks [@konopkov](https://github.com/konopkov)! - Enforce the complete anti-slop rule set with zero accepted diagnostics and update affected APIs and implementations to satisfy the required contracts.
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Update Effect and effect-qb, migrate schema-tagged errors to the current Effect API, and adopt the dialect-scoped SQLite function and type APIs introduced by effect-qb 0.22.
+
 ## 0.11.0
 
 ### Minor Changes
