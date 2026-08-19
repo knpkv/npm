@@ -85,6 +85,7 @@ describe("model", () => {
             HOME: "/home/reviewer",
             PATH: "/reviewed/bin",
             SENTRY_AUTH_TOKEN: "vendor-canary",
+            USER: "reviewer",
             USERPROFILE: "C:\\Users\\reviewer",
             XDG_CONFIG_HOME: "/home/reviewer/.config"
           }
@@ -105,6 +106,9 @@ describe("model", () => {
           CLAUDE_CONFIG_DIR: "/home/reviewer/.config/claude",
           HOME: "/home/reviewer",
           PATH: "/reviewed/bin",
+          // Forwarded on purpose: macOS Keychain items are scoped to the account name, so without
+          // USER the CLI reports "Not logged in" and every call fails.
+          USER: "reviewer",
           USERPROFILE: "C:\\Users\\reviewer",
           XDG_CONFIG_HOME: "/home/reviewer/.config"
         })
@@ -159,6 +163,40 @@ describe("model", () => {
         })
         expect(schema).not.toHaveProperty("dialect")
         expect(schema).not.toHaveProperty("schema")
+        // The CLI only has draft-07 registered, so declaring a dialect it cannot resolve makes it
+        // reject --json-schema and every structured-output call fails. Leave it to the CLI.
+        expect(schema).not.toHaveProperty("$schema")
+      }
+    }))
+
+  // Given file tools the CLI explores before answering, which costs turns and wall clock on a prompt
+  // that is already self-contained: 42s over 6 turns with Read,Glob,Grep against 15s over 2 turns
+  // with none. `access: "none"` is how a caller says the prompt needs nothing from disk.
+  it.effect("withholds every tool for access none", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Classify this" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", access: "none" })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: success("ok") }))
+      )
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
+        expect(command.args).toContain("plan")
+      }
+    }))
+
+  it.effect("grants read tools by default", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Look around" }).pipe(
+        Effect.provide(model({ cwd: "/workspace" })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: success("ok") }))
+      )
+      const command = calls[0]
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args[command.args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep")
       }
     }))
 
