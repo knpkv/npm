@@ -44,7 +44,8 @@ jcf config reset           # Reset to defaults
 
 ### 4. Session Roots (optional)
 
-Only needed for `jcf sync reconcile --agent claude`. Nothing is read until you opt a directory in:
+Only needed for `jcf sync reconcile --agent claude` and `jcf watch claude`. Nothing is read until you
+opt a directory in:
 
 ```bash
 jcf config set session-root ~/dev/work            # Sessions here may become proposed worklogs
@@ -68,6 +69,7 @@ jcf timer edit                    # Edit running timer
 jcf timer status                  # Show current timer status
 jcf issue list [--json]           # List Jira tickets from configured JQL
 jcf auth status            # Show auth status for both services
+jcf watch claude           # Log Claude Code session time as it happens
 ```
 
 ### Reconciling
@@ -133,6 +135,40 @@ The text is printed before it is written, since it lands in two systems other pe
 asked for only about the rows you confirm, in one batched call. If the coding agent cannot be reached
 the entry falls back to the title and its provenance — a missing sentence never costs the write — and
 a session whose prompts do not say what was done gets no sentence rather than an invented one.
+
+### Watching as you work
+
+```bash
+jcf watch claude              # Log settled blocks as they happen (Ctrl-C to stop)
+jcf watch claude --dry-run    # Same, printing what it would write instead of writing it
+jcf watch claude --interval 60
+```
+
+Same evidence, same arithmetic, no picker. It looks every five minutes and writes a block of work
+once it has been quiet for one idle cap — six minutes by default — because until then the block can
+still grow, and its share of any parallel work can still change. So entries land at natural breaks
+rather than a minute at a time, and each says what the time went on exactly as a confirmed row does:
+
+```
+jcf watch claude
+  Looking every 5m, from 10:32. A block is written once it has been quiet for 6m.
+  Only branch-, path-, and standing-attributed work is written. Earlier work and anything needing review: jcf sync reconcile --agent claude
+  11:48  PROJ-5663  +1h 24m to both
+    Add OpenTelemetry spans to the ingest worker — Traced the ingest worker end to end and added spans around the batch flush (Reconciled from Claude Agent Session)
+    ✓ created Clockify entry
+    ✓ posted to Jira
+```
+
+It writes only what it can defend without you: blocks placed by a branch name, a worktree path, or a
+standing ticket. It never wakes the coding agent to guess at an attribution — a session's ticket does
+not change, so asking every five minutes would spend a call to be told the same thing — and time no
+deliberate signal places is named on screen and left for `jcf sync reconcile --agent claude`. The
+coding agent is woken only to describe a block it is about to write.
+
+It only ever covers time since it started; the morning you started it in is `reconcile`'s job, where
+you see the rows first. Nothing is remembered between looks — a proposal is always the gap the two
+sides still have — so a failed write, a closed laptop, or a restart costs nothing but a delay. If
+Jira rejects the login it stops rather than logging to Clockify alone all afternoon.
 
 ## TUI Keybindings
 

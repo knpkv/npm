@@ -144,6 +144,26 @@ jcf sync reconcile --agent claude --day --calendar
   A branch name states intent, not fact: time spent on an unrelated fix while on a ticket branch is
   credited to that branch's ticket, so review the signal before confirming.
 
+## Watch Command
+
+```bash
+jcf watch claude              # Runs until interrupted; writes as work settles
+jcf watch claude --dry-run    # Prints what it would write, writes nothing
+jcf watch claude --interval 60
+```
+
+- A long-running remote write command. Only start it when the user explicitly asks for live
+  tracking, and say that it will keep writing until they stop it. Do not start it to answer a
+  question — it never terminates on its own, so it cannot be used to gather information.
+- `--dry-run` is the read-only form, but it still runs forever. To inspect unlogged work, use
+  `jcf sync reconcile --agent claude --json` instead.
+- It writes only branch-, path-, and standing-attributed blocks. Time only a coding agent could
+  place is reported and left for `jcf sync reconcile --agent claude`.
+- It writes a block once it has been quiet for one idle cap, so work in progress is never written
+  and nothing is ever written twice.
+- It covers only time since it started. Earlier work in the same day needs `jcf sync reconcile`.
+- It stops itself if Jira rejects the login. Re-authenticate with `jcf auth jira login` and restart.
+
 ## Agent Workflow
 
 1. Run `jcf auth status` and `jcf timer status` before changing timer state.

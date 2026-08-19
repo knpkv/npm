@@ -21,6 +21,7 @@ describe("jcf command surface", () => {
     ["timer", "edit", "--help"],
     ["issue", "list", "--help"],
     ["sync", "reconcile", "--help"],
+    ["watch", "--help"],
     ["config", "set", "session-root", "--help"],
     ["config", "set", "session-ticket", "--help"],
     ["config", "set", "idle-cap", "--help"]

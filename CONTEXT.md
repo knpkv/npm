@@ -137,8 +137,16 @@ The longest gap between two consecutive pieces of Session Activity that still co
 _Avoid_: Timeout, session gap, inactivity threshold
 
 **Proposed Worklog**:
-Time derived from Session Activity and offered for review before any Clockify entry or Jira worklog exists. It carries its Attribution Signal and never claims authority over a duration, so Agent Sessions are evidence for reconciliation and never a side of it.
+Time derived from Session Activity, offered for review before any Clockify entry or Jira worklog exists, or written unattended when it is a Settled Block a person's own Attribution Signal placed. It carries its Attribution Signal and never claims authority over a duration, so Agent Sessions are evidence for reconciliation and never a side of it.
 _Avoid_: Derived worklog, automatic worklog, reconciled row, agent time
+
+**Settled Block**:
+An Attributed Interval far enough in the past that no later Session Activity can still extend it or change its share of parallel work — one Idle Cap after its last moment, since a longer gap is not presence at all. Only a Settled Block may be written without review, because a block still being worked in would otherwise be logged a minute at a time.
+_Avoid_: Closed block, finished session, flushed interval
+
+**Session Watch**:
+A long-running command that derives Proposed Worklogs from Session Activity as it happens and writes each Settled Block once, covering only the time since it started. It writes nothing a Coding Agent had to guess at, leaving that for review, and needs no record of what it has already written because a proposal is always the gap the two sides still have.
+_Avoid_: Daemon, auto-logger, tracker, sync loop
 
 **Jira Custom Field**:
 A Jira issue field defined by a Jira site or project outside Jira's built-in issue fields, identified operationally by a site-specific field id and often shown to users by a display name.
