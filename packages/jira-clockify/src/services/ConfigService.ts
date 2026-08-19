@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **File-backed with defaults**: Reads `~/.jcf/config.json`, merging stored values over
- *   {@link defaultConfig}. Missing or corrupt files silently fall back to defaults.
+ *   {@link defaultJcfConfig}. Missing or corrupt files silently fall back to defaults.
  * - **Partial updates**: {@link ConfigServiceShape.set} merges a patch over the current config.
  *
  * @module
@@ -50,7 +50,8 @@ export interface JcfConfig {
   readonly sessionConfidenceFloor: number
 }
 
-const defaultConfig: JcfConfig = {
+/** The values every unset field falls back to, and what `jcf config reset` restores. */
+export const defaultJcfConfig: JcfConfig = {
   defaultJql: "assignee = currentUser() AND status != Done ORDER BY updated DESC",
   refreshInterval: 30,
   projectMap: {},
@@ -90,18 +91,43 @@ const stringArray = (value: unknown): ReadonlyArray<string> | undefined => {
   return value.every((entry) => typeof entry === "string") ? value : undefined
 }
 
-/** A finite, non-negative number — the shape both session tunables need. */
-const nonNegativeNumber = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+/**
+ * A finite, positive number of seconds.
+ *
+ * Zero is rejected rather than merely odd: an Idle Cap of zero makes every presence window
+ * zero-length, so both `reconcile --agent` and `watch` report nothing to propose, forever, with
+ * nothing on screen to explain it. `jcf config set idle-cap` already refuses it — this is the same
+ * rule for the file, which is the other way in.
+ */
+const positiveSeconds = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
 
-const parseConfigPatch = (content: string): Partial<JcfConfig> => {
+/**
+ * A confidence in `[0, 1]`, or nothing.
+ *
+ * Narrower than {@link nonNegativeNumber} because the value is compared against a confidence that is
+ * itself clamped to `[0, 1]`. There is no `jcf config set` subcommand for this field, so hand-editing
+ * the file is the only way to set it — which is exactly where `70` gets written for "70%". Accepting
+ * it would withhold every Coding Agent attribution from then on, permanently and with nothing to
+ * point at. Out of range falls back to the default instead.
+ */
+const confidence = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined
+
+/**
+ * The stored fields worth keeping, out of whatever `~/.jcf/config.json` happens to contain.
+ *
+ * Exported for testing: this is the one place a hand-edited file meets the rest of jcf, and a value
+ * that gets through here wrongly is one that changes behaviour with nothing on screen to explain it.
+ */
+export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const parsed: unknown = JSON.parse(content)
   if (!Predicate.isObject(parsed)) return {}
   const projectMap = stringRecord(parsed.projectMap)
   const sessionRoots = stringArray(parsed.sessionRoots)
   const sessionTicketMap = stringRecord(parsed.sessionTicketMap)
-  const sessionIdleCapSeconds = nonNegativeNumber(parsed.sessionIdleCapSeconds)
-  const sessionConfidenceFloor = nonNegativeNumber(parsed.sessionConfidenceFloor)
+  const sessionIdleCapSeconds = positiveSeconds(parsed.sessionIdleCapSeconds)
+  const sessionConfidenceFloor = confidence(parsed.sessionConfidenceFloor)
   return {
     ...(sessionRoots !== undefined ? { sessionRoots } : {}),
     ...(sessionTicketMap !== undefined ? { sessionTicketMap } : {}),
@@ -139,14 +165,14 @@ export const layer = Layer.effect(
 
     const read: Effect.Effect<JcfConfig> = Effect.gen(function*() {
       const exists = yield* fs.exists(filePath)
-      if (!exists) return defaultConfig
+      if (!exists) return defaultJcfConfig
       const content = yield* fs.readFileString(filePath)
       const parsed = yield* Effect.try({
         try: () => parseConfigPatch(content),
         catch: () => ({})
       })
-      return { ...defaultConfig, ...parsed }
-    }).pipe(Effect.catch(() => Effect.succeed(defaultConfig)))
+      return { ...defaultJcfConfig, ...parsed }
+    }).pipe(Effect.catch(() => Effect.succeed(defaultJcfConfig)))
 
     const write = (config: JcfConfig) =>
       Effect.gen(function*() {

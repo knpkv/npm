@@ -7,7 +7,7 @@ import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
-import { ConfigService, type JcfConfig } from "../services/ConfigService.js"
+import { ConfigService, defaultJcfConfig, type JcfConfig } from "../services/ConfigService.js"
 
 // ---------------------------------------------------------------------------
 // show
@@ -219,9 +219,16 @@ const configReset = Command.make(
         defaultBillable: true,
         defaultJql: "assignee = currentUser() AND status != Done ORDER BY updated DESC",
         refreshInterval: 30,
-        projectMap: {}
+        projectMap: {},
+        // Reset means reset. Leaving these behind was invisible — `jcf config show` lists them, so a
+        // user chasing a bad idle cap or a stale Standing Attribution would reset, see them still
+        // there, and have nothing to go on.
+        sessionRoots: defaultJcfConfig.sessionRoots,
+        sessionTicketMap: defaultJcfConfig.sessionTicketMap,
+        sessionIdleCapSeconds: defaultJcfConfig.sessionIdleCapSeconds,
+        sessionConfidenceFloor: defaultJcfConfig.sessionConfidenceFloor
       })
-      yield* Console.log("Config reset to defaults.")
+      yield* Console.log("Config reset to defaults, including session roots and standing attributions.")
     })
 )
 
