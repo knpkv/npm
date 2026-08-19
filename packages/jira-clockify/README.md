@@ -42,6 +42,16 @@ jcf config show            # Show current config
 jcf config reset           # Reset to defaults
 ```
 
+### 4. Session Roots (optional)
+
+Only needed for `jcf sync reconcile --agent claude`. Nothing is read until you opt a directory in:
+
+```bash
+jcf config set session-root ~/dev/work            # Sessions here may become proposed worklogs
+jcf config set session-ticket ~/dev/work/docs KEY # Standing ticket for work with no branch
+jcf config set idle-cap 300                       # Longest gap still counted as work (seconds)
+```
+
 ## CLI Commands
 
 ```bash
@@ -59,6 +69,70 @@ jcf timer status                  # Show current timer status
 jcf issue list [--json]           # List Jira tickets from configured JQL
 jcf auth status            # Show auth status for both services
 ```
+
+### Reconciling
+
+```bash
+jcf sync reconcile clockify-to-jira        # Fill Jira from Clockify (--day|--week|--since|--until)
+jcf sync reconcile jira-to-clockify        # Fill Clockify from Jira
+jcf sync reconcile --agent claude             # Propose worklogs from local Claude Code sessions
+jcf sync reconcile --agent claude --calendar  # ...with an hour-by-hour grid of when it happened
+jcf sync reconcile --agent claude --json      # Reporting only: one JSON value, nothing logged
+```
+
+`--agent claude` is for time _neither_ side recorded: it reads the Claude Code transcripts under your
+session roots — and only those; a project outside them is never opened — works out which issue each
+session belongs to and how long it accounts for, subtracts
+what Clockify and Jira already hold, and offers each remaining gap for confirmation. Every row shows
+the signal behind it — the git branch, the directory path, a standing ticket, or a reading of the
+transcript — so a wrong attribution is visible before you accept it. It is a mode switch, not a
+direction, so combining it with `clockify-to-jira` is an error.
+
+Only messages _you typed_ count as presence — the agent's own output, its tool results, and the
+prompts it sends its own subagents do not, since they show it was busy rather than that you were
+working. On one real day that was 66 events out
+of 1641, and the difference between 1h 53m and 3h 51m. A session counts as active between its own
+consecutive prompts, gaps longer than the idle cap are
+credited to nothing, and any moment you were working on several tickets at once is divided equally
+between them — so a day's proposals can never add up to more than that day's wall clock. Time
+spent reading and thinking between prompts is therefore under-counted rather than over-counted; a day
+with a timer still running is reported but never proposed.
+
+Everything you need to judge a row is on the row itself, in the picker: when the work item started
+and ended, the issue summary, its assignee, the attribution signal, what each side already holds, and
+how many blocks the total spans. So the number is checkable against your memory of the day rather
+than taken on trust, and time credited to someone else's ticket stands out before it is written. Rows
+are laid out for your terminal's width; a wider one spends the room on the issue title and the block
+times. `--calendar` draws the same evidence as a
+grid — one column per minute, one row per hour, only the hours with credited time:
+
+```
+  2026-07-25   # PROJ-5663
+        :00  :05  :10  :15  :20  :25  :30  :35  :40  :45  :50  :55
+  00h   .................###########################################
+  01h   ##########......###################################.....####
+        ~~~ 8h with nothing credited
+  11h   ........#############.......................................
+```
+
+The grid answers _when_ at minute resolution, so a span shorter than a minute still shows as one
+cell; the row above it remains the authority on _how much_.
+
+Each entry it writes says what the time went on. The Clockify description and the Jira worklog comment
+carry the issue title and one sentence, read off the session's own prompts, describing what was
+actually done:
+
+```
+  2026-07-25  PROJ-5663  +2h 35m to both
+    Add SSP API for per-user application list — Researched Keycloak OIDC docs and designed an endpoint returning the caller's allowed applications (Reconciled from Claude Agent Session)
+    ✓ created Clockify entry
+    ✓ posted to Jira
+```
+
+The text is printed before it is written, since it lands in two systems other people read. Notes are
+asked for only about the rows you confirm, in one batched call. If the coding agent cannot be reached
+the entry falls back to the title and its provenance — a missing sentence never costs the write — and
+a session whose prompts do not say what was done gets no sentence rather than an invented one.
 
 ## TUI Keybindings
 
@@ -112,7 +186,7 @@ Stored in `~/.jcf/`:
 
 ```
 ~/.jcf/
-├── config.json      # JQL, project, billable defaults
+├── config.json      # JQL, project, billable defaults, session roots
 ├── clockify.json    # Clockify API key, workspace, user
 └── state.json       # Current timer state
 ```

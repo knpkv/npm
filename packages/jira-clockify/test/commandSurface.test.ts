@@ -20,7 +20,10 @@ describe("jcf command surface", () => {
     ["timer", "log", "--help"],
     ["timer", "edit", "--help"],
     ["issue", "list", "--help"],
-    ["sync", "reconcile", "--help"]
+    ["sync", "reconcile", "--help"],
+    ["config", "set", "session-root", "--help"],
+    ["config", "set", "session-ticket", "--help"],
+    ["config", "set", "idle-cap", "--help"]
   ]
 
   for (const args of canonicalCommands) {

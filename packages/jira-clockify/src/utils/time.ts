@@ -4,6 +4,27 @@
  * @module
  */
 
+/**
+ * Local calendar day (`YYYY-MM-DD`) of an instant — matches how a person reads their
+ * timesheet, and the single definition every day bucket in jcf is keyed by.
+ */
+export function localDay(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  return `${y}-${m}-${d}`
+}
+
+/**
+ * Local midnight following `atMs`, as epoch milliseconds — how every day-by-day walk in jcf
+ * advances. Built from local calendar fields rather than by adding 24 hours, so it lands on
+ * midnight across a daylight-saving change too.
+ */
+export function nextLocalMidnight(atMs: number): number {
+  const at = new Date(atMs)
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0).getTime()
+}
+
 /** Format a `Date` as local `HH:MM` — the canonical clock format for prompts and confirmations. */
 export function formatClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { deltaToApply, resolvePeriod } from "../src/cli/reconcile.js"
+import { deltaToApply, resolveAgentMode, resolvePeriod } from "../src/cli/reconcile.js"
 import {
   buildReconcileRows,
   combineDescriptions,
@@ -184,5 +184,49 @@ describe("resolvePeriod", () => {
   it("rejects a malformed date", () => {
     const period = resolvePeriod({ week: false, since: "june 1", until: undefined })
     expect("error" in period).toBe(true)
+  })
+})
+
+describe("resolveAgentMode", () => {
+  it("stays in direction mode when --agent is absent", () => {
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: false, calendar: false })).toEqual({
+      _tag: "Directions"
+    })
+    expect(resolveAgentMode({ agent: undefined, direction: "jira-to-clockify", json: false, calendar: false })).toEqual(
+      {
+        _tag: "Directions"
+      }
+    )
+  })
+
+  it("switches to agent mode for a supported agent", () => {
+    expect(resolveAgentMode({ agent: "claude", direction: undefined, json: false, calendar: false })).toEqual({
+      _tag: "Agent",
+      agent: "claude"
+    })
+  })
+
+  // --agent is a mode switch, not a direction. Honouring one of two contradictory arguments
+  // silently would leave the user unable to tell which took effect.
+  it("rejects --agent combined with a direction", () => {
+    const result = resolveAgentMode({ agent: "claude", direction: "clockify-to-jira", json: false, calendar: false })
+    expect(result._tag).toBe("UsageError")
+    if (result._tag === "UsageError") expect(result.message).toContain("clockify-to-jira")
+  })
+
+  it("rejects an unsupported agent and names the supported ones", () => {
+    const result = resolveAgentMode({ agent: "codex", direction: undefined, json: false, calendar: false })
+    expect(result._tag).toBe("UsageError")
+    if (result._tag === "UsageError") expect(result.message).toContain("claude")
+  })
+
+  it("rejects agent-only flags outside agent mode instead of silently ignoring them", () => {
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: true, calendar: false })._tag)
+      .toBe("UsageError")
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: false, calendar: true })._tag)
+      .toBe("UsageError")
+    const both = resolveAgentMode({ agent: undefined, direction: undefined, json: true, calendar: true })
+    expect(both._tag).toBe("UsageError")
+    if (both._tag === "UsageError") expect(both.message).toContain("--json and --calendar")
   })
 })

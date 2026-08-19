@@ -1,6 +1,6 @@
 ---
 name: jcf
-description: Use the @knpkv/jira-clockify CLI to track work across Jira and Clockify. Trigger when the user asks an agent to start, stop, discard, edit, inspect, or manually log time for Jira tickets; configure Jira OAuth or Clockify API access; list current Jira tickets; set default Clockify project, billable flag, or JQL; or launch the jcf TUI.
+description: Use the @knpkv/jira-clockify CLI to track work across Jira and Clockify. Trigger when the user asks an agent to start, stop, discard, edit, inspect, or manually log time for Jira tickets; reconcile Clockify against Jira or recover forgotten time from local Claude Code sessions; configure Jira OAuth or Clockify API access; list current Jira tickets; set default Clockify project, billable flag, or JQL; or launch the jcf TUI.
 ---
 
 # Jcf
@@ -36,6 +36,15 @@ jcf config set project
 jcf config set billable
 jcf config set jql 'assignee = currentUser() AND status != Done ORDER BY updated DESC'
 jcf config reset
+```
+
+Configure which directories' Claude Code sessions may become proposed worklogs:
+
+```bash
+jcf config set session-root ~/dev/work
+jcf config set session-root ~/dev/work --remove
+jcf config set session-ticket ~/dev/work/docs PROJ-42
+jcf config set idle-cap 300
 ```
 
 ## Timer Commands
@@ -85,6 +94,56 @@ Edit the running timer:
 jcf timer edit
 ```
 
+## Reconcile Commands
+
+Both forms are remote write commands: they create Clockify entries and Jira worklogs. Never run
+either unattended. Confirm the window and the direction (or the agent) with the user first, and
+prefer the read-only forms below when gathering information.
+
+Compare the two sides and fill whichever is short:
+
+```bash
+jcf sync reconcile clockify-to-jira --day
+jcf sync reconcile jira-to-clockify --week
+jcf sync reconcile clockify-to-jira --since 2026-07-01 --until 2026-07-07
+```
+
+Recover time neither side recorded, using local Claude Code sessions as evidence:
+
+```bash
+jcf sync reconcile --agent claude --day
+jcf sync reconcile --agent claude --week
+jcf sync reconcile --agent claude --json
+jcf sync reconcile --agent claude --day --calendar
+```
+
+- `--agent` is a mode switch, not a direction. Passing both is a usage error.
+- `claude` is the only supported agent; `--agent codex` fails.
+- `--agent --json` is the read-only form: it writes exactly one JSON value to stdout, sends
+  everything human-facing to stderr, and creates no Clockify entry or Jira worklog. Use it to
+  inspect proposals before asking the user which to accept.
+- Without `--json`, every row needs an interactive confirmation, so this form is unsuitable for
+  unattended use.
+- Nothing is proposed for a directory outside the configured session roots, and a day with a timer
+  still running is reported but never proposed. Stop the timer and re-run to log that day.
+- Every picker row names the issue summary and assignee; `--json` carries both as `summary` and
+  `assignee`. Rows are not listed above the picker — the picker rows _are_ the report.
+- Written entries carry the issue title and an agent-written sentence saying what was done, read off
+  the session prompts. Notes are asked for only about confirmed rows, and only when writing, so
+  `--json` never spends a call on one. A row still writes when no note can be produced.
+- `--calendar` adds an ASCII hour-by-hour grid of when the time was credited. `--json` carries the
+  same information as a `spans` array per proposal, plus the issue `summary`.
+- `--json` and `--calendar` are agent-mode flags; passing either without `--agent` is a usage error.
+- Only messages the user typed count towards time; the agent's own output, its tool results, and
+  prompts it sends its own subagents do not, so an unattended agent run credits at most the idle cap
+  rather than the hour it ran for.
+- If Jira cannot be read, the run fails rather than proposing time that may already be logged.
+- Time worked on several issues at once is split equally between them, so a row's credited total can
+  be lower than the clock ranges beneath it; the report names the active total and the shared amount.
+- Each proposal shows the attribution signal behind it (`branch`, `path`, `standing`, `agent`).
+  A branch name states intent, not fact: time spent on an unrelated fix while on a ticket branch is
+  credited to that branch's ticket, so review the signal before confirming.
+
 ## Agent Workflow
 
 1. Run `jcf auth status` and `jcf timer status` before changing timer state.
@@ -92,3 +151,5 @@ jcf timer edit
 3. Verify the active Jira profile when the user names a Jira site/account or before posting worklogs; `atlassian profiles doctor` shows Jira Clockify as a consumer of the `jira-cli` auth store.
 4. Prefer explicit flags for non-interactive work: issue key, duration, date, time, project id, billable flag, and comment.
 5. If no timer is running, `jcf timer stop` may offer an interactive correction interval; use `jcf timer log` for deterministic manual logging.
+6. To find unlogged work, read `jcf sync reconcile --agent claude --json` first and report the
+   proposals to the user; only they should decide which rows to write.

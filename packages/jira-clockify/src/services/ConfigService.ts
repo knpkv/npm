@@ -25,6 +25,29 @@ export interface JcfConfig {
   readonly defaultProjectId: string | null
   readonly defaultProjectName: string | null
   readonly defaultBillable: boolean
+  /**
+   * Session Roots: directory prefixes (`~` allowed) whose Agent Sessions may become Proposed
+   * Worklogs. Empty means nothing is opted in, so `reconcile --agent` finds nothing — an
+   * allowlist, because a denylist grows with every side project.
+   */
+  readonly sessionRoots: ReadonlyArray<string>
+  /**
+   * Standing Attributions: directory prefix → Issue Key, for recurring work with no natural
+   * ticket (release notes, known-issues documents). Matched longest-prefix-first, and always
+   * loses to a branch or path signal, so adding one can only ever add attribution.
+   */
+  readonly sessionTicketMap: Record<string, string>
+  /**
+   * Idle Cap in seconds: the longest gap between two Session Activity events still counted as
+   * work. 5 minutes is the only setting that produced defensible daily totals over the author's
+   * transcripts; 15 gave 6–12h days and 30 gave 11–13h.
+   */
+  readonly sessionIdleCapSeconds: number
+  /**
+   * Below this Coding Agent confidence, an attribution is reported but never offered for
+   * confirmation, so "yes" at the confirm prompt stays usually-correct.
+   */
+  readonly sessionConfidenceFloor: number
 }
 
 const defaultConfig: JcfConfig = {
@@ -34,7 +57,11 @@ const defaultConfig: JcfConfig = {
   workspaceId: null,
   defaultProjectId: null,
   defaultProjectName: null,
-  defaultBillable: true
+  defaultBillable: true,
+  sessionRoots: [],
+  sessionTicketMap: {},
+  sessionIdleCapSeconds: 300,
+  sessionConfidenceFloor: 0.7
 }
 
 export interface ConfigServiceShape {
@@ -58,11 +85,28 @@ const stringRecord = (value: unknown): Record<string, string> | undefined => {
   return result
 }
 
+const stringArray = (value: unknown): ReadonlyArray<string> | undefined => {
+  if (!Array.isArray(value)) return undefined
+  return value.every((entry) => typeof entry === "string") ? value : undefined
+}
+
+/** A finite, non-negative number — the shape both session tunables need. */
+const nonNegativeNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+
 const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const parsed: unknown = JSON.parse(content)
   if (!Predicate.isObject(parsed)) return {}
   const projectMap = stringRecord(parsed.projectMap)
+  const sessionRoots = stringArray(parsed.sessionRoots)
+  const sessionTicketMap = stringRecord(parsed.sessionTicketMap)
+  const sessionIdleCapSeconds = nonNegativeNumber(parsed.sessionIdleCapSeconds)
+  const sessionConfidenceFloor = nonNegativeNumber(parsed.sessionConfidenceFloor)
   return {
+    ...(sessionRoots !== undefined ? { sessionRoots } : {}),
+    ...(sessionTicketMap !== undefined ? { sessionTicketMap } : {}),
+    ...(sessionIdleCapSeconds !== undefined ? { sessionIdleCapSeconds } : {}),
+    ...(sessionConfidenceFloor !== undefined ? { sessionConfidenceFloor } : {}),
     ...(typeof parsed.defaultJql === "string" ? { defaultJql: parsed.defaultJql } : {}),
     ...(typeof parsed.refreshInterval === "number" ? { refreshInterval: parsed.refreshInterval } : {}),
     ...(projectMap !== undefined ? { projectMap } : {}),

@@ -27,6 +27,7 @@
     "@effect/atom-react": "4.0.0-beta.98",
     "@effect/platform-node": "4.0.0-beta.98",
     "@knpkv/agent-skills": "workspace:^",
+    "@knpkv/ai-claude": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",

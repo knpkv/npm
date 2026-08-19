@@ -8,10 +8,13 @@ import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth, layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
 import { Effect, Layer, Redacted } from "effect"
+import * as Logger from "effect/Logger"
+import { layer as AgentSessionReaderLayer } from "../services/AgentSessionReader.js"
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
 import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
+import { layer as SessionAttributorLayer } from "../services/SessionAttributor.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
 import { layer as TicketServiceLayer } from "../services/TicketService.js"
 import { layer as TimerServiceLayer } from "../services/TimerService.js"
@@ -19,6 +22,16 @@ import { layer as TimerServiceLayer } from "../services/TimerService.js"
 // ---------------------------------------------------------------------------
 // Platform
 // ---------------------------------------------------------------------------
+
+/**
+ * Diagnostics belong on stderr. The default logger writes to stdout, which corrupts every `--json`
+ * output: one warning turns "exactly one JSON value on stdout" into unparseable output for whatever
+ * is reading it. Warnings stay visible, just on the stream reserved for them.
+ *
+ * Part of the layer rather than the binary so the test seam inherits the same routing the real CLI
+ * runs with, instead of the two drifting apart.
+ */
+export const LogToStderrLive = Layer.succeed(Logger.LogToStderr, true)
 
 // HttpClient backs TimerService's raw Jira worklog POST. Use the fetch implementation, not
 // undici: the TUI runs under Bun (see main.tsx) where undici fails with a transport error,
@@ -104,13 +117,29 @@ export const TimerServiceLive = TimerServiceLayer.pipe(
   Layer.provide(PlatformLayer)
 )
 
+export const AgentSessionReaderLive = AgentSessionReaderLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(ConfigLive),
+  Layer.provide(PlatformLayer)
+)
+
+// Constructing this spawns nothing — the Claude CLI is only invoked when a session no
+// deterministic Attribution Signal could place actually needs attributing.
+export const SessionAttributorLive = SessionAttributorLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(PlatformLayer)
+)
+
 export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
   Layer.provide(ClockifyApiLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(JiraApiLive),
   Layer.provide(JiraAuthLive),
   Layer.provide(ConfigLive),
-  Layer.provide(TimerServiceLive)
+  Layer.provide(TimerServiceLive),
+  Layer.provide(AgentSessionReaderLive),
+  Layer.provide(SessionAttributorLive)
 )
 
 // ---------------------------------------------------------------------------
@@ -126,5 +155,8 @@ export const HeadlessLayer = Layer.mergeAll(
   ClockifyAuthLive,
   ClockifyApiLive,
   JiraAuthLive,
-  JiraApiLive
+  JiraApiLive,
+  AgentSessionReaderLive,
+  SessionAttributorLive,
+  LogToStderrLive
 ).pipe(Layer.provideMerge(PlatformLayer))
