@@ -36,4 +36,7 @@ const program = processArgv.pipe(
 // parent, so both processes need the explicit exit. Always terminate.
 const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
 
-NodeRuntime.runMain(program, { teardown: forceExitTeardown })
+// Error reporting off: commands print their own failures in the user's terms before re-failing, so
+// the runtime's second report would only add a stack trace to a message already shown. Matches the
+// convention the other CLIs in this repo follow.
+NodeRuntime.runMain(program, { disableErrorReporting: true, teardown: forceExitTeardown })

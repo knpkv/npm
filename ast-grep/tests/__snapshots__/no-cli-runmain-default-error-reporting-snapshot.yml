@@ -1,0 +1,23 @@
+id: no-cli-runmain-default-error-reporting
+snapshots:
+  ? |
+    NodeRuntime.runMain(program)
+  : labels:
+      - source: NodeRuntime.runMain(program)
+        style: primary
+        start: 0
+        end: 28
+  ? |
+    NodeRuntime.runMain(program, { disableErrorReporting: false })
+  : labels:
+      - source: "NodeRuntime.runMain(program, { disableErrorReporting: false })"
+        style: primary
+        start: 0
+        end: 62
+  ? |
+    NodeRuntime.runMain(program, { teardown: forceExitTeardown })
+  : labels:
+      - source: "NodeRuntime.runMain(program, { teardown: forceExitTeardown })"
+        style: primary
+        start: 0
+        end: 61

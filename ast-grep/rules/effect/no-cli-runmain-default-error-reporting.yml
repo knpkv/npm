@@ -5,12 +5,24 @@ language: tsx
 severity: error
 message: "Disable NodeRuntime error reporting when CLI code handles and re-fails errors"
 
+# Any `runMain` call that does not switch reporting off. The single-argument form is the obvious
+# case, but `runMain(program, { teardown })` also leaves reporting on while *looking* configured —
+# which is how a jcf usage error came to print both a friendly line and a stack trace.
 rule:
-  pattern: NodeRuntime.runMain($PROGRAM)
+  all:
+    - pattern: NodeRuntime.runMain($$$ARGS)
+    - not:
+        has:
+          pattern:
+            context: |
+              const $_ = { disableErrorReporting: true }
+            selector: pair
+          stopBy: end
 
 files:
   - "packages/atlassian-common/src/bin.ts"
   - "packages/jira-cli/src/bin.ts"
+  - "packages/jira-clockify/src/bin.ts"
 
 ignores:
   - "repos/**"
