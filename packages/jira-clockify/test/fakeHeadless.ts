@@ -32,10 +32,11 @@
  * @internal
  */
 import { NodePath } from "@effect/platform-node"
-import type { ClockifyApiClientShape, TimeEntry } from "@knpkv/clockify-api-client"
+import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
+import type * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -45,9 +46,11 @@ import { systemError } from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Terminal from "effect/Terminal"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { LogToStderrLive } from "../src/cli/layers.js"
 import { layer as agentSessionReaderLayer } from "../src/services/AgentSessionReader.js"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
@@ -76,17 +79,42 @@ export interface CreatedClockifyEntry {
  * Deliberately tolerant: a test asserts on what a reader would see, and walking the node tree for
  * every `text` leaf says that without also pinning the paragraph structure around it.
  */
-const commentText = (comment: unknown): string => {
+/**
+ * One node of Jira's document format, reduced to what reading a comment back needs.
+ *
+ * Decoded rather than inspected: the tree is external data, and a schema is what turns "some
+ * object" into something with a `text` and a `content` this can rely on.
+ */
+const AdfNode = Schema.Struct({
+  text: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.Unknown)
+})
+
+const decodeAdfNode = Schema.decodeUnknownOption(AdfNode)
+
+/** The worklog fields the fake reads back off a POST body. */
+const WorklogPayload = Schema.Struct({
+  started: Schema.optional(Schema.String),
+  timeSpentSeconds: Schema.optional(Schema.Number),
+  comment: Schema.optional(Schema.Unknown)
+})
+
+type WorklogPayload = typeof WorklogPayload.Type
+
+const decodeWorklogPayload = Schema.decodeUnknownOption(Schema.fromJsonString(WorklogPayload))
+
+const commentText = <UnparsedInput>(comment: UnparsedInput): string => {
   const texts: Array<string> = []
-  const walk = (node: unknown): void => {
+  const walk = <Node>(node: Node): void => {
     if (Array.isArray(node)) {
       for (const child of node) walk(child)
       return
     }
-    if (typeof node !== "object" || node === null) return
-    const record: Record<string, unknown> = { ...node }
-    if (typeof record["text"] === "string") texts.push(record["text"])
-    if ("content" in record) walk(record["content"])
+    const decoded = decodeAdfNode(node)
+    if (Option.isNone(decoded)) return
+    const { content, text } = decoded.value
+    if (text !== undefined) texts.push(text)
+    if (content !== undefined) walk(content)
   }
   walk(comment)
   return texts.join(" ")
@@ -205,7 +233,7 @@ const makeTimeEntry = (entry: ExistingClockifyEntry, id: string): TimeEntry => (
   billable: true,
   userId: FAKE_USER_ID,
   workspaceId: FAKE_WORKSPACE_ID,
-  timeInterval: { start: entry.start, ...(entry.end === undefined ? {} : { end: entry.end }) },
+  timeInterval: { start: entry.start, ...((entry.end !== undefined) && { end: entry.end }) },
   tagIds: [],
   type: "REGULAR",
   isLocked: false
@@ -252,7 +280,7 @@ const fakeFileSystemLayer = (transcripts: Record<string, string>, reads: Array<s
       if (!line.includes("\"cwd\"")) continue
       const parsed: unknown = JSON.parse(line)
       const cwd = Predicate.isObject(parsed) ? parsed["cwd"] : undefined
-      if (typeof cwd === "string") return cwd.replace(/[/.]/g, "-")
+      if (Predicate.isString(cwd)) return cwd.replace(/[/.]/g, "-")
     }
     return key.split("/")[0] ?? key
   }
@@ -342,11 +370,13 @@ const fakeTerminalLayer = (
 ) =>
   Layer.succeed(
     Terminal.Terminal,
-    Terminal.Terminal.of({
+    Terminal.make({
       columns: Effect.succeed(options.columns),
       rows: Effect.succeed(24),
+      // Scoped in rc.109, and the queue ends with `Cause.Done` rather than a terminal-specific
+      // error. An exhausted script is still what a missing TTY looks like to `Prompt`.
       readInput: Effect.gen(function*() {
-        const queue = yield* Queue.unbounded<Terminal.UserInput, Terminal.QuitError>()
+        const queue = yield* Queue.unbounded<Terminal.UserInput, Cause.Done>()
         // No script at all means no input, so the prompt ends unanswered.
         if (options.keep !== undefined) yield* Queue.offerAll(queue, pickerKeys(options.keep))
         yield* Queue.end(queue)
@@ -416,11 +446,14 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   const jiraLedger = new Map<string, Array<ExistingJiraWorklog>>(
     Object.entries(options.jiraWorklogs ?? {}).map(([key, worklogs]) => [key, [...worklogs]])
   )
-  const running = options.runningTimer
-    ? makeTimeEntry({ description: options.runningTimer.description, start: options.runningTimer.start }, "running-1")
-    : null
+  const running = options.runningTimer === undefined
+    ? null
+    : makeTimeEntry(
+      { description: options.runningTimer.description, start: options.runningTimer.start },
+      "running-1"
+    )
 
-  const clockify: ClockifyApiClientShape = {
+  const clockify: ClockifyApiClientContract = {
     getUser: () =>
       Effect.succeed({
         id: FAKE_USER_ID,
@@ -434,7 +467,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     getWorkspaces: () => Effect.succeed([{ id: FAKE_WORKSPACE_ID, name: "WS", imageUrl: "" }]),
     getProjects: () => Effect.succeed([]),
     getProjectByName: () => Effect.succeed(null),
-    getTimeEntries: () => Effect.succeed(running ? [...clockifyLedger, running] : [...clockifyLedger]),
+    getTimeEntries: () => Effect.succeed(running === null ? [...clockifyLedger] : [...clockifyLedger, running]),
     getRunningTimer: () => Effect.succeed(running),
     getTimeEntry: (_ws, id) => Effect.succeed(makeTimeEntry({ description: "", start: "" }, id)),
     getTags: () => Effect.succeed([]),
@@ -474,16 +507,22 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
 
   const loggedIn = options.jiraLoggedIn ?? true
 
-  const jsonResponse = (request: Parameters<typeof HttpClientResponse.fromWeb>[0], status: number, body: unknown) =>
+  const jsonResponse = <ResponseBody>(
+    request: Parameters<typeof HttpClientResponse.fromWeb>[0],
+    status: number,
+    body: ResponseBody
+  ) =>
     HttpClientResponse.fromWeb(
       request,
       new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
     )
 
-  const requestPayload = (body: { readonly _tag: string }): Record<string, unknown> => {
+  const requestPayload = (body: { readonly _tag: string }): WorklogPayload => {
     if (body._tag !== "Uint8Array" || !("body" in body) || !Predicate.isUint8Array(body.body)) return {}
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(body.body))
-    return typeof parsed === "object" && parsed !== null ? { ...parsed } : {}
+    return Option.getOrElse(
+      decodeWorklogPayload(new TextDecoder().decode(body.body)),
+      (): WorklogPayload => ({})
+    )
   }
 
   /**
@@ -496,16 +535,16 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     HttpClient.make((request) =>
       Effect.sync(() => {
         const worklogMatch = request.url.match(/issue\/([^/]+)\/worklog/)
-        if (request.method === "POST" && worklogMatch) {
+        if (request.method === "POST" && worklogMatch !== null) {
           const payload = requestPayload(request.body)
           const issueKey = worklogMatch[1] ?? "unknown"
-          const started = typeof payload["started"] === "string" ? payload["started"] : ""
-          const timeSpentSeconds = typeof payload["timeSpentSeconds"] === "number" ? payload["timeSpentSeconds"] : 0
-          world.jiraWorklogs.push({ issueKey, started, timeSpentSeconds, comment: commentText(payload["comment"]) })
+          const started = payload.started ?? ""
+          const timeSpentSeconds = payload.timeSpentSeconds ?? 0
+          world.jiraWorklogs.push({ issueKey, started, timeSpentSeconds, comment: commentText(payload.comment) })
           jiraLedger.set(issueKey, [...(jiraLedger.get(issueKey) ?? []), { started, timeSpentSeconds }])
           return jsonResponse(request, 201, { id: "wl-fake" })
         }
-        if (worklogMatch) {
+        if (worklogMatch !== null) {
           if (options.jiraWorklogReadFails === true) {
             return jsonResponse(request, 500, { errorMessages: ["Jira is having a moment"] })
           }
@@ -523,7 +562,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           })
         }
         const issueMatch = request.url.match(/issue\/([^/?]+)(?:\?|$)/)
-        if (request.method === "GET" && issueMatch) {
+        if (request.method === "GET" && issueMatch !== null) {
           const key = issueMatch[1] ?? ""
           const summary = (options.issueSummaries ?? {})[key]
           if (summary === undefined) {
@@ -535,7 +574,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             key,
             fields: {
               summary,
-              ...(assignee === undefined ? {} : { assignee: { displayName: assignee } })
+              ...((assignee !== undefined) && { assignee: { displayName: assignee } })
             }
           })
         }
@@ -574,7 +613,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const answer = options.attributor?.(request) ?? { _tag: "None" }
           // A single "fail" fails the whole call, which is what a real timeout does to a batch.
           if (answer === "fail") {
-            return yield* Effect.fail(new SessionAttributorError({ message: "claude executable not found" }))
+            return yield* new SessionAttributorError({ message: "claude executable not found" })
           }
           answers.push({ sessionId: request.sessionId, choice: answer })
         }
@@ -595,13 +634,26 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const answer = options.describer?.(request) ?? null
           // As with attribution, one "fail" fails the whole call — a timeout costs a batch.
           if (answer === "fail") {
-            return yield* Effect.fail(new SessionAttributorError({ message: "claude executable not found" }))
+            return yield* new SessionAttributorError({ message: "claude executable not found" })
           }
           answers.push({ id: request.id, note: answer })
         }
         return answers
       })
   })
+
+  /**
+   * A spawner that refuses to spawn.
+   *
+   * The Coding Agent is faked at the `SessionAttributor` seam, so nothing in these tests should
+   * reach a child process — but the layer was previously left open, which typechecking would have
+   * caught had this package's tests been in a tsconfig. Failing loudly beats a real `claude` process
+   * starting during a test run.
+   */
+  const SpawnerLayer = Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() => Effect.die("the fake headless layer spawns no child processes"))
+  )
 
   const HomeLayer = Layer.succeed(HomeDirectory, { path: FAKE_HOME })
   // A ledger rather than a constant: `set` is how the config commands do their whole job, so a
@@ -678,6 +730,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     attributorLayer,
     fakeTerminalLayer({ keep: options.keep, columns: options.columns ?? DEFAULT_COLUMNS }, world),
     captureConsoleLayer(world),
+    SpawnerLayer,
     // Mirrors HeadlessLayer: warnings must land on stderr, or they corrupt --json output.
     LogToStderrLive
   )

@@ -85,7 +85,7 @@ export class SessionAttributorError extends Data.TaggedError("SessionAttributorE
   readonly cause?: unknown
 }> {}
 
-export interface SessionAttributorShape {
+export interface SessionAttributorContract {
   /**
    * Attribute a batch of sessions in one call.
    *
@@ -115,7 +115,7 @@ export interface SessionAttributorShape {
   ) => Effect.Effect<ReadonlyArray<SessionDescribeAnswer>, SessionAttributorError>
 }
 
-export class SessionAttributor extends Context.Service<SessionAttributor, SessionAttributorShape>()(
+export class SessionAttributor extends Context.Service<SessionAttributor, SessionAttributorContract>()(
   "jcf/SessionAttributor"
 ) {}
 
@@ -262,6 +262,9 @@ export const layer = Layer.effect(
           schema: Answers,
           objectName: "attributions"
         }).pipe(
+          // The provider is built per call and lives exactly as long as the call does, which is the
+          // scope this diagnostic exists to protect rather than one it puts at risk.
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(provider),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.mapError((cause) =>
@@ -298,6 +301,9 @@ export const layer = Layer.effect(
           schema: Notes,
           objectName: "notes"
         }).pipe(
+          // The provider is built per call and lives exactly as long as the call does, which is the
+          // scope this diagnostic exists to protect rather than one it puts at risk.
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(provider),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.mapError((cause) =>

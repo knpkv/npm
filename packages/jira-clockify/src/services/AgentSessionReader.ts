@@ -35,6 +35,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import {
   type AttributableSession,
@@ -65,7 +66,7 @@ export class AgentSessionError extends Data.TaggedError("AgentSessionError")<{
   readonly cause?: unknown
 }> {}
 
-export interface AgentSessionReaderShape {
+export interface AgentSessionReaderContract {
   /**
    * Every in-scope Agent Session with activity inside the period. Sessions outside every
    * Session Root are never read.
@@ -75,7 +76,7 @@ export interface AgentSessionReaderShape {
   ) => Effect.Effect<ReadonlyArray<AgentSessionRecord>, AgentSessionError>
 }
 
-export class AgentSessionReader extends Context.Service<AgentSessionReader, AgentSessionReaderShape>()(
+export class AgentSessionReader extends Context.Service<AgentSessionReader, AgentSessionReaderContract>()(
   "jcf/AgentSessionReader"
 ) {}
 
@@ -119,13 +120,19 @@ const ACTIVITY_TYPES: ReadonlyArray<string> = ["user", "assistant"]
 /** Block types that are the agent's own machinery rather than anything a person wrote. */
 const MACHINE_BLOCK_TYPES: ReadonlyArray<string> = ["tool_result", "tool_use", "thinking"]
 
+/** The fields of a transcript line that decide whether it evidences a person being present. */
+interface TranscriptLineFields {
+  readonly type?: string | undefined
+  readonly isSidechain?: boolean | null | undefined
+}
+
 /** The readable text of a message, or `""` when it carries none we understand. */
-const messageText = (message: unknown): string => {
+const messageText = <UnparsedInput>(message: UnparsedInput): string => {
   const decoded = decodeContent(message)
   if (Option.isNone(decoded)) return ""
   const content = decoded.value.content
   if (content === undefined) return ""
-  if (typeof content === "string") return content
+  if (Predicate.isString(content)) return content
   return content.flatMap((block) => (block.text === undefined ? [] : [block.text])).join("\n")
 }
 
@@ -143,16 +150,16 @@ const messageText = (message: unknown): string => {
  * every Idle Cap gap. That is the one thing the Idle Cap exists to stop, and under `jcf watch` the
  * result would be written unattended.
  */
-const isHumanPrompt = (
-  line: { readonly type?: string | undefined; readonly isSidechain?: boolean | null | undefined },
-  message: unknown
+const isHumanPrompt = <UnparsedInput>(
+  line: TranscriptLineFields,
+  message: UnparsedInput
 ): boolean => {
   if (line.type !== "user" || line.isSidechain === true) return false
   const decoded = decodeContent(message)
   if (Option.isNone(decoded)) return false
   const content = decoded.value.content
   if (content === undefined) return false
-  if (typeof content === "string") return content.trim().length > 0
+  if (Predicate.isString(content)) return content.trim().length > 0
   return content.length > 0 &&
     content.every((block) => block.type === undefined || !MACHINE_BLOCK_TYPES.includes(block.type))
 }
@@ -203,7 +210,7 @@ export const decodeTranscript = (
     // yesterday's hours from today's work, and could carry text from a directory that was never
     // opted in to a Coding Agent.
     const text = messageText(line.message)
-    if (text) texts.push(text)
+    if (text !== "") texts.push(text)
 
     sessionId = line.sessionId
     // Last in-window line wins: the directory and branch the credited work ran under.

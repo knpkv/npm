@@ -24,6 +24,8 @@ const cli = Command.runWith(root, {
 
 const program = processArgv.pipe(
   Effect.flatMap((argv) => cli(argv)),
+  // This *is* the entry point — the one place the whole layer graph is composed and provided.
+  // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(HeadlessLayer)
 )
 

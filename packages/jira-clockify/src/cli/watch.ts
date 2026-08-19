@@ -277,13 +277,13 @@ export const watch = Command.make(
       if (!SUPPORTED_AGENTS.includes(name)) {
         const message = `Unsupported agent "${name}". Supported: ${SUPPORTED_AGENTS.join(", ")}.`
         yield* Console.error(message)
-        return yield* Effect.fail(new WatchUsageError({ message }))
+        return yield* new WatchUsageError({ message })
       }
       const intervalSeconds = Option.isSome(interval) ? interval.value : DEFAULT_INTERVAL_SECONDS
       if (intervalSeconds < 1) {
         const message = "--interval must be at least 1 second."
         yield* Console.error(message)
-        return yield* Effect.fail(new WatchUsageError({ message }))
+        return yield* new WatchUsageError({ message })
       }
       return yield* runWatch({ agent: name, intervalSeconds, dryRun })
     })

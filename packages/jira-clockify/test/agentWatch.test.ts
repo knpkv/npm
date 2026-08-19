@@ -17,6 +17,12 @@ import { writeAnchor } from "../src/cli/agentWrite.js"
 import { root } from "../src/cli/root.js"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "./fakeHeadless.js"
 
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -66,7 +72,7 @@ const breathe = Effect.gen(function*() {
   for (let index = 0; index < 200; index++) yield* Effect.yieldNow
 })
 
-const advance = (duration: Duration.DurationInput) =>
+const advance = (duration: Duration.Input) =>
   breathe.pipe(Effect.andThen(TestClock.adjust(duration)), Effect.andThen(breathe))
 
 /**

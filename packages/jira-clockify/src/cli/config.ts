@@ -54,7 +54,7 @@ const configSetProject = Command.make(
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
       const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
-      if (!auth) {
+      if (auth === null) {
         yield* Console.log("Clockify not configured. Run: jcf auth clockify setup")
         return
       }
@@ -72,7 +72,7 @@ const configSetProject = Command.make(
           { title: "(none)", value: "" }
         ]
       })
-      if (selected) {
+      if (selected !== "") {
         const name = projects.find((p) => p.id === selected)?.name ?? null
         yield* cfg.set({ defaultProjectId: selected, defaultProjectName: name })
         yield* Console.log(`Default project: ${name ?? selected}`)

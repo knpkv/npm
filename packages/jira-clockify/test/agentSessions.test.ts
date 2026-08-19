@@ -532,6 +532,8 @@ describe("buildSessionProposals", () => {
     ticketKey: "PROJ-1",
     day: "2026-07-01",
     seconds,
+    activeSeconds: seconds,
+    sessionIds: ["s1"],
     signal: "branch",
     confidence: null,
     spans: [{ startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 0) + seconds * 1000 }]

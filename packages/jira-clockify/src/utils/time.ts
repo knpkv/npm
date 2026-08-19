@@ -55,7 +55,7 @@ export function formatDuration(seconds: number): string {
  */
 export function parseDuration(input: string): number | null {
   const match = input.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?$/)
-  if (!match || (!match[1] && !match[2])) return null
+  if (match === null || ((match[1] ?? "") === "" && (match[2] ?? "") === "")) return null
   const hours = parseInt(match[1] ?? "0", 10)
   const minutes = parseInt(match[2] ?? "0", 10)
   return hours * 3600 + minutes * 60
@@ -85,7 +85,7 @@ export function isFullIsoTimestamp(input: string): boolean {
 export function parseStartTime(input: string, now: Date = new Date()): Date | null {
   const trimmed = input.trim()
   const hm = trimmed.match(/^(\d{1,2}):(\d{2})$/)
-  if (hm) {
+  if (hm !== null) {
     const hours = parseInt(hm[1]!, 10)
     const minutes = parseInt(hm[2]!, 10)
     if (hours > 23 || minutes > 59) return null
@@ -144,21 +144,21 @@ export function resolveCorrectedEnd(params: {
   readonly now: Date
 }): CorrectedEnd {
   const trimmed = params.input.trim()
-  if (!trimmed) {
+  if (trimmed === "") {
     return { ok: false, error: "Enter an end time as HH:MM (today) or a full ISO timestamp." }
   }
 
   let end: Date
   if (HH_MM.test(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
+    if (parsed === null) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
     // Bare HH:MM lands on today by default; if that is still in the future the
     // user means the same clock time yesterday (they forgot overnight).
     if (parsed.getTime() > params.now.getTime()) parsed.setDate(parsed.getDate() - 1)
     end = parsed
   } else if (isFullIsoTimestamp(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid ISO timestamp." }
+    if (parsed === null) return { ok: false, error: "Invalid ISO timestamp." }
     end = parsed
   } else {
     return { ok: false, error: "Unrecognised time. Use HH:MM (today) or a full ISO timestamp." }

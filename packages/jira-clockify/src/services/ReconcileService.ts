@@ -342,9 +342,11 @@ export const expandedStandingMap = (
 export const parseTicketKey = (description: string | null | undefined): string | null => {
   const desc = description ?? ""
   const bracket = desc.match(/^\[([^\]]+)\]/)
-  if (bracket?.[1]) return bracket[1].trim()
+  const bracketKey = bracket?.[1]
+  if (bracketKey !== undefined && bracketKey !== "") return bracketKey.trim()
   const colon = desc.match(/^([A-Za-z][A-Za-z0-9]*-\d+):/)
-  if (colon?.[1]) return colon[1].trim()
+  const colonKey = colon?.[1]
+  if (colonKey !== undefined && colonKey !== "") return colonKey.trim()
   return null
 }
 
@@ -372,7 +374,7 @@ export const combineDescriptions = (descriptions: ReadonlyArray<string | null | 
   const parts: Array<string> = []
   for (const raw of descriptions) {
     const text = stripTicketPrefix(raw ?? "")
-    if (text && !seen.has(text)) {
+    if (text !== "" && !seen.has(text)) {
       seen.add(text)
       parts.push(text)
     }
@@ -457,7 +459,7 @@ const toRawWorklogs = <UnparsedInput>(response: UnparsedInput): ReadonlyArray<Ra
   if (!Predicate.isObject(response) || !Array.isArray(response.worklogs)) return []
   return response.worklogs.flatMap((worklog) => {
     const parsed = toRawWorklog(worklog)
-    return parsed ? [parsed] : []
+    return parsed === null ? [] : [parsed]
   })
 }
 
@@ -494,7 +496,9 @@ export const layer = Layer.effect(
           const ticketKey = parseTicketKey(entry.description)
           const start = entry.timeInterval?.start
           const end = entry.timeInterval?.end
-          if (!ticketKey || !start || !end) continue // skip running / unparseable entries
+          // Skip running or unparseable entries: a missing end means the time is not yet real.
+          if (ticketKey === null || start === undefined || start === null) continue
+          if (end === undefined || end === null) continue
           const seconds = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000))
           tally.push({ ticketKey, day: localDay(new Date(start)), seconds, description: entry.description ?? null })
         }
@@ -522,7 +526,7 @@ export const layer = Layer.effect(
 
         const issueKeys = (search.issues ?? []).flatMap((issue) => {
           const key = issueKey(issue)
-          return key ? [key] : []
+          return key === null ? [] : [key]
         })
 
         const fromMs = period.from.getTime()
@@ -547,9 +551,10 @@ export const layer = Layer.effect(
           )
 
           for (const wl of worklogs) {
-            if (!wl.started || !Predicate.isNumber(wl.timeSpentSeconds)) continue
+            if (wl.started === undefined || !Predicate.isNumber(wl.timeSpentSeconds)) continue
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
-            if (accountId && wl.author?.accountId && wl.author.accountId !== accountId) continue
+            const author = wl.author?.accountId
+            if (accountId !== null && author !== undefined && author !== accountId) continue
             const startedMs = new Date(wl.started).getTime()
             if (startedMs < fromMs || startedMs >= toMs) continue
             tally.push({ ticketKey: issueKey, day: localDay(new Date(wl.started)), seconds: wl.timeSpentSeconds })
@@ -585,7 +590,7 @@ export const layer = Layer.effect(
         startedAt: startOf(day, startedAt),
         durationSeconds: seconds,
         // Carry the Clockify description across; only fall back to a generic note when blank.
-        comment: comment && comment.trim() ? comment.trim() : "Reconciled from Clockify"
+        comment: comment !== undefined && comment.trim() !== "" ? comment.trim() : "Reconciled from Clockify"
       })
 
     const applyToClockify = (
@@ -601,7 +606,9 @@ export const layer = Layer.effect(
         const start = startOf(day, startedAt)
         const end = new Date(start.getTime() + seconds * 1000)
         yield* clockify.createTimeEntry(auth.workspaceId, {
-          description: `[${ticketKey}] ${note && note.trim() ? note.trim() : "Reconciled from Jira"}`,
+          description: `[${ticketKey}] ${
+            note !== undefined && note.trim() !== "" ? note.trim() : "Reconciled from Jira"
+          }`,
           start: start.toISOString(),
           end: end.toISOString(),
           ...((cfg.defaultProjectId) && { projectId: cfg.defaultProjectId })
@@ -628,7 +635,7 @@ export const layer = Layer.effect(
           Effect.catch((error) => Effect.logDebug(`Running-timer check failed: ${error.message}`))
         )
         const state = yield* SubscriptionRef.get(timer.state)
-        if (!state.active || !state.startedAt) return []
+        if (!state.active || state.startedAt === null) return []
         const startedMs = state.startedAt.getTime()
         // Clamped to the window on both sides: a Timer running since last week makes nothing outside
         // this period any less proposable, and the period's own end is as far as the run can look.

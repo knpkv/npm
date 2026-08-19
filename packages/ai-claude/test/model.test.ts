@@ -7,6 +7,12 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { model } from "../src/index.js"
 
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
+
 type FakeProcessOptions = {
   readonly exitCode?: number
   readonly spawnFailure?: PlatformError
@@ -30,7 +36,6 @@ const fakeProcessLayer = (calls: Array<ChildProcess.Command>, options: FakeProce
         isRunning: Effect.succeed(false),
         kill: () => Effect.void,
         pid: ChildProcessSpawner.ProcessId(42),
-        reref: Effect.void,
         stderr,
         stdin: Sink.drain,
         stdout,
@@ -231,9 +236,19 @@ describe("model", () => {
 
       const command = calls[0]
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        // `stdin` is a `CommandInput | StdinConfig`: the pipe-mode strings, a stream, or a config
+        // carrying one. Only the stream forms hold a prompt to read back.
         const stdin = command.options.stdin
-        if (Predicate.isObjectOrArray(stdin) && stdin !== null && "stream" in stdin && Stream.isStream(stdin.stream)) {
-          const prompt = yield* stdin.stream.pipe(Stream.decodeText(), Stream.mkString)
+        // `stdin` is `CommandInput | StdinConfig`: a pipe-mode string, a stream, or a config wrapping
+        // one. Only a stream carries the prompt this assertion reads back.
+        const source: ChildProcess.CommandInput | undefined = stdin === undefined || Predicate.isString(stdin)
+          ? undefined
+          : Stream.isStream(stdin)
+          ? stdin
+          : stdin.stream
+        const stream = source === undefined || Predicate.isString(source) ? undefined : source
+        if (stream !== undefined) {
+          const prompt = yield* stream.pipe(Stream.decodeText(), Stream.mkString)
           expect(prompt).toContain("Checked the release constraints")
           expect(prompt).toContain("Continue the review")
         }

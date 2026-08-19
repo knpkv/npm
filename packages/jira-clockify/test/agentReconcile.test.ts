@@ -7,9 +7,17 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import { Command } from "effect/unstable/cli"
 import { root } from "../src/cli/root.js"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "./fakeHeadless.js"
+
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -81,7 +89,7 @@ const transcript = (options: {
 const steady = (startMs: number, minutes: number, text?: string): ReadonlyArray<TranscriptEvent> =>
   Array.from({ length: minutes + 1 }, (_, index) => ({
     atMs: startMs + index * 60_000,
-    ...(index === 0 && text !== undefined ? { text } : {})
+    ...((index === 0 && text !== undefined) && { text })
   }))
 
 /** Agent output and tool results every 30s — a busy agent with nobody necessarily watching. */
@@ -111,6 +119,42 @@ const run = (args: ReadonlyArray<string>, options: FakeHeadlessOptions = {}) => 
 const agent = (extra: ReadonlyArray<string> = []) => ["sync", "reconcile", "--agent", "claude", ...SINCE, ...extra]
 
 const output = (lines: ReadonlyArray<string>): string => lines.join("\n")
+
+/**
+ * The `--json` payload, decoded rather than picked apart.
+ *
+ * Decoding is the point of asserting on the JSON Output Contract at all: a test that reaches into
+ * an `unknown` with `typeof` checks goes on passing when the shape changes underneath it, which is
+ * the one failure this contract exists to catch.
+ */
+const ReportProposal = Schema.Struct({
+  ticketKey: Schema.String,
+  day: Schema.String,
+  signal: Schema.optional(Schema.String),
+  sessionSeconds: Schema.Number,
+  activeSeconds: Schema.optional(Schema.Number),
+  clockifyDelta: Schema.optional(Schema.Number),
+  jiraDelta: Schema.optional(Schema.Number),
+  summary: Schema.NullOr(Schema.String),
+  assignee: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.String),
+  endedAt: Schema.NullOr(Schema.String),
+  spans: Schema.optional(Schema.Array(Schema.Struct({ startMs: Schema.Number, endMs: Schema.Number })))
+})
+
+const AgentReport = Schema.Struct({
+  mode: Schema.optional(Schema.String),
+  proposals: Schema.Array(ReportProposal)
+})
+
+const decodeAgentReport = Schema.decodeUnknownOption(Schema.fromJsonString(AgentReport))
+
+/** The proposals from a `--json` run, or an empty list when stdout was not a report. */
+const jsonProposals = (stdout: ReadonlyArray<string>): ReadonlyArray<typeof ReportProposal.Type> =>
+  Option.match(decodeAgentReport(stdout.join("\n")), {
+    onNone: () => [],
+    onSome: (report) => report.proposals
+  })
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -301,11 +345,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
           }
         })
       )
-      const parsed: unknown = JSON.parse(world.stdout[0]!)
-      const proposals = typeof parsed === "object" && parsed !== null && "proposals" in parsed &&
-          Array.isArray(parsed.proposals)
-        ? parsed.proposals
-        : []
+      const proposals = jsonProposals(world.stdout)
       // One 90-minute gap between two prompts, capped at the 5-minute Idle Cap.
       expect(proposals[0]).toMatchObject({ sessionSeconds: 300 })
     }))
@@ -573,17 +613,13 @@ describe("jcf sync reconcile --agent: proposals", () => {
           }
         })
       )
-      const parsed: unknown = JSON.parse(world.stdout[0]!)
-      const proposals = typeof parsed === "object" && parsed !== null && "proposals" in parsed &&
-          Array.isArray(parsed.proposals)
-        ? parsed.proposals
-        : []
+      const proposals = jsonProposals(world.stdout)
       const row = proposals[0]
       // Bounds span the interruption; the credited total does not.
       expect(row).toMatchObject({ sessionSeconds: 10 * 60 + 10 * 60 + 300 })
       const instant = (field: "startedAt" | "endedAt"): Date => {
-        const value = typeof row === "object" && row !== null && field in row ? row[field] : null
-        if (typeof value !== "string") throw new Error(`${field} missing from the proposal`)
+        const value = row?.[field]
+        if (value === undefined || value === null) throw new Error(`${field} missing from the proposal`)
         return new Date(value)
       }
       expect(instant("startedAt").getHours()).toBe(9)
@@ -685,7 +721,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
         },
         issueAssignees: { "PROJ-5662": "Someone With A Long Name", "PROJ-5663": "Dana Reviewer" },
         keep: [true, false],
-        ...(columns === undefined ? {} : { columns })
+        ...((columns !== undefined) && { columns })
       })
 
     const wordyOptions = wordy()
@@ -898,19 +934,10 @@ describe("jcf sync reconcile --agent: duration", () => {
           }
         })
       )
-      const parsed: unknown = JSON.parse(world.stdout.join("\n"))
-      const report = typeof parsed === "object" && parsed !== null ? parsed : {}
-      const proposals = "proposals" in report && Array.isArray(report.proposals) ? report.proposals : []
+      const proposals = jsonProposals(world.stdout)
       expect(proposals.length).toBe(3)
 
-      const total = proposals.reduce(
-        (sum: number, proposal: unknown) =>
-          sum + (typeof proposal === "object" && proposal !== null && "sessionSeconds" in proposal &&
-              typeof proposal.sessionSeconds === "number"
-            ? proposal.sessionSeconds
-            : 0),
-        0
-      )
+      const total = proposals.reduce((sum, proposal) => sum + proposal.sessionSeconds, 0)
       // Three sessions overlapping for two hours account for two hours, not six.
       const wallClock = 120 * 60 + 45
       expect(total).toBeLessThanOrEqual(wallClock)
@@ -934,16 +961,9 @@ describe("jcf sync reconcile --agent: duration", () => {
           }
         })
       )
-      const parsed: unknown = JSON.parse(world.stdout.join("\n"))
-      const report = typeof parsed === "object" && parsed !== null ? parsed : {}
-      const proposals = "proposals" in report && Array.isArray(report.proposals) ? report.proposals : []
+      const proposals = jsonProposals(world.stdout)
       const byDay = new Map<string, number>(
-        proposals.flatMap((proposal: unknown) =>
-          typeof proposal === "object" && proposal !== null && "day" in proposal && "sessionSeconds" in proposal &&
-            typeof proposal.day === "string" && typeof proposal.sessionSeconds === "number"
-            ? [[proposal.day, proposal.sessionSeconds]]
-            : []
-        )
+        proposals.map((proposal): readonly [string, number] => [proposal.day, proposal.sessionSeconds])
       )
       // 30 credited minutes on each day, plus one capped 5-minute gap on the evening side.
       expect(byDay.get("2026-07-01")).toBe(30 * 60 + 300)
@@ -1648,15 +1668,15 @@ describe("jcf sync reconcile --agent --json", () => {
       expect(exit._tag).toBe("Success")
       expect(world.stdout).toHaveLength(1)
 
-      const parsed: unknown = JSON.parse(world.stdout[0]!)
-      expect(parsed).toMatchObject({ mode: "agent", agent: "claude", from: "2026-07-01", to: "2026-07-01" })
+      expect(JSON.parse(world.stdout[0]!)).toMatchObject({
+        mode: "agent",
+        agent: "claude",
+        from: "2026-07-01",
+        to: "2026-07-01"
+      })
       // `summary` is present but null rather than omitted, so a consumer can tell "unknown" from
       // "never looked up".
-      const proposals = typeof parsed === "object" && parsed !== null && "proposals" in parsed &&
-          Array.isArray(parsed.proposals)
-        ? parsed.proposals
-        : []
-      expect(proposals[0]).toHaveProperty("summary", null)
+      expect(jsonProposals(world.stdout)[0]).toHaveProperty("summary", null)
 
       expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toEqual([])

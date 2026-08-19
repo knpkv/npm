@@ -86,9 +86,9 @@ const stringRecord = <UnparsedInput>(value: UnparsedInput): Record<string, strin
   return result
 }
 
-const stringArray = (value: unknown): ReadonlyArray<string> | undefined => {
+const stringArray = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<string> | undefined => {
   if (!Array.isArray(value)) return undefined
-  return value.every((entry) => typeof entry === "string") ? value : undefined
+  return value.every((entry) => Predicate.isString(entry)) ? value : undefined
 }
 
 /**
@@ -99,8 +99,8 @@ const stringArray = (value: unknown): ReadonlyArray<string> | undefined => {
  * nothing on screen to explain it. `jcf config set idle-cap` already refuses it — this is the same
  * rule for the file, which is the other way in.
  */
-const positiveSeconds = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+const positiveSeconds = <UnparsedInput>(value: UnparsedInput): number | undefined =>
+  Predicate.isNumber(value) && Number.isFinite(value) && value > 0 ? value : undefined
 
 /**
  * A confidence in `[0, 1]`, or nothing.
@@ -111,8 +111,8 @@ const positiveSeconds = (value: unknown): number | undefined =>
  * it would withhold every Coding Agent attribution from then on, permanently and with nothing to
  * point at. Out of range falls back to the default instead.
  */
-const confidence = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined
+const confidence = <UnparsedInput>(value: UnparsedInput): number | undefined =>
+  Predicate.isNumber(value) && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined
 
 /**
  * The stored fields worth keeping, out of whatever `~/.jcf/config.json` happens to contain.

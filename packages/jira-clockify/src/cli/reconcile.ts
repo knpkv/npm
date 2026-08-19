@@ -421,7 +421,7 @@ const runAgentMode = (options: {
     // contract: silence on stdout with a zero exit reads as "no unlogged work", and the skill tells
     // an agent to act on exactly that. So the message goes to stderr and the command fails.
     if (report === null) {
-      return yield* Effect.fail(new ReconcileUsageError({ message: "Could not read Agent Sessions." }))
+      return yield* new ReconcileUsageError({ message: "Could not read Agent Sessions." })
     }
 
     // Looked up for every row that names an Issue Key, including the withheld ones — a row you
@@ -604,7 +604,7 @@ export const reconcile = Command.make(
         // as a stack trace. The failure still propagates so the process exits non-zero, and the
         // binary disables runtime error reporting so this is not also printed a second time.
         yield* Console.error(mode.message)
-        return yield* Effect.fail(new ReconcileUsageError({ message: mode.message }))
+        return yield* new ReconcileUsageError({ message: mode.message })
       }
 
       // The window is resolved the same way in both modes, so `--day/--week/--since/--until`

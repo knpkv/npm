@@ -4,6 +4,12 @@ import { Command } from "effect/unstable/cli"
 import { HeadlessLayer } from "../src/cli/layers.js"
 import { root } from "../src/cli/root.js"
 
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
+
 const run = (args: ReadonlyArray<string>) =>
   Command.runWith(root, { version: "0.0.0-test" })(args).pipe(
     Effect.provide(HeadlessLayer),

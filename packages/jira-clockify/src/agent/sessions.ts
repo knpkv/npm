@@ -140,7 +140,7 @@ export const mineTicketKeys = (
  * predictably, and applies no placeholder filter — naming a branch is a deliberate act.
  */
 export const ticketKeyFromBranch = (branch: string | null | undefined): string | null => {
-  if (!branch) return null
+  if (branch === null || branch === undefined || branch === "") return null
   return matchTicketKeys(branch)[0] ?? null
 }
 
@@ -218,11 +218,11 @@ export const deterministicAttribution = (
   options: { readonly standingMap: Readonly<Record<string, string>> }
 ): DeterministicAttribution | null => {
   const fromBranch = ticketKeyFromBranch(session.gitBranch)
-  if (fromBranch) return { ticketKey: fromBranch, signal: "branch" }
+  if (fromBranch !== null) return { ticketKey: fromBranch, signal: "branch" }
   const fromPath = ticketKeyFromPath(session.cwd)
-  if (fromPath) return { ticketKey: fromPath, signal: "path" }
+  if (fromPath !== null) return { ticketKey: fromPath, signal: "path" }
   const standing = standingAttribution(session.cwd, options.standingMap)
-  if (standing) return { ticketKey: standing, signal: "standing" }
+  if (standing !== null) return { ticketKey: standing, signal: "standing" }
   return null
 }
 
@@ -247,7 +247,7 @@ export const attributeSession = (
   }
 ): SessionAttribution => {
   const deterministic = deterministicAttribution(session, { standingMap: options.standingMap })
-  if (deterministic) {
+  if (deterministic !== null) {
     return {
       sessionId: session.sessionId,
       ticketKey: deterministic.ticketKey,
@@ -267,7 +267,9 @@ export const attributeSession = (
   }
   // The choice set is closed over the transcript's own text: a key the transcript never
   // mentioned cannot reach a worklog, however confidently it was named.
-  if (!choice || !session.candidateKeys.includes(choice.ticketKey)) return unattributed
+  if (choice === null || choice === undefined || !session.candidateKeys.includes(choice.ticketKey)) {
+    return unattributed
+  }
 
   return {
     sessionId: session.sessionId,
@@ -742,7 +744,7 @@ export const buildSessionDigest = (
   let length = 0
   for (const raw of texts) {
     const text = raw.trim()
-    if (!text) continue
+    if (text === "") continue
     const remaining = maxChars - length
     if (remaining <= 0) break
     const clipped = text.length > remaining ? text.slice(0, remaining) : text

@@ -99,11 +99,16 @@ const encodeJson = <UnparsedInput>(value: UnparsedInput, method: string): Effect
     Effect.mapError((cause) => unsupportedSchema(cause, method))
   )
 
+/** What a text response passes for the schema argument: nothing. */
+const noSchemaArgument: string | undefined = undefined
+
 const schemaArgument = (
   options: LanguageModel.ProviderOptions,
   method: string
 ): Effect.Effect<string | undefined, AiError.AiError> => {
-  if (options.responseFormat.type === "text") return Effect.succeed(undefined)
+  // Named rather than a bare `undefined`: this is "no `--json-schema` argument at all", which is a
+  // different outcome from an empty one, and `Effect.void` cannot carry it in a `string | undefined`.
+  if (options.responseFormat.type === "text") return Effect.succeed(noSchemaArgument)
   const responseSchema = options.responseFormat.schema
   return Effect.try({
     try: () => Schema.toJsonSchemaDocument(responseSchema),
