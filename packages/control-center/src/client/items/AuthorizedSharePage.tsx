@@ -1,10 +1,12 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { type ReactElement, useEffect, useState } from "react"
 import { Link, useParams } from "react-router"
@@ -27,11 +29,15 @@ const SHARE_REVALIDATION_MILLISECONDS = 30_000
 
 const isTaggedFailure =
   (tag: string) =>
-  (failure: unknown): boolean =>
+  <UnparsedInput,>(failure: UnparsedInput): boolean =>
     Predicate.hasProperty(failure, "_tag") && failure._tag === tag
 
 const isNotFound = isTaggedFailure("NotFoundApiError")
 const isUnauthorized = isTaggedFailure("UnauthorizedApiError")
+
+class AuthorizedShareResolveError extends Data.TaggedError("AuthorizedShareResolveError")<{
+  readonly cause: unknown
+}> {}
 
 export interface AuthorizedSharePageProps {
   readonly transport?: AuthorizedShareTransport
@@ -65,22 +71,25 @@ export const AuthorizedSharePage = ({
     }
     const request = new AbortController()
     setState({ _tag: "loading" })
-    const program = Effect.gen(function* () {
-      while (!request.signal.aborted) {
-        const result = yield* Effect.tryPromise({
-          try: () => transport.resolve(workspaceId, shareId, request.signal),
-          catch: (cause) => cause
-        }).pipe(Effect.result)
-        if (request.signal.aborted) return
-        if (result._tag === "Failure") {
-          if (isUnauthorized(result.failure)) browserSession.invalidateSession(session.sessionId)
-          setState(isNotFound(result.failure) ? { _tag: "not-found" } : { _tag: "failed" })
-          return
-        }
-        setState({ _tag: "ready", resolution: result.success })
-        yield* Effect.sleep(Duration.millis(SHARE_REVALIDATION_MILLISECONDS))
-      }
-    })
+    const resolveOnce = Effect.tryPromise({
+      try: () => transport.resolve(workspaceId, shareId, request.signal),
+      catch: (cause) => new AuthorizedShareResolveError({ cause })
+    }).pipe(
+      Effect.tap((resolution) =>
+        Effect.sync(() => {
+          if (!request.signal.aborted) setState({ _tag: "ready", resolution })
+        })
+      )
+    )
+    const program = Effect.repeat(resolveOnce, Schedule.spaced(Duration.millis(SHARE_REVALIDATION_MILLISECONDS))).pipe(
+      Effect.catch((failure) =>
+        Effect.sync(() => {
+          if (request.signal.aborted) return
+          if (isUnauthorized(failure.cause)) browserSession.invalidateSession(session.sessionId)
+          setState(isNotFound(failure.cause) ? { _tag: "not-found" } : { _tag: "failed" })
+        })
+      )
+    )
     Effect.runPromise(program, { signal: request.signal }).catch(() => {
       if (!request.signal.aborted) setState({ _tag: "failed" })
     })

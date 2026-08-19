@@ -28,7 +28,7 @@ import { Context, Layer } from "effect"
  *
  * @category Config
  */
-export interface AwsClientConfigShape {
+export interface AwsClientConfigContract {
   readonly credentialTimeout: Duration.Input
   readonly operationTimeout: Duration.Input
   readonly streamTimeout: Duration.Input
@@ -47,10 +47,10 @@ export interface AwsClientConfigShape {
  */
 export class AwsClientConfig extends Context.Service<
   AwsClientConfig,
-  AwsClientConfigShape
+  AwsClientConfigContract
 >()("@knpkv/codecommit-core/AwsClientConfig") {}
 
-const defaults: AwsClientConfigShape = {
+const defaults: AwsClientConfigContract = {
   credentialTimeout: "5 seconds",
   operationTimeout: "30 seconds",
   streamTimeout: "60 seconds",
@@ -68,5 +68,5 @@ export const Default: Layer.Layer<AwsClientConfig> = Layer.succeed(AwsClientConf
 /**
  * Create a configuration layer with custom overrides.
  */
-export const layer = (overrides: Partial<AwsClientConfigShape>): Layer.Layer<AwsClientConfig> =>
+export const layer = (overrides: Partial<AwsClientConfigContract>): Layer.Layer<AwsClientConfig> =>
   Layer.succeed(AwsClientConfig, { ...defaults, ...overrides })

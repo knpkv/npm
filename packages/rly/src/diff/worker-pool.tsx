@@ -22,9 +22,13 @@ interface WorkerSubscription {
 /** Props for the bounded, fail-open diff syntax-highlighting worker provider. */
 export interface DiffWorkerProviderProps {
   readonly children: ReactNode
+  readonly observeWorkerFailure?: DiffWorkerFailureObserver
   readonly poolSize?: number
   readonly workerFactory?: () => Worker
 }
+
+/** Adapter for simulating or externally observing worker failure without exposing vendor manager types. */
+export type DiffWorkerFailureObserver = (onFailure: () => void) => () => void
 
 /** Options for creating package-relative module workers without exposing vendor types. */
 export interface CreateDiffWorkerFactoryOptions {
@@ -48,18 +52,21 @@ export const createDiffWorkerFactory = ({
   workerUrl = defaultWorkerUrl
 }: CreateDiffWorkerFactoryOptions = {}): (() => Worker) => {
   return () => {
-    if (typeof window === "undefined" || typeof Worker === "undefined") {
+    try {
+      return new Worker(workerUrl, { name, type: "module" })
+    } catch {
       throw new Error("Diff workers are available only in a browser")
     }
-    return new Worker(workerUrl, { name, type: "module" })
   }
 }
 
 const DEFAULT_DIFF_WORKER_FACTORY = createDiffWorkerFactory()
+const observeManagerFailure = (manager: WorkerPoolManager, onFailure: () => void): (() => void) =>
+  manager.subscribeToStatChanges((stats) => {
+    if (stats.workersFailed) onFailure()
+  })
 
 const initializeWorkerState = (workerFactory: () => Worker, poolSize: number): RlyDiffWorkerState => {
-  if (typeof window === "undefined") return { status: "main-thread" }
-
   try {
     const probe = workerFactory()
     probe.terminate()
@@ -79,6 +86,7 @@ const initializeWorkerState = (workerFactory: () => Worker, poolSize: number): R
 /** Provide bounded worker acceleration with immediate synchronous failover and cleanup. */
 export const DiffWorkerProvider = ({
   children,
+  observeWorkerFailure,
   poolSize: requestedPoolSize,
   workerFactory = DEFAULT_DIFF_WORKER_FACTORY
 }: DiffWorkerProviderProps): ReactNode => {
@@ -97,12 +105,14 @@ export const DiffWorkerProvider = ({
       manager?.terminate()
     }
     if (manager !== undefined) {
-      subscription.unsubscribe = manager.subscribeToStatChanges((stats) => {
-        if (active && stats.workersFailed) {
+      const onFailure = () => {
+        if (active) {
           cleanWorkerManager()
           setState({ status: "fallback" })
         }
-      })
+      }
+      subscription.unsubscribe =
+        observeWorkerFailure === undefined ? observeManagerFailure(manager, onFailure) : observeWorkerFailure(onFailure)
       if (cleaned) subscription.unsubscribe()
     }
     if (!cleaned) setState(nextState)
@@ -111,7 +121,7 @@ export const DiffWorkerProvider = ({
       active = false
       cleanWorkerManager()
     }
-  }, [requestedPoolSize, workerFactory])
+  }, [observeWorkerFailure, requestedPoolSize, workerFactory])
 
   return (
     <DiffWorkerStateContext.Provider value={state}>

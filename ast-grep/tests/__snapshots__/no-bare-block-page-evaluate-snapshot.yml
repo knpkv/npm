@@ -1,0 +1,37 @@
+id: no-bare-block-page-evaluate
+snapshots:
+  page.evaluate("{ document.querySelector('main')?.remove() }"):
+    labels:
+      - source: page.evaluate("{ document.querySelector('main')?.remove() }")
+        style: primary
+        start: 0
+        end: 61
+      - source: ("{ document.querySelector('main')?.remove() }")
+        style: secondary
+        start: 13
+        end: 61
+  ? |
+    page.evaluate(`
+      {
+        document.querySelector("main")?.remove()
+      }
+    `)
+  : labels:
+      - source: |-
+          page.evaluate(`
+            {
+              document.querySelector("main")?.remove()
+            }
+          `)
+        style: primary
+        start: 0
+        end: 71
+      - source: |-
+          (`
+            {
+              document.querySelector("main")?.remove()
+            }
+          `)
+        style: secondary
+        start: 13
+        end: 71

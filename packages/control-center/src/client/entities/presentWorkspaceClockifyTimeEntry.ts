@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import type { DeliveryEntityDetails, DeliveryRelationship } from "../../domain/deliveryGraph.js"
 import type { EntityId, WorkspaceId } from "../../domain/identifiers.js"
+import type { Revision } from "../../domain/sourceRevision.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 type TimeEntryDetails = Extract<DeliveryEntityDetails, { readonly _tag: "time-entry" }>
@@ -16,6 +17,11 @@ export interface WorkspaceClockifyJiraAssociation {
 }
 
 export interface WorkspaceClockifyTimeEntryPresentation {
+  readonly approvalDecidedAt: {
+    readonly dateTime: string
+    readonly label: string
+  } | null
+  readonly approvalDetail: string
   readonly approvalLabel: string
   readonly approvers: ReadonlyArray<string>
   readonly associationDetail: string
@@ -26,8 +32,10 @@ export interface WorkspaceClockifyTimeEntryPresentation {
   readonly durationLabel: string
   readonly endedAt: string
   readonly jiraAssociations: ReadonlyArray<WorkspaceClockifyJiraAssociation>
+  readonly lockLabel: string
   readonly projectLabel: string
   readonly rollupLabel: string
+  readonly sourceRevision: Revision
   readonly startedAt: string
   readonly timerLabel: string
   readonly totalMinutes: number
@@ -55,6 +63,14 @@ const durationLabel = (minutes: number): string => {
 
 const timestampLabel = (value: DateTime.DateTime | null | undefined): string =>
   value === null || value === undefined ? "Not synchronized" : timestampFormatter.format(DateTime.toDateUtc(value))
+
+const timestampPresentation = (value: DateTime.DateTime | null | undefined) =>
+  value === null || value === undefined
+    ? null
+    : {
+      dateTime: DateTime.formatIso(value),
+      label: timestampFormatter.format(DateTime.toDateUtc(value))
+    }
 
 const acceptedRelationship = (relationship: DeliveryRelationship): boolean =>
   relationship.lifecycle._tag !== "missing" &&
@@ -126,7 +142,7 @@ const jiraAssociationsFor = (
   }))
 }
 
-/** Present one immutable Clockify entry as a deterministic, read-only time ledger. */
+/** Present one immutable Clockify entry with its current Control Center approval. */
 export const presentWorkspaceClockifyTimeEntry = (
   workspaceId: WorkspaceId,
   details: TimeEntryDetails,
@@ -145,7 +161,13 @@ export const presentWorkspaceClockifyTimeEntry = (
       ) ?? false
     )
   return {
-    approvalLabel: titleCase(details.approvalState),
+    approvalDecidedAt: timestampPresentation(inspection.clockifyApproval?.decidedAt),
+    approvalDetail: inspection.clockifyApproval === null
+      ? "No Control Center decision is recorded for this exact Clockify revision."
+      : inspection.clockifyApproval.rationale,
+    approvalLabel: inspection.clockifyApproval === null
+      ? "Pending"
+      : titleCase(inspection.clockifyApproval.decision),
     approvers,
     associationDetail: jiraAssociations.length === 0
       ? "No current Jira relationship explains where this time belongs. The entry remains visible."
@@ -159,10 +181,16 @@ export const presentWorkspaceClockifyTimeEntry = (
     durationLabel: durationLabel(details.durationMinutes),
     endedAt: timestampLabel(details.endedAt),
     jiraAssociations,
+    lockLabel: details.locked === undefined
+      ? "Lock state not synchronized"
+      : details.locked
+      ? "Locked"
+      : "Unlocked",
     projectLabel: details.projectId ?? "No Clockify project",
     rollupLabel: `1 visible entry · ${String(details.durationMinutes)} exact minute${
       details.durationMinutes === 1 ? "" : "s"
     }`,
+    sourceRevision: inspection.source.revision,
     startedAt: timestampLabel(details.startedAt),
     timerLabel: details.startedAt === undefined || details.endedAt === undefined
       ? "Timer state not synchronized"

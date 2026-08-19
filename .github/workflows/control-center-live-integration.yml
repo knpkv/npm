@@ -1,0 +1,126 @@
+name: Control Center Live Integration
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: control-center-live-integration
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  prepare-live-runner:
+    name: Build sealed live runner
+    if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      runner-sha256: ${{ steps.package-runner.outputs.sha256 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: "26.7.0"
+
+      - name: Build Control Center and workspace dependencies
+        run: pnpm --filter @knpkv/control-center... build
+
+      - name: Package sealed live runner
+        id: package-runner
+        shell: bash
+        run: |
+          runner_root="${RUNNER_TEMP}/control-center-live-runner"
+          mkdir -p "${runner_root}"
+          cp -R node_modules packages "${runner_root}/"
+          cp package.json tsconfig.base.jsonc "${runner_root}/"
+          node_root="$(dirname "$(dirname "$(command -v node)")")"
+          cp -R "${node_root}" "${runner_root}/node-runtime"
+          tar --create --gzip \
+            --file "${RUNNER_TEMP}/control-center-live-runner.tgz" \
+            --directory "${runner_root}" .
+          runner_sha256="$(sha256sum "${RUNNER_TEMP}/control-center-live-runner.tgz" | cut -d ' ' -f 1)"
+          echo "sha256=${runner_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload sealed live runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-center-live-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-runner.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  live-provider-journey:
+    name: Four-provider real server journey
+    if: github.repository_owner == 'knpkv' && github.ref == 'refs/heads/main'
+    needs: prepare-live-runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: control-center-live-integration
+    permissions:
+      id-token: write
+    steps:
+      - name: Download sealed live runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: control-center-live-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-artifact
+
+      - name: Verify sealed live runner
+        shell: bash
+        env:
+          EXPECTED_RUNNER_SHA256: ${{ needs.prepare-live-runner.outputs.runner-sha256 }}
+        run: |
+          artifact_root="${RUNNER_TEMP}/control-center-live-artifact"
+          runner_root="${RUNNER_TEMP}/control-center-live-runner"
+          printf '%s  %s\n' \
+            "${EXPECTED_RUNNER_SHA256}" \
+            "${artifact_root}/control-center-live-runner.tgz" \
+            | sha256sum --check --strict
+          mkdir -p "${runner_root}"
+          tar --extract --gzip \
+            --file "${artifact_root}/control-center-live-runner.tgz" \
+            --directory "${runner_root}"
+          echo "CONTROL_CENTER_LIVE_RUNNER=${runner_root}" >> "${GITHUB_ENV}"
+
+      - name: Assume read-only live-test role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: ${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}
+          role-to-assume: ${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}
+          role-session-name: control-center-live-integration
+          mask-aws-account-id: true
+          output-credentials: false
+          unset-current-credentials: true
+
+      - name: Run bounded live provider journey
+        env:
+          CONTROL_CENTER_LIVE_INTEGRATION: "1"
+          CONTROL_CENTER_TEST_AWS_REGION: ${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}
+          CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY: ${{ vars.CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY }}
+          CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE: ${{ vars.CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE }}
+          CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL: ${{ vars.CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL }}
+          CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID: ${{ vars.CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID }}
+          CONTROL_CENTER_TEST_JIRA_PROJECT_ID: ${{ vars.CONTROL_CENTER_TEST_JIRA_PROJECT_ID }}
+          CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID: ${{ vars.CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID }}
+          CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID: ${{ vars.CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_KEY: ${{ secrets.JIRA_API_KEY }}
+          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+          CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
+        run: |
+          control_center_root="${CONTROL_CENTER_LIVE_RUNNER}/packages/control-center"
+          "${CONTROL_CENTER_LIVE_RUNNER}/node-runtime/bin/node" \
+            "${CONTROL_CENTER_LIVE_RUNNER}/node_modules/vitest/vitest.mjs" \
+            run \
+            --root "${control_center_root}" \
+            --config "${control_center_root}/vitest.live.config.ts"

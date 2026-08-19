@@ -30,8 +30,8 @@ const validate = ajv.compile<DocNode>(adfJsonSchema)
 export class AdfSchemaValidator extends Context.Service<
   AdfSchemaValidator,
   {
-    readonly check: (
-      doc: unknown,
+    readonly check: <UnparsedInput>(
+      doc: UnparsedInput,
       direction: "incoming" | "outgoing"
     ) => Effect.Effect<DocNode, AdfSchemaError>
   }
@@ -57,7 +57,7 @@ export const layer: Layer.Layer<AdfSchemaValidator> = Layer.succeed(
               schemaPath: e.schemaPath,
               keyword: e.keyword,
               params: e.params,
-              ...(e.message !== undefined ? { message: e.message } : {})
+              ...((e.message !== undefined) && { message: e.message })
             }))
           })
         )

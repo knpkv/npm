@@ -31,7 +31,7 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Duration, Effect, Layer, Schedule, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import { HttpClient } from "effect/unstable/http"
-import { AwsClientConfig, type AwsClientConfigShape } from "../AwsClientConfig.js"
+import { AwsClientConfig, type AwsClientConfigContract } from "../AwsClientConfig.js"
 import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
 
@@ -42,7 +42,7 @@ export type { AwsClientError } from "../Errors.js"
  * Check if an error is an AWS throttling exception.
  * Inspects structured error properties instead of pretty-printing.
  */
-export const isThrottlingError = (error: unknown): boolean => {
+export const isThrottlingError = <UnparsedInput>(error: UnparsedInput): boolean => {
   const name = Predicate.hasProperty(error, "name") ? String(error.name) : ""
   const code = Predicate.hasProperty(error, "code") ? String(error.code).toLowerCase() : ""
   const message = Predicate.isError(error)
@@ -71,8 +71,8 @@ const decodeAwsCredentialIdentity = (
 ): AwsCredentialIdentity => ({
   accessKeyId: identity.accessKeyId,
   secretAccessKey: identity.secretAccessKey,
-  ...(identity.sessionToken === undefined ? {} : { sessionToken: identity.sessionToken }),
-  ...(identity.expiration === undefined ? {} : { expiration: identity.expiration })
+  ...(!(identity.sessionToken === undefined) && { sessionToken: identity.sessionToken }),
+  ...(!(identity.expiration === undefined) && { expiration: identity.expiration })
 })
 
 type AwsRuntimeEnv =
@@ -81,7 +81,7 @@ type AwsRuntimeEnv =
   | DistilledRegion.Region
   | HttpClient.HttpClient
 
-const makeThrottleSchedule = (config: AwsClientConfigShape) =>
+const makeThrottleSchedule = (config: AwsClientConfigContract) =>
   Schedule.max([
     Schedule.exponential(config.retryBaseDelay, 2).pipe(Schedule.jittered),
     Schedule.recurs(config.maxRetries)
@@ -143,6 +143,23 @@ export const makeApiError = (operation: string, profile: AwsProfileName, region:
  */
 export type AccountParams = Pick<Account, "profile" | "region">
 
+/** Applies the interrupting timeout only to operations whose outcome remains safely retryable. */
+export const applyAwsOperationTimeout = <A, E, R>(
+  operation: string,
+  account: AccountParams,
+  effect: Effect.Effect<A, E, R>,
+  timeout: Duration.Input | null
+): Effect.Effect<A, E | AwsApiError, R> =>
+  timeout === null
+    ? effect
+    : effect.pipe(
+      Effect.timeout(timeout),
+      Effect.catchTag(
+        "TimeoutError",
+        (cause) => Effect.fail(makeApiError(operation, account.profile, account.region, cause))
+      )
+    )
+
 /**
  * Shared combinator: acquire credentials → build Layer → provide → optional retry → timeout.
  * Eliminates boilerplate repeated across all AwsClient method files.
@@ -151,18 +168,22 @@ export const withAwsContext = <A, E>(
   operation: string,
   account: AccountParams,
   effect: Effect.Effect<A, E, AwsRuntimeEnv>,
-  options?: { readonly retry?: boolean; readonly timeout?: "stream" }
+  options?: { readonly retry?: boolean; readonly timeout?: "none" | "stream" }
 ): Effect.Effect<A, E | AwsCredentialError | AwsApiError, AwsClientConfig | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const config = yield* AwsClientConfig
     const httpClient = yield* HttpClient.HttpClient
     const credentials = yield* acquireCredentials(account.profile, account.region)
-    const timeout = options?.timeout === "stream" ? config.streamTimeout : config.operationTimeout
+    const timeout = options?.timeout === "none"
+      ? null
+      : options?.timeout === "stream"
+      ? config.streamTimeout
+      : config.operationTimeout
 
     const provided = Effect.provide(
       effect,
       Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials),
+        DistilledCredentials.fromCredentials(credentials, account.region),
         Layer.succeed(HttpClient.HttpClient, httpClient),
         Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(AwsClientConfig, config)
@@ -170,13 +191,7 @@ export const withAwsContext = <A, E>(
     )
     const attempted = options?.retry === false ? provided : throttleRetry(provided)
 
-    return yield* attempted.pipe(
-      Effect.timeout(timeout),
-      Effect.catchTag(
-        "TimeoutError",
-        (cause) => Effect.fail(makeApiError(operation, account.profile, account.region, cause))
-      )
-    )
+    return yield* applyAwsOperationTimeout(operation, account, attempted, timeout)
   })
 
 // ---------------------------------------------------------------------------
@@ -255,6 +270,8 @@ export interface DeleteApprovalRuleParams {
 }
 
 export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequestDetail")({
+  revisionId: Schema.String,
+  sourceCommit: Schema.String,
   title: Schema.String,
   description: Schema.optional(Schema.String),
   author: Schema.String,

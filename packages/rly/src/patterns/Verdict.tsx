@@ -49,13 +49,13 @@ export type VerdictProps = Omit<ComponentPropsWithRef<"section">, "children"> & 
   readonly verdict: string
 }
 
-const toneIcons: Readonly<Record<RlyVerdictTone, RlyIconName>> = {
+const toneIcons = {
   caution: "clock",
   critical: "alert",
   neutral: "minus",
   positive: "check",
   progress: "loader"
-}
+} satisfies Readonly<Record<RlyVerdictTone, RlyIconName>>
 
 /** Render a neutral giant verdict with explicit icon, semantic rail, and supplied reason. */
 export const Verdict = ({ className, reason, tone, verdict, ...props }: VerdictProps): ReactElement => {

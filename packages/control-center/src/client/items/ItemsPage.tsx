@@ -54,20 +54,13 @@ const freshnessFormatter = new Intl.DateTimeFormat("en-GB", {
 
 export const formatItemFreshness = (freshness: string): string => freshnessFormatter.format(Date.parse(freshness))
 
-export const itemsLocationWithSearch = (
-  location: Pick<Location, "hash" | "pathname">,
-  params: URLSearchParams
-): { readonly hash: string; readonly pathname: string; readonly search: string } => ({
+export const itemsLocationWithSearch = (location: Pick<Location, "hash" | "pathname">, params: URLSearchParams) => ({
   hash: location.hash,
   pathname: location.pathname,
   search: params.size === 0 ? "" : `?${params.toString()}`
 })
 
-export const unlinkedItemLocation = (
-  pathname: string,
-  params: URLSearchParams,
-  entityId: string
-): { readonly hash: string; readonly pathname: string; readonly search: string } => {
+export const unlinkedItemLocation = (pathname: string, params: URLSearchParams, entityId: string) => {
   const next = new URLSearchParams(params)
   next.set("object", entityId)
   return {

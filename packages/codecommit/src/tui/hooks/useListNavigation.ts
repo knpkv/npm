@@ -4,7 +4,9 @@ import { useKeyboard } from "@opentui/react"
 import { useEffect } from "react"
 import { selectedIndexAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
+import { pullRequestSelectionKey } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
+import { shouldHandleListSelection } from "../navigation-model.js"
 
 function isSelectable(item: ListItem | undefined): boolean {
   if (!item) return false
@@ -23,7 +25,7 @@ export function useListNavigation(items: ReadonlyArray<ListItem>, onSelect: () =
     setSelectedIndex(newIndex)
     const item = items[newIndex]
     if (item?.type === "pr") {
-      setSelectedPrId(item.pr.id)
+      setSelectedPrId(pullRequestSelectionKey(item.pr))
     }
   }
 
@@ -99,7 +101,7 @@ export function useListNavigation(items: ReadonlyArray<ListItem>, onSelect: () =
       while (prev >= 0 && (!items[prev] || !isSelectable(items[prev]))) prev--
       if (prev >= 0) navigate(prev)
     } else if (key.name === "return") {
-      onSelect()
+      if (shouldHandleListSelection(view)) onSelect()
     } else if (key.name === "space") {
       if (onToggle) onToggle()
     }

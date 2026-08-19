@@ -9,7 +9,7 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
-import { contextualAgentPath } from "../contextualAgentPath.js"
+import { contextualAgentPath, contextualReleaseAgentPath } from "../contextualAgentPath.js"
 import { releaseAgentPath } from "../releases/releasePaths.js"
 import { type ReleaseRouteState, ReleaseRouteStateSchema, retainReleaseRouteState } from "../releases/releaseRoutes.js"
 import { workspaceEntityParentPath } from "../workspaceEntityPaths.js"
@@ -89,7 +89,7 @@ export const workspaceEntityTargetFromHref = (href: string): WorkspaceEntityTarg
 }
 
 /** Decode one entity route segment at the browser boundary. */
-export const decodeEntityRouteId = (value: unknown): EntityIdType | null => {
+export const decodeEntityRouteId = <UnparsedInput>(value: UnparsedInput): EntityIdType | null => {
   const decoded = Schema.decodeUnknownOption(EntityId)(value)
   return Option.isSome(decoded) ? decoded.value : null
 }
@@ -154,8 +154,8 @@ export const isSafeWorkspaceEntityOrigin = (
   return target !== null && retainReleaseRouteState(origin.state, workspaceId, target.releaseId) !== null
 }
 
-const reusableStoredOrigin = (
-  state: unknown,
+const reusableStoredOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType
 ): WorkspaceEntityOrigin | null => {
   const decoded = Schema.decodeUnknownOption(WorkspaceEntityRouteStateSchema)(state)
@@ -172,8 +172,8 @@ const reusableStoredOrigin = (
  * A previously validated entity origin is carried through related-entity navigation so the
  * shell's explicit Back action still returns to the root activation surface.
  */
-export const makeWorkspaceEntityRouteState = (
-  state: unknown,
+export const makeWorkspaceEntityRouteState = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   entityId: EntityIdType,
   origin: WorkspaceEntityOrigin
@@ -188,8 +188,8 @@ export const makeWorkspaceEntityRouteState = (
 })
 
 /** Decode safe history state for the exact workspace/entity pair or use the Items parent. */
-export const resolveWorkspaceEntityOrigin = (
-  state: unknown,
+export const resolveWorkspaceEntityOrigin = <UnparsedInput>(
+  state: UnparsedInput,
   workspaceId: WorkspaceIdType,
   entityId: EntityIdType
 ): ResolvedWorkspaceEntityOrigin => {
@@ -233,20 +233,22 @@ export const workspaceEntityAgentPath = (
 ): string => {
   const originRelease = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
   const canonicalReleaseId = releaseContext.canonicalReleaseId
-  const releasePath = originRelease === null
+  const releaseTargetId = originRelease === null
     ? releaseContext.releaseMembershipsTruncated ||
         releaseContext.releaseIds.length !== 1 ||
         releaseContext.releaseIds[0] !== canonicalReleaseId ||
         canonicalReleaseId === null ||
         !routableReleaseIds.has(canonicalReleaseId)
       ? null
-      : releaseAgentPath(workspaceId, canonicalReleaseId)
+      : canonicalReleaseId
     : !releaseContext.releaseMembershipsTruncated &&
         releaseContext.releaseIds.includes(originRelease.releaseId) &&
         routableReleaseIds.has(originRelease.releaseId)
-    ? releaseAgentPath(workspaceId, originRelease.releaseId)
+    ? originRelease.releaseId
     : null
-  if (releasePath !== null) return releasePath
+  if (releaseTargetId !== null) {
+    return contextualReleaseAgentPath(workspaceId, releaseTargetId, current.pathname)
+  }
 
   const entity = workspaceEntityTargetFromHref(current.pathname)
   if (entity === null || entity.workspaceId !== workspaceId) {

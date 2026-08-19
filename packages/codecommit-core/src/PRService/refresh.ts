@@ -2,17 +2,17 @@
  * @internal
  */
 
-import { Cause, Clock, DateTime, Effect, Predicate, SubscriptionRef } from "effect"
+import { Clock, DateTime, Effect, Predicate, Result, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import type { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import type { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import type { ConfigService } from "../ConfigService/index.js"
 import type { AppStatus } from "../Domain.js"
-import type { PRState } from "./internal.js"
+import { decodeCachedPR, type PRState } from "./internal.js"
 import { enrichDiffs } from "./refreshDiffs.js"
 import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
@@ -21,6 +21,25 @@ import { calculateHealthScores } from "./refreshScore.js"
 
 const idleStatus: AppStatus = "idle"
 const errorStatus: AppStatus = "error"
+
+const refreshErrorMessage = <UnparsedInput>(error: UnparsedInput): string =>
+  Result.try(() => String(Predicate.isError(error) ? error.message : error) || "Unknown error").pipe(
+    Result.getOrElse(() => "Unknown error")
+  )
+
+const transitionToRefreshError = <UnparsedInput>(state: PRState, error: UnparsedInput) =>
+  SubscriptionRef.update(state, (current) => ({
+    ...current,
+    status: errorStatus,
+    error: refreshErrorMessage(error)
+  }))
+
+const publishCachedPullRequests = (state: PRState) =>
+  Effect.gen(function*() {
+    const prRepo = yield* PullRequestRepo
+    const pullRequests = (yield* prRepo.findAll()).map((row) => decodeCachedPR(row))
+    yield* SubscriptionRef.update(state, (current) => ({ ...current, pullRequests }))
+  })
 
 export type RefreshDeps =
   | ConfigService
@@ -44,12 +63,23 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     const staleNow = yield* Clock.currentTimeMillis
     const staleThreshold = DateTime.toDate(DateTime.makeUnsafe(staleNow)).toISOString().slice(0, 19) + "Z"
 
-    yield* hub.batch(
+    const successfulRefreshScopes = yield* hub.batch(
       Effect.gen(function*() {
-        yield* fetchAndUpsertPRs({ state, enabledAccounts, accountIdMap, subscribedRef, currentUser, staleThreshold })
+        const scopes = yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts,
+          accountIdMap,
+          subscribedRef,
+          currentUser,
+          staleThreshold
+        })
         yield* enrichComments({ state, subscribedRef })
         yield* enrichDiffs(state)
         yield* calculateHealthScores(state)
+        // All enrichment writes land in the cache. Publish that final snapshot
+        // during this refresh so newly fetched PRs do not require a second run.
+        yield* publishCachedPullRequests(state)
+        return scopes
       })
     )
 
@@ -58,7 +88,8 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
       status: idleStatus,
-      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now))
+      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
+      successfulRefreshScopes
     }))
 
     // Sync metadata
@@ -78,10 +109,11 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
   (effect, state) =>
     effect.pipe(
       Effect.timeout("120 seconds"),
-      Effect.catchCause((cause) => {
-        const squashed = Cause.squash(cause)
-        const errorStr = (Predicate.isError(squashed) ? squashed.message : String(squashed)) || "Unknown error"
-        return SubscriptionRef.update(state, (s) => ({ ...s, status: errorStatus, error: errorStr }))
-      })
+      Effect.catch((error) => transitionToRefreshError(state, error)),
+      Effect.tapDefect((defect) =>
+        Effect.logError("PRService.refresh defect", defect).pipe(
+          Effect.andThen(transitionToRefreshError(state, defect))
+        )
+      )
     )
 )

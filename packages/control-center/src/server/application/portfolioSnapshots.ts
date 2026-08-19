@@ -1,3 +1,4 @@
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -6,16 +7,25 @@ import type {
   PortfolioReadinessSummary,
   PortfolioRelationshipCounts,
   PortfolioReleaseCollaborator,
+  PortfolioReleasePageAwareness,
   PortfolioReleaseRole,
   PortfolioSnapshot
 } from "../../api/portfolio.js"
 import { derivePersonInitials, type Role } from "../../domain/actors.js"
 import { evaluateFreshnessAt } from "../../domain/freshness.js"
+import type { ReleaseId } from "../../domain/identifiers.js"
 import type { Release } from "../../domain/release.js"
 import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/ApplicationServices.js"
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
+import type { GovernedActionRecord } from "../persistence/repositories/governed-action/contract.js"
 import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
+import {
+  digestReleaseSourceRevisions,
+  latestConfluencePublicationReference,
+  type ReleasePublicationReceiptCandidate,
+  releasePublicationReceiptCandidatesFromRecords
+} from "./releasePublicationMetadata.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_COMPACT_COLLABORATORS = 50
@@ -95,8 +105,102 @@ const releaseRelationships = Effect.fn("PortfolioSnapshots.releaseRelationships"
   } satisfies PortfolioRelationshipCounts
 })
 
+/** Compare the synchronized release projection with the latest successful page publication. */
+export const classifyReleasePageAwareness = (
+  releaseUpdatedAt: Release["updatedAt"],
+  lastPublishedAt: Release["updatedAt"] | null
+): PortfolioReleasePageAwareness["state"] =>
+  lastPublishedAt === null
+    ? "not-published"
+    : DateTime.Order(releaseUpdatedAt, lastPublishedAt) > 0
+    ? "stale"
+    : "current"
+
+const unknownPageAwareness = (): PortfolioReleasePageAwareness => ({
+  state: "unknown",
+  lastPublishedAt: null
+})
+const notPublishedPageAwareness = (): PortfolioReleasePageAwareness => ({
+  state: "not-published",
+  lastPublishedAt: null
+})
+
+/** Fail closed when successful publication history has no supported durable receipt locator. */
+export const classifyReleasePublicationAwareness = (
+  release: Release,
+  publications: ReadonlyArray<ReleasePublicationReceiptCandidate>,
+  currentSourceRevisionDigest: ReleasePublicationReceiptCandidate["sourceRevisionDigest"]
+): PortfolioReleasePageAwareness => {
+  const page = latestConfluencePublicationReference(publications, release.id)
+  if (page === null) {
+    return publications.length === 0
+      ? { state: "not-published", lastPublishedAt: null }
+      : unknownPageAwareness()
+  }
+  return {
+    state: page.sourceRevisionDigest === currentSourceRevisionDigest ? "current" : "stale",
+    lastPublishedAt: page.publishedAt,
+    publicationActionId: page.publicationActionId
+  }
+}
+
+const releasePageAwareness = Effect.fn("PortfolioSnapshots.releasePageAwareness")(function*(
+  release: Release,
+  records: ReadonlyArray<GovernedActionRecord>
+) {
+  const candidates = releasePublicationReceiptCandidatesFromRecords(records)
+  if (records.length > 0 && candidates.length === 0) return unknownPageAwareness()
+  if (candidates.length === 0) return notPublishedPageAwareness()
+  const currentSourceRevisionDigest = yield* digestReleaseSourceRevisions(release.sourceRevisions)
+  return classifyReleasePublicationAwareness(release, candidates, currentSourceRevisionDigest)
+})
+
+/**
+ * Load release publication awareness with one indexed history projection.
+ *
+ * Any projection failure makes every requested release unknown so callers
+ * cannot mistake unavailable or malformed history for permission to republish.
+ */
+export const loadReleasePageAwareness = Effect.fn(
+  "PortfolioSnapshots.loadReleasePageAwareness"
+)(function*(
+  history: Pick<
+    PersistenceService["governedActions"],
+    "readLatestTerminalReleasePublications"
+  >,
+  releases: ReadonlyArray<Release>
+) {
+  const firstRelease = releases[0]
+  if (firstRelease === undefined) return new Map<ReleaseId, PortfolioReleasePageAwareness>()
+  return yield* history.readLatestTerminalReleasePublications({
+    workspaceId: firstRelease.workspaceId,
+    providerId: "confluence",
+    releaseIds: releases.map(({ id }) => id)
+  }).pipe(
+    Effect.flatMap((records) => {
+      const recordsByReleaseId = new Map<ReleaseId, typeof records>()
+      for (const record of records) {
+        const releaseId = record.envelope.releasePublication?.releaseId
+        if (releaseId === undefined) continue
+        recordsByReleaseId.set(releaseId, [record])
+      }
+      return Effect.forEach(releases, (release) =>
+        Effect.map(
+          releasePageAwareness(release, recordsByReleaseId.get(release.id) ?? []),
+          (awareness) => [release.id, awareness] satisfies readonly [ReleaseId, PortfolioReleasePageAwareness]
+        )).pipe(Effect.map((entries) => new Map(entries)))
+    }),
+    Effect.catch(() =>
+      Effect.succeed(
+        new Map(releases.map((release) => [release.id, unknownPageAwareness()]))
+      )
+    )
+  )
+})
+
 /** Construct the bird's-eye projection from persisted facts only. */
 export const makePortfolioSnapshots = Effect.gen(function*() {
+  const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
 
   return PortfolioSnapshots.of({
@@ -116,6 +220,10 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
             summarizeReleaseReadiness(record)
           ])
         )
+        const pageAwarenessByReleaseId = yield* loadReleasePageAwareness(
+          persistence.governedActions,
+          releases.map(({ release }) => release)
+        ).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
         const releaseSummaries = yield* Effect.forEach(releases, ({ release }) =>
           Effect.gen(function*() {
             const collaboratorProjection = yield* releaseCollaborators(persistence, release)
@@ -123,6 +231,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
             const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
               Effect.mapError(() => unavailable())
             )
+            const pageAwareness = pageAwarenessByReleaseId.get(release.id) ?? unknownPageAwareness()
             return {
               releaseId: release.id,
               serviceName: release.serviceName,
@@ -136,6 +245,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               readiness: readinessByReleaseId.get(release.id) ?? null,
               relationships,
               sourceRevisionCount: release.sourceRevisions.length,
+              releasePageAwareness: pageAwareness,
               updatedAt: release.updatedAt
             }
           }))

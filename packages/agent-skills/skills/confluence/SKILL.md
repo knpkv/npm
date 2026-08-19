@@ -13,8 +13,11 @@ Use the `confluence` binary to manage a local markdown mirror of Confluence Clou
 - Authenticate before clone or sync with `confluence auth create`, `confluence auth configure`, and `confluence auth login`.
 - For multi-account or multi-site setups, inspect `confluence auth profiles` and switch with `confluence auth use <profile>` before pulling or pushing content. When the `atlassian` binary is available, use `atlassian profiles doctor` to check Jira, Confluence, and Jira Clockify profile state together.
 - Use OAuth for normal operation. API-token env vars may be available as `CONFLUENCE_API_KEY` and `CONFLUENCE_EMAIL`.
-- Confirm before running `confluence sync push`, because it writes to Confluence.
+- Confirm before running `confluence sync push`, because it writes to Confluence. `--force` additionally pushes a page markdown cannot round-trip, which corrupts the nodes the refusal was protecting — confirm it separately.
+- Confirm before running `confluence page create`, `confluence page put`, and `confluence page patch`, because each writes to Confluence directly, bypassing the markdown workspace.
 - Confirm before running `confluence page delete`, because it removes a local page that will be deleted remotely on the next push.
+- Confirm before running `confluence folder create`, because it writes to Confluence immediately; use `--dry-run` first to report what would be created.
+- `confluence folder` and `confluence search` work against the site directly, not the local mirror, so they need `--base-url` (or a folder URL that carries its own site) rather than a `.confluence/` workspace.
 - Treat `confluence page get --clean-markdown` output as read-only/export output. Do not push it back unless the user explicitly accepts metadata loss.
 
 ## Setup
@@ -23,6 +26,7 @@ Use the `confluence` binary to manage a local markdown mirror of Confluence Clou
 confluence auth status
 confluence auth create
 confluence auth configure --client-id <id> --client-secret <secret>
+confluence auth manage
 confluence auth login
 confluence auth login --site https://example.atlassian.net
 confluence auth profiles
@@ -103,6 +107,36 @@ confluence sync commit --message "Delete obsolete page"
 confluence sync push
 ```
 
+## Folders
+
+Folders are containers with no body, so the page commands do not address them: `/pages/{id}` 404s on a folder id and vice versa. `--folder-id` accepts a bare numeric id or a folder URL; a folder URL supplies its own site, so `--base-url` is only needed alongside a bare id.
+
+```bash
+confluence folder get --url "https://example.atlassian.net/wiki/spaces/PROJ/folder/12345/OOB-100"
+confluence folder get --folder-id 12345 --base-url https://example.atlassian.net --json
+confluence folder children --folder-id 12345 --base-url https://example.atlassian.net --json
+```
+
+Create a folder (remote write — confirm first, and `--space` takes the numeric space id, not the space key):
+
+```bash
+confluence folder create --base-url https://example.atlassian.net --space 98765 --title "OOB 100" --dry-run
+confluence folder create --base-url https://example.atlassian.net --space 98765 --title "OOB 100" --parent 12345
+```
+
+`--parent` accepts a numeric id, a page URL, or a folder URL.
+
+Content ids are per-site, so a site mismatch is refused rather than acted on: a `--base-url` that disagrees with the URL, a `--parent` from another site, and — under OAuth — a `--base-url` that is not the active profile's site. OAuth requests route by the profile's cloud id and ignore `--base-url`, so switch with `confluence auth use <profile>` rather than expecting `--base-url` to select the site.
+
+## Search
+
+CQL is the only way to find content by title or by parent — there is no "children of X by title" endpoint, and folder ids appear in no page's front-matter. `search` returns one page of results and reports when Confluence has more.
+
+```bash
+confluence search --base-url https://example.atlassian.net --cql 'title ~ "OOB 100" AND type = page'
+confluence search --base-url https://example.atlassian.net --cql 'parent = 12345 AND type = page' --limit 50 --json
+```
+
 ## Element Fidelity
 
 Confluence pages are stored as Atlassian Document Format (ADF). The CLI emits readable Markdown where possible and exact `<!-- adf:... -->` placeholders/sidecars where Markdown cannot represent the element safely.
@@ -133,7 +167,7 @@ Use this quick reference before editing complex pages. It names every ADF elemen
 | Expands: `expand`, `nestedExpand`                                                    | Visible title/body wrapped with exact ADF metadata                                       | Keep markers paired; avoid moving only one side of the wrapper.                                                                 |
 | Layouts: `layoutSection`, `layoutColumn`                                             | Visible column content wrapped with exact ADF metadata                                   | Avoid manual reflow unless the user accepts layout loss.                                                                        |
 | Cards: `inlineCard`, `blockCard`, `embedCard`                                        | URL cards when resolvable; otherwise unsupported/placeholder output                      | Do not delete `adf:*Card` refs unless replacing the card.                                                                       |
-| Media blocks: `mediaSingle`, `mediaGroup`, `media`, `caption`                        | Image Markdown when a URL exists; otherwise `adf:media` placeholder; captions as text    | Warn that attachments and media metadata are not fully supported; captions may not round-trip structurally.                     |
+| Media blocks: `mediaSingle`, `mediaGroup`, `media`, `caption`                        | Image Markdown when an attachment URL is known; native media identity in ADF metadata    | Preserve `adf:mediaSingle` / `adf:mediaGroup` markers and sidecars; captions may not round-trip structurally.                   |
 | Inline media: `mediaInline`                                                          | `adf:media` placeholder                                                                  | Treat as unsupported media; preserve the placeholder.                                                                           |
 | Macros/extensions: `extension`, `inlineExtension`, `bodiedExtension`                 | Native syntax for simple TOC; otherwise exact placeholder comments with sidecar metadata | Preserve macro markers. For TOC, `[[toc]]` and `[[toc:min=2,max=4]]` are supported; richer TOC attrs fall back to placeholders. |
 | Text marks: `strong`, `em`, `strike`                                                 | Native Markdown                                                                          | Safe.                                                                                                                           |
@@ -153,4 +187,5 @@ Clean fetch mode removes `adf:` comments from stdout for readability. It is usef
 4. Preserve `<!-- adf:... -->` markers, `.adf.json` sidecars, front matter, and custom Confluence links unless the user explicitly asks for a lossy cleanup.
 5. Use `confluence sync commit` instead of raw git for normal sync commits so external docs paths are copied into `.confluence/`.
 6. Use `confluence sync push --dry-run` before `confluence sync push`.
-7. Mention fidelity limits when editing complex Confluence content: media, cards, macros, panels, task lists, expand sections, layouts, dates, emojis, and some marks may not round-trip exactly.
+7. Use `confluence page attachment upload <page-id> <file> --document <markdown>` to add a local file as a page attachment and replace matching Markdown image/link placeholders with a native media reference.
+8. Mention fidelity limits when editing complex Confluence content: media captions, cards, macros, panels, task lists, expand sections, layouts, dates, emojis, and some marks may not round-trip exactly.

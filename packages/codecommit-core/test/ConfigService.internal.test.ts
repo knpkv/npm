@@ -53,6 +53,17 @@ output = json`
     expect(result[0]!.region).toBeUndefined()
   })
 
+  it("treats blank and whitespace-only regions as absent", () => {
+    const result = parseAwsConfig(`[profile blank]
+region =
+
+[profile whitespace]
+region =   `)
+
+    expect(result).toHaveLength(2)
+    expect(result.every(({ region }) => region === undefined)).toBe(true)
+  })
+
   // Duplicate profile names should be deduplicated (first wins)
   it("deduplicates profiles by name", () => {
     const content = `[profile dup]

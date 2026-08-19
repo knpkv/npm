@@ -5,6 +5,7 @@
  */
 import * as Data from "effect/Data"
 import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 
 /**
  * Error thrown when .confluence.json is not found.
@@ -120,7 +121,7 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
     const message = params?.retryAfter
       ? `Rate limited. Retry after ${params.retryAfter}s.`
       : "Rate limited. Please wait and try again."
-    super({ retryAfter: params?.retryAfter, message })
+    super({ ...((params?.retryAfter !== undefined) && { retryAfter: params.retryAfter }), message })
   }
 }
 
@@ -160,7 +161,7 @@ export interface AdfSchemaIssue {
   readonly schemaPath?: string
   readonly keyword?: string
   readonly message?: string
-  readonly params?: Record<string, unknown>
+  readonly params?: Record<string, Schema.Json>
 }
 
 /**
@@ -319,11 +320,43 @@ export class AttachmentResolutionError extends Data.TaggedError("AttachmentResol
 }
 
 /**
+ * Error thrown when a push would send a page through the markdown projection
+ * that the projection cannot represent.
+ *
+ * Datasource cards and extensions have no markdown spelling, so converting
+ * them out and back silently mangles them. Rather than write the damage, the
+ * push stops and points at the ADF path.
+ *
+ * @category Errors
+ */
+export class RoundTripUnsafeError extends Data.TaggedError("RoundTripUnsafeError")<{
+  readonly pageId: string
+  readonly path: string
+  readonly nodeTypes: ReadonlyArray<string>
+  readonly message: string
+}> {
+  constructor(params: { pageId: string; path: string; nodeTypes: ReadonlyArray<string> }) {
+    super({
+      ...params,
+      message: `${params.path} contains ${params.nodeTypes.join(", ")} node(s) that markdown cannot ` +
+        `represent, so pushing it would corrupt them.\n` +
+        `  Edit it as ADF instead:\n` +
+        `    confluence page get --page-id ${params.pageId} --base-url <site> --format adf > page.json\n` +
+        `    confluence page put --page-id ${params.pageId} --base-url <site> --adf page.json --if-version <n>\n` +
+        `  --if-version is the version 'page get' printed to stderr; without it a write lands on whatever\n` +
+        `  the current version is and would overwrite an edit made in Confluence in between.\n` +
+        `  Or make a targeted edit with 'confluence page patch'. Use --force to push anyway.`
+    })
+  }
+}
+
+/**
  * Union of all Confluence errors.
  *
  * @category Errors
  */
 export type ConfluenceError =
+  | RoundTripUnsafeError
   | ConfigNotFoundError
   | ConfigParseError
   | ConfigError
@@ -348,9 +381,9 @@ export type ConfluenceError =
  *
  * @category Utilities
  */
-export const isConfluenceError = (error: unknown): error is ConfluenceError =>
+export const isConfluenceError = <UnparsedInput>(error: UnparsedInput): error is UnparsedInput & ConfluenceError =>
   Predicate.hasProperty(error, "_tag") &&
-  typeof error._tag === "string" &&
+  Predicate.isString(error._tag) &&
   [
     "ConfigNotFoundError",
     "ConfigParseError",
@@ -366,5 +399,6 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "OAuthError",
     "FrontMatterError",
     "StructureError",
-    "AttachmentResolutionError"
+    "AttachmentResolutionError",
+    "RoundTripUnsafeError"
   ].includes(error._tag)

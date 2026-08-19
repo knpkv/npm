@@ -25,6 +25,8 @@ export function Dialog({ children, fullscreen = false, title }: DialogProps) {
         height: fullscreen ? "100%" : "auto",
         flexDirection: "column",
         backgroundColor: theme.backgroundPanel,
+        border: true,
+        borderColor: theme.borderStrong,
         padding: 0
       }}
     >
@@ -32,12 +34,13 @@ export function Dialog({ children, fullscreen = false, title }: DialogProps) {
         style={{
           height: 1,
           width: "100%",
-          backgroundColor: theme.backgroundElement,
-          paddingLeft: 2,
+          backgroundColor: theme.backgroundPanel,
+          paddingLeft: 1,
           paddingRight: 2
         }}
       >
-        <text fg={theme.textWarning}>{`  ${title}`}</text>
+        <text fg={theme.textAccent}>CODECOMMIT / </text>
+        <text fg={theme.text}>{title}</text>
       </box>
       <box style={{ flexDirection: "column", padding: 1, flexGrow: 1 }}>{children}</box>
     </box>

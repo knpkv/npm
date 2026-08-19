@@ -14,7 +14,7 @@ import {
   CommandSeparator
 } from "./ui/command.js"
 
-const FILTER_LABELS: Record<FilterKey, string> = {
+const FILTER_LABELS = {
   account: "Account",
   author: "Author",
   approver: "Approver",
@@ -23,7 +23,7 @@ const FILTER_LABELS: Record<FilterKey, string> = {
   repo: "Repo",
   status: "Status",
   size: "Size"
-}
+} satisfies Record<FilterKey, string>
 
 export function CommandPalette() {
   const isOpen = useAtomValue(commandPaletteAtom)

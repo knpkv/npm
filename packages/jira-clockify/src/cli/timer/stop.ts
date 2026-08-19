@@ -299,7 +299,7 @@ export const stop = Command.make(
         projectId: stopProjectId,
         billable: stopBillable,
         comment: comment.trim() || undefined,
-        ...(endedAt ? { endedAt } : {})
+        ...(endedAt && { endedAt })
       }).pipe(
         Effect.catch((e: TimerError) =>
           Console.log(`Error: ${e.message}`).pipe(Effect.flatMap(() => Effect.succeed(null)))

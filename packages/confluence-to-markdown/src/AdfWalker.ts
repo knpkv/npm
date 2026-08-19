@@ -8,6 +8,7 @@
  */
 import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { sanitizeConfluenceMediaAlt } from "./internal/mediaAlt.js"
 
 /**
@@ -33,7 +34,7 @@ export interface WalkResult {
 
 interface AdfNode {
   readonly type: string
-  readonly attrs?: Record<string, unknown>
+  readonly attrs?: Record<string, Schema.Json>
   readonly content?: ReadonlyArray<AdfNode>
   readonly text?: string
   readonly marks?: ReadonlyArray<AdfNode>
@@ -43,6 +44,9 @@ interface Ctx {
   readonly inTable: boolean
   readonly warnings: Array<WalkerWarning>
 }
+
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const isJsonObject = Schema.is(JsonObject)
 
 // Mid-line characters that change inline parsing in GFM. We deliberately omit
 // `.` and `-` because they only carry meaning at line-start (numbered lists,
@@ -94,16 +98,16 @@ const escapeLineStarts = (s: string): string => s.split("\n").map(escapeLineStar
 
 const attrStr = (n: AdfNode, key: string): string | undefined => {
   const v = n.attrs?.[key]
-  return typeof v === "string" ? v : undefined
+  return Predicate.isString(v) ? v : undefined
 }
 const attrNum = (n: AdfNode, key: string): number | undefined => {
   const v = n.attrs?.[key]
-  return typeof v === "number" ? v : undefined
+  return Predicate.isNumber(v) ? v : undefined
 }
 
-const attrRecord = (n: AdfNode, key: string): Record<string, unknown> | undefined => {
+const attrRecord = (n: AdfNode, key: string): Record<string, Schema.Json> | undefined => {
   const v = n.attrs?.[key]
-  return Predicate.isObject(v) ? v : undefined
+  return isJsonObject(v) ? v : undefined
 }
 
 const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
@@ -112,7 +116,7 @@ const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
 // recursively so the same attrs always produce the same marker/sidecar data,
 // no matter what order Confluence happens to serialize them in. Keeps pull →
 // push → pull a byte-level fixed point (and contentHash stable).
-const stableStringify = (v: unknown): string => {
+const stableStringify = <UnparsedInput>(v: UnparsedInput): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
   if (Predicate.isObject(v)) {
     const entries = Object.entries(v)
@@ -124,19 +128,19 @@ const stableStringify = (v: unknown): string => {
   return JSON.stringify(v) ?? "null"
 }
 
-const toAdfNode = (value: unknown): AdfNode => {
+const toAdfNode = <UnparsedInput>(value: UnparsedInput): AdfNode => {
   if (!Predicate.isObject(value)) return { type: "unknown" }
-  const type = Reflect.get(value, "type")
-  const attrs = Reflect.get(value, "attrs")
-  const content = Reflect.get(value, "content")
-  const text = Reflect.get(value, "text")
-  const marks = Reflect.get(value, "marks")
+  const type = Predicate.hasProperty(value, "type") ? value.type : undefined
+  const attrs = Predicate.hasProperty(value, "attrs") ? value.attrs : undefined
+  const content = Predicate.hasProperty(value, "content") ? value.content : undefined
+  const text = Predicate.hasProperty(value, "text") ? value.text : undefined
+  const marks = Predicate.hasProperty(value, "marks") ? value.marks : undefined
   return {
-    type: typeof type === "string" ? type : "unknown",
-    ...(Predicate.isObject(attrs) ? { attrs } : {}),
-    ...(Array.isArray(content) ? { content: content.map(toAdfNode) } : {}),
-    ...(typeof text === "string" ? { text } : {}),
-    ...(Array.isArray(marks) ? { marks: marks.map(toAdfNode) } : {})
+    type: Predicate.isString(type) ? type : "unknown",
+    ...((isJsonObject(attrs)) && { attrs }),
+    ...((Array.isArray(content)) && { content: content.map(toAdfNode) }),
+    ...((Predicate.isString(text)) && { text }),
+    ...((Array.isArray(marks)) && { marks: marks.map(toAdfNode) })
   }
 }
 
@@ -232,20 +236,23 @@ const extensionPlaceholder = (
   return `<!-- adf:${nodeType}${keyPart}${typePart}${attrsPart} -->`
 }
 
-const objectKeys = (v: Record<string, unknown> | undefined): ReadonlyArray<string> => Object.keys(v ?? {})
-const isOnlyKeys = (v: Record<string, unknown> | undefined, keys: ReadonlyArray<string>): boolean => {
+const objectKeys = (v: Record<string, Schema.Json> | undefined): ReadonlyArray<string> => Object.keys(v ?? {})
+const isOnlyKeys = (v: Record<string, Schema.Json> | undefined, keys: ReadonlyArray<string>): boolean => {
   const allowed = new Set(keys)
   return objectKeys(v).every((key) => allowed.has(key))
 }
 
-const tocLevel = (macroParams: Record<string, unknown> | undefined, key: "minLevel" | "maxLevel"): string | null => {
+const tocLevel = (
+  macroParams: Record<string, Schema.Json> | undefined,
+  key: "minLevel" | "maxLevel"
+): string | null => {
   const param = macroParams?.[key]
   if (param === undefined) return null
-  if (!Predicate.isObject(param)) return null
+  if (!isJsonObject(param)) return null
   const record = param
   if (!isOnlyKeys(record, ["value"])) return null
   const value = record["value"]
-  return typeof value === "string" && /^[1-6]$/.test(value) ? value : null
+  return Predicate.isString(value) && /^[1-6]$/.test(value) ? value : null
 }
 
 const tocMarkdown = (n: AdfNode): string | null => {
@@ -259,7 +266,7 @@ const tocMarkdown = (n: AdfNode): string | null => {
   if (!isOnlyKeys(parameters, ["macroParams"])) return null
 
   const macroParams = parameters["macroParams"]
-  if (!Predicate.isObject(macroParams)) return null
+  if (!isJsonObject(macroParams)) return null
   const macroParamRecord = macroParams
   if (!isOnlyKeys(macroParamRecord, ["minLevel", "maxLevel"])) return null
 
@@ -582,7 +589,7 @@ const cardUrl = (n: AdfNode): string | undefined => {
   if (url) return url
   const data = attrRecord(n, "data")
   const dataUrl = data?.["url"]
-  return typeof dataUrl === "string" ? dataUrl : undefined
+  return Predicate.isString(dataUrl) ? dataUrl : undefined
 }
 
 const blockCard = (n: AdfNode, ctx: Ctx): string => {
@@ -644,7 +651,7 @@ const mediaGroup = (n: AdfNode, ctx: Ctx): string =>
  * Walk an ADF document and emit GFM markdown. Always synchronous; warnings
  * are collected, not thrown.
  */
-export const walk = (doc: unknown): WalkResult => {
+export const walk = <UnparsedInput>(doc: UnparsedInput): WalkResult => {
   const ctx: Ctx = { inTable: false, warnings: [] }
   const root = toAdfNode(doc)
   const blocks = (root.content ?? []).map((c) => block(c, ctx))

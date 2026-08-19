@@ -1,0 +1,155 @@
+---
+title: Control Center Operations
+description: Operate lifecycle, telemetry, recovery, backups, retention, and release acceptance gates.
+---
+
+## Process lifecycle
+
+`SIGINT` and `SIGTERM` start graceful drain. The server rejects new mutations and live streams with a
+retryable `503`, closes existing streams, and gives admitted mutations and startup jobs up to ten
+seconds to finish. Release chat, PR review, synchronization, retention, governed-action recovery, and
+OAuth timers share that admission barrier.
+
+After work drains, named subsystem hooks flush sequentially. SQLite checkpoints and truncates its WAL.
+Worker leases and recovery claims remain durable, so an interrupted process does not turn ambiguous
+provider work into an automatic replay.
+
+## OpenTelemetry
+
+Trace and structured-log export is opt-in. Metrics are not exported in this phase. To send OTLP/HTTP
+JSON to a local collector:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:27686 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
+OTEL_LOGS_EXPORTER=otlp \
+OTEL_TRACES_EXPORTER=otlp \
+pnpm --filter @knpkv/control-center start
+```
+
+Standard signal-specific endpoint, protocol, header, and service-name variables are supported.
+Without an explicit endpoint, OpenTelemetry uses `http://localhost:4318` with `/v1/logs` and
+`/v1/traces`. Exporters flush bounded batches during scoped shutdown; collector outages do not fail
+application work.
+
+Review prompts, provider content, secrets, filesystem paths, and raw failures do not belong in
+telemetry. Operational events use bounded identifiers and safe failure classifications.
+
+## Owner recovery
+
+If no owner session remains or the initial code was lost, stop the server and run:
+
+```bash
+pnpm --filter @knpkv/control-center start recover-owner
+```
+
+Recovery verifies the canonical private data directory and requires the exact phrase printed by the
+command. Success revokes existing owner sessions and outstanding pairing codes before printing one
+replacement code. Recovery is terminal-only and has no HTTP route.
+
+## Offline backup and restore
+
+Stop Control Center and every process that can write the data root. Never copy live SQLite files.
+
+```bash
+CONTROL_CENTER_DATA_ROOT=/srv/control-center \
+pnpm --filter @knpkv/control-center start backup /srv/control-center-backups/2026-07-30
+
+pnpm --filter @knpkv/control-center start verify-backup /srv/control-center-backups/2026-07-30
+
+CONTROL_CENTER_DATA_ROOT=/srv/control-center-restored \
+pnpm --filter @knpkv/control-center start restore /srv/control-center-backups/2026-07-30
+```
+
+- `backup <archive>` reads the existing prepared data root. It never creates, adopts, repairs, or
+  migrates the source.
+- `verify-backup <archive>` reads only the archive and ignores `CONTROL_CENTER_DATA_ROOT`.
+- `restore <archive>` requires a destination that does not exist, including as a dangling symlink.
+  It verifies before publication and never overwrites a concurrent target.
+
+Source, archive, and destination must not contain one another. A backup can remain usable with
+explicit reproducible-cache gaps because those bytes can be fetched again; durable database, secret,
+and non-reproducible content failures are fatal.
+
+Normal startup still requires a restored database to match the exact current unstable schema
+snapshot. Backup is disaster recovery for the same snapshot, not a migration mechanism.
+
+## Data-root integrity
+
+A fresh data root is published as a private sibling directory plus an atomic relative symlink claim.
+Treat the configured symlink and its sibling target as one unit. While every writer is stopped, move
+or back up the containing parent tree rather than dereferencing only the configured pathname.
+
+Startup validates owner, permissions, marker binding, database integrity, required SQLite pragmas,
+and exact schema. It fails closed on a lost claim, ambiguous sibling, damaged database, or unsupported
+marker shape. It does not silently repair, reset, or migrate durable state.
+
+Secure blob reads require verified descriptor aliases at `/proc/self/fd` or `/dev/fd`. Hosts without
+either alias fail with a typed containment error; the store does not fall back to trusting a replaced
+pathname.
+
+## Retention and startup recovery
+
+An explicitly bootstrapped workspace runs one bounded retention pass at startup and daily thereafter:
+
+- replay rows advance a durable pruned cursor;
+- reproducible diff-cache mappings use cleanup intents;
+- evidence requires expiry, no legal hold, and no authoritative reference;
+- agent history must be terminal, unpublished, and unreferenced.
+
+Canonical governed actions, settings, exports, and cleanup audit records remain immutable. Every
+committed pass records workspace, retention class, policy revision, cutoff, bound, selected/deleted
+counts, and completion time.
+
+Startup also reconciles stale PR-review sandboxes and interrupted synchronization attempts. The
+governed worker inspects at most 64 recovery-safe actions in stable order and never redispatches an
+ambiguous provider mutation.
+
+## Synchronization
+
+Services exposes never-attempted, running, synchronized, and source-unavailable states for supported
+connections. **Sync now** invokes the workspace-scoped endpoint and records an immutable attempt before
+provider acquisition. A page and its checkpoint commit atomically. Cancellation, defects, and
+persistence failures cannot become successful synchronization records.
+
+Provider pages, concurrency, response bytes, event payloads, and complete plugin pages all have
+explicit bounds. Truncation and resumable checkpoints remain visible rather than claiming a complete
+snapshot.
+
+## Acceptance and benchmark gates
+
+Run the package browser and benchmark gates:
+
+```bash
+pnpm --filter @knpkv/control-center test:e2e
+pnpm --filter @knpkv/control-center benchmark:contracts
+pnpm --filter @knpkv/control-center benchmark:runtime
+pnpm --filter @knpkv/control-center benchmark:validate-runtime
+```
+
+The browser suite covers every public and authenticated route family under keyboard navigation,
+serious/critical WCAG 2.2 AA rules, a 320 CSS-pixel viewport, forced colors, and reduced motion. It
+also pairs through the documented trusted HTTPS proxy and scans browser-readable surfaces for
+forbidden credentials.
+
+The large deterministic fixture contains 100 releases, 2,000 entities, 10,000
+relationships/evidence records, 500 files, 20,000 timeline events, and a 500-event SSE replay.
+`benchmark:runtime` writes:
+
+```text
+packages/control-center/test-results/control-center/runtime-benchmark.json
+```
+
+Absolute timing is enforced only on Linux x64 or arm64 with Node 26+, four logical CPUs, 8 GiB RAM,
+and `CONTROL_CENTER_BENCHMARK_STORAGE_CLASS=local-ssd`. Other environments still prove cardinality,
+ordering, lifecycle, SSE, and cleanup contracts but report timing as informational.
+
+For the complete repository gate:
+
+```bash
+pnpm verify:full
+pnpm test:browser
+```
+
+CI uploads the validated runtime report as the `control-center-runtime-benchmark` artifact and fails
+if the evidence file is absent.

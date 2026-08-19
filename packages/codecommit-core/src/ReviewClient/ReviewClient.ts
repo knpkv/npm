@@ -10,15 +10,24 @@ import { identityMatches } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../ReadClient/errors.js"
 import type { CodeCommitAccountIdentity, CodeCommitPullRequestRevision } from "../ReadClient/models.js"
-import { CodeCommitReadClient } from "../ReadClient/ReadClient.js"
+import {
+  CodeCommitReadClient,
+  decodeAccountIdentityProviderResponse,
+  decodeRepositoryIdentityProviderResponse
+} from "../ReadClient/ReadClient.js"
 import { CodeCommitReviewConflictError, type CodeCommitReviewError } from "./errors.js"
 import {
+  type CodeCommitMergeTarget,
   type CodeCommitReviewAction,
   CodeCommitReviewReceipt,
   type CodeCommitReviewReconciliation,
   type CodeCommitReviewTarget
 } from "./models.js"
-import { CodeCommitReviewProvider, CodeCommitReviewProviderLive } from "./ReviewProvider.js"
+import {
+  type CodeCommitMergeAuthorizationEvidence,
+  CodeCommitReviewProvider,
+  CodeCommitReviewProviderLive
+} from "./ReviewProvider.js"
 
 const MAXIMUM_COMMENT_PAGES = 20
 const COMMENT_MARKER_PREFIX = "<!-- knpkv-codecommit-review:"
@@ -38,10 +47,18 @@ const RawApprovalStates = Schema.Struct({
   })))
 })
 
+const RawMergeResponse = Schema.Struct({
+  pullRequest: Schema.Struct({
+    pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    pullRequestStatus: Schema.Literal("CLOSED")
+  })
+})
+
 const RawCommentsPage = Schema.Struct({
   commentsForPullRequestData: Schema.optional(Schema.Array(Schema.Struct({
     comments: Schema.optional(Schema.Array(Schema.Struct({
       commentId: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
+      inReplyTo: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
       clientRequestToken: Schema.optional(Schema.String),
       content: Schema.optional(Schema.String)
     })))
@@ -55,10 +72,10 @@ const malformed = (operation: string) =>
     diagnosticCode: "provider-response-schema-invalid"
   })
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(() => malformed(operation))
@@ -79,18 +96,36 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
   if (Predicate.isTagged(cause, "CommitDoesNotExistException")) return "source-commit-changed"
   if (
     Predicate.isTagged(cause, "CommentContentSizeLimitExceededException") ||
-    Predicate.isTagged(cause, "InvalidClientRequestTokenException")
+    Predicate.isTagged(cause, "InvalidClientRequestTokenException") ||
+    Predicate.isTagged(cause, "InvalidFileLocationException") ||
+    Predicate.isTagged(cause, "InvalidFilePositionException") ||
+    Predicate.isTagged(cause, "InvalidPathException") ||
+    Predicate.isTagged(cause, "PathDoesNotExistException") ||
+    Predicate.isTagged(cause, "InvalidRelativeFileVersionEnumException") ||
+    Predicate.isTagged(cause, "CommentDoesNotExistException") ||
+    Predicate.isTagged(cause, "InvalidCommentIdException")
   ) return "revision-changed"
-  if (
-    Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
-    Predicate.isTagged(cause, "ManualMergeRequiredException")
-  ) return "merge-conflict"
+  if (Predicate.isTagged(cause, "ManualMergeRequiredException")) return "merge-conflict"
   return null
+}
+
+const providerConflictReason = (
+  operation: string,
+  cause: unknown
+): CodeCommitReviewConflictError["reason"] | null => {
+  if (
+    operation === "merge-pull-request" &&
+    (Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
+      Predicate.isTagged(cause, "ReferenceDoesNotExistException"))
+  ) {
+    return "destination-reference-changed"
+  }
+  return conflictReason(cause)
 }
 
 const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReviewError => {
   if (error._tag !== "AwsApiError") return error
-  const reason = conflictReason(error.cause)
+  const reason = providerConflictReason(operation, error.cause)
   if (reason !== null) return new CodeCommitReviewConflictError({ operation, reason })
   if (
     Predicate.isTagged(error.cause, "PullRequestDoesNotExistException") ||
@@ -98,6 +133,9 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
   ) return new CodeCommitReadNotFoundError({ operation })
   return error
 }
+
+const isAwsClientError = (error: CodeCommitReviewError): error is AwsClientError =>
+  error._tag === "AwsApiError" || error._tag === "AwsCredentialError" || error._tag === "AwsThrottleError"
 
 const targetConflict = (
   target: CodeCommitReviewTarget,
@@ -143,6 +181,33 @@ const preflightTarget = Effect.fn("CodeCommitReviewClient.preflightTarget")(func
   return pullRequest
 })
 
+/** Authorizes raw evidence captured by the exact AWS runtime that will dispatch the merge. */
+const verifyMergeTargetIdentity = Effect.fn("CodeCommitReviewClient.verifyMergeTargetIdentity")(function*(
+  target: CodeCommitMergeTarget,
+  evidence: CodeCommitMergeAuthorizationEvidence
+) {
+  const repository = yield* decodeRepositoryIdentityProviderResponse(evidence.repositoryIdentity)
+  if (repository.repositoryName !== target.repositoryName) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-changed"
+    })
+  }
+  if (repository.accountId !== target.expectedRepositoryAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "repository-account-changed"
+    })
+  }
+  const caller = yield* decodeAccountIdentityProviderResponse(evidence.callerIdentity)
+  if (caller.accountId !== target.expectedCallerAccountId) {
+    return yield* new CodeCommitReviewConflictError({
+      operation: "preflight-merge-identity",
+      reason: "caller-account-changed"
+    })
+  }
+})
+
 const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
   switch (tag) {
     case "request-review":
@@ -151,10 +216,16 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
       return "Change request posted to the pull request"
     case "comment":
       return "Comment posted to the pull request"
+    case "update-comment":
+      return "Pull request comment updated"
+    case "reply-comment":
+      return "Reply posted to the pull request"
     case "approve":
       return "Pull request revision approved"
     case "revoke-approval":
       return "Pull request approval revoked"
+    case "merge":
+      return "Pull request merged"
   }
 }
 
@@ -210,6 +281,28 @@ export class CodeCommitReviewClient extends Context.Service<
               summary: commentSummary(action._tag)
             })
           }
+          case "update-comment": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.updateComment(withCommentMarker(action)).pipe(
+              Effect.mapError(mapProviderError("update-comment"))
+            )
+            const response = yield* decodeProvider("update-comment", RawCommentResponse, raw)
+            return new CodeCommitReviewReceipt({
+              operationId: `comment:${response.comment.commentId}`,
+              summary: commentSummary(action._tag)
+            })
+          }
+          case "reply-comment": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.postReply(withCommentMarker(action)).pipe(
+              Effect.mapError(mapProviderError("reply-comment"))
+            )
+            const response = yield* decodeProvider("reply-comment", RawCommentResponse, raw)
+            return new CodeCommitReviewReceipt({
+              operationId: `comment:${response.comment.commentId}`,
+              summary: commentSummary(action._tag)
+            })
+          }
           case "approve":
           case "revoke-approval": {
             yield* preflightTarget(readClient, action.target)
@@ -221,13 +314,32 @@ export class CodeCommitReviewClient extends Context.Service<
               summary: commentSummary(action._tag)
             })
           }
+          case "merge": {
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.mergePullRequest<CodeCommitReviewError>(
+              action,
+              (evidence) => verifyMergeTargetIdentity(action.target, evidence)
+            ).pipe(
+              Effect.mapError((error) =>
+                isAwsClientError(error) ? mapProviderError("merge-pull-request")(error) : error
+              )
+            )
+            const response = yield* decodeProvider("merge-pull-request", RawMergeResponse, raw)
+            if (response.pullRequest.pullRequestId !== action.target.pullRequestId) {
+              return yield* malformed("merge-pull-request")
+            }
+            return new CodeCommitReviewReceipt({
+              operationId: `merge:${action.strategy}:${action.target.pullRequestId}:${action.target.sourceCommit}`,
+              summary: `${commentSummary(action._tag)} using ${action.strategy}`
+            })
+          }
         }
       })
 
       const reconcileComment = Effect.fn("CodeCommitReviewClient.reconcileComment")(function*(
         action: Extract<
           CodeCommitReviewAction,
-          { readonly _tag: "comment" | "request-changes" | "request-review" }
+          { readonly _tag: "comment" | "request-changes" | "request-review" | "update-comment" | "reply-comment" }
         >
       ) {
         let nextToken: string | null = null
@@ -242,10 +354,17 @@ export class CodeCommitReviewClient extends Context.Service<
           )
           const comment = (page.commentsForPullRequestData ?? [])
             .flatMap(({ comments }) => comments ?? [])
-            .find(({ clientRequestToken, content }) =>
-              clientRequestToken === action.clientRequestToken ||
-              content?.includes(commentMarker(action.clientRequestToken)) === true
-            )
+            .find(({ clientRequestToken, commentId, content, inReplyTo }) => {
+              const markerMatched = content?.includes(commentMarker(action.clientRequestToken)) === true
+              if (action._tag === "update-comment") {
+                return commentId === action.commentId && markerMatched
+              }
+              if (action._tag === "reply-comment") {
+                return inReplyTo === action.commentId &&
+                  (clientRequestToken === action.clientRequestToken || markerMatched)
+              }
+              return clientRequestToken === action.clientRequestToken || markerMatched
+            })
           if (comment?.commentId !== undefined) {
             return {
               _tag: "succeeded",
@@ -266,6 +385,8 @@ export class CodeCommitReviewClient extends Context.Service<
           case "request-review":
           case "request-changes":
           case "comment":
+          case "update-comment":
+          case "reply-comment":
             return yield* reconcileComment(action)
           case "approve":
           case "revoke-approval": {
@@ -290,6 +411,8 @@ export class CodeCommitReviewClient extends Context.Service<
               } satisfies CodeCommitReviewReconciliation
               : { _tag: "pending" } satisfies CodeCommitReviewReconciliation
           }
+          case "merge":
+            return { _tag: "pending" } satisfies CodeCommitReviewReconciliation
         }
       })
 

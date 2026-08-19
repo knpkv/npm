@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+
 type ReleaseTransitionKind = "close" | "full"
 
 interface ViewTransitionHandle {
@@ -9,7 +11,7 @@ type ViewTransitionDocument = Document & {
 }
 
 const supportsViewTransitions = (candidate: Document): candidate is ViewTransitionDocument =>
-  "startViewTransition" in candidate && typeof candidate.startViewTransition === "function"
+  "startViewTransition" in candidate && Predicate.isFunction(candidate.startViewTransition)
 
 /**
  * Keeps release navigation usable everywhere while progressively enhancing the

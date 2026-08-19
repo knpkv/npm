@@ -15,10 +15,14 @@ import {
 } from "../../../../domain/governedAction/index.js"
 import {
   DomainEventId,
+  EntityId,
   GovernedActionId,
   GovernedActionTransitionId,
+  PluginConnectionId,
+  ReleaseId,
   WorkspaceId
 } from "../../../../domain/identifiers.js"
+import { ProviderId, Revision } from "../../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 
 /** Immutable identity of the audit record paired with one action transition. */
@@ -200,6 +204,43 @@ export const GovernedActionReadInput = Schema.Struct({
 /** Decoded governed-action lookup. */
 export type GovernedActionReadInput = typeof GovernedActionReadInput.Type
 
+/** Workspace/connection-scoped lookup for a previously submitted idempotent action. */
+export const GovernedActionIdempotencyReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  idempotencyKey: GovernedActionEnvelopeV1.fields.idempotencyKey
+})
+
+/** Decoded governed-action idempotency lookup. */
+export type GovernedActionIdempotencyReadInput = typeof GovernedActionIdempotencyReadInput.Type
+
+/** Bounded newest-first terminal action lookup for one exact workspace entity. */
+export const GovernedActionTargetReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  providerId: ProviderId,
+  targetEntityId: EntityId,
+  actionKind: GovernedActionEnvelopeV1.fields.proposal.fields.request.fields.actionKind,
+  expectedRevision: Schema.optionalKey(Revision),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+})
+
+/** Decoded newest terminal target lookup. */
+export type GovernedActionTargetReadInput = typeof GovernedActionTargetReadInput.Type
+
+/** Bounded batched lookup for the latest successful publications of exact releases. */
+export const GovernedActionReleasePublicationReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  providerId: Schema.Literal("confluence"),
+  releaseIds: Schema.Array(ReleaseId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(200),
+    Schema.isUnique()
+  )
+})
+
+/** Decoded release-publication batch lookup. */
+export type GovernedActionReleasePublicationReadInput = typeof GovernedActionReleasePublicationReadInput.Type
+
 /** Trusted governed action reconstructed from its immutable ordered history. */
 export const GovernedActionRecord = Schema.Struct({
   envelope: GovernedActionEnvelopeV1,
@@ -220,7 +261,7 @@ export type GovernedActionCommitResult =
   | { readonly _tag: "replayed"; readonly transition: GovernedActionTransitionV1 }
 
 /** Caller material is invalid or conflicts with immutable governed-action identity. */
-export class GovernedActionInputError extends Schema.TaggedErrorClass<GovernedActionInputError>()(
+export class GovernedActionInputError extends Schema.TaggedError<GovernedActionInputError>()(
   "GovernedActionInputError",
   {
     operation: Schema.Literals(["commit", "read"]),

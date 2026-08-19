@@ -1,11 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, AgentProviderId, makeAgentRuntime } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Effect, Layer, Ref, Result, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as TestClock from "effect/testing/TestClock"
 
-import { AgentModelId, DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  ReleaseAgentThreadCursor,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import {
   AgentThreadId,
   JobId,
@@ -18,20 +24,24 @@ import {
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import { makeReleaseAgentJobs } from "../../src/server/application/releaseAgentJobs.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
-  type AgentJobTask,
   AgentThreadEvent,
-  EnqueueAgentJobInput
+  EnqueueAgentJobInput,
+  type EnqueueAgentJobTask
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import {
+  ContentBlobDigest,
   RecordRevision,
   ReleaseSnapshotRecord,
   WorkspaceName
 } from "../../src/server/persistence/repositories/models.js"
+import { WorkspaceSettingsRecord } from "../../src/server/persistence/repositories/workspaceSettingsRepository.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000201")
@@ -49,6 +59,34 @@ const ROLE_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000
 const PROVIDER_CREDENTIAL_CANARY = "provider-credential-must-not-enter-prompt"
 const STARTED_AT_STRING = "2026-07-19T12:00:00.000Z"
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)(STARTED_AT_STRING)
+
+const workspaceSettingsRecord = (
+  allowedProviders: ReadonlyArray<typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]>,
+  defaults: {
+    readonly defaultModel?: string | null
+    readonly defaultProvider?: string | null
+    readonly toolPolicy?: "read-only" | "review-sandbox"
+  } = {}
+) =>
+  WorkspaceSettingsRecord.make({
+    workspaceId: WORKSPACE_ID,
+    revision: RecordRevision.make(1),
+    policyRevision: RecordRevision.make(1),
+    settings: WorkspaceSettingsV1.make({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      agent: {
+        ...DEFAULT_WORKSPACE_SETTINGS.agent,
+        allowedProviders,
+        defaultModel: defaults.defaultModel ?? null,
+        defaultProvider: defaults.defaultProvider ?? null,
+        toolPolicy: defaults.toolPolicy ?? "read-only"
+      }
+    }),
+    settingsDigest: ContentBlobDigest.make("1".repeat(64)),
+    createdAt: STARTED_AT,
+    updatedAt: STARTED_AT,
+    updatedByPersonId: null
+  })
 
 const release = Schema.decodeSync(Release)({
   id: RELEASE_ID,
@@ -98,6 +136,14 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
 
 const reviewTask = {
   _tag: "pr-review",
+  pluginConnectionId: PLUGIN_CONNECTION_ID,
+  reviewProfile: {
+    profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+    label: "Full-project review",
+    budgetMillis: 1_200_000,
+    networkAccess: "blocked",
+    sandbox: "sbx"
+  },
   subject: {
     providerId: "codecommit",
     repository: "control-center",
@@ -105,17 +151,17 @@ const reviewTask = {
     baseRevision: "1".repeat(40),
     headRevision: "2".repeat(40)
   }
-} satisfies AgentJobTask
+} satisfies EnqueueAgentJobTask
 
-const releaseChatTask = { _tag: "release-chat" } satisfies AgentJobTask
+const releaseChatTask = { _tag: "release-chat" } satisfies EnqueueAgentJobTask
 
-const threadEvent = (
+const threadEvent = <UnparsedInput>(
   eventSequence: number,
   eventKind: AgentThreadEvent["eventKind"],
-  payload: unknown,
+  payload: UnparsedInput,
   options: {
     readonly jobId?: typeof JobId.Type
-    readonly task?: AgentJobTask
+    readonly task?: EnqueueAgentJobTask
   } = {}
 ): AgentThreadEvent =>
   AgentThreadEvent.make({
@@ -124,7 +170,7 @@ const threadEvent = (
     eventSequence: AgentEventCursor.make(eventSequence),
     jobId: options.jobId ?? JOB_ID,
     attemptSequence: null,
-    ...(options.task === undefined ? {} : { task: options.task }),
+    ...(!(options.task === undefined) && { task: options.task }),
     eventKind,
     payload,
     occurredAt: STARTED_AT
@@ -138,7 +184,12 @@ const replayEvents: Array<AgentThreadEvent> = [
   threadEvent(3, "job-started", {
     _tag: "started",
     providerRunRef: "provider-native-run-secret",
-    sessionRef: "provider-native-session-secret"
+    sessionRef: "provider-native-session-secret",
+    runtimeMetadata: {
+      _tag: "local-cli",
+      implementation: "codex-cli",
+      version: "1.2.3"
+    }
   }),
   threadEvent(4, "assistant-output", {
     _tag: "output",
@@ -175,17 +226,202 @@ const configuredRegistry = AgentRuntimeRegistry.of({
 })
 
 const withPersistence = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, AgentRuntimeRegistry | Crypto.Crypto | Persistence>
+  use: Effect.Effect<
+    Success,
+    Failure,
+    AgentRuntimeRegistry | Crypto.Crypto | Database | Persistence
+  >
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-release-agent-jobs-")
+    const database = databaseLayer(config)
+    const persistence = persistenceLayerFromDatabase(config).pipe(
+      Layer.provideMerge(database)
+    )
     return yield* use.pipe(
       Effect.provideService(AgentRuntimeRegistry, configuredRegistry),
-      Effect.provide(persistenceLayer(config))
+      Effect.provide(persistence)
     )
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("release agent jobs", () => {
+  it.effect("filters the runtime catalog through durable workspace policy", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const catalogRegistry = AgentRuntimeRegistry.of({
+        ...configuredRegistry,
+        catalog: () =>
+          Effect.succeed({
+            providers: [
+              {
+                providerId: DurableAgentProviderId.make("codex"),
+                displayName: "Codex",
+                models: [AgentModelId.make("review-model")],
+                capabilities: ["release-chat"],
+                health: "available"
+              },
+              {
+                providerId: DurableAgentProviderId.make("claude"),
+                displayName: "Claude",
+                models: [AgentModelId.make("review-model")],
+                capabilities: ["release-chat"],
+                health: "available"
+              }
+            ]
+          })
+      })
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () => Effect.succeed(workspaceSettingsRecord(["codex"]))
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(
+        Effect.provideService(Persistence, fakePersistence),
+        Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+      )
+
+      assert.deepStrictEqual(
+        (yield* service.providers(WORKSPACE_ID)).providers.map(({ providerId }) => providerId),
+        ["codex"]
+      )
+    })))
+
+  it.effect("hides review capabilities unless the durable tool policy enables the review sandbox", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const reviewProfile = {
+        profileId: ReviewAgentProfileId.make("codex:review-model:sbx"),
+        label: "Full-project review",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      } satisfies ReviewAgentProfile
+      const catalogRegistry = AgentRuntimeRegistry.of({
+        ...configuredRegistry,
+        catalog: () =>
+          Effect.succeed({
+            providers: [{
+              providerId: DurableAgentProviderId.make("codex"),
+              displayName: "Codex",
+              models: [AgentModelId.make("review-model")],
+              capabilities: ["release-chat", "pr-review"],
+              health: "available",
+              reviewProfile
+            }]
+          })
+      })
+      const serviceFor = (toolPolicy: "read-only" | "review-sandbox") =>
+        makeReleaseAgentJobs.pipe(
+          Effect.provideService(
+            Persistence,
+            Persistence.of({
+              ...persistence,
+              workspaceSettings: {
+                ...persistence.workspaceSettings,
+                get: () => Effect.succeed(workspaceSettingsRecord(["codex"], { toolPolicy }))
+              }
+            })
+          ),
+          Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+        )
+
+      const readOnly = yield* serviceFor("read-only")
+      assert.deepStrictEqual((yield* readOnly.providers(WORKSPACE_ID)).providers, [{
+        providerId: DurableAgentProviderId.make("codex"),
+        displayName: "Codex",
+        models: [AgentModelId.make("review-model")],
+        capabilities: ["release-chat"],
+        health: "available"
+      }])
+
+      const reviewSandbox = yield* serviceFor("review-sandbox")
+      assert.deepStrictEqual((yield* reviewSandbox.providers(WORKSPACE_ID)).providers, [{
+        providerId: DurableAgentProviderId.make("codex"),
+        displayName: "Codex",
+        models: [AgentModelId.make("review-model")],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available",
+        reviewProfile
+      }])
+    })))
+
+  it.effect("orders the configured default provider and model first in the filtered catalog", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const catalogRegistry = AgentRuntimeRegistry.of({
+        ...configuredRegistry,
+        catalog: () =>
+          Effect.succeed({
+            providers: [
+              {
+                providerId: DurableAgentProviderId.make("claude"),
+                displayName: "Claude",
+                models: [AgentModelId.make("claude-model")],
+                capabilities: ["release-chat"],
+                health: "available"
+              },
+              {
+                providerId: DurableAgentProviderId.make("codex"),
+                displayName: "Codex",
+                models: [AgentModelId.make("fallback"), AgentModelId.make("preferred")],
+                capabilities: ["release-chat"],
+                health: "available"
+              }
+            ]
+          })
+      })
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () =>
+            Effect.succeed(workspaceSettingsRecord(["claude", "codex"], {
+              defaultProvider: "codex",
+              defaultModel: "preferred"
+            }))
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(
+        Effect.provideService(Persistence, fakePersistence),
+        Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+      )
+
+      const catalog = yield* service.providers(WORKSPACE_ID)
+      assert.deepStrictEqual(
+        catalog.providers.map(({ providerId }) => providerId),
+        ["codex", "claude"]
+      )
+      assert.deepStrictEqual(
+        catalog.providers[0]?.models,
+        [AgentModelId.make("preferred"), AgentModelId.make("fallback")]
+      )
+
+      const nullDefaults = yield* makeReleaseAgentJobs.pipe(
+        Effect.provideService(
+          Persistence,
+          Persistence.of({
+            ...persistence,
+            workspaceSettings: {
+              ...persistence.workspaceSettings,
+              get: () => Effect.succeed(workspaceSettingsRecord(["claude", "codex"]))
+            }
+          })
+        ),
+        Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+      )
+      const unchanged = yield* nullDefaults.providers(WORKSPACE_ID)
+      assert.deepStrictEqual(
+        unchanged.providers.map(({ providerId }) => providerId),
+        ["claude", "codex"]
+      )
+      assert.deepStrictEqual(
+        unchanged.providers[1]?.models,
+        [AgentModelId.make("fallback"), AgentModelId.make("preferred")]
+      )
+    })))
+
   it.effect("returns an empty cursor-preserving replay only for an existing release", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -232,12 +468,62 @@ describe("release agent jobs", () => {
       }
     })))
 
+  it.effect("retains malformed settings quarantine when enqueue rolls back", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const { sql } = yield* Database
+      yield* persistence.workspaces.create(WORKSPACE_ID, {
+        displayName: WorkspaceName.make("Release agent quarantine"),
+        createdAt: STARTED_AT
+      })
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+      yield* sql`UPDATE workspace_settings
+        SET settings_digest = ${"0".repeat(64)}
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      const service = yield* makeReleaseAgentJobs
+
+      const rejected = yield* service.enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ApplicationServiceUnavailable")
+      }
+      const jobRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM agent_jobs
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      assert.strictEqual(jobRows[0]?.count, 0)
+      const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+        diagnostic_code AS diagnosticCode
+      FROM quarantined_records
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND record_kind = 'workspace-settings'`
+      assert.deepStrictEqual(
+        quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+        ["workspace-settings-digest-mismatch"]
+      )
+    })))
+
   it.effect("derives immutable job context and returns a redacted ordered replay", () =>
     withPersistence(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
       const persistence = yield* Persistence
       const enqueuedInput = yield* Ref.make<unknown>(null)
       const replayInput = yield* Ref.make<unknown>(null)
+      const transactionActive = yield* Ref.make(false)
+      const settingsAdmissionReads = yield* Ref.make<Array<boolean>>([])
+      const allowedProviders = yield* Ref.make<
+        ReadonlyArray<typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]>
+      >(["codex"])
       const fakePersistence = Persistence.of({
         ...persistence,
         agentJobs: {
@@ -251,10 +537,39 @@ describe("release agent jobs", () => {
         releases: {
           ...persistence.releases,
           get: () => Effect.succeed(releaseSnapshot)
+        },
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          readAtomically: (_workspaceId, use) =>
+            Ref.set(transactionActive, true).pipe(
+              Effect.andThen(Ref.get(transactionActive)),
+              Effect.tap((isActive) => Ref.update(settingsAdmissionReads, (reads) => [...reads, isActive])),
+              Effect.andThen(Ref.get(allowedProviders)),
+              Effect.flatMap((providers) => use(workspaceSettingsRecord(providers))),
+              Effect.ensuring(Ref.set(transactionActive, false))
+            )
         }
       })
       const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
 
+      yield* Ref.set(allowedProviders, ["anthropic"])
+      const disallowed = yield* service.enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(disallowed))
+      if (Result.isFailure(disallowed)) {
+        assert.strictEqual(disallowed.failure._tag, "ApplicationInvalidRequest")
+      }
+      assert.isNull(yield* Ref.get(enqueuedInput))
+
+      yield* Ref.set(allowedProviders, ["codex"])
       const rejected = yield* service.enqueue({
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,
@@ -290,6 +605,7 @@ describe("release agent jobs", () => {
       assert.strictEqual(capturedEnqueue.access, "read-only")
       assert.strictEqual(capturedEnqueue.model, "review-model")
       assert.strictEqual(capturedEnqueue.providerId, "codex")
+      assert.deepStrictEqual(yield* Ref.get(settingsAdmissionReads), [true, true])
       assert.deepStrictEqual(capturedEnqueue.task, { _tag: "release-chat" })
       assert.strictEqual(capturedEnqueue.userPrompt, "Explain the release.")
       assert.include(capturedEnqueue.prompt, `"releaseId":"${RELEASE_ID}"`)
@@ -322,6 +638,17 @@ describe("release agent jobs", () => {
           { _tag: "job-failed", eventSequence: 6 }
         ]
       )
+      assert.deepStrictEqual(page.events[2], {
+        _tag: "job-started",
+        eventSequence: ReleaseAgentThreadCursor.make(3),
+        jobId: JOB_ID,
+        occurredAt: STARTED_AT,
+        runtimeMetadata: {
+          _tag: "local-cli",
+          implementation: "codex-cli",
+          version: "1.2.3"
+        }
+      })
       assert.deepStrictEqual(yield* Ref.get(replayInput), {
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,

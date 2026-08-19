@@ -11,16 +11,21 @@
  *   though it is not in the public OpenAPI spec).
  * - **Account-id resolution**: account IDs are looked up against
  *   `/rest/api/3/user?accountId={id}` and cached per service instance.
- * - **Mutations**: {@link VersionServiceShape.updateVersion} edits version fields
- *   (e.g. description) and {@link VersionServiceShape.addRelatedWork} /
- *   {@link VersionServiceShape.listRelatedWork} manage the "Related work" links that
+ * - **Mutations**: {@link VersionServiceContract.createVersion} opens a new release,
+ *   {@link VersionServiceContract.updateVersion} edits version fields (e.g. description)
+ *   and {@link VersionServiceContract.addRelatedWork} /
+ *   {@link VersionServiceContract.listRelatedWork} manage the "Related work" links that
  *   surface as Confluence pages on a release report. Mutations require the
  *   `manage:jira-project` OAuth scope (see `JiraAuth`).
+ * - **Project id resolution**: the create endpoint takes a numeric `projectId`
+ *   (`project` is deprecated), so {@link VersionServiceContract.createVersion} accepts the
+ *   project *key* callers already use elsewhere and resolves it via `/project/{key}`.
  *
  * **Common tasks**
  *
  * - List versions for a project: `service.listProjectVersions("RPS", { released: true })`
  * - Get a single version: `service.getVersion("12345")`
+ * - Open a new release: `service.createVersion({ projectKey: "RPS", name: "OOB 100" })`
  * - Set the description: `service.updateVersion("12345", { description: "..." })`
  * - Attach a Confluence page: `service.addRelatedWork("12345", { title, category, url })`
  *
@@ -30,6 +35,8 @@ import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { buildByVersionJql } from "./internal/jqlBuilder.js"
 import { JiraApiError } from "./JiraCliError.js"
 
@@ -133,6 +140,21 @@ export interface UpdateVersionInput {
 }
 
 /**
+ * Fields for a new version. `projectKey` is the key (e.g. `RPS`) — it is resolved
+ * to the numeric `projectId` the create endpoint requires. Dates are ISO 8601
+ * `yyyy-mm-dd`.
+ *
+ * @category Types
+ */
+export interface CreateVersionInput {
+  readonly projectKey: string
+  readonly name: string
+  readonly description?: string
+  readonly startDate?: string
+  readonly releaseDate?: string
+}
+
+/**
  * Filters for listing versions.
  *
  * @category Types
@@ -158,18 +180,25 @@ export interface ListVersionsOptions {
  *
  * @category Services
  */
-export interface VersionServiceShape {
+export interface VersionServiceContract {
   readonly listProjectVersions: (
     projectKey: string,
     options?: ListVersionsOptions
   ) => Effect.Effect<ReadonlyArray<Version>, JiraApiError>
   readonly getVersion: (id: string) => Effect.Effect<Version, JiraApiError>
+  /**
+   * Create a new (unreleased) version on a project. Needs `manage:jira-project`.
+   * Resolves `projectKey` to the numeric project id the API requires.
+   */
+  readonly createVersion: (input: CreateVersionInput) => Effect.Effect<Version, JiraApiError>
   /** Update editable fields (currently description) on a version. Needs `manage:jira-project`. */
   readonly updateVersion: (id: string, input: UpdateVersionInput) => Effect.Effect<Version, JiraApiError>
   /** List the "Related work" links attached to a version. */
   readonly listRelatedWork: (id: string) => Effect.Effect<ReadonlyArray<RelatedWork>, JiraApiError>
   /** Attach a "Related work" link (e.g. a Confluence page) to a version. Needs `manage:jira-project`. */
   readonly addRelatedWork: (id: string, input: AddRelatedWorkInput) => Effect.Effect<RelatedWork, JiraApiError>
+  /** Remove a "Related work" link from a version. Needs `manage:jira-project`. */
+  readonly deleteRelatedWork: (id: string, relatedWorkId: string) => Effect.Effect<void, JiraApiError>
 }
 
 /**
@@ -191,16 +220,18 @@ export interface VersionServiceShape {
  */
 export class VersionService extends Context.Service<
   VersionService,
-  VersionServiceShape
+  VersionServiceContract
 >()("@knpkv/jira-cli/VersionService") {}
 
 const EXPAND = "approvers,driver,operations,issuesstatus,contributors"
 
 /** Loosely-typed record helper for navigating untyped API JSON. */
-type Raw = Record<string, unknown>
-const isRaw = (value: unknown): value is Raw => typeof value === "object" && value !== null && !Array.isArray(value)
-const asRaw = (value: unknown): Raw => isRaw(value) ? value : {}
-const rawArray = (value: unknown): ReadonlyArray<Raw> => Array.isArray(value) ? value.filter(isRaw) : []
+type Raw = Record<string, Schema.Json>
+const isRaw = <UnparsedInput>(value: UnparsedInput): value is UnparsedInput & Raw =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
+const asRaw = <UnparsedInput>(value: UnparsedInput): Raw => isRaw(value) ? value : {}
+const rawArray = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<Raw> =>
+  Array.isArray(value) ? value.filter(isRaw) : []
 
 /**
  * Render a Jira custom-field value as a flat string.
@@ -213,10 +244,10 @@ const rawArray = (value: unknown): ReadonlyArray<Raw> => Array.isArray(value) ? 
  * - array of any of the above → values joined with `, `
  * - null / unset / unknown shape → `null`
  */
-export const renderCustomFieldValue = (raw: unknown): string | null => {
+export const renderCustomFieldValue = <UnparsedInput>(raw: UnparsedInput): string | null => {
   if (raw === null || raw === undefined) return null
-  if (typeof raw === "string") return raw.length > 0 ? raw : null
-  if (typeof raw === "number" || typeof raw === "boolean") return String(raw)
+  if (Predicate.isString(raw)) return raw.length > 0 ? raw : null
+  if (Predicate.isNumber(raw) || Predicate.isBoolean(raw)) return String(raw)
   if (Array.isArray(raw)) {
     const parts = raw.map(renderCustomFieldValue).filter((v): v is string => !!v)
     return parts.length > 0 ? parts.join(", ") : null
@@ -240,9 +271,10 @@ export const renderCustomFieldValue = (raw: unknown): string | null => {
   return null
 }
 
-const stringOrNull = (v: unknown): string | null => typeof v === "string" && v.length > 0 ? v : null
+const stringOrNull = <UnparsedInput>(v: UnparsedInput): string | null =>
+  Predicate.isString(v) && v.length > 0 ? v : null
 
-export const personFromObject = (raw: unknown, fallbackId?: string): Person | null => {
+export const personFromObject = <UnparsedInput>(raw: UnparsedInput, fallbackId?: string): Person | null => {
   if (isRaw(raw)) {
     const obj = raw
     const accountId = stringOrNull(obj["accountId"]) ?? fallbackId ?? null
@@ -253,7 +285,7 @@ export const personFromObject = (raw: unknown, fallbackId?: string): Person | nu
       emailAddress: stringOrNull(obj["emailAddress"])
     }
   }
-  if (typeof raw === "string" && raw.length > 0) {
+  if (Predicate.isString(raw) && raw.length > 0) {
     return { accountId: raw, displayName: raw, emailAddress: null }
   }
   return null
@@ -267,17 +299,17 @@ export const extractContributorIds = (raw: Raw): ReadonlyArray<string> => {
   if (!Array.isArray(field)) return []
   const ids: Array<string> = []
   for (const c of field) {
-    if (typeof c === "string" && c.length > 0) ids.push(c)
+    if (Predicate.isString(c) && c.length > 0) ids.push(c)
     else if (isRaw(c)) {
       const id = c["accountId"]
-      if (typeof id === "string" && id.length > 0) ids.push(id)
+      if (Predicate.isString(id) && id.length > 0) ids.push(id)
     }
   }
   return ids
 }
 
 /** Normalise a Jira "Related work" entry into a {@link RelatedWork}. */
-export const toRelatedWork = (raw: unknown): RelatedWork => {
+export const toRelatedWork = <UnparsedInput>(raw: UnparsedInput): RelatedWork => {
   const o = asRaw(raw)
   return {
     relatedWorkId: stringOrNull(o["relatedWorkId"]),
@@ -309,7 +341,7 @@ const make = Effect.gen(function*() {
       const matches: Array<string> = []
       for (const field of rawArray(result)) {
         const id = field["id"]
-        if (field["name"] === name && typeof id === "string") {
+        if (field["name"] === name && Predicate.isString(id)) {
           matches.push(id)
         }
       }
@@ -392,12 +424,12 @@ const make = Effect.gen(function*() {
       const MAX_PAGES = 100
       let nextPageToken: string | undefined = undefined
       for (let page = 0; page < MAX_PAGES; page++) {
-        const result = yield* client.searchIssuesUsingJql({
+        const result: unknown = yield* client.searchIssuesUsingJql({
           params: {
             jql: buildByVersionJql(versionName, projectKey),
             fields: requestedFields,
             maxResults: PAGE,
-            ...(nextPageToken ? { nextPageToken } : {})
+            ...(nextPageToken && { nextPageToken })
           }
         }).pipe(
           Effect.mapError((cause) =>
@@ -405,7 +437,7 @@ const make = Effect.gen(function*() {
           )
         )
 
-        const resObj = asRaw(result)
+        const resObj: Raw = asRaw(result)
         const issues = rawArray(resObj["issues"])
         for (const issue of issues) {
           const key = stringOrNull(issue["key"]) ?? ""
@@ -414,12 +446,12 @@ const make = Effect.gen(function*() {
           let assigneeId: string | null = null
           if (isRaw(assignee)) {
             const accountId = assignee["accountId"]
-            if (typeof accountId === "string" && accountId.length > 0) assigneeId = accountId
+            if (Predicate.isString(accountId) && accountId.length > 0) assigneeId = accountId
           }
           const labelsRaw = fields["labels"]
           const labels: Array<string> = []
           if (Array.isArray(labelsRaw)) {
-            for (const l of labelsRaw) if (typeof l === "string" && l.length > 0) labels.push(l)
+            for (const l of labelsRaw) if (Predicate.isString(l) && l.length > 0) labels.push(l)
           }
           const customFields: Record<string, string | null> = {}
           for (const name of customFieldNames) {
@@ -445,7 +477,7 @@ const make = Effect.gen(function*() {
 
         const isLast = resObj["isLast"]
         const next = resObj["nextPageToken"]
-        if (isLast === true || typeof next !== "string" || next.length === 0) break
+        if (isLast === true || !Predicate.isString(next) || next.length === 0) break
         nextPageToken = next
       }
 
@@ -582,9 +614,56 @@ const make = Effect.gen(function*() {
       Effect.flatMap((raw) => mapVersion(asRaw(raw), []))
     )
 
+  /**
+   * Resolve a project key to its numeric id.
+   *
+   * `POST /version` requires `projectId`; its `project` (key) field is deprecated
+   * and ignored by newer instances, so sending the key straight through creates
+   * nothing and reports a confusing 400. Callers pass the key because that is
+   * what every other command takes.
+   */
+  const resolveProjectId = (projectKey: string): Effect.Effect<number, JiraApiError> =>
+    client.getProject(projectKey, undefined).pipe(
+      Effect.mapError((cause) => new JiraApiError({ message: `Failed to look up project ${projectKey}`, cause })),
+      Effect.flatMap((raw) => {
+        const id = asRaw(raw)["id"]
+        // Jira serialises project ids as strings here even though the version
+        // payload wants a number.
+        const numeric = Predicate.isNumber(id) ? id : Predicate.isString(id) ? Number(id) : Number.NaN
+        return Number.isInteger(numeric)
+          ? Effect.succeed(numeric)
+          : Effect.fail(
+            new JiraApiError({
+              message: `Project ${projectKey} returned no usable numeric id; cannot create a version against it.`
+            })
+          )
+      })
+    )
+
+  const createVersion = (input: CreateVersionInput): Effect.Effect<Version, JiraApiError> =>
+    Effect.gen(function*() {
+      const projectId = yield* resolveProjectId(input.projectKey)
+      const raw = yield* client.createVersion({
+        payload: {
+          name: input.name,
+          projectId,
+          ...((input.description !== undefined) && { description: input.description }),
+          ...((input.startDate !== undefined) && { startDate: input.startDate }),
+          ...((input.releaseDate !== undefined) && { releaseDate: input.releaseDate })
+        }
+      }).pipe(
+        Effect.mapError((cause) =>
+          new JiraApiError({ message: `Failed to create version "${input.name}" on ${input.projectKey}`, cause })
+        )
+      )
+      // The 201 body carries no `expand`, so map scalars only — same reasoning as
+      // updateVersion.
+      return mapVersionScalar(asRaw(raw))
+    })
+
   const updateVersion = (id: string, input: UpdateVersionInput): Effect.Effect<Version, JiraApiError> =>
     client.updateVersion(id, {
-      payload: { ...(input.description !== undefined ? { description: input.description } : {}) }
+      payload: { ...((input.description !== undefined) && { description: input.description }) }
     }).pipe(
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to update version ${id}`, cause })),
       Effect.map((raw) => mapVersionScalar(asRaw(raw)))
@@ -613,14 +692,107 @@ const make = Effect.gen(function*() {
       })
     )
 
+  const deleteRelatedWork = (id: string, relatedWorkId: string): Effect.Effect<void, JiraApiError> =>
+    client.deleteRelatedWork(id, relatedWorkId, undefined).pipe(
+      Effect.mapError((cause) =>
+        new JiraApiError({ message: `Failed to remove related work ${relatedWorkId} from version ${id}`, cause })
+      ),
+      Effect.asVoid
+    )
+
   return VersionService.of({
     listProjectVersions,
     getVersion,
+    createVersion,
     updateVersion,
     listRelatedWork,
-    addRelatedWork
+    addRelatedWork,
+    deleteRelatedWork
   })
 })
+
+/**
+ * Desired related-work link for {@link planRelatedWorkSync}.
+ *
+ * @category Types
+ */
+export interface DesiredRelatedWork {
+  readonly title: string
+  readonly url: string
+}
+
+/**
+ * Plan for reconciling a version's related-work links.
+ *
+ * @category Types
+ */
+export interface RelatedWorkSyncPlan {
+  readonly toAdd: ReadonlyArray<DesiredRelatedWork>
+  readonly kept: ReadonlyArray<string>
+  // `url` is nullable because Jira can return a related-work entry without one;
+  // pruning still has to be able to remove it.
+  readonly toRemove: ReadonlyArray<{ readonly relatedWorkId: string; readonly url: string | null }>
+}
+
+/**
+ * Work out which related-work links to add, keep and remove.
+ *
+ * Matching is by URL: Jira assigns the id, and the title is editable, so the
+ * URL is the only stable identity a link has. Scoped to one category so a
+ * `Communication` reconcile cannot disturb `Testing` links. Removal is opt-in
+ * (`prune`) because links added by hand in the Jira UI are legitimate.
+ *
+ * URL identity is applied on both sides, which is what makes "exactly the given
+ * set" true: repeated desired entries collapse to one, and `prune` removes
+ * surplus copies of a desired URL as well as links to undesired ones — a pile-up
+ * of identical `Release notes` links is the case this exists to clean up, so
+ * keeping every copy merely because its URL is wanted would defeat it.
+ *
+ * Pure so that repeated scaffolding runs can be tested without the API — the
+ * property that matters is that running it twice adds nothing the second time.
+ *
+ * @category Utilities
+ */
+export const planRelatedWorkSync = (
+  existing: ReadonlyArray<RelatedWork>,
+  desired: ReadonlyArray<DesiredRelatedWork>,
+  options: { readonly category: string; readonly prune: boolean }
+): RelatedWorkSyncPlan => {
+  const inCategory = existing.filter((w) => w.category === options.category)
+  const existingUrls = new Set(inCategory.flatMap((w) => (w.url === null ? [] : [w.url])))
+
+  const desiredByUrl = new Map<string, DesiredRelatedWork>()
+  for (const entry of desired) {
+    if (!desiredByUrl.has(entry.url)) desiredByUrl.set(entry.url, entry)
+  }
+  const unique = [...desiredByUrl.values()]
+
+  const toAdd = unique.filter((d) => !existingUrls.has(d.url))
+  const kept = unique.filter((d) => existingUrls.has(d.url)).map((d) => d.url)
+
+  const keptUrls = new Set<string>()
+  const toRemove = options.prune
+    ? inCategory.flatMap((w) => {
+      // Designate the keeper before asking whether this copy is deletable. An
+      // undeletable first copy that skipped straight out never claimed the
+      // URL, so the next duplicate claimed it instead and *both* survived a
+      // reconcile that reported success.
+      if (w.url !== null && desiredByUrl.has(w.url) && !keptUrls.has(w.url)) {
+        keptUrls.add(w.url)
+        return []
+      }
+      // Nothing to delete with; leave it alone whatever its url.
+      if (w.relatedWorkId === null) return []
+      // A url-less entry can never match a desired link — every desired link
+      // has one — so pruning must remove it rather than skip it, or the
+      // category is not reconciled to the requested set and the command
+      // reports success while the stale entry stays.
+      return [{ relatedWorkId: w.relatedWorkId, url: w.url }]
+    })
+    : []
+
+  return { toAdd, kept, toRemove }
+}
 
 /**
  * Layer for VersionService.

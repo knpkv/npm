@@ -40,6 +40,12 @@ export default tseslint.config(
     },
 
     settings: {
+      // TypeScript 7 has no JavaScript API. Microsoft's official `typescript`
+      // compatibility alias re-exports TypeScript 6 via `export =`, which
+      // import-x cannot expand when checking namespace members.
+      "import-x/ignore": [
+        "[/\\\\]@typescript[/\\\\]typescript6[/\\\\]lib[/\\\\]typescript\\.d\\.ts$"
+      ],
       "import-x/resolver": {
         name: "tsResolver",
         resolver: tsResolver,
@@ -151,7 +157,36 @@ export default tseslint.config(
   {
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "error"
+      "@typescript-eslint/no-explicit-any": "error",
+      "local-rules/require-bounded-base64-schema": "error",
+      "local-rules/require-exact-cause-rethrow": "error"
+    }
+  },
+  {
+    files: ["packages/*/src/client/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-unsafe-optional-host-global-read": "error"
+    }
+  },
+  {
+    files: ["packages/*/src/**/*.{ts,tsx,mjs}", "packages/*/scripts/**/*.{ts,tsx,mjs}"],
+    rules: {
+      "local-rules/no-unowned-detached-fiber": "error"
+    }
+  },
+  {
+    files: ["packages/codecommit-core/src/PRService/refresh*.ts"],
+    rules: {
+      "local-rules/no-ignore-cause-in-codecommit-refresh": "error"
+    }
+  },
+  {
+    files: [
+      "packages/codecommit-core/src/**/*.{ts,tsx}",
+      "packages/codecommit-web/src/**/*.{ts,tsx}"
+    ],
+    rules: {
+      "local-rules/no-throwing-json-parse-in-effect-map": "error"
     }
   },
   {
@@ -161,22 +196,71 @@ export default tseslint.config(
     }
   },
   {
+    files: [
+      "packages/*/src/**/*.{ts,tsx}",
+      "packages/*/test/**/*.{ts,tsx}",
+      "packages/*/scripts/**/*.ts"
+    ],
+    rules: {
+      "local-rules/require-explicit-child-process-env-inheritance": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/server/plugins/jira/**/*.{ts,tsx}"],
     rules: {
       "local-rules/require-jira-path-identifier-schema": "error"
     }
   },
   {
+    files: ["packages/control-center/src/server/plugins/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-structured-reconciliation-key-schema": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-direct-mutation-proof-read": "error",
-      "local-rules/no-ad-hoc-workspace-entity-path": "error"
+      "local-rules/no-ad-hoc-workspace-entity-path": "error",
+      "local-rules/no-manual-control-center-client-poll-loop": "error",
+      "local-rules/no-throwing-schema-decode-in-control-center-client": "error",
+      "local-rules/require-run-promise-signal-in-react-effect": "error"
+    }
+  },
+  {
+    files: ["packages/rly/scripts/visual/classify-git-changes.ts"],
+    rules: {
+      "local-rules/require-rly-visual-classifier-runtime-error-reporting": "error"
     }
   },
   {
     files: ["packages/control-center/src/api/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-number-from-string-in-control-center-api": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/{src,test,e2e}/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-invalid-branded-uuid-literal": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/test/integration/live*.test.ts"],
+    rules: {
+      "local-rules/no-echoing-secret-assertions": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/e2e/**/*.spec.ts"],
+    rules: {
+      "local-rules/require-playwright-clock-before-navigation": "error"
+    }
+  },
+  {
+    files: ["packages/*/{e2e,visual}/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-playwright-evaluate-closure-captures": "error"
     }
   },
   {
@@ -199,6 +283,14 @@ export default tseslint.config(
     // Prettier remains the repository formatter for JSX. ESLint still applies
     // every semantic, import, safety, no-console, and no-any rule to TSX.
     files: ["**/*.tsx"],
+    rules: {
+      "@effect/dprint": "off"
+    }
+  },
+  {
+    // Prettier formats root JavaScript utilities; ESLint still enforces their
+    // semantic and safety rules.
+    files: ["scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs"],
     rules: {
       "@effect/dprint": "off"
     }

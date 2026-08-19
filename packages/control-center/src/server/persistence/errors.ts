@@ -8,16 +8,19 @@ const RecordKind = Schema.String.check(
   Schema.isMaxLength(100)
 )
 
+/** Maximum diagnostic identity retained by persistence-domain errors. */
+export const MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH = 500
+
 const RecordKey = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
-  Schema.isMaxLength(500)
+  Schema.isMaxLength(MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH)
 )
 
 const Revision = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 
 /** Raised when persistence configuration cannot be decoded safely. */
-export class PersistenceConfigError extends Schema.TaggedErrorClass<PersistenceConfigError>()(
+export class PersistenceConfigError extends Schema.TaggedError<PersistenceConfigError>()(
   "PersistenceConfigError",
   {
     message: Schema.String
@@ -25,13 +28,14 @@ export class PersistenceConfigError extends Schema.TaggedErrorClass<PersistenceC
 ) {}
 
 /** Raised when a database startup operation fails. */
-export class DatabaseInitializationError extends Schema.TaggedErrorClass<DatabaseInitializationError>()(
+export class DatabaseInitializationError extends Schema.TaggedError<DatabaseInitializationError>()(
   "DatabaseInitializationError",
   {
     operation: Schema.Literals([
       "connect",
       "configure",
       "initialize-schema",
+      "verify-integrity",
       "verify-pragmas",
       "verify-schema"
     ])
@@ -39,7 +43,7 @@ export class DatabaseInitializationError extends Schema.TaggedErrorClass<Databas
 ) {}
 
 /** Raised when a workspace-scoped persisted record does not exist. */
-export class RecordNotFoundError extends Schema.TaggedErrorClass<RecordNotFoundError>()(
+export class RecordNotFoundError extends Schema.TaggedError<RecordNotFoundError>()(
   "RecordNotFoundError",
   {
     recordKey: RecordKey,
@@ -49,7 +53,7 @@ export class RecordNotFoundError extends Schema.TaggedErrorClass<RecordNotFoundE
 ) {}
 
 /** Raised when creating a record would replace an existing workspace-scoped identity. */
-export class RecordAlreadyExistsError extends Schema.TaggedErrorClass<RecordAlreadyExistsError>()(
+export class RecordAlreadyExistsError extends Schema.TaggedError<RecordAlreadyExistsError>()(
   "RecordAlreadyExistsError",
   {
     recordKey: RecordKey,
@@ -59,7 +63,7 @@ export class RecordAlreadyExistsError extends Schema.TaggedErrorClass<RecordAlre
 ) {}
 
 /** Raised when a workspace has reached its bounded plugin-connection capacity. */
-export class PluginConnectionLimitError extends Schema.TaggedErrorClass<PluginConnectionLimitError>()(
+export class PluginConnectionLimitError extends Schema.TaggedError<PluginConnectionLimitError>()(
   "PluginConnectionLimitError",
   {
     maximum: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
@@ -68,7 +72,7 @@ export class PluginConnectionLimitError extends Schema.TaggedErrorClass<PluginCo
 ) {}
 
 /** Raised when an entity update attempts to replace its immutable vendor identity. */
-export class SourceIdentityMismatchError extends Schema.TaggedErrorClass<SourceIdentityMismatchError>()(
+export class SourceIdentityMismatchError extends Schema.TaggedError<SourceIdentityMismatchError>()(
   "SourceIdentityMismatchError",
   {
     recordKey: RecordKey,
@@ -78,7 +82,7 @@ export class SourceIdentityMismatchError extends Schema.TaggedErrorClass<SourceI
 ) {}
 
 /** Stable boundary error for a failed persistence operation. */
-export class PersistenceOperationError extends Schema.TaggedErrorClass<PersistenceOperationError>()(
+export class PersistenceOperationError extends Schema.TaggedError<PersistenceOperationError>()(
   "PersistenceOperationError",
   {
     operation: Schema.String.check(
@@ -90,7 +94,7 @@ export class PersistenceOperationError extends Schema.TaggedErrorClass<Persisten
 ) {}
 
 /** Raised when identical content bytes are registered with conflicting durable metadata. */
-export class ContentMetadataMismatchError extends Schema.TaggedErrorClass<ContentMetadataMismatchError>()(
+export class ContentMetadataMismatchError extends Schema.TaggedError<ContentMetadataMismatchError>()(
   "ContentMetadataMismatchError",
   {
     digest: BlobDigest,
@@ -99,7 +103,7 @@ export class ContentMetadataMismatchError extends Schema.TaggedErrorClass<Conten
 ) {}
 
 /** Reproducible bytes are unavailable and the owning adapter may safely refetch them. */
-export class ReproducibleContentUnavailableError extends Schema.TaggedErrorClass<
+export class ReproducibleContentUnavailableError extends Schema.TaggedError<
   ReproducibleContentUnavailableError
 >()(
   "ReproducibleContentUnavailableError",
@@ -112,7 +116,7 @@ export class ReproducibleContentUnavailableError extends Schema.TaggedErrorClass
 ) {}
 
 /** Raised when a compare-and-swap update observes a different persisted revision. */
-export class RevisionConflictError extends Schema.TaggedErrorClass<RevisionConflictError>()(
+export class RevisionConflictError extends Schema.TaggedError<RevisionConflictError>()(
   "RevisionConflictError",
   {
     actualRevision: Schema.Union([Revision, Schema.Null]),
@@ -124,13 +128,13 @@ export class RevisionConflictError extends Schema.TaggedErrorClass<RevisionConfl
 ) {}
 
 /** Raised when an opaque secret reference is reused outside its durable first-use scope. */
-export class SecretReferenceScopeConflictError extends Schema.TaggedErrorClass<SecretReferenceScopeConflictError>()(
+export class SecretReferenceScopeConflictError extends Schema.TaggedError<SecretReferenceScopeConflictError>()(
   "SecretReferenceScopeConflictError",
   {}
 ) {}
 
 /** Raised when a persisted record cannot be decoded into its trusted domain model. */
-export class PersistedRecordError extends Schema.TaggedErrorClass<PersistedRecordError>()(
+export class PersistedRecordError extends Schema.TaggedError<PersistedRecordError>()(
   "PersistedRecordError",
   {
     diagnosticCode: Schema.String.check(
@@ -144,8 +148,23 @@ export class PersistedRecordError extends Schema.TaggedErrorClass<PersistedRecor
   }
 ) {}
 
+/** A settings mutation did not acknowledge the exact governed sections it changes. */
+export class WorkspaceSettingsGovernanceError extends Schema.TaggedError<
+  WorkspaceSettingsGovernanceError
+>()("WorkspaceSettingsGovernanceError", {}) {}
+
+/** A settings mutation identity was already committed with different semantics. */
+export class WorkspaceSettingsMutationConflictError extends Schema.TaggedError<
+  WorkspaceSettingsMutationConflictError
+>()("WorkspaceSettingsMutationConflictError", {}) {}
+
+/** A complete settings replacement did not change the current aggregate. */
+export class WorkspaceSettingsNoChangesError extends Schema.TaggedError<
+  WorkspaceSettingsNoChangesError
+>()("WorkspaceSettingsNoChangesError", {}) {}
+
 /** Raised when a bounded quarantine diagnostic cannot be persisted. */
-export class QuarantineWriteError extends Schema.TaggedErrorClass<QuarantineWriteError>()(
+export class QuarantineWriteError extends Schema.TaggedError<QuarantineWriteError>()(
   "QuarantineWriteError",
   {
     recordKey: RecordKey,

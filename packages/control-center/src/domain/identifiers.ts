@@ -136,11 +136,35 @@ export const JobId = canonicalUuid7("JobId")
 /** Decoded asynchronous job identifier. */
 export type JobId = typeof JobId.Type
 
+/** Stable digest identity of one immutable PR-review suggestion revision. */
+export const PrReviewSuggestionRevisionId = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, {
+    expected: "a lowercase SHA-256 suggestion revision identity"
+  })
+).pipe(Schema.brand("PrReviewSuggestionRevisionId"))
+
+/** Decoded immutable PR-review suggestion revision identifier. */
+export type PrReviewSuggestionRevisionId = typeof PrReviewSuggestionRevisionId.Type
+
+/** Canonical owner identifier for one expiring review-publication reservation. */
+export const ReviewSuggestionPublicationReservationId = canonicalUuid7(
+  "ReviewSuggestionPublicationReservationId"
+)
+
+/** Decoded review-publication reservation owner identifier. */
+export type ReviewSuggestionPublicationReservationId = typeof ReviewSuggestionPublicationReservationId.Type
+
 /** Canonical identifier of one durable release-scoped agent thread. */
 export const AgentThreadId = canonicalUuid7("AgentThreadId")
 
 /** Decoded durable agent-thread identifier. */
 export type AgentThreadId = typeof AgentThreadId.Type
+
+/** Canonical identifier of one retained Review Sandbox command artifact. */
+export const ReviewCommandArtifactId = canonicalUuid7("ReviewCommandArtifactId")
+
+/** Decoded retained Review Sandbox command-artifact identifier. */
+export type ReviewCommandArtifactId = typeof ReviewCommandArtifactId.Type
 
 /** Canonical identifier of an authenticated browser session. */
 export const SessionId = canonicalUuid7("SessionId")
@@ -177,3 +201,9 @@ export const GovernedActionAttemptId = canonicalUuid7("GovernedActionAttemptId")
 
 /** Decoded governed-action attempt identifier. */
 export type GovernedActionAttemptId = typeof GovernedActionAttemptId.Type
+
+/** Canonical idempotency identity of one workspace-settings mutation. */
+export const WorkspaceSettingsMutationId = canonicalUuid7("WorkspaceSettingsMutationId")
+
+/** Decoded workspace-settings mutation identifier. */
+export type WorkspaceSettingsMutationId = typeof WorkspaceSettingsMutationId.Type

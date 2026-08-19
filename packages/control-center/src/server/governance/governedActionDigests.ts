@@ -1,6 +1,7 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 import {
@@ -41,7 +42,7 @@ import {
 import type { PluginPayloadJson } from "../../domain/plugins/bounds.js"
 
 /** Bounded failure while encoding or hashing governed-action authority. */
-export class GovernedActionDigestError extends Schema.TaggedErrorClass<GovernedActionDigestError>()(
+export class GovernedActionDigestError extends Schema.TaggedError<GovernedActionDigestError>()(
   "GovernedActionDigestError",
   {
     operation: Schema.Literals(["encode", "encode-utf8", "digest"])
@@ -49,7 +50,7 @@ export class GovernedActionDigestError extends Schema.TaggedErrorClass<GovernedA
 ) {}
 
 /** Exact immutable action binding that failed canonical verification. */
-export class GovernedActionBindingMismatch extends Schema.TaggedErrorClass<GovernedActionBindingMismatch>()(
+export class GovernedActionBindingMismatch extends Schema.TaggedError<GovernedActionBindingMismatch>()(
   "GovernedActionBindingMismatch",
   {
     reason: Schema.Literals([
@@ -201,21 +202,15 @@ export const canonicalizeGovernedActionJson = (value: Schema.Json): string => {
   if (value === null) return "null"
   if (Array.isArray(value)) return `[${value.map(canonicalizeGovernedActionJson).join(",")}]`
 
-  switch (typeof value) {
-    case "boolean":
-      return value ? "true" : "false"
-    case "number":
-      return JSON.stringify(value) ?? "null"
-    case "string":
-      return JSON.stringify(value)
-    case "object":
-      return `{${
-        Object.entries(value)
-          .sort(([leftKey], [rightKey]) => compareText(leftKey, rightKey))
-          .map(([key, nestedValue]) => `${JSON.stringify(key)}:${canonicalizeGovernedActionJson(nestedValue)}`)
-          .join(",")
-      }}`
-  }
+  if (Predicate.isBoolean(value)) return value ? "true" : "false"
+  if (Predicate.isNumber(value)) return JSON.stringify(value) ?? "null"
+  if (Predicate.isString(value)) return JSON.stringify(value)
+  return `{${
+    Object.entries(value)
+      .sort(([leftKey], [rightKey]) => compareText(leftKey, rightKey))
+      .map(([key, nestedValue]) => `${JSON.stringify(key)}:${canonicalizeGovernedActionJson(nestedValue)}`)
+      .join(",")
+  }}`
 }
 
 /** Hash canonical JSON with the governed-action SHA-256 representation. */
@@ -243,7 +238,7 @@ const encodeAuthorization = Schema.encodeEffect(GovernedActionAuthorizationV1)
 const encodeAttempt = Schema.encodeEffect(GovernedActionAttemptV1)
 const encodeTransition = Schema.encodeEffect(GovernedActionTransitionV1)
 
-const decodeJson = Effect.fn("GovernedActionDigests.decodeJson")(function*(value: unknown) {
+const decodeJson = Effect.fn("GovernedActionDigests.decodeJson")(function*<UnparsedInput>(value: UnparsedInput) {
   return yield* Schema.decodeUnknownEffect(Schema.Json)(value).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )

@@ -40,13 +40,13 @@ const emptyState: TimerStateFile = {
   clockifyEntryId: null
 }
 
-export interface StateWriterShape {
+export interface StateWriterContract {
   readonly write: (state: TimerStateFile) => Effect.Effect<void>
   readonly read: Effect.Effect<TimerStateFile>
   readonly clear: Effect.Effect<void>
 }
 
-export class StateWriter extends Context.Service<StateWriter, StateWriterShape>()("jcf/StateWriter") {}
+export class StateWriter extends Context.Service<StateWriter, StateWriterContract>()("jcf/StateWriter") {}
 
 const STATE_DIR = ".jcf"
 const STATE_FILE = "state.json"
@@ -55,20 +55,20 @@ const parseStateFile = (content: string): TimerStateFile => {
   const parsed: unknown = JSON.parse(content)
   if (!Predicate.isObject(parsed)) return emptyState
   return {
-    active: typeof parsed.active === "boolean" ? parsed.active : emptyState.active,
-    ticketKey: typeof parsed.ticketKey === "string" || parsed.ticketKey === null
+    active: Predicate.isBoolean(parsed.active) ? parsed.active : emptyState.active,
+    ticketKey: Predicate.isString(parsed.ticketKey) || parsed.ticketKey === null
       ? parsed.ticketKey
       : emptyState.ticketKey,
-    summary: typeof parsed.summary === "string" || parsed.summary === null ? parsed.summary : emptyState.summary,
-    project: typeof parsed.project === "string" || parsed.project === null ? parsed.project : emptyState.project,
-    startedAt: typeof parsed.startedAt === "string" || parsed.startedAt === null
+    summary: Predicate.isString(parsed.summary) || parsed.summary === null ? parsed.summary : emptyState.summary,
+    project: Predicate.isString(parsed.project) || parsed.project === null ? parsed.project : emptyState.project,
+    startedAt: Predicate.isString(parsed.startedAt) || parsed.startedAt === null
       ? parsed.startedAt
       : emptyState.startedAt,
-    startedAt_unix: typeof parsed.startedAt_unix === "number" || parsed.startedAt_unix === null
+    startedAt_unix: Predicate.isNumber(parsed.startedAt_unix) || parsed.startedAt_unix === null
       ? parsed.startedAt_unix
       : emptyState.startedAt_unix,
-    elapsed: typeof parsed.elapsed === "number" ? parsed.elapsed : emptyState.elapsed,
-    clockifyEntryId: typeof parsed.clockifyEntryId === "string" || parsed.clockifyEntryId === null
+    elapsed: Predicate.isNumber(parsed.elapsed) ? parsed.elapsed : emptyState.elapsed,
+    clockifyEntryId: Predicate.isString(parsed.clockifyEntryId) || parsed.clockifyEntryId === null
       ? parsed.clockifyEntryId
       : emptyState.clockifyEntryId
   }

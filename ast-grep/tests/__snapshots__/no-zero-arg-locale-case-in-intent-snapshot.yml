@@ -1,0 +1,16 @@
+id: no-zero-arg-locale-case-in-intent
+snapshots:
+  ? |
+    const normalized = prompt.trim().toLocaleLowerCase()
+  : labels:
+      - source: prompt.trim().toLocaleLowerCase()
+        style: primary
+        start: 19
+        end: 52
+  ? |
+    const normalized = prompt.trim().toLocaleUpperCase()
+  : labels:
+      - source: prompt.trim().toLocaleUpperCase()
+        style: primary
+        start: 19
+        end: 52

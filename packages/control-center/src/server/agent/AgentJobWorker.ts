@@ -9,7 +9,7 @@ import {
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
@@ -20,21 +20,27 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
+import type { PrReviewReport } from "../../domain/prReview.js"
+import { PrReviewSuggestionAgentAuthor } from "../../domain/prReviewRevision.js"
+import { RevisionConflictError } from "../persistence/errors.js"
 import {
   AgentJobInputError,
   type AgentLeaseOwner,
   AgentLeaseToken,
   type ClaimedAgentJob
 } from "../persistence/repositories/agentJobModels.js"
-import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
+import { AgentJobRepository, type AgentJobRepositoryService } from "../persistence/repositories/agentJobRepository.js"
 import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
 import {
   AgentJobTaskExecutor,
+  prReviewOnlyTaskExecutorLayer,
   releaseChatTaskExecutorLayer,
   reviewEnabledTaskExecutorLayer
 } from "./internal/AgentJobTaskExecutor.js"
-import type { PrReviewSandboxRunner } from "./internal/PrReviewSandboxRunner.js"
+import { AgentJobWorkspacePolicy } from "./internal/AgentJobWorkspacePolicy.js"
+import type { PrReviewSandboxSessions } from "./internal/PrReviewSandboxSession.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
+import { prReviewThreadHistoryLayer } from "./internal/PrReviewThreadHistory.js"
 
 /** Worker lease policy fixed when the server composes the module. */
 export interface AgentJobWorkerOptions {
@@ -84,21 +90,26 @@ const chunkOutputEvent = (event: AgentRuntimeEvent): ReadonlyArray<AgentRuntimeE
   return events
 }
 
-const isDurableBoundFailure = (
-  failure: unknown
-): failure is AgentJobInputError & {
+const isDurableBoundFailure = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & {
   readonly reason: "event-limit-exceeded" | "output-limit-exceeded"
 } =>
   isAgentJobInputError(failure) &&
   (failure.reason === "event-limit-exceeded" || failure.reason === "output-limit-exceeded")
 
-const isInvalidReviewResult = (
-  failure: unknown
-): failure is AgentJobInputError & {
+const isInvalidReviewResult = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & {
   readonly reason: "invalid-result" | "task-mismatch"
 } =>
   isAgentJobInputError(failure) &&
   (failure.reason === "invalid-result" || failure.reason === "task-mismatch")
+
+const isCancellationRequested = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & AgentJobInputError & { readonly reason: "cancellation-requested" } =>
+  isAgentJobInputError(failure) && failure.reason === "cancellation-requested"
 
 const normalizeRuntimeFailure = (
   providerId: ClaimedAgentJob["providerId"],
@@ -147,44 +158,166 @@ const makeAgentJobWorker = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const jobs = yield* AgentJobRepository
   const taskExecutor = yield* AgentJobTaskExecutor
+  const workspacePolicy = yield* AgentJobWorkspacePolicy
+
+  const cancelClaim = Effect.fn("AgentJobWorker.cancelClaim")(function*(claim: ClaimedAgentJob) {
+    const occurredAt = yield* DateTime.now
+    yield* jobs.appendEvent({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId,
+      attemptSequence: claim.attemptSequence,
+      leaseToken: claim.leaseToken,
+      event: { _tag: "completed", outcome: "cancelled", sessionRef: claim.sessionRef },
+      occurredAt
+    })
+    return {
+      _tag: "completed",
+      jobId: claim.jobId,
+      outcome: "cancelled"
+    } satisfies AgentJobWorkerRunResult
+  })
 
   const failClaim = Effect.fn("AgentJobWorker.failClaim")(function*(
     claim: ClaimedAgentJob,
     error: AgentProviderError
   ) {
     const failedAt = yield* DateTime.now
-    yield* jobs.failAttempt({
+    const failed = yield* jobs.failAttempt({
       workspaceId: claim.workspaceId,
       jobId: claim.jobId,
       attemptSequence: claim.attemptSequence,
       leaseToken: claim.leaseToken,
       error,
       failedAt
-    })
+    }).pipe(Effect.result)
+    if (Result.isFailure(failed)) {
+      return isCancellationRequested(failed.failure)
+        ? yield* cancelClaim(claim)
+        : yield* Effect.fail(failed.failure)
+    }
     return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
+  })
+
+  const incompleteReport = (claim: ClaimedAgentJob): PrReviewReport | null =>
+    claim.context.task._tag !== "pr-review"
+      ? null
+      : {
+        schemaVersion: 3,
+        subject: claim.context.task.subject,
+        completion: {
+          status: "unable-to-conclude",
+          reason: "The review stopped before the complete project was examined."
+        },
+        suggestions: [],
+        notes: []
+      }
+
+  const persistIncompleteReview = Effect.fn("AgentJobWorker.persistIncompleteReview")(function*(
+    claim: ClaimedAgentJob
+  ) {
+    const report = incompleteReport(claim)
+    if (report === null) return
+    const existing = yield* jobs.reviewResult({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId
+    }).pipe(Effect.result)
+    if (Result.isSuccess(existing)) return
+    if (existing.failure._tag !== "RecordNotFoundError") return
+    yield* DateTime.now.pipe(
+      Effect.flatMap((occurredAt) =>
+        jobs.recordReviewProgress({
+          workspaceId: claim.workspaceId,
+          jobId: claim.jobId,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: claim.leaseToken,
+          report,
+          occurredAt
+        })
+      ),
+      Effect.ignore
+    )
   })
 
   const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
     if (claim.cancellationRequested) {
-      const occurredAt = yield* DateTime.now
-      yield* jobs.appendEvent({
-        workspaceId: claim.workspaceId,
-        jobId: claim.jobId,
-        attemptSequence: claim.attemptSequence,
-        leaseToken: claim.leaseToken,
-        event: { _tag: "completed", outcome: "cancelled", sessionRef: claim.sessionRef },
-        occurredAt
-      })
-      return {
-        _tag: "completed",
-        jobId: claim.jobId,
-        outcome: "cancelled"
-      } satisfies AgentJobWorkerRunResult
+      return yield* cancelClaim(claim)
+    }
+    const policy = yield* workspacePolicy.read(claim.workspaceId)
+    const providerAllowed = policy.allowedProviders.some(
+      (providerId) => providerId === String(claim.providerId)
+    )
+    const toolsAllowed = claim.context.task._tag !== "pr-review" ||
+      policy.toolPolicy === "review-sandbox"
+    if (!providerAllowed || !toolsAllowed) {
+      return yield* failClaim(
+        claim,
+        new AgentProviderError({
+          providerId: claim.providerId,
+          phase: "configuration",
+          message: "Current workspace policy no longer permits this agent job.",
+          retryable: false
+        })
+      )
     }
 
-    const selected = yield* taskExecutor.execute(claim).pipe(Effect.result)
+    const onReviewActivity = (event: AgentRuntimeEvent) =>
+      DateTime.now.pipe(
+        Effect.flatMap((occurredAt) =>
+          jobs.appendEvent({
+            workspaceId: claim.workspaceId,
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken,
+            event,
+            occurredAt
+          })
+        ),
+        Effect.asVoid,
+        Effect.mapError((failure) =>
+          isCancellationRequested(failure)
+            ? failure
+            : new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "execution",
+              message: "Review activity persistence failed.",
+              retryable: false
+            })
+        )
+      )
+    const onPartialReview = (report: PrReviewReport) =>
+      DateTime.now.pipe(
+        Effect.flatMap((occurredAt) =>
+          jobs.recordReviewProgress({
+            workspaceId: claim.workspaceId,
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken,
+            report,
+            occurredAt
+          })
+        ),
+        Effect.asVoid,
+        Effect.mapError((failure) =>
+          isCancellationRequested(failure)
+            ? failure
+            : new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "execution",
+              message: "Partial review persistence failed.",
+              retryable: false
+            })
+        )
+      )
+    const selected = yield* taskExecutor.execute(claim, onReviewActivity, onPartialReview).pipe(Effect.result)
     if (Result.isFailure(selected)) {
-      return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
+      if (isCancellationRequested(selected.failure)) {
+        yield* persistIncompleteReview(claim)
+        return yield* cancelClaim(claim)
+      }
+      if (isAgentRuntimeFailure(selected.failure)) {
+        return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
+      }
+      return yield* Effect.fail(selected.failure)
     }
     if (selected.success._tag !== claim.context.task._tag) {
       return yield* failClaim(
@@ -198,16 +331,125 @@ const makeAgentJobWorker = Effect.gen(function*() {
       )
     }
     if (selected.success._tag === "pr-review") {
+      const targetedIntent = claim.context.task._tag === "pr-review" &&
+        (claim.context.task.intent === "suggestion-edit" || claim.context.task.intent === "suggestion-revalidation")
+      if (targetedIntent) {
+        const target = claim.context.task.target
+        if (target === undefined || selected.success.report._tag !== "targeted") {
+          return yield* failClaim(
+            claim,
+            new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "protocol",
+              message: "Targeted review returned no immutable suggestion result.",
+              retryable: false
+            })
+          )
+        }
+        const source = yield* jobs.reviewResult({
+          workspaceId: claim.workspaceId,
+          jobId: target.sourceJobId
+        }).pipe(Effect.result)
+        if (Result.isFailure(source)) {
+          if (isCancellationRequested(source.failure)) return yield* cancelClaim(claim)
+          if (isAgentJobInputError(source.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "The targeted review source result could not be loaded.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(source.failure)
+        }
+        const completedAt = yield* DateTime.now
+        const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
+        const completion = yield* jobs.completeTargetedReview({
+          source: {
+            workspaceId: claim.workspaceId,
+            jobId: target.sourceJobId,
+            suggestionId: target.suggestionId,
+            expectedRevisionId: target.selectedRevisionId,
+            expectedSequence: target.history.current.sequence,
+            edit: selected.success.report.edit,
+            ...(!(validation === undefined) && { validation }),
+            author: PrReviewSuggestionAgentAuthor.make({
+              jobId: claim.jobId,
+              providerId: claim.providerId,
+              model: claim.model === null ? null : String(claim.model),
+              runtimeMetadata: selected.success.report.runtimeMetadata ?? null
+            }),
+            createdAt: completedAt,
+            leaseFence: {
+              jobId: claim.jobId,
+              attemptSequence: claim.attemptSequence,
+              leaseToken: claim.leaseToken
+            }
+          },
+          target: {
+            workspaceId: claim.workspaceId,
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken,
+            report: source.success.report,
+            completedAt
+          }
+        }).pipe(Effect.result)
+        if (Result.isFailure(completion)) {
+          if (isCancellationRequested(completion.failure)) return yield* cancelClaim(claim)
+          if (Schema.is(RevisionConflictError)(completion.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review revision became stale before it could be applied.",
+                retryable: false
+              })
+            )
+          }
+          if (isAgentJobInputError(completion.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review result could not be applied to the selected revision.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(completion.failure)
+        }
+        return { _tag: "completed", jobId: claim.jobId, outcome: "success" } satisfies AgentJobWorkerRunResult
+      }
       const completedAt = yield* DateTime.now
+      if (selected.success.report._tag !== "report") {
+        return yield* failClaim(
+          claim,
+          new AgentProviderError({
+            providerId: claim.providerId,
+            phase: "protocol",
+            message: "Agent task executor returned a targeted result for a full PR review.",
+            retryable: false
+          })
+        )
+      }
       const completion = yield* jobs.completeReview({
         workspaceId: claim.workspaceId,
         jobId: claim.jobId,
         attemptSequence: claim.attemptSequence,
         leaseToken: claim.leaseToken,
-        report: selected.success.report,
+        report: selected.success.report.report,
         completedAt
       }).pipe(Effect.result)
       if (Result.isFailure(completion)) {
+        if (isCancellationRequested(completion.failure)) {
+          return yield* cancelClaim(claim)
+        }
         if (isInvalidReviewResult(completion.failure)) {
           return yield* failClaim(
             claim,
@@ -251,6 +493,9 @@ const makeAgentJobWorker = Effect.gen(function*() {
     )
     if (Result.isFailure(execution)) {
       const failure = execution.failure
+      if (isCancellationRequested(failure)) {
+        return yield* cancelClaim(claim)
+      }
       if (isAgentRuntimeFailure(failure)) {
         return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, failure))
       }
@@ -279,6 +524,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
 
   return (options: AgentJobWorkerOptions) => ({
     runOnce: Effect.fn("AgentJobWorker.runOnce")(function*(workspaceId: WorkspaceId) {
+      const leaseDuration = Duration.fromInputUnsafe(options.leaseDuration)
       const claimedAt = yield* DateTime.now
       const leaseToken = AgentLeaseToken.make(
         Encoding.encodeHex(yield* cryptoService.randomBytes(32))
@@ -289,11 +535,86 @@ const makeAgentJobWorker = Effect.gen(function*() {
         leaseOwner: options.leaseOwner,
         leaseToken,
         claimedAt,
-        leaseExpiresAt: DateTime.addDuration(claimedAt, options.leaseDuration)
+        leaseExpiresAt: DateTime.addDuration(claimedAt, leaseDuration)
       })
-      return Option.isNone(claim)
-        ? { _tag: "idle" } satisfies AgentJobWorkerRunResult
-        : yield* executeClaim(claim.value)
+      if (Option.isNone(claim)) return { _tag: "idle" } satisfies AgentJobWorkerRunResult
+      const claimed = claim.value
+      if (claimed.cancellationRequested) return yield* cancelClaim(claimed)
+      const heartbeatInterval = Duration.millis(
+        Math.max(1, Math.min(10_000, Math.floor(Duration.toMillis(leaseDuration) / 3)))
+      )
+      const executionStartedAt = yield* DateTime.now
+      const claimedTask = claimed.context.task
+      const awaitCancellation = (): Effect.Effect<
+        "budget-exhausted" | "cancelled",
+        Effect.Error<ReturnType<AgentJobRepositoryService["heartbeat"]>>
+      > =>
+        Effect.sleep(heartbeatInterval).pipe(
+          Effect.andThen(DateTime.now),
+          Effect.flatMap((renewedAt) =>
+            jobs.heartbeat({
+              workspaceId: claimed.workspaceId,
+              jobId: claimed.jobId,
+              attemptSequence: claimed.attemptSequence,
+              leaseToken: claimed.leaseToken,
+              leaseExpiresAt: DateTime.addDuration(renewedAt, leaseDuration)
+            })
+          ),
+          Effect.flatMap((cancellationRequested) =>
+            cancellationRequested
+              ? Effect.succeed("cancelled")
+              : claimedTask._tag !== "pr-review"
+              ? Effect.suspend(awaitCancellation)
+              : jobs.reviewBudget({
+                workspaceId: claimed.workspaceId,
+                jobId: claimed.jobId,
+                task: claimedTask
+              }).pipe(
+                Effect.flatMap(({ reviewBudgetMillis }) =>
+                  DateTime.now.pipe(
+                    Effect.map((observedAt) =>
+                      DateTime.toEpochMillis(observedAt) - DateTime.toEpochMillis(executionStartedAt) >=
+                          (reviewBudgetMillis ?? claimedTask.reviewProfile.budgetMillis)
+                        ? "budget-exhausted"
+                        : null
+                    )
+                  )
+                ),
+                Effect.flatMap((budgetState) =>
+                  budgetState === "budget-exhausted"
+                    ? Effect.succeed(budgetState)
+                    : Effect.suspend(awaitCancellation)
+                )
+              )
+          )
+        )
+      const observed = yield* Effect.raceFirst(
+        executeClaim(claimed).pipe(
+          Effect.map((result) => ({
+            _tag: "executed",
+            result
+          } satisfies { readonly _tag: "executed"; readonly result: AgentJobWorkerRunResult }))
+        ),
+        awaitCancellation().pipe(
+          Effect.map((reason) => ({
+            _tag: "interrupted",
+            reason
+          } satisfies { readonly _tag: "interrupted"; readonly reason: "budget-exhausted" | "cancelled" }))
+        )
+      )
+      if (observed._tag === "executed") return observed.result
+      yield* persistIncompleteReview(claimed)
+      return observed.reason === "cancelled"
+        ? yield* cancelClaim(claimed)
+        : yield* failClaim(
+          claimed,
+          new AgentProviderError({
+            providerId: claimed.providerId,
+            phase: "timeout",
+            message: "The review budget expired before the complete project was examined.",
+            retryable: false
+          })
+        )
     })
   })
 })
@@ -312,7 +633,11 @@ export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWork
 /** Default release-chat worker composition; it remains independent of sandbox configuration. */
 export const agentJobWorkerLayer = (
   options: AgentJobWorkerOptions
-): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentJobWorkspacePolicy | AgentRuntimeRegistry | Crypto.Crypto
+> =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(releaseChatTaskExecutorLayer)
   )
@@ -323,12 +648,44 @@ export const agentJobWorkerWithPrReviewLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner
+  | AgentJobRepository
+  | AgentJobWorkspacePolicy
+  | AgentRuntimeRegistry
+  | Crypto.Crypto
+  | PrReviewSandboxSessions
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
       reviewEnabledTaskExecutorLayer.pipe(
-        Layer.provide(prReviewTaskExecutorLayer)
+        Layer.provide(
+          prReviewTaskExecutorLayer.pipe(
+            Layer.provide(prReviewThreadHistoryLayer)
+          )
+        )
+      )
+    )
+  )
+
+/** Review-only worker composition used by the production review supervisor. */
+export const prReviewAgentJobWorkerLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  | AgentJobRepository
+  | AgentJobWorkspacePolicy
+  | AgentRuntimeRegistry
+  | Crypto.Crypto
+  | PrReviewSandboxSessions
+> =>
+  agentJobWorkerWithTaskExecutorLayer(options).pipe(
+    Layer.provide(
+      prReviewOnlyTaskExecutorLayer.pipe(
+        Layer.provide(
+          prReviewTaskExecutorLayer.pipe(
+            Layer.provide(prReviewThreadHistoryLayer)
+          )
+        )
       )
     )
   )
@@ -336,7 +693,11 @@ export const agentJobWorkerWithPrReviewLayer = (
 /** Internal composition hook used by deterministic task-executor contract tests. */
 export const agentJobWorkerWithTaskExecutorLayer = (
   options: AgentJobWorkerOptions
-): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentJobTaskExecutor | Crypto.Crypto> =>
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentJobTaskExecutor | AgentJobWorkspacePolicy | Crypto.Crypto
+> =>
   Layer.effect(
     AgentJobWorker,
     makeAgentJobWorker.pipe(Effect.map((make) => AgentJobWorker.of(make(options))))

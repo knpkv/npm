@@ -16,5 +16,5 @@ export * from "./codecommit/index.js"
 export * from "./codepipeline/index.js"
 /** Production, read-only Jira issue adapter. */
 export * from "./jira/index.js"
-/** Production, read-only Clockify time-entry adapter. */
+/** Production Clockify time-entry integration with governed correction and approval actions. */
 export * from "./clockify/index.js"

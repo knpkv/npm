@@ -5,6 +5,7 @@
  * @module
  */
 import * as Schema from "effect/Schema"
+import { AgentRuntimeMetadata } from "./cliMetadata.js"
 
 const boundedIdentifier = <const Brand extends string>(brand: Brand) =>
   Schema.String.check(
@@ -74,11 +75,15 @@ const SafeProviderReference = Schema.NullOr(
 
 const AgentStarted = Schema.TaggedStruct("started", {
   providerRunRef: SafeProviderReference,
-  sessionRef: Schema.NullOr(AgentSessionRef)
+  sessionRef: Schema.NullOr(AgentSessionRef),
+  runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
 })
 
 /** Maximum text characters emitted by one provider-neutral output event. */
 export const MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH = 32_768
+
+/** Maximum encoded UTF-8 bytes in one durable runtime event payload. */
+export const MAXIMUM_AGENT_RUNTIME_EVENT_BYTES = 32_768
 
 const AgentOutput = Schema.TaggedStruct("output", {
   channel: Schema.Literals(["assistant", "progress"]),
@@ -104,8 +109,17 @@ export const AgentRuntimeEvent = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type AgentRuntimeEvent = typeof AgentRuntimeEvent.Type
 
+/** Attach safe runtime identity only to the start event of one agent run. */
+export const attachAgentRuntimeMetadata = (
+  event: AgentRuntimeEvent,
+  runtimeMetadata: AgentRuntimeMetadata | undefined
+): AgentRuntimeEvent =>
+  event._tag === "started" && runtimeMetadata !== undefined
+    ? { ...event, runtimeMetadata }
+    : event
+
 /** A provider failed without exposing credentials or provider-native state. */
-export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderError>()(
+export class AgentProviderError extends Schema.TaggedError<AgentProviderError>()(
   "AgentProviderError",
   {
     providerId: AgentProviderId,
@@ -116,7 +130,7 @@ export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderErr
 ) {}
 
 /** The adapter violated the shared event-stream contract. */
-export class AgentRuntimeProtocolError extends Schema.TaggedErrorClass<AgentRuntimeProtocolError>()(
+export class AgentRuntimeProtocolError extends Schema.TaggedError<AgentRuntimeProtocolError>()(
   "AgentRuntimeProtocolError",
   {
     reason: Schema.Literals([
@@ -131,7 +145,7 @@ export class AgentRuntimeProtocolError extends Schema.TaggedErrorClass<AgentRunt
 ) {}
 
 /** A continuation was captured for a different immutable release context. */
-export class AgentContextMismatchError extends Schema.TaggedErrorClass<AgentContextMismatchError>()(
+export class AgentContextMismatchError extends Schema.TaggedError<AgentContextMismatchError>()(
   "AgentContextMismatchError",
   {}
 ) {}

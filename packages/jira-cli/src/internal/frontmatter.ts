@@ -9,6 +9,7 @@
  * @internal
  */
 import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
+import * as Predicate from "effect/Predicate"
 import matter from "gray-matter"
 import * as yaml from "js-yaml"
 import type { Issue } from "../IssueService.js"
@@ -24,9 +25,9 @@ import type { Issue } from "../IssueService.js"
 const yamlEngine = {
   parse: (str: string): object => {
     const parsed = yaml.load(str)
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+    return parsed !== null && Predicate.isObjectOrArray(parsed) && !Array.isArray(parsed) ? parsed : {}
   },
-  stringify: (data: object): string => yaml.dump(data)
+  stringify: <Data extends object>(data: Data): string => yaml.dump(data)
 }
 
 /**

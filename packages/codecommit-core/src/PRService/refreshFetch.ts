@@ -15,21 +15,22 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import {
   type CachedPullRequest,
   PullRequestRepo,
-  type PullRequestRepoShape
+  type PullRequestRepoContract
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
+import type { PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 
-/** Resolve a stale OPEN PR: delete if still open, update status if merged/closed. */
+/** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
-  prRepo: PullRequestRepoShape,
+  prRepo: PullRequestRepoContract,
   detail: PullRequestDetail,
   awsAccountId: string,
   id: string
 ) =>
   detail.status === "OPEN"
-    ? prRepo.deleteOne(awsAccountId, id)
+    ? Effect.void
     : prRepo.updateStatusAndClosedAt(
       awsAccountId,
       id,
@@ -39,6 +40,8 @@ const resolveStaleStatus = (
       detail.approvedBy
     )
 
+const accountRegionKey = (profile: string, region: string): string => `${profile}\0${region}`
+
 export const fetchAndUpsertPRs = (params: {
   readonly state: PRState
   readonly enabledAccounts: ReadonlyArray<AccountConfig>
@@ -46,7 +49,11 @@ export const fetchAndUpsertPRs = (params: {
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
   readonly staleThreshold: string
-}): Effect.Effect<void, never, AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo> =>
+}): Effect.Effect<
+  ReadonlyArray<PullRequestRefreshScope>,
+  never,
+  AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo
+> =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo
@@ -54,6 +61,25 @@ export const fetchAndUpsertPRs = (params: {
     const subscriptionRepo = yield* SubscriptionRepo
 
     const { accountIdMap, currentUser, enabledAccounts, staleThreshold, state, subscribedRef } = params
+
+    // Stale rows are safe to reconcile only when their owning list operation
+    // completed successfully. A failed account stream says nothing about which
+    // cached PRs remain open and must never turn into cache deletion.
+    const successfullyFetchedScopes = yield* Ref.make(
+      new Set(
+        enabledAccounts.flatMap((account) =>
+          accountIdMap.get(account.profile)
+            ? (account.regions ?? []).map((region) => accountRegionKey(account.profile, region))
+            : []
+        )
+      )
+    )
+    const withholdScopeSuccess = (profile: string, region: string) =>
+      Ref.update(successfullyFetchedScopes, (scopes) => {
+        const next = new Set(scopes)
+        next.delete(accountRegionKey(profile, region))
+        return next
+      })
 
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({
@@ -67,11 +93,10 @@ export const fetchAndUpsertPRs = (params: {
         const awsAccountId = accountIdMap.get(account.profile) ?? ""
         return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
           Stream.map((pr) => ({ awsAccountId, label, pr })),
-          Stream.catchCause((cause) => {
-            const squashed = Cause.squash(cause)
-            const causeStr = (Predicate.isError(squashed)
-              ? squashed.name !== "Error" ? squashed.name : squashed.message
-              : String(squashed)) || "Unknown error"
+          Stream.catch((error) => {
+            const causeStr = (Predicate.isError(error)
+              ? error.name !== "Error" ? error.name : error.message
+              : String(error)) || "Unknown error"
             const message = JSON.stringify({
               operation: "getPullRequests",
               profile: account.profile,
@@ -81,13 +106,18 @@ export const fetchAndUpsertPRs = (params: {
             const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
             return Stream.fromEffectDrain(
               Effect.gen(function*() {
+                yield* Ref.update(successfullyFetchedScopes, (scopes) => {
+                  const next = new Set(scopes)
+                  next.delete(accountRegionKey(account.profile, region))
+                  return next
+                })
                 yield* notificationRepo.addSystem({
                   type: "error",
                   title: label,
                   message,
                   profile: account.profile,
                   deduplicate: true
-                }).pipe(Effect.catchCause(() => Effect.void))
+                }).pipe(Effect.catch(() => Effect.void))
                 if (isAuthError) {
                   yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
                 }
@@ -106,7 +136,7 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
             const cached = yield* prRepo.findByAccountAndId(awsAccountId, pr.id).pipe(
               Effect.map((row) => Option.some(row)),
-              Effect.catchCause(() => Effect.succeed(Option.none<CachedPullRequest>()))
+              Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
             )
             if (Option.isSome(cached)) {
               const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
@@ -122,7 +152,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
                 discard: true
               }).pipe(
-                Effect.catchCause(() => Effect.void)
+                Effect.catch(() => Effect.void)
               )
             }
           }
@@ -131,14 +161,16 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId) {
             yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
-              Effect.catchCause(() => Effect.void)
+              Effect.catch(() => withholdScopeSuccess(pr.account.profile, pr.account.region))
             )
             const isAuthor = currentUser && pr.author === currentUser
             const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
             if (isAuthor || isApprover) {
-              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
+              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
             }
+          } else {
+            yield* withholdScopeSuccess(pr.account.profile, pr.account.region)
           }
 
           yield* SubscriptionRef.update(state, (s) => ({
@@ -150,10 +182,15 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
+    const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
-          stalePRs,
+          stalePRs.filter(
+            (pr) =>
+              accountIdMap.get(pr.accountProfile) === pr.awsAccountId &&
+              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))
+          ),
           (pr) =>
             awsClient
               .getPullRequest({
@@ -162,16 +199,32 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
-                Effect.catchCause(() =>
-                  prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
+                Effect.catch(() =>
+                  withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
+                    Effect.andThen(
+                      prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
+                    )
+                  )
                 )
               ),
           { concurrency: 5, discard: true }
         )
       ),
-      Effect.catchCause(() => Effect.void)
+      Effect.catch(() => Ref.set(successfullyFetchedScopes, new Set()))
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
-    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchCause(() => Effect.void))
-  }).pipe(Effect.ignoreCause({ log: "Warn", message: "fetchAndUpsertPRs failed" }))
+    yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
+
+    const reconciledScopes = yield* Ref.get(successfullyFetchedScopes)
+    return enabledAccounts.flatMap((account) =>
+      (account.regions ?? []).flatMap((region) => {
+        const awsAccountId = accountIdMap.get(account.profile)
+        return awsAccountId && reconciledScopes.has(accountRegionKey(account.profile, region))
+          ? [{ profile: account.profile, region, awsAccountId }]
+          : []
+      })
+    )
+  }).pipe(
+    Effect.tapCauseIf(Cause.hasDies, (cause) => Effect.logWarning("fetchAndUpsertPRs failed", cause))
+  )

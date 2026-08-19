@@ -1,5 +1,10 @@
 /** Durable application adapters for the authenticated HTTP API. @packageDocumentation */
 export { authorizedSharesLayer, makeAuthorizedShares } from "./authorizedShares.js"
+export {
+  clockifyActionSubmissionsLayer,
+  clockifyActionSubmissionsUnavailableLayer
+} from "./clockifyActionSubmissions.js"
+export { codePipelineReadsLayer, makeCodePipelineReads } from "./codePipelineReads.js"
 export { completeDiffReadsLayer, makeCompleteDiffReads } from "./completeDiffReads.js"
 export { deliveryGraphInspectionLayer, makeDeliveryGraphInspection } from "./deliveryGraphInspection.js"
 export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
@@ -31,7 +36,16 @@ export {
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer
 } from "./releaseAgent.js"
-export { makeReleaseAgentJobs, releaseAgentJobsLayer, releaseAgentJobsUnavailableLayer } from "./releaseAgentJobs.js"
+export {
+  makeReleaseAgentJobs,
+  releaseAgentJobsLayer,
+  releaseAgentJobsLayerForWorkerWorkspace,
+  releaseAgentJobsUnavailableLayer
+} from "./releaseAgentJobs.js"
+export {
+  releasePublicationSubmissionsLayer,
+  releasePublicationSubmissionsUnavailableLayer
+} from "./releasePublicationSubmissions.js"
 export {
   reconcileFakeReleaseProjection,
   reconcileFakeReleaseSyncAttempts,
@@ -46,3 +60,7 @@ export type {
 } from "./releaseSynchronization.js"
 export { makeTimelineExportAudits, timelineExportAuditsLayer } from "./timelineExportAudits.js"
 export { makeTimelineReads, timelineReadsLayer } from "./timelineReads.js"
+export {
+  makeWorkspaceSettingsAdministration,
+  workspaceSettingsAdministrationLayer
+} from "./workspaceSettingsAdministration.js"

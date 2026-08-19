@@ -1,0 +1,6 @@
+id: no-direct-blob-byte-removal
+valid:
+  - content.removeReproducible(workspaceId, digest)
+  - blobs.readAll(workspaceId, digest)
+invalid:
+  - blobs.removeAuthorizedBytes(workspaceId, digest)

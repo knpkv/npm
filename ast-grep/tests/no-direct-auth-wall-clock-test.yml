@@ -1,0 +1,10 @@
+id: no-direct-auth-wall-clock
+valid:
+  - |
+    const nowMs = yield* Clock.currentTimeMillis
+    const token = buildOAuthTokenAt(response, site, user, nowMs)
+  - |
+    const expired = isTokenExpiredAt(token, nowMs)
+invalid:
+  - |
+    const expiresAt = Date.now() + expiresIn

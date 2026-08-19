@@ -43,7 +43,7 @@ export interface PaginatedAuditLog {
   readonly nextCursor?: number
 }
 
-export interface AuditLogRepoShape {
+export interface AuditLogRepoContract {
   readonly log: (entry: NewAuditLogEntry) => Effect.Effect<void, CacheError>
   readonly findAll: (opts?: {
     readonly limit?: number | undefined
@@ -143,7 +143,7 @@ const makeAuditLogRepo = Effect.gen(function*() {
           Effect.map(([items, total]) => ({
             items,
             total,
-            ...(items.length === limit ? { nextCursor: offset + limit } : {})
+            ...((items.length === limit) && { nextCursor: offset + limit })
           })),
           cacheError("findAll")
         )
@@ -157,7 +157,7 @@ const makeAuditLogRepo = Effect.gen(function*() {
         Effect.map(([items, { count }]) => ({
           items,
           total: count,
-          ...(items.length === limit ? { nextCursor: offset + limit } : {})
+          ...((items.length === limit) && { nextCursor: offset + limit })
         })),
         cacheError("findAll")
       )
@@ -199,12 +199,12 @@ const makeAuditLogRepo = Effect.gen(function*() {
       const voidRequest: void = undefined
       return exportAllQuery(voidRequest).pipe(cacheError("exportAll"))
     }
-  } satisfies AuditLogRepoShape
+  } satisfies AuditLogRepoContract
 })
 
 export class AuditLogRepo extends Context.Service<
   AuditLogRepo,
-  AuditLogRepoShape
+  AuditLogRepoContract
 >()("AuditLogRepo") {
   static readonly Default = Layer.effect(AuditLogRepo, makeAuditLogRepo).pipe(
     Layer.provide(DatabaseLive)

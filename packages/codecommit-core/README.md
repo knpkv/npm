@@ -44,13 +44,13 @@ const program = Effect.gen(function* () {
 })
 ```
 
-The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. `getBlob` reads one immutable blob through the same injectable provider and Schema boundary, retains at most 1 MiB, and distinguishes the provider's file limit from the read client's exact observed byte limit. Streams and blob reads inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, malformed responses, and blob size limits remain typed.
+The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. `getRepositoryIdentity` decodes the repository name and owning AWS account used for authority revalidation. `getBlob` reads one immutable blob through the same injectable provider and Schema boundary, retains at most 1 MiB, and distinguishes the provider's file limit from the read client's exact observed byte limit. Streams and blob reads inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, malformed responses, and blob size limits remain typed.
 
 `classifyCodeCommitFile` derives conservative binary/generated facts from bounded bytes and stable path signals. Binary detection requires a NUL byte; generated detection recognizes an explicit `generated` path segment, `.generated.`, minified/source-map suffixes, and common lockfiles. It deliberately avoids broad directory guesses such as `dist` or `vendor`. General ReadClient commit-history and comment queries remain later I01 slices; the ReviewClient uses a bounded internal comment read only for reconciliation. Callers must not infer classification merely from a successful inventory read without content.
 
 ### ReviewClient
 
-The supported `@knpkv/codecommit-core/ReviewClient.js` entry exposes immutable pull-request review actions for server integrations. Every action carries the exact repository, pull request revision, base commit, and head commit that a caller authorized. `preflight` rejects a changed or closed target before a write, `execute` returns a secret-free provider receipt, and `reconcile` inspects provider state without replaying an ambiguous mutation.
+The supported `@knpkv/codecommit-core/ReviewClient.js` entry exposes immutable pull-request review actions plus an explicitly confirmed native CodeCommit merge action. Every action carries the exact repository, pull request revision, base commit, and head commit that a caller authorized. `preflight` rejects a changed or closed target before a write, `execute` returns a secret-free provider receipt, and `reconcile` inspects provider state without replaying an ambiguous mutation.
 
 ```typescript
 import { ReviewClient } from "@knpkv/codecommit-core"
@@ -67,7 +67,9 @@ const program = Effect.gen(function* () {
 
 `CodeCommitReviewClient.live` supplies the raw mutation provider and still requires a `CodeCommitReadClient`, `AwsClientConfig`, and `HttpClient` when layers are composed. CodeCommit natively supports approve and revoke approval. It has no request-review or request-changes state mutation, so those actions are target-bound idempotent comments attached to the authorized base/head commits. Comment reconciliation searches by AWS client request token; approval reconciliation reads the signed-in identity’s state and treats an absent caller as a completed revoke.
 
-Governed merge is deliberately not exposed. CodeCommit’s pull-request merge operation enforces provider approval rules but cannot compare-and-set the authorized destination commit, while its branch fast-forward operation can compare-and-set the destination but bypasses pull-request approval rules. Until the provider offers one atomic operation with both guarantees, callers must not model either endpoint as a governed PR merge.
+The exported `merge` action is an authority-bearing, non-idempotent direct provider mutation for an interactive client that pins `sourceCommitId`, prevents cancellation after submission, and waits for the provider receipt without interrupting the submitted call at the generic operation timeout. Its decoded target carries the captured STS caller account ID and repository-owner account ID. Immediately before dispatch, the provider resolves both identities and authorizes them inside the same credential snapshot that performs the merge; either mismatch fails before the destructive provider call. It is not a governed server-review action: Control Center deliberately excludes `merge` from its accepted action union and reconciliation locators. Other server integrations must exclude it unless they explicitly own the same non-idempotent execution and receipt-settlement lifecycle.
+
+Governed merge remains deliberately unavailable. CodeCommit’s pull-request merge operation honors the provider’s current approval or approval-rule override state and can pin the authorized source commit. Destination commit validation is preflight-only: the operation cannot compare-and-set the authorized destination commit, so CodeCommit may merge against a destination that advances after preflight. Callers must not describe the exported direct merge action as an atomic governed PR merge or promise that a three-way merge uses the reviewed base.
 
 ### CacheService (SQLite)
 
@@ -105,6 +107,45 @@ Consumers that only need the shared AWS profile catalogue can use
 It reads the standard AWS config and credentials files, deduplicates profile
 names, and returns safe profile/region metadata only; credential values are
 never returned.
+
+`review` stores the default web Relay profile and the server-issued prompt-only
+skill IDs selected for each built-in review focus. Older config files decode to
+the built-in Thorough, Security, Tests, and Explain profiles. Skill contents and
+filesystem paths are not persisted in this shared config schema.
+
+Sandbox settings are validated before persistence. Images must use an immutable
+`sha256` digest; the former built-in `codercom/code-server:latest` default is
+migrated to the current pinned digest during load, while other mutable tags
+remain invalid. Reserved code-server credential variables cannot be overridden,
+environment names must be portable identifiers, and values must be single-line
+so Docker env-file parsing cannot introduce extra variables. Container
+environment values, including the generated password, travel through Docker's
+pipe-backed env-file input and never appear in child-process arguments.
+Existing host mounts must canonically resolve to children of
+`~/.codecommit/sandbox-volumes` while targeting children of `/home/coder` or
+the exact `/tmp/.local/share/code-server` runtime data subtree.
+
+### SandboxService
+
+Sandbox creation validates the loaded policy before inserting its database row
+and revalidates it immediately before Docker execution. Each sandbox receives a
+cryptographically random persisted access
+password, runs code-server as the non-root owner of its bind-mounted workspace
+(repairing root-owned clones to `1000:1000`) with all Linux capabilities
+dropped, and publishes its IDE only on `127.0.0.1`. List and event projections
+exclude both the access password and workspace path; the authenticated web
+owner retrieves the password through the single-sandbox credential route.
+That response is non-cacheable, and sandbox browser pages use the alternate
+loopback hostname so the host-only owner cookie is not sent to sandbox ports.
+The local cache directory and database are created or repaired as owner-only
+`0700` and `0600` paths before that password is persisted; symbolic-link paths
+are rejected before either target is mutated.
+Legacy containers without a password are stopped during reconciliation and must
+be recreated. Active and terminal legacy rows are both checked; reconciliation
+finds every container by its `codecommit.sandbox.id` label, includes any
+persisted container ID, and remains unready until every shutdown succeeds.
+Custom runtime composition must provide Effect `Crypto`, `Path`,
+filesystem, process, and configuration services required by the sandbox layer.
 
 ## Deep Imports
 

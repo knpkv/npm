@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
             "domain/index": "src/domain/index.ts",
             index: "src/index.ts",
             "server/cli": "src/server/cli.ts",
+            "server/internal/codepipeline-state-probe": "src/server/plugins/codepipeline/CodePipelineStateProbe.ts",
             "server/index": "src/server/index.ts"
           },
           output: {
@@ -27,6 +28,8 @@ export default defineConfig(({ mode }) => {
         ssr: true
       }
       : {
+        // Vite warns when a large lazy syntax-language chunk exceeds this threshold.
+        chunkSizeWarningLimit: 800,
         emptyOutDir: true,
         manifest: true,
         outDir: "dist/client",
@@ -41,6 +44,6 @@ export default defineConfig(({ mode }) => {
         sourcemap: true
       },
     plugins: [react(), controlCenterBuildGraph(packageRoot, isServer ? "server" : "client")],
-    ...(isServer ? { ssr: { external: true } } : {})
+    ...(isServer && { ssr: { external: true } })
   }
 })

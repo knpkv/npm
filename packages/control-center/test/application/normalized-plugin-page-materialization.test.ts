@@ -1,10 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect"
-import type * as Crypto from "effect/Crypto"
+import { DateTime, Effect, Layer, Option, Ref, Result, Schema } from "effect"
+import * as Crypto from "effect/Crypto"
 
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import { DeliveryRelationship, LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import { Freshness } from "../../src/domain/freshness.js"
 import {
   AgentId,
   EntityId,
@@ -18,6 +19,7 @@ import { NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from ".
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { makeDeliveryGraphInspection } from "../../src/server/application/deliveryGraphInspection.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
 import {
@@ -25,10 +27,19 @@ import {
   type NormalizedPluginPageMaterializationScope
 } from "../../src/server/application/normalizedPluginPageMaterialization.js"
 import { pipelineStatus } from "../../src/server/application/pipelineExecutionProjection.js"
+import {
+  reconcileRelationshipInferencePolicy
+} from "../../src/server/application/relationshipInferenceMaterialization.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import {
+  Persistence,
+  persistenceLayerFromDatabase,
+  type PersistenceService
+} from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import type { SqlRow } from "../../src/server/persistence/repositories/sqlRow.js"
+import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -54,7 +65,8 @@ const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
 const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:06:00.000Z")
 const T5 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:00.000Z")
-const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const jsonBytes = <UnparsedInput>(value: UnparsedInput): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -755,7 +767,8 @@ const setup = Effect.gen(function*() {
 
 const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
   pluginConnectionId: PluginConnectionId,
-  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence"
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence",
+  pluginDescriptor: Schema.Json = descriptorFor(providerId)
 ) {
   const persistence = yield* Persistence
   yield* persistence.pluginConnections.create(WORKSPACE_ID, {
@@ -769,11 +782,31 @@ const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setup
     WORKSPACE_ID,
     pluginConnectionId,
     providerId,
-    descriptorFor(providerId),
+    pluginDescriptor,
     0,
     T0
   )
 })
+
+const persistenceWithWorkspaceSettings = (
+  persistence: PersistenceService,
+  settings: WorkspaceSettingsV1
+): PersistenceService =>
+  Persistence.of({
+    ...persistence,
+    workspaceSettings: {
+      ...persistence.workspaceSettings,
+      get: (workspaceId) =>
+        persistence.workspaceSettings.get(workspaceId).pipe(
+          Effect.map((record) => ({ ...record, settings }))
+        ),
+      readAtomically: (workspaceId, use) =>
+        persistence.workspaceSettings.readAtomically(
+          workspaceId,
+          (record) => use({ ...record, settings })
+        )
+    }
+  })
 
 const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(function*() {
   const persistence = yield* Persistence
@@ -805,6 +838,59 @@ const exactFirstProjection = Effect.fn(
   return result.value.projection
 })
 
+const inferredCodeCommitFreshnessAt = (
+  committedAt: UtcTimestamp
+) =>
+  withMaterializer(Effect.gen(function*() {
+    const persistence = yield* Persistence
+    yield* setup
+    yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+    const settings: WorkspaceSettingsV1 = {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      synchronization: {
+        ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
+        staleAfterMinutes: 5
+      }
+    }
+    const configuredPersistence = persistenceWithWorkspaceSettings(persistence, settings)
+    const synchronize = (
+      pluginConnectionId: PluginConnectionId,
+      providerId: "codecommit" | "jira",
+      page: typeof PluginSyncPageV1.Type
+    ) =>
+      materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId,
+        providerId,
+        streamKey: firstPartyStream(providerId),
+        expectedRevision: 0,
+        committedAt,
+        successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+      }, page).pipe(Effect.provideService(Persistence, configuredPersistence))
+
+    yield* synchronize(PLUGIN_ID, "jira", inferenceJiraReleasePage)
+    yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", codeCommitRelationshipPage)
+
+    const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+    if (release === undefined) return yield* Effect.die("expected synchronized release")
+    const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+      _tag: "releaseSlice",
+      releaseId: release.id,
+      environmentId: null,
+      limit: 100
+    })
+    if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+    const evidence = slice.value.evidenceItems.find(
+      ({ attribution, freshness }) =>
+        attribution._tag === "system" &&
+        attribution.component === "relationship-inference" &&
+        freshness.provenance._tag !== "none" &&
+        freshness.provenance.sourceRevision.providerId === "codecommit"
+    )
+    if (evidence === undefined) return yield* Effect.die("expected inferred CodeCommit evidence")
+    return evidence.freshness._tag
+  }))
+
 describe("normalized plugin page materialization", () => {
   it("maps terminal and active CodePipeline statuses", () => {
     const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
@@ -813,6 +899,45 @@ describe("normalized plugin page materialization", () => {
     ]
     for (const [status, expected] of cases) assert.strictEqual(pipelineStatus(status), expected)
   })
+
+  it.effect("preserves malformed settings quarantine after materialization rollback", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const { sql } = yield* Database
+      yield* setup
+      yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+      yield* sql`UPDATE workspace_settings
+        SET settings_digest = ${"0".repeat(64)}
+        WHERE workspace_id = ${WORKSPACE_ID}`
+
+      const failure = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T1,
+        successfulHealth: { _tag: "healthy", checkedAt: T1 }
+      }, materializedPage).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failure))
+      if (Result.isFailure(failure)) {
+        assert.strictEqual(failure.failure._tag, "PersistedRecordError")
+      }
+      const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+        diagnostic_code AS diagnosticCode
+      FROM quarantined_records
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND record_kind = 'workspace-settings'`
+      assert.deepStrictEqual(
+        quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+        ["workspace-settings-digest-mismatch"]
+      )
+      const entityRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM entities
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      assert.strictEqual(entityRows[0]?.count, 0)
+    })))
 
   it.effect("materializes one bounded, credential-free CodePipeline execution document", () =>
     withMaterializer(Effect.gen(function*() {
@@ -828,7 +953,7 @@ describe("normalized plugin page materialization", () => {
         successfulHealth: { _tag: "healthy", checkedAt: T4 }
       }, richCodePipelinePage)
       assert.strictEqual(receipt.entityProjectionCount, 1)
-      assert.strictEqual(receipt.skippedEntityCount, 4)
+      assert.strictEqual(receipt.skippedEntityCount, 3)
 
       const index = yield* items()
       const projection = index.items[0]?.projection
@@ -857,9 +982,10 @@ describe("normalized plugin page materialization", () => {
         { name: "Source", direction: "input", access: "proxy-required" },
         { name: "BuildOutput", direction: "output", access: "proxy-required" }
       ])
+      const deliveryGraphInspection = yield* makeDeliveryGraphInspection
       const serialized = JSON.stringify(
         yield* Schema.encodeEffect(WorkspaceEntityInspection)(
-          yield* (yield* makeDeliveryGraphInspection).workspaceEntity({
+          yield* deliveryGraphInspection.workspaceEntity({
             workspaceId: WORKSPACE_ID,
             entityId: projection.entityId
           })
@@ -1190,7 +1316,7 @@ describe("normalized plugin page materialization", () => {
         })
       )
       assert.strictEqual(declarationOnly.entityProjectionCount, 1)
-      assert.strictEqual(declarationOnly.skippedEntityCount, 1)
+      assert.strictEqual(declarationOnly.skippedEntityCount, 0)
       const declared = (yield* items()).items[0]?.projection
       if (declared?.details._tag !== "pipeline-execution") {
         return yield* Effect.die("expected declaration-refreshed pipeline execution")
@@ -1220,7 +1346,7 @@ describe("normalized plugin page materialization", () => {
         })
       )
       assert.strictEqual(unrelatedDeclaration.entityProjectionCount, 0)
-      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
+      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 0)
 
       const deletedActionPage = Schema.decodeSync(PluginSyncPageV1)({
         checkpointAfterPage: "pipeline-cache-action-deleted",
@@ -1869,7 +1995,7 @@ describe("normalized plugin page materialization", () => {
             projectionRevision: 1,
             sourceEntityRevision: 1,
             supersedesProjectionRevision: null,
-            projectionSchemaVersion: 1,
+            projectionSchemaVersion: 3,
             entityState: "present",
             entityType: "time-entry",
             displayKey: "time-entry-backfill",
@@ -1905,6 +2031,7 @@ describe("normalized plugin page materialization", () => {
           attributes: {
             description: longTimeEntryDescription,
             billable: true,
+            locked: true,
             approvalState: "approved",
             projectId: "payments",
             userId: "clockify-user-avery",
@@ -1946,7 +2073,7 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backfilled time entry")
       }
       assert.strictEqual(timeEntryProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 3)
+      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 4)
       assert.strictEqual(timeEntryProjection.value.projection.sourceEntityRevision, 1)
       if (timeEntryProjection.value.projection.details._tag !== "time-entry") {
         return yield* Effect.die("expected time-entry backfill details")
@@ -1954,6 +2081,7 @@ describe("normalized plugin page materialization", () => {
       assert.deepInclude(timeEntryProjection.value.projection.details, {
         description: longTimeEntryDescription,
         durationMinutes: 45,
+        locked: true,
         projectId: "payments",
         userId: "clockify-user-avery"
       })
@@ -2138,7 +2266,7 @@ describe("normalized plugin page materialization", () => {
       }
       assert.strictEqual(correctedProjection.value.projection.title, "Older entry")
       assert.strictEqual(correctedProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 3)
+      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 4)
       assert.strictEqual(
         (yield* persistence.entities.get(WORKSPACE_ID, newerTimeEntryEntityId)).sourceRevision.revision,
         "time-entry-revision-1"
@@ -2259,6 +2387,85 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backward Clockify interval failure")
       }
       assert.strictEqual(failure.diagnosticCode, "normalized-time-entry-timestamp-invalid")
+    })))
+
+  it.effect("projects Clockify action availability from the negotiated source descriptor", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000259")
+      const sourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "clockify",
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        vendorImmutableId: "time-entry-capabilities",
+        revision: "clockify-capabilities-revision",
+        sourceUrl: "https://app.clockify.me/tracker",
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId,
+        entityType: "time-entry",
+        sourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 3,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-capabilities",
+            title: "Capability projection",
+            details: {
+              _tag: "time-entry",
+              durationMinutes: 60,
+              billable: true,
+              approvalState: "pending"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const inspection = yield* makeDeliveryGraphInspection
+      const historical = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isFalse(historical.sourceActionsAvailable)
+      assert.isTrue(historical.sourceSynchronizationAvailable)
+
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        clockifyReadPluginDescriptor,
+        1,
+        T3
+      )
+      const current = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isTrue(current.sourceActionsAvailable)
+      assert.isTrue(current.sourceSynchronizationAvailable)
+
+      const connection = yield* persistence.pluginConnections.get(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID)
+      yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID, {
+        displayName: connection.displayName,
+        isEnabled: false,
+        expectedRevision: connection.revision,
+        updatedAt: T4
+      })
+      const disabled = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isFalse(disabled.sourceActionsAvailable)
+      assert.isFalse(disabled.sourceSynchronizationAvailable)
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
@@ -2712,6 +2919,354 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 1)
     })))
 
+  it.effect("applies workspace freshness and evidence retention policy during materialization", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const settings: WorkspaceSettingsV1 = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          enabled: false
+        },
+        synchronization: {
+          ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
+          staleAfterMinutes: 5
+        },
+        retention: {
+          ...DEFAULT_WORKSPACE_SETTINGS.retention,
+          evidenceDays: 7
+        }
+      }
+      const configuredPersistence = persistenceWithWorkspaceSettings(persistence, settings)
+      const policyPage = PluginSyncPageV1.make({
+        checkpointAfterPage: PluginCheckpointV1.make("workspace-policy-materialization"),
+        hasMore: false,
+        events: [...materializedPage.events, ...jiraReleasePage.events]
+      })
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T5,
+        successfulHealth: { _tag: "healthy", checkedAt: T5 }
+      }, policyPage).pipe(Effect.provideService(Persistence, configuredPersistence))
+
+      const database = yield* Database
+      const evidenceRows = yield* database.sql<{
+        readonly freshnessJson: string
+        readonly retainUntil: string
+      }>`SELECT freshness_json AS freshnessJson, retain_until AS retainUntil
+        FROM evidence_items
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND origin_kind = 'plugin'`
+      const evidence = evidenceRows[0]
+      if (evidence === undefined) return yield* Effect.die("expected materialized plugin evidence")
+      const freshness = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Freshness))(
+        evidence.freshnessJson
+      )
+
+      assert.strictEqual(freshness._tag, "stale")
+      assert.strictEqual(freshness.staleAfterSeconds, 300)
+      const materializedRelease = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+      if (materializedRelease === undefined) return yield* Effect.die("expected materialized release")
+      assert.strictEqual(materializedRelease.freshness._tag, "stale")
+      assert.strictEqual(materializedRelease.freshness.staleAfterSeconds, 300)
+      const currentReleasePage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "workspace-policy-current-release",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "jira-version-2026-30-current",
+          observedAt: "2026-07-19T09:06:30.000Z",
+          revision: "candidate:2026-07-30:2026.30",
+          entityType: "release",
+          vendorImmutableId: "jira-version:2026.30",
+          sourceUrl: "https://jira.example/plugins/servlet/project-config/PAY/versions",
+          title: "Payments · 2026.30",
+          attributes: {
+            source: "jira-fix-version",
+            serviceName: "Payments",
+            version: "2026.30",
+            lifecycle: "candidate"
+          }
+        }]
+      })
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 1,
+        committedAt: T5,
+        successfulHealth: { _tag: "healthy", checkedAt: T5 }
+      }, currentReleasePage).pipe(Effect.provideService(Persistence, configuredPersistence))
+      const currentRelease = (yield* persistence.releases.list(WORKSPACE_ID, 10))
+        .find(({ release }) => release.version === "2026.30")?.release
+      if (currentRelease === undefined) return yield* Effect.die("expected current materialized release")
+      assert.strictEqual(currentRelease.freshness._tag, "current")
+      assert.strictEqual(currentRelease.freshness.staleAfterSeconds, 300)
+      assert.strictEqual(
+        evidence.retainUntil,
+        DateTime.formatIso(DateTime.add(T5, { days: 7 }))
+      )
+    })))
+
+  it.effect("uses an exclusive stale boundary for normalized evidence", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const settings: WorkspaceSettingsV1 = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          enabled: false
+        },
+        synchronization: {
+          ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
+          staleAfterMinutes: 5
+        }
+      }
+      const boundaryPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "exclusive-evidence-boundary",
+        hasMore: false,
+        events: [
+          {
+            _tag: "UpsertEntity",
+            eventId: "boundary-pr",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "boundary",
+            entityType: "pull-request",
+            vendorImmutableId: "boundary-pr",
+            sourceUrl: null,
+            title: "Boundary pull request",
+            attributes: {
+              repository: "payments-api",
+              sourceBranch: "boundary",
+              targetBranch: "main",
+              headRevision: "boundary",
+              reviewState: "requested"
+            }
+          },
+          {
+            _tag: "AppendEvidence",
+            eventId: "boundary-evidence",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "boundary",
+            evidenceId: "boundary-evidence",
+            subject: { entityType: "pull-request", vendorImmutableId: "boundary-pr" },
+            evidenceType: "status-observed",
+            summary: "Boundary evidence",
+            capturedAt: "2026-07-19T09:02:00.000Z",
+            data: {}
+          },
+          {
+            _tag: "UpsertEntity",
+            eventId: "inside-pr",
+            observedAt: "2026-07-19T09:02:00.001Z",
+            revision: "inside",
+            entityType: "pull-request",
+            vendorImmutableId: "inside-pr",
+            sourceUrl: null,
+            title: "Inside pull request",
+            attributes: {
+              repository: "payments-api",
+              sourceBranch: "inside",
+              targetBranch: "main",
+              headRevision: "inside",
+              reviewState: "requested"
+            }
+          },
+          {
+            _tag: "AppendEvidence",
+            eventId: "inside-evidence",
+            observedAt: "2026-07-19T09:02:00.001Z",
+            revision: "inside",
+            evidenceId: "inside-evidence",
+            subject: { entityType: "pull-request", vendorImmutableId: "inside-pr" },
+            evidenceType: "status-observed",
+            summary: "Inside evidence",
+            capturedAt: "2026-07-19T09:02:00.001Z",
+            data: {}
+          }
+        ]
+      })
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T5,
+        successfulHealth: { _tag: "healthy", checkedAt: T5 }
+      }, boundaryPage).pipe(
+        Effect.provideService(
+          Persistence,
+          persistenceWithWorkspaceSettings(persistence, settings)
+        )
+      )
+
+      const database = yield* Database
+      const rows = yield* database.sql<{ readonly freshnessJson: string }>`SELECT
+        freshness_json AS freshnessJson
+      FROM evidence_items
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND origin_kind = 'plugin'`
+      const freshness = yield* Effect.forEach(
+        rows,
+        ({ freshnessJson }) => Schema.decodeUnknownEffect(Schema.fromJsonString(Freshness))(freshnessJson)
+      )
+      const at = (sourceObservedAt: string) =>
+        freshness.find(
+          (item) =>
+            item.sourceObservedAt !== null &&
+            DateTime.formatIso(item.sourceObservedAt) === sourceObservedAt
+        )
+
+      assert.strictEqual(at("2026-07-19T09:02:00.000Z")?._tag, "stale")
+      assert.strictEqual(at("2026-07-19T09:02:00.001Z")?._tag, "current")
+    })))
+
+  it.effect("uses the same exclusive stale boundary for inferred evidence", () =>
+    Effect.gen(function*() {
+      const boundary = yield* inferredCodeCommitFreshnessAt(
+        Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:10.000Z")
+      )
+      const inside = yield* inferredCodeCommitFreshnessAt(
+        Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:09.999Z")
+      )
+
+      assert.strictEqual(boundary, "stale")
+      assert.strictEqual(inside, "current")
+    }))
+
+  it.effect("enforces the workspace inference confidence floor and enabled switch", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+
+      const synchronizeCodeCommit = (
+        expectedRevision: number,
+        committedAt: UtcTimestamp,
+        settings: WorkspaceSettingsV1,
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+          providerId: "codecommit",
+          streamKey: firstPartyStream("codecommit"),
+          expectedRevision,
+          committedAt,
+          successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+        }, page).pipe(
+          Effect.provideService(
+            Persistence,
+            persistenceWithWorkspaceSettings(persistence, settings)
+          )
+        )
+      const hasCurrentInferredImplementation = Effect.fn(
+        "NormalizedPluginPageMaterializationTest.hasCurrentInferredImplementation"
+      )(function*() {
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+        if (release === undefined) return yield* Effect.die("expected synchronized release")
+        const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+        return slice.value.relationships.some(
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        )
+      })
+      const currentImplementationLifecycles = Effect.fn(
+        "NormalizedPluginPageMaterializationTest.currentImplementationLifecycles"
+      )(function*() {
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+        if (release === undefined) return yield* Effect.die("expected synchronized release")
+        const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+        return slice.value.relationships.flatMap(({ kind, lifecycle }) =>
+          kind === "implements" &&
+            (lifecycle._tag === "inferred" || lifecycle._tag === "missing")
+            ? [lifecycle._tag]
+            : []
+        )
+      })
+      const reconcilePolicy = Effect.fn(
+        "NormalizedPluginPageMaterializationTest.reconcilePolicy"
+      )(function*(settings: WorkspaceSettingsV1, committedAt: UtcTimestamp) {
+        const cryptoService = yield* Crypto.Crypto
+        return yield* persistence.transact(
+          reconcileRelationshipInferencePolicy(
+            persistence,
+            cryptoService,
+            WORKSPACE_ID,
+            committedAt,
+            settings
+          )
+        )
+      })
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, inferenceJiraReleasePage)
+      yield* synchronizeCodeCommit(0, T3, DEFAULT_WORKSPACE_SETTINGS, codeCommitRelationshipPage)
+      assert.isTrue(yield* hasCurrentInferredImplementation())
+
+      yield* reconcilePolicy(
+        {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          inference: {
+            enabled: true,
+            minimumConfidencePercent: 99
+          }
+        },
+        T4
+      )
+      assert.isFalse(yield* hasCurrentInferredImplementation())
+      assert.includeMembers(yield* currentImplementationLifecycles(), ["missing"])
+
+      yield* reconcilePolicy(DEFAULT_WORKSPACE_SETTINGS, T5)
+      assert.isTrue(yield* hasCurrentInferredImplementation())
+
+      const disabledAt = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:08:00.000Z")
+      yield* reconcilePolicy(
+        {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          inference: {
+            ...DEFAULT_WORKSPACE_SETTINGS.inference,
+            enabled: false
+          }
+        },
+        disabledAt
+      )
+      assert.isFalse(yield* hasCurrentInferredImplementation())
+      yield* reconcilePolicy(
+        DEFAULT_WORKSPACE_SETTINGS,
+        Schema.decodeSync(UtcTimestamp)("2026-07-19T09:09:00.000Z")
+      )
+      assert.isTrue(yield* hasCurrentInferredImplementation())
+    })))
+
   it.effect("materializes inferred relationships across synchronized provider evidence", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -2770,8 +3325,8 @@ describe("normalized plugin page materialization", () => {
       const indexedPage = boundedSlice.entityProjections.find(({ projection }) => projection.details._tag === "page")
         ?.projection
       if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
-      assert.strictEqual(indexedPage.details.contentState, "lazy")
-      assert.isNull(indexedPage.details.content)
+      assert.strictEqual(indexedPage.details.contentState, "loaded")
+      assert.isNotNull(indexedPage.details.content)
       const indexedTimeEntry = boundedSlice.entityProjections.find(
         ({ projection }) => projection.details._tag === "time-entry"
       )?.projection
@@ -2782,6 +3337,7 @@ describe("normalized plugin page materialization", () => {
         durationMinutes: 45,
         billable: true,
         approvalState: "approved",
+        locked: true,
         projectId: "project-payments",
         userId: "clockify-user-mina"
       })
@@ -3083,6 +3639,182 @@ describe("normalized plugin page materialization", () => {
         (yield* persistence.people.getPerson(WORKSPACE_ID, discoveredContributor.assignment.actor.personId)).person
           .displayName,
         "Morgan Lee"
+      )
+    })))
+
+  it.effect("converges corrected Clockify association while preserving prior projection and relationship history", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const synchronize = (
+        pluginConnectionId: PluginConnectionId,
+        providerId: "clockify" | "jira",
+        expectedRevision: number,
+        committedAt: UtcTimestamp,
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId,
+          providerId,
+          streamKey: firstPartyStream(providerId),
+          expectedRevision,
+          committedAt,
+          successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+        }, page)
+
+      yield* synchronize(PLUGIN_ID, "jira", 0, T3, inferenceJiraReleasePage)
+      yield* synchronize(CLOCKIFY_PLUGIN_ID, "clockify", 0, T3, clockifyRelationshipPage)
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected synchronized release")
+      const initial = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (initial._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+      const initialTimeEntry = initial.value.entityProjections.find(
+        ({ projection }) => projection.details._tag === "time-entry"
+      )?.projection
+      if (initialTimeEntry?.details._tag !== "time-entry") {
+        return yield* Effect.die("expected initial time entry")
+      }
+      const originalTracking = initial.value.relationships.find(
+        ({ kind, lifecycle }) => kind === "tracks-time-for" && lifecycle._tag === "inferred"
+      )
+      if (originalTracking === undefined) return yield* Effect.die("expected original time association")
+
+      const correctedIssuePage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "jira-corrected-association",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "jira-inference-issue-ops-99",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          entityType: "jira.issue",
+          vendorImmutableId: "issue-ops-99",
+          sourceUrl: "https://jira.example/browse/OPS-99",
+          title: "OPS-99 · Review payment safeguards",
+          attributes: { key: "OPS-99", status: { name: "Ready" } }
+        }, {
+          _tag: "AppendEvidence",
+          eventId: "jira-inference-ops-99-fix-version-evidence",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          evidenceId: "jira:issue:issue-ops-99:fix-version:2026.29",
+          subject: { entityType: "jira.issue", vendorImmutableId: "issue-ops-99" },
+          evidenceType: "relationship-observed",
+          summary: "Jira fix version 2026.29",
+          capturedAt: "2026-07-19T09:05:00.000Z",
+          data: { predicate: "relationship-observed", value: { _tag: "state", value: "2026.29" } }
+        }, {
+          _tag: "ProposeRelationship",
+          eventId: "jira-inference-release-contains-ops-99",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          relationshipId: "jira-version:2026.29:contains:issue-ops-99",
+          from: { entityType: "release", vendorImmutableId: "jira-version:2026.29" },
+          to: { entityType: "jira.issue", vendorImmutableId: "issue-ops-99" },
+          relationshipType: "contains",
+          confidence: 1,
+          evidenceIds: ["jira:issue:issue-ops-99:fix-version:2026.29"]
+        }]
+      })
+      yield* synchronize(PLUGIN_ID, "jira", 1, T4, correctedIssuePage)
+      const correctedClockifyPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "clockify-corrected-association",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "clockify-time-1-corrected",
+          observedAt: "2026-07-19T09:02:30.000Z",
+          revision: "time-1-corrected-revision",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-1",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "[OPS-99] review and rollout",
+          attributes: {
+            billable: true,
+            description: "[OPS-99] review and rollout",
+            projectId: "project-payments",
+            taskId: "task-review",
+            userId: "clockify-user-mina",
+            locked: true,
+            entryType: "REGULAR",
+            tagIds: ["release", "review"],
+            interval: {
+              start: "2026-07-19T08:17:30.000Z",
+              end: "2026-07-19T09:02:30.000Z",
+              duration: "PT45M",
+              state: "completed"
+            }
+          }
+        }]
+      })
+      yield* synchronize(CLOCKIFY_PLUGIN_ID, "clockify", 1, T5, correctedClockifyPage)
+
+      const converged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (converged._tag !== "releaseSlice") return yield* Effect.die("expected converged release slice")
+      const currentTracking = converged.value.relationships.filter(
+        ({ kind, lifecycle }) =>
+          kind === "tracks-time-for" &&
+          lifecycle._tag !== "rejected" &&
+          lifecycle._tag !== "superseded"
+      )
+      assert.lengthOf(currentTracking, 1)
+      const targetNode = converged.value.nodes.find(({ nodeId }) => nodeId === currentTracking[0]?.targetNodeId)
+      if (targetNode?.resolution._tag !== "resolved" || targetNode.resolution.target._tag !== "entity") {
+        return yield* Effect.die("expected corrected issue target")
+      }
+      const targetEntityId = targetNode.resolution.target.entityId
+      const targetProjection = converged.value.entityProjections.find(
+        ({ projection }) => projection.entityId === targetEntityId
+      )?.projection
+      if (targetProjection?.details._tag !== "issue") return yield* Effect.die("expected corrected issue")
+      assert.strictEqual(targetProjection.details.key, "OPS-99")
+
+      const currentTimeEntry = converged.value.entityProjections.find(
+        ({ projection }) => projection.entityId === initialTimeEntry.entityId
+      )?.projection
+      if (currentTimeEntry?.details._tag !== "time-entry") {
+        return yield* Effect.die("expected corrected time entry projection")
+      }
+      assert.strictEqual(currentTimeEntry.details.description, "[OPS-99] review and rollout")
+      assert.strictEqual(currentTimeEntry.projectionRevision, 2)
+      const originalProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: initialTimeEntry.entityId,
+        revision: 1
+      })
+      if (
+        originalProjection._tag !== "entityProjection" ||
+        originalProjection.value.projection.details._tag !== "time-entry"
+      ) return yield* Effect.die("expected original time entry projection")
+      assert.strictEqual(
+        originalProjection.value.projection.details.description,
+        "PAY-42 review and rollout"
+      )
+      const originalRelationshipHistory = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: originalTracking.relationshipId,
+        limit: 10
+      })
+      if (originalRelationshipHistory._tag !== "relationshipHistory") {
+        return yield* Effect.die("expected original relationship history")
+      }
+      assert.strictEqual(originalRelationshipHistory.value[0]?.lifecycle._tag, "superseded")
+      assert.isTrue(
+        originalRelationshipHistory.value.some(
+          ({ evidenceClaimIds, lifecycle }) => lifecycle._tag === "inferred" && evidenceClaimIds.length > 0
+        )
       )
     })))
 
@@ -4732,7 +5464,7 @@ describe("normalized plugin page materialization", () => {
       const remainingItems = yield* items()
       assert.strictEqual(remainingItems.totalCount, 1)
 
-      const beforeReplay = yield* database.sql<Record<string, unknown>>`SELECT
+      const beforeReplay = yield* database.sql<SqlRow>`SELECT
         (SELECT COUNT(*) FROM entities) AS entities,
         (SELECT COUNT(*) FROM entity_projection_revisions) AS projections,
         (SELECT COUNT(*) FROM persons) AS people,
@@ -4759,7 +5491,7 @@ describe("normalized plugin page materialization", () => {
         relationshipCount: 0,
         skippedEntityCount: 0
       })
-      const afterReplay = yield* database.sql<Record<string, unknown>>`SELECT
+      const afterReplay = yield* database.sql<SqlRow>`SELECT
         (SELECT COUNT(*) FROM entities) AS entities,
         (SELECT COUNT(*) FROM entity_projection_revisions) AS projections,
         (SELECT COUNT(*) FROM persons) AS people,
@@ -5309,6 +6041,7 @@ describe("normalized plugin page materialization", () => {
       if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
       assert.strictEqual(lazy.projectionSchemaVersion, 2)
       assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.isFalse(lazy.details.taskUpdatesSafe)
       assert.deepStrictEqual(lazy.details.linkedIssueKeys, ["PAY-42"])
       assert.deepStrictEqual(lazy.details.linkedReleaseVersions, ["2026.29"])
       assert.deepStrictEqual(lazy.details.contributors?.[0], {
@@ -5344,6 +6077,7 @@ describe("normalized plugin page materialization", () => {
       if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
       assert.strictEqual(loaded.projectionRevision, 2)
       assert.strictEqual(loaded.details.contentState, "loaded")
+      assert.isFalse(loaded.details.taskUpdatesSafe)
       assert.isNull(loaded.details.content)
       assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
       assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })

@@ -10,11 +10,12 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
-    "@aws-sdk/credential-providers": "^3.1085.0",
-    "@effect/ai-openai-compat": "4.0.0-beta.98",
-    "@effect/platform-browser": "4.0.0-beta.98",
-    "@effect/platform-node": "4.0.0-beta.98",
-    "@effect/sql-libsql": "4.0.0-beta.98",
+    "@aws-sdk/client-codepipeline": "^3.1108.0",
+    "@aws-sdk/credential-providers": "^3.1108.0",
+    "@effect/ai-openai-compat": "4.0.0-rc.109",
+    "@effect/platform-browser": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/sql-libsql": "4.0.0-rc.109",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/ai-runtime": "workspace:^",
@@ -26,15 +27,15 @@ const validManifest = {
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "@distilled.cloud/aws": "0.29.1",
-    effect: "4.0.0-beta.98",
-    react: "^19.2.7",
-    "react-dom": "^19.2.7",
+    "@distilled.cloud/aws": "1.0.0-rc.4",
+    effect: "4.0.0-rc.109",
+    react: "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
-    "react-router": "^8.2.0",
+    "react-router": "8.3.0",
     "remark-gfm": "^4.0.1"
   },
-  engines: { node: ">=24" },
+  engines: { node: ">=26" },
   exports: {
     ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
     "./api": { import: "./dist/server/api/index.js", types: "./dist/server/api/index.d.ts" },
@@ -48,9 +49,23 @@ const validManifest = {
   version: "0.0.0"
 }
 
+const effectAlignmentCases: ReadonlyArray<readonly [keyof typeof validManifest.dependencies, string]> = [
+  ["@effect/ai-openai-compat", "@effect/ai-openai-compat must align with the pinned Effect RC"],
+  ["@effect/platform-browser", "@effect/platform-browser must align with the pinned Effect RC"],
+  ["@effect/platform-node", "@effect/platform-node must align with the pinned Effect RC"],
+  ["@effect/sql-libsql", "@effect/sql-libsql must align with the pinned Effect RC"],
+  ["effect", "effect must align with the pinned Effect RC"]
+]
+
 describe("package contract", () => {
   it("accepts the reviewed T01 manifest surface", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
+  })
+
+  it("rejects a Node.js engine older than the supported baseline", () => {
+    expect(inspectPackageContract({ ...validManifest, engines: { node: ">=24" } })).toEqual([
+      "Node 26 or newer must be required"
+    ])
   })
 
   it.effect("keeps the checked-in manifest compatible with release versioning", () =>
@@ -113,12 +128,14 @@ describe("package contract", () => {
         ...validManifest,
         dependencies: {
           ...validManifest.dependencies,
+          "@aws-sdk/client-codepipeline": "latest",
           "@aws-sdk/credential-providers": "latest",
           "@distilled.cloud/aws": "latest"
         }
       })
     ).toEqual(expect.arrayContaining([
       "@distilled.cloud/aws must remain on the reviewed CodePipeline client version",
+      "AWS CodePipeline client must remain on the reviewed runtime version",
       "AWS credential providers must remain on the reviewed runtime version"
     ]))
   })
@@ -168,21 +185,12 @@ describe("package contract", () => {
     ).toContain("start must forward arguments to the built server CLI")
   })
 
-  it("rejects a libSQL adapter from a different Effect release", () => {
+  it.each(effectAlignmentCases)("rejects %s from a different Effect release", (dependency, violation) => {
     expect(
       inspectPackageContract({
         ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.97" }
+        dependencies: { ...validManifest.dependencies, [dependency]: "4.0.0-rc.108" }
       })
-    ).toContain("@effect/sql-libsql must align with the pinned Effect beta")
-  })
-
-  it("rejects a browser platform adapter from a different Effect release", () => {
-    expect(
-      inspectPackageContract({
-        ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.97" }
-      })
-    ).toContain("@effect/platform-browser must align with the pinned Effect beta")
+    ).toContain(violation)
   })
 })

@@ -15,7 +15,7 @@ import { mapPersistenceOperation } from "./internal.js"
 const RECORD_KIND = "authorized-share"
 
 /** Raised when authorized-share persistence input fails boundary decoding. */
-export class AuthorizedShareInputError extends Schema.TaggedErrorClass<AuthorizedShareInputError>()(
+export class AuthorizedShareInputError extends Schema.TaggedError<AuthorizedShareInputError>()(
   "AuthorizedShareInputError",
   { operation: Schema.Literals(["create", "get", "revoke"]) }
 ) {}
@@ -67,10 +67,10 @@ const AuthorizedShareRow = Schema.Struct({
 
 type AuthorizedShareRow = typeof AuthorizedShareRow.Type
 
-const decodeInput = <SchemaType extends Schema.Top>(
+const decodeInput = <SchemaType extends Schema.Top, UnparsedInput>(
   schema: SchemaType,
   operation: AuthorizedShareInputError["operation"],
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<SchemaType["Type"], AuthorizedShareInputError, SchemaType["DecodingServices"]> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(input).pipe(
     Effect.mapError(() => new AuthorizedShareInputError({ operation }))
@@ -144,13 +144,13 @@ const makeAuthorizedShareRepository = Effect.gen(function*() {
     return yield* grantFromRow(row)
   })
 
-  const read = Effect.fn("AuthorizedShareRepository.read")(function*(input: unknown) {
+  const read = Effect.fn("AuthorizedShareRepository.read")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* decodeInput(ReadAuthorizedShareInput, "get", input)
     return yield* readGrant(request)
   }, mapPersistenceOperation("authorized-share.get"))
 
   return {
-    create: Effect.fn("AuthorizedShareRepository.create")(function*(input: unknown) {
+    create: Effect.fn("AuthorizedShareRepository.create")(function*<UnparsedInput>(input: UnparsedInput) {
       const request = yield* decodeInput(CreateAuthorizedShareInput, "create", input)
       // Keep conflict arbitration in one autocommit statement so concurrent processes cannot
       // both hold deferred read transactions before competing for the immutable grant identity.
@@ -172,7 +172,7 @@ const makeAuthorizedShareRepository = Effect.gen(function*() {
       })
     }, mapPersistenceOperation("authorized-share.create")),
     get: read,
-    revoke: Effect.fn("AuthorizedShareRepository.revoke")(function*(input: unknown) {
+    revoke: Effect.fn("AuthorizedShareRepository.revoke")(function*<UnparsedInput>(input: UnparsedInput) {
       const request = yield* decodeInput(RevokeAuthorizedShareInput, "revoke", input)
       return yield* database.transaction(
         Effect.gen(function*() {

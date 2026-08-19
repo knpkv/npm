@@ -10,7 +10,7 @@ const fields = (overrides: Partial<SyncBaselineFields> = {}): SyncBaselineFields
     Risk: {
       fieldId: "customfield_1",
       displayName: "Risk",
-      shape: "singleSelect",
+      form: "singleSelect",
       value: { id: "1", value: "Low" }
     }
   },
@@ -80,7 +80,7 @@ describe("compareIssueFields", () => {
           Risk: {
             fieldId: "customfield_1",
             displayName: "Risk",
-            shape: "singleSelect",
+            form: "singleSelect",
             value: { id: "2", value: "High" }
           }
         }

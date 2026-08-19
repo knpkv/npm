@@ -33,19 +33,53 @@ confluence sync pull --replay-history      # replay each version as separate git
 # Push local changes to Confluence
 confluence sync push
 confluence sync push -n, --dry-run         # preview changes without applying
+confluence sync push --force               # push even a page markdown cannot round-trip
+
+# Read or write a page as raw ADF, bypassing the markdown projection
+confluence page get --url <PAGE_URL> --format adf
+confluence page create --space <SPACE_ID> --title <TITLE> --adf <FILE> [--parent <ID>] [--base-url <URL>]
+confluence page put --url <PAGE_URL> --adf <FILE> [--title <TITLE>] [-m <MESSAGE>]
+confluence page patch --url <PAGE_URL> --replace <TEXT> --with <TEXT>
+confluence page patch --url <PAGE_URL> --delete-node <SELECTOR>   # e.g. blockCard[1]
 
 # Delete a page (interactive selector, deletes local file)
 confluence page delete
 
 # Check sync status
 confluence sync status
+
+# Folders — containers with no body, so the page commands do not address them
+confluence folder get --url <FOLDER_URL>
+confluence folder get --folder-id <ID> --base-url <URL> [--json]
+confluence folder children --folder-id <ID> --base-url <URL> [--json]
+confluence folder create --base-url <URL> --space <SPACE_ID> --title <TITLE> [--parent <ID_OR_URL>] [-n, --dry-run]
+
+# Find content by title or parent (CQL); one page of results
+confluence search --base-url <URL> --cql <QUERY> [--limit <N>] [--json]
 ```
+
+`folder` and `search` talk to the site directly rather than to the local mirror,
+so they take `--base-url` instead of running inside a `.confluence/` workspace. A
+folder URL carries its own site, so `--base-url` is only needed alongside a bare
+id. `--space` takes the **numeric** space id, not the space key; `--parent`
+accepts a numeric id, a page URL, or a folder URL.
+
+Content ids are per-site, so these commands refuse a site mismatch instead of
+acting on the wrong site: a `--base-url` that disagrees with the URL, a
+`--parent` pasted from another site, and — under OAuth — a `--base-url` that is
+not the site the active profile is signed in to. That last check matters because
+OAuth requests route by the profile's cloud id and ignore `--base-url` entirely,
+so without it a wrong-site `folder create` would silently create the folder on
+the profile's site. Switch sites with `confluence auth use <profile>`.
 
 ### Authentication Commands
 
 ```bash
 # Create OAuth app (opens browser to Atlassian Developer Console)
 confluence auth create
+
+# Open the console to edit an existing app's scopes (prints the scopes to enable)
+confluence auth manage
 
 # Configure OAuth credentials
 confluence auth configure --client-id <ID> --client-secret <SECRET>
@@ -125,7 +159,39 @@ confluence sync diff --commit HEAD~1   # compare with commit
 
 `confluence page get --clean-markdown` removes Confluence round-trip metadata comments such as `<!-- adf:... -->`
 from the printed output. This is intended for readable exports and is not suitable for editing and pushing back to
-Confluence.
+Confluence. It applies to `--format md` only; combining it with `--format adf` is rejected rather than ignored.
+
+### Pages markdown cannot represent
+
+Most nodes do survive the trip back, because block-level nodes travel whole inside an
+`<!-- adf:… node=… -->` marker and macros carry their attributes in an `<!-- adf:extension … attrs=… -->` one.
+A Jira datasource card, a TOC, an excerpt and a children-display macro all round-trip and stay pushable — and so
+does anything nested inside a table, whose marker carries every descendant.
+
+Three shapes do not: a `blockCard`/`embedCard` with no resolvable url, which degrades to a placeholder comment; a
+`multiBodiedExtension`, which the walker has no case for; and a bodied macro inside a table cell, which cannot be
+converted back at all. The url-less card is refused wherever it sits, including under a marker that would in fact
+carry it — the guard deliberately over-refuses, because the refusal names a way forward and a wrong exemption
+would surface as an opaque conversion error instead.
+
+Pulling a page that holds one of the unsafe nodes marks it `roundTrip: unsafe` in its front matter, and
+`confluence sync push` refuses it rather than corrupting the node. Edit such a page with `page put --adf` or
+`page patch`, which never go through markdown. `--force` overrides the refusal; because a refused push leaves the
+commit unpushed, the retry still has something to push. Deletions already applied in Confluence are replayed
+harmlessly on that retry, so a partially completed push is never stuck.
+
+Any push error — not just a refusal — holds `origin/confluence` back, so work Confluence did not receive is never
+recorded as pushed. The consequence is that a page which cannot succeed (one deleted in the Confluence UI, say)
+makes every later `sync push` repeat the same failure until you resolve it or remove the file. `--force` covers
+only the round-trip refusal, and applies to the whole run rather than a single page.
+
+`page put` writes onto whatever version the page is currently at. When you use it as the remedy above —
+`page get --format adf`, edit, `page put` — pass `--if-version <n>` so an edit made in Confluence in between
+fails as a conflict instead of being overwritten. `page get --format adf` prints `Read page <id> at version <n>.`
+to stderr for exactly this, leaving stdout the machine-readable document.
+
+`page patch` writes the version it read, so a page edited in Confluence between the read and the write is
+reported as a conflict instead of being silently overwritten.
 
 ### Conversion pipeline
 
@@ -241,9 +307,20 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
      - `delete:page:confluence` - delete pages
      - `read:attachment:confluence` - resolve page attachments
      - `write:attachment:confluence` - upload page attachments
+     - `read:folder:confluence` - read folders (`folder get`)
+     - `write:folder:confluence` - create folders (`folder create`)
+     - `read:hierarchical-content:confluence` - list a folder's direct children (`folder children`)
+     - `read:content-details:confluence` - CQL search (`search --cql`)
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
+
+The provider-facing callback URL and callback listener both use `localhost`, so
+the browser and listener select the same loopback family on IPv4-only and
+IPv6-only hosts. Requests with a missing
+or mismatched OAuth state are rejected without consuming the pending login, so
+only the provider callback carrying the expected state can complete or fail it.
+
 6. In **Settings** tab, copy **Client ID** and **Secret**
 
 #### 2. Configure and Login
@@ -269,6 +346,14 @@ confluence auth logout
 Each login is saved as an auth profile keyed by Atlassian account and site. `<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
 
 Existing OAuth profiles created before attachment support need a fresh `confluence auth login` after the OAuth app includes the attachment scopes.
+
+`folder` and `search` need the same treatment, but **update the OAuth app first**. The
+CLI now requests the folder, hierarchical-content, and content-details scopes on
+every `confluence auth login`, and Atlassian rejects an authorization request that
+asks for a scope the app does not enable — so until those scopes are added to the
+app, `confluence auth login` itself fails at the authorize step, not just the new
+commands. Existing tokens keep working for the page and attachment commands
+meanwhile; only `folder` and `search` fail with 401/403 until you re-login.
 
 ### API Token (alternative)
 

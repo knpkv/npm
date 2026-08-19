@@ -10,6 +10,7 @@ import { appStateAtom } from "../atoms/app.js"
 import { creatingPrAtom } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
+import { textFromKeyboardKey } from "../keyboard-text.js"
 import { getCurrentBranch, type PRTemplate, scanPRTemplates } from "../utils/prTemplates.js"
 
 type Step = "repo" | "source" | "dest" | "template" | "details" | "preview"
@@ -192,7 +193,7 @@ export function DialogCreatePR() {
         setRepoFilter((s) => s.slice(0, -1))
         setSelectedIndex(0)
       } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
+        const char = textFromKeyboardKey(key)
         if (char && char.length === 1) {
           setRepoFilter((s) => s + char)
           setSelectedIndex(0)
@@ -223,7 +224,7 @@ export function DialogCreatePR() {
         setBranchFilter((s) => s.slice(0, -1))
         setSelectedIndex(0)
       } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
+        const char = textFromKeyboardKey(key)
         if (char && char.length === 1) {
           setBranchFilter((s) => s + char)
           setSelectedIndex(0)
@@ -251,7 +252,7 @@ export function DialogCreatePR() {
         setBranchFilter((s) => s.slice(0, -1))
         setSelectedIndex(0)
       } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
+        const char = textFromKeyboardKey(key)
         if (char && char.length === 1) {
           setBranchFilter((s) => s + char)
           setSelectedIndex(0)
@@ -306,7 +307,7 @@ export function DialogCreatePR() {
           setDescription((s) => s.slice(0, -1))
         }
       } else {
-        const char = key.char || (key.name?.length === 1 ? key.name : null)
+        const char = textFromKeyboardKey(key)
         if (char) {
           if (focusedField === "title") {
             setTitle((s) => s + char)
@@ -326,14 +327,14 @@ export function DialogCreatePR() {
     }
   })
 
-  const stepTitles: Record<Step, string> = {
+  const stepTitles = {
     repo: "Select Repository",
     source: "Select Source Branch",
     dest: "Select Destination Branch",
     template: "Select Template",
     details: "Enter Details",
     preview: "Confirm"
-  }
+  } satisfies Record<Step, string>
 
   const stepNumber = { repo: 1, source: 2, dest: 3, template: 4, details: 5, preview: 6 }[step]
 
@@ -369,9 +370,9 @@ export function DialogCreatePR() {
         left: "15%",
         width: "70%",
         height: listHeight,
-        backgroundColor: theme.backgroundElement,
+        backgroundColor: theme.backgroundPanel,
         borderStyle: "rounded",
-        borderColor: theme.primary,
+        borderColor: theme.borderStrong,
         flexDirection: "column"
       }}
     >
@@ -381,10 +382,12 @@ export function DialogCreatePR() {
           width: "100%",
           paddingLeft: 1,
           paddingRight: 1,
-          backgroundColor: theme.backgroundHeader
+          backgroundColor: theme.backgroundElement
         }}
       >
-        <text fg={theme.primary}>{`CREATE PR - Step ${stepNumber}/6: ${stepTitles[step]}`}</text>
+        <text fg={theme.textAccent}>CODECOMMIT / CREATE PULL REQUEST</text>
+        <text fg={theme.textMuted}>{`  ${stepNumber}/6  `}</text>
+        <text fg={theme.text}>{stepTitles[step]}</text>
       </box>
 
       {step === "repo" && (
@@ -410,11 +413,11 @@ export function DialogCreatePR() {
                   height: 1,
                   width: "100%",
                   paddingLeft: 1,
-                  ...(i === selectedIndex && { backgroundColor: theme.primary })
+                  ...(i === selectedIndex && { backgroundColor: theme.backgroundRaised })
                 }}
               >
-                <text fg={i === selectedIndex ? theme.selectedText : theme.text}>
-                  {`${repo.name} (${repo.account.profile})`}
+                <text fg={i === selectedIndex ? theme.text : theme.textMuted}>
+                  {`${i === selectedIndex ? "› " : "  "}${repo.name}  ${repo.account.profile}`}
                 </text>
               </box>
             ))
@@ -450,10 +453,11 @@ export function DialogCreatePR() {
                   height: 1,
                   width: "100%",
                   paddingLeft: 1,
-                  ...(i === selectedIndex && { backgroundColor: theme.primary })
+                  ...(i === selectedIndex && { backgroundColor: theme.backgroundRaised })
                 }}
               >
-                <text fg={i === selectedIndex ? theme.selectedText : theme.text}>
+                <text fg={i === selectedIndex ? theme.text : theme.textMuted}>
+                  {i === selectedIndex ? "› " : "  "}
                   {branch}
                   {step === "source" && branch === currentGitBranch ? " (current)" : ""}
                   {step === "dest" && (branch === "main" || branch === "master") ? " (default)" : ""}
@@ -479,10 +483,12 @@ export function DialogCreatePR() {
                 style={{
                   height: 1,
                   paddingLeft: 1,
-                  ...(selectedIndex === 0 && { backgroundColor: theme.primary })
+                  ...(selectedIndex === 0 && { backgroundColor: theme.backgroundRaised })
                 }}
               >
-                <text fg={selectedIndex === 0 ? theme.selectedText : theme.text}>Manual entry</text>
+                <text fg={selectedIndex === 0 ? theme.text : theme.textMuted}>
+                  {selectedIndex === 0 ? "› Manual entry" : "  Manual entry"}
+                </text>
               </box>
             </>
           ) : (
@@ -493,11 +499,11 @@ export function DialogCreatePR() {
                   height: 1,
                   width: "100%",
                   paddingLeft: 1,
-                  ...(i === selectedIndex && { backgroundColor: theme.primary })
+                  ...(i === selectedIndex && { backgroundColor: theme.backgroundRaised })
                 }}
               >
-                <text fg={i === selectedIndex ? theme.selectedText : theme.text}>
-                  {t.filename === "__manual__" ? "Manual entry" : `${t.title} (${t.filename})`}
+                <text fg={i === selectedIndex ? theme.text : theme.textMuted}>
+                  {`${i === selectedIndex ? "› " : "  "}${t.filename === "__manual__" ? "Manual entry" : `${t.title}  ${t.filename}`}`}
                 </text>
               </box>
             ))
@@ -508,21 +514,19 @@ export function DialogCreatePR() {
       {step === "details" && (
         <box style={{ flexDirection: "column", padding: 1 }}>
           <box style={{ height: 1, flexDirection: "row" }}>
-            <text fg={theme.text}>{"Title: "}</text>
-            <box style={{ flexGrow: 1, ...(focusedField === "title" && { backgroundColor: theme.primary }) }}>
-              <text fg={focusedField === "title" ? theme.selectedText : theme.text}>
-                {`${title}${focusedField === "title" ? "|" : ""}`}
-              </text>
+            <text fg={theme.textMuted}>{"TITLE  "}</text>
+            <box style={{ flexGrow: 1, ...(focusedField === "title" && { backgroundColor: theme.backgroundRaised }) }}>
+              <text fg={theme.text}>{`${title}${focusedField === "title" ? "|" : ""}`}</text>
             </box>
           </box>
           <box style={{ height: 1, marginTop: 1 }}>
-            <text fg={theme.text}>Description:</text>
+            <text fg={theme.textMuted}>DESCRIPTION</text>
           </box>
           <box
             style={{
               height: 4,
               width: "100%",
-              ...(focusedField === "desc" && { backgroundColor: theme.backgroundPanel })
+              ...(focusedField === "desc" && { backgroundColor: theme.backgroundRaised })
             }}
           >
             <text fg={focusedField === "desc" ? theme.text : theme.textMuted}>
@@ -530,7 +534,7 @@ export function DialogCreatePR() {
             </text>
           </box>
           <box style={{ height: 1, marginTop: 1 }}>
-            <text fg={theme.textMuted}>[Tab] Switch [Enter] Next</text>
+            <text fg={theme.textMuted}>tab switch · enter next</text>
           </box>
         </box>
       )}
@@ -564,7 +568,7 @@ export function DialogCreatePR() {
             <text fg={theme.text}>{description || "(empty)"}</text>
           </box>
           <box style={{ height: 1, marginTop: 1 }}>
-            <text fg={theme.textMuted}>[Enter] Create PR [Esc] Back</text>
+            <text fg={theme.textMuted}>enter create pull request · esc back</text>
           </box>
         </box>
       )}

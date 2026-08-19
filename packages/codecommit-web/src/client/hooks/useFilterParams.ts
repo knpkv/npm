@@ -53,44 +53,47 @@ export function useFilterParams() {
     return {
       filters: parseFilters(searchParams),
       hot: searchParams.get("sortBy") === "updated",
-      ...(searchParams.has("groupBy") ? { groupBy: searchParams.get("groupBy")! } : {}),
+      ...((searchParams.has("groupBy")) && { groupBy: searchParams.get("groupBy")! }),
       mine: searchParams.has("mine"),
       review: searchParams.has("review"),
-      ...(mineScope != null ? { mineScope } : {}),
+      ...((mineScope != null) && { mineScope }),
       q: searchParams.get("q") ?? "",
-      ...(from != null ? { from } : {}),
-      ...(to != null ? { to } : {})
+      ...((from != null) && { from }),
+      ...((to != null) && { to })
     }
   }, [searchParams])
 
   /** Toggle a filter value — adds if missing, removes if present */
   const toggleFilter = useCallback(
     (key: FilterKey, value: string) => {
-      setSearchParams((prev) => {
-        let existing = prev.getAll("f")
-        const target = `${key}:${value}`
+      setSearchParams(
+        (prev) => {
+          let existing = prev.getAll("f")
+          const target = `${key}:${value}`
 
-        // Materialize defaults into URL when no explicit f= params
-        if (existing.length === 0) {
-          for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
-          existing = prev.getAll("f")
-        }
+          // Materialize defaults into URL when no explicit f= params
+          if (existing.length === 0) {
+            for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
+            existing = prev.getAll("f")
+          }
 
-        const has = existing.includes(target)
-        prev.delete("f")
-        for (const raw of existing) {
-          if (raw === target || raw === "") continue
-          prev.append("f", raw)
-        }
-        if (!has) prev.append("f", target)
+          const has = existing.includes(target)
+          prev.delete("f")
+          for (const raw of existing) {
+            if (raw === target || raw === "") continue
+            prev.append("f", raw)
+          }
+          if (!has) prev.append("f", target)
 
-        // Sentinel prevents default re-injection when all filters removed
-        if (prev.getAll("f").length === 0 && has) {
-          prev.append("f", "")
-        }
+          // Sentinel prevents default re-injection when all filters removed
+          if (prev.getAll("f").length === 0 && has) {
+            prev.append("f", "")
+          }
 
-        return prev
-      }, { replace: true })
+          return prev
+        },
+        { preventScrollReset: true, replace: true }
+      )
     },
     [setSearchParams]
   )
@@ -98,93 +101,114 @@ export function useFilterParams() {
   /** Remove all values for a given key */
   const removeFilterKey = useCallback(
     (key: FilterKey) => {
-      setSearchParams((prev) => {
-        let existing = prev.getAll("f")
+      setSearchParams(
+        (prev) => {
+          let existing = prev.getAll("f")
 
-        if (existing.length === 0) {
-          for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
-          existing = prev.getAll("f")
-        }
+          if (existing.length === 0) {
+            for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
+            existing = prev.getAll("f")
+          }
 
-        prev.delete("f")
-        for (const raw of existing) {
-          if (raw === "" || raw.slice(0, raw.indexOf(":")) === key) continue
-          prev.append("f", raw)
-        }
+          prev.delete("f")
+          for (const raw of existing) {
+            if (raw === "" || raw.slice(0, raw.indexOf(":")) === key) continue
+            prev.append("f", raw)
+          }
 
-        if (prev.getAll("f").length === 0) {
-          prev.append("f", "")
-        }
+          if (prev.getAll("f").length === 0) {
+            prev.append("f", "")
+          }
 
-        return prev
-      }, { replace: true })
+          return prev
+        },
+        { preventScrollReset: true, replace: true }
+      )
     },
     [setSearchParams]
   )
 
   const toggleHot = useCallback(() => {
-    setSearchParams((prev) => {
-      if (prev.get("sortBy") === "updated") prev.delete("sortBy")
-      else prev.set("sortBy", "updated")
-      return prev
-    }, { replace: true })
+    setSearchParams(
+      (prev) => {
+        if (prev.get("sortBy") === "updated") prev.delete("sortBy")
+        else prev.set("sortBy", "updated")
+        return prev
+      },
+      { preventScrollReset: true, replace: true }
+    )
   }, [setSearchParams])
 
   const toggleReview = useCallback(() => {
-    setSearchParams((prev) => {
-      if (prev.has("review")) prev.delete("review")
-      else prev.set("review", "1")
-      return prev
-    }, { replace: true })
+    setSearchParams(
+      (prev) => {
+        if (prev.has("review")) prev.delete("review")
+        else prev.set("review", "1")
+        return prev
+      },
+      { preventScrollReset: true, replace: true }
+    )
   }, [setSearchParams])
 
   const toggleMine = useCallback(() => {
-    setSearchParams((prev) => {
-      if (prev.has("mine")) {
-        prev.delete("mine")
-        prev.delete("mineScope")
-      } else {
-        prev.set("mine", "1")
-      }
-      return prev
-    }, { replace: true })
+    setSearchParams(
+      (prev) => {
+        if (prev.has("mine")) {
+          prev.delete("mine")
+          prev.delete("mineScope")
+        } else {
+          prev.set("mine", "1")
+        }
+        return prev
+      },
+      { preventScrollReset: true, replace: true }
+    )
   }, [setSearchParams])
 
   const setMineScope = useCallback(
     (scope: string | undefined) => {
-      setSearchParams((prev) => {
-        if (scope) prev.set("mineScope", scope)
-        else prev.delete("mineScope")
-        return prev
-      }, { replace: true })
+      setSearchParams(
+        (prev) => {
+          if (scope) prev.set("mineScope", scope)
+          else prev.delete("mineScope")
+          return prev
+        },
+        { preventScrollReset: true, replace: true }
+      )
     },
     [setSearchParams]
   )
 
   const setFilterText = useCallback(
     (text: string) => {
-      setSearchParams((prev) => {
-        if (text) prev.set("q", text)
-        else prev.delete("q")
-        return prev
-      }, { replace: true })
+      setSearchParams(
+        (prev) => {
+          if (text) prev.set("q", text)
+          else prev.delete("q")
+          return prev
+        },
+        { preventScrollReset: true, replace: true }
+      )
     },
     [setSearchParams]
   )
 
   const clearAll = useCallback(() => {
-    setSearchParams((prev) => {
-      prev.delete("f")
-      prev.delete("sortBy")
-      prev.delete("groupBy")
-      prev.delete("mine")
-      prev.delete("review")
-      prev.delete("mineScope")
-      prev.delete("q")
-      prev.delete("from")
-      prev.delete("to")
-      return prev
-    }, { replace: true })
+    setSearchParams(
+      (prev) => {
+        prev.delete("f")
+        prev.delete("sortBy")
+        prev.delete("groupBy")
+        prev.delete("mine")
+        prev.delete("review")
+        prev.delete("mineScope")
+        prev.delete("q")
+        prev.delete("from")
+        prev.delete("to")
+        return prev
+      },
+      { preventScrollReset: true, replace: true }
+    )
   }, [setSearchParams])
 
   return {

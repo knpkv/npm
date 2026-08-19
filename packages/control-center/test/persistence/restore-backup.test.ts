@@ -10,7 +10,9 @@ import {
   ReproducibleContentUnavailableError,
   restoreBackup
 } from "../../src/server/persistence/index.js"
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
+import { descriptorIt } from "../fixtures/descriptorPublication.js"
 import {
   assertOwnerOnlyTree,
   makeContentVerifiedArchive,
@@ -21,47 +23,47 @@ import { fixtureTimestamps, fixtureWorkspaceIds } from "./fixtures.js"
 
 const encoder = new TextEncoder()
 
-const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: file.writeAll
-})
+const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: file.writeAll
+  })
 
-const withStat = (file: FileSystem.File, stat: FileSystem.File["stat"]): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: file.writeAll
-})
+const withStat = (file: FileSystem.File, stat: FileSystem.File["stat"]): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: file.writeAll
+  })
 
 const withWriteAll = (
   file: FileSystem.File,
   writeAll: FileSystem.File["writeAll"]
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll
+  })
 
 describe("restore backup", () => {
   it.effect("publishes a fresh relative-symlink claim without exposing its physical paths", () =>
@@ -111,51 +113,57 @@ describe("restore backup", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("restores every owned directory and file with private modes", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-modes-")
-      const path = yield* Path.Path
-      const restored = yield* restoreBackup({
-        archiveRoot,
-        configuredDataRoot: path.join(root, "restored")
-      })
-      const prepared = yield* prepareControlCenterDataRoot(
-        yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
-      )
-      yield* assertOwnerOnlyTree(prepared.dataRoot)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+  descriptorIt.effect(
+    "restores every owned directory and file with private modes",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-modes-")
+        const path = yield* Path.Path
+        const restored = yield* restoreBackup({
+          archiveRoot,
+          configuredDataRoot: path.join(root, "restored")
+        })
+        const prepared = yield* prepareControlCenterDataRoot(
+          yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+        )
+        yield* assertOwnerOnlyTree(prepared.dataRoot)
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
-  it.effect("closes each staged file handle before restoring the next file", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-file-handles-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const activeStagedFileHandles = yield* Ref.make(0)
-      const maximumActiveStagedFileHandles = yield* Ref.make(0)
-      const tracking = FileSystem.make({
-        ...fileSystem,
-        open: (target, options) =>
-          fileSystem.open(target, options).pipe(
-            Effect.tap(() =>
-              options?.flag === "wx"
-                ? Ref.updateAndGet(activeStagedFileHandles, (active) => active + 1).pipe(
-                  Effect.tap((active) =>
-                    Ref.update(maximumActiveStagedFileHandles, (maximum) => Math.max(maximum, active))
-                  ),
-                  Effect.tap(() =>
-                    Effect.addFinalizer(() => Ref.update(activeStagedFileHandles, (active) => active - 1))
+  descriptorIt.effect(
+    "closes each staged file handle before restoring the next file",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-file-handles-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const activeStagedFileHandles = yield* Ref.make(0)
+        const maximumActiveStagedFileHandles = yield* Ref.make(0)
+        const tracking = FileSystem.make({
+          ...fileSystem,
+          open: (target, options) =>
+            fileSystem.open(target, options).pipe(
+              Effect.tap(() =>
+                options?.flag === "wx"
+                  ? Ref.updateAndGet(activeStagedFileHandles, (active) => active + 1).pipe(
+                    Effect.tap((active) =>
+                      Ref.update(maximumActiveStagedFileHandles, (maximum) => Math.max(maximum, active))
+                    ),
+                    Effect.tap(() =>
+                      Effect.addFinalizer(() => Ref.update(activeStagedFileHandles, (active) => active - 1))
+                    )
                   )
-                )
-                : Effect.void
+                  : Effect.void
+              )
             )
-          )
-      })
-      yield* restoreBackup({
-        archiveRoot,
-        configuredDataRoot: path.join(root, "restored")
-      }).pipe(Effect.provideService(FileSystem.FileSystem, tracking))
-      assert.strictEqual(yield* Ref.get(maximumActiveStagedFileHandles), 1)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+        })
+        yield* restoreBackup({
+          archiveRoot,
+          configuredDataRoot: path.join(root, "restored")
+        }).pipe(Effect.provideService(FileSystem.FileSystem, tracking))
+        assert.strictEqual(yield* Ref.get(maximumActiveStagedFileHandles), 1)
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
   it.effect("survives data-root preparation and database reopen after restart", () =>
     Effect.gen(function*() {
@@ -867,40 +875,43 @@ describe("restore backup", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects database source bytes changed between verification and staging write", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-db-tamper-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const target = path.join(root, "restored")
-      const databaseFile = path.join(archiveRoot, "control-center.db")
-      const databaseReads = yield* Ref.make(0)
-      const tampering = FileSystem.make({
-        ...fileSystem,
-        readFile: (source) =>
-          source === databaseFile
-            ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
-              Effect.flatMap((count) =>
-                fileSystem.readFile(source).pipe(
-                  Effect.map((bytes) =>
-                    count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+  descriptorIt.effect(
+    "rejects database source bytes changed between verification and staging write",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-db-tamper-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const target = path.join(root, "restored")
+        const databaseFile = path.join(archiveRoot, "control-center.db")
+        const databaseReads = yield* Ref.make(0)
+        const tampering = FileSystem.make({
+          ...fileSystem,
+          readFile: (source) =>
+            source === databaseFile
+              ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
+                Effect.flatMap((count) =>
+                  fileSystem.readFile(source).pipe(
+                    Effect.map((bytes) =>
+                      count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+                    )
                   )
                 )
               )
-            )
-            : fileSystem.readFile(source)
-      })
-      const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
-        Effect.provideService(FileSystem.FileSystem, tampering),
-        Effect.result
-      )
-      assert.isTrue(Result.isFailure(result))
-      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupIntegrityError")
-      if (Result.isFailure(result) && result.failure._tag === "BackupIntegrityError") {
-        assert.strictEqual(result.failure.reason, "database-digest-mismatch")
-      }
-      assert.isFalse(yield* fileSystem.exists(target))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+              : fileSystem.readFile(source)
+        })
+        const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
+          Effect.provideService(FileSystem.FileSystem, tampering),
+          Effect.result
+        )
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupIntegrityError")
+        if (Result.isFailure(result) && result.failure._tag === "BackupIntegrityError") {
+          assert.strictEqual(result.failure.reason, "database-digest-mismatch")
+        }
+        assert.isFalse(yield* fileSystem.exists(target))
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
   it.effect("transfers the verified database buffer to staging without a second full clone", () =>
     Effect.gen(function*() {
@@ -951,202 +962,215 @@ describe("restore backup", () => {
       assert.deepEqual(yield* Ref.get(preservedIdentity), Option.some(true))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects blob source bytes changed between verification and staging write", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-blob-tamper-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const target = path.join(root, "restored")
-      const durableFile = blobPath(
-        path,
-        path.join(archiveRoot, "blobs"),
-        fixtureWorkspaceIds.alpha,
-        digests.durable
-      ).file
-      const durableReads = yield* Ref.make(0)
-      const tampering = FileSystem.make({
-        ...fileSystem,
-        readFile: (source) =>
-          source === durableFile
-            ? Ref.getAndUpdate(durableReads, (count) => count + 1).pipe(
-              Effect.flatMap((count) =>
-                fileSystem.readFile(source).pipe(
-                  Effect.map((bytes) =>
-                    count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+  descriptorIt.effect(
+    "rejects blob source bytes changed between verification and staging write",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-blob-tamper-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const target = path.join(root, "restored")
+        const durableFile = blobPath(
+          path,
+          path.join(archiveRoot, "blobs"),
+          fixtureWorkspaceIds.alpha,
+          digests.durable
+        ).file
+        const durableReads = yield* Ref.make(0)
+        const tampering = FileSystem.make({
+          ...fileSystem,
+          readFile: (source) =>
+            source === durableFile
+              ? Ref.getAndUpdate(durableReads, (count) => count + 1).pipe(
+                Effect.flatMap((count) =>
+                  fileSystem.readFile(source).pipe(
+                    Effect.map((bytes) =>
+                      count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+                    )
                   )
                 )
               )
-            )
-            : fileSystem.readFile(source)
-      })
-      const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
-        Effect.provideService(FileSystem.FileSystem, tampering),
-        Effect.result
-      )
-      assert.isTrue(Result.isFailure(result))
-      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupIntegrityError")
-      if (Result.isFailure(result) && result.failure._tag === "BackupIntegrityError") {
-        assert.strictEqual(result.failure.reason, "blob-corrupt")
-      }
-      assert.isFalse(yield* fileSystem.exists(target))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
-
-  it.effect("restores cache gaps as restart-visible refetch state and repairs regenerated bytes", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-cache-gap-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      yield* fileSystem.remove(
-        blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.cache).file
-      )
-      const configuredDataRoot = path.join(root, "restored")
-      const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot })
-      assert.strictEqual(restored.verification._tag, "RecoverableCacheGaps")
-      const prepared = yield* prepareControlCenterDataRoot(
-        yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
-      )
-      assert.isFalse(
-        yield* fileSystem.exists(
-          blobPath(path, prepared.persistenceConfig.blobRoot, fixtureWorkspaceIds.alpha, digests.cache).file
-        )
-      )
-      assert.isTrue(
-        yield* fileSystem.exists(
-          blobPath(path, prepared.persistenceConfig.blobRoot, fixtureWorkspaceIds.alpha, digests.durable).file
-        )
-      )
-
-      yield* Effect.gen(function*() {
-        const persistence = yield* Persistence
-        const metadata = yield* persistence.content.getMetadata(fixtureWorkspaceIds.alpha, digests.cache)
-        assert.strictEqual(metadata.storageClass, "reproducible-cache")
-
-        const unavailable = yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.cache).pipe(
+              : fileSystem.readFile(source)
+        })
+        const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
+          Effect.provideService(FileSystem.FileSystem, tampering),
           Effect.result
         )
-        assert.isTrue(Result.isFailure(unavailable))
-        if (Result.isFailure(unavailable)) {
-          assert.strictEqual(unavailable.failure._tag, "ReproducibleContentUnavailableError")
-          assert.instanceOf(unavailable.failure, ReproducibleContentUnavailableError)
-          if (unavailable.failure._tag === "ReproducibleContentUnavailableError") {
-            assert.strictEqual(unavailable.failure.reason, "missing")
-            assert.strictEqual(unavailable.failure.recovery, "refetch")
-          }
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupIntegrityError")
+        if (Result.isFailure(result) && result.failure._tag === "BackupIntegrityError") {
+          assert.strictEqual(result.failure.reason, "blob-corrupt")
         }
+        assert.isFalse(yield* fileSystem.exists(target))
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
-        assert.deepStrictEqual(
-          yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.durable),
-          encoder.encode("authoritative release evidence")
+  descriptorIt.effect(
+    "restores cache gaps as restart-visible refetch state and repairs regenerated bytes",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-cache-gap-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        yield* fileSystem.remove(
+          blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.cache).file
         )
-        const repaired = yield* persistence.content.put(fixtureWorkspaceIds.alpha, {
-          bytes: encoder.encode("reproducible provider cache"),
-          classification: "reproducible-cache",
-          createdAt: fixtureTimestamps.created,
-          mimeType: "text/plain"
+        const configuredDataRoot = path.join(root, "restored")
+        const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot })
+        assert.strictEqual(restored.verification._tag, "RecoverableCacheGaps")
+        const prepared = yield* prepareControlCenterDataRoot(
+          yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+        )
+        assert.isFalse(
+          yield* fileSystem.exists(
+            blobPath(path, prepared.persistenceConfig.blobRoot, fixtureWorkspaceIds.alpha, digests.cache).file
+          )
+        )
+        assert.isTrue(
+          yield* fileSystem.exists(
+            blobPath(path, prepared.persistenceConfig.blobRoot, fixtureWorkspaceIds.alpha, digests.durable).file
+          )
+        )
+
+        yield* Effect.gen(function*() {
+          const persistence = yield* Persistence
+          const metadata = yield* persistence.content.getMetadata(fixtureWorkspaceIds.alpha, digests.cache)
+          assert.strictEqual(metadata.storageClass, "reproducible-cache")
+
+          const unavailable = yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.cache).pipe(
+            Effect.result
+          )
+          assert.isTrue(Result.isFailure(unavailable))
+          if (Result.isFailure(unavailable)) {
+            assert.strictEqual(unavailable.failure._tag, "ReproducibleContentUnavailableError")
+            assert.instanceOf(unavailable.failure, ReproducibleContentUnavailableError)
+            if (unavailable.failure._tag === "ReproducibleContentUnavailableError") {
+              assert.strictEqual(unavailable.failure.reason, "missing")
+              assert.strictEqual(unavailable.failure.recovery, "refetch")
+            }
+          }
+
+          assert.deepStrictEqual(
+            yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.durable),
+            encoder.encode("authoritative release evidence")
+          )
+          const repaired = yield* persistence.content.put(fixtureWorkspaceIds.alpha, {
+            bytes: encoder.encode("reproducible provider cache"),
+            classification: "reproducible-cache",
+            createdAt: fixtureTimestamps.created,
+            mimeType: "text/plain"
+          })
+          assert.isTrue(repaired.stored)
+          assert.strictEqual(repaired.metadata.digest, digests.cache)
+        }).pipe(Effect.provide(persistenceLayer(prepared.persistenceConfig)), Effect.scoped)
+
+        yield* Effect.gen(function*() {
+          const persistence = yield* Persistence
+          assert.deepStrictEqual(
+            yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.cache),
+            encoder.encode("reproducible provider cache")
+          )
+        }).pipe(Effect.provide(persistenceLayer(prepared.persistenceConfig)), Effect.scoped)
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
+
+  descriptorIt.effect(
+    "syncs restored data and publishes the owner marker before publishing the claim",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-order-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const target = path.join(root, "restored")
+        const events = yield* Ref.make<ReadonlyArray<string>>([])
+        const record = (event: string) => Ref.update(events, (all) => [...all, event])
+        const recording = FileSystem.make({
+          ...fileSystem,
+          chmod: (opened, mode) =>
+            record(`chmod:${opened}:${mode}`).pipe(Effect.andThen(fileSystem.chmod(opened, mode))),
+          copyFile: (source, destination) =>
+            record(`copy:${destination}`).pipe(Effect.andThen(fileSystem.copyFile(source, destination))),
+          makeDirectory: (directory, options) =>
+            record(`mkdir:${directory}`).pipe(Effect.andThen(fileSystem.makeDirectory(directory, options))),
+          open: (opened, options) =>
+            record(`${options?.flag === "wx" ? "create" : "open"}:${opened}`).pipe(
+              Effect.andThen(fileSystem.open(opened, options))
+            ),
+          rename: (source, destination) =>
+            record(`rename:${destination}`).pipe(Effect.andThen(fileSystem.rename(source, destination))),
+          symlink: (source, destination) =>
+            record(`symlink:${destination}`).pipe(Effect.andThen(fileSystem.symlink(source, destination)))
         })
-        assert.isTrue(repaired.stored)
-        assert.strictEqual(repaired.metadata.digest, digests.cache)
-      }).pipe(Effect.provide(persistenceLayer(prepared.persistenceConfig)), Effect.scoped)
-
-      yield* Effect.gen(function*() {
-        const persistence = yield* Persistence
-        assert.deepStrictEqual(
-          yield* persistence.content.readAll(fixtureWorkspaceIds.alpha, digests.cache),
-          encoder.encode("reproducible provider cache")
+        const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
+          Effect.provideService(FileSystem.FileSystem, recording)
         )
-      }).pipe(Effect.provide(persistenceLayer(prepared.persistenceConfig)), Effect.scoped)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+        const all = yield* Ref.get(events)
+        const claim = all.findIndex((event) => {
+          if (!event.startsWith("symlink:")) return false
+          return path.basename(event.slice("symlink:".length)) === path.basename(target)
+        })
+        const marker = all.findIndex((event) => event.endsWith("/.control-center-root"))
+        const databaseWrite = all.findIndex((event) =>
+          event.startsWith("create:") && event.endsWith("/control-center.db")
+        )
+        const durableWrite = all.findIndex((event) =>
+          event.startsWith("create:") && event.endsWith(`/${digests.durable}`)
+        )
+        assert.isAtLeast(claim, 0)
+        assert.isAtLeast(marker, 0)
+        assert.isAtLeast(databaseWrite, 0)
+        assert.isAtLeast(durableWrite, 0)
+        assert.isBelow(databaseWrite, marker)
+        assert.isBelow(durableWrite, marker)
+        assert.isBelow(marker, claim)
+        const prepared = yield* prepareControlCenterDataRoot(
+          yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+        )
+        const blobRoot = prepared.persistenceConfig.blobRoot
+        const durablePath = blobPath(path, blobRoot, fixtureWorkspaceIds.alpha, digests.durable)
+        for (
+          const directory of [
+            blobRoot,
+            path.join(blobRoot, "objects"),
+            durablePath.workspaceDirectory,
+            path.join(durablePath.workspaceDirectory, "sha256"),
+            path.dirname(durablePath.objectDirectory),
+            durablePath.objectDirectory
+          ]
+        ) {
+          const relative = path.relative(prepared.dataRoot, directory)
+          const suffix = relative.length === 0 ? "" : `/${relative}`
+          const chmod = all.findIndex((event) => event.startsWith("chmod:") && event.endsWith(`${suffix}:${0o700}`))
+          const sync = all.findIndex((event) => event.startsWith("open:") && event.endsWith(suffix))
+          assert.isAtLeast(chmod, 0)
+          assert.isAtLeast(sync, 0)
+          assert.isBelow(chmod, sync)
+          assert.isBelow(sync, claim)
+        }
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 
-  it.effect("syncs restored data and publishes the owner marker before publishing the claim", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-order-")
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const target = path.join(root, "restored")
-      const events = yield* Ref.make<ReadonlyArray<string>>([])
-      const record = (event: string) => Ref.update(events, (all) => [...all, event])
-      const recording = FileSystem.make({
-        ...fileSystem,
-        chmod: (opened, mode) => record(`chmod:${opened}:${mode}`).pipe(Effect.andThen(fileSystem.chmod(opened, mode))),
-        copyFile: (source, destination) =>
-          record(`copy:${destination}`).pipe(Effect.andThen(fileSystem.copyFile(source, destination))),
-        makeDirectory: (directory, options) =>
-          record(`mkdir:${directory}`).pipe(Effect.andThen(fileSystem.makeDirectory(directory, options))),
-        open: (opened, options) =>
-          record(`${options?.flag === "wx" ? "create" : "open"}:${opened}`).pipe(
-            Effect.andThen(fileSystem.open(opened, options))
-          ),
-        rename: (source, destination) =>
-          record(`rename:${destination}`).pipe(Effect.andThen(fileSystem.rename(source, destination))),
-        symlink: (source, destination) =>
-          record(`symlink:${destination}`).pipe(Effect.andThen(fileSystem.symlink(source, destination)))
-      })
-      const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
-        Effect.provideService(FileSystem.FileSystem, recording)
-      )
-      const all = yield* Ref.get(events)
-      const claim = all.findIndex((event) => {
-        if (!event.startsWith("symlink:")) return false
-        return path.basename(event.slice("symlink:".length)) === path.basename(target)
-      })
-      const marker = all.findIndex((event) => event.endsWith("/.control-center-root"))
-      const databaseWrite = all.findIndex((event) =>
-        event.startsWith("create:") && event.endsWith("/control-center.db")
-      )
-      const durableWrite = all.findIndex((event) =>
-        event.startsWith("create:") && event.endsWith(`/${digests.durable}`)
-      )
-      assert.isAtLeast(claim, 0)
-      assert.isAtLeast(marker, 0)
-      assert.isAtLeast(databaseWrite, 0)
-      assert.isAtLeast(durableWrite, 0)
-      assert.isBelow(databaseWrite, marker)
-      assert.isBelow(durableWrite, marker)
-      assert.isBelow(marker, claim)
-      const prepared = yield* prepareControlCenterDataRoot(
-        yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
-      )
-      const blobRoot = prepared.persistenceConfig.blobRoot
-      const durablePath = blobPath(path, blobRoot, fixtureWorkspaceIds.alpha, digests.durable)
-      for (
-        const directory of [
-          blobRoot,
-          path.join(blobRoot, "objects"),
-          durablePath.workspaceDirectory,
-          path.join(durablePath.workspaceDirectory, "sha256"),
-          path.dirname(durablePath.objectDirectory),
-          durablePath.objectDirectory
-        ]
-      ) {
-        const relative = path.relative(prepared.dataRoot, directory)
-        const suffix = relative.length === 0 ? "" : `/${relative}`
-        const chmod = all.findIndex((event) => event.startsWith("chmod:") && event.endsWith(`${suffix}:${0o700}`))
-        const sync = all.findIndex((event) => event.startsWith("open:") && event.endsWith(suffix))
-        assert.isAtLeast(chmod, 0)
-        assert.isAtLeast(sync, 0)
-        assert.isBelow(chmod, sync)
-        assert.isBelow(sync, claim)
-      }
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
-
-  it.effect("verifies a missing durable blob before creating destination state", () =>
-    Effect.gen(function*() {
-      const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive(
-        "control-center-restore-missing-durable-"
-      )
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      yield* fileSystem.remove(
-        blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.durable).file
-      )
-      const stableEntries = (entries: ReadonlyArray<string>) =>
-        entries.filter((entry) => entry !== "control-center.db-shm" && entry !== "control-center.db-wal")
-      const before = stableEntries(yield* fileSystem.readDirectory(root))
-      const target = path.join(root, "restored")
-      const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(result))
-      assert.isFalse(yield* fileSystem.exists(target))
-      assert.deepStrictEqual(stableEntries(yield* fileSystem.readDirectory(root)), before)
-      assert.deepStrictEqual(yield* stagingEntries(fileSystem, root, ".control-center-incoming-"), [])
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+  descriptorIt.effect(
+    "verifies a missing durable blob before creating destination state",
+    () =>
+      Effect.gen(function*() {
+        const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive(
+          "control-center-restore-missing-durable-"
+        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        yield* fileSystem.remove(
+          blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.durable).file
+        )
+        const stableEntries = (entries: ReadonlyArray<string>) =>
+          entries.filter((entry) => entry !== "control-center.db-shm" && entry !== "control-center.db-wal")
+        const before = stableEntries(yield* fileSystem.readDirectory(root))
+        const target = path.join(root, "restored")
+        const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        assert.isFalse(yield* fileSystem.exists(target))
+        assert.deepStrictEqual(stableEntries(yield* fileSystem.readDirectory(root)), before)
+        assert.deepStrictEqual(yield* stagingEntries(fileSystem, root, ".control-center-incoming-"), [])
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  )
 })

@@ -18,6 +18,11 @@ export interface CodexModelOptions {
   readonly environment?: Readonly<Record<string, string>>
   /** Filesystem access granted to Codex. Defaults to `read-only`. */
   readonly access?: "read-only" | "workspace-write"
+  /**
+   * Runs without host-capable tools, user configuration, repository instructions,
+   * or inherited shell variables. Use when all review material is in the prompt.
+   */
+  readonly promptOnly?: boolean
   /** Maximum duration of one Codex turn. Defaults to two minutes. */
   readonly timeout?: Duration.Input
   /** Maximum bytes accepted from Codex stdout. Defaults to 1 MiB. */

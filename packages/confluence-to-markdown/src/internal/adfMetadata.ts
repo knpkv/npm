@@ -24,7 +24,7 @@ export const AdfMetadataSidecarSchema = Schema.Struct({
 export type AdfMetadataEntry = typeof AdfMetadataEntrySchema.Type
 export type AdfMetadataSidecar = typeof AdfMetadataSidecarSchema.Type
 
-const stableStringify = (v: unknown): string => {
+const stableStringify = <UnparsedInput>(v: UnparsedInput): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
   if (Predicate.isObject(v)) {
     const entries = Object.entries(v)
@@ -60,11 +60,13 @@ const toBase64 = (s: string): string => {
   return btoa(bin)
 }
 
-const parseMetadataValue = (raw: string): unknown | null => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parseMetadataValue = (raw: string): Schema.Json | null => {
   const trimmed = raw.trim()
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
-      return JSON.parse(trimmed)
+      return decodeJson(trimmed)
     } catch {
       return null
     }
@@ -73,7 +75,7 @@ const parseMetadataValue = (raw: string): unknown | null => {
   try {
     const decoded = fromBase64(trimmed)
     if (!decoded.startsWith("{") && !decoded.startsWith("[")) return null
-    return JSON.parse(decoded)
+    return decodeJson(decoded)
   } catch {
     return null
   }
@@ -110,7 +112,7 @@ const externalizeLine = (
 export const externalizeAdfMetadata = (
   markdown: string,
   sidecarHref: string
-): { readonly markdown: string; readonly sidecar: AdfMetadataSidecar | null } => {
+) => {
   const entries: Record<string, AdfMetadataEntry> = {}
   let counter = 0
   const nextId = (type: string): string => `${type}-${++counter}`

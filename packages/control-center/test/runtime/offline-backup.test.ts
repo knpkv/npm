@@ -1,10 +1,11 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
-import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { createServer } from "node:net"
 
+import * as Predicate from "effect/Predicate"
 import {
   decodeControlCenterDataPaths,
   prepareControlCenterDataRoot,
@@ -19,6 +20,11 @@ interface RegularFileSnapshot {
   readonly metadata: Omit<FileSystemType.File.Info, "atime">
   readonly name: string
 }
+
+class EphemeralPortFixtureError extends Schema.TaggedError<EphemeralPortFixtureError>()(
+  "EphemeralPortFixtureError",
+  { message: Schema.String }
+) {}
 
 const stableFileMetadata = (info: FileSystemType.File.Info): Omit<FileSystemType.File.Info, "atime"> => ({
   // Reading the comparison bytes necessarily advances atime on strict-atime filesystems.
@@ -36,6 +42,11 @@ const stableFileMetadata = (info: FileSystemType.File.Info): Omit<FileSystemType
   type: info.type,
   uid: info.uid
 })
+
+const durableDataRootEntries = (entries: ReadonlyArray<string>) =>
+  entries
+    .filter((entry) => entry !== "control-center.db-shm" && entry !== "control-center.db-wal")
+    .sort()
 
 const snapshotRegularFiles = Effect.fn("OfflineBackupTest.snapshotRegularFiles")(function*(
   fileSystem: FileSystemType.FileSystem,
@@ -186,7 +197,7 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
       ...inactiveTelemetryEnvironment,
       ...extraEnvironment,
       CONTROL_CENTER_DATA_ROOT: configuredDataRoot,
-      ...(port === undefined ? {} : { CONTROL_CENTER_PORT: String(port) })
+      ...(!(port === undefined) && { CONTROL_CENTER_PORT: String(port) })
     },
     extendEnv: true
   })
@@ -245,7 +256,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return
@@ -253,7 +264,7 @@ const acquireEphemeralPort = Effect.tryPromise({
         probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
       })
     }),
-  catch: (cause) => new Error("could not reserve an ephemeral test port", { cause })
+  catch: () => new EphemeralPortFixtureError({ message: "could not reserve an ephemeral test port" })
 })
 
 describe("offline backup commands", () => {
@@ -267,14 +278,20 @@ describe("offline backup commands", () => {
       const claimBefore = yield* fileSystem.readLink(configuredRoot)
       const markerPath = path.join(prepared.dataRoot, ".control-center-root")
       const markerBefore = yield* fileSystem.readFile(markerPath)
-      const entriesBefore = (yield* fileSystem.readDirectory(prepared.dataRoot)).sort()
+      // SQLite may checkpoint and remove clean WAL sidecars after the fixture's
+      // database scope closes. They are lifecycle artifacts, not root contents
+      // owned by the read-only resolver.
+      const entriesBefore = durableDataRootEntries(yield* fileSystem.readDirectory(prepared.dataRoot))
 
       const resolved = yield* resolvePreparedControlCenterDataRoot(configured)
 
       assert.strictEqual(resolved.dataRoot, prepared.dataRoot)
       assert.strictEqual(yield* fileSystem.readLink(configuredRoot), claimBefore)
       assert.deepStrictEqual(yield* fileSystem.readFile(markerPath), markerBefore)
-      assert.deepStrictEqual((yield* fileSystem.readDirectory(prepared.dataRoot)).sort(), entriesBefore)
+      assert.deepStrictEqual(
+        durableDataRootEntries(yield* fileSystem.readDirectory(prepared.dataRoot)),
+        entriesBefore
+      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects missing, unprepared, and legacy roots without adopting or cleaning them", () =>
@@ -331,6 +348,79 @@ describe("offline backup commands", () => {
       const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot })
       assert.strictEqual(restored.configuredDataRoot, configuredDataRoot)
       assert.strictEqual(restored.verification._tag, "Complete")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("restarts a snapshot when a closing SQLite sidecar disappears after discovery", () =>
+    Effect.gen(function*() {
+      const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-sidecar-race-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* resolvePreparedControlCenterDataRoot(configured)
+      const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+      const closingSidecar = `${databaseFile}-journal`
+      yield* fileSystem.remove(closingSidecar, { force: true })
+
+      let databaseCopies = 0
+      let reportClosingSidecar = true
+      const closingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        copyFile: (sourceFile, destinationFile) => {
+          if (sourceFile === databaseFile) databaseCopies += 1
+          return fileSystem.copyFile(sourceFile, destinationFile)
+        },
+        exists: (target) =>
+          target === closingSidecar && reportClosingSidecar
+            ? Effect.sync(() => {
+              reportClosingSidecar = false
+              return true
+            })
+            : fileSystem.exists(target)
+      })
+
+      const published = yield* createOfflineVerifiedBackup({
+        destination: path.join(parent, "archive"),
+        persistenceConfig: source.persistenceConfig
+      }).pipe(Effect.provideService(FileSystem.FileSystem, closingFileSystem))
+
+      assert.strictEqual(published.verification._tag, "Complete")
+      assert.strictEqual(databaseCopies, 2)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("fails closed when an offline sidecar keeps changing during snapshot capture", () =>
+    Effect.gen(function*() {
+      const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-sidecar-churn-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const source = yield* resolvePreparedControlCenterDataRoot(configured)
+      const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+      const changingSidecar = `${databaseFile}-journal`
+      const archiveRoot = path.join(parent, "archive")
+      yield* fileSystem.remove(changingSidecar, { force: true })
+
+      let databaseCopies = 0
+      const changingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        copyFile: (sourceFile, destinationFile) => {
+          if (sourceFile === databaseFile) databaseCopies += 1
+          return fileSystem.copyFile(sourceFile, destinationFile)
+        },
+        exists: (target) => (target === changingSidecar ? Effect.succeed(true) : fileSystem.exists(target))
+      })
+
+      const published = yield* createOfflineVerifiedBackup({
+        destination: archiveRoot,
+        persistenceConfig: source.persistenceConfig
+      }).pipe(Effect.provideService(FileSystem.FileSystem, changingFileSystem), Effect.result)
+
+      assert.isTrue(Result.isFailure(published))
+      if (Result.isFailure(published)) {
+        assert.strictEqual(published.failure._tag, "BackupStorageError")
+        if (published.failure._tag === "BackupStorageError") {
+          assert.strictEqual(published.failure.operation, "copy-offline-sidecar")
+        }
+      }
+      assert.strictEqual(databaseCopies, 3)
+      assert.isFalse(yield* fileSystem.exists(archiveRoot))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("backs up a crash-recovery database without touching the stopped source", () =>

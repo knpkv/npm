@@ -33,6 +33,8 @@ ignores:
   - "**/*.test.ts"
   - "**/*.spec.ts"
   - "**/generated/**"
+  # Audited O_NOFOLLOW/fchmod boundary; Effect FileSystem has no equivalent.
+  - "packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts"
   - "repos/**"
   - "scratchpad/**"
 

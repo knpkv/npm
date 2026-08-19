@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-plain-vitest-in-codecommit-web-tests
+language: tsx
+severity: error
+message: "Use @effect/vitest for codecommit-web tests"
+
+rule:
+  kind: import_statement
+  has:
+    field: source
+    regex: '^["'']vitest["'']$'
+
+files:
+  - "packages/codecommit-web/**/*.test.ts"
+  - "packages/codecommit-web/**/*.test.tsx"
+  - "packages/codecommit-web/**/*.spec.ts"
+  - "packages/codecommit-web/**/*.spec.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+
+note: |
+  The codecommit-web package uses the Effect-aware Vitest harness. Import test
+  APIs, including vi and lifecycle hooks, from @effect/vitest.

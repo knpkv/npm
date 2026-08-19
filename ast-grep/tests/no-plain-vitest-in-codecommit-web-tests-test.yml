@@ -1,0 +1,13 @@
+id: no-plain-vitest-in-codecommit-web-tests
+valid:
+  - |
+    import { describe, expect, it, vi } from "@effect/vitest"
+  - |
+    import { Effect } from "effect"
+invalid:
+  - |
+    import { describe, expect, it } from "vitest"
+  - |
+    import * as Vitest from "vitest"
+  - |
+    import { describe } from 'vitest'

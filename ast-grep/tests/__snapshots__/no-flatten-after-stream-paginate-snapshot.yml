@@ -1,0 +1,28 @@
+id: no-flatten-after-stream-paginate
+snapshots:
+  ? |
+    const branches = Stream.paginate(undefined, (token) =>
+      Effect.succeed([["main", "feature"], Option.none()])).pipe(
+        Stream.flatMap(Stream.fromIterable))
+  : labels:
+      - source: |-
+          Stream.paginate(undefined, (token) =>
+            Effect.succeed([["main", "feature"], Option.none()])).pipe(
+              Stream.flatMap(Stream.fromIterable))
+        style: primary
+        start: 17
+        end: 157
+  ? |
+    const branches = Stream.paginate(undefined, (token) =>
+      Effect.succeed([["main", "feature"], Option.none()])).pipe(
+        Stream.flatMap(Stream.fromIterable),
+        Stream.take(10))
+  : labels:
+      - source: |-
+          Stream.paginate(undefined, (token) =>
+            Effect.succeed([["main", "feature"], Option.none()])).pipe(
+              Stream.flatMap(Stream.fromIterable),
+              Stream.take(10))
+        style: primary
+        start: 17
+        end: 178

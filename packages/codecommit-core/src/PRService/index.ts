@@ -25,6 +25,7 @@ import { makeToggleAccount } from "./toggleAccount.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
+export type { RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -53,7 +54,7 @@ const makePRService = Effect.gen(function*() {
     )
 
   // Load cached PRs to show immediately
-  const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchCause(() => Effect.succeed<Array<CachedPullRequest>>([])))
+  const cachedPRs = yield* prRepo.findAll().pipe(Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([])))
 
   const state = yield* SubscriptionRef.make<AppState>({
     pullRequests: cachedPRs.map((pr) => decodeCachedPR(pr)),
@@ -80,40 +81,40 @@ const makePRService = Effect.gen(function*() {
     ) =>
       prRepo.search(query, opts).pipe(
         Effect.tapError((e) => Effect.logWarning("PRService.searchPullRequests", e)),
-        Effect.catchCause(() => Effect.succeed<SearchResult>({ items: [], total: 0, hasMore: false }))
+        Effect.catch(() => Effect.succeed<SearchResult>({ items: [], total: 0, hasMore: false }))
       ),
     subscribe: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.subscribe(awsAccountId, prId).pipe(Effect.catchCause(() => Effect.void)),
+      subscriptionRepo.subscribe(awsAccountId, prId).pipe(Effect.catch(() => Effect.void)),
     unsubscribe: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.unsubscribe(awsAccountId, prId).pipe(Effect.catchCause(() => Effect.void)),
+      subscriptionRepo.unsubscribe(awsAccountId, prId).pipe(Effect.catch(() => Effect.void)),
     getSubscriptions: () =>
       subscriptionRepo.findAll().pipe(
-        Effect.catchCause(() => Effect.succeed<ReadonlyArray<{ awsAccountId: string; pullRequestId: string }>>([]))
+        Effect.catch(() => Effect.succeed<ReadonlyArray<{ awsAccountId: string; pullRequestId: string }>>([]))
       ),
     isSubscribed: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.isSubscribed(awsAccountId, prId).pipe(Effect.catchCause(() => Effect.succeed(false))),
+      subscriptionRepo.isSubscribed(awsAccountId, prId).pipe(Effect.catch(() => Effect.succeed(false))),
     getPersistentNotifications: (
       opts?: { readonly unreadOnly?: boolean; readonly limit?: number; readonly cursor?: number }
     ) =>
       notificationRepo.findAll(opts).pipe(
-        Effect.catchCause(() => Effect.succeed<PaginatedNotifications>({ items: [] }))
+        Effect.catch(() => Effect.succeed<PaginatedNotifications>({ items: [] }))
       ),
-    markNotificationRead: (id: number) => notificationRepo.markRead(id).pipe(Effect.catchCause(() => Effect.void)),
-    markAllNotificationsRead: () => notificationRepo.markAllRead().pipe(Effect.catchCause(() => Effect.void)),
-    getUnreadNotificationCount: () => notificationRepo.unreadCount().pipe(Effect.catchCause(() => Effect.succeed(0))),
+    markNotificationRead: (id: number) => notificationRepo.markRead(id).pipe(Effect.catch(() => Effect.void)),
+    markAllNotificationsRead: () => notificationRepo.markAllRead().pipe(Effect.catch(() => Effect.void)),
+    getUnreadNotificationCount: () => notificationRepo.unreadCount().pipe(Effect.catch(() => Effect.succeed(0))),
     getCachedComments: (awsAccountId: string, prId: PullRequestId) =>
       commentRepo.find(awsAccountId, prId).pipe(
-        Effect.catchCause(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+        Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       ),
     refreshSinglePR: (awsAccountId: string, prId: PullRequestId) => provide(refreshSinglePR(awsAccountId, prId))
   }
 })
 
-export interface PRServiceShape extends Success<typeof makePRService> {}
+export interface PRServiceContract extends Success<typeof makePRService> {}
 
 export class PRService extends Context.Service<
   PRService,
-  PRServiceShape
+  PRServiceContract
 >()("@knpkv/codecommit-core/PRService") {
   static readonly Default = Layer.effect(PRService, makePRService)
 }

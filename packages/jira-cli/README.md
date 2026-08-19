@@ -43,6 +43,12 @@ Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 http://localhost:8585/callback
 ```
 
+The provider-facing callback URL and callback listener both use `localhost`, so
+the browser and listener select the same loopback family on IPv4-only and
+IPv6-only hosts. Requests with a missing
+or mismatched OAuth state are rejected without consuming the pending login, so
+only the provider callback carrying the expected state can complete or fail it.
+
 ### 2. Configure Credentials
 
 ```bash
@@ -112,6 +118,30 @@ jira issue attachment upload PROJ-123 ./evidence.svg --document ./PROJ-123.md
 
 The command uploads the file, replaces exactly one matching placeholder with the remote attachment reference, and includes hidden `jiraAttachment` metadata so later parses keep the Jira attachment identity.
 
+### Edit an issue
+
+Edit an issue's list-valued fields (fix versions and labels).
+
+```bash
+jira issue edit PROJ-123 --add-fix-version "OOB 100" --add-label release-notes
+jira issue edit PROJ-123 --remove-fix-version "OOB 99" --json
+```
+
+| Option                 | Description                                                    | Default |
+| ---------------------- | -------------------------------------------------------------- | ------- |
+| `--add-fix-version`    | Add a fix version by name, keeping existing ones (repeatable)  | -       |
+| `--remove-fix-version` | Remove a fix version by name (repeatable)                      | -       |
+| `--fix-version`        | Replace the fix versions with exactly these names (repeatable) | -       |
+| `--add-label`          | Add a label, keeping existing ones (repeatable)                | -       |
+| `--remove-label`       | Remove a label (repeatable)                                    | -       |
+| `--label`              | Replace the labels with exactly these (repeatable)             | -       |
+| `--json`               | Output as JSON                                                 | `false` |
+
+Both fields are sets, so prefer the incremental flags: the replacing forms
+(`--fix-version`, `--label`) silently drop every value not listed. A replacing
+flag cannot be combined with its own incremental flags. Requires the
+`write:jira-work` scope.
+
 ### Output Formats
 
 **Multi (default):** One markdown file per issue with YAML front-matter.
@@ -162,6 +192,28 @@ jira version get 10042 --json
 
 The version id is the **numeric** id (e.g. `10042`); use `version list` to find it.
 
+### Create a version
+
+```bash
+jira version create --project PROJ --name "OOB 100"
+jira version create --project PROJ --name "OOB 100" \
+  --description "Q3 release" \
+  --start-date 2026-01-05 \
+  --release-date 2026-01-19 \
+  --json
+```
+
+| Option           | Alias | Description                           | Default |
+| ---------------- | ----- | ------------------------------------- | ------- |
+| `--project`      | `-p`  | Jira project key (e.g. `PROJ`)        | -       |
+| `--name`         |       | Version name (e.g. `"OOB 100"`)       | -       |
+| `--description`  | `-d`  | Version description                   | -       |
+| `--start-date`   |       | Start date, ISO 8601 (`yyyy-mm-dd`)   | -       |
+| `--release-date` |       | Release date, ISO 8601 (`yyyy-mm-dd`) | -       |
+| `--json`         |       | Output as JSON                        | `false` |
+
+The version is created unreleased. Requires the `manage:jira-project` scope.
+
 ### Set the description
 
 ```bash
@@ -180,9 +232,21 @@ jira version related-work add 10042 \
   --title "Release notes" \
   --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
   --category Communication
+
+# Reconcile the category to exactly this set — idempotent, safe to re-run
+jira version related-work sync 10042 \
+  --link "Release notes=https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
+  --link "Test report=https://example.atlassian.net/wiki/spaces/PROJ/pages/124" \
+  --category Communication \
+  --prune
 ```
 
 `related-work add` requires the `write:jira-work` scope.
+
+`related-work sync` is what a release scaffold should use: repeated `add` calls pile up duplicate links, while
+`sync` matches on URL (the only stable identity a link has, since Jira assigns the id and the title is editable)
+and adds only what is missing. `--prune` additionally removes links in the category that are not in the desired
+set, including surplus copies of a URL that _is_ desired. Other categories are never touched.
 
 ## Auth Commands
 

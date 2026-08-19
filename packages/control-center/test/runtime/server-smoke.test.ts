@@ -1,12 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { AgentContextFingerprint, AgentProviderId } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -15,27 +18,58 @@ import * as TestClock from "effect/testing/TestClock"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { createServer } from "node:net"
 
-import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import { makeControlCenterApiClient } from "../../src/api/client.js"
-import { PairingCode } from "../../src/api/session.js"
+import { PairingCode, SessionSummary } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
+  EntityId,
   EnvironmentId,
   GovernedActionId,
+  JobId,
   PersonId,
   PluginConnectionId,
   ReleaseId,
   RoleAssignmentId,
-  WorkspaceId
+  SessionId,
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import type { PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { GovernedWorkspaceSettingsSections, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
+import {
+  type PrReviewSandboxCommandResult,
+  type PrReviewSandboxSession,
+  PrReviewSandboxSessions
+} from "../../src/server/agent/internal/PrReviewSandboxSession.js"
+import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { ReleaseAgentJobs } from "../../src/server/api/ApplicationServices.js"
+import { synchronizeFakeReleaseFromMap } from "../../src/server/application/releaseSynchronization.js"
+import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
+import { authorizeWorkspaceSettingsGovernanceRequest } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
+import { makeWorkspaceGovernedActionPolicyDefinitions } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import {
+  Persistence,
+  persistenceLayer,
+  persistenceLayerFromDatabase
+} from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
-import { AgentEventCursor, AgentThreadEventPageSize } from "../../src/server/persistence/repositories/agentJobModels.js"
+import {
+  AgentEventCursor,
+  AgentLeaseOwner,
+  AgentThreadEventPageSize
+} from "../../src/server/persistence/repositories/agentJobModels.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -51,17 +85,22 @@ import {
 } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginRuntimeAuthoritySource } from "../../src/server/plugins/internal/PluginRuntimeAuthoritySource.js"
+import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
-import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
+import { PluginConnectionMap, type PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
-import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
+import {
+  makeControlCenterApplicationComposition,
+  makeControlCenterServer
+} from "../../src/server/runtime/ControlCenterServer.js"
+import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import {
   GovernedActionExecutionStartup,
-  governedActionExecutionStartupLayer
+  governedActionExecutionStartupFromRegistryLayer
 } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
-import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
+import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
   ACTION_ID as AUTHORIZED_ACTION_ID,
@@ -94,6 +133,11 @@ const GOVERNED_FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:
 const AUTHORIZED_WORKSPACE = Schema.decodeSync(WorkspaceId)(AUTHORIZED_WORKSPACE_ID)
 const AUTHORIZED_CONNECTION = Schema.decodeSync(PluginConnectionId)(AUTHORIZED_CONNECTION_ID)
 const AUTHORIZED_ACTION = Schema.decodeSync(GovernedActionId)(AUTHORIZED_ACTION_ID)
+const SETTINGS_OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
+const SETTINGS_SESSION_ID = SessionId.make("01890f6f-6d6a-7cc0-98d2-000000000092")
+const SETTINGS_MUTATION_ID = WorkspaceSettingsMutationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000093"
+)
 
 const fakeDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -217,6 +261,11 @@ const makeFakeConnectionMap = Effect.gen(function*() {
   } satisfies PluginConnectionMapV1
 })
 
+class EphemeralPortFixtureError extends Schema.TaggedError<EphemeralPortFixtureError>()(
+  "EphemeralPortFixtureError",
+  { message: Schema.String }
+) {}
+
 const acquireEphemeralPort = Effect.tryPromise({
   try: () =>
     new Promise<number>((resolve, reject) => {
@@ -224,7 +273,7 @@ const acquireEphemeralPort = Effect.tryPromise({
       probe.once("error", reject)
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
-        if (address === null || typeof address === "string") {
+        if (address === null || Predicate.isString(address)) {
           probe.close()
           reject(new Error("ephemeral listener did not expose an internet port"))
           return
@@ -232,7 +281,7 @@ const acquireEphemeralPort = Effect.tryPromise({
         probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
       })
     }),
-  catch: (cause) => new Error("could not reserve an ephemeral test port", { cause })
+  catch: () => new EphemeralPortFixtureError({ message: "could not reserve an ephemeral test port" })
 })
 
 const makeStaticFixture = Effect.gen(function*() {
@@ -250,6 +299,97 @@ const makeStaticFixture = Effect.gen(function*() {
   return root
 })
 
+const makeCodexCliFixture = Effect.gen(function*() {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-codex-" })
+  const executable = path.join(root, "codex")
+  yield* fileSystem.writeFileString(
+    executable,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then",
+      "  printf '%s\\n' 'codex-cli 1.2.3'",
+      "  exit 0",
+      "fi",
+      "printf '%s\\n' \\",
+      "  '{\"thread_id\":\"runtime-thread\",\"type\":\"thread.started\"}' \\",
+      "  '{\"item\":{\"text\":\"Release context is ready.\",\"type\":\"agent_message\"},\"type\":\"item.completed\"}' \\",
+      "  '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}'"
+    ].join("\n")
+  )
+  yield* fileSystem.chmod(executable, 0o700)
+  return executable
+})
+
+const enableCodexAgentProvider = Effect.fn(
+  "ControlCenterServerSmoke.enableCodexAgentProvider"
+)(function*() {
+  const database = yield* Database
+  const persistence = yield* Persistence
+  yield* database.sql`INSERT INTO persons (
+    workspace_id, person_id, display_name, avatar_json, is_active,
+    revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${SETTINGS_OWNER_ID}, 'Settings Owner',
+    '{"_tag":"initials","text":"SO"}', 1, 1,
+    ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+  )`
+  yield* database.sql`INSERT INTO sessions (
+    workspace_id, session_id, token_hash, csrf_hash, actor_kind,
+    person_id, agent_id, permission, created_at, last_seen_at,
+    idle_expires_at, absolute_expires_at, revoked_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${SETTINGS_SESSION_ID}, ${"c".repeat(64)}, ${"d".repeat(64)},
+    'human', ${SETTINGS_OWNER_ID}, NULL, 'workspace-owner',
+    ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT},
+    '2026-07-31T09:00:00.000Z', '2026-08-30T09:00:00.000Z', NULL
+  )`
+  const current = yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+  const settings: WorkspaceSettingsV1 = {
+    ...current.settings,
+    agent: {
+      ...current.settings.agent,
+      allowedProviders: ["codex"]
+    }
+  }
+  const acknowledgedGovernedSections = GovernedWorkspaceSettingsSections.make(["agent"])
+  const request = {
+    workspaceId: WORKSPACE_ID,
+    mutationId: SETTINGS_MUTATION_ID,
+    expectedRevision: current.revision,
+    settings,
+    acknowledgedGovernedSections,
+    actorPersonId: SETTINGS_OWNER_ID,
+    sessionId: SETTINGS_SESSION_ID
+  }
+  const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+    Schema.decodeSync(SessionSummary)({
+      sessionId: SETTINGS_SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+      actor: { _tag: "human", personId: SETTINGS_OWNER_ID },
+      permission: "workspace-owner",
+      createdAt: FIXTURE_TIME_INPUT,
+      lastSeenAt: FIXTURE_TIME_INPUT,
+      idleExpiresAt: "2026-07-31T09:00:00.000Z",
+      absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
+      revokedAt: null
+    }),
+    request,
+    FIXTURE_TIME
+  )
+  yield* persistence.workspaceSettings.update(WORKSPACE_ID, {
+    mutationId: SETTINGS_MUTATION_ID,
+    expectedRevision: current.revision,
+    settings,
+    acknowledgedGovernedSections,
+    actorPersonId: SETTINGS_OWNER_ID,
+    sessionId: SETTINGS_SESSION_ID,
+    governanceAuthority,
+    updatedAt: FIXTURE_TIME
+  })
+})
+
 const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuthorizedRuntimeAction")(function*(
   persistenceConfig: PersistenceConfig
 ) {
@@ -259,10 +399,12 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
   const graph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
   const runtimes = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
   const authorities = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
-  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities)
+  const persistence = persistenceLayerFromDatabase(persistenceConfig).pipe(Layer.provide(database))
+  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities, persistence)
 
   return yield* Effect.gen(function*() {
     yield* seedGovernedActionAuthorityRoots()
+    const persistenceService = yield* Persistence
     const runtimeRepository = yield* PluginRuntimeRepository
     const runtimeRecord = yield* runtimeRepository.acceptPluginDescriptor(
       AUTHORIZED_WORKSPACE,
@@ -288,7 +430,16 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
       accountDigest: PluginRuntimeAccountDigest.make(`sha256:${"c".repeat(64)}`),
       activatedAt: GOVERNED_AUTHORITY_TIME
     })
+    const settings = yield* persistenceService.workspaceSettings.get(AUTHORIZED_WORKSPACE)
+    const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(settings)
+    const ownerPolicy = definitions.find(
+      ({ binding }) => binding.requiredPermission === "workspace-owner"
+    )
+    if (ownerPolicy === undefined) {
+      return yield* Effect.die("workspace-owner governed-action policy is unavailable")
+    }
     yield* seedGovernedAction({
+      policy: ownerPolicy.binding,
       pluginConnectionAuthorityDigest: current.runtimeAuthorityToken,
       seedAuthorityRoots: false
     })
@@ -298,6 +449,74 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
 })
 
 describe("Control Center closed runtime", () => {
+  it.effect("keeps review publication unavailable when governed execution has no runtime registry", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-runtime-publication-disabled-"
+      })
+      const proposalLeaseCalls = yield* Ref.make(0)
+      const fakeConnections = yield* makeFakeConnectionMap
+      const pluginConnections: PluginConnectionMapV1 = {
+        ...fakeConnections,
+        proposalContextEffect: () =>
+          Ref.update(proposalLeaseCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.die("disabled publication acquired provider authority"))
+          )
+      }
+      const composition = makeControlCenterApplicationComposition({
+        bindConfig: yield* decodeBindConfig({ port: 4173 }),
+        persistenceConfig: {
+          blobRoot: BlobRoot.make(path.join(root, "blobs")),
+          busyTimeoutMilliseconds: 5_000,
+          databaseUrl: LocalDatabaseUrl.make(`file:${path.join(root, "control-center.db")}`),
+          maxConnections: 1
+        },
+        secretRoot: SecretRoot.make(path.join(root, "secrets")),
+        staticAssets: { root },
+        pluginConnections,
+        firstPartyPluginRuntime: false,
+        governedActionExecution: { workspaceId: WORKSPACE_ID }
+      })
+      const publications = yield* Layer.build(
+        composition.reviewSuggestionPublications.pipe(
+          Layer.provide(
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("disabled publication used HTTP"))
+            )
+          ),
+          Layer.provide(SecretStore.layer({
+            secretRoot: SecretRoot.make(path.join(root, "secrets"))
+          })),
+          Layer.provide(ServerLifecycle.layer)
+        )
+      )
+      const result = yield* Context.get(
+        publications,
+        ReviewSuggestionPublicationGateway
+      ).identity({
+        workspaceId: WORKSPACE_ID,
+        entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-00000000007a"),
+        pluginConnectionId: PLUGIN_ID,
+        sourceRevision: "revision-1",
+        subject: {
+          providerId: "codecommit",
+          repository: "payments-api",
+          pullRequestId: "17",
+          baseRevision: "base",
+          headRevision: "head"
+        }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.reason, "publication-unavailable")
+      }
+      assert.strictEqual(yield* Ref.get(proposalLeaseCalls), 0)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("serves immutable SPA bytes and generated-client pairing plus portfolio", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -379,6 +598,21 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const secondBrowserCode = yield* mutationClient.session.issueBrowserPairingCode({
+        payload: { permission: "workspace-approver" }
+      })
+      const [secondBrowser, secondBrowserResponse] = yield* pairClient.session.pair({
+        payload: { pairingCode: secondBrowserCode.pairingCode },
+        responseMode: "decoded-and-response"
+      })
+      assert.strictEqual(secondBrowser.session.permission, "workspace-approver")
+      assert.isDefined(secondBrowserResponse.cookies.cookies.cc_session)
+      const sessions = yield* authenticatedClient.session.list()
+      assert.strictEqual(sessions.length, 2)
+      assert.deepStrictEqual(
+        sessions.map(({ sessionId }) => sessionId).sort(),
+        [paired.session.sessionId, secondBrowser.session.sessionId].sort()
+      )
       const rejectedAgentJob = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
         payload: {
@@ -507,10 +741,11 @@ describe("Control Center closed runtime", () => {
 
   it.effect("runs explicit cache-backed plugin synchronization before serving the authenticated portfolio", () =>
     Effect.gen(function*() {
-      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const staticRoot = yield* makeStaticFixture
+      const codexExecutable = yield* makeCodexCliFixture
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-sync-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
@@ -549,6 +784,13 @@ describe("Control Center closed runtime", () => {
       const currentRuntimeAuthority = yield* seedAuthorizedRuntimeAction(persistenceConfig)
       const pluginConnections = yield* makeFakeConnectionMap
       const governedRuntime = yield* makeFakePluginRuntime(governedScenario)
+      const governedPluginRuntimes = {
+        layer: () =>
+          Layer.merge(
+            governedRuntime.layer,
+            Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
+          )
+      }
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,
@@ -565,15 +807,13 @@ describe("Control Center closed runtime", () => {
         },
         governedActionExecution: {
           workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
+          pluginRuntimes: governedPluginRuntimes
         },
-        releaseAgent: { cwd: staticRoot, enabledProviders: ["codex"] }
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: ["codex"],
+          codexExecutable
+        }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
       const governedExecution = Context.getOption(runtime, GovernedActionExecutionStartup)
@@ -583,16 +823,10 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
       assert.isTrue(Option.isNone(governedExecution))
       const internalWorker = yield* Layer.build(
-        governedActionExecutionStartupLayer({
-          workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
-        }).pipe(
+        governedActionExecutionStartupFromRegistryLayer(WORKSPACE_ID).pipe(
+          Layer.provide(
+            Layer.succeed(PluginRuntimeRegistry, governedPluginRuntimes)
+          ),
           Layer.provide(databaseLayer(persistenceConfig)),
           Layer.provide(ServerLifecycle.layer)
         )
@@ -621,7 +855,6 @@ describe("Control Center closed runtime", () => {
           0
         )
 
-        yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
         assert.deepStrictEqual(
           yield* privateExecution.advance({
             workspaceId: AUTHORIZED_WORKSPACE,
@@ -641,7 +874,6 @@ describe("Control Center closed runtime", () => {
           afterAuthorized.calls.filter(({ operation }) => operation === "execute-authorized-action"),
           1
         )
-        yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       }
       assert.strictEqual(persistedRuntime.health._tag, "healthy")
       assert.deepStrictEqual(synchronizationState, {
@@ -685,6 +917,24 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const currentSettings = yield* mutationClient.workspaceSettings.read()
+      const configuredSettings = yield* mutationClient.workspaceSettings.update({
+        payload: {
+          mutationId: WorkspaceSettingsMutationId.make(
+            "01890f6f-6d6a-7cc0-98d2-000000000083"
+          ),
+          expectedRevision: currentSettings.revision,
+          settings: {
+            ...currentSettings.settings,
+            agent: {
+              ...currentSettings.settings.agent,
+              allowedProviders: ["codex"]
+            }
+          },
+          acknowledgedGovernedSections: ["agent"]
+        }
+      })
+      assert.deepStrictEqual(configuredSettings.settings.agent.allowedProviders, ["codex"])
       const enqueued = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
         payload: {
@@ -702,10 +952,566 @@ describe("Control Center closed runtime", () => {
       })
       assert.strictEqual(enqueued.releaseId, RELEASE_ID)
       assert.strictEqual(enqueued.state, "queued")
+      const unownedReleaseChat = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
+        workspaceId: AUTHORIZED_WORKSPACE,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "This workspace is not owned by the supervised release worker."
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(unownedReleaseChat))
+      if (Result.isFailure(unownedReleaseChat)) {
+        assert.strictEqual(unownedReleaseChat.failure._tag, "ApplicationServiceUnavailable")
+      }
       assert.deepStrictEqual(
         durableThread.events.map(({ eventKind }) => eventKind),
         ["user-message", "job-queued"]
       )
+      yield* TestClock.adjust("1 second")
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* lifecycle.beginDrain
+      yield* lifecycle.awaitWorkDrained
+      const terminalThread = yield* runtimePersistence.agentJobs.threadAfter({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: AgentEventCursor.make(0),
+        limit: AgentThreadEventPageSize.make(128)
+      })
+      assert.include(
+        terminalThread.events.map(({ eventKind }) => eventKind),
+        "job-started",
+        JSON.stringify(terminalThread.events)
+      )
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("runs durable release chat for an initialized workspace without bootstrap", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const codexExecutable = yield* makeCodexCliFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-runtime-release-agent-no-bootstrap-"
+      })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const bindConfig = yield* decodeBindConfig({ port })
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(
+          `file:${path.join(dataRoot, "control-center.db")}`
+        ),
+        maxConnections: 1
+      }
+      const seedDatabase = databaseLayer(persistenceConfig)
+      const seedPersistence = persistenceLayerFromDatabase(persistenceConfig).pipe(
+        Layer.provideMerge(seedDatabase)
+      )
+      const pluginConnections = yield* makeFakeConnectionMap
+      yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Runtime release agent"),
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          displayName: PluginConnectionDisplayName.make("Runtime Jira"),
+          isEnabled: true,
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          fakeDescriptor,
+          0,
+          FIXTURE_TIME
+        )
+        yield* enableCodexAgentProvider()
+        yield* synchronizeFakeReleaseFromMap({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          streamKey: "releases"
+        }).pipe(
+          Effect.provideService(PluginConnectionMap, pluginConnections)
+        )
+      }).pipe(
+        Effect.provide(seedPersistence.pipe(Layer.provideMerge(DomainEventWakeups.layer))),
+        Effect.scoped
+      )
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        bootstrap: null,
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: ["codex"],
+          workerWorkspaceId: WORKSPACE_ID,
+          codexExecutable
+        }
+      }))
+      assert.deepStrictEqual(
+        Context.get(runtime, ControlCenterBootstrap),
+        { _tag: "disabled" }
+      )
+      const persistence = Context.get(runtime, Persistence)
+      const enqueued = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "Explain the initialized release."
+        }
+      })
+      assert.strictEqual(enqueued.state, "queued")
+      yield* TestClock.adjust("1 second")
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* lifecycle.beginDrain
+      yield* lifecycle.awaitWorkDrained
+      const terminalThread = yield* persistence.agentJobs.threadAfter({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: AgentEventCursor.make(0),
+        limit: AgentThreadEventPageSize.make(128)
+      })
+      assert.include(
+        terminalThread.events.map(({ eventKind }) => eventKind),
+        "job-completed",
+        JSON.stringify(terminalThread.events)
+      )
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("crosses production review composition once and durably persists the provider result", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-review-" })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const bindConfig = yield* decodeBindConfig({ port })
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+        maxConnections: 1
+      }
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000081")
+      const subject = {
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: "1".repeat(40),
+        headRevision: "2".repeat(40)
+      } satisfies PrReviewSubject
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
+      const evidencePath = "packages/control-center/src/review.ts"
+      const evidenceExcerpt = "const unsafe = true"
+      const output = JSON.stringify({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [{
+          title: "Disable unsafe review behavior",
+          severity: "P2",
+          problem: "Unsafe review behavior is enabled.",
+          impact: "The production path can accept unsafe state.",
+          evidence: {
+            path: evidencePath,
+            startLine: 42,
+            endLine: 42,
+            excerpt: evidenceExcerpt
+          },
+          recommendation: "Use the validated safe configuration.",
+          anchor: {
+            _tag: "line",
+            path: evidencePath,
+            line: 42
+          },
+          relatedLocations: [],
+          confidence: {
+            level: "high",
+            reason: "The exact added line enables the unsafe state."
+          }
+        }],
+        notes: []
+      })
+      let providerCalls = 0
+      const providerClient = HttpClient.make((request) => {
+        providerCalls += 1
+        const toolCalls = [
+          {
+            id: "list-project",
+            type: "function",
+            function: {
+              name: "ReviewListFiles",
+              arguments: JSON.stringify({ path: "." })
+            }
+          },
+          {
+            id: "read-instructions",
+            type: "function",
+            function: {
+              name: "ReviewRunCommand",
+              arguments: JSON.stringify({
+                command: `git show ${subject.baseRevision}:AGENTS.md`
+              })
+            }
+          },
+          {
+            id: "inspect-diff",
+            type: "function",
+            function: {
+              name: "ReviewRunCommand",
+              arguments: JSON.stringify({
+                command: `git diff --stat ${subject.baseRevision} ${subject.headRevision}`
+              })
+            }
+          }
+        ]
+        const toolCall = toolCalls[providerCalls - 1]
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              JSON.stringify({
+                id: "chatcmpl_runtime_review",
+                object: "chat.completion",
+                model: "review-model",
+                created: 1,
+                choices: [{
+                  index: 0,
+                  finish_reason: toolCall === undefined ? "stop" : "tool_calls",
+                  message: toolCall === undefined
+                    ? { role: "assistant", content: output }
+                    : { role: "assistant", content: null, tool_calls: [toolCall] }
+                }],
+                usage: {
+                  prompt_tokens: 8,
+                  completion_tokens: 2,
+                  total_tokens: 10
+                }
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              }
+            )
+          )
+        )
+      })
+      const seedDatabase = databaseLayer(persistenceConfig)
+      const seedPersistence = persistenceLayerFromDatabase(persistenceConfig).pipe(
+        Layer.provideMerge(seedDatabase)
+      )
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Runtime review"),
+          createdAt: FIXTURE_TIME
+        })
+        const settingsSessionId = SessionId.make(
+          "01890f6f-6d6a-7cc0-98d2-000000000085"
+        )
+        yield* database.sql`INSERT INTO persons (
+          workspace_id, person_id, display_name, avatar_json, is_active,
+          revision, created_at, updated_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${OWNER_ID}, 'Runtime Owner',
+          '{"_tag":"initials","text":"RO"}', 1, 1,
+          ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+        )`
+        yield* database.sql`INSERT INTO sessions (
+          workspace_id, session_id, token_hash, csrf_hash, actor_kind,
+          person_id, agent_id, permission, created_at, last_seen_at,
+          idle_expires_at, absolute_expires_at, revoked_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${settingsSessionId}, ${"a".repeat(64)}, ${"b".repeat(64)},
+          'human', ${OWNER_ID}, NULL, 'workspace-owner',
+          ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT},
+          '2026-07-31T09:00:00.000Z', '2026-08-30T09:00:00.000Z', NULL
+        )`
+        yield* database.sql`INSERT INTO releases (
+          workspace_id, release_id, current_revision, created_at, updated_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${RELEASE_ID}, 1, ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+        )`
+        const currentSettings = yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+        const settingsMutationId = WorkspaceSettingsMutationId.make(
+          "01890f6f-6d6a-7cc0-98d2-000000000084"
+        )
+        const settingsCandidate: WorkspaceSettingsV1 = {
+          ...currentSettings.settings,
+          agent: {
+            ...currentSettings.settings.agent,
+            allowedProviders: ["openai-compatible"],
+            toolPolicy: "review-sandbox"
+          }
+        }
+        const acknowledgedGovernedSections = GovernedWorkspaceSettingsSections.make(["agent"])
+        const settingsRequest = {
+          workspaceId: WORKSPACE_ID,
+          mutationId: settingsMutationId,
+          expectedRevision: currentSettings.revision,
+          settings: settingsCandidate,
+          acknowledgedGovernedSections,
+          actorPersonId: OWNER_ID,
+          sessionId: settingsSessionId
+        }
+        const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+          Schema.decodeSync(SessionSummary)({
+            sessionId: settingsSessionId,
+            workspaceId: WORKSPACE_ID,
+            actor: { _tag: "human", personId: OWNER_ID },
+            permission: "workspace-owner",
+            createdAt: FIXTURE_TIME_INPUT,
+            lastSeenAt: FIXTURE_TIME_INPUT,
+            idleExpiresAt: "2026-07-31T09:00:00.000Z",
+            absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
+            revokedAt: null
+          }),
+          settingsRequest,
+          FIXTURE_TIME
+        )
+        yield* persistence.workspaceSettings.update(WORKSPACE_ID, {
+          mutationId: settingsMutationId,
+          expectedRevision: currentSettings.revision,
+          settings: settingsCandidate,
+          acknowledgedGovernedSections,
+          actorPersonId: OWNER_ID,
+          sessionId: settingsSessionId,
+          governanceAuthority,
+          updatedAt: FIXTURE_TIME
+        })
+        yield* persistence.agentJobs.enqueue({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          jobId,
+          providerId: AgentProviderId.make("openai-compatible"),
+          model: "review-model",
+          access: "read-only",
+          userPrompt: "Review the immutable pull request.",
+          prompt: "Review the immutable pull request.",
+          contextFingerprint: AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`),
+          subjectRevision: subject.headRevision,
+          task: {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_ID,
+            subject,
+            reviewProfile
+          },
+          createdAt: FIXTURE_TIME
+        })
+      }).pipe(
+        Effect.provide(Layer.merge(
+          seedPersistence,
+          seedDatabase
+        ))
+      )
+
+      let sourceUses = 0
+      let sandboxCalls = 0
+      const reviewExecutionCompleted = yield* Deferred.make<void>()
+      const sandboxOperations = new Array<string>()
+      const sourceWorkspace = PrReviewSourceWorkspace.of({
+        withSource: (_request, use) => {
+          sourceUses += 1
+          return use("/deterministic-review-source")
+        }
+      })
+      const sandboxOutput = (
+        stdout = ""
+      ): PrReviewSandboxCommandResult => ({
+        exitCode: 0,
+        stderr: {
+          artifact: null,
+          byteLength: 0,
+          text: "",
+          truncated: false
+        },
+        stdout: {
+          artifact: null,
+          byteLength: new TextEncoder().encode(stdout).byteLength,
+          text: stdout,
+          truncated: false
+        }
+      })
+      const sandboxSession: PrReviewSandboxSession = {
+        attemptId: "0123456789ab",
+        baseRevision: subject.baseRevision,
+        headRevision: subject.headRevision,
+        jobId,
+        listFiles: () =>
+          Effect.sync(() => {
+            sandboxOperations.push("listFiles")
+            return sandboxOutput("AGENTS.md\npackages\n")
+          }),
+        readFile: () =>
+          Effect.sync(() => {
+            sandboxOperations.push("readFile")
+            return sandboxOutput("# Review instructions\n")
+          }),
+        searchFiles: () => Effect.succeed(sandboxOutput()),
+        runCommand: (command) =>
+          Effect.sync(() => {
+            sandboxOperations.push(command)
+            if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+              return sandboxOutput(`@@ -0,0 +42 @@\n+${evidenceExcerpt}\n`)
+            }
+            if (
+              command.startsWith(
+                `git show '${subject.headRevision}:${evidencePath}' | sed -n '42,42p'`
+              )
+            ) {
+              return sandboxOutput(`${evidenceExcerpt}\n`)
+            }
+            return command.startsWith("git show ")
+              ? sandboxOutput("# Review instructions\n")
+              : sandboxOutput("1 file changed\n")
+          }),
+        applyPatch: () => Effect.succeed(sandboxOutput()),
+        readDiff: () => Effect.succeed(sandboxOutput()),
+        listArtifacts: () => Effect.succeed([]),
+        pageArtifact: () => Effect.succeed({ complete: true, nextOffset: 0, text: "" }),
+        searchArtifact: () => Effect.succeed([]),
+        close: Effect.void
+      }
+      const sandboxSessions = PrReviewSandboxSessions.of({
+        withSession: (_request, use) => {
+          sandboxCalls += 1
+          return use(sandboxSession).pipe(
+            Effect.tap(() => Deferred.succeed(reviewExecutionCompleted, undefined))
+          )
+        },
+        reconcile: () => Effect.succeed({ removedSandboxes: [] })
+      })
+      const invalidRuntime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        releaseAgent: null,
+        prReviewWorker: {
+          workspaceId: WORKSPACE_ID,
+          workspaceRoot: path.join(dataRoot, "review-workspaces"),
+          leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
+          sourceWorkspace,
+          sandboxSessions
+        }
+      })).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalidRuntime))
+      if (Result.isFailure(invalidRuntime)) {
+        assert.isTrue(Predicate.isTagged(invalidRuntime.failure, "PrReviewWorkerConfigurationError"))
+      }
+      const queued = yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        return yield* persistence.agentJobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          subject
+        })
+      }).pipe(Effect.provide(seedPersistence))
+      assert.isTrue(Option.isSome(queued))
+      if (Option.isSome(queued)) {
+        assert.strictEqual(queued.value.state, "queued")
+      }
+      assert.strictEqual(sourceUses, 0)
+      assert.strictEqual(sandboxCalls, 0)
+      assert.strictEqual(providerCalls, 0)
+
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        outboundHttpClient: providerClient,
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: [],
+          openAiCompatible: {
+            apiUrl: "https://provider-fixture.example/v1",
+            model: AgentModelId.make("review-model")
+          }
+        },
+        prReviewWorker: {
+          workspaceId: WORKSPACE_ID,
+          workspaceRoot: path.join(dataRoot, "review-workspaces"),
+          leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
+          sourceWorkspace,
+          sandboxSessions
+        }
+      }))
+      const persistence = Context.get(runtime, Persistence)
+      yield* Deferred.await(reviewExecutionCompleted)
+      const latest = yield* Effect.gen(function*() {
+        const result = yield* persistence.agentJobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          subject
+        })
+        return Option.isSome(result) && result.value.state !== "running"
+          ? result
+          : yield* Effect.fail("review worker has not durably completed its claim")
+      }).pipe(
+        Effect.tapError(() => Effect.yieldNow),
+        Effect.retry({ times: 50 })
+      )
+      const retentionRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
+
+      assert.isTrue(Option.isSome(latest))
+      if (Option.isSome(latest)) {
+        assert.strictEqual(latest.value.report?.suggestions[0]?.problem, "Unsafe review behavior is enabled.")
+        assert.match(
+          latest.value.report?.suggestions[0]?.suggestionId ?? "",
+          /^sha256:[0-9a-f]{64}$/u
+        )
+      }
+      assert.strictEqual(sourceUses, 0)
+      assert.strictEqual(sandboxCalls, 1)
+      assert.strictEqual(providerCalls, 4)
+      assert.deepStrictEqual(
+        retentionRuns.map(({ deletedCount, retentionClass, selectedCount }) => ({
+          deletedCount,
+          retentionClass,
+          selectedCount
+        })),
+        [
+          {
+            deletedCount: 0,
+            retentionClass: "sandbox-artifact",
+            selectedCount: 0
+          }
+        ]
+      )
+      assert.deepStrictEqual(sandboxOperations.slice(0, 3), [
+        "listFiles",
+        `git show ${subject.baseRevision}:AGENTS.md`,
+        `git diff --stat ${subject.baseRevision} ${subject.headRevision}`
+      ])
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

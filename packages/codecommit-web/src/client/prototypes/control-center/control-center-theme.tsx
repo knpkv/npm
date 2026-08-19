@@ -1,5 +1,6 @@
 import { Moon, Sun } from "lucide-react"
 import { useEffect, useState } from "react"
+import { readBrowserWindow } from "../../host-globals.js"
 
 export type ControlCenterTheme = "dark" | "light"
 
@@ -10,13 +11,14 @@ interface ControlCenterThemeController {
 
 const storageKey = "cc:ockto-demo:workspace-engineering:theme"
 
-const systemTheme = (): ControlCenterTheme =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+const systemTheme = (browserWindow: Window): ControlCenterTheme =>
+  browserWindow.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 
 const initialTheme = (): ControlCenterTheme => {
-  if (typeof window === "undefined") return "light"
-  const saved = window.localStorage.getItem(storageKey)
-  return saved === "dark" || saved === "light" ? saved : systemTheme()
+  const browserWindow = readBrowserWindow()
+  if (browserWindow === undefined) return "light"
+  const saved = browserWindow.localStorage.getItem(storageKey)
+  return saved === "dark" || saved === "light" ? saved : systemTheme(browserWindow)
 }
 
 export function useControlCenterTheme(): ControlCenterThemeController {

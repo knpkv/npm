@@ -123,11 +123,7 @@ const isGlobalRootRule = (blocks: ReadonlyArray<CssBlock>, block: CssBlock): boo
 const tokenDefinitions = (
   sanitized: string,
   blocks: ReadonlyArray<CssBlock>
-): {
-  readonly all: ReadonlySet<string>
-  readonly global: ReadonlySet<string>
-  readonly localByBlock: ReadonlyMap<number, ReadonlySet<string>>
-} => {
+) => {
   const all = new Set<string>()
   const global = new Set<string>()
   const localByBlock = new Map<number, Set<string>>()
@@ -174,7 +170,7 @@ const hasFallback = (source: string, tokenEnd: number): boolean => {
   return false
 }
 
-const sourcePosition = (source: string, index: number): { readonly column: number; readonly line: number } => {
+const sourcePosition = (source: string, index: number) => {
   const lineStart = source.lastIndexOf("\n", index - 1)
   let line = 1
   for (let cursor = 0; cursor < index; cursor += 1) {

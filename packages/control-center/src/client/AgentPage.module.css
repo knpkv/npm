@@ -4,6 +4,7 @@
 .people,
 .starters,
 .composer,
+.templatePicker,
 .legacy,
 .legacyHeader,
 .legacyContext {
@@ -66,12 +67,43 @@
   gap: var(--rly-space-24);
 }
 
+.publication {
+  scroll-margin-block-start: 6rem;
+}
+
+.publicationAction {
+  display: grid;
+}
+
+.templatePicker {
+  background: color-mix(in srgb, var(--rly-color-service-confluence) 6%, var(--rly-color-surface-2));
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence);
+  gap: var(--rly-space-16);
+  padding: var(--rly-space-20);
+}
+
+.templatePicker > div:first-child {
+  display: grid;
+  gap: var(--rly-space-8);
+}
+
+.presetList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rly-space-12);
+}
+
+.preset,
 .suggestionList {
   display: grid;
+}
+
+.suggestionList {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--rly-space-12);
 }
 
+.preset,
 .suggestion {
   min-block-size: 7rem;
   padding: var(--rly-space-20);
@@ -85,16 +117,49 @@
   text-align: start;
   transition:
     border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+    box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.suggestion:hover,
+.preset {
+  gap: var(--rly-space-8);
+}
+
+.preset span,
+.suggestion span {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+    var(--rly-type-body-font);
+}
+
+.preset small {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  text-transform: uppercase;
+}
+
+.preset[aria-checked="true"] {
+  border-color: var(--rly-color-agent);
+  background: var(--rly-color-surface-2);
+  box-shadow: inset 0 0 0 1px var(--rly-color-agent);
+}
+
+.preset:hover,
+.suggestion:hover {
+  border-color: var(--rly-color-agent);
+  background: var(--rly-color-surface-2);
+}
+
+.preset:focus-visible,
 .suggestion:focus-visible {
   border-color: var(--rly-color-agent);
   background: var(--rly-color-surface-2);
-  outline: none;
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
 
+.preset:disabled,
 .suggestion:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -158,12 +223,18 @@
     grid-template-columns: 1fr;
   }
 
+  .presetList {
+    grid-template-columns: 1fr;
+  }
+
+  .preset,
   .suggestion {
     min-block-size: 5rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .preset,
   .suggestion {
     transition: none;
   }

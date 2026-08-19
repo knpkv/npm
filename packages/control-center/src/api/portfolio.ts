@@ -2,7 +2,14 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { Freshness } from "../domain/freshness.js"
-import { EnvironmentId, EventCursor, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import {
+  EnvironmentId,
+  EventCursor,
+  GovernedActionId,
+  PersonId,
+  ReleaseId,
+  WorkspaceId
+} from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
 import { ReadinessFinding, ReadinessStages, ReadinessVerdict } from "../domain/readiness/model.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
@@ -35,6 +42,16 @@ export const PortfolioRelationshipCounts = Schema.Struct({
 
 /** Decoded compact relationship totals. */
 export type PortfolioRelationshipCounts = typeof PortfolioRelationshipCounts.Type
+
+/** Whether the current release projection is covered by its latest Confluence page publication. */
+export const PortfolioReleasePageAwareness = Schema.Struct({
+  state: Schema.Literals(["current", "stale", "not-published", "unknown"]),
+  lastPublishedAt: Schema.NullOr(UtcTimestamp),
+  publicationActionId: Schema.optionalKey(GovernedActionId)
+}).annotate({ identifier: "PortfolioReleasePageAwareness" })
+
+/** Decoded release-page freshness summary. */
+export type PortfolioReleasePageAwareness = typeof PortfolioReleasePageAwareness.Type
 
 /** Current server-owned readiness facts required by the bird's-eye portfolio. */
 export const PortfolioReadinessSummary = Schema.Struct({
@@ -98,6 +115,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
   readiness: Schema.NullOr(PortfolioReadinessSummary),
   relationships: PortfolioRelationshipCounts,
   sourceRevisionCount: BoundedCount,
+  releasePageAwareness: Schema.optionalKey(PortfolioReleasePageAwareness),
   updatedAt: UtcTimestamp
 }).annotate({ identifier: "PortfolioReleaseSummary" })
 

@@ -22,7 +22,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures consistent formatting across codebase
 - **Command**: `pnpm format`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Lint
 
@@ -30,7 +30,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Ensures code style consistency
 - **Command**: `pnpm lint`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Audit
 
@@ -38,30 +38,64 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Fails the workflow when audited dependencies include advisories
 - **Command**: `pnpm run audit`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Types
 
 - Validates TypeScript compilation
 - **Command**: `pnpm check`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 #### Test
 
 - Runs test suite
+- Pins Bun 1.3.14 so the shipped CodeCommit runtime and Bun-hosted child-process
+  boundary tests run instead of reporting a platform skip
 - **Command**: `pnpm test`
+- **Timeout**: 15 minutes
+- **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
+
+#### Edge runtimes
+
+- Runs on the Ubuntu 26.04 public-preview image as an explicit forward-compatibility canary
+- Pins and verifies Node.js 26.7.0 and Bun 1.3.14
+- Builds the CodeCommit package and its complete workspace dependency graph from a clean checkout
+- Exercises the focused CodeCommit CLI and Node/Bun child-environment boundaries
+- Uses Vite's native configuration loader now, ahead of its planned default
+- **Commands**:
+  - `pnpm --filter @knpkv/codecommit... build`
+  - `pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
+- **Bun Version**: 1.3.14
 
 #### Browser
 
 - Installs the Playwright-managed Chromium runtime and its system dependencies
-- Runs the `rly` Storybook interaction, accessibility, static-catalog, and visual-state checks
+- Runs every package browser suite, including the `rly` catalog and Control Center production routes
 - Serializes browser work to one worker through the package configuration
-- **Command**: `pnpm --filter @knpkv/rly test:browser`
+- Audits Control Center routes for keyboard focus, serious/critical WCAG violations,
+  320-pixel reflow, forced colors, and reduced motion
+- Exercises second-machine pairing through the trusted HTTPS proxy fixture
+- Runs the deterministic large-fixture contract benchmark and validates the
+  browser-runtime cardinality, cleanup, and machine-qualified timing report
+- Treats the GitHub-hosted runner's `local-ssd` declaration as a trusted CI
+  configuration input rather than hardware attestation. The validator fails
+  when that declaration is missing or renamed, so timing cannot silently become
+  informational in CI.
+- Does not automatically retry a timing failure. A timing-only failure is
+  quarantined for one deliberate workflow rerun after confirming the declared
+  Node, CPU, memory, platform, architecture, and storage class. A second timing
+  failure on the eligible class is a release-gate failure; other failures are
+  never retried as noise.
+- **Commands**:
+  - `pnpm test:browser`
+  - `pnpm --filter @knpkv/control-center benchmark:contracts`
+  - `pnpm --filter @knpkv/control-center benchmark:validate-runtime`
 - **Timeout**: 15 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -75,20 +109,30 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Pull requests to `main` branch
 - Manual workflow dispatch
 
-**Condition**: Only runs if repository owner is 'knpkv'
+**Condition**: Verification runs only when the repository owner is `knpkv`.
+Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 
 **Jobs**:
 
 #### Snapshot
 
 - Builds all packages
-- Creates snapshot releases using `pkg-pr-new`
-- Publishes to temporary registry for testing
+- Runs for pull requests with a read-only `GITHUB_TOKEN` for checkout, without
+  OIDC authority; checkout credentials are not persisted
 - **Commands**:
   - `pnpm build` - Build all packages
-  - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
+
+#### Publish snapshot
+
+- Runs only for pushes to `main` or a `main` workflow dispatch
+- Checks out `refs/heads/main`, rebuilds, and alone receives `id-token: write`
+- Creates snapshot releases using `pkg-pr-new`
+- Publishes to the temporary registry for testing
+- **Commands**:
+  - `pnpm build` - Build all packages from trusted `main`
+  - `sfw pnpm dlx pkg-pr-new@0.0.87 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
-- **Node Version**: 24.10.0
+- **Node Version**: 26.7.0
 
 ---
 
@@ -177,8 +221,8 @@ regeneration and patch-review instructions.
   - `pnpm changeset:publish` - Build and publish packages to npm
 - **Timeout**: 30 minutes
 - **Required Secrets**:
-  - `NPM_TOKEN` - npm authentication token for publishing
-  - `GITHUB_TOKEN` - GitHub token for creating releases and PRs
+  - `TOKEN_NPM` - npm authentication token passed to the configured npm registry
+  - `TOKEN_GITHUB` - GitHub token passed to Changesets for releases and PRs
 
 **Release Process**:
 
@@ -200,6 +244,46 @@ concurrency:
 ```
 
 This prevents resource waste and speeds up CI feedback.
+
+---
+
+### Control Center Live Integration (`control-center-live-integration.yml`)
+
+**Purpose**: Prove the real Control Center owner API and production provider runtimes against
+controlled read-only CodeCommit, CodePipeline, Jira, and Confluence fixtures.
+
+The workflow runs weekly and by manual dispatch in the protected
+`control-center-live-integration` environment. An unprivileged build job receives only
+`contents: read`, installs and builds the exact revision, then publishes a one-day sealed runner
+artifact with its SHA-256 checksum. The protected execution job downloads and verifies that runner,
+contains no checkout, install, or build step, and alone receives `id-token: write`. Repository-wide
+permissions remain empty. AWS credentials are temporary and come from
+`aws-actions/configure-aws-credentials` using `CONTROL_CENTER_TEST_AWS_ROLE_ARN`. Long-lived AWS
+access-key secrets are forbidden.
+
+Stable provider locators are environment variables, while Jira and Confluence email/API-token pairs
+are environment secrets. The only artifact is the pre-credential runner bundle; provider results,
+logs, credentials, and runtime evidence are never uploaded. The test prints no raw provider payloads
+and fails before allocating its scoped temporary server when configuration is incomplete. Local
+invocation and the complete variable list are documented in `packages/control-center/README.md`.
+The AWS role, CodeCommit repository, CodePipeline pipeline, and private artifact bucket are defined
+in `infra/control-center-live-aws`. Its bootstrap publishes the four non-secret AWS environment
+variables. The GitHub environment uses a custom deployment branch policy allowing only `main`, and
+the AWS trust policy independently binds the OIDC subject to this exact repository and environment.
+
+### Control Center Live AWS Probe (`control-center-live-aws-probe.yml`)
+
+**Purpose**: Prove the GitHub OIDC trust and stable AWS fixtures independently of Atlassian
+configuration.
+
+This manual workflow first builds and uploads a one-day checksum-sealed Control Center runner in an
+unprivileged `contents: read` job. The protected job contains no checkout, install, or build step;
+it verifies the runner before assuming the same temporary read-only role. A bounded CLI probe
+validates the role account, open CodeCommit pull request and exact diff, and successful CodePipeline
+execution/action history. The sealed runner then invokes the production Control Center CodeCommit
+and CodePipeline clients with profile `default` and independently proves both clients resolve the
+expected account and fixtures. It emits only success markers, not account identifiers or raw
+provider payloads.
 
 ## Dependency Install Protection
 
@@ -244,13 +328,13 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm my-custom-command
 ```
 
 ## Node Version
 
-- **Node.js**: 24.10.0
+- **Node.js**: 26.7.0
 
 This can be updated in the workflow file as needed.
 

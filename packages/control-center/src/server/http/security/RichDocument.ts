@@ -306,7 +306,7 @@ export const RichDocumentV1: Schema.Codec<RichDocumentV1, RichDocumentV1Encoded>
 const RichDocumentJson = Schema.fromJsonString(RichDocumentV1)
 
 /** Canonical rich content failed schema or resource-limit validation. */
-export class RichDocumentError extends Schema.TaggedErrorClass<RichDocumentError>()("RichDocumentError", {
+export class RichDocumentError extends Schema.TaggedError<RichDocumentError>()("RichDocumentError", {
   reason: Schema.Literals(["invalid-document", "bounds-exceeded", "encoded-size-exceeded"])
 }) {}
 
@@ -318,7 +318,7 @@ interface RichBudget {
 
 const textEncoder = new TextEncoder()
 
-const preflightUnknownTree = (input: unknown): boolean => {
+const preflightUnknownTree = <UnparsedInput>(input: UnparsedInput): boolean => {
   const stack: Array<{ readonly value: unknown; readonly depth: number }> = [{ value: input, depth: 0 }]
   let nodeCount = 0
   let linkCount = 0
@@ -333,7 +333,7 @@ const preflightUnknownTree = (input: unknown): boolean => {
     if (current.value._tag === "media") mediaCount += 1
     if (linkCount > MAXIMUM_LINKS || mediaCount > MAXIMUM_MEDIA) return false
     const text = current.value.text
-    if (typeof text === "string" && textEncoder.encode(text).byteLength > MAXIMUM_TEXT_BYTES) return false
+    if (Predicate.isString(text) && textEncoder.encode(text).byteLength > MAXIMUM_TEXT_BYTES) return false
     const children = current.value.children
     if (Array.isArray(children)) {
       for (const child of children) stack.push({ value: child, depth: current.depth + 1 })
@@ -343,30 +343,32 @@ const preflightUnknownTree = (input: unknown): boolean => {
 }
 
 /** Validate a canonical document and all structural, text, link, media, and encoded-size bounds. */
-export const validateRichDocumentV1 = Effect.fn("RichDocument.validate")(function*(input: unknown) {
-  if (!preflightUnknownTree(input)) return yield* new RichDocumentError({ reason: "bounds-exceeded" })
-  const typedResult = Schema.decodeUnknownResult(Schema.toType(RichDocumentV1))(input)
-  const document = Result.isSuccess(typedResult)
-    ? typedResult.success
-    : yield* Schema.decodeUnknownEffect(RichDocumentV1)(input).pipe(
+export const validateRichDocumentV1 = Effect.fn("RichDocument.validate")(
+  function*<UnparsedInput>(input: UnparsedInput) {
+    if (!preflightUnknownTree(input)) return yield* new RichDocumentError({ reason: "bounds-exceeded" })
+    const typedResult = Schema.decodeUnknownResult(Schema.toType(RichDocumentV1))(input)
+    const document = Result.isSuccess(typedResult)
+      ? typedResult.success
+      : yield* Schema.decodeUnknownEffect(RichDocumentV1)(input).pipe(
+        Effect.mapError(() => new RichDocumentError({ reason: "invalid-document" }))
+      )
+    const encoded = yield* Schema.encodeUnknownEffect(RichDocumentJson)(document).pipe(
       Effect.mapError(() => new RichDocumentError({ reason: "invalid-document" }))
     )
-  const encoded = yield* Schema.encodeUnknownEffect(RichDocumentJson)(document).pipe(
-    Effect.mapError(() => new RichDocumentError({ reason: "invalid-document" }))
-  )
-  if (textEncoder.encode(encoded).byteLength > MAXIMUM_ENCODED_BYTES) {
-    return yield* new RichDocumentError({ reason: "encoded-size-exceeded" })
+    if (textEncoder.encode(encoded).byteLength > MAXIMUM_ENCODED_BYTES) {
+      return yield* new RichDocumentError({ reason: "encoded-size-exceeded" })
+    }
+    return document
   }
-  return document
-})
+)
 
-const decodeString = (schema: Schema.Codec<string>, input: unknown): string | undefined => {
+const decodeString = <UnparsedInput>(schema: Schema.Codec<string>, input: UnparsedInput): string | undefined => {
   const result = Schema.decodeUnknownResult(schema)(input)
   return Result.isSuccess(result) ? result.success : undefined
 }
 
-const rawChildren = (input: Readonly<Record<PropertyKey, unknown>>): ReadonlyArray<unknown> =>
-  Array.isArray(input.children) ? input.children : []
+const rawChildren = <Input extends object>(input: Input): ReadonlyArray<unknown> =>
+  Predicate.hasProperty(input, "children") && Array.isArray(input.children) ? input.children : []
 
 const addNode = (budget: RichBudget): boolean => {
   if (budget.nodeCount >= MAXIMUM_NODES) return false
@@ -394,8 +396,8 @@ const sanitizeLinkChildren = (
   return children
 }
 
-const sanitizeInline = (
-  input: unknown,
+const sanitizeInline = <UnparsedInput>(
+  input: UnparsedInput,
   budget: RichBudget,
   depth: number
 ): ReadonlyArray<RichInlineNode> => {
@@ -443,14 +445,22 @@ const sanitizeInlines = (
   depth: number
 ): ReadonlyArray<RichInlineNode> => inputs.flatMap((input) => sanitizeInline(input, budget, depth))
 
-const sanitizeListItem = (input: unknown, budget: RichBudget, depth: number): RichListItemNode | undefined => {
+const sanitizeListItem = <UnparsedInput>(
+  input: UnparsedInput,
+  budget: RichBudget,
+  depth: number
+): RichListItemNode | undefined => {
   if (depth > MAXIMUM_DEPTH || !Predicate.isObject(input) || input._tag !== "list-item" || !addNode(budget)) {
     return undefined
   }
   return { _tag: "list-item", children: sanitizeBlocks(rawChildren(input), budget, depth + 1) }
 }
 
-const sanitizeBlock = (input: unknown, budget: RichBudget, depth: number): RichBlockNode | undefined => {
+const sanitizeBlock = <UnparsedInput>(
+  input: UnparsedInput,
+  budget: RichBudget,
+  depth: number
+): RichBlockNode | undefined => {
   if (depth > MAXIMUM_DEPTH || !Predicate.isObject(input)) return undefined
   if (input._tag === "paragraph" && addNode(budget)) {
     return { _tag: "paragraph", children: sanitizeInlines(rawChildren(input), budget, depth + 1) }
@@ -515,15 +525,17 @@ const RawRichDocument = Schema.Struct({
 })
 
 /** Drop unsupported/provider-active nodes and return a validated canonical document. */
-export const sanitizeRichDocumentV1 = Effect.fn("RichDocument.sanitize")(function*(input: unknown) {
-  const raw = yield* Schema.decodeUnknownEffect(RawRichDocument)(input).pipe(
-    Effect.mapError(() => new RichDocumentError({ reason: "invalid-document" }))
-  )
-  const budget: RichBudget = { nodeCount: 1, linkCount: 0, mediaCount: 0 }
-  const document: RichDocumentV1 = {
-    _tag: "rich-document",
-    version: 1,
-    children: sanitizeBlocks(raw.children, budget, 1)
+export const sanitizeRichDocumentV1 = Effect.fn("RichDocument.sanitize")(
+  function*<UnparsedInput>(input: UnparsedInput) {
+    const raw = yield* Schema.decodeUnknownEffect(RawRichDocument)(input).pipe(
+      Effect.mapError(() => new RichDocumentError({ reason: "invalid-document" }))
+    )
+    const budget: RichBudget = { nodeCount: 1, linkCount: 0, mediaCount: 0 }
+    const document: RichDocumentV1 = {
+      _tag: "rich-document",
+      version: 1,
+      children: sanitizeBlocks(raw.children, budget, 1)
+    }
+    return yield* validateRichDocumentV1(document)
   }
-  return yield* validateRichDocumentV1(document)
-})
+)

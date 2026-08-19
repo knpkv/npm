@@ -10,12 +10,19 @@ import type { PersistedRecordError, PersistenceOperationError, QuarantineWriteEr
 import { mapPersistenceOperation } from "../internal.js"
 import { makePersistedRowQuarantine } from "../persistedRowQuarantine.js"
 import { QuarantineRepository } from "../quarantineRepository.js"
-import type { GovernedActionReadInput } from "./contract.js"
+import type {
+  GovernedActionIdempotencyReadInput,
+  GovernedActionReadInput,
+  GovernedActionReleasePublicationReadInput,
+  GovernedActionTargetReadInput
+} from "./contract.js"
 import type { MalformedGovernedActionRecord } from "./quarantine.js"
 import { governedActionQuarantineDiagnostic } from "./quarantine.js"
 import { makeGovernedActionRead } from "./read.js"
 
-const isMalformedGovernedActionRecord = (failure: unknown): failure is MalformedGovernedActionRecord =>
+const isMalformedGovernedActionRecord = <UnparsedInput>(
+  failure: UnparsedInput
+): failure is UnparsedInput & MalformedGovernedActionRecord =>
   Predicate.isTagged("MalformedGovernedActionRecord")(failure) &&
   Predicate.hasProperty(failure, "error") &&
   Predicate.isTagged("PersistedRecordError")(failure.error) &&
@@ -85,6 +92,25 @@ export const makeGovernedActionTransaction = Effect.gen(function*() {
 
   const read = (request: GovernedActionReadInput) =>
     reader.read(request).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+  const readByIdempotencyKey = (request: GovernedActionIdempotencyReadInput) =>
+    reader.readByIdempotencyKey(request).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
+  const readLatestTerminalByTarget = (request: GovernedActionTargetReadInput) =>
+    reader.readLatestTerminalByTarget(request).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
+  const readLatestTerminalReleasePublications = (request: GovernedActionReleasePublicationReadInput) =>
+    reader.readLatestTerminalReleasePublications(request).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService)
+    )
 
-  return { capture, read, transact }
+  return {
+    capture,
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications,
+    transact
+  }
 })

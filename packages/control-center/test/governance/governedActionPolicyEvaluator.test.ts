@@ -8,7 +8,9 @@ import {
   GovernedActionEvidenceReference,
   GovernedActionPolicyBinding
 } from "../../src/domain/governedAction/index.js"
+import { PersonId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
 import type { VerifyGovernedActionDispatchAuthorityInput } from "../../src/server/governance/governedActionAuthority.js"
 import {
@@ -16,13 +18,19 @@ import {
   makeGovernedActionEnvelope
 } from "../../src/server/governance/governedActionDigests.js"
 import {
+  BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL,
   BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL,
   type GovernedActionPolicyDefinition,
   GovernedActionPolicyMaterialV1,
   makeBuiltInGovernedActionPolicyDefinition,
+  makeBuiltInGovernedActionPolicyDefinitions,
   makeGovernedActionPolicyDefinition,
-  makeGovernedActionPolicyEvaluator
+  makeGovernedActionPolicyEvaluator,
+  makeWorkspaceGovernedActionPolicyCatalogSource,
+  makeWorkspaceGovernedActionPolicyDefinitions
 } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
+import { ContentBlobDigest, RecordRevision } from "../../src/server/persistence/repositories/models.js"
+import { WorkspaceSettingsRecord } from "../../src/server/persistence/repositories/workspaceSettingsRepository.js"
 import {
   makeAuthorizedGovernedActionEnvelope,
   PERSON_ID,
@@ -35,18 +43,32 @@ const decodeMaterial = Schema.decodeUnknownSync(GovernedActionPolicyMaterialV1)
 const decodePolicyBinding = Schema.decodeUnknownSync(GovernedActionPolicyBinding)
 const decodeSession = Schema.decodeUnknownSync(SessionSummary)
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp)
+const decodeActionKind = Schema.decodeUnknownSync(
+  GovernedActionEnvelopeMaterialV1.fields.proposal.fields.request.fields.actionKind
+)
+const decodePluginId = Schema.decodeUnknownSync(
+  GovernedActionEnvelopeMaterialV1.fields.pluginId
+)
+type GovernedActionKind = typeof GovernedActionEnvelopeMaterialV1.Type["proposal"]["request"]["actionKind"]
+type GovernedPluginId = typeof GovernedActionEnvelopeMaterialV1.Type["pluginId"]
+const jiraPluginId = decodePluginId("dev.knpkv.jira.read")
+const pipelinePluginId = decodePluginId("dev.knpkv.aws-codepipeline")
 
-type EvaluationInput = Pick<
-  VerifyGovernedActionDispatchAuthorityInput,
-  "currentEvidence" | "envelope" | "evaluatedAt" | "session"
->
+type EvaluationInput =
+  & Pick<
+    VerifyGovernedActionDispatchAuthorityInput,
+    "currentEvidence" | "envelope" | "evaluatedAt" | "session"
+  >
+  & {
+    readonly priorTargetAttempts: number
+  }
 
 const makeInput = Effect.fn("GovernedActionPolicyEvaluatorTest.makeInput")(function*() {
   const envelope = yield* makeAuthorizedGovernedActionEnvelope()
   const definition = yield* makeBuiltInGovernedActionPolicyDefinition()
   const session = decodeSession({
     sessionId: SESSION_ID,
-    workspaceId: WORKSPACE_ID,
+    workspaceId: WorkspaceId.make(WORKSPACE_ID),
     actor: { _tag: "human", personId: PERSON_ID },
     permission: "workspace-owner",
     createdAt: "2026-07-15T09:00:00.000Z",
@@ -61,7 +83,8 @@ const makeInput = Effect.fn("GovernedActionPolicyEvaluatorTest.makeInput")(funct
       envelope,
       currentEvidence: envelope.evidence,
       session,
-      evaluatedAt: decodeTimestamp("2026-07-15T10:02:00.000Z")
+      evaluatedAt: decodeTimestamp("2026-07-15T10:02:00.000Z"),
+      priorTargetAttempts: 0
     } satisfies EvaluationInput
   }
 })
@@ -90,7 +113,273 @@ const replaceEvidence = Effect.fn("GovernedActionPolicyEvaluatorTest.replaceEvid
   } satisfies EvaluationInput
 })
 
+const workspaceSettingsRecord = (
+  policyRevision: number,
+  settings: WorkspaceSettingsV1
+) =>
+  WorkspaceSettingsRecord.make({
+    workspaceId: WorkspaceId.make(WORKSPACE_ID),
+    revision: RecordRevision.make(policyRevision),
+    policyRevision: RecordRevision.make(policyRevision),
+    settings,
+    settingsDigest: ContentBlobDigest.make("a".repeat(64)),
+    createdAt: decodeTimestamp("2026-07-15T09:00:00.000Z"),
+    updatedAt: decodeTimestamp("2026-07-15T10:00:00.000Z"),
+    updatedByPersonId: PersonId.make(PERSON_ID)
+  })
+
+const replacePolicyAction = Effect.fn(
+  "GovernedActionPolicyEvaluatorTest.replacePolicyAction"
+)(function*(
+  input: EvaluationInput,
+  definition: GovernedActionPolicyDefinition,
+  actionKind: GovernedActionKind,
+  pluginId: GovernedPluginId
+) {
+  const encoded = Schema.encodeSync(GovernedActionEnvelopeMaterialV1)(
+    input.envelope
+  )
+  const material = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)({
+    ...encoded,
+    pluginId,
+    policy: definition.binding,
+    proposal: {
+      ...encoded.proposal,
+      request: { ...encoded.proposal.request, actionKind }
+    }
+  })
+  return {
+    ...input,
+    envelope: (yield* makeGovernedActionEnvelope(material)).envelope
+  } satisfies EvaluationInput
+})
+
 describe("governed action policy evaluator", () => {
+  it.effect(
+    "binds Jira decisions to the exact governed settings policy revision",
+    () =>
+      Effect.gen(function*() {
+        const { input } = yield* makeInput()
+        const manualDefinitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
+          workspaceSettingsRecord(1, DEFAULT_WORKSPACE_SETTINGS)
+        )
+        const manualDefinition = manualDefinitions.find(
+          ({ binding }) => binding.requiredPermission === "workspace-owner"
+        )
+        if (manualDefinition === undefined) {
+          return yield* Effect.die("expected owner settings policy")
+        }
+        const manualEvaluator = yield* makeGovernedActionPolicyEvaluator(manualDefinitions)
+        assert.strictEqual(
+          (
+            yield* manualEvaluator
+              .evaluate(input)
+              .pipe(Effect.flip)
+          )._tag,
+          "GovernedActionPolicyBindingUnavailable"
+        )
+        const manualInputs = yield* Effect.all(
+          ["add-comment", "reply-comment"].map((actionKind) =>
+            replacePolicyAction(
+              input,
+              manualDefinition,
+              decodeActionKind(actionKind),
+              jiraPluginId
+            )
+          )
+        )
+        for (const manualInput of manualInputs) {
+          assert.strictEqual(
+            (yield* manualEvaluator.evaluate(manualInput)).decision,
+            "denied"
+          )
+        }
+        const unrelatedJiraInput = yield* replacePolicyAction(
+          input,
+          manualDefinition,
+          decodeActionKind("set-fix-versions"),
+          jiraPluginId
+        )
+        assert.strictEqual(
+          (yield* manualEvaluator.evaluate(unrelatedJiraInput)).decision,
+          "allowed"
+        )
+
+        const confirmedSettings: WorkspaceSettingsV1 = {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          jira: {
+            ...DEFAULT_WORKSPACE_SETTINGS.jira,
+            commentMode: "confirm-before-publish"
+          }
+        }
+        const confirmedDefinitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
+          workspaceSettingsRecord(2, confirmedSettings)
+        )
+        const confirmedDefinition = confirmedDefinitions.find(
+          ({ binding }) => binding.requiredPermission === "workspace-owner"
+        )
+        if (confirmedDefinition === undefined) {
+          return yield* Effect.die("expected confirmed settings policy")
+        }
+        const confirmedEvaluator = yield* makeGovernedActionPolicyEvaluator(confirmedDefinitions)
+        for (const actionKind of ["add-comment", "reply-comment"]) {
+          const confirmedInput = yield* replacePolicyAction(
+            input,
+            confirmedDefinition,
+            decodeActionKind(actionKind),
+            jiraPluginId
+          )
+          assert.strictEqual(
+            (yield* confirmedEvaluator.evaluate(confirmedInput)).decision,
+            "allowed"
+          )
+        }
+        for (const manualInput of manualInputs) {
+          assert.strictEqual(
+            (
+              yield* confirmedEvaluator
+                .evaluate(manualInput)
+                .pipe(Effect.flip)
+            )._tag,
+            "GovernedActionPolicyBindingUnavailable"
+          )
+        }
+
+        const presentationOnlyDefinitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
+          workspaceSettingsRecord(2, {
+            ...confirmedSettings,
+            presentation: {
+              ...confirmedSettings.presentation,
+              density: "compact"
+            }
+          })
+        )
+        assert.deepStrictEqual(
+          presentationOnlyDefinitions.map(({ binding }) => binding),
+          confirmedDefinitions.map(({ binding }) => binding)
+        )
+      }).pipe(Effect.provide(NodeServices.layer))
+  )
+
+  it.effect("reuses derived policy catalogs only for the same durable policy revision", () =>
+    Effect.gen(function*() {
+      let current = workspaceSettingsRecord(1, DEFAULT_WORKSPACE_SETTINGS)
+      let readCount = 0
+      const catalogs = yield* makeWorkspaceGovernedActionPolicyCatalogSource(
+        () =>
+          Effect.sync(() => {
+            readCount += 1
+            return current
+          })
+      )
+
+      const workspaceId = WorkspaceId.make(WORKSPACE_ID)
+      const first = yield* catalogs.get(workspaceId)
+      const repeated = yield* catalogs.get(workspaceId)
+      assert.strictEqual(repeated, first)
+      assert.strictEqual(readCount, 3)
+
+      current = workspaceSettingsRecord(2, {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        jira: {
+          ...DEFAULT_WORKSPACE_SETTINGS.jira,
+          commentMode: "confirm-before-publish"
+        }
+      })
+      const changed = yield* catalogs.get(workspaceId)
+      assert.notStrictEqual(changed, first)
+      assert.strictEqual(readCount, 5)
+      assert.notStrictEqual(
+        changed.definitions[0]?.binding.policyDigest,
+        first.definitions[0]?.binding.policyDigest
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("enforces the durable pipeline retry attempt ceiling", () =>
+    Effect.gen(function*() {
+      const { input } = yield* makeInput()
+      const settings: WorkspaceSettingsV1 = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        pipeline: {
+          retryMode: "confirm-before-retry",
+          maximumAttempts: 1
+        }
+      }
+      const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
+        workspaceSettingsRecord(2, settings)
+      )
+      const definition = definitions.find(
+        ({ binding }) => binding.requiredPermission === "workspace-owner"
+      )
+      if (definition === undefined) {
+        return yield* Effect.die("expected owner settings policy")
+      }
+      const evaluator = yield* makeGovernedActionPolicyEvaluator(definitions)
+      const retryInput = yield* replacePolicyAction(
+        input,
+        definition,
+        decodeActionKind("pipeline.retry"),
+        pipelinePluginId
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate(retryInput)).decision,
+        "allowed"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate({ ...retryInput, priorTargetAttempts: 1 })).decision,
+        "denied"
+      )
+      const unrelatedInput = yield* replacePolicyAction(
+        { ...input, priorTargetAttempts: 100 },
+        definition,
+        decodeActionKind("pipeline.stop"),
+        pipelinePluginId
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate(unrelatedInput)).decision,
+        "allowed"
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("binds approval actions to a policy granted to approvers and owners", () =>
+    Effect.gen(function*() {
+      const { input } = yield* makeInput()
+      const definitions = yield* makeBuiltInGovernedActionPolicyDefinitions()
+      const approverDefinition = definitions.find(
+        ({ binding }) => binding.requiredPermission === "workspace-approver"
+      )
+      if (approverDefinition === undefined) {
+        return yield* Effect.die("expected the built-in approver policy")
+      }
+      assert.deepStrictEqual(
+        approverDefinition.material,
+        BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL
+      )
+      const material = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)({
+        ...Schema.encodeSync(GovernedActionEnvelopeMaterialV1)(input.envelope),
+        policy: approverDefinition.binding
+      })
+      const envelope = (yield* makeGovernedActionEnvelope(material)).envelope
+      const evaluator = yield* makeGovernedActionPolicyEvaluator(definitions)
+      const approverSession = decodeSession({
+        ...Schema.encodeSync(SessionSummary)(input.session),
+        permission: "workspace-approver"
+      })
+
+      assert.strictEqual(
+        (yield* evaluator.evaluate({
+          ...input,
+          envelope,
+          session: approverSession
+        })).decision,
+        "allowed"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate({ ...input, envelope })).decision,
+        "allowed"
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("allows the exact immutable evidence set at a later trusted instant", () =>
     Effect.gen(function*() {
       const { definition, input } = yield* makeInput()

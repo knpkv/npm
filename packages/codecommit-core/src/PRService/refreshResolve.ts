@@ -78,8 +78,10 @@ export const resolveAccounts = (state: PRState) =>
     yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
       ...s,
       pullRequests: cachedPRs.map(decodeCachedPR),
+      refreshGeneration: (s.refreshGeneration ?? 0) + 1,
       status: loadingStatus,
-      ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
+      successfulRefreshScopes: [],
+      ...((cachedPRs.length > 0) && { statusDetail: "loading from cache..." })
     }))
 
     const config = yield* configService.load.pipe(Effect.orDie)

@@ -1,5 +1,6 @@
 import type { Domain } from "@knpkv/codecommit-core"
 import * as Atom from "effect/unstable/reactivity/Atom"
+import type { AmbiguousMergeGuards } from "../details-model.js"
 
 /**
  * TUI view type
@@ -37,6 +38,9 @@ export const showHelpAtom = Atom.make(false).pipe(Atom.keepAlive)
  */
 export const currentPRAtom = Atom.make<Domain.PullRequest | null>(null).pipe(Atom.keepAlive)
 
+/** Application-scoped locks for PRs whose non-idempotent merge outcomes are unknown. */
+export const ambiguousMergeGuardsAtom = Atom.make<AmbiguousMergeGuards>({}).pipe(Atom.keepAlive)
+
 /**
  * Currently selected list index
  * @category atoms
@@ -44,7 +48,10 @@ export const currentPRAtom = Atom.make<Domain.PullRequest | null>(null).pipe(Ato
 export const selectedIndexAtom = Atom.make(0).pipe(Atom.keepAlive)
 
 /**
- * Currently selected PR ID (for stable selection during streaming)
+ * Collision-safe selected PR key (for stable selection during streaming).
+ *
+ * The historical atom name is retained for source compatibility; CodeCommit
+ * pull-request numbers are only unique within an account and repository.
  * @category atoms
  */
 export const selectedPrIdAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)

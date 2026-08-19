@@ -32,6 +32,7 @@ import {
 import { PluginConnectionDisplayName, PluginConnectionRecord, RecordRevision } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 const PluginConnectionRow = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -94,11 +95,11 @@ const makePluginConnectionRepository = Effect.gen(function*() {
   const quarantine = yield* QuarantineRepository
   const quarantineRow = makePersistedRowQuarantine(cryptoService, quarantine)
   const sql = database.sql
-  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
+  const run = (plan: RenderedSql) => sql.unsafe<SqlRow>(plan.sql, [...plan.params])
 
-  const quarantineMalformed = Effect.fn("PluginConnectionRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("PluginConnectionRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
-    row: unknown,
+    row: UnparsedInput,
     fallbackKey: PluginConnectionId | WorkspaceId
   ) {
     const identity = Schema.decodeUnknownResult(PluginConnectionIdentity)(row)

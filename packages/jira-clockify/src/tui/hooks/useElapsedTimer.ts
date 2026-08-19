@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react"
 import type { TimerState } from "../../services/TimerService.js"
 import { elapsedAtom, timerStateAtom } from "../atoms/timer.js"
 
-export function useElapsedTimer(): { timerState: TimerState | null; elapsed: number } {
+export function useElapsedTimer() {
   const timerResult = useAtomValue(timerStateAtom)
   const elapsed = useAtomValue(elapsedAtom)
   const setElapsed = useAtomSet(elapsedAtom)

@@ -6,6 +6,7 @@ import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
   agentHandlersLayer,
+  codePipelineHandlersLayer,
   deliveryGraphHandlersLayer,
   diffHandlersLayer,
   liveEventHandlersLayer,
@@ -14,7 +15,8 @@ import {
   portfolioHandlersLayer,
   sessionHandlersLayer,
   shareHandlersLayer,
-  timelineHandlersLayer
+  timelineHandlersLayer,
+  workspaceSettingsHandlersLayer
 } from "./Handlers.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
@@ -29,12 +31,14 @@ export const controlCenterApiMiddlewareLayer = controlCenterApiMiddlewareLayerWi
 /** Complete group implementation, still requiring injectable application services. */
 const controlCenterApiHandlersLayerWithLifecycle = Layer.mergeAll(
   sessionHandlersLayer,
+  workspaceSettingsHandlersLayer,
   shareHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
   timelineHandlersLayer,
   deliveryGraphHandlersLayer,
   diffHandlersLayer,
+  codePipelineHandlersLayer,
   agentHandlersLayer,
   mediaHandlersLayer,
   liveEventHandlersLayer

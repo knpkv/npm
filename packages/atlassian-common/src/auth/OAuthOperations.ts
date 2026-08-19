@@ -23,11 +23,13 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { type OAuthConfig, type OAuthToken } from "../config/OAuthSchemas.js"
+import { unsafeCurrentTimeMillis } from "../internal/legacyWallClock.js"
 import { ME_URL, RESOURCES_URL, REVOKE_URL, TOKEN_URL } from "./OAuthEndpoints.js"
 import { OAuthError } from "./OAuthErrors.js"
 import {
   type AccessibleResource,
   AccessibleResourceSchema,
+  TokenErrorSchema,
   type TokenResponse,
   TokenResponseSchema,
   type UserInfo,
@@ -48,6 +50,15 @@ export interface ExchangeCodeOptions {
   readonly codeVerifier?: string | undefined
 }
 
+interface AuthorizationCodeTokenBody {
+  readonly grant_type: string
+  readonly client_id: string
+  readonly client_secret: string
+  readonly code: string
+  readonly redirect_uri: string
+  code_verifier?: string
+}
+
 /**
  * Exchange authorization code for tokens.
  *
@@ -57,10 +68,10 @@ export const exchangeCodeForTokens = (
   code: string,
   config: OAuthConfig,
   options: ExchangeCodeOptions
-): Effect.Effect<TokenResponse, OAuthError, HttpClient.HttpClient> =>
+) =>
   Effect.gen(function*() {
     const httpClient = yield* HttpClient.HttpClient
-    const tokenBody: Record<string, string> = {
+    const tokenBody: AuthorizationCodeTokenBody = {
       grant_type: "authorization_code",
       client_id: config.clientId,
       client_secret: config.clientSecret,
@@ -191,8 +202,21 @@ export const refreshToken = (
       const text = yield* response.text.pipe(
         Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
       )
+      // The OAuth `error` code is what distinguishes "this grant is spent" from
+      // "your request was malformed", and callers key credential deletion off
+      // it. A body that is not JSON, or not shaped like an OAuth error, simply
+      // leaves it absent — which callers read as "no verdict", not "rejected".
+      const errorCode = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TokenErrorSchema))(text).pipe(
+        Effect.map((decoded) => decoded.error),
+        Effect.catch(() => Effect.succeed(undefined))
+      )
       return yield* Effect.fail(
-        new OAuthError({ step: "refresh", cause: `HTTP ${response.status}: ${text}` })
+        new OAuthError({
+          step: "refresh",
+          cause: `HTTP ${response.status}: ${text}`,
+          status: response.status,
+          ...(!(errorCode === undefined) && { errorCode })
+        })
       )
     }
 
@@ -260,14 +284,15 @@ export const revokeToken = (
  *
  * @category Utilities
  */
-export const buildOAuthToken = (
+export const buildOAuthTokenAt = (
   tokenResponse: TokenResponse,
   site: AccessibleResource,
-  user: UserInfo
+  user: UserInfo,
+  nowMs: number
 ): OAuthToken => ({
   access_token: tokenResponse.access_token,
   refresh_token: tokenResponse.refresh_token,
-  expires_at: Date.now() + tokenResponse.expires_in * 1000,
+  expires_at: nowMs + tokenResponse.expires_in * 1000,
   scope: tokenResponse.scope,
   cloud_id: site.id,
   site_url: site.url,
@@ -277,3 +302,16 @@ export const buildOAuthToken = (
     email: user.email
   }
 })
+
+/**
+ * Build an OAuth token using the host clock.
+ *
+ * @deprecated Effect workflows should call {@link buildOAuthTokenAt} with
+ * `Clock.currentTimeMillis`. This wrapper preserves the existing synchronous
+ * public API until the next major release.
+ */
+export const buildOAuthToken = (
+  tokenResponse: TokenResponse,
+  site: AccessibleResource,
+  user: UserInfo
+): OAuthToken => buildOAuthTokenAt(tokenResponse, site, user, unsafeCurrentTimeMillis())

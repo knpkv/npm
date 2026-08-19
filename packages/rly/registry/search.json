@@ -136,12 +136,12 @@
         "circle",
         "default",
         "fallback",
+        "form",
         "hero",
         "identify",
         "large",
         "primitive",
         "rounded-square",
-        "shape",
         "size",
         "small"
       ]
@@ -230,6 +230,7 @@
     },
     {
       "capabilities": [
+        "annotate",
         "compare",
         "review"
       ],
@@ -237,19 +238,32 @@
       "importPath": "@knpkv/rly/diff",
       "name": "DiffCodeView",
       "states": [
+        "annotated",
+        "buffered",
         "default",
+        "dismissed",
+        "draft",
+        "resolved",
+        "split",
         "stacked",
+        "stale",
         "strict"
       ],
       "terms": [
+        "annotate",
+        "annotated",
         "buffered",
         "compare",
         "diff",
         "diffcodeview",
+        "dismissed",
+        "draft",
         "mode",
+        "resolved",
         "review",
         "split",
         "stacked",
+        "stale",
         "strict",
         "virtualization"
       ]
@@ -1088,6 +1102,7 @@
         "card",
         "compact",
         "default",
+        "form",
         "group",
         "grouped",
         "none",
@@ -1095,7 +1110,6 @@
         "primary",
         "primitive",
         "secondary",
-        "shape",
         "spacious",
         "surface",
         "tertiary",

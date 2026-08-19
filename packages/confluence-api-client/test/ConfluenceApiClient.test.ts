@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest"
-import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -10,7 +9,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { ConfluenceApiClient, ConfluenceApiConfig } from "../src/index.js"
 
 const clientLayer = (
-  config: Context.Service.Shape<typeof ConfluenceApiConfig>,
+  config: ConfluenceApiConfig["Service"],
   response: { readonly status: number; readonly body: unknown },
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) =>
@@ -40,7 +39,7 @@ const basicConfig = {
     email: "user@example.com",
     apiToken: Redacted.make("token")
   }
-} satisfies Context.Service.Shape<typeof ConfluenceApiConfig>
+} satisfies ConfluenceApiConfig["Service"]
 
 describe("ConfluenceApiClient", () => {
   it.effect("authenticates and decodes V2 requests with basic auth", () => {

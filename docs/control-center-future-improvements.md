@@ -18,10 +18,23 @@ This file records deliberate follow-up work that is outside the current narrow d
 ## Build performance
 
 - Profile and reduce the forced declaration build and distribution validation stages; these currently dominate the apparent pause after the Vite bundles finish.
-- Cache or avoid unchanged dependency builds in local end-to-end workflows.
 
 ## Relationship inference
 
 - Replace bounded workspace-wide reconciliation with incremental recomputation from the entities and releases affected by each committed synchronization page. The MVP deliberately skips inference when its complete bounded snapshot cannot be proven.
 - Extract explicit Jira and release links from bounded Confluence page bodies when lazy content is materialized. The MVP understands normalized link metadata and falls back to bounded page-title metadata during space synchronization.
 - Model multi-source releases explicitly instead of deriving the release graph-node identity from the first synchronized source revision. The MVP-created Jira releases have one authoritative source revision.
+
+## Pull-request review threads
+
+- Virtualize very long browser review threads after several explicitly loaded backward pages. The current browser keeps prior history visible across pull-request heads and temporary launch ineligibility, but intentionally renders the expanded in-memory history without virtualization.
+
+## Review-suggestion revisions
+
+- Sequence the remaining agentic review work as durable task identities and one private lifecycle fold first, then targeted edit/revalidation execution, recovery and retention convergence, and only then the broader agentic review release gate. Do not duplicate lifecycle transitions across dispatch and reconciliation adapters.
+- Add a browser-backed edit/conflict/history/publication journey and Storybook state matrix, including keyboard focus and reduced-motion coverage. The MVP has focused component coverage, but not a Playwright journey for this surface; the browser now exposes the durable targeted controls.
+- The durable `suggestion-edit` and `suggestion-revalidation` task intents beneath the existing `pr-review` worker route are implemented. The task—not prompt text—binds the source job, stable suggestion, selected revision, and exact immutable head.
+- Give targeted `sbx` runs the selected revision plus its complete bounded immutable history. Split structured output into edit, validated revalidation, and unable-to-conclude protocols; decode and re-anchor all output on the host.
+- Fold a successful targeted result and the terminal job transition through one durable repository transaction. Agent edits must append `requires-revalidation`; successful revalidation must append a new `validated` revision. Failed, cancelled, inconclusive, or superseded runs append no revision.
+- Keep **Ask agent to edit** and **Revalidate** bound to the durable targeted protocol. Do not regress either control into a free-form full-review prompt, because prompt text is not an authority boundary.
+- Add the opt-in real Codex-through-`sbx` targeted edit/revalidation smoke fixture. Assert exact-head provenance, file exploration and test execution, structured revision output, and absence of push, comment, approval, database, credential, and network authority.

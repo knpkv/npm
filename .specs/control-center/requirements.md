@@ -45,7 +45,7 @@ Two distinctions are normative:
 ### Full service views
 
 - **FR1.21 — Shared entity shell.** Jira, CodeCommit PR, Confluence, CodePipeline, and Clockify routes SHALL use the production design system and show service identity, large verdict, title/status, freshness, people with explicit roles, a navigable cross-service relationship chain, native content, facts, activity, contextual agent, and governed actions.
-- **FR1.22 — Jira issue.** Jira SHALL include structured fields, assignee/owner, priority, estimate, release/workstream, rich description read/edit/cancel/save, independently togglable acceptance criteria, comments, threaded replies, validated composer, human and synchronized history, delivery evidence, and governed transition/link/approval actions. Successful edits SHALL persist and append history/audit.
+- **FR1.22 — Jira issue.** Jira SHALL include structured fields, assignee/owner, priority, estimate, release/workstream, read-only description and acceptance-criteria presentation, comments, reply-fallback, fix-version, and typed issue-link proposals, validated composer, human and synchronized history, and delivery evidence. Validated proposals SHALL persist and append history/audit locally; no provider write occurs while Jira lacks a documented, verified provider-enforced atomic revision precondition for the exact target revision. Workflow transitions, approval mutations, and description replacement remain unsupported, and Jira Cloud remains proposal-only.
 - **FR1.23 — CodeCommit PR.** A PR SHALL include author, source/base branch, immutable head commit, diff summary, commits, checks, reviewers, approvers, human review state, linked Jira/pipeline/release evidence, request-review/request-changes/approval state, and governed merge-capable actions when supported. Its Files view SHALL load the complete PR diff across every changed file and render it with `@pierre/diffs/react`, including file tree and changed-file status, split and stacked layouts, syntax highlighting, line numbers, inline change highlighting, wrapped/unwrapped lines, unchanged-context expansion, line selection, and annotation/finding anchors. Added, modified, deleted, renamed, binary, generated, too-large, and unavailable files SHALL have explicit states; large PRs SHALL remain complete through lazy loading and virtualization rather than silent truncation.
 - **FR1.24 — Sandboxed agent review.** Starting agent review SHALL resolve a trusted PR head server-side, create an isolated sandbox pinned to that commit, progress through checkout → analysis → findings, continue after navigation or UI close, stream persisted progress, return file-specific findings, and let a human record approve or request changes. Agent recommendation SHALL never impersonate human approval.
 - **FR1.25 — CodePipeline execution.** CodePipeline SHALL include pipeline/execution identity, trigger and revision, artifact and target, duration, stage states, logs, verified/downloadable artifact references, environment and rollout state, operators and deployment approver, related PR/release/runbook, and governed retry/start-deploy/watch actions. Retry SHALL create a new linked execution and preserve the failed one.
@@ -102,7 +102,7 @@ Two distinctions are normative:
 - **TC3.8 — External-call policy.** Vendor and agent calls SHALL support cancellation and configurable timeouts. Retries SHALL be bounded to safe/idempotent operations, honor `Retry-After`, add jitter, and surface terminal authentication/rate-limit health.
 - **TC3.9 — Persistence.** Production domain state SHALL use a Control Center-owned transactional store separate from the CodeCommit-specific cache. Before schema stability it SHALL use one exact checked-in schema and reject drift; after the first released schema it SHALL become migration-managed. Prototype collections and browser `localStorage` SHALL not be production state; browser storage is limited to non-sensitive user presentation preferences.
 - **TC3.10 — Typed API and streaming.** Server contracts SHALL use Effect Schema and Effect HTTP APIs in a browser-safe module. Same-origin authenticated SSE SHOULD carry versioned, bounded events with initial snapshot, cursor, heartbeat, reconnect/resume, and scoped authorization unless Phase 3 documents an equivalent transport.
-- **TC3.11 — Runtime.** The production server SHALL support the repository CI runtime (Node 24 with `@effect/platform-node`) unless Phase 3 explicitly adds and validates another runtime. Host, port, allowed origins, session/authentication, data path, and credential references SHALL be decoded configuration.
+- **TC3.11 — Runtime.** The production server SHALL support the repository CI runtime (Node 26 with `@effect/platform-node`) unless Phase 3 explicitly adds and validates another runtime. Host, port, allowed origins, session/authentication, data path, and credential references SHALL be decoded configuration.
 - **TC3.12 — Content safety.** Jira/Confluence rich content, Markdown, diffs, logs, and agent output SHALL pass through an allowlisted representation and sanitization policy; untrusted HTML, scriptable SVG, unsafe URLs, and external credential-bearing media SHALL not bypass it.
 - **TC3.13 — Supervised jobs.** Plugin sync, agent work, sandbox work, and long actions SHALL be supervised/scoped jobs with durable ID, ownership, progress, cancellation, timeout, retry policy, and terminal state rather than detached fibers.
 - **TC3.14 — Diff rendering.** Production PR diffs SHALL use the supported React entry point from `@pierre/diffs/react`. Large multi-file diffs SHALL use its virtualization facilities and SHOULD offload highlighting through its worker-pool API; the implementation SHALL not fork or recreate the library's renderer as page-local markup.
@@ -173,7 +173,7 @@ Two distinctions are normative:
 - **SC7.6 — Relationship repair.** Applying one of two missing relationships reduces only that gap and audits it; applying the second recomputes readiness. Stale evidence or repeated idempotency key causes no duplicate mutation.
 - **SC7.7 — Pipeline retry.** Retrying failed execution `#1842` creates and links a new execution while preserving `#1842`; repeated submission executes once and produces a complete audit chain.
 - **SC7.8 — Active work.** OPS-428 centers human review rather than generic pipeline streaming, shows six Jira items, two PRs, preview evidence, people, runbook, and agent activity; request and completion transitions persist through refresh/restart.
-- **SC7.9 — Jira lifecycle.** Description save/cancel, criteria, comment/reply validation, threaded display, and history work and persist. A concurrent stale edit returns a recoverable conflict rather than silently overwrite.
+- **SC7.9 — Jira lifecycle.** Description save/cancel, criteria, comment/reply validation, threaded display, and history work and persist. The current Jira Cloud adapter exposes these issue changes as revision-inspected, proposal-only governed actions: it never claims an atomic provider revision precondition, never dispatches a Jira issue mutation, and rejects a stale inspected revision before creating a proposal. A concurrent local draft/history update returns a recoverable conflict rather than silently overwriting local state. The separate project-scoped `create-release-version` capability may create one release version after explicit workspace-owner confirmation; it is bound to the exact workspace, connection, release, source-revision digest, destination, and canonical payload, performs exact-name preflight and ambiguous-outcome reconciliation, and never edits an existing issue or version. If Jira Cloud later exposes an atomic expected-revision write for issue mutations, that capability requires a separately negotiated descriptor, executor, and acceptance fixture before provider mutation is advertised.
 - **SC7.10 — Complete PR diff and agent review.** A fixture containing added, modified, deleted, renamed, binary, generated, and large files proves the UI exposes every changed file without silent truncation and renders supported text through `@pierre/diffs/react` in split and stacked modes with syntax, context expansion, line selection, and stable finding anchors. Agent review checks out the trusted immutable PR head in an isolated sandbox, survives UI close, streams progress, attaches file/line findings to those anchors, supports human decision, persists evidence, and cleans up safely.
 - **SC7.11 — Agent isolation.** Two release threads and browser sessions receive only their authorized messages, evidence, prompts, and events. Foreign release IDs are rejected and restart restores correct job terminal state.
 - **SC7.12 — Governed mutation.** Changed payload/revision after authorization is rejected; deny/timeout/cancel causes zero vendor calls; same idempotency key executes once; success and failure append the full audit lifecycle.
@@ -193,22 +193,23 @@ Two distinctions are normative:
 
 ## Acceptance traceability
 
-| Approved instruction criterion                       | Primary requirements                   | Acceptance evidence |
-| ---------------------------------------------------- | -------------------------------------- | ------------------- |
-| Configure plugin, start server, load normalized data | FR1.2, FR1.32, IR5.1, IR5.11           | SC7.1               |
-| Portfolio and preview → full routing                 | FR1.3–FR1.9, FR1.35                    | SC7.2–SC7.4         |
-| Six Jira items linked to delivery evidence           | FR1.10–FR1.11, DR4.3–DR4.6             | SC7.5               |
-| Five complete service routes                         | FR1.21–FR1.27                          | SC7.13              |
-| Inspect and repair relationship                      | FR1.16–FR1.18                          | SC7.6               |
-| Complete PR diff and background sandbox agent review | FR1.23–FR1.24, TC3.14, NFR2.16–NFR2.17 | SC7.10, SC7.18      |
-| Isolated durable release agent thread                | FR1.29–FR1.31, DR4.10                  | SC7.11              |
-| Explicit governed mutation                           | FR1.19–FR1.20, NFR2.13–NFR2.15         | SC7.12              |
-| Complete accessible themes and mobile UI             | FR1.37, NFR2.1–NFR2.4                  | SC7.20              |
-| Partial plugin failure                               | NFR2.7–NFR2.9, IR5.12                  | SC7.14–SC7.16       |
-| Design-system-first composition                      | FR1.37, NFR2.19                        | SC7.22              |
-| Repository validation                                | TC3.15–TC3.16, DEP6.8–DEP6.10          | SC7.23              |
-| Local Codex and Claude Effect AI providers           | FR1.31, NFR2.21, IR5.9, DEP6.6         | SC7.24              |
-| Documentation website for every new package          | IR5.14, DEP6.9                         | SC7.25              |
+| Approved instruction criterion                        | Primary requirements                   | Acceptance evidence |
+| ----------------------------------------------------- | -------------------------------------- | ------------------- |
+| Configure plugin, start server, load normalized data  | FR1.2, FR1.32, IR5.1, IR5.11           | SC7.1               |
+| Portfolio and preview → full routing                  | FR1.3–FR1.9, FR1.35                    | SC7.2–SC7.4         |
+| Six Jira items linked to delivery evidence            | FR1.10–FR1.11, DR4.3–DR4.6             | SC7.5               |
+| Jira lifecycle and capability-truthful proposal state | FR1.19, FR1.20, FR1.22, NFR2.15        | SC7.9               |
+| Five complete service routes                          | FR1.21–FR1.27                          | SC7.13              |
+| Inspect and repair relationship                       | FR1.16–FR1.18                          | SC7.6               |
+| Complete PR diff and background sandbox agent review  | FR1.23–FR1.24, TC3.14, NFR2.16–NFR2.17 | SC7.10, SC7.18      |
+| Isolated durable release agent thread                 | FR1.29–FR1.31, DR4.10                  | SC7.11              |
+| Explicit governed mutation                            | FR1.19–FR1.20, NFR2.13–NFR2.15         | SC7.12              |
+| Complete accessible themes and mobile UI              | FR1.37, NFR2.1–NFR2.4                  | SC7.20              |
+| Partial plugin failure                                | NFR2.7–NFR2.9, IR5.12                  | SC7.14–SC7.16       |
+| Design-system-first composition                       | FR1.37, NFR2.19                        | SC7.22              |
+| Repository validation                                 | TC3.15–TC3.16, DEP6.8–DEP6.10          | SC7.23              |
+| Local Codex and Claude Effect AI providers            | FR1.31, NFR2.21, IR5.9, DEP6.6         | SC7.24              |
+| Documentation website for every new package           | IR5.14, DEP6.9                         | SC7.25              |
 
 ## Required Phase 3 decisions
 

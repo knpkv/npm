@@ -80,7 +80,7 @@ const BuildGraphSchema = Schema.Struct({
 })
 
 /** Decode an emitted graph without trusting build output JSON. */
-export const decodeBuildGraph = (value: unknown): ControlCenterBuildGraph | undefined => {
+export const decodeBuildGraph = <UnparsedInput>(value: UnparsedInput): ControlCenterBuildGraph | undefined => {
   const decoded = Schema.decodeUnknownResult(BuildGraphSchema)(value)
   return Result.isSuccess(decoded) ? decoded.success : undefined
 }
@@ -102,6 +102,19 @@ export const inspectBuildGraph = (graph: ControlCenterBuildGraph): ReadonlyArray
     const expectedEntries = ["src/api/index.ts", "src/domain/index.ts", "src/index.ts", "src/server/index.ts"]
     for (const entry of expectedEntries) {
       if (!entryIds.includes(entry)) violations.push(`server graph is missing ${entry}`)
+    }
+    const codePipelineProvider = graph.modules.find(
+      ({ id }) => id === "src/server/plugins/codepipeline/CodePipelineReadProvider.ts"
+    )
+    if (!codePipelineProvider?.imports.includes("@aws-sdk/client-codepipeline")) {
+      violations.push("server CodePipeline provider is missing the official AWS SDK")
+    }
+    if (
+      !codePipelineProvider?.imports.includes(
+        "src/server/plugins/codepipeline/CodePipelineStateDecoder.ts"
+      )
+    ) {
+      violations.push("server CodePipeline provider is missing the shipped state decoder")
     }
     if (ids.some((id) => id.includes("src/client/"))) violations.push("server graph contains client source")
     if (ids.some((id) => id === "@knpkv/rly" || id.includes("@knpkv/rly/"))) {

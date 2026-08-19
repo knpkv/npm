@@ -13,7 +13,7 @@ export const RLY_SURFACE_VARIANTS = defineVariants({
     secondary: { className: style("toneSecondary"), purpose: "Quiet secondary surface", tokens: ["color-surface-2"] },
     tertiary: { className: style("toneTertiary"), purpose: "Inset tertiary surface", tokens: ["color-surface-3"] }
   },
-  shape: {
+  form: {
     card: { className: style("shapeCard"), purpose: "Standard card geometry", tokens: ["radius-control"] },
     grouped: { className: style("shapeGrouped"), purpose: "Grouped content geometry", tokens: ["radius-group"] }
   },
@@ -24,9 +24,9 @@ export const RLY_SURFACE_VARIANTS = defineVariants({
     spacious: { className: style("paddingSpacious"), purpose: "Prominent grouped content", tokens: ["space-32"] }
   }
 })
-export const RLY_SURFACE_DEFAULT_VARIANTS = defineVariants({ tone: "primary", shape: "card", padding: "default" })
+export const RLY_SURFACE_DEFAULT_VARIANTS = defineVariants({ tone: "primary", form: "card", padding: "default" })
 export type RlySurfaceTone = keyof typeof RLY_SURFACE_VARIANTS.tone
-export type RlySurfaceShape = keyof typeof RLY_SURFACE_VARIANTS.shape
+export type RlySurfaceForm = keyof typeof RLY_SURFACE_VARIANTS.form
 export type RlySurfacePadding = keyof typeof RLY_SURFACE_VARIANTS.padding
 export type RlySurfaceElement = "div" | "section" | "article" | "aside"
 
@@ -42,7 +42,7 @@ export type SurfaceProps<
   readonly children: ReactNode
   readonly padding?: RlySurfacePadding
   readonly ref?: ExactRef<HTMLElementTagNameMap[Element], ElementRef>
-  readonly shape?: RlySurfaceShape
+  readonly form?: RlySurfaceForm
   readonly tone?: RlySurfaceTone
 }
 
@@ -54,9 +54,9 @@ export const Surface = <
   as,
   children,
   className,
+  form = "card",
   padding = "default",
   ref,
-  shape = "card",
   tone = "primary",
   ...props
 }: SurfaceProps<Element, ElementRef>): ReactElement =>
@@ -67,7 +67,7 @@ export const Surface = <
       className: classNames(
         style("root"),
         RLY_SURFACE_VARIANTS.tone[tone].className,
-        RLY_SURFACE_VARIANTS.shape[shape].className,
+        RLY_SURFACE_VARIANTS.form[form].className,
         RLY_SURFACE_VARIANTS.padding[padding].className,
         className
       ),

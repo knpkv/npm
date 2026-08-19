@@ -18,7 +18,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { ConfluenceApiConfig, type ConfluenceApiConfigShape } from "./ConfluenceApiConfig.js"
+import { ConfluenceApiConfig, type ConfluenceApiConfigContract } from "./ConfluenceApiConfig.js"
 import * as ConfluenceV1Api from "./generated/ConfluenceV1Api.js"
 import * as ConfluenceV2Api from "./generated/ConfluenceV2Api.js"
 
@@ -28,7 +28,7 @@ export interface UploadAttachmentInput {
   readonly mediaType?: string | undefined
 }
 
-export interface ConfluenceApiClientShape {
+export interface ConfluenceApiClientContract {
   readonly v1: ConfluenceV1Api.ConfluenceV1Api
   readonly v2: ConfluenceV2Api.ConfluenceV2Api
   readonly uploadAttachment: (
@@ -40,12 +40,12 @@ export interface ConfluenceApiClientShape {
   >
 }
 
-const authorizationHeader = (config: ConfluenceApiConfigShape): string =>
+const authorizationHeader = (config: ConfluenceApiConfigContract): string =>
   config.auth.type === "basic"
     ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
     : `Bearer ${Redacted.value(config.auth.accessToken)}`
 
-const apiBaseUrl = (config: ConfluenceApiConfigShape, version: "v1" | "v2"): string => {
+const apiBaseUrl = (config: ConfluenceApiConfigContract, version: "v1" | "v2"): string => {
   const origin = config.auth.type === "oauth2"
     ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}`
     : config.baseUrl
@@ -54,7 +54,7 @@ const apiBaseUrl = (config: ConfluenceApiConfigShape, version: "v1" | "v2"): str
 
 const authenticatedClient = (
   httpClient: HttpClient.HttpClient,
-  config: ConfluenceApiConfigShape,
+  config: ConfluenceApiConfigContract,
   version: "v1" | "v2"
 ): HttpClient.HttpClient =>
   httpClient.pipe(
@@ -67,21 +67,21 @@ const authenticatedClient = (
 
 export const makeV1 = (
   httpClient: HttpClient.HttpClient,
-  config: ConfluenceApiConfigShape
+  config: ConfluenceApiConfigContract
 ): ConfluenceV1Api.ConfluenceV1Api => ConfluenceV1Api.make(authenticatedClient(httpClient, config, "v1"))
 
 export const makeV2 = (
   httpClient: HttpClient.HttpClient,
-  config: ConfluenceApiConfigShape
+  config: ConfluenceApiConfigContract
 ): ConfluenceV2Api.ConfluenceV2Api => ConfluenceV2Api.make(authenticatedClient(httpClient, config, "v2"))
 
 export const make = (
   httpClient: HttpClient.HttpClient,
-  config: ConfluenceApiConfigShape
-): ConfluenceApiClientShape => {
+  config: ConfluenceApiConfigContract
+): ConfluenceApiClientContract => {
   const v1 = makeV1(httpClient, config)
   const v2 = makeV2(httpClient, config)
-  const uploadAttachment: ConfluenceApiClientShape["uploadAttachment"] = (pageId, input) => {
+  const uploadAttachment: ConfluenceApiClientContract["uploadAttachment"] = (pageId, input) => {
     const buffer = new ArrayBuffer(input.bytes.byteLength)
     new Uint8Array(buffer).set(input.bytes)
     const form = new FormData()
@@ -107,7 +107,7 @@ export const make = (
   return { v1, v2, uploadAttachment }
 }
 
-export class ConfluenceApiClient extends Context.Service<ConfluenceApiClient, ConfluenceApiClientShape>()(
+export class ConfluenceApiClient extends Context.Service<ConfluenceApiClient, ConfluenceApiClientContract>()(
   "@knpkv/confluence-api-client/ConfluenceApiClient"
 ) {
   static readonly layer: Layer.Layer<

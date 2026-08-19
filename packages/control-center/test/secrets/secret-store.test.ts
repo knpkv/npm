@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Crypto, Scope } from "effect"
 import { Deferred, Effect, Fiber, FileSystem, Logger, Option, Path, PlatformError, Ref, Result, Schema } from "effect"
 
+import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { makeSecretStore, SecretRoot, type SecretStore } from "../../src/server/secrets/SecretStore.js"
 import {
@@ -19,31 +20,31 @@ const decoder = new TextDecoder()
 const withWriteAll = (
   file: FileSystem.File,
   writeAll: FileSystem.File["writeAll"]
-): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync: file.sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll
-})
+): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync: file.sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll
+  })
 
-const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File => ({
-  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
-  fd: file.fd,
-  read: file.read,
-  readAlloc: file.readAlloc,
-  seek: file.seek,
-  stat: file.stat,
-  sync,
-  truncate: file.truncate,
-  write: file.write,
-  writeAll: (bytes) => file.writeAll(bytes)
-})
+const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File =>
+  preserveNodeFileDescriptor(file, {
+    [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+    read: file.read,
+    readAlloc: file.readAlloc,
+    seek: file.seek,
+    stat: file.stat,
+    sync,
+    truncate: file.truncate,
+    write: file.write,
+    writeAll: (bytes) => file.writeAll(bytes)
+  })
 
 const withSecretStore = <A, E>(
   use: (

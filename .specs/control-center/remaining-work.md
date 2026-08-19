@@ -38,7 +38,7 @@ slice must leave an explicit extension seam and must not advertise capabilities 
 | D01–D09 delivery core                   | Complete MVP  | Replace fixture-only facts with synchronized provider facts                                                                         |
 | I01/I03 CodeCommit                      | Partial       | Read/sync/inventory exist; complete diff content, reviews, checks, history, and governed writes do not                              |
 | I04/I05 Jira                            | Partial       | Bounded issue detail exists; project sync and governed edits/comments/transitions do not                                            |
-| I06/I07 Confluence                      | Partial       | Bounded page detail exists; space sync, activity, and governed update/publish do not                                                |
+| I06/I07 Confluence                      | Partial       | Bounded page detail, space sync, and governed update/publish exist; activity remains incomplete                                     |
 | I08/I09 Clockify                        | Partial       | Bounded time-entry read/sync exists; people, Jira association, rollups, correction, and approval do not                             |
 | I10 CodePipeline                        | Partial       | Bounded execution sync exists; logs, artifact proxy, retry/deploy actions, and reconciliation do not                                |
 | I11 provider administration             | MVP           | Connection ownership/setup is usable; sync controls, recovery, permissions, and richer account editing remain                       |
@@ -179,6 +179,8 @@ slice must leave an explicit extension seam and must not advertise capabilities 
 
 #### M3.3 — Confluence actions
 
+**Status: complete.**
+
 - Add optimistic page update/publish with safe content conversion, revision-bound receipts, and
   reconciliation.
 - **Acceptance:** a superseded revision never overwrites newer content and historical evidence remains
@@ -286,7 +288,11 @@ From a fresh local installation, an owner pairs a browser, connects one AWS acco
 site, follows multiple repositories/pipelines/projects/spaces, synchronizes real data, and sees a
 release composed from six Jira items, PRs, pipeline execution, runbook, collaborators, evidence, and
 gaps. Every object opens a canonical full page. A human can repair a relationship and perform at least
-one governed action per provider with durable receipt/reconciliation. A release-scoped agent survives
+one governed action per provider that advertises a safe executable capability, with durable
+receipt/reconciliation. Jira issue mutations remain the capability-truthful exception because Jira
+Cloud does not expose an atomic expected-revision write; they must not claim a stale-safe mutation.
+The separate create-only Jira project-version capability may execute after explicit owner confirmation
+without editing an existing issue or version. A release-scoped agent survives
 browser closure, reviews an immutable PR in a contained sandbox, reports anchored findings, proposes
 prevention, and remains separate from the final human decision. Restart, partial provider failure,
 dark/light/narrow/keyboard use, and a second-machine HTTPS session preserve truthful state without

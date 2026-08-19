@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as Redacted from "effect/Redacted"
 
-import type { Actor } from "../../domain/actors.js"
+import { type Actor, derivePersonInitials, Person } from "../../domain/actors.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { Auth } from "../auth/Auth.js"
 import type { AuthCryptoError, AuthPersistenceError, CredentialRejectedError } from "../auth/errors.js"
@@ -59,6 +59,34 @@ const ensureWorkspace = Effect.fn("ControlCenterBootstrap.ensureWorkspace")(func
   )
 })
 
+/** Materialize the human owner before authentication can issue FK-backed sessions and mutations. */
+const ensureOwnerPerson = Effect.fn("ControlCenterBootstrap.ensureOwnerPerson")(function*(
+  workspaceId: WorkspaceId,
+  owner: Actor
+) {
+  if (owner._tag !== "human") return
+  const persistence = yield* Persistence
+  yield* persistence.people.getPerson(workspaceId, owner.personId).pipe(
+    Effect.asVoid,
+    Effect.catchTag("RecordNotFoundError", () =>
+      Effect.gen(function*() {
+        const createdAt = yield* DateTime.now
+        const displayName = "Control Center Owner"
+        yield* persistence.people.createPerson(
+          workspaceId,
+          Person.make({
+            avatar: { _tag: "initials", text: derivePersonInitials(displayName) },
+            displayName,
+            isActive: true,
+            personId: owner.personId,
+            sourceIdentities: []
+          }),
+          createdAt
+        ).pipe(Effect.catchTag("RecordAlreadyExistsError", () => Effect.void))
+      }))
+  )
+})
+
 /** Ensure the configured workspace and issue its first owner code at most once. */
 export const makeControlCenterBootstrap: (
   options: ControlCenterBootstrapOptions
@@ -68,6 +96,7 @@ export const makeControlCenterBootstrap: (
   Auth | Persistence
 > = Effect.fn("ControlCenterBootstrap.make")(function*(options: ControlCenterBootstrapOptions) {
   yield* ensureWorkspace(options)
+  yield* ensureOwnerPerson(options.workspaceId, options.owner)
   const auth = yield* Auth
   return yield* auth.bootstrapOwnerPairing({
     workspaceId: options.workspaceId,

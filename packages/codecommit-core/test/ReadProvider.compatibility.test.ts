@@ -18,13 +18,15 @@ const liveReadClient = CodeCommitReadClient.live.pipe(
 describe("CodeCommitReadProvider compatibility", () => {
   it.effect("preserves distilled AWS retry delays with the pinned Effect version", () =>
     Effect.gen(function*() {
-      const firstDelay = Effect.fn("ReadProviderCompatibility.firstDelay")(function*(error: unknown) {
-        const lastError = yield* Ref.make(error)
-        const step = yield* Schedule.toStepWithMetadata(AwsRetry.makeDefault(lastError).schedule)
-        const next = yield* step(error).pipe(Effect.forkChild)
-        yield* TestClock.adjust(Duration.seconds(3))
-        return Duration.toMillis((yield* Fiber.join(next)).duration)
-      })
+      const firstDelay = Effect.fn("ReadProviderCompatibility.firstDelay")(
+        function*<UnparsedInput>(error: UnparsedInput) {
+          const lastError = yield* Ref.make(error)
+          const step = yield* Schedule.toStepWithMetadata(AwsRetry.makeDefault(lastError).schedule)
+          const next = yield* step(error).pipe(Effect.forkChild)
+          yield* TestClock.adjust(Duration.seconds(3))
+          return Duration.toMillis((yield* Fiber.join(next)).duration)
+        }
+      )
 
       const transientDelay = yield* firstDelay({
         [categoriesKey]: { [ServerError]: true }
@@ -34,11 +36,11 @@ describe("CodeCommitReadProvider compatibility", () => {
       })
       const retryAfterDelay = yield* firstDelay({
         [retryableKey]: {},
-        retryAfterSeconds: 2
+        retryAfter: Duration.seconds(2)
       })
 
-      assert.isAtLeast(transientDelay, 100)
-      assert.isBelow(transientDelay, 150)
+      assert.isAtLeast(transientDelay, 250)
+      assert.isBelow(transientDelay, 300)
       assert.isAtLeast(throttlingDelay, 500)
       assert.isBelow(throttlingDelay, 550)
       assert.isAtLeast(retryAfterDelay, 2_000)

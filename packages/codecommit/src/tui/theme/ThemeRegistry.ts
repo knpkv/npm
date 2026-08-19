@@ -35,7 +35,7 @@ import zenburn from "./data/zenburn.json"
 
 import type { ThemeJson } from "./Resolver.js"
 
-export const themeRegistry: Record<string, ThemeJson> = {
+export const themeRegistry = {
   aura,
   ayu,
   carbonfox,
@@ -69,4 +69,4 @@ export const themeRegistry: Record<string, ThemeJson> = {
   vercel,
   vesper,
   zenburn
-}
+} satisfies Record<string, ThemeJson>

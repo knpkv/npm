@@ -13,7 +13,8 @@ Use the `jira` binary for Jira Cloud issue export and release-version workflows.
 - For multi-account or multi-site setups, inspect `jira auth profiles` and switch with `jira auth use <profile>` before reading or writing project data. When the `atlassian` binary is available, prefer `atlassian profiles doctor` for a cross-tool Jira/Confluence/Jira Clockify check and `atlassian auth refresh` for expired active tokens.
 - Use `--json` on version commands when the agent needs structured data.
 - Use numeric version ids for `jira version get`, `jira version update`, and `jira version related-work`.
-- Confirm before remote write commands: `jira version update` and `jira version related-work add`.
+- Confirm before remote write commands: `jira version create`, `jira version update`, `jira issue edit`, `jira version related-work add`, and `jira version related-work sync`. `sync` with `--prune` also deletes links, including surplus copies of a desired URL.
+- On `jira issue edit`, prefer the incremental flags (`--add-fix-version`, `--remove-fix-version`, `--add-label`, `--remove-label`). The replacing forms (`--fix-version`, `--label`) drop every value not listed.
 
 ## Authentication
 
@@ -80,6 +81,13 @@ View a version:
 jira version get 10042 --json
 ```
 
+Open a new unreleased version:
+
+```bash
+jira version create --project PROJ --name "OOB 100"
+jira version create --project PROJ --name "OOB 100" --description "Q3 release" --start-date 2026-01-05 --release-date 2026-01-19 --json
+```
+
 Update a version description:
 
 ```bash
@@ -91,6 +99,14 @@ Manage related work links:
 ```bash
 jira version related-work list 10042 --json
 jira version related-work add 10042 --title "Release notes" --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" --category Communication
+jira version related-work sync 10042 --link "Release notes=https://example.atlassian.net/wiki/spaces/PROJ/pages/123" --category Communication
+```
+
+Set an issue's fix versions and labels:
+
+```bash
+jira issue edit PROJ-123 --add-fix-version "OOB 100" --add-label release-notes
+jira issue edit PROJ-123 --remove-fix-version "OOB 99" --json
 ```
 
 ## Agent Workflow

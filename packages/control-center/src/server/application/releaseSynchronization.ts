@@ -43,12 +43,12 @@ const pluginFailureTags = new Set([
   "PluginUnknownOutcomeFailure"
 ])
 
-const isPluginFailure = (failure: unknown): failure is PluginFailure =>
+const isPluginFailure = <UnparsedInput>(failure: UnparsedInput): failure is UnparsedInput & PluginFailure =>
   Predicate.hasProperty(failure, "_tag") &&
-  typeof failure._tag === "string" &&
+  Predicate.isString(failure._tag) &&
   pluginFailureTags.has(failure._tag)
 
-const sourceFailure = (failure: unknown): PluginFailure | null => {
+const sourceFailure = <UnparsedInput>(failure: UnparsedInput): PluginFailure | null => {
   if (isPluginFailure(failure)) return failure
   if (Predicate.hasProperty(failure, "_tag") && failure._tag === "FakeReleaseNormalizationError") {
     return new PluginMalformedResponseFailure({
@@ -212,12 +212,16 @@ const recoveryProjectionsEqual = Effect.fn("ReleaseSynchronization.recoveryProje
 const identityKey = ({ pluginConnectionId, providerId, vendorPersonId }: PersonSourceIdentity): string =>
   `${providerId}\u0000${pluginConnectionId}\u0000${vendorPersonId}`
 
-const mergePersonIdentities = (current: Person, synchronized: Person): Person => {
+const mergePersonIdentities = (
+  current: Person,
+  synchronized: Person,
+  preserveCurrentMutableFields: boolean
+): Person => {
   const identities = new Map<string, PersonSourceIdentity>()
   for (const identity of current.sourceIdentities) identities.set(identityKey(identity), identity)
   for (const identity of synchronized.sourceIdentities) identities.set(identityKey(identity), identity)
   return {
-    ...synchronized,
+    ...(preserveCurrentMutableFields ? current : synchronized),
     sourceIdentities: Array.from(identities.values()).sort((left, right) => {
       const leftKey = identityKey(left)
       const rightKey = identityKey(right)
@@ -237,14 +241,18 @@ const persistPerson = Effect.fn("ReleaseSynchronization.persistPerson")(function
     if (current.failure._tag !== "RecordNotFoundError") return yield* Effect.fail(current.failure)
     return { record: yield* persistence.people.createPerson(workspaceId, person, updatedAt), changed: true }
   }
-  const mergedPerson = mergePersonIdentities(current.success.person, person)
+  const durableRecordIsNewer = DateTime.Order(current.success.updatedAt, updatedAt) > 0
+  const mergedPerson = mergePersonIdentities(current.success.person, person, durableRecordIsNewer)
   if (yield* peopleEqual(current.success.person, mergedPerson)) return { record: current.success, changed: false }
+  const durableUpdatedAt = durableRecordIsNewer
+    ? current.success.updatedAt
+    : updatedAt
   return {
     record: yield* persistence.people.updatePerson(
       workspaceId,
       mergedPerson,
       current.success.revision,
-      updatedAt
+      durableUpdatedAt
     ),
     changed: true
   }

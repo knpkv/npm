@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 
 import { sanitizeRichDocumentV1, validateRichDocumentV1 } from "../../../src/server/http/security/index.js"
-import type { RichTextNode } from "../../../src/server/http/security/index.js"
+import type { RichBlockNode, RichTextNode } from "../../../src/server/http/security/index.js"
 
 const text = (value: string): RichTextNode => ({ _tag: "text", text: value, marks: [] })
 
@@ -61,7 +61,7 @@ describe("RichDocumentV1", () => {
 
   it.effect("rejects excessive depth before recursive schema decoding", () =>
     Effect.gen(function*() {
-      let nested: unknown = { _tag: "paragraph", children: [text("bottom")] }
+      let nested: RichBlockNode = { _tag: "paragraph", children: [text("bottom")] }
       for (let depth = 0; depth < 25; depth += 1) nested = { _tag: "blockquote", children: [nested] }
       const result = yield* validateRichDocumentV1({
         _tag: "rich-document",

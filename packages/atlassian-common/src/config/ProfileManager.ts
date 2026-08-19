@@ -3,6 +3,7 @@
  *
  * @module
  */
+import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -10,7 +11,7 @@ import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import type { HttpClient } from "effect/unstable/http"
-import type { OAuthError } from "../auth/OAuthErrors.js"
+import { OAuthError } from "../auth/OAuthErrors.js"
 import { refreshToken } from "../auth/OAuthOperations.js"
 import {
   type AuthProfile,
@@ -22,7 +23,7 @@ import {
 } from "./AuthProfiles.js"
 import { getProfilesPath, type HomeDirectoryError, HomeDirectoryTag } from "./ConfigPaths.js"
 import { type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
-import { FileSystemError, isTokenExpired, loadOAuthConfig } from "./TokenStorage.js"
+import { FileSystemError, isTokenExpiredAt, loadOAuthConfig } from "./TokenStorage.js"
 
 export interface AtlassianToolDefinition {
   readonly toolName: string
@@ -42,6 +43,25 @@ export const JIRA_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "offline_access"
 ]
 
+/** Legacy read-only Jira requirements retained for proposal-only consumers. */
+export const JIRA_PROPOSAL_REQUIRED_SCOPES: ReadonlyArray<string> = [
+  "read:jira-work",
+  "read:jira-user",
+  "read:me",
+  "offline_access"
+]
+
+/**
+ * Scopes a Confluence profile must hold to be considered valid.
+ *
+ * Deliberately page-only. The CLI also requests the folder and CQL-search scopes
+ * (`CONFLUENCE_FOLDER_SCOPES`), but they are not listed here: this constant also
+ * gates control-center's per-site scope check, and a profile that can read and
+ * write pages is legitimately valid for everything except `folder`/`search`.
+ * The cost is that `atlassian profiles doctor` reports a pre-folder profile as
+ * valid and those two commands then fail with 401/403 until the OAuth app is
+ * updated and the user logs in again — see the confluence-to-markdown README.
+ */
 export const CONFLUENCE_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:page:confluence",
   "write:page:confluence",
@@ -135,7 +155,7 @@ const loadLegacyToken = (
     )
     const parsed = yield* Effect.try({
       try: () => JSON.parse(content),
-      catch: (cause) => cause
+      catch: (): "invalid-json" => "invalid-json"
     }).pipe(Effect.catch(() => Effect.succeed(null)))
     if (parsed === null) return null
     return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
@@ -166,12 +186,15 @@ export const inspectToolProfiles = (
     const [store, config] = yield* Effect.all([loadProfiles(storeName), loadOAuthConfig(storeName)])
     const activeProfile = store.profiles.find((profile) => profile.id === store.activeProfileId) ?? store.profiles[0] ??
       null
+    const nowMs = yield* Clock.currentTimeMillis
     return {
       tool,
       authStoreName: storeName,
       activeProfile,
       profiles: store.profiles,
-      tokenStatus: activeProfile === null ? "missing" : isTokenExpired(activeProfile.token, 0) ? "expired" : "valid",
+      tokenStatus: activeProfile === null ? "missing" : isTokenExpiredAt(activeProfile.token, nowMs, 0)
+        ? "expired"
+        : "valid",
       missingScopes: activeProfile === null ? [] : missingScopes(activeProfile.token, tool.requiredScopes),
       oauthConfigured: config !== null
     }
@@ -248,6 +271,9 @@ export const migrateLegacyProfiles = (
     return yield* inspectAllToolProfiles(tools)
   })
 
+/** Matches `JiraAuth`'s refresh deadline; see the rotation comment below. */
+const REFRESH_TIMEOUT = "30 seconds"
+
 /**
  * Refresh expired active profiles.
  *
@@ -268,13 +294,36 @@ export const refreshActiveProfiles = (
         const store = yield* loadProfiles(storeName)
         const active = store.profiles.find((profile) => profile.id === store.activeProfileId) ?? store.profiles[0] ??
           null
-        if (!active || !isTokenExpired(active.token, 0)) return
+        const nowMs = yield* Clock.currentTimeMillis
+        if (!active || !isTokenExpiredAt(active.token, nowMs, 0)) return
         const config = yield* loadOAuthConfig(storeName)
         if (!config) {
           return yield* Effect.fail(new MissingOAuthConfigError({ authStoreName: storeName, profileId: active.id }))
         }
-        const refreshed = yield* refreshToken(active.token, config)
-        yield* saveProfileToken(storeName, refreshed)
+        // Rotating refresh tokens: the grant consumes the stored token
+        // server-side and the response carries its replacement, so an interrupt
+        // between the two spends the credential without persisting what
+        // replaced it — the next refresh 4xxs and the user is silently logged
+        // out. Keep the grant and the persist atomic, as `JiraAuth` does.
+        // The deadline is inside the region on purpose: an uninterruptible
+        // region with no bound of its own absorbs SIGINT/SIGTERM entirely
+        // (`runMain`'s handlers only interrupt the main fiber), so `atlassian
+        // auth refresh` would stop answering Ctrl-C against a stalled token
+        // endpoint. A deadline forked inside the region is still interruptible,
+        // so it does bound this. Failing here leaves the stored token in place
+        // — a refresh that never answered says nothing about its validity.
+        yield* Effect.uninterruptible(
+          Effect.gen(function*() {
+            const refreshed = yield* refreshToken(active.token, config).pipe(
+              Effect.timeout(REFRESH_TIMEOUT),
+              Effect.catchTag(
+                "TimeoutError",
+                () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
+              )
+            )
+            yield* saveProfileToken(storeName, refreshed)
+          })
+        )
       }))
     return yield* inspectAllToolProfiles(tools)
   })

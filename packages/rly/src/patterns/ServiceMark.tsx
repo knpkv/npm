@@ -48,13 +48,13 @@ export type RlyService = keyof typeof RLY_SERVICE_MARK_VARIANTS.service
 /** Visual density supported by ServiceMark. */
 export type RlyServiceMarkSize = keyof typeof RLY_SERVICE_MARK_VARIANTS.size
 
-const serviceNames: Readonly<Record<RlyService, string>> = {
+const serviceNames = {
   codecommit: "CodeCommit",
   codepipeline: "CodePipeline",
   jira: "Jira",
   confluence: "Confluence",
   clockify: "Clockify"
-}
+} satisfies Readonly<Record<RlyService, string>>
 
 const CodeCommitGlyph = (): ReactElement => (
   <svg aria-hidden="true" className={style("glyph")} focusable="false" viewBox="0 0 24 24">

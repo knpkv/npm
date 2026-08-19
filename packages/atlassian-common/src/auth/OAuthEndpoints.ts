@@ -68,6 +68,28 @@ export const CONFLUENCE_SCOPES = [
 ]
 
 /**
+ * Additional scopes for the CLI's folder and CQL-search commands.
+ *
+ * Deliberately *not* folded into {@link CONFLUENCE_SCOPES}: that constant is the
+ * shared page/attachment set, and control-center feeds it straight into its own
+ * `authorize` request. Adding folder authority there would widen every
+ * control-center sign-in — asking for a scope its documented OAuth app does not
+ * enable, and granting `write:folder:confluence` to a product that never creates
+ * folders. Union these in only where the folder/search commands actually live.
+ *
+ * @category Scopes
+ */
+export const CONFLUENCE_FOLDER_SCOPES = [
+  // Folders are a separate v2 content type: read/write for the folder itself,
+  // hierarchical-content for its direct children.
+  "read:folder:confluence",
+  "write:folder:confluence",
+  "read:hierarchical-content:confluence",
+  // CQL search (`GET /wiki/rest/api/search`).
+  "read:content-details:confluence"
+]
+
+/**
  * Jira scopes for OAuth2.
  *
  * @category Scopes
@@ -78,6 +100,22 @@ export const JIRA_SCOPES = [
   "read:jira-user",
   "manage:jira-project",
   "manage:jira-configuration",
+  "read:me",
+  "offline_access"
+]
+
+/**
+ * Legacy proposal-only Jira scopes retained for public API compatibility.
+ *
+ * Control Center owns a separate least-privilege release-publication scope set;
+ * {@link JIRA_SCOPES} remains the legacy write-capable set for other consumers,
+ * while proposal-only integrations may continue using this read-only set.
+ *
+ * @category Scopes
+ */
+export const JIRA_PROPOSAL_SCOPES = [
+  "read:jira-work",
+  "read:jira-user",
   "read:me",
   "offline_access"
 ]

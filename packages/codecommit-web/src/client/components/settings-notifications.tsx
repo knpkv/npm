@@ -11,6 +11,7 @@
  */
 import { BellIcon, ClockIcon } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
+import { readNotificationApi } from "../host-globals.js"
 import { StorageKeys } from "../storage-keys.js"
 import { Badge } from "./ui/badge.js"
 import { Separator } from "./ui/separator.js"
@@ -47,12 +48,17 @@ export function SettingsNotifications() {
     readNumber(StorageKeys.reminderInterval, 60 * 60 * 1000)
   )
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
-    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+    readNotificationApi()?.permission ?? "unsupported"
   )
 
   const toggleDesktop = useCallback(async () => {
     if (!desktopEnabled && permission === "default") {
-      const result = await Notification.requestPermission()
+      const NotificationApi = readNotificationApi()
+      if (NotificationApi === undefined) {
+        setPermission("unsupported")
+        return
+      }
+      const result = await NotificationApi.requestPermission()
       setPermission(result)
       if (result !== "granted") return
     }
@@ -87,7 +93,8 @@ export function SettingsNotifications() {
   // Sync permission state on focus (user might change in OS settings)
   useEffect(() => {
     const onFocus = () => {
-      if (typeof Notification !== "undefined") setPermission(Notification.permission)
+      const NotificationApi = readNotificationApi()
+      if (NotificationApi !== undefined) setPermission(NotificationApi.permission)
     }
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)

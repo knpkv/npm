@@ -223,7 +223,7 @@ export interface SessionProposalReport {
   readonly digests: ReadonlyMap<string, string>
 }
 
-export interface ReconcileServiceShape {
+export interface ReconcileServiceContract {
   /** Compare Clockify entries and Jira worklogs over the period, bucketed by ticket+day. */
   readonly compare: (period: ReconcilePeriod) => Effect.Effect<ReadonlyArray<ReconcileRow>, ReconcileError>
   /**
@@ -289,7 +289,7 @@ export interface ReconcileServiceShape {
   ) => Effect.Effect<SessionProposalReport, ReconcileError>
 }
 
-export class ReconcileService extends Context.Service<ReconcileService, ReconcileServiceShape>()(
+export class ReconcileService extends Context.Service<ReconcileService, ReconcileServiceContract>()(
   "jcf/ReconcileService"
 ) {}
 
@@ -436,24 +436,24 @@ interface RawWorklog {
   readonly timeSpentSeconds?: number | undefined
 }
 
-const issueKey = (issue: unknown): string | null => {
+const issueKey = <UnparsedInput>(issue: UnparsedInput): string | null => {
   if (!Predicate.isObject(issue)) return null
   const key = issue.key
-  return typeof key === "string" ? key : null
+  return Predicate.isString(key) ? key : null
 }
 
-const toRawWorklog = (value: unknown): RawWorklog | null => {
+const toRawWorklog = <UnparsedInput>(value: UnparsedInput): RawWorklog | null => {
   if (!Predicate.isObject(value)) return null
   const author = Predicate.isObject(value.author) ? value.author : undefined
   const accountId = author?.accountId
   return {
-    ...(typeof accountId === "string" ? { author: { accountId } } : {}),
-    ...(typeof value.started === "string" ? { started: value.started } : {}),
-    ...(typeof value.timeSpentSeconds === "number" ? { timeSpentSeconds: value.timeSpentSeconds } : {})
+    ...((Predicate.isString(accountId)) && { author: { accountId } }),
+    ...((Predicate.isString(value.started)) && { started: value.started }),
+    ...((Predicate.isNumber(value.timeSpentSeconds)) && { timeSpentSeconds: value.timeSpentSeconds })
   }
 }
 
-const toRawWorklogs = (response: unknown): ReadonlyArray<RawWorklog> => {
+const toRawWorklogs = <UnparsedInput>(response: UnparsedInput): ReadonlyArray<RawWorklog> => {
   if (!Predicate.isObject(response) || !Array.isArray(response.worklogs)) return []
   return response.worklogs.flatMap((worklog) => {
     const parsed = toRawWorklog(worklog)
@@ -547,7 +547,7 @@ export const layer = Layer.effect(
           )
 
           for (const wl of worklogs) {
-            if (!wl.started || typeof wl.timeSpentSeconds !== "number") continue
+            if (!wl.started || !Predicate.isNumber(wl.timeSpentSeconds)) continue
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
             if (accountId && wl.author?.accountId && wl.author.accountId !== accountId) continue
             const startedMs = new Date(wl.started).getTime()
@@ -604,7 +604,7 @@ export const layer = Layer.effect(
           description: `[${ticketKey}] ${note && note.trim() ? note.trim() : "Reconciled from Jira"}`,
           start: start.toISOString(),
           end: end.toISOString(),
-          ...(cfg.defaultProjectId ? { projectId: cfg.defaultProjectId } : {})
+          ...((cfg.defaultProjectId) && { projectId: cfg.defaultProjectId })
         }).pipe(
           Effect.mapError((e) => new ReconcileError({ message: `Clockify create failed: ${e.message}`, cause: e }))
         )

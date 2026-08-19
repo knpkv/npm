@@ -3,8 +3,8 @@
  *
  * **Mental model**
  *
- * - **Two output modes**: {@link MarkdownWriterShape.writeMulti} creates one `.md` per issue;
- *   {@link MarkdownWriterShape.writeSingle} combines all into `jira-export.md`.
+ * - **Two output modes**: {@link MarkdownWriterContract.writeMulti} creates one `.md` per issue;
+ *   {@link MarkdownWriterContract.writeSingle} combines all into `jira-export.md`.
  * - **Effect service**: Requires `FileSystem` and `Path` from `effect`.
  *
  * @module
@@ -23,7 +23,7 @@ import { WriteError } from "./JiraCliError.js"
  *
  * @category Services
  */
-export interface MarkdownWriterShape {
+export interface MarkdownWriterContract {
   /** Write each issue to a separate markdown file */
   readonly writeMulti: (
     issues: ReadonlyArray<Issue>,
@@ -55,7 +55,7 @@ export interface MarkdownWriterShape {
  */
 export class MarkdownWriter extends Context.Service<
   MarkdownWriter,
-  MarkdownWriterShape
+  MarkdownWriterContract
 >()("@knpkv/jira-cli/MarkdownWriter") {}
 
 const make = Effect.gen(function*() {
@@ -72,7 +72,7 @@ const make = Effect.gen(function*() {
       Effect.catch((cause) => Effect.fail(new WriteError({ path: filePath, message: "Failed to write file", cause })))
     )
 
-  const writeMulti: MarkdownWriterShape["writeMulti"] = (issues, outputDir) =>
+  const writeMulti: MarkdownWriterContract["writeMulti"] = (issues, outputDir) =>
     Effect.gen(function*() {
       yield* ensureDir(outputDir)
 
@@ -84,7 +84,7 @@ const make = Effect.gen(function*() {
       }
     })
 
-  const writeSingle: MarkdownWriterShape["writeSingle"] = (issues, outputDir, jql) =>
+  const writeSingle: MarkdownWriterContract["writeSingle"] = (issues, outputDir, jql) =>
     Effect.gen(function*() {
       yield* ensureDir(outputDir)
 

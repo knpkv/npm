@@ -1,16 +1,19 @@
 /**
  * Direct AWS CodePipeline read boundary.
  *
- * The live implementation owns credential acquisition and @distilled.cloud/aws
- * runtime provision. Every response remains `unknown` until the read client
- * applies repository-owned Schema contracts.
+ * The live implementation owns credential acquisition and AWS client runtime
+ * provision. Every response remains `unknown` until repository-owned Schema
+ * contracts decode it.
  *
  * @internal
  */
+import { CodePipelineClient, GetPipelineStateCommand } from "@aws-sdk/client-codepipeline"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
+import * as cloudwatchLogs from "@distilled.cloud/aws/cloudwatch-logs"
 import * as codepipeline from "@distilled.cloud/aws/codepipeline"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
+import * as s3 from "@distilled.cloud/aws/s3"
 import * as sts from "@distilled.cloud/aws/sts"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -18,25 +21,117 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
   PluginRateLimitFailure,
   PluginTimeoutFailure
 } from "../failures.js"
+import { decodeCodePipelineStateProviderOutput } from "./CodePipelineStateDecoder.js"
 
 const RETRY_DELAY_SECONDS = 30
+
+interface ArtifactBodyCollection {
+  readonly chunks: Array<Uint8Array>
+  readonly total: number
+}
+
+/** Plan a satisfiable S3 byte range or the canonical exhausted-range response. @internal */
+export const planCodePipelineArtifactRange = (
+  offset: number,
+  length: number,
+  totalBytes: number
+):
+  | { readonly _tag: "exhausted"; readonly contentRange: string }
+  | { readonly _tag: "bounded"; readonly range: string } =>
+  offset >= totalBytes
+    ? { _tag: "exhausted", contentRange: `bytes */${totalBytes}` }
+    : {
+      _tag: "bounded",
+      range: `bytes=${offset}-${Math.min(offset + length - 1, totalBytes - 1)}`
+    }
+
+/** Pin a satisfiable range read to the exact object observed by HEAD. @internal */
+export const planCodePipelineArtifactObjectIdentity = (
+  metadata: {
+    readonly VersionId?: string
+    readonly ETag?: string
+  }
+): { readonly VersionId: string } | { readonly IfMatch: string } | null =>
+  metadata.VersionId !== undefined
+    ? { VersionId: metadata.VersionId }
+    : metadata.ETag !== undefined
+    ? { IfMatch: metadata.ETag }
+    : null
+
+/** Collect one provider body while stopping consumption at the authorized range bound. @internal */
+export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.collectBoundedArtifactBody")(
+  function*<Error>(body: Stream.Stream<Uint8Array, Error>, maximumBytes: number): Effect.fn.Return<
+    Uint8Array,
+    Error | PluginMalformedResponseFailure
+  > {
+    const collected = yield* Stream.runFoldEffect(
+      body,
+      (): ArtifactBodyCollection => ({ chunks: [], total: 0 }),
+      (state, chunk) => {
+        const total = state.total + chunk.byteLength
+        return total > maximumBytes
+          ? Effect.fail(
+            new PluginMalformedResponseFailure({
+              operation: "codepipeline-get-artifact",
+              diagnosticCode: "codepipeline-artifact-range-exceeded"
+            })
+          )
+          : Effect.succeed({ chunks: [...state.chunks, chunk], total })
+      }
+    )
+    const bytes = new Uint8Array(collected.total)
+    let offset = 0
+    for (const chunk of collected.chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return bytes
+  }
+)
+
+/** Bound both artifact body size and the time spent draining the provider stream. @internal */
+export const collectBoundedArtifactBodyWithin = Effect.fn(
+  "CodePipelineReadProvider.collectBoundedArtifactBodyWithin"
+)(function*<Error>(
+  body: Stream.Stream<Uint8Array, Error>,
+  maximumBytes: number,
+  timeoutMillis: number
+): Effect.fn.Return<
+  Uint8Array,
+  Error | PluginMalformedResponseFailure | PluginTimeoutFailure
+> {
+  return yield* collectBoundedArtifactBody(body, maximumBytes).pipe(
+    Effect.timeoutOrElse({
+      duration: timeoutMillis,
+      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation: "codepipeline-get-artifact" }))
+    })
+  )
+})
 
 /** Secret-free AWS coordinates shared by every provider request. @internal */
 export interface CodePipelineAwsAccount {
   readonly profile: string
   readonly region: string
   readonly operationTimeoutMillis: number
+}
+
+/** Stable AWS authority approved for one provider mutation. @internal */
+export interface CodePipelineRuntimeIdentity {
+  readonly accountId: string
+  readonly arn: string
 }
 
 /** Request for a single configured pipeline. @internal */
@@ -69,14 +164,98 @@ export interface ListActionExecutionsProviderRequest extends GetPipelineExecutio
   readonly nextToken: string | null
 }
 
+/** Request for current stage and action state. @internal */
+export interface GetPipelineStateProviderRequest extends GetPipelineProviderRequest {}
+
+/** Request for one bounded CloudWatch log page. Provider coordinates never leave this boundary. @internal */
+export interface GetPipelineLogEventsProviderRequest {
+  readonly account: CodePipelineAwsAccount
+  readonly logGroupName: string
+  readonly logStreamName: string
+  readonly nextToken: string | null
+  readonly limit: number
+}
+
+/** Request for one bounded S3 artifact range. Provider coordinates never leave this boundary. @internal */
+export interface GetPipelineArtifactRangeProviderRequest {
+  readonly account: CodePipelineAwsAccount
+  readonly bucket: string
+  readonly key: string
+  readonly offset: number
+  readonly length: number
+}
+
+/** Explicit source revision for a new, independently tracked execution. @internal */
+export interface CodePipelineSourceRevisionOverride {
+  readonly actionName: string
+  readonly revisionType: "COMMIT_ID" | "IMAGE_DIGEST" | "S3_OBJECT_VERSION_ID" | "S3_OBJECT_KEY"
+  readonly revisionValue: string
+}
+
+/** Resolved pipeline-level variable bound to an execution. @internal */
+export interface CodePipelineVariableOverride {
+  readonly name: string
+  readonly value: string
+}
+
+/** Idempotent request to start a distinct pipeline execution. @internal */
+export interface StartPipelineExecutionProviderRequest extends GetPipelineProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
+  readonly clientRequestToken: string
+  readonly sourceRevisions: ReadonlyArray<CodePipelineSourceRevisionOverride>
+  readonly variables: ReadonlyArray<CodePipelineVariableOverride>
+}
+
+/** Request to stop one exact pipeline execution. @internal */
+export interface StopPipelineExecutionProviderRequest extends GetPipelineExecutionProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
+  readonly abandon: boolean
+  readonly reason: string
+}
+
+/** Request to resolve one exact pending manual approval. @internal */
+export interface PutPipelineApprovalProviderRequest extends GetPipelineProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
+  readonly stageName: string
+  readonly actionName: string
+  readonly token: string
+  readonly status: "Approved" | "Rejected"
+  readonly summary: string
+}
+
 /** A provider object requested by the adapter does not exist. @internal */
-export class CodePipelineProviderNotFoundFailure extends Schema.TaggedErrorClass<CodePipelineProviderNotFoundFailure>()(
+export class CodePipelineProviderNotFoundFailure extends Schema.TaggedError<CodePipelineProviderNotFoundFailure>()(
   "CodePipelineProviderNotFoundFailure",
   { operation: Schema.String }
 ) {}
 
+/** Credential acquisition timed out before a mutation could reach AWS. @internal */
+export class CodePipelinePreDispatchTimeoutFailure extends Schema.TaggedError<CodePipelinePreDispatchTimeoutFailure>()(
+  "CodePipelinePreDispatchTimeoutFailure",
+  { operation: Schema.String }
+) {}
+
+/** Identity verification failed before a mutation could reach AWS. @internal */
+export class CodePipelinePreDispatchFailure extends Schema.TaggedError<CodePipelinePreDispatchFailure>()(
+  "CodePipelinePreDispatchFailure",
+  { operation: Schema.String, diagnosticCode: Schema.String }
+) {}
+
+class CodePipelineSdkFailure extends Schema.TaggedError<CodePipelineSdkFailure>()(
+  "CodePipelineSdkFailure",
+  { cause: Schema.Defect() }
+) {}
+
 /** Failures visible to the Schema-decoding read client. @internal */
-export type CodePipelineProviderFailure = PluginFailure | CodePipelineProviderNotFoundFailure
+export type CodePipelineProviderFailure =
+  | PluginFailure
+  | CodePipelineProviderNotFoundFailure
+
+/** Failures visible only while invoking a provider mutation. @internal */
+export type CodePipelineMutationProviderFailure =
+  | CodePipelineProviderFailure
+  | CodePipelinePreDispatchFailure
+  | CodePipelinePreDispatchTimeoutFailure
 
 /** Raw provider surface used by the CodePipeline read client. @internal */
 export interface CodePipelineReadProviderService {
@@ -98,6 +277,24 @@ export interface CodePipelineReadProviderService {
   readonly listActionExecutionsPage: (
     request: ListActionExecutionsProviderRequest
   ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  readonly getPipelineState: (
+    request: GetPipelineStateProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  readonly getLogEventsPage: (
+    request: GetPipelineLogEventsProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  readonly getArtifactRange: (
+    request: GetPipelineArtifactRangeProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  readonly startPipelineExecution: (
+    request: StartPipelineExecutionProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
+  readonly stopPipelineExecution: (
+    request: StopPipelineExecutionProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
+  readonly putApprovalResult: (
+    request: PutPipelineApprovalProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
 }
 
 /** Injectable raw CodePipeline provider. @internal */
@@ -112,15 +309,61 @@ const AwsCredentialIdentity = Schema.Struct({
   sessionToken: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty()))
 })
 
+/** Credentials acquired once and pinned across mutation identity verification and dispatch. @internal */
+export type CodePipelineCredentialIdentity = typeof AwsCredentialIdentity.Type
+
+/** Injectable credential acquisition boundary used by the live AWS provider. @internal */
+export interface CodePipelineCredentialResolverService {
+  readonly resolve: (
+    operation: string,
+    account: CodePipelineAwsAccount
+  ) => Effect.Effect<
+    CodePipelineCredentialIdentity,
+    PluginAuthenticationFailure | PluginTimeoutFailure
+  >
+}
+
+/** Injectable credential acquisition boundary used by the live AWS provider. @internal */
+export class CodePipelineCredentialResolver extends Context.Service<
+  CodePipelineCredentialResolver,
+  CodePipelineCredentialResolverService
+>()("@knpkv/control-center/CodePipelineCredentialResolver") {}
+
+const RawRuntimeIdentity = Schema.Struct({
+  Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+})
+
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
-  tags.some((tag) => Predicate.isTagged(cause, tag))
+  tags.some(
+    (tag) =>
+      Predicate.isTagged(cause, tag) ||
+      (Predicate.hasProperty(cause, "name") && Predicate.isString(cause.name) && cause.name === tag)
+  )
+
+interface MutationRejectionTags {
+  readonly [operation: string]: ReadonlyArray<string>
+}
+const deterministicMutationRejectionTags: MutationRejectionTags = {
+  "codepipeline-start-execution": ["ValidationException"],
+  "codepipeline-stop-execution": ["PipelineExecutionNotStoppableException", "ValidationException"],
+  "codepipeline-put-approval": ["ValidationException"]
+}
 
 /** Map provider failures without exposing raw AWS causes. @internal */
 export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(function*(
   operation: string,
   cause: unknown
 ): Effect.fn.Return<never, CodePipelineProviderFailure> {
-  if (hasTag(cause, ["PipelineNotFoundException", "PipelineExecutionNotFoundException"])) {
+  if (
+    hasTag(cause, [
+      "PipelineNotFoundException",
+      "PipelineExecutionNotFoundException",
+      "ResourceNotFoundException",
+      "NoSuchKey",
+      "NotFound"
+    ])
+  ) {
     return yield* new CodePipelineProviderNotFoundFailure({ operation })
   }
   if (
@@ -134,10 +377,26 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
   ) {
     return yield* new PluginAuthenticationFailure({ operation })
   }
-  if (hasTag(cause, ["AccessDeniedException", "UnauthorizedException"])) {
+  if (hasTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])) {
     return yield* new PluginAuthorizationFailure({ operation })
   }
-  if (hasTag(cause, ["ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded"])) {
+  if (
+    hasTag(cause, [
+      "ActionNotFoundException",
+      "ApprovalAlreadyCompletedException",
+      "ConcurrentPipelineExecutionsLimitExceededException",
+      "ConflictException",
+      "InvalidApprovalTokenException",
+      "StageNotFoundException"
+    ]) ||
+    hasTag(cause, deterministicMutationRejectionTags[operation] ?? [])
+  ) {
+    return yield* new PluginConflictFailure({
+      operation,
+      diagnosticCode: "codepipeline-provider-state-conflict"
+    })
+  }
+  if (hasTag(cause, ["SlowDown", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded"])) {
     const retryAt = DateTime.add(yield* DateTime.now, { seconds: RETRY_DELAY_SECONDS })
     return yield* new PluginRateLimitFailure({ operation, retryAt })
   }
@@ -158,26 +417,50 @@ export const codePipelineCredentialProviderOptions = (
   profile: string
 ): { readonly profile?: string } => profile === "default" ? {} : { profile }
 
-const acquireCredentials = Effect.fn("CodePipelineReadProvider.acquireCredentials")(function*(
-  operation: string,
-  account: CodePipelineAwsAccount
-): Effect.fn.Return<
-  typeof AwsCredentialIdentity.Type,
-  PluginAuthenticationFailure | PluginTimeoutFailure
-> {
-  const raw = yield* Effect.tryPromise({
-    try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
-    catch: () => new PluginAuthenticationFailure({ operation })
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: account.operationTimeoutMillis,
-      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+/** Live AWS profile-chain credential acquisition. @internal */
+export const CodePipelineCredentialResolverLive = Layer.succeed(
+  CodePipelineCredentialResolver,
+  {
+    resolve: Effect.fn("CodePipelineCredentialResolver.resolve")(function*(
+      operation: string,
+      account: CodePipelineAwsAccount
+    ) {
+      const raw = yield* Effect.tryPromise({
+        try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
+        catch: () => new PluginAuthenticationFailure({ operation })
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: account.operationTimeoutMillis,
+          orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+        })
+      )
+      return yield* Schema.decodeUnknownEffect(AwsCredentialIdentity)(raw).pipe(
+        Effect.mapError(() => new PluginAuthenticationFailure({ operation }))
+      )
     })
-  )
-  return yield* Schema.decodeUnknownEffect(AwsCredentialIdentity)(raw).pipe(
-    Effect.mapError(() => new PluginAuthenticationFailure({ operation }))
-  )
-})
+  } satisfies CodePipelineCredentialResolverService
+)
+
+/**
+ * Collapse only STS assumed-role sessions to their stable IAM role principal.
+ * IAM users, federated users, and all unknown ARN shapes remain exact.
+ *
+ * @internal
+ */
+export const canonicalCodePipelinePrincipalArn = (arn: string): string => {
+  const assumedRole = /^arn:([^:]+):sts::([^:]+):assumed-role\/(.+)\/[^/]+$/u.exec(arn)
+  return assumedRole === null
+    ? arn
+    : `arn:${assumedRole[1]}:iam::${assumedRole[2]}:role/${assumedRole[3]}`
+}
+
+/** Compare an observed STS identity with the authority approved for mutation. @internal */
+export const codePipelineRuntimeIdentityMatches = (
+  expected: CodePipelineRuntimeIdentity,
+  observed: CodePipelineRuntimeIdentity
+): boolean =>
+  expected.accountId === observed.accountId &&
+  canonicalCodePipelinePrincipalArn(expected.arn) === canonicalCodePipelinePrincipalArn(observed.arn)
 
 const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function*<Value, Error>(
   operation: string,
@@ -187,13 +470,18 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
     Error,
     DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
   >
-): Effect.fn.Return<Value, CodePipelineProviderFailure, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  Value,
+  CodePipelineProviderFailure,
+  CodePipelineCredentialResolver | HttpClient.HttpClient
+> {
   const httpClient = yield* HttpClient.HttpClient
-  const credentials = yield* acquireCredentials(operation, account)
+  const credentialResolver = yield* CodePipelineCredentialResolver
+  const credentials = yield* credentialResolver.resolve(operation, account)
   return yield* effect.pipe(
     Effect.provide(
       Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials),
+        DistilledCredentials.fromCredentials(credentials, account.region),
         Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(HttpClient.HttpClient, httpClient)
       )
@@ -210,14 +498,161 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
   )
 })
 
-/** Live raw provider backed only by direct @distilled.cloud/aws CodePipeline and STS operations. @internal */
+/**
+ * Verify and dispatch a mutation through one immutable credential snapshot.
+ *
+ * Exported for provider-boundary regression coverage.
+ *
+ * @internal
+ */
+export const callPinnedCodePipelineMutationProvider = Effect.fn(
+  "CodePipelineReadProvider.callPinnedMutationProvider"
+)(function*<Value, IdentityError, MutationError>(
+  operation: string,
+  account: CodePipelineAwsAccount,
+  expectedIdentity: CodePipelineRuntimeIdentity,
+  identityEffect: Effect.Effect<
+    unknown,
+    IdentityError,
+    DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
+  >,
+  mutationEffect: Effect.Effect<
+    Value,
+    MutationError,
+    DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
+  >
+): Effect.fn.Return<
+  Value,
+  CodePipelineMutationProviderFailure,
+  CodePipelineCredentialResolver | HttpClient.HttpClient
+> {
+  const httpClient = yield* HttpClient.HttpClient
+  const credentialResolver = yield* CodePipelineCredentialResolver
+  const credentials = yield* credentialResolver.resolve(operation, account).pipe(
+    Effect.catchTags({
+      PluginAuthenticationFailure: () =>
+        Effect.fail(
+          new CodePipelinePreDispatchFailure({
+            operation,
+            diagnosticCode: "codepipeline-credentials-unavailable"
+          })
+        ),
+      PluginTimeoutFailure: () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+    })
+  )
+  const runtimeLayer = Layer.mergeAll(
+    DistilledCredentials.fromCredentials(credentials, account.region),
+    Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
+    Layer.succeed(HttpClient.HttpClient, httpClient)
+  )
+  const rawIdentity = yield* identityEffect.pipe(
+    Effect.provide(runtimeLayer),
+    Effect.timeoutOrElse({
+      duration: account.operationTimeoutMillis,
+      orElse: () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+    }),
+    Effect.catch((cause) =>
+      Predicate.isTagged(cause, "CodePipelinePreDispatchTimeoutFailure")
+        ? Effect.fail(cause)
+        : mapCodePipelineAwsFailure(operation, cause).pipe(
+          Effect.mapError((failure) =>
+            Predicate.isTagged(failure, "PluginTimeoutFailure")
+              ? new CodePipelinePreDispatchTimeoutFailure({ operation })
+              : new CodePipelinePreDispatchFailure({
+                operation,
+                diagnosticCode: "codepipeline-runtime-identity-unavailable"
+              })
+          )
+        )
+    )
+  )
+  const observedIdentity = yield* Schema.decodeUnknownEffect(RawRuntimeIdentity)(rawIdentity).pipe(
+    Effect.mapError(() =>
+      new CodePipelinePreDispatchFailure({
+        operation,
+        diagnosticCode: "codepipeline-runtime-identity-invalid"
+      })
+    ),
+    Effect.map((identity): CodePipelineRuntimeIdentity => ({
+      accountId: identity.Account,
+      arn: identity.Arn
+    }))
+  )
+  if (!codePipelineRuntimeIdentityMatches(expectedIdentity, observedIdentity)) {
+    return yield* new PluginConflictFailure({
+      operation,
+      diagnosticCode: "codepipeline-runtime-identity-changed"
+    })
+  }
+  return yield* mutationEffect.pipe(
+    Effect.provide(runtimeLayer),
+    Effect.timeoutOrElse({
+      duration: account.operationTimeoutMillis,
+      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+    }),
+    Effect.catch((cause): Effect.Effect<never, CodePipelineProviderFailure> =>
+      Predicate.isTagged(cause, "PluginTimeoutFailure")
+        ? Effect.fail(cause)
+        : mapCodePipelineAwsFailure(operation, cause)
+    )
+  )
+})
+
+/** Live raw provider backed by direct AWS CodePipeline and STS operations. @internal */
 export const CodePipelineReadProviderLive = Layer.effect(
   CodePipelineReadProvider,
   Effect.gen(function*() {
     const httpClient = yield* HttpClient.HttpClient
+    const credentialResolver = yield* CodePipelineCredentialResolver
     const provideHttp = <Value, Error>(
-      effect: Effect.Effect<Value, Error, HttpClient.HttpClient>
-    ): Effect.Effect<Value, Error> => Effect.provideService(effect, HttpClient.HttpClient, httpClient)
+      effect: Effect.Effect<
+        Value,
+        Error,
+        CodePipelineCredentialResolver | HttpClient.HttpClient
+      >
+    ): Effect.Effect<Value, Error> =>
+      effect.pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(CodePipelineCredentialResolver, credentialResolver)
+      )
+
+    const getPipelineState = Effect.fn("CodePipelineReadProvider.getPipelineState")(function*(
+      request: GetPipelineStateProviderRequest
+    ) {
+      const operation = "codepipeline-get-state"
+      const credentials = yield* credentialResolver.resolve(operation, request.account)
+      const response = yield* Effect.acquireUseRelease(
+        Effect.sync(() =>
+          new CodePipelineClient({
+            credentials: {
+              accessKeyId: credentials.accessKeyId,
+              secretAccessKey: credentials.secretAccessKey,
+              ...(!(credentials.sessionToken === undefined) && { sessionToken: credentials.sessionToken })
+            },
+            region: request.account.region
+          })
+        ),
+        (client) =>
+          Effect.tryPromise({
+            try: (signal) =>
+              client.send(
+                new GetPipelineStateCommand({
+                  name: request.pipelineName
+                }),
+                { abortSignal: signal }
+              ),
+            catch: (cause) => new CodePipelineSdkFailure({ cause })
+          }),
+        (client) => Effect.sync(() => client.destroy())
+      ).pipe(
+        Effect.timeoutOrElse({
+          duration: request.account.operationTimeoutMillis,
+          orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+        }),
+        Effect.catchTag("CodePipelineSdkFailure", (failure) => mapCodePipelineAwsFailure(operation, failure.cause))
+      )
+      return yield* decodeCodePipelineStateProviderOutput(response)
+    })
 
     return {
       getCallerIdentity: (account) =>
@@ -238,7 +673,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             codepipeline.listPipelineExecutions({
               pipelineName: request.pipelineName,
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -249,7 +684,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
             request.account,
             codepipeline.listPipelines({
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
             })
           )
         ),
@@ -273,7 +708,142 @@ export const CodePipelineReadProviderLive = Layer.effect(
               pipelineName: request.pipelineName,
               filter: { pipelineExecutionId: request.pipelineExecutionId },
               maxResults: request.maximumResults,
-              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
+            })
+          )
+        ),
+      getPipelineState,
+      getLogEventsPage: (request) =>
+        provideHttp(
+          callProvider(
+            "codepipeline-get-logs",
+            request.account,
+            cloudwatchLogs.getLogEvents({
+              logGroupName: request.logGroupName,
+              logStreamName: request.logStreamName,
+              limit: request.limit,
+              startFromHead: true,
+              unmask: false,
+              ...(!(request.nextToken === null) && { nextToken: request.nextToken })
+            })
+          )
+        ),
+      getArtifactRange: (request) =>
+        provideHttp(Effect.gen(function*() {
+          const metadata = yield* callProvider(
+            "codepipeline-head-artifact",
+            request.account,
+            s3.headObject({
+              Bucket: request.bucket,
+              Key: request.key
+            })
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({
+              ContentLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+              VersionId: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))),
+              ETag: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)))
+            }))),
+            Effect.mapError((failure) =>
+              Schema.isSchemaError(failure)
+                ? new PluginMalformedResponseFailure({
+                  operation: "codepipeline-head-artifact",
+                  diagnosticCode: "codepipeline-artifact-size-invalid"
+                })
+                : failure
+            )
+          )
+          const plan = planCodePipelineArtifactRange(
+            request.offset,
+            request.length,
+            metadata.ContentLength
+          )
+          if (plan._tag === "exhausted") {
+            return {
+              bytes: new Uint8Array(),
+              contentLength: 0,
+              contentRange: plan.contentRange
+            }
+          }
+          const objectIdentity = planCodePipelineArtifactObjectIdentity(metadata)
+          if (objectIdentity === null) {
+            return yield* new PluginMalformedResponseFailure({
+              operation: "codepipeline-head-artifact",
+              diagnosticCode: "codepipeline-artifact-object-identity-missing"
+            })
+          }
+          const response = yield* callProvider(
+            "codepipeline-get-artifact",
+            request.account,
+            s3.getObject({
+              Bucket: request.bucket,
+              Key: request.key,
+              Range: plan.range,
+              ...objectIdentity
+            })
+          )
+          return yield* response.Body === undefined
+            ? Effect.succeed({
+              bytes: new Uint8Array(),
+              contentLength: response.ContentLength,
+              contentRange: response.ContentRange
+            })
+            : collectBoundedArtifactBodyWithin(
+              response.Body.pipe(
+                Stream.mapError(() => new PluginOutageFailure({ operation: "codepipeline-get-artifact" }))
+              ),
+              request.length,
+              request.account.operationTimeoutMillis
+            ).pipe(
+              Effect.map((bytes) => ({
+                bytes,
+                contentLength: response.ContentLength,
+                contentRange: response.ContentRange
+              }))
+            )
+        })),
+      startPipelineExecution: (request) =>
+        provideHttp(
+          callPinnedCodePipelineMutationProvider(
+            "codepipeline-start-execution",
+            request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
+            codepipeline.startPipelineExecution({
+              name: request.pipelineName,
+              clientRequestToken: request.clientRequestToken,
+              sourceRevisions: [...request.sourceRevisions],
+              variables: [...request.variables]
+            })
+          )
+        ),
+      stopPipelineExecution: (request) =>
+        provideHttp(
+          callPinnedCodePipelineMutationProvider(
+            "codepipeline-stop-execution",
+            request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
+            codepipeline.stopPipelineExecution({
+              pipelineName: request.pipelineName,
+              pipelineExecutionId: request.pipelineExecutionId,
+              abandon: request.abandon,
+              reason: request.reason
+            })
+          )
+        ),
+      putApprovalResult: (request) =>
+        provideHttp(
+          callPinnedCodePipelineMutationProvider(
+            "codepipeline-put-approval",
+            request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
+            codepipeline.putApprovalResult({
+              pipelineName: request.pipelineName,
+              stageName: request.stageName,
+              actionName: request.actionName,
+              token: request.token,
+              result: { status: request.status, summary: request.summary }
             })
           )
         )

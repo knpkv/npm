@@ -58,7 +58,7 @@ const tombstonePayload = JSON.stringify({
   reason: "Deleted upstream"
 })
 
-const descriptor = (capabilities: ReadonlyArray<unknown>, contractMajor = 1): unknown => ({
+const descriptor = (capabilities: ReadonlyArray<unknown>, contractMajor = 1) => ({
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: contractMajor, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira",

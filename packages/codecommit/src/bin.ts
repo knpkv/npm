@@ -2,10 +2,16 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
-import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { makeServer } from "@knpkv/codecommit-web"
-import { Console, Effect, Layer, Schema, Stream } from "effect"
+import {
+  makeOwnerSessionSecrets,
+  makeServer,
+  ownerSessionOrigin,
+  ownerSessionUrl,
+  requireLoopbackHostname
+} from "@knpkv/codecommit-web"
+import { Console, Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
@@ -36,10 +42,19 @@ const web = Command.make("web", {
   hostname: Options.string("hostname").pipe(Options.withDefault("127.0.0.1"))
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
-    yield* Effect.logInfo(`Starting web server at http://${hostname}:${port}`)
+    yield* requireLoopbackHostname(hostname)
+    const security = yield* makeOwnerSessionSecrets()
+    const ready = yield* Deferred.make<void>()
+    const url = ownerSessionUrl(hostname, port, security)
+    const stdio = yield* Stdio.Stdio
+    const serverFiber = yield* Layer.launch(makeServer({ port, hostname, ready, security })).pipe(
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+    yield* Effect.logInfo(`Authenticated web server ready at ${ownerSessionOrigin(hostname, port)}`)
+    yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
 
     // Open browser
-    const url = `http://${hostname}:${port}`
     const exitCode = (command: ChildProcess.Command) =>
       Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
     yield* exitCode(ChildProcess.make("open", [url])).pipe(
@@ -51,8 +66,8 @@ const web = Command.make("web", {
       Effect.catchIf(() => true, () => Effect.void)
     )
 
-    // Run server with configured port/hostname
-    return yield* Layer.launch(makeServer({ port, hostname }))
+    // Keep the supervised server alive after readiness and bootstrap handoff.
+    return yield* Fiber.join(serverFiber)
   }))
 
 // PR Create Command
@@ -265,11 +280,12 @@ const prList = Command.make("list", {
       // FilterService draws AwsClient/ConfigService from the base layers, which
       // are also merged into the output so the single-account path keeps them.
       FilterServiceLive.pipe(
-        Layer.provideMerge(Layer.mergeAll(
-          AwsClient.AwsClientLive,
-          NodeHttpClient.layerFetch,
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-        ))
+        Layer.provideMerge(
+          Layer.mergeAll(
+            AwsClient.AwsClientLive,
+            ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
+          ).pipe(Layer.provideMerge(NodeHttpClient.layerFetch))
+        )
       )
     )
   )).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))
@@ -441,15 +457,19 @@ const cli = Command.runWith(command, {
   version: pkg.version
 })
 
-const AppRuntimeLayer = Layer.mergeAll(NodeHttpClient.layerFetch, AwsClientConfig.Default)
-
-const needsAppRuntime = (args: ReadonlyArray<string>): boolean => args[0] !== "skills"
+// The executable boundary is the only place permitted to read the host process.
+// Profile-scoped spawns need the environment they will actually inherit so ambient AWS
+// variables are tombstoned under whatever casing the host exported them with.
+const AppRuntimeLayer = Layer.mergeAll(
+  NodeHttpClient.layerFetch,
+  AwsClientConfig.Default,
+  ChildEnv.layerHostEnvironment(process.env)
+)
 
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  const runCli = needsAppRuntime(args) ? cli(args).pipe(Effect.provide(AppRuntimeLayer)) : cli(args)
-  return yield* runCli
+  return yield* cli(args).pipe(Effect.provide(AppRuntimeLayer))
 })
 
 // The TUI keeps long-lived resources open through its atom runtime (SQLite

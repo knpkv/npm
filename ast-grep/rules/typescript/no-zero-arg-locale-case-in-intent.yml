@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-zero-arg-locale-case-in-intent
+language: tsx
+severity: error
+message: "Use locale-independent toLowerCase/toUpperCase in application intent normalization"
+
+rule:
+  any:
+    - pattern: $VALUE.toLocaleLowerCase()
+    - pattern: $VALUE.toLocaleUpperCase()
+
+files:
+  - "packages/**/src/**/application/*Intent.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Intent command normalization is an ASCII command-boundary operation. A zero-argument
+  locale-sensitive case conversion can vary with the host locale. Locale-aware
+  conversions with an explicit locale and non-intent application code are outside
+  this rule's scope.

@@ -90,7 +90,7 @@ const peopleFor = (details: IssueDetails): ReadonlyMap<string, RlyPerson> =>
           id: collaborator.sourcePersonId,
           name: collaborator.displayName,
           role: roles.length === 0 ? "Jira collaborator" : roles.join(" · "),
-          ...(collaborator.avatarUrl === null ? {} : { avatarSrc: collaborator.avatarUrl })
+          ...(!(collaborator.avatarUrl === null) && { avatarSrc: collaborator.avatarUrl })
         }
       ]
     })

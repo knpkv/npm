@@ -5,7 +5,8 @@ export {
   type AgentJobWorkerOptions,
   type AgentJobWorkerRunResult,
   type AgentJobWorkerService,
-  agentJobWorkerWithPrReviewLayer
+  agentJobWorkerWithPrReviewLayer,
+  prReviewAgentJobWorkerLayer
 } from "./AgentJobWorker.js"
 export {
   type AgentProviderRegistryOptions,
@@ -17,9 +18,24 @@ export {
   type SelectedAgentRuntime
 } from "./AgentRuntimeRegistry.js"
 export {
-  PrReviewSandboxError,
-  PrReviewSandboxRunner,
-  prReviewSandboxRunnerLayer,
-  type PrReviewSandboxRunnerOptions,
-  type PrReviewSandboxRunnerService
-} from "./internal/PrReviewSandboxRunner.js"
+  PrReviewCommandArtifactId,
+  type PrReviewSandboxCommandResult,
+  type PrReviewSandboxOutput,
+  type PrReviewSandboxReconciliation,
+  type PrReviewSandboxSession,
+  PrReviewSandboxSessionError,
+  type PrReviewSandboxSessionOptions,
+  type PrReviewSandboxSessionRequest,
+  PrReviewSandboxSessions,
+  prReviewSandboxSessionsLayer,
+  PrReviewSandboxTools,
+  prReviewSandboxToolsLayer,
+  ReviewApplyPatch,
+  ReviewListFiles,
+  ReviewPageArtifact,
+  ReviewReadDiff,
+  ReviewReadFile,
+  ReviewRunCommand,
+  ReviewSearchArtifact,
+  ReviewSearchFiles
+} from "./internal/PrReviewSandboxSession.js"

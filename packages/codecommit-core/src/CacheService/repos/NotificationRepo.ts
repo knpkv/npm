@@ -191,11 +191,11 @@ const makeNotificationRepo = Effect.gen(function*() {
   return service
 })
 
-export interface NotificationRepoShape extends Success<typeof makeNotificationRepo> {}
+export interface NotificationRepoContract extends Success<typeof makeNotificationRepo> {}
 
 export class NotificationRepo extends Context.Service<
   NotificationRepo,
-  NotificationRepoShape
+  NotificationRepoContract
 >()("NotificationRepo") {
   static readonly Default = Layer.effect(NotificationRepo, makeNotificationRepo).pipe(
     Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))

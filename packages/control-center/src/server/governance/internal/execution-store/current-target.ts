@@ -56,8 +56,8 @@ const exactlyOne = <Value extends object>(
     : Effect.fail(invalidTarget(workspaceId, entityId, `current-target-${kind}-ambiguous`))
 }
 
-const decodeCurrentEntity = (
-  rows: unknown,
+const decodeCurrentEntity = <UnparsedInput>(
+  rows: UnparsedInput,
   workspaceId: WorkspaceId,
   entityId: EntityId
 ): Effect.Effect<ReadonlyArray<CurrentEntityRow>, PersistedRecordError> =>
@@ -65,8 +65,8 @@ const decodeCurrentEntity = (
     Effect.mapError(() => invalidTarget(workspaceId, entityId, "current-target-entity-invalid"))
   )
 
-const decodeCurrentProjection = (
-  rows: unknown,
+const decodeCurrentProjection = <UnparsedInput>(
+  rows: UnparsedInput,
   workspaceId: WorkspaceId,
   entityId: EntityId
 ) =>
@@ -86,10 +86,7 @@ export const makeGovernedActionCurrentTargetReader = Effect.gen(function*() {
     const entityRows = yield* sql`SELECT
       entity.workspace_id AS workspaceId,
       entity.entity_id AS entityId,
-      CASE entity.entity_type
-        WHEN 'pipeline' THEN 'pipeline-execution'
-        ELSE entity.entity_type
-      END AS entityType,
+      entity.entity_type AS entityType,
       entity.current_revision AS entityRevision,
       entity.plugin_connection_id AS pluginConnectionId,
       entity.provider_id AS providerId,
@@ -145,6 +142,26 @@ export const makeGovernedActionCurrentTargetReader = Effect.gen(function*() {
           AND candidate.entity_id = projection.entity_id
       )
     LIMIT 2`
+    if (entity.entityType === "pipeline" && projectionRows.length === 0) {
+      return yield* Schema.decodeUnknownEffect(GovernedActionTargetSnapshotV1)({
+        workspaceId: entity.workspaceId,
+        entityId: entity.entityId,
+        entityType: entity.entityType,
+        sourceRevision: {
+          providerId: entity.providerId,
+          pluginConnectionId: entity.pluginConnectionId,
+          vendorImmutableId: entity.vendorImmutableId,
+          revision: entity.sourceRevision,
+          sourceUrl: entity.sourceUrl,
+          firstObservedAt: entity.firstObservedAt,
+          lastObservedAt: entity.lastObservedAt,
+          synchronizedAt: entity.synchronizedAt,
+          normalizationSchemaVersion: entity.normalizationSchemaVersion
+        }
+      }).pipe(
+        Effect.mapError(() => invalidTarget(input.workspaceId, input.entityId, "current-target-snapshot-invalid"))
+      )
+    }
     const projectionRow = yield* exactlyOne(
       yield* decodeCurrentProjection(projectionRows, input.workspaceId, input.entityId),
       input.workspaceId,
@@ -152,10 +169,11 @@ export const makeGovernedActionCurrentTargetReader = Effect.gen(function*() {
       "projection"
     )
     const { projection } = yield* decoders.decodeProjectionRow(projectionRow)
+    const entityType = entity.entityType === "pipeline" ? "pipeline-execution" : entity.entityType
     if (
       projection.entityState !== "present" ||
       projection.sourceEntityRevision !== entity.entityRevision ||
-      projection.entityType !== entity.entityType
+      projection.entityType !== entityType
     ) {
       return yield* invalidTarget(input.workspaceId, input.entityId, "current-target-projection-mismatch")
     }
@@ -163,7 +181,7 @@ export const makeGovernedActionCurrentTargetReader = Effect.gen(function*() {
     return yield* Schema.decodeUnknownEffect(GovernedActionTargetSnapshotV1)({
       workspaceId: entity.workspaceId,
       entityId: entity.entityId,
-      entityType: entity.entityType,
+      entityType,
       sourceRevision: {
         providerId: entity.providerId,
         pluginConnectionId: entity.pluginConnectionId,

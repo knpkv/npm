@@ -4,6 +4,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 
 import {
   AgentApiGroup,
+  CodePipelineApiGroup,
   CompleteDiffContentRequest,
   ControlCenterApi,
   CreateAtlassianOAuthGrantRequest,
@@ -19,13 +20,16 @@ import {
   PluginOverviewResponse,
   PluginsApiGroup,
   PortfolioApiGroup,
+  ReauthorizePluginConnectionRequest,
   ReleaseAgentThreadCursor,
   SessionApiGroup,
   SessionCookieAuth,
   SessionId,
   SessionMutationAuth,
   SharesApiGroup,
-  TimelineApiGroup
+  TimelineApiGroup,
+  WorkspacePresentationReadModel,
+  WorkspaceSettingsApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -84,7 +88,37 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
   accounts: []
 }
 
+const collaboratorPresentationCompatibilityFixture: typeof WorkspacePresentationReadModel.Encoded = {
+  workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001",
+  revision: 2,
+  presentation: {
+    density: "compact",
+    defaultLanding: "active-work"
+  }
+}
+
 describe("ControlCenterApi contract", () => {
+  it("exports the collaborator presentation validator from the public API", () => {
+    assert.isTrue(
+      Schema.is(WorkspacePresentationReadModel)(collaboratorPresentationCompatibilityFixture)
+    )
+  })
+
+  it("preserves opaque credential bytes while rejecting blank replacements", () => {
+    const decode = Schema.decodeUnknownSync(ReauthorizePluginConnectionRequest)
+    const request = decode({
+      expectedRevision: 1,
+      credentials: [{ key: "apiToken", value: "  opaque token bytes  " }]
+    })
+    assert.strictEqual(request.credentials[0]?.value, "  opaque token bytes  ")
+    assert.throws(() =>
+      decode({
+        expectedRevision: 1,
+        credentials: [{ key: "apiToken", value: "   " }]
+      })
+    )
+  })
+
   it("accepts only one or both distinct Atlassian OAuth providers", () => {
     const isCreateGrantRequest = Schema.is(CreateAtlassianOAuthGrantRequest)
 
@@ -133,6 +167,25 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(eventsPath.get.responses["200"])
     assert.isDefined(eventsPath.get.responses["200"].content)
     assert.isDefined(eventsPath.get.responses["200"].content["text/event-stream"])
+    const artifactPath = specification.paths["/api/v1/codepipeline/artifact"]
+    assert.isDefined(artifactPath)
+    assert.isDefined(artifactPath.post)
+    assert.deepStrictEqual(Object.keys(artifactPath.post.responses), [
+      "200",
+      "206",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "416",
+      "429",
+      "503"
+    ])
+    const artifactSuccessStatuses: ReadonlyArray<"200" | "206" | "416"> = ["200", "206", "416"]
+    for (const status of artifactSuccessStatuses) {
+      assert.isDefined(artifactPath.post.responses[status]?.content?.["application/octet-stream"])
+    }
     assert.deepStrictEqual(
       eventsPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
       [
@@ -158,6 +211,20 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(jsonExportPath)
     assert.isDefined(jsonExportPath.get)
     assert.isDefined(jsonExportPath.get.responses["200"]?.content?.["application/json; charset=utf-8"])
+
+    const submitClockifyActionPath = specification.paths["/api/v1/items/{entityId}/clockify-actions"]
+    assert.isDefined(submitClockifyActionPath)
+    assert.isDefined(submitClockifyActionPath.post)
+    assert.deepStrictEqual(Object.keys(submitClockifyActionPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "503"
+    ])
 
     const diffInventoryPath =
       specification.paths["/api/v1/diffs/{pluginConnectionId}/pull-requests/{vendorImmutableId}/inventory"]
@@ -204,6 +271,7 @@ describe("ControlCenterApi contract", () => {
       "403",
       "404",
       "408",
+      "409",
       "413",
       "429",
       "503"
@@ -283,7 +351,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the ten API groups and endpoint routes explicit", () => {
+  it("keeps the twelve API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -292,20 +360,44 @@ describe("ControlCenterApi contract", () => {
       "portfolio",
       "deliveryGraph",
       "diff",
+      "codepipeline",
       "media",
       "liveEvents",
       "timeline",
+      "workspaceSettings",
       "agent"
     ])
 
+    assert.deepStrictEqual(
+      Object.entries(WorkspaceSettingsApiGroup.endpoints).map(
+        ([identifier, { method, path }]) => [identifier, method, path]
+      ),
+      [
+        ["read", "GET", "/api/v1/settings"],
+        ["readPresentation", "GET", "/api/v1/settings/presentation"],
+        ["update", "PUT", "/api/v1/settings"]
+      ]
+    )
     assert.deepStrictEqual(
       Object.entries(SessionApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
         ["pair", "POST", "/api/v1/session/pair"],
         ["current", "GET", "/api/v1/session/current"],
         ["list", "GET", "/api/v1/session"],
+        ["issueBrowserPairingCode", "POST", "/api/v1/session/device-code"],
         ["revoke", "DELETE", "/api/v1/session/:sessionId"],
         ["logout", "POST", "/api/v1/session/logout"]
+      ]
+    )
+    assert.deepStrictEqual(
+      Object.entries(CodePipelineApiGroup.endpoints).map(([identifier, { method, path }]) => [
+        identifier,
+        method,
+        path
+      ]),
+      [
+        ["logs", "POST", "/api/v1/codepipeline/logs"],
+        ["artifact", "POST", "/api/v1/codepipeline/artifact"]
       ]
     )
     assert.deepStrictEqual(
@@ -338,13 +430,17 @@ describe("ControlCenterApi contract", () => {
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["createConnections", "POST", "/api/v1/plugins/connections/batch"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
+        ["patchProviderAccount", "PATCH", "/api/v1/plugins/accounts/:providerAccountId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
         ["synchronization", "GET", "/api/v1/plugins/:pluginConnectionId/synchronization"],
         ["synchronizeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/sync"],
         ["configurationMetadata", "GET", "/api/v1/plugins/:pluginConnectionId/configuration-metadata"],
         ["configuration", "GET", "/api/v1/plugins/:pluginConnectionId/configuration"],
-        ["patchConfiguration", "PATCH", "/api/v1/plugins/:pluginConnectionId/configuration"]
+        ["administration", "GET", "/api/v1/plugins/:pluginConnectionId/administration"],
+        ["patchConfiguration", "PATCH", "/api/v1/plugins/:pluginConnectionId/configuration"],
+        ["reauthorizeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/reauthorize"],
+        ["revokeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/revoke"]
       ]
     )
     assert.deepStrictEqual(
@@ -360,6 +456,7 @@ describe("ControlCenterApi contract", () => {
       [
         ["workspaceEntityProjections", "GET", "/api/v1/items"],
         ["workspaceEntity", "GET", "/api/v1/items/:entityId"],
+        ["submitClockifyAction", "POST", "/api/v1/items/:entityId/clockify-actions"],
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
         ["repairCandidates", "GET", "/api/v1/relationships/releases/:releaseId/repair-candidates"],
         [
@@ -425,7 +522,49 @@ describe("ControlCenterApi contract", () => {
         ["enqueueJob", "POST", "/api/v1/agent/releases/:releaseId/jobs"],
         ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"],
         ["pullRequestReview", "GET", "/api/v1/agent/pull-requests/:entityId/review"],
-        ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"]
+        [
+          "pullRequestReviewThread",
+          "GET",
+          "/api/v1/agent/pull-requests/:entityId/review-thread/events"
+        ],
+        ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"],
+        [
+          "cancelPullRequestReview",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/cancellation"
+        ],
+        [
+          "extendPullRequestReviewBudget",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/budget-extension"
+        ],
+        [
+          "reviewSuggestionRevisions",
+          "GET",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
+        ],
+        [
+          "editReviewSuggestion",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
+        ],
+        [
+          "targetReviewSuggestion",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/agent"
+        ],
+        [
+          "dismissReviewSuggestion",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal"
+        ],
+        [
+          "previewReviewSuggestionPublication",
+          "GET",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
+        ],
+        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"],
+        ["submitReleasePublication", "POST", "/api/v1/agent/releases/:releaseId/publications"]
       ]
     )
   })
@@ -470,6 +609,7 @@ describe("ControlCenterApi contract", () => {
       pair: [],
       current: [SessionCookieAuth.key],
       list: [SessionCookieAuth.key],
+      issueBrowserPairingCode: [SessionCookieAuth.key, MutationCsrf.key],
       revoke: [SessionCookieAuth.key, MutationCsrf.key],
       logout: [SessionCookieAuth.key, MutationCsrf.key]
     })
@@ -490,13 +630,17 @@ describe("ControlCenterApi contract", () => {
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       createConnections: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
+      patchProviderAccount: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       synchronization: [SessionCookieAuth.key],
       synchronizeConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       configurationMetadata: [SessionCookieAuth.key],
       configuration: [SessionCookieAuth.key],
-      patchConfiguration: [SessionCookieAuth.key, SessionMutationAuth.key]
+      administration: [SessionCookieAuth.key],
+      patchConfiguration: [SessionCookieAuth.key, SessionMutationAuth.key],
+      reauthorizeConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
+      revokeConnection: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(PortfolioApiGroup.endpoints), {
       snapshot: [SessionCookieAuth.key]
@@ -504,6 +648,7 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
       workspaceEntityProjections: [SessionCookieAuth.key],
       workspaceEntity: [SessionCookieAuth.key],
+      submitClockifyAction: [SessionCookieAuth.key, SessionMutationAuth.key],
       releaseSlice: [SessionCookieAuth.key],
       repairCandidates: [SessionCookieAuth.key],
       repairProposalDraft: [SessionCookieAuth.key],
@@ -519,6 +664,10 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(DiffApiGroup.endpoints), {
       inventory: [SessionCookieAuth.key],
       content: [SessionCookieAuth.key]
+    })
+    assert.deepStrictEqual(middlewareByEndpoint(CodePipelineApiGroup.endpoints), {
+      logs: [SessionCookieAuth.key],
+      artifact: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(MediaApiGroup.endpoints), {
       read: [SessionCookieAuth.key]
@@ -538,7 +687,17 @@ describe("ControlCenterApi contract", () => {
       enqueueJob: [SessionCookieAuth.key, SessionMutationAuth.key],
       replayThread: [SessionCookieAuth.key],
       pullRequestReview: [SessionCookieAuth.key],
-      enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key]
+      pullRequestReviewThread: [SessionCookieAuth.key],
+      enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      cancelPullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      extendPullRequestReviewBudget: [SessionCookieAuth.key, SessionMutationAuth.key],
+      reviewSuggestionRevisions: [SessionCookieAuth.key],
+      editReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      targetReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      dismissReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      previewReviewSuggestionPublication: [SessionCookieAuth.key],
+      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      submitReleasePublication: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
@@ -565,6 +724,10 @@ describe("ControlCenterApi contract", () => {
     const vendorImmutableId = VendorImmutableId.make("184")
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
+    assert.strictEqual(
+      urls.session.issueBrowserPairingCode(),
+      "https://control.example/api/v1/session/device-code"
+    )
     assert.strictEqual(
       urls.session.revoke({ params: { sessionId } }),
       "https://control.example/api/v1/session/01890f6f-6d6a-7cc0-98d2-000000000091"

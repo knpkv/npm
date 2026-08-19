@@ -143,7 +143,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
 export const launchTui = (args: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     // @opentui/react requires Bun (react-reconciler import without .js extension)
-    const isBun = typeof Bun !== "undefined"
+    const isBun = yield* Effect.try(() => !Predicate.isUndefined(Bun)).pipe(Effect.orElseSucceed(() => false))
     if (isBun) {
       yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
     } else {

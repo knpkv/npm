@@ -30,7 +30,7 @@ import {
   serviceUnavailableApiError
 } from "./ErrorMapping.js"
 
-const requestShape = (request: HttpServerRequest.HttpServerRequest) => ({
+const requestContract = (request: HttpServerRequest.HttpServerRequest) => ({
   method: request.method,
   host: request.headers.host ?? "",
   origin: request.headers.origin ?? null,
@@ -44,6 +44,7 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
   switch (groupIdentifier) {
     case "media":
     case "portfolio":
+    case "codepipeline":
     case "liveEvents":
       return "release-read"
     case "agent":
@@ -68,13 +69,19 @@ export const isAuthenticatedReadTransportEndpoint = (
   method === "GET" ||
   method === "HEAD" ||
   method === "OPTIONS" ||
-  (method === "POST" && groupIdentifier === "diff" && endpointIdentifier === "content")
+  (method === "POST" && (
+    (groupIdentifier === "diff" && endpointIdentifier === "content") ||
+    (groupIdentifier === "codepipeline" && (
+      endpointIdentifier === "logs" ||
+      endpointIdentifier === "artifact"
+    ))
+  ))
 
 /** Guard the sole unauthenticated endpoint with the same authority and Origin policy. */
 export const authorizePairingRequest = Effect.fn("ApiMiddleware.authorizePairing")(function*() {
   const config = yield* ApiBindConfiguration
   const request = yield* HttpServerRequest.HttpServerRequest
-  yield* authorizeRequest(config, requestShape(request), "public-pair").pipe(
+  yield* authorizeRequest(config, requestContract(request), "public-pair").pipe(
     Effect.catchTag("RequestSecurityError", mapPairingSecurityFailure)
   )
 })
@@ -98,7 +105,7 @@ export const sessionCookieAuthLayer = Layer.effect(
               yield* authorizeRead({
                 capability: capabilityFor(group.identifier, endpoint.identifier),
                 config,
-                request: requestShape(request)
+                request: requestContract(request)
               }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
             }
             const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
@@ -136,7 +143,7 @@ export const mutationCsrfLayer = Layer.effect(
                 capability: capabilityFor(group.identifier, endpoint.identifier),
                 config,
                 request: {
-                  ...requestShape(request),
+                  ...requestContract(request),
                   csrfToken: Redacted.value(credential)
                 }
               },

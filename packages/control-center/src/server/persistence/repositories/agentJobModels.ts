@@ -1,9 +1,27 @@
 /** Durable release-thread and local-agent job contracts. @module */
 import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
+import { ReviewAgentProfile, ReviewSuggestionPublicationOperation } from "../../../api/agent.js"
+import {
+  AgentThreadId,
+  GovernedActionId,
+  JobId,
+  PluginConnectionId,
+  PrReviewSuggestionRevisionId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
+import { PrReviewReport, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../../domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevisionAuthor,
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../../../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 /** Maximum persisted provider output across one attempt. */
@@ -19,6 +37,12 @@ export const MAXIMUM_AGENT_JOB_PROMPT_LENGTH = 5_000
 
 /** Maximum thread events returned by one replay page. */
 export const MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE = 128
+
+/** One explicit extension is bounded to the selected profile's original budget. */
+export const MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT = 1
+
+/** Hard upper bound for one immutable review, including its single extension. */
+export const MAXIMUM_REVIEW_BUDGET_MILLIS = 3_600_000
 
 /** Positive sequence assigned to attempts within one durable job. */
 export const AgentAttemptSequence = Schema.Int.check(
@@ -76,10 +100,78 @@ export type AgentJobTaskTag = typeof AgentJobTaskTag.Type
 /** Existing release-scoped conversational work. */
 const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 
-/** Read-only review work bound to one immutable pull request head. */
-const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
-  subject: PrReviewSubject
+const PrReviewAgentJobTaskFields = {
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewSubject,
+  reviewProfile: ReviewAgentProfile,
+  intent: Schema.optionalKey(Schema.Literals(["full-review", "suggestion-edit", "suggestion-revalidation"])),
+  target: Schema.optionalKey(Schema.Struct({
+    sourceJobId: JobId,
+    suggestionId: PrReviewSuggestionId,
+    selectedRevisionId: PrReviewSuggestionRevisionId,
+    history: PrReviewSuggestionRevisionPage
+  }))
+}
+
+/** Read-only review request bound to one immutable pull request head. */
+const EnqueuePrReviewAgentJobTask = Schema.TaggedStruct("pr-review", PrReviewAgentJobTaskFields)
+
+const PrReviewThreadRequestSummary = Schema.Struct({
+  jobId: JobId,
+  prompt: AgentJobPrompt,
+  subjectRevision: SubjectRevision,
+  requestedAt: UtcTimestamp
 })
+
+const PrReviewThreadRunSummary = Schema.Struct({
+  jobId: JobId,
+  subject: PrReviewSubject,
+  state: Schema.Literals(["cancelled", "failed", "interrupted", "succeeded", "unknown"]),
+  requestedAt: UtcTimestamp,
+  suggestionTitles: Schema.Array(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+  ).check(Schema.isMaxLength(8)),
+  suggestionsTruncated: Schema.Boolean,
+  noteTitles: Schema.Array(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+  ).check(Schema.isMaxLength(8)),
+  notesTruncated: Schema.Boolean,
+  limitation: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+  )
+})
+
+/**
+ * Small review-thread context frozen into one immutable run.
+ *
+ * Full messages and artifacts remain behind explicit paged lookup boundaries.
+ */
+export const PrReviewThreadContextSnapshot = Schema.Struct({
+  recentRequests: Schema.Array(PrReviewThreadRequestSummary).check(Schema.isMaxLength(4)),
+  priorRuns: Schema.Array(PrReviewThreadRunSummary).check(Schema.isMaxLength(4)),
+  historyTruncated: Schema.Boolean
+})
+export type PrReviewThreadContextSnapshot = typeof PrReviewThreadContextSnapshot.Type
+
+/** Empty first-run context used before a review thread has prior activity. */
+export const EMPTY_PR_REVIEW_THREAD_CONTEXT = PrReviewThreadContextSnapshot.make({
+  recentRequests: [],
+  priorRuns: [],
+  historyTruncated: false
+})
+
+/** Persisted review work with the bounded thread context selected at enqueue. */
+const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
+  ...PrReviewAgentJobTaskFields,
+  context: PrReviewThreadContextSnapshot
+})
+
+/** Caller-owned task request before repository context enrichment. */
+export const EnqueueAgentJobTask = Schema.Union([
+  ReleaseChatAgentJobTask,
+  EnqueuePrReviewAgentJobTask
+]).pipe(Schema.toTaggedUnion("_tag"))
+export type EnqueueAgentJobTask = typeof EnqueueAgentJobTask.Type
 
 /** Durable task context used to select an internal task executor. */
 export const AgentJobTask = Schema.Union([
@@ -111,7 +203,7 @@ export const EnqueueAgentJobInput = Schema.Struct({
   prompt: AgentJobPrompt,
   contextFingerprint: AgentContextFingerprint,
   subjectRevision: SubjectRevision,
-  task: AgentJobTask,
+  task: EnqueueAgentJobTask,
   createdAt: UtcTimestamp
 })
 export type EnqueueAgentJobInput = typeof EnqueueAgentJobInput.Type
@@ -141,6 +233,10 @@ export const ClaimedAgentJob = Schema.Struct({
   access: Schema.Literals(["read-only", "workspace-write"]),
   prompt: AgentJobPrompt,
   context: AgentContextSnapshotRecord,
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
   sessionRef: Schema.NullOr(AgentSessionRef),
   cancellationRequested: Schema.Boolean
 })
@@ -188,12 +284,174 @@ export const CompleteAgentReviewInput = Schema.Struct({
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 
+/** Startup transition for review attempts whose owning process disappeared. */
+export const InterruptRunningReviewsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  interruptedAt: UtcTimestamp,
+  preservedAttempts: Schema.optionalKey(Schema.Array(Schema.Struct({
+    jobId: JobId,
+    attemptSequence: AgentAttemptSequence
+  })))
+})
+export type InterruptRunningReviewsInput = typeof InterruptRunningReviewsInput.Type
+
+/** Durable identity used to match a live Review Sandbox to one immutable attempt. */
+export const RunningPrReviewAttempt = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  attemptId: Schema.String.check(Schema.isPattern(/^[a-f0-9]{12}$/u)),
+  sessionRef: Schema.NullOr(AgentSessionRef)
+})
+export type RunningPrReviewAttempt = typeof RunningPrReviewAttempt.Type
+
+/** Startup handoff for a live server-private Review Sandbox. */
+export const AttachRunningPrReviewSessionInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  sessionRef: AgentSessionRef
+})
+export type AttachRunningPrReviewSessionInput = typeof AttachRunningPrReviewSessionInput.Type
+
+/** Persist the latest validated report while an immutable review is still running. */
+export const RecordAgentReviewProgressInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken,
+  report: Schema.Unknown,
+  occurredAt: UtcTimestamp
+})
+export type RecordAgentReviewProgressInput = typeof RecordAgentReviewProgressInput.Type
+
+/** Read the effective budget of one claimed immutable review. */
+export const ReadReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  task: AgentJobTask
+})
+export type ReadReviewBudgetInput = typeof ReadReviewBudgetInput.Type
+
+/** Digest binding one durable publication reservation to the exact confirmed body. */
+export const ReviewSuggestionPublicationDigest = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
+).pipe(Schema.brand("ReviewSuggestionPublicationDigest"))
+export type ReviewSuggestionPublicationDigest = typeof ReviewSuggestionPublicationDigest.Type
+
+/** Provider comment identity retained for governed lifecycle operations. */
+export const ReviewSuggestionPublicationCommentId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+).pipe(Schema.brand("ReviewSuggestionPublicationCommentId"))
+export type ReviewSuggestionPublicationCommentId = typeof ReviewSuggestionPublicationCommentId.Type
+
+const ReviewSuggestionPublicationCommentLocatorEncoded = Schema.TemplateLiteral([
+  Schema.Literal("comment:"),
+  ReviewSuggestionPublicationCommentId
+])
+
+/** Provider receipt coordinate decoded to the persisted comment identity. */
+export const ReviewSuggestionPublicationCommentLocator = ReviewSuggestionPublicationCommentLocatorEncoded.pipe(
+  Schema.decodeTo(ReviewSuggestionPublicationCommentId, {
+    decode: SchemaGetter.transform((locator) => locator.slice("comment:".length)),
+    encode: SchemaGetter.transform((commentId): `comment:${string}` => `comment:${commentId}`)
+  })
+)
+
+/** Atomic pre-provider reservation for one suggestion and exact confirmed body. */
+export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
+  reservationId: ReviewSuggestionPublicationReservationId,
+  reservedAt: UtcTimestamp
+})
+export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
+
+/** Durable result of reserving an exact publication body. */
+export const ReviewSuggestionPublicationReservation = Schema.Union([
+  Schema.TaggedStruct("acquired", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
+  Schema.TaggedStruct("in-progress", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
+  Schema.TaggedStruct("recoverable", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp,
+    reservationId: ReviewSuggestionPublicationReservationId,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
+  Schema.TaggedStruct("published", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  })
+])
+export type ReviewSuggestionPublicationReservation = typeof ReviewSuggestionPublicationReservation.Type
+
+/** Release one exact reservation after a confirmed provider no-write outcome. */
+export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId
+})
+export type ReleaseReviewSuggestionPublicationInput = typeof ReleaseReviewSuggestionPublicationInput.Type
+
+/** Successful governed publication to overlay onto one immutable review report. */
+export const RecordReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  reservationId: ReviewSuggestionPublicationReservationId,
+  publicationId: GovernedActionId,
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
+  publishedAt: UtcTimestamp,
+  finalize: Schema.optionalKey(Schema.Boolean)
+})
+export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
+
+/** Lookup for the latest durable publication target of one exact suggestion. */
+export const ReadReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId
+})
+export type ReadReviewSuggestionPublicationInput = typeof ReadReviewSuggestionPublicationInput.Type
+
+export const ReadReviewSuggestionPublication = Schema.Struct({
+  state: Schema.Literal("published"),
+  publicationId: GovernedActionId,
+  commentId: ReviewSuggestionPublicationCommentId
+})
+export type ReadReviewSuggestionPublication = typeof ReadReviewSuggestionPublication.Type
+
 /** Workspace-scoped lookup for one durable review result. */
 export const AgentReviewResultInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId
 })
 export type AgentReviewResultInput = typeof AgentReviewResultInput.Type
+
+/** Request one operator-authorized extension of a running review's budget. */
+export const ExtendReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  extendedAt: UtcTimestamp
+})
+export type ExtendReviewBudgetInput = typeof ExtendReviewBudgetInput.Type
 
 /** Sanitized durable review result attributable to one terminal attempt. */
 export const AgentReviewResultRecord = Schema.Struct({
@@ -205,26 +463,132 @@ export const AgentReviewResultRecord = Schema.Struct({
 })
 export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
 
+/** Workspace-scoped bounded read of one stable suggestion's prior revisions. */
+export const ReadReviewSuggestionRevisionsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  beforeSequence: Schema.NullOr(PrReviewSuggestionRevisionSequence),
+  limit: PrReviewSuggestionRevisionPageSize
+})
+export type ReadReviewSuggestionRevisionsInput = typeof ReadReviewSuggestionRevisionsInput.Type
+
+/** Complete compare-and-append command for one immutable suggestion edit. */
+export const ReviewSuggestionRevisionLeaseFence = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken
+})
+export type ReviewSuggestionRevisionLeaseFence = typeof ReviewSuggestionRevisionLeaseFence.Type
+
+export const AppendReviewSuggestionRevisionInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  edit: PrReviewSuggestionEdit,
+  state: Schema.optionalKey(Schema.Literals(["dismissed", "stale"])),
+  dismissalReason: Schema.optionalKey(PrReviewSuggestion.fields.dismissalReason),
+  validation: Schema.optionalKey(Schema.Literal("validated")),
+  author: PrReviewSuggestionRevisionAuthor,
+  createdAt: UtcTimestamp,
+  leaseFence: Schema.optionalKey(ReviewSuggestionRevisionLeaseFence)
+})
+export type AppendReviewSuggestionRevisionInput = typeof AppendReviewSuggestionRevisionInput.Type
+
+/** Atomic targeted completion: append the source revision and terminalize the worker job together. */
+export const CompleteTargetedReviewInput = Schema.Struct({
+  source: AppendReviewSuggestionRevisionInput,
+  target: CompleteAgentReviewInput
+})
+export type CompleteTargetedReviewInput = typeof CompleteTargetedReviewInput.Type
+
 /** Exact immutable subject used to recover its newest durable review job. */
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
-  subject: PrReviewSubject
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewSubject,
+  excludeJobId: Schema.optionalKey(JobId),
+  excludeSubjectRevision: Schema.optionalKey(Schema.String),
+  jobId: Schema.optionalKey(JobId),
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
+
+/** Cursor-bounded lookup for the durable thread behind a stable pull request. */
+export const PrReviewThreadSubject = Schema.Struct({
+  providerId: PrReviewSubject.fields.providerId,
+  repository: PrReviewSubject.fields.repository,
+  pullRequestId: PrReviewSubject.fields.pullRequestId
+})
+export type PrReviewThreadSubject = typeof PrReviewThreadSubject.Type
+
+export const AgentReviewThreadAfterInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewThreadSubject,
+  after: AgentEventCursor,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadAfterInput = typeof AgentReviewThreadAfterInput.Type
+
+export const AgentReviewThreadBeforeInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewThreadSubject,
+  before: AgentEventCursor,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadBeforeInput = typeof AgentReviewThreadBeforeInput.Type
+
+/** Cursor-bounded prior history fenced before one immutable review job. */
+export const AgentReviewThreadHistoryInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  threadId: AgentThreadId,
+  beforeJobId: JobId,
+  after: AgentEventCursor,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadHistoryInput = typeof AgentReviewThreadHistoryInput.Type
+
+export const AgentReviewThreadTailInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewThreadSubject,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadTailInput = typeof AgentReviewThreadTailInput.Type
 
 /** Newest durable lifecycle state for one exact immutable review subject. */
 export const LatestAgentReviewRecord = Schema.Struct({
   jobId: JobId,
+  threadId: AgentThreadId,
   providerId: AgentProviderId,
   model: AgentModel,
-  state: AgentJobState,
+  state: Schema.Union([AgentJobState, Schema.Literal("interrupted")]),
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
-  report: Schema.NullOr(PrReviewReport)
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
+  taskIntent: Schema.optionalKey(Schema.NullOr(Schema.Literals(["suggestion-edit", "suggestion-revalidation"]))),
+  report: Schema.NullOr(PrReviewReport),
+  reviewProfile: ReviewAgentProfile,
+  activity: Schema.Struct({
+    events: Schema.Array(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES))
+    ).check(Schema.isMaxLength(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)),
+    truncated: Schema.Boolean
+  })
 }).check(
   Schema.makeFilter(
-    ({ report, state }) => (state === "succeeded") === (report !== null),
-    { expected: "only succeeded review jobs to carry a report" }
+    ({ report, state }) =>
+      report === null || state === "succeeded" || state === "failed" ||
+      state === "cancelled" || state === "interrupted",
+    { expected: "only terminal review jobs to carry a report" }
   )
 )
 export type LatestAgentReviewRecord = typeof LatestAgentReviewRecord.Type
@@ -236,7 +600,7 @@ export const AgentThreadEvent = Schema.Struct({
   eventSequence: AgentEventCursor.check(Schema.isGreaterThan(0)),
   jobId: JobId,
   attemptSequence: Schema.NullOr(AgentAttemptSequence),
-  task: Schema.optionalKey(AgentJobTask),
+  task: Schema.optionalKey(EnqueueAgentJobTask),
   eventKind: Schema.Literals([
     "user-message",
     "job-queued",
@@ -245,6 +609,8 @@ export const AgentThreadEvent = Schema.Struct({
     "progress",
     "usage",
     "review-report",
+    "review-suggestion-revised",
+    "review-suggestion-published",
     "job-completed",
     "job-failed",
     "cancel-requested"
@@ -261,7 +627,7 @@ export interface AgentThreadEventPage {
 }
 
 /** Stable typed failure for invalid job state, lease, or bounded output. */
-export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputError>()(
+export class AgentJobInputError extends Schema.TaggedError<AgentJobInputError>()(
   "AgentJobInputError",
   {
     workspaceId: WorkspaceId,
@@ -270,9 +636,11 @@ export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputErr
       "invalid-transition",
       "lease-lost",
       "lease-expired",
+      "cancellation-requested",
       "output-limit-exceeded",
       "event-limit-exceeded",
       "invalid-result",
+      "revision-identity-mismatch",
       "task-mismatch"
     ])
   }

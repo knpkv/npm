@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import { GitService, layer as GitServiceLayer } from "../src/GitService.js"
 import { getConflictedFiles, GIT_LOG_FORMAT, parseGitLog, parseGitStatus } from "../src/internal/gitCommands.js"
 
@@ -207,7 +208,7 @@ M  normal.ts`
       Effect.gen(function*() {
         const git = yield* GitService
         const initialized = yield* git.isInitialized()
-        expect(typeof initialized).toBe("boolean")
+        expect(Predicate.isBoolean(initialized)).toBe(true)
       }).pipe(Effect.provide(TestLayer)))
   })
 })

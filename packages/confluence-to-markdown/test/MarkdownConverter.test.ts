@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../src/AtlaskitTransformers.js"
 import { layer as MarkdownConverterLayer, MarkdownConverter } from "../src/MarkdownConverter.js"
@@ -10,18 +11,21 @@ const TestLayer = MarkdownConverterLayer.pipe(
   Layer.provide(AdfSchemaValidatorLayer)
 )
 
-const isAdfDoc = (
-  value: unknown
-): value is {
+const isAdfDoc = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & {
   readonly type: string
   readonly version: number
   readonly content: ReadonlyArray<{ readonly type: string }>
 } =>
   value !== null &&
-  typeof value === "object" &&
-  Reflect.get(value, "type") === "doc" &&
-  typeof Reflect.get(value, "version") === "number" &&
-  Array.isArray(Reflect.get(value, "content"))
+  Predicate.isObjectOrArray(value) &&
+  Predicate.hasProperty(value, "type") &&
+  value.type === "doc" &&
+  Predicate.hasProperty(value, "version") &&
+  Predicate.isNumber(value.version) &&
+  Predicate.hasProperty(value, "content") &&
+  Array.isArray(value.content)
 
 const minimalDoc = (content: ReadonlyArray<unknown>): string => JSON.stringify({ version: 1, type: "doc", content })
 

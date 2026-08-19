@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -77,6 +78,57 @@ describe("ClockifyApiClient", () => {
           }
         }]
       }, requests))
+    )
+  })
+
+  it.effect("requests hydrated time-entry details when required by the caller", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      const entry = yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: true })
+      yield* client.getTimeEntry("workspace-1", "entry-1")
+      yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: false })
+      expect(entry.id).toBe("entry-1")
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[1]?.urlParams ?? []).has("hydrated")).toBe(false)
+      expect(new Map(requests[2]?.urlParams ?? []).get("hydrated")).toBe("false")
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 200,
+        body: {
+          id: "entry-1",
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          description: "Review payment safeguards",
+          billable: true,
+          customFieldValues: [],
+          projectId: "project-1",
+          taskId: "task-1",
+          tagIds: ["delivery"],
+          timeInterval: {
+            start: "2026-07-11T08:00:00Z",
+            end: "2026-07-11T09:00:00Z",
+            duration: "PT1H"
+          }
+        }
+      }, requests))
+    )
+  })
+
+  it.effect("forwards hydration when listing canonical time-entry snapshots", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      yield* client.getTimeEntries("workspace-1", "user-1", {
+        hydrated: true,
+        page: 2,
+        pageSize: 10
+      })
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("2")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page-size")).toBe("10")
+    }).pipe(
+      Effect.provide(clientLayer({ status: 200, body: [] }, requests))
     )
   })
 
@@ -222,8 +274,7 @@ describe("ClockifyApiClient", () => {
       if (requests[0]?.body._tag !== "FormData") throw new Error("Expected a FormData request body")
       const file = requests[0].body.formData.get("file")
       expect(requests[0].body.formData).toBeInstanceOf(FormData)
-      expect(typeof file).not.toBe("string")
-      if (file === null || typeof file === "string") throw new Error("Expected a file field")
+      if (file === null || Predicate.isString(file)) throw new Error("Expected a file field")
       expect(yield* Effect.promise(() => file.text())).toBe("avatar bytes")
       expect(requests[0]?.headers["x-api-key"]).toBe("secret")
     })

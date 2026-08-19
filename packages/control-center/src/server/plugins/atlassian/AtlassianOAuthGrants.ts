@@ -9,7 +9,6 @@ import {
   generateCodeVerifier,
   getAccessibleResources,
   getUserInfo,
-  JIRA_SCOPES,
   type TokenResponse,
   type UserInfo
 } from "@knpkv/atlassian-common/auth"
@@ -19,7 +18,6 @@ import {
   getOAuthConfigPath,
   getProfilesPath,
   HomeDirectoryLive,
-  JIRA_REQUIRED_SCOPES,
   loadOAuthConfig,
   loadProfiles,
   type OAuthConfig,
@@ -36,6 +34,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -58,6 +57,8 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable
 } from "../../api/ApplicationServices.js"
+import { ServerLifecycle } from "../../runtime/ServerLifecycle.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "./AtlassianOAuthScopes.js"
 import { CONTROL_CENTER_AUTH_STORE_NAME } from "./AtlassianProfiles.js"
 
 const ATLASSIAN_CALLBACK_PATH = "/services/oauth/atlassian/callback"
@@ -183,8 +184,15 @@ const sameOAuthConfig = (left: OAuthConfig, right: OAuthConfig): boolean =>
   left.clientId === right.clientId && left.clientSecret === right.clientSecret
 
 const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boolean => {
+  const storedScopes = new Set(stored.scope.split(/\s+/).filter((scope) => scope.length > 0))
   const replacementScopes = new Set(replacement.scope.split(/\s+/).filter((scope) => scope.length > 0))
-  return stored.scope.split(/\s+/).filter((scope) => scope.length > 0).every((scope) => replacementScopes.has(scope))
+  const productScopes = [CONTROL_CENTER_JIRA_OAUTH_SCOPES, CONFLUENCE_REQUIRED_SCOPES]
+  // Preserve every product capability represented by the stored profile, while
+  // allowing obsolete provider scopes that are no longer requested by the
+  // current proposal to disappear during recovery.
+  return productScopes.every((required) =>
+    required.some((scope) => !storedScopes.has(scope)) || required.every((scope) => replacementScopes.has(scope))
+  )
 }
 
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
@@ -351,20 +359,20 @@ const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileM
 
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
-const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_SCOPES,
+const oauthScopes = {
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_SCOPES
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
-const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
+const requiredSiteScopes = {
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES.filter((scope) => scope.includes(":jira")),
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
-const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES,
+const requiredTokenScopes = {
+  jira: CONTROL_CENTER_JIRA_OAUTH_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
-}
+} satisfies Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>>
 
 const mergeProductResourceScopes = (
   resources: ReadonlyArray<AccessibleResource>
@@ -444,6 +452,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const httpClient = yield* HttpClient.HttpClient
   const path = yield* Path.Path
   const scope = yield* Scope.Scope
+  const lifecycle = yield* Effect.serviceOption(ServerLifecycle)
   const grants = yield* Ref.make<PendingGrants>(new Map())
   const profileStoreLock = yield* Semaphore.make(1)
   const localStorageLayer = Layer.mergeAll(
@@ -455,22 +464,34 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const scheduleExpiry = (
     grantId: AtlassianOAuthGrantId,
     createdAtMilliseconds: number
-  ): Effect.Effect<void> =>
-    Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(
-      Effect.andThen(
-        Ref.update(grants, (current) => {
-          const grant = current.get(grantId)
-          if (grant?.createdAtMilliseconds === createdAtMilliseconds) {
-            const next = new Map(current)
-            next.delete(grantId)
-            return next
-          }
-          return current
-        })
+  ): Effect.Effect<void> => {
+    const expire = Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(Effect.as(true))
+    const scheduled = Option.isSome(lifecycle)
+      ? lifecycle.value.runBackground(
+        Effect.raceFirst(
+          expire,
+          lifecycle.value.awaitDrain.pipe(Effect.as(false))
+        )
+      ).pipe(Effect.catchTag("ServerDraining", () => Effect.succeed(false)))
+      : expire
+    return scheduled.pipe(
+      Effect.flatMap((didExpire) =>
+        didExpire
+          ? Ref.update(grants, (current) => {
+            const grant = current.get(grantId)
+            if (grant?.createdAtMilliseconds === createdAtMilliseconds) {
+              const next = new Map(current)
+              next.delete(grantId)
+              return next
+            }
+            return current
+          })
+          : Effect.void
       ),
       Effect.forkIn(scope),
       Effect.asVoid
     )
+  }
 
   const start: AtlassianOAuthGrantOperations["start"] = Effect.fn("AtlassianOAuthGrants.start")(function*(
     owner,

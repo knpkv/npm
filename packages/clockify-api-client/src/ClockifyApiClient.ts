@@ -40,11 +40,16 @@ export type AuthenticatedClockifyApi = Omit<Generated.ClockifyApi, "uploadImage"
 export interface GetTimeEntriesParams {
   readonly start?: string | undefined
   readonly end?: string | undefined
+  readonly hydrated?: boolean | undefined
   readonly page?: number | undefined
   readonly pageSize?: number | undefined
 }
 
-export interface ClockifyApiClientShape {
+export interface GetTimeEntryParams {
+  readonly hydrated?: boolean | undefined
+}
+
+export interface ClockifyApiClientContract {
   readonly getUser: () => Effect.Effect<User, ClockifyClientError>
   readonly getWorkspaceUsers?: (
     workspaceId: string
@@ -86,7 +91,8 @@ export interface ClockifyApiClientShape {
   ) => Effect.Effect<Generated.GetTags200[number] | Generated.CreateNewTag201, ClockifyClientError>
   readonly getTimeEntry: (
     workspaceId: string,
-    timeEntryId: string
+    timeEntryId: string,
+    params?: GetTimeEntryParams
   ) => Effect.Effect<Generated.GetTimeEntry200, ClockifyClientError>
   readonly deleteTimeEntry: (workspaceId: string, timeEntryId: string) => Effect.Effect<void, ClockifyClientError>
   readonly updateTimeEntry: (
@@ -121,7 +127,7 @@ export const make = (
   }
 }
 
-export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientShape>()(
+export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientContract>()(
   "@knpkv/clockify-api-client/ClockifyApiClient"
 ) {
   static readonly layer: Layer.Layer<ClockifyApiClient, never, ClockifyApiConfig | HttpClient.HttpClient> = Layer
@@ -181,10 +187,11 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
           getTimeEntries: (workspaceId, userId, params) =>
             api.getTimeEntries(workspaceId, userId, {
               params: {
-                ...(params?.start !== undefined ? { start: params.start } : {}),
-                ...(params?.end !== undefined ? { end: params.end } : {}),
-                ...(params?.page !== undefined ? { page: params.page } : {}),
-                ...(params?.pageSize !== undefined ? { "page-size": params.pageSize } : {})
+                ...((params?.start !== undefined) && { start: params.start }),
+                ...((params?.end !== undefined) && { end: params.end }),
+                ...(!(params?.hydrated === undefined) && { hydrated: params.hydrated }),
+                ...((params?.page !== undefined) && { page: params.page }),
+                ...((params?.pageSize !== undefined) && { "page-size": params.pageSize })
               }
             }),
           getRunningTimer: (workspaceId, userId) =>
@@ -202,7 +209,12 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
                   : Effect.succeed(existing)
               })
             ),
-          getTimeEntry: (workspaceId, timeEntryId) => api.getTimeEntry(workspaceId, timeEntryId, undefined),
+          getTimeEntry: (workspaceId, timeEntryId, params) =>
+            api.getTimeEntry(workspaceId, timeEntryId, {
+              params: {
+                ...(!(params?.hydrated === undefined) && { hydrated: params.hydrated })
+              }
+            }),
           deleteTimeEntry: (workspaceId, timeEntryId) => api.deleteTimeEntry(workspaceId, timeEntryId, undefined),
           updateTimeEntry: (workspaceId, timeEntryId, payload) =>
             api.updateTimeEntry(workspaceId, timeEntryId, { payload })

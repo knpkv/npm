@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import {
@@ -35,7 +36,7 @@ const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string |
   const authMode = configured.get("authMode")
   if (authMode === "oauth") {
     const profileId = configured.get("oauthProfileId")
-    return typeof profileId === "string" &&
+    return Predicate.isString(profileId) &&
       profileId.length > 0 &&
       !configured.has("email") &&
       !configured.has("apiToken")
@@ -43,7 +44,7 @@ const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string |
   const apiToken = configured.get("apiToken")
   return authMode === "api-token" &&
     Schema.is(AtlassianBasicAuthEmail)(configured.get("email")) &&
-    typeof apiToken === "string" &&
+    Predicate.isString(apiToken) &&
     apiToken.length > 0 &&
     !configured.has("oauthProfileId")
 }
@@ -111,6 +112,7 @@ const codePipelineSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionVa
       actionPageSize: configured.get("actionPageSize"),
       maximumActionPages: configured.get("maximumActionPages"),
       maximumActionsPerExecution: configured.get("maximumActionsPerExecution"),
+      maximumLogBytes: configured.get("maximumLogBytes"),
       operationTimeoutMillis: configured.get("operationTimeoutMillis")
     })
   )
@@ -143,12 +145,18 @@ const field = (
 })
 
 const codeCommitFields = [
-  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", { defaultValue: "default" }),
+  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", {
+    defaultValue: "default",
+    scope: "credential"
+  }),
   field("region", "AWS region", "Region containing the CodeCommit repository.", "text"),
   field("repositoryName", "Repository", "CodeCommit repository to read.", "text")
 ]
 const codePipelineFields = [
-  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", { defaultValue: "default" }),
+  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", {
+    defaultValue: "default",
+    scope: "credential"
+  }),
   field("region", "AWS region", "Region containing the CodePipeline pipeline.", "text"),
   field("pipelineName", "Pipeline", "CodePipeline pipeline to read.", "text"),
   field("maximumExecutionPages", "Execution pages", "Maximum execution pages per synchronization.", "integer", {
@@ -171,6 +179,11 @@ const codePipelineFields = [
     minimum: 1,
     maximum: 200
   }),
+  field("maximumLogBytes", "Log page bytes", "Maximum UTF-8 message bytes returned per log page.", "integer", {
+    defaultValue: "262144",
+    minimum: 1,
+    maximum: 1024 * 1024
+  }),
   field("operationTimeoutMillis", "Request timeout", "Provider request timeout in milliseconds.", "integer", {
     defaultValue: "30000",
     minimum: 1_000,
@@ -184,7 +197,10 @@ const jiraFields = [
   field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
     defaultValue: "api-token"
   }),
-  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", {
+    required: false,
+    scope: "credential"
+  }),
   field("email", "Atlassian email", "Email paired with the Jira API token.", "text", {
     scope: "credential",
     required: false
@@ -214,7 +230,10 @@ const confluenceFields = [
   field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
     defaultValue: "api-token"
   }),
-  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", {
+    required: false,
+    scope: "credential"
+  }),
   field("email", "Atlassian email", "Email paired with the Confluence API token.", "text", {
     scope: "credential",
     required: false
@@ -259,10 +278,10 @@ const clockifyFields = [
   })
 ]
 
-const entry = (
+const entry = <UnparsedInput>(
   identity: FirstPartyServiceIdentity,
   configurationFields: ReadonlyArray<PluginServiceCatalogField>,
-  rawDescriptor: unknown,
+  rawDescriptor: UnparsedInput,
   validatesSetup: FirstPartyServiceCatalogEntry["validatesSetup"]
 ): FirstPartyServiceCatalogEntry => ({
   metadata: { ...identity, configurationFields },

@@ -71,7 +71,7 @@ const MIME_BY_EXTENSION: ReadonlyMap<string, StaticAssetMimeType> = new Map([
 ])
 
 /** Static asset initialization failed closed. */
-export class StaticAssetStoreError extends Schema.TaggedErrorClass<StaticAssetStoreError>()(
+export class StaticAssetStoreError extends Schema.TaggedError<StaticAssetStoreError>()(
   "StaticAssetStoreError",
   {
     reason: Schema.Literals([

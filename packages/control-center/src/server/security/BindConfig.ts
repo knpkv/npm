@@ -54,7 +54,7 @@ const BindConfigInput = Schema.Struct({
 })
 
 /** A decoded bind configuration is invalid or would expose an ambiguous endpoint. */
-export class BindConfigError extends Schema.TaggedErrorClass<BindConfigError>()("BindConfigError", {
+export class BindConfigError extends Schema.TaggedError<BindConfigError>()("BindConfigError", {
   reason: Schema.Literals([
     "invalid-input",
     "invalid-origin",
@@ -134,7 +134,7 @@ const isIpAddress = (address: string): boolean => {
 const unique = <Value extends string>(values: ReadonlyArray<Value>): Array<Value> => Array.from(new Set(values))
 
 /** Decode loopback-first bind configuration and reject ambiguous LAN exposure. */
-export const decodeBindConfig = Effect.fn("BindConfig.decode")(function*(input: unknown) {
+export const decodeBindConfig = Effect.fn("BindConfig.decode")(function*<UnparsedInput>(input: UnparsedInput) {
   const decoded = yield* Schema.decodeUnknownEffect(BindConfigInput)(input).pipe(
     Effect.mapError(() => new BindConfigError({ reason: "invalid-input" }))
   )

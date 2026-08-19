@@ -12,11 +12,20 @@ export interface PluginRuntimeScope {
   readonly pluginConnectionId: PluginConnectionId
 }
 
+/** Safe proposal surface and exact runtime generation held under one scoped lease. */
+export interface PluginActionProposalLease {
+  readonly context: Context.Context<PluginConnection>
+  readonly runtimeAuthorityToken: string
+}
+
 /** Public projection of one cached runtime; no executor service can escape this context. */
 export interface PluginConnectionMapV1 {
   readonly contextEffect: (
     scope: PluginRuntimeScope
   ) => Effect.Effect<Context.Context<PluginConnection>, PluginFailure, Scope.Scope>
+  readonly proposalContextEffect?: (
+    scope: PluginRuntimeScope
+  ) => Effect.Effect<PluginActionProposalLease, PluginFailure, Scope.Scope>
   readonly invalidate: (scope: PluginRuntimeScope) => Effect.Effect<void>
 }
 

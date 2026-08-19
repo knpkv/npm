@@ -8,10 +8,18 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import {
   AgentModelId,
+  type AgentProviderCatalog,
   DurableAgentProviderId,
+  PublishedReviewComment,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
-  ReleaseAgentThreadCursor
+  PullRequestReviewThreadPage,
+  ReleaseAgentThreadCursor,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId,
+  ReviewSuggestionPublicationAuthorityBinding,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -24,6 +32,7 @@ import {
   CreatePluginConnectionResponse,
   PluginConfiguration,
   PluginConfigurationKey,
+  PluginConnectionAdministration,
   PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginSynchronizationState,
@@ -37,30 +46,52 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
+import {
+  workspaceSettingsEtag,
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision
+} from "../../src/api/workspaceSettings.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import type { GovernedActionState } from "../../src/domain/governedAction/index.js"
 import {
   AgentId,
   EntityId,
   EventCursor,
   FollowedResourceId,
+  GovernedActionId,
   JobId,
   PluginConnectionId,
   ProviderAccountId,
+  PrReviewSuggestionRevisionId,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
   ReleaseId,
   ShareId,
-  WorkspaceId
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
-import { PrReviewSubject } from "../../src/domain/prReview.js"
+import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionOperatorAuthor,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence,
+  PrReviewSuggestionValidated
+} from "../../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
+import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  ApplicationInvalidRequest,
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -71,7 +102,8 @@ import {
   ReleaseAgentJobs,
   ReleaseAgentTurns,
   TimelineExportAudits,
-  TimelineReads
+  TimelineReads,
+  WorkspaceSettingsAdministration
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
 import {
@@ -81,12 +113,21 @@ import {
   pluginHandlersLayer,
   portfolioHandlersLayer,
   shareHandlersLayer,
-  timelineHandlersLayer
+  timelineHandlersLayer,
+  workspaceSettingsHandlersLayer
 } from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
 } from "../../src/server/api/LiveStreamAdmission.js"
+import {
+  ClockifyActionSubmissionError,
+  ClockifyActionSubmissions
+} from "../../src/server/application/clockifyActionSubmissions.js"
+import {
+  ReleasePublicationSubmissionError,
+  ReleasePublicationSubmissions
+} from "../../src/server/application/releasePublicationSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -181,6 +222,7 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
   }
 })
 const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  clockifyApproval: null,
   entity: {
     canonicalReleaseId: null,
     owners: [],
@@ -215,6 +257,7 @@ const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+const reviewerSession = SessionSummary.make({ ...session, permission: "reviewer" })
 const agentOwnerSession = SessionSummary.make({
   ...session,
   actor: {
@@ -365,8 +408,17 @@ const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
 })
 
 const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
+  thread: () => Effect.die("not used"),
   current: () => Effect.die("not used"),
-  enqueue: () => Effect.die("not used")
+  enqueue: () => Effect.die("not used"),
+  cancel: () => Effect.die("not used"),
+  extendBudget: () => Effect.die("not used"),
+  revisions: () => Effect.die("not used"),
+  editSuggestion: () => Effect.die("not used"),
+  targetSuggestion: () => Effect.die("not used"),
+  dismissSuggestion: () => Effect.die("not used"),
+  previewPublication: () => Effect.die("not used"),
+  publishSuggestion: () => Effect.die("not used")
 })
 
 const agentLayer = Layer.mergeAll(
@@ -425,6 +477,313 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("keeps governed settings private while sharing presentation with a reviewer", () =>
+    Effect.gen(function*() {
+      const reviewerMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, reviewerSession)
+      })
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = WorkspaceSettingsReadModel.make({
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          presentation: {
+            defaultLanding: "active-work",
+            density: "compact"
+          }
+        },
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(reviewerMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        const governed = yield* client.workspaceSettings.read().pipe(Effect.result)
+        const presentation = yield* client.workspaceSettings.readPresentation()
+        return { governed, presentation }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          reviewerMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assertForbidden(result.governed)
+      assert.deepStrictEqual(result.presentation, {
+        workspaceId: session.workspaceId,
+        revision,
+        presentation: {
+          defaultLanding: "active-work",
+          density: "compact"
+        }
+      })
+      assert.strictEqual(yield* Ref.get(reads), 1)
+    }))
+
+  it.effect("admits lazy settings initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["workspaceSettings"])
+        const accepted = yield* client.workspaceSettings.read()
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.workspaceSettings.read().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.accepted.revision, revision)
+      assert.strictEqual(yield* Ref.get(reads), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
+  it.effect("derives workspace-settings mutation attribution from the owner session", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const settings = Layer.succeed(WorkspaceSettingsAdministration, {
+        read: () => Effect.succeed(readModel),
+        update: (input) =>
+          Ref.set(received, input).pipe(
+            Effect.as({
+              ...readModel,
+              revision: WorkspaceSettingsRevision.make(2),
+              etag: workspaceSettingsEtag(WorkspaceSettingsRevision.make(2)),
+              settings: input.request.settings,
+              updatedByPersonId: input.session.actor._tag === "human"
+                ? input.session.actor.personId
+                : null
+            })
+          )
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(settings),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const mutationId = WorkspaceSettingsMutationId.make(
+        "01890f6f-6d6a-7cc0-98d2-000000000191"
+      )
+      const candidate = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          minimumConfidencePercent: 91
+        }
+      }
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        return yield* client.workspaceSettings.update({
+          payload: {
+            mutationId,
+            expectedRevision: revision,
+            settings: candidate,
+            acknowledgedGovernedSections: []
+          }
+        })
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.revision, 2)
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        session,
+        request: {
+          mutationId,
+          expectedRevision: revision,
+          settings: candidate,
+          acknowledgedGovernedSections: []
+        }
+      })
+    }))
+
+  it.effect("submits an exact-revision Clockify approval through the authenticated product boundary", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const applications = Layer.mergeAll(
+        deliveryGraphApplicationLayer,
+        Layer.succeed(ClockifyActionSubmissions, {
+          submit: (input) => Ref.set(received, input).pipe(Effect.as({ actionId, state: "succeeded" }))
+        })
+      )
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(applications)
+      )
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, { actionId, state: "succeeded" })
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        entityId: sharedEntityId,
+        request: {
+          _tag: "record-approval",
+          expectedRevision,
+          decision: "approved",
+          rationale: "Reviewed against the delivery record"
+        }
+      })
+    }))
+
+  it.effect("maps Clockify submission failures through the documented HTTP contract", () =>
+    Effect.gen(function*() {
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const request = Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      })
+      const attempt = (reason: ClockifyActionSubmissionError["reason"]) => {
+        const applications = Layer.mergeAll(
+          deliveryGraphApplicationLayer,
+          Layer.succeed(ClockifyActionSubmissions, {
+            submit: () => Effect.fail(new ClockifyActionSubmissionError({ reason }))
+          })
+        )
+        const handler = deliveryGraphHandlersLayer.pipe(
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(applications)
+        )
+        return request.pipe(
+          Effect.provide([
+            NodeHttpServer.layerHttpServices,
+            mutationMiddlewareLayer,
+            sessionMiddlewareLayer,
+            handler
+          ]),
+          Effect.result
+        )
+      }
+
+      const conflict = yield* attempt("conflict")
+      const forbidden = yield* attempt("forbidden")
+      const invalid = yield* attempt("invalid-request")
+      const unavailable = yield* attempt("unavailable")
+      const missingService = yield* request.pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          deliveryGraphHandlersTestLayer
+        ]),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(conflict))
+      assert.isTrue(Result.isFailure(forbidden))
+      assert.isTrue(Result.isFailure(invalid))
+      assert.isTrue(Result.isFailure(unavailable))
+      assert.isTrue(Result.isFailure(missingService))
+      if (
+        Result.isFailure(conflict) &&
+        Result.isFailure(forbidden) &&
+        Result.isFailure(invalid) &&
+        Result.isFailure(unavailable) &&
+        Result.isFailure(missingService)
+      ) {
+        assert.strictEqual(conflict.failure._tag, "ConflictApiError")
+        assert.strictEqual(forbidden.failure._tag, "ForbiddenApiError")
+        assert.strictEqual(invalid.failure._tag, "InvalidRequestApiError")
+        assert.strictEqual(unavailable.failure._tag, "ServiceUnavailableApiError")
+        assert.strictEqual(missingService.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("creates an exact share from session-derived human owner authority", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<
@@ -971,6 +1330,138 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result, expected)
     }))
 
+  it.effect("routes account editing and credential recovery through owner-scoped administration handlers", () =>
+    Effect.gen(function*() {
+      const connection = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        pluginConnectionId,
+        providerAccountId,
+        followedResourceId: null,
+        providerId: "codecommit",
+        displayName: "Payments repository",
+        revision: 4,
+        isEnabled: true,
+        supportsSynchronization: false,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const configured = Schema.decodeUnknownSync(PluginConfiguration)({
+        pluginConnectionId,
+        revision: 7,
+        values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+        connection: Schema.encodeSync(PluginConnectionSummary)(connection),
+        configuration: Schema.encodeSync(PluginConfiguration)(configured),
+        metadata: {
+          pluginConnectionId,
+          pluginId: "dev.knpkv.codecommit",
+          contractVersion: { major: 1, minor: 0, patch: 0 },
+          adapterVersion: { major: 1, minor: 0, patch: 0 },
+          configurationFields: [],
+          capabilities: []
+        },
+        credentialFields: [],
+        permissions: [],
+        schedule: { mode: "unsupported", nextRunAt: null },
+        synchronization: null,
+        diagnostics: [{
+          code: "connection-health-unverified",
+          severity: "warning",
+          summary: "The connection has not produced a current health result.",
+          observedAt: "2026-07-14T10:03:00.000Z"
+        }]
+      })
+      const renamed = Schema.decodeUnknownSync(ProviderAccountSummary)({
+        providerAccountId,
+        providerFamily: "aws",
+        providerImmutableId: "123456789012",
+        displayName: "Production AWS",
+        revision: 3,
+        resources: []
+      })
+      const test = Schema.decodeUnknownSync(PluginConnectionTestResult)({
+        _tag: "healthy",
+        pluginConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:04:00.000Z",
+        latencyMilliseconds: 12,
+        identity: {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Production AWS",
+          providerImmutableId: "123456789012"
+        }
+      })
+      const plugins = PluginAdministration.of({
+        administration: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(administration)
+            : Effect.die("administration read crossed its authenticated scope"),
+        patchProviderAccount: ({ patch, providerAccountId: requestedAccountId, workspaceId: requestedWorkspaceId }) =>
+          requestedWorkspaceId === session.workspaceId &&
+            requestedAccountId === providerAccountId &&
+            patch.expectedRevision === 2 &&
+            patch.displayName === "Production AWS"
+            ? Effect.succeed(renamed)
+            : Effect.die("account patch crossed its authenticated scope"),
+        reauthorizeConnection: ({ credentials, expectedRevision, pluginConnectionId: requestedId, workspaceId }) =>
+          workspaceId === session.workspaceId &&
+            requestedId === pluginConnectionId &&
+            expectedRevision === 7 &&
+            credentials[0]?.key === "profile" &&
+            credentials[0]?.value === "rotated"
+            ? Effect.succeed({ connection, configuration: { ...configured, revision: 8 }, test })
+            : Effect.die("reauthorization crossed its authenticated scope"),
+        revokeConnection: ({ expectedRevision, pluginConnectionId: requestedId, workspaceId }) =>
+          workspaceId === session.workspaceId && requestedId === pluginConnectionId && expectedRevision === 8
+            ? Effect.succeed({ ...connection, isEnabled: false, revision: 5 })
+            : Effect.die("revocation crossed its authenticated scope"),
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return {
+          administration: yield* client.plugins.administration({ params: { pluginConnectionId } }),
+          account: yield* client.plugins.patchProviderAccount({
+            params: { providerAccountId },
+            payload: { expectedRevision: 2, displayName: "Production AWS" }
+          }),
+          recovered: yield* client.plugins.reauthorizeConnection({
+            params: { pluginConnectionId },
+            payload: {
+              expectedRevision: 7,
+              credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
+            }
+          }),
+          revoked: yield* client.plugins.revokeConnection({
+            params: { pluginConnectionId },
+            payload: { expectedRevision: 8 }
+          })
+        }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.administration, administration)
+      assert.deepStrictEqual(result.account, renamed)
+      assert.strictEqual(result.recovered.configuration.revision, 8)
+      assert.isFalse(result.revoked.isEnabled)
+    }))
+
   it.effect("lets an approver read synchronization state without entering mutation authorization", () =>
     Effect.gen(function*() {
       const expected = Schema.decodeSync(PluginSynchronizationState)({
@@ -1384,7 +1875,7 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result.batch, { results: [{ _tag: "succeeded", response: expected }] })
     }))
 
-  it.effect("serves credential-scoped emails as redacted references while adapter values remain readable", () =>
+  it.effect("serves credential-scoped fields as redacted references while adapter values remain readable", () =>
     Effect.gen(function*() {
       const configuredAt = "2026-07-14T10:03:00.000Z"
       const jira = Schema.decodeUnknownSync(PluginConfiguration)({
@@ -1408,7 +1899,7 @@ describe("Control Center API handlers", () => {
       const codeCommit = Schema.decodeUnknownSync(PluginConfiguration)({
         pluginConnectionId: codeCommitPluginConnectionId,
         revision: 1,
-        values: [{ _tag: "text", key: "profile", value: "delivery" }],
+        values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
         updatedAt: configuredAt
       })
       const configurations = new Map([
@@ -1463,9 +1954,9 @@ describe("Control Center API handlers", () => {
         state: "configured"
       })
       assert.deepInclude(result.codeCommit.values, {
-        _tag: "text",
+        _tag: "secret-reference",
         key: PluginConfigurationKey.make("profile"),
-        value: "delivery"
+        state: "configured"
       })
     }))
 
@@ -1579,8 +2070,10 @@ describe("Control Center API handlers", () => {
       )
       yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
-        yield* client.timeline.exportCsv({ query: { actor: "agent", limit: 25 } })
-        yield* client.timeline.exportJson({ query: { limit: 10 } })
+        const csv = yield* client.timeline.exportCsv({ query: { actor: "agent", limit: 25 } })
+        const json = yield* client.timeline.exportJson({ query: { limit: 10 } })
+        yield* Stream.runDrain(csv)
+        yield* Stream.runDrain(json)
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -1654,19 +2147,33 @@ describe("Control Center API handlers", () => {
       testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const codePipelineReads = CodePipelineReads.of({
+      logs: () => Effect.die("not used"),
+      artifact: ({ request }) =>
+        Effect.succeed({
+          body: new Uint8Array(request.offset >= 9 ? [] : [1, 2, 3]),
+          contentLength: request.offset >= 9 ? 0 : 3,
+          filename: "BuildOutput.zip",
+          offset: request.offset,
+          totalBytes: request.offset === 0 ? 3 : 9
+        })
+    })
     const bind = await Effect.runPromise(decodeBindConfig({}))
     const requestContext = Context.empty().pipe(
       Context.add(Auth, authentication),
       Context.add(ApiBindConfiguration, bind),
+      Context.add(CodePipelineReads, codePipelineReads),
       Context.add(MediaReads, media),
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(CodePipelineReads, codePipelineReads),
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
@@ -1689,9 +2196,40 @@ describe("Control Center API handlers", () => {
           origin: "http://127.0.0.1:4173"
         }
       })
+    const artifactRequest = (offset: number) =>
+      new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `cc_session=${"ab".repeat(32)}`,
+          host: "127.0.0.1:4173",
+          origin: "http://127.0.0.1:4173"
+        },
+        body: JSON.stringify({
+          pluginConnectionId: codeCommitPluginConnectionId,
+          request: {
+            action: {
+              entity: {
+                entityType: "aws.codepipeline.action",
+                vendorImmutableId: "execution-1#action-1"
+              },
+              executionId: "execution-1",
+              actionExecutionId: "action-1",
+              expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+            },
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset,
+            length: 3
+          }
+        })
+      })
     try {
       const csvResponse = await webHandler.handler(request("csv"), requestContext)
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
+      const artifactResponse = await webHandler.handler(artifactRequest(3), requestContext)
+      const completeArtifactResponse = await webHandler.handler(artifactRequest(0), requestContext)
+      const exhaustedArtifactResponse = await webHandler.handler(artifactRequest(10), requestContext)
 
       assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
       assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")
@@ -1709,6 +2247,26 @@ describe("Control Center API handlers", () => {
         metadata: { eventCount: 0, eventLimit: 25, truncated: false },
         events: []
       })
+      assert.strictEqual(artifactResponse.headers.get("content-type"), "application/octet-stream")
+      assert.strictEqual(
+        artifactResponse.headers.get("content-disposition"),
+        "attachment; filename=\"BuildOutput.zip\""
+      )
+      assert.strictEqual(artifactResponse.headers.get("content-length"), "3")
+      assert.strictEqual(artifactResponse.headers.get("content-range"), "bytes 3-5/9")
+      assert.strictEqual(artifactResponse.status, 206)
+      assert.strictEqual(artifactResponse.headers.get("cache-control"), "private, no-store")
+      assert.strictEqual(artifactResponse.headers.get("x-content-type-options"), "nosniff")
+      assert.deepStrictEqual(new Uint8Array(await artifactResponse.arrayBuffer()), new Uint8Array([1, 2, 3]))
+      assert.strictEqual(completeArtifactResponse.status, 200)
+      assert.isNull(completeArtifactResponse.headers.get("content-range"))
+      assert.deepStrictEqual(
+        new Uint8Array(await completeArtifactResponse.arrayBuffer()),
+        new Uint8Array([1, 2, 3])
+      )
+      assert.strictEqual(exhaustedArtifactResponse.status, 416)
+      assert.strictEqual(exhaustedArtifactResponse.headers.get("content-range"), "bytes */9")
+      assert.strictEqual((await exhaustedArtifactResponse.arrayBuffer()).byteLength, 0)
     } finally {
       await webHandler.dispose()
     }
@@ -1840,6 +2398,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: (input) =>
@@ -1872,6 +2431,363 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.reply, "The release is waiting for approval.")
     }))
 
+  it.effect("keeps release-publication commands read-only until explicit confirmation", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const admissions = yield* Ref.make(0)
+      const submissions = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const publicationResults = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+          submit: (input) =>
+            Ref.update(submissions, (items) => [...items, input]).pipe(
+              Effect.as({ actionId, state: "succeeded" })
+            )
+        })),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          admitTurn: (input) =>
+            Ref.update(admissions, (count) => count + 1).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              })
+            ),
+          runTurn: (input) =>
+            Ref.update(publicationResults, (items) => [...items, input.publicationResult]).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "Publication request evaluated."
+              })
+            )
+        }))
+      )
+
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: {
+            history: [],
+            prompt: "Create a Jira release version after Jane approves it",
+            provider: "codex"
+          }
+        })
+        yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(yield* Ref.get(admissions), 0)
+      assert.strictEqual((yield* Ref.get(submissions)).length, 0)
+      assert.deepStrictEqual(yield* Ref.get(publicationResults), [undefined, undefined])
+    }))
+
+  it.effect("does not dispatch publications when release chat admission or generation fails", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const rejectedSubmissions = yield* Ref.make(0)
+      const rejectedHandler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+          submit: () =>
+            Ref.update(rejectedSubmissions, (count) => count + 1).pipe(
+              Effect.as({ actionId, state: "succeeded" })
+            )
+        })),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          admitTurn: () => Effect.fail(new ApplicationInvalidRequest()),
+          runTurn: (input) =>
+            Effect.succeed({
+              eventCursor: releaseSnapshot.eventCursor,
+              provider: input.provider,
+              release,
+              releaseId: release.releaseId,
+              reply: "Explicit publication confirmation is still required."
+            })
+        }))
+      )
+      const rejected = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        rejectedHandler
+      ]))
+
+      assert.isTrue(Result.isSuccess(rejected))
+      assert.strictEqual(yield* Ref.get(rejectedSubmissions), 0)
+
+      const publicationCalls = yield* Ref.make(0)
+      const recover = (state: GovernedActionState) => {
+        const failedGenerationHandler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: () =>
+              Ref.update(publicationCalls, (count) => count + 1).pipe(
+                Effect.as({ actionId, state })
+              )
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Jira release version", provider: "codex" }
+          }).pipe(Effect.result)
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          failedGenerationHandler
+        ]))
+      }
+
+      const states: ReadonlyArray<GovernedActionState> = ["succeeded", "failed", "unknown", "started"]
+      for (const state of states) {
+        const result = yield* recover(state)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "ServiceUnavailableApiError")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
+    }))
+
+  it.effect("never turns natural-language Confluence requests into publication writes", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const currentRelease = {
+        ...release,
+        releasePageAwareness: {
+          state: "current",
+          lastPublishedAt: session.lastSeenAt,
+          publicationActionId: actionId
+        }
+      } satisfies typeof release
+      const notPublishedRelease = {
+        ...release,
+        releasePageAwareness: {
+          state: "not-published",
+          lastPublishedAt: null
+        }
+      } satisfies typeof release
+      const publicationCalls = yield* Ref.make(0)
+      const attempt = (admittedRelease: typeof currentRelease | typeof notPublishedRelease) => {
+        const handler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: (input) =>
+              Effect.sync(() => assert.strictEqual(input.expectedReleaseUpdatedAt, admittedRelease.updatedAt)).pipe(
+                Effect.andThen(Ref.update(publicationCalls, (count) => count + 1)),
+                Effect.as({ actionId, state: "succeeded" })
+              )
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release: admittedRelease,
+                releaseId: admittedRelease.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release: admittedRelease,
+                releaseId: admittedRelease.releaseId,
+                reply: "Publication request evaluated."
+              })
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Confluence release page", provider: "codex" }
+          }).pipe(Effect.result)
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ]))
+      }
+
+      const rejected = yield* attempt(currentRelease)
+      assert.isTrue(Result.isSuccess(rejected))
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
+
+      const created = yield* attempt(notPublishedRelease)
+      assert.isTrue(Result.isSuccess(created))
+      assert.strictEqual(yield* Ref.get(publicationCalls), 0)
+    }))
+
+  it.effect("does not invoke release-publication submission errors from agent turns", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const attempt = (reason: ReleasePublicationSubmissionError["reason"]) => {
+        const handler = agentHandlersLayer.pipe(
+          Layer.provide(pullRequestReviewsLayer),
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(ServerLifecycle.layer),
+          Layer.provide(releaseAgentJobsLayer),
+          Layer.provide(Layer.succeed(ReleasePublicationSubmissions, {
+            submit: () => Effect.fail(new ReleasePublicationSubmissionError({ reason }))
+          })),
+          Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+            admitTurn: (input) =>
+              Effect.succeed({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                workspaceId: input.workspaceId
+              }),
+            runTurn: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
+          }))
+        )
+        return Effect.gen(function*() {
+          const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+          return yield* client.agent.turn({
+            params: { releaseId: release.releaseId },
+            payload: { history: [], prompt: "Create a Confluence release page", provider: "codex" }
+          }).pipe(Effect.result)
+        }).pipe(Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ]))
+      }
+
+      const conflict = yield* attempt("conflict")
+      assert.isTrue(Result.isFailure(conflict))
+      if (Result.isFailure(conflict)) {
+        assert.strictEqual(conflict.failure._tag, "ServiceUnavailableApiError")
+      }
+
+      const unavailable = yield* attempt("unavailable")
+      assert.isTrue(Result.isFailure(unavailable))
+      if (Result.isFailure(unavailable)) {
+        assert.strictEqual(unavailable.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
+  it.effect("admits release turns only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const turnCalls = yield* Ref.make(0)
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: (input) =>
+            Ref.update(turnCalls, (count) => count + 1).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "The release is waiting for approval."
+              })
+            )
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(turnCalls), 0)
+        const accepted = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this ship?", provider: "codex" }
+        })
+        assert.strictEqual(yield* Ref.get(turnCalls), 1)
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this still ship?", provider: "codex" }
+        }).pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.accepted.releaseId, release.releaseId)
+      assert.strictEqual(yield* Ref.get(turnCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("enqueues a durable agent job in the owner session workspace", () =>
     Effect.gen(function*() {
       const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
@@ -1889,6 +2805,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -1924,6 +2841,57 @@ describe("Control Center API handlers", () => {
       })
     }))
 
+  it.effect("admits lazy provider catalog initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const providerCalls = yield* Ref.make(0)
+      const catalog = {
+        providers: [{
+          providerId: DurableAgentProviderId.make("openai-compatible"),
+          models: [AgentModelId.make("review-model")],
+          capabilities: ["release-chat"],
+          health: "available"
+        }]
+      } satisfies AgentProviderCatalog
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        providers: () => Ref.update(providerCalls, (count) => count + 1).pipe(Effect.as(catalog)),
+        replay: () => Effect.die("not used")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(providerCalls), 0)
+        const accepted = yield* client.agent.providers()
+        assert.strictEqual(yield* Ref.get(providerCalls), 1)
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.providers().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.deepStrictEqual(result.accepted, catalog)
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("reads and enqueues immutable pull-request reviews in the authenticated workspace", () =>
     Effect.gen(function*() {
       const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
@@ -1935,8 +2903,101 @@ describe("Control Center API handlers", () => {
         baseRevision: "1".repeat(40),
         headRevision: "2".repeat(40)
       })
+      const suggestionId = PrReviewSuggestionId.make(
+        `sha256:${"4".repeat(64)}`
+      )
+      const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+        suggestionId,
+        state: "draft",
+        title: "Decode the response",
+        severity: "P2",
+        problem: "The response is persisted before decoding.",
+        impact: "Malformed output may reach durable state.",
+        evidence: {
+          path: "src/review.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "yield* persist(response)"
+        },
+        recommendation: "Decode the response before persistence.",
+        anchor: {
+          _tag: "line",
+          path: "src/review.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        },
+        relatedLocations: [],
+        confidence: {
+          level: "high",
+          reason: "The operation order is explicit."
+        }
+      })
+      const revisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"5".repeat(64)}`
+      )
+      const currentRevision = PrReviewSuggestionRevision.make({
+        revisionId,
+        sequence: PrReviewSuggestionRevisionSequence.make(1),
+        predecessorRevisionId: null,
+        sourceJobId: jobId,
+        subject,
+        suggestion,
+        validation: PrReviewSuggestionValidated.make({
+          reviewedHead: subject.headRevision,
+          validatingJobId: jobId,
+          sourceRevisionId: revisionId
+        }),
+        author: PrReviewSuggestionOperatorAuthor.make({
+          personId: sessionPersonId
+        }),
+        createdAt: session.lastSeenAt
+      })
+      const editedRevisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"6".repeat(64)}`
+      )
+      const editedRevision = PrReviewSuggestionRevision.make({
+        ...currentRevision,
+        revisionId: editedRevisionId,
+        sequence: PrReviewSuggestionRevisionSequence.make(2),
+        predecessorRevisionId: revisionId,
+        suggestion: PrReviewSuggestion.make({
+          ...suggestion,
+          title: "Decode every response"
+        })
+      })
+      const dismissedRevision = PrReviewSuggestionRevision.make({
+        ...editedRevision,
+        revisionId: PrReviewSuggestionRevisionId.make(`sha256:${"7".repeat(64)}`),
+        sequence: PrReviewSuggestionRevisionSequence.make(3),
+        predecessorRevisionId: editedRevisionId,
+        suggestion: PrReviewSuggestion.make({
+          ...editedRevision.suggestion,
+          state: "dismissed"
+        })
+      })
       const received = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
       const reviews = Layer.succeed(PullRequestReviews, {
+        thread: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(PullRequestReviewThreadPage.make({
+              events: [{
+                _tag: "operator-message",
+                eventSequence: ReleaseAgentThreadCursor.make(1),
+                jobId,
+                occurredAt: session.lastSeenAt,
+                prompt: "Focus on the persistence boundary."
+              }],
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(1)
+            }))
+          ),
         current: (input) =>
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(new PullRequestReviewNotStarted({ subject }))
@@ -1949,16 +3010,48 @@ describe("Control Center API handlers", () => {
                 jobId,
                 providerId: input.request.providerId,
                 model: input.request.model,
+                reviewProfile,
+                activity: { events: [], truncated: false },
                 requestedAt: session.lastSeenAt,
                 state: "queued"
               })
             )
-          )
+          ),
+        cancel: () => Effect.die("not used"),
+        extendBudget: () => Effect.die("not used"),
+        revisions: (input) =>
+          Effect.gen(function*() {
+            yield* Ref.update(received, (items) => [...items, input])
+            if (
+              input.beforeSequence !== null &&
+              input.beforeSequence > currentRevision.sequence
+            ) {
+              return yield* new ApplicationInvalidRequest()
+            }
+            return {
+              current: currentRevision,
+              revisions: [],
+              hasMore: false,
+              nextBeforeSequence: null
+            }
+          }),
+        editSuggestion: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(editedRevision)
+          ),
+        targetSuggestion: () => Effect.die("not used"),
+        dismissSuggestion: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(dismissedRevision)
+          ),
+        previewPublication: () => Effect.die("not used"),
+        publishSuggestion: () => Effect.die("not used")
       })
       const handler = agentHandlersLayer.pipe(
         Layer.provide(reviews),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -1966,15 +3059,75 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const current = yield* client.agent.pullRequestReview({ params: { entityId } })
+        const thread = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: { after: ReleaseAgentThreadCursor.make(0), limit: 12 }
+        })
+        const earlierThread = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: { before: ReleaseAgentThreadCursor.make(2), limit: 1 }
+        })
+        const conflictingCursors = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: {
+            after: ReleaseAgentThreadCursor.make(1),
+            before: ReleaseAgentThreadCursor.make(2),
+            limit: 1
+          }
+        }).pipe(Effect.result)
+        const revisions = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, jobId, suggestionId },
+          query: {
+            limit: PrReviewSuggestionRevisionPageSize.make(3)
+          }
+        })
+        const invalidRevisionCursor = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, jobId, suggestionId },
+          query: {
+            before: PrReviewSuggestionRevisionSequence.make(2),
+            limit: PrReviewSuggestionRevisionPageSize.make(3)
+          }
+        }).pipe(Effect.result)
+        const edited = yield* client.agent.editReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: currentRevision.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+              ...suggestion,
+              title: "Decode every response"
+            })
+          }
+        })
+        const dismissed = yield* client.agent.dismissReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: editedRevisionId,
+            expectedSequence: editedRevision.sequence,
+            reason: "false-positive"
+          }
+        })
         const accepted = yield* client.agent.enqueuePullRequestReview({
           params: { entityId },
           payload: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: reviewProfile.profileId,
+            prompt: "Re-check transaction ownership."
           }
         })
-        return { accepted, current }
+        return {
+          accepted,
+          conflictingCursors,
+          current,
+          dismissed,
+          earlierThread,
+          edited,
+          invalidRevisionCursor,
+          revisions,
+          thread
+        }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -1984,18 +3137,409 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
+      assert.strictEqual(result.revisions.current.revisionId, revisionId)
+      assert.isTrue(Result.isFailure(result.invalidRevisionCursor))
+      if (Result.isFailure(result.invalidRevisionCursor)) {
+        assert.strictEqual(
+          result.invalidRevisionCursor.failure._tag,
+          "InvalidRequestApiError"
+        )
+      }
+      assert.strictEqual(result.edited.revisionId, editedRevisionId)
+      assert.strictEqual(result.dismissed.suggestion.state, "dismissed")
+      assert.isTrue(Result.isFailure(result.conflictingCursors))
+      if (Result.isFailure(result.conflictingCursors)) {
+        assert.strictEqual(result.conflictingCursors.failure._tag, "InvalidRequestApiError")
+      }
+      assert.strictEqual(result.thread.events[0]?._tag, "operator-message")
+      assert.strictEqual(result.earlierThread.events[0]?._tag, "operator-message")
       assert.deepStrictEqual(yield* Ref.get(received), [
         { workspaceId: session.workspaceId, entityId },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          after: ReleaseAgentThreadCursor.make(0),
+          before: null,
+          limit: 12
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          after: null,
+          before: ReleaseAgentThreadCursor.make(2),
+          limit: 1
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(3)
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          beforeSequence: PrReviewSuggestionRevisionSequence.make(2),
+          limit: PrReviewSuggestionRevisionPageSize.make(3)
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          request: {
+            expectedRevisionId: revisionId,
+            expectedSequence: currentRevision.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+              ...suggestion,
+              title: "Decode every response"
+            })
+          },
+          session
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          request: {
+            expectedRevisionId: editedRevisionId,
+            expectedSequence: editedRevision.sequence,
+            reason: "false-positive"
+          },
+          session
+        },
         {
           workspaceId: session.workspaceId,
           entityId,
           request: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: reviewProfile.profileId,
+            prompt: "Re-check transaction ownership."
           }
         }
       ])
+    }))
+
+  it.effect("previews and publishes one exact review suggestion only through the human session", () =>
+    Effect.gen(function*() {
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000026")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000027")
+      const suggestionId = PrReviewSuggestionId.make(`sha256:${"5".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"6".repeat(64)}`
+      )
+      const publicationId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000028")
+      const subject = PrReviewSubject.make({
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: "1".repeat(40),
+        headRevision: "2".repeat(40)
+      })
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
+      const editableContent = ReviewSuggestionPublicationContent.make(
+        "Authorize before mutating.\n\n```suggestion\nyield* authorize()\nyield* mutate()\n```"
+      )
+      const publicationFooter = `— ${reviewProfile.label} · head ${
+        subject.headRevision.slice(0, 12)
+      } · operator ${sessionPersonId}`
+      const finalContent = ReviewSuggestionPublicationContent.make(
+        `${editableContent}\n\n${publicationFooter}`
+      )
+      const preview = new ReviewSuggestionPublicationPreview({
+        jobId,
+        suggestionId,
+        revisionId,
+        subject,
+        suggestionRevision: {
+          jobId,
+          suggestionId,
+          revisionId,
+          sequence: PrReviewSuggestionRevisionSequence.make(1),
+          reviewedHead: subject.headRevision
+        },
+        anchor: {
+          _tag: "line",
+          path: PrReviewPath.make("src/authorization.ts"),
+          line: 42,
+          relativeFileVersion: "AFTER"
+        },
+        editableContent,
+        editableContentMaximumLength: 10_100 - publicationFooter.length - 2,
+        finalContent,
+        publicationFooter,
+        replacement: "yield* authorize()\nyield* mutate()",
+        connectedIdentity: {
+          accountId: "123456789012",
+          arn: "arn:aws:iam::123456789012:user/local-operator"
+        },
+        authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+          `sha256:${"a".repeat(64)}`
+        ),
+        proposingAgent: reviewProfile,
+        publishingOperator: sessionPersonId
+      })
+      const receipt = Schema.decodeSync(PluginProviderReceiptV1)({
+        providerOperationId: PluginProviderOperationId.make("comment-42"),
+        status: "succeeded",
+        safeSummary: "Posted an inline pull-request comment",
+        observedAt: "2026-07-14T10:01:00.000Z"
+      })
+      const published = new PublishedReviewComment({
+        publicationId,
+        jobId,
+        suggestionId,
+        revisionId,
+        subject,
+        suggestionRevision: preview.suggestionRevision,
+        anchor: preview.anchor,
+        content: finalContent,
+        connectedIdentity: preview.connectedIdentity,
+        proposingAgent: reviewProfile,
+        publishingOperator: sessionPersonId,
+        receipt,
+        publishedAt: session.lastSeenAt
+      })
+      const received = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const reviews = Layer.succeed(PullRequestReviews, {
+        thread: () => Effect.die("not used"),
+        current: () => Effect.die("not used"),
+        enqueue: () => Effect.die("not used"),
+        cancel: () => Effect.die("not used"),
+        extendBudget: () => Effect.die("not used"),
+        revisions: () => Effect.die("not used"),
+        editSuggestion: () => Effect.die("not used"),
+        targetSuggestion: () => Effect.die("not used"),
+        dismissSuggestion: () => Effect.die("not used"),
+        previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),
+        publishSuggestion: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(published))
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const publicationPreview = yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
+        })
+        const publication = yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          }
+        })
+        return { publication, publicationPreview }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+      const approverMiddleware = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const approverHandler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(approverMiddleware),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("not used")
+        }))
+      )
+      const rejected = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddleware,
+        approverHandler
+      ]))
+
+      assert.deepStrictEqual(result.publicationPreview, preview)
+      assert.deepStrictEqual(result.publication, published)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ForbiddenApiError")
+      }
+      assert.deepStrictEqual(yield* Ref.get(received), [
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          revisionId,
+          publishingOperator: sessionPersonId
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          request: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          },
+          session
+        }
+      ])
+    }))
+
+  it.effect("rejects authority-bearing review-suggestion operations after server drain begins", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const authorityBearingCalls = yield* Ref.make(0)
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000025")
+      const suggestionId = PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(`sha256:${"5".repeat(64)}`)
+      const sequence = PrReviewSuggestionRevisionSequence.make(1)
+      const edit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+        title: "Decode the response",
+        severity: "P2",
+        problem: "The response is persisted before decoding.",
+        impact: "Malformed output may reach durable state.",
+        evidence: {
+          path: "src/review.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "yield* persist(response)"
+        },
+        recommendation: "Decode the response before persistence.",
+        confidence: {
+          level: "high",
+          reason: "The operation order is explicit."
+        },
+        relatedLocations: [],
+        anchor: {
+          _tag: "line",
+          path: "src/review.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        }
+      })
+      const blockedMutation = Ref.update(authorityBearingCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.die("authority-bearing review operation crossed the drain guard"))
+      )
+      const reviews = Layer.succeed(PullRequestReviews, {
+        thread: () => Effect.die("not used"),
+        current: () => Effect.die("not used"),
+        enqueue: () => Effect.die("not used"),
+        cancel: () => blockedMutation,
+        extendBudget: () => blockedMutation,
+        revisions: () => Effect.die("not used"),
+        editSuggestion: () => blockedMutation,
+        targetSuggestion: () => blockedMutation,
+        dismissSuggestion: () => blockedMutation,
+        previewPublication: () => blockedMutation,
+        publishSuggestion: () => blockedMutation
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("not used")
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        yield* lifecycle.beginDrain
+        const edited = yield* client.agent.editReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence,
+            edit
+          }
+        }).pipe(Effect.result)
+        const dismissed = yield* client.agent.dismissReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence,
+            reason: "other"
+          }
+        }).pipe(Effect.result)
+        const previewed = yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
+        }).pipe(Effect.result)
+        const published = yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent: ReviewSuggestionPublicationContent.make("Decode before persistence."),
+            authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+              `sha256:${"a".repeat(64)}`
+            )
+          }
+        }).pipe(Effect.result)
+        return { dismissed, edited, previewed, published }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result.edited))
+      if (Result.isFailure(result.edited)) {
+        assert.strictEqual(result.edited.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.dismissed))
+      if (Result.isFailure(result.dismissed)) {
+        assert.strictEqual(result.dismissed.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.previewed))
+      if (Result.isFailure(result.previewed)) {
+        assert.strictEqual(result.previewed.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.published))
+      if (Result.isFailure(result.published)) {
+        assert.strictEqual(result.published.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.strictEqual(yield* Ref.get(authorityBearingCalls), 0)
     }))
 
   it.effect("returns only the redacted agent provider catalog to an owner", () =>
@@ -2017,6 +3561,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2071,6 +3616,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2113,6 +3659,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2151,6 +3698,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("watcher reached the local agent runtime")
@@ -2191,6 +3739,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2394,7 +3943,8 @@ describe("Control Center API handlers", () => {
         Context.add(PluginAdministration, plugins),
         Context.add(LiveEvents, trackedLiveEvents)
       )
-      const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+      const webHandlerLayer = controlCenterApiLayer.pipe(
+        Layer.provideMerge(HttpServer.layerServices),
         Layer.provide(
           Layer.mergeAll(
             Layer.succeed(Auth, authentication),
@@ -2479,7 +4029,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -2589,7 +4140,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, streamAuthentication),
@@ -2691,7 +4243,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -2740,6 +4293,18 @@ describe("Control Center API handlers", () => {
           new Request(`${origin}/api/v1/session/${session.sessionId}`, {
             method: "DELETE",
             headers: { ...headers, "x-csrf-token": recoveredCsrf }
+          }),
+          403
+        ],
+        [
+          new Request(`${origin}/api/v1/session/device-code`, {
+            method: "POST",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              "x-csrf-token": recoveredCsrf
+            },
+            body: JSON.stringify({ permission: "workspace-approver" })
           }),
           403
         ],
@@ -2811,12 +4376,16 @@ describe("Control Center API handlers", () => {
       revokeSession: () => Effect.die("not used")
     })
     const plugins = PluginAdministration.of({
+      administration: () => Effect.die("non-owner reached connection administration"),
       connectAndTest: () => Effect.die("non-owner reached connection creation"),
       configuration: () => Effect.die("not used"),
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.succeed([]),
       patchConfiguration: () => Effect.die("non-owner reached plugin mutation"),
+      patchProviderAccount: () => Effect.die("non-owner reached account mutation"),
+      reauthorizeConnection: () => Effect.die("non-owner reached credential replacement"),
+      revokeConnection: () => Effect.die("non-owner reached credential revocation"),
       setConnectionEnabled: () => Effect.die("non-owner reached connection enablement"),
       synchronizeConnection: () => Effect.die("non-owner reached manual synchronization"),
       testConnection: () => Effect.die("non-owner reached connection test")
@@ -2830,7 +4399,8 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
     )
-    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+    const webHandlerLayer = controlCenterApiLayer.pipe(
+      Layer.provideMerge(HttpServer.layerServices),
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
@@ -2896,6 +4466,45 @@ describe("Control Center API handlers", () => {
         requestContext
       )
       assert.strictEqual(synchronizationResponse.status, 403)
+      const recoveryRequests = [
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/reauthorize", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1, credentials: [{ key: "profile", value: "rotated" }] })
+        }),
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/revoke", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1 })
+        }),
+        new Request("http://127.0.0.1:4173/api/v1/plugins/accounts/01890f6f-6d6a-7cc0-98d2-000000000013", {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1, displayName: "Blocked rename" })
+        })
+      ]
+      for (const recoveryRequest of recoveryRequests) {
+        const recoveryResponse = await webHandler.handler(recoveryRequest, requestContext)
+        assert.strictEqual(recoveryResponse.status, 403)
+      }
       const createResponse = await webHandler.handler(
         new Request("http://127.0.0.1:4173/api/v1/plugins/connections", {
           method: "POST",

@@ -92,9 +92,11 @@ const releaseRaw = () => ({
 
 const ruleRaw = () => ({ ruleId: "delivery-v1", version: 1, definitions })
 
-const decodeEnvironment = (input: unknown) => Schema.decodeUnknownSync(EnvironmentReadinessCandidateMaterial)(input)
-const decodeRelease = (input: unknown) => Schema.decodeUnknownSync(ReleaseReadinessCandidateMaterial)(input)
-const decodeRule = (input: unknown) => Schema.decodeUnknownSync(ReadinessRuleMaterial)(input)
+const decodeEnvironment = <UnparsedInput>(input: UnparsedInput) =>
+  Schema.decodeUnknownSync(EnvironmentReadinessCandidateMaterial)(input)
+const decodeRelease = <UnparsedInput>(input: UnparsedInput) =>
+  Schema.decodeUnknownSync(ReleaseReadinessCandidateMaterial)(input)
+const decodeRule = <UnparsedInput>(input: UnparsedInput) => Schema.decodeUnknownSync(ReadinessRuleMaterial)(input)
 
 describe("readiness canonical digests", () => {
   it.effect("matches the canonical digest vectors", () =>

@@ -3,14 +3,15 @@ import { Button } from "../primitives/Button.js"
 import { StateLabel, type RlyStateTone } from "../primitives/StateLabel.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import styles from "./AgentJob.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
 const requireSlot = (value: ReactNode, label: string): void => {
-  if (value === undefined || value === null || typeof value === "boolean") {
+  if (value === undefined || value === null || Predicate.isBoolean(value)) {
     throw new Error(`${label} must contain renderable content`)
   }
-  if (typeof value === "string") requireText(value, label)
+  if (Predicate.isString(value)) requireText(value, label)
 }
 
 export type RlyAgentJobState = "queued" | "running" | "cancel-requested" | "succeeded" | "failed" | "cancelled"
@@ -58,14 +59,14 @@ export type AgentJobProps = Omit<ComponentPropsWithRef<"article">, "aria-label" 
     readonly cancelLabel?: string
   }
 
-const statePresentation: Readonly<Record<RlyAgentJobState, { label: string; tone: RlyStateTone }>> = {
+const statePresentation = {
   queued: { label: "Queued", tone: "neutral" },
   running: { label: "Running", tone: "progress" },
   "cancel-requested": { label: "Cancel requested", tone: "caution" },
   succeeded: { label: "Succeeded", tone: "positive" },
   failed: { label: "Failed", tone: "critical" },
   cancelled: { label: "Cancelled", tone: "neutral" }
-}
+} satisfies Readonly<Record<RlyAgentJobState, { label: string; tone: RlyStateTone }>>
 
 const validateProgress = (progress: number | undefined): void => {
   if (progress !== undefined && (!Number.isFinite(progress) || progress < 0 || progress > 100)) {

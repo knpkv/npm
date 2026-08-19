@@ -3,6 +3,7 @@ import { StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import { Link, Navigate, useLocation, useOutletContext } from "react-router"
 
+import { portfolioSessionBoundaryPresentation } from "../portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import type { WorkspaceReleaseOutletContext } from "./WorkspaceReleaseLayout.js"
 import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
@@ -52,6 +53,9 @@ const ReleaseSelector = ({
 export const ActiveWorkPage = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const location = useLocation()
+  if (context.controller.state._tag === "session") {
+    return <StatePanel {...portfolioSessionBoundaryPresentation(context.controller.state.reason)} />
+  }
   if (context.controller.state._tag !== "ready") {
     return (
       <StatePanel

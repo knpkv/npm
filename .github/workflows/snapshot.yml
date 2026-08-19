@@ -20,15 +20,37 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
+      - name: Build
+        run: pnpm build
+
+  publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository_owner == 'knpkv'
+    name: Publish snapshot
+    needs: snapshot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: refs/heads/main
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
       - name: Build
         run: pnpm build
       - name: Publish
-        run: sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*
+        run: sfw pnpm dlx pkg-pr-new@0.0.87 publish --pnpm --comment=off ./packages/*

@@ -184,5 +184,7 @@ export const GovernedActionAuditEventRow = Schema.Struct({
 })
 
 /** Decode an untrusted driver result without allowing malformed rows into repository logic. */
-export const decodeGovernedActionRows = <SchemaType extends Schema.Top>(schema: SchemaType, rows: unknown) =>
-  Schema.decodeUnknownEffect(Schema.Array(schema))(rows)
+export const decodeGovernedActionRows = <SchemaType extends Schema.Top, UnparsedInput>(
+  schema: SchemaType,
+  rows: UnparsedInput
+) => Schema.decodeUnknownEffect(Schema.Array(schema))(rows)

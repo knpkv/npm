@@ -15,12 +15,27 @@ import type { DetectedProfile, TuiConfig } from "./internal.js"
 import { ConfigPaths } from "./internal.js"
 import { makeLoad } from "./load.js"
 import { makeReset } from "./reset.js"
+import { validateSandboxConfig } from "./SandboxPolicy.js"
 import { save } from "./save.js"
 import type { ConfigValidationResult } from "./validate.js"
 import { validate } from "./validate.js"
 
+export { reviewProfileSkillLimit } from "../ReviewProfile.js"
 export { discoverAwsProfiles } from "./detectProfiles.js"
-export { AccountConfig, defaultSandboxConfig, DetectedProfile, SandboxConfig, TuiConfig } from "./internal.js"
+export {
+  AccountConfig,
+  defaultReviewConfig,
+  defaultReviewProfiles,
+  defaultSandboxConfig,
+  defaultSandboxImage,
+  DetectedProfile,
+  ReviewConfig,
+  ReviewKind,
+  ReviewProfileConfig,
+  SandboxConfig,
+  TuiConfig
+} from "./internal.js"
+export { sandboxVolumeRoot, validateSandboxConfig } from "./SandboxPolicy.js"
 export { ConfigValidationResult } from "./validate.js"
 
 // ---------------------------------------------------------------------------
@@ -96,7 +111,15 @@ export const ConfigServiceLive = Layer.effect(
 
     return {
       load: provide(load),
-      save: (config) => provide(save(config)).pipe(Effect.tap(() => hub.publish({ _tag: "Config" }))),
+      save: (config) =>
+        provide(
+          Effect.gen(function*() {
+            const paths = yield* ConfigPaths
+            const homePath = yield* paths.homePath
+            yield* validateSandboxConfig(config.sandbox, homePath)
+            yield* save(config)
+          })
+        ).pipe(Effect.tap(() => hub.publish({ _tag: "Config" }))),
       detectProfiles: provide(detectProfilesLive),
       getConfigPath: provide(ConfigPaths.pipe(Effect.flatMap((p) => p.configPath))),
       backup: provide(backup),

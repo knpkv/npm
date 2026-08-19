@@ -1,5 +1,5 @@
 import type { FileSystem as FileSystemType, Scope } from "effect"
-import { Context, Crypto, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Result, Schema } from "effect"
+import { Cause, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Result, Schema } from "effect"
 
 import { SecretRef } from "./SecretRef.js"
 import {
@@ -61,6 +61,15 @@ export interface SecretLease {
   readonly toString: () => "[REDACTED]"
 }
 
+const makeSecretLease = (bytes: Uint8Array): SecretLease => ({
+  byteLength: bytes.byteLength,
+  withBytes: <A, E, R>(
+    use: (bytes: Uint8Array) => Effect.Effect<A, E, R>
+  ): Effect.Effect<A, E, R> => use(bytes),
+  toJSON: () => "[REDACTED]",
+  toString: () => "[REDACTED]"
+})
+
 interface SecretStoreService {
   readonly create: (value: Uint8Array) => Effect.Effect<SecretRef, SecretStoreError>
   /** Publish a replacement generation while retaining the old reference for active leases. */
@@ -87,10 +96,10 @@ interface PinnedRoot {
   readonly assertIdentity: Effect.Effect<void, SecretProtectionError>
 }
 
-const decodeInput = <S extends Schema.ConstraintDecoder<unknown>>(
+const decodeInput = <S extends Schema.ConstraintDecoder<unknown>, UnparsedInput>(
   operation: string,
   schema: S,
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<S["Type"], SecretStoreInputError> => {
   const result = Schema.decodeUnknownResult(schema)(input)
   return Result.isSuccess(result)
@@ -309,7 +318,7 @@ export const makeSecretStore: (
 
   yield* verifyProcessOwnsRoot()
 
-  const decodeRef = (operation: string, input: unknown) => decodeInput(operation, SecretRef, input)
+  const decodeRef = <UnparsedInput>(operation: string, input: UnparsedInput) => decodeInput(operation, SecretRef, input)
 
   const checkedValue = Effect.fn("SecretStore.checkedValue")(function*(value: Uint8Array) {
     if (!Predicate.isUint8Array(value)) {
@@ -429,7 +438,9 @@ export const makeSecretStore: (
 
     const retained = yield* Ref.make(false)
     const cleanup = removeOpenedSecretIfStillBound(root, opened.success, destination).pipe(
-      Effect.catchCause(() => Effect.void)
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause) || Cause.hasDies(cause) ? Effect.failCause(cause) : Effect.void
+      )
     )
     yield* Effect.addFinalizer(() =>
       Ref.get(retained).pipe(
@@ -544,12 +555,7 @@ export const makeSecretStore: (
       offset += read
     }
     yield* root.assertIdentity
-    return {
-      byteLength: size,
-      withBytes: (use) => use(bytes),
-      toJSON: () => "[REDACTED]",
-      toString: () => "[REDACTED]"
-    } satisfies SecretLease
+    return makeSecretLease(bytes)
   })
 
   return { create, rotate, remove, resolve }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape, TimeEntry } from "@knpkv/clockify-api-client"
+import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Duration from "effect/Duration"
@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
+import type * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
@@ -48,7 +49,7 @@ const resetCaptures = () => {
   stoppedTimers = []
 }
 
-const paramsRecord = (value: unknown): Record<string, unknown> => {
+const paramsRecord = <UnparsedInput>(value: UnparsedInput): Record<string, Schema.Json> => {
   if (!Predicate.isObject(value)) {
     throw new Error("Expected captured params to be a record")
   }
@@ -59,7 +60,7 @@ const makeTimeEntry = (id: string, description: string, startedAt: Date, project
   id,
   description,
   billable: true,
-  ...(projectId ? { projectId } : {}),
+  ...(projectId && { projectId }),
   userId: USER_ID,
   workspaceId: WORKSPACE_ID,
   timeInterval: { start: startedAt.toISOString() },
@@ -68,7 +69,7 @@ const makeTimeEntry = (id: string, description: string, startedAt: Date, project
   isLocked: false
 })
 
-const mockClockify: ClockifyApiClientShape = {
+const mockClockify: ClockifyApiClientContract = {
   getUser: () =>
     Effect.succeed({
       id: USER_ID,
@@ -259,7 +260,7 @@ const TestLayer = timerLayer.pipe(
 
 // Build a TimerService layer with overridden Clockify / HttpClient / JiraAuth mocks.
 const makeTestLayer = (
-  clockify: ClockifyApiClientShape = mockClockify,
+  clockify: ClockifyApiClientContract = mockClockify,
   httpLayer: Layer.Layer<HttpClient.HttpClient> = MockHttpClientLayer,
   jiraAuthLayer: Layer.Layer<JiraAuth> = MockJiraAuthLayer
 ) =>
@@ -412,7 +413,7 @@ describe("TimerService", () => {
         "proj-id"
       )
 
-      const clockifyWithRunning: ClockifyApiClientShape = {
+      const clockifyWithRunning: ClockifyApiClientContract = {
         ...mockClockify,
         getRunningTimer: () => Effect.succeed(runningEntry),
         getProjects: () =>
@@ -451,7 +452,7 @@ describe("TimerService", () => {
     it.effect("parses colon format KEY: summary", () => {
       const runningEntry = makeTimeEntry("ext-2", "PROJ-99: Review PR", new Date("2025-01-01T10:00:00Z"))
 
-      const clockifyWithRunning: ClockifyApiClientShape = {
+      const clockifyWithRunning: ClockifyApiClientContract = {
         ...mockClockify,
         getRunningTimer: () => Effect.succeed(runningEntry)
       }

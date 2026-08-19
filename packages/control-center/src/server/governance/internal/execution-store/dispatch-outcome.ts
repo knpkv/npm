@@ -54,6 +54,15 @@ export const dispatchInboxOutcomeObservedAt = (
     ? outcome.observedAt
     : outcome.receipt.observedAt
 
+/** Whether a trusted local action reports its immutable authorization observation. */
+export const dispatchInboxOutcomeUsesAuthorizationObservation = (
+  outcome: DispatchInboxOutcome
+): boolean =>
+  !isLocalUnknown(outcome) &&
+  outcome._tag === "confirmed" &&
+  outcome.receipt.status !== "accepted" &&
+  outcome.receipt.observationBasis === "authorization"
+
 /** Reconstruct the exact lifecycle command represented by one dispatch-side inbox outcome. */
 export const dispatchInboxOutcomeCommand = (
   result: DispatchInboxOutcome

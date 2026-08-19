@@ -4,24 +4,46 @@ import {
   DiffWorkbench,
   type RlyDiffFile,
   type RlyDiffFileContent,
+  type RlyDiffFindingFilter,
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
-import type { RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
+import type {
+  RlyDiffCodeAnnotation,
+  RlyDiffCodeItem,
+  RlyDiffRendererGeneration,
+  RlyDiffCodeViewHandle,
+  RlyDiffCodeViewProps
+} from "@knpkv/rly/diff"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from "react"
+import { forwardRef, lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
+import type { PrReviewSuggestion, PrReviewSuggestionState } from "../../domain/prReview.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
+import styles from "./WorkspacePullRequestDiff.module.css"
 
-const BoundedDiffCodeView = lazy(async () => {
-  const module = await import("@knpkv/rly/diff/bounded")
-  return { default: module.BoundedDiffCodeView }
+const CompleteDiffCodeView = lazy(async () => {
+  const module = await import("@knpkv/rly/diff")
+  const Viewer = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>((props, ref): ReactElement => (
+    <module.DiffWorkerProvider poolSize={2}>
+      <module.DiffCodeView {...props} ref={ref} />
+    </module.DiffWorkerProvider>
+  ))
+  return { default: Viewer }
+})
+const DiffLineFocus = lazy(async () => {
+  const module = await import("./DiffLineFocus.js")
+  return { default: module.DiffLineFocus }
+})
+const ReviewSuggestionOverview = lazy(async () => {
+  const module = await import("./ReviewSuggestionOverview.js")
+  return { default: module.ReviewSuggestionOverview }
 })
 
 export interface WorkspacePullRequestDiffScope {
@@ -91,8 +113,22 @@ type InventoryLoadState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly inventory: CompleteDiffInventory }
 
+type SuggestionSeverityFilter = "all" | PrReviewSuggestion["severity"]
+type SuggestionStateFilter = "all" | PrReviewSuggestionState
+
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
+const matchesFindingFilter = (suggestion: PrReviewSuggestion, filter: RlyDiffFindingFilter): boolean => {
+  switch (filter) {
+    case "all":
+    case "agent":
+      return true
+    case "human":
+      return false
+    case "unresolved":
+      return suggestion.state !== "dismissed" && suggestion.state !== "resolved"
+  }
+}
 
 const explicitContent = (entry: CompleteDiffInventoryEntry): RlyDiffFileContent =>
   entry.binary
@@ -117,6 +153,19 @@ const unavailableContent = (reason: NonNullable<CompleteDiffContentRange["unavai
       return { state: "unavailable", reason: "CodeCommit content is temporarily unavailable." }
   }
 }
+
+const entryForSuggestionAnchor = (
+  entries: ReadonlyArray<CompleteDiffInventoryEntry>,
+  anchor: Exclude<PrReviewSuggestion["anchor"], { readonly _tag: "changes" }>
+): CompleteDiffInventoryEntry | undefined =>
+  anchor.relativeFileVersion === "BEFORE"
+    ? (entries.find(
+        (entry) =>
+          entry.status === "renamed" &&
+          entry.previousPath !== null &&
+          String(entry.previousPath) === String(anchor.path)
+      ) ?? entries.find(({ path }) => String(path) === String(anchor.path)))
+    : entries.find(({ path }) => String(path) === String(anchor.path))
 
 const textFrom = (content: CompleteDiffContentRange): string | null => {
   if (content.unavailableReason !== null || content.bytesBase64 === null) return null
@@ -146,14 +195,20 @@ export const WorkspacePullRequestDiff = ({
   onSessionExpired = ignoreSessionExpiration,
   scope,
   sessionKey = null,
+  suggestions = [],
   transport = browserWorkspacePullRequestDiffTransport
 }: {
   readonly heading: string
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly scope: WorkspacePullRequestDiffScope
   readonly sessionKey?: string | null
+  readonly suggestions?: ReadonlyArray<PrReviewSuggestion>
   readonly transport?: WorkspacePullRequestDiffTransport
 }): ReactElement => {
+  const onSessionExpiredRef = useRef(onSessionExpired)
+  const scopeRef = useRef(scope)
+  onSessionExpiredRef.current = onSessionExpired
+  scopeRef.current = scope
   const [inventoryState, setInventoryState] = useState<InventoryLoadState>({ _tag: "loading" })
   const [selectedFileId, setSelectedFileId] = useState<string>()
   const [contentStates, setContentStates] = useState<ReadonlyMap<string, RlyDiffFileContent>>(new Map())
@@ -161,6 +216,30 @@ export const WorkspacePullRequestDiff = ({
   const [contentRetryKey, setContentRetryKey] = useState(0)
   const [layout, setLayout] = useState<RlyDiffLayout>("split")
   const [isWrapped, setIsWrapped] = useState(false)
+  const [findingFilter, setFindingFilter] = useState<RlyDiffFindingFilter>("agent")
+  const [severityFilter, setSeverityFilter] = useState<SuggestionSeverityFilter>("all")
+  const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
+  const [focusRequest, setFocusRequest] = useState<{
+    readonly fileId: string
+    readonly lineNumber: number
+    readonly requestId: number
+    readonly side: "additions" | "deletions"
+  }>()
+  const viewerRef = useRef<HTMLDivElement>(null)
+  const allFilesTargetRef = useRef<string | undefined>(undefined)
+  const appliedAllFilesGenerationsRef = useRef<Set<RlyDiffRendererGeneration>>(new Set())
+  const diffCodeViewRef = useRef<RlyDiffCodeViewHandle | null>(null)
+  const [diffCodeView, setDiffCodeView] = useState<RlyDiffCodeViewHandle | null>(null)
+  const attachDiffCodeView = useCallback((viewer: RlyDiffCodeViewHandle | null): void => {
+    diffCodeViewRef.current = viewer
+    setDiffCodeView(viewer)
+  }, [])
+
+  useEffect(() => {
+    setFindingFilter("agent")
+    setSeverityFilter("all")
+    setSuggestionStateFilter("all")
+  }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId])
 
   useEffect(() => {
     const abort = new AbortController()
@@ -169,7 +248,10 @@ export const WorkspacePullRequestDiff = ({
     setContentStates(new Map())
     setLoadedText(new Map())
     setContentRetryKey(0)
-    transport.inventory(scope, abort.signal).then(
+    setFocusRequest(undefined)
+    allFilesTargetRef.current = undefined
+    appliedAllFilesGenerationsRef.current.clear()
+    transport.inventory(scopeRef.current, abort.signal).then(
       (inventory) => {
         if (abort.signal.aborted) return
         setInventoryState({ _tag: "ready", inventory })
@@ -178,14 +260,14 @@ export const WorkspacePullRequestDiff = ({
       (failure) => {
         if (abort.signal.aborted) return
         if (sessionKey !== null && isUnauthorizedFailure(failure)) {
-          onSessionExpired(sessionKey)
+          onSessionExpiredRef.current(sessionKey)
           return
         }
         setInventoryState({ _tag: "failed" })
       }
     )
     return () => abort.abort()
-  }, [onSessionExpired, scope.pluginConnectionId, scope.revision, scope.vendorImmutableId, sessionKey, transport])
+  }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId, sessionKey, transport])
 
   const entries = inventoryState._tag === "ready" ? inventoryState.inventory.entries : []
   const selectedEntry = entries.find(({ anchor }) => anchor === selectedFileId)
@@ -206,8 +288,8 @@ export const WorkspacePullRequestDiff = ({
       })
     )
     Promise.all([
-      transport.content(scope, selectedEntry, "before", abort.signal),
-      transport.content(scope, selectedEntry, "after", abort.signal)
+      transport.content(scopeRef.current, selectedEntry, "before", abort.signal),
+      transport.content(scopeRef.current, selectedEntry, "after", abort.signal)
     ]).then(
       ([before, after]) => {
         if (abort.signal.aborted) return
@@ -243,7 +325,7 @@ export const WorkspacePullRequestDiff = ({
       (failure) => {
         if (abort.signal.aborted) return
         if (sessionKey !== null && isUnauthorizedFailure(failure)) {
-          onSessionExpired(sessionKey)
+          onSessionExpiredRef.current(sessionKey)
           return
         }
         setContentStates((current) =>
@@ -255,7 +337,7 @@ export const WorkspacePullRequestDiff = ({
       }
     )
     return () => abort.abort()
-  }, [contentRetryKey, loadedText, onSessionExpired, scope, selectedEntry, sessionKey, transport])
+  }, [contentRetryKey, loadedText, selectedEntry, sessionKey, transport])
 
   const files = useMemo(
     () => entries.map((entry) => toFile(entry, contentStates.get(entry.anchor) ?? explicitContent(entry))),
@@ -274,95 +356,297 @@ export const WorkspacePullRequestDiff = ({
             state: "error"
           }
         : { files, state: "ready" }
-  const selectedText = selectedFileId === undefined ? undefined : loadedText.get(selectedFileId)
-  const selectedCodeItems = useMemo<ReadonlyArray<RlyDiffCodeItem>>(
+  const loadedCodeItems = useMemo<ReadonlyArray<RlyDiffCodeItem>>(
     () =>
-      selectedEntry === undefined || selectedText === undefined
-        ? []
-        : [
-            {
-              id: selectedEntry.anchor,
-              before: {
-                cacheKey: `${scope.revision}:${selectedEntry.anchor}:before`,
-                contents: selectedText.before,
-                name: selectedEntry.previousPath ?? selectedEntry.path
-              },
-              after: {
-                cacheKey: `${scope.revision}:${selectedEntry.anchor}:after`,
-                contents: selectedText.after,
-                name: selectedEntry.path
+      entries.flatMap((entry) => {
+        const text = loadedText.get(entry.anchor)
+        return text === undefined
+          ? []
+          : [
+              {
+                id: entry.anchor,
+                before: {
+                  cacheKey: `${scope.revision}:${entry.anchor}:before`,
+                  contents: text.before,
+                  name: entry.previousPath ?? entry.path
+                },
+                after: {
+                  cacheKey: `${scope.revision}:${entry.anchor}:after`,
+                  contents: text.after,
+                  name: entry.path
+                }
               }
-            }
-          ],
-    [scope.revision, selectedEntry, selectedText]
+            ]
+      }),
+    [entries, loadedText, scope.revision]
   )
+  const visibleCodeItems =
+    selectedFileId === undefined ? loadedCodeItems : loadedCodeItems.filter(({ id }) => id === selectedFileId)
+  useEffect(() => {
+    if (selectedFileId !== undefined || diffCodeView === null || allFilesTargetRef.current === undefined) return
+    diffCodeView.scrollTo({
+      align: "start",
+      id: allFilesTargetRef.current,
+      type: "item"
+    })
+  }, [diffCodeView, selectedFileId])
+  const onDiffItemRender = useCallback((itemId: string, generation: RlyDiffRendererGeneration): void => {
+    const target = allFilesTargetRef.current
+    if (target === undefined || appliedAllFilesGenerationsRef.current.has(generation)) return
+    diffCodeViewRef.current?.scrollTo({
+      align: "start",
+      id: target,
+      type: "item"
+    })
+    if (itemId !== target) return
+    viewerRef.current
+      ?.querySelector(`diffs-container[data-rly-diff-item="${CSS.escape(target)}"]`)
+      ?.scrollIntoView({ block: "nearest" })
+    appliedAllFilesGenerationsRef.current.add(generation)
+  }, [])
+  const visibleSuggestions = useMemo(
+    () =>
+      suggestions.filter(
+        (suggestion) =>
+          matchesFindingFilter(suggestion, findingFilter) &&
+          (severityFilter === "all" || suggestion.severity === severityFilter) &&
+          (suggestionStateFilter === "all" || suggestion.state === suggestionStateFilter)
+      ),
+    [findingFilter, severityFilter, suggestionStateFilter, suggestions]
+  )
+  const navigateToLine = useCallback((fileId: string, lineNumber: number, side: "additions" | "deletions"): void => {
+    allFilesTargetRef.current = undefined
+    appliedAllFilesGenerationsRef.current.clear()
+    setFocusRequest((current) => ({
+      fileId,
+      lineNumber,
+      requestId: (current?.requestId ?? 0) + 1,
+      side
+    }))
+    setSelectedFileId(fileId)
+  }, [])
+  const annotations = useMemo<ReadonlyArray<RlyDiffCodeAnnotation>>(
+    () =>
+      visibleSuggestions.flatMap((suggestion) => {
+        if (suggestion.anchor._tag !== "line") return []
+        const anchor = suggestion.anchor
+        const entry = entries.find(({ path }) => String(path) === String(anchor.path))
+        if (entry === undefined) return []
+        const annotation: RlyDiffCodeAnnotation = {
+          accessibilityLabel: `${suggestion.severity} review suggestion with ${suggestion.confidence.level} confidence`,
+          id: suggestion.suggestionId,
+          location: {
+            itemId: entry.anchor,
+            lineNumber: anchor.line,
+            side: "additions"
+          },
+          render: ({ returnFocus }) => (
+            <article>
+              <strong>
+                {suggestion.severity} · {suggestion.confidence.level} confidence
+              </strong>
+              <p>{suggestion.title}</p>
+              <p>
+                <strong>Impact:</strong> {suggestion.impact}
+              </p>
+              <pre>{suggestion.evidence.excerpt}</pre>
+              <p>
+                <strong>Recommendation:</strong> {suggestion.recommendation}
+              </p>
+              <p>{suggestion.confidence.reason}</p>
+              {suggestion.relatedLocations.length === 0 ? null : (
+                <p>{suggestion.relatedLocations.length} related locations</p>
+              )}
+              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.unifiedDiff}</pre>}
+              <button onClick={returnFocus} type="button">
+                Return to line
+              </button>
+            </article>
+          )
+        }
+        return [annotation]
+      }),
+    [entries, visibleSuggestions]
+  )
+  const unattachedSuggestionCount = useMemo(
+    () =>
+      visibleSuggestions.filter((suggestion) => {
+        const anchor = suggestion.anchor
+        return anchor._tag !== "changes" && entryForSuggestionAnchor(entries, anchor) === undefined
+      }).length,
+    [entries, visibleSuggestions]
+  )
+  const findings = useMemo(
+    () =>
+      visibleSuggestions.map((suggestion) => ({
+        id: suggestion.suggestionId,
+        content: (
+          <>
+            <strong>
+              {suggestion.severity} · {suggestion.title}
+            </strong>
+            <p>
+              {suggestion.anchor._tag === "changes"
+                ? "Whole change"
+                : `${suggestion.anchor.path}:${String(suggestion.anchor.line)}`}
+            </p>
+          </>
+        )
+      })),
+    [visibleSuggestions]
+  )
+  const severities = ["all", "P1", "P2", "P3", "P4"] satisfies ReadonlyArray<SuggestionSeverityFilter>
+  const states = [
+    "all",
+    ...new Set(suggestions.map(({ state }) => state))
+  ] satisfies ReadonlyArray<SuggestionStateFilter>
 
   return (
-    <DiffWorkbench
-      emptyFindings="No review findings are attached to this revision."
-      findings={[]}
-      header={
-        <DiffHeader
-          findingFilter="all"
-          heading={heading}
-          indexedCount={files.length}
-          isWrapped={isWrapped}
-          layout={layout}
-          onFindingFilterChange={() => undefined}
-          onLayoutChange={setLayout}
-          onWrapChange={setIsWrapped}
-          totalCount={files.length}
-          {...(selectedEntry === undefined ? {} : { selectedFileLabel: selectedEntry.path })}
-        />
-      }
-      inventory={
-        <DiffFileTree
-          data={inventory}
-          heading="Complete file inventory"
-          onSelectedFileChange={(fileId) => {
-            if (contentStates.get(fileId)?.state === "error") {
-              setContentStates((current) => {
-                const next = new Map(current)
-                next.delete(fileId)
-                return next
-              })
-              setContentRetryKey((current) => current + 1)
-            }
-            setSelectedFileId(fileId)
+    <>
+      <section aria-label="Review suggestion filters" className={styles.filters}>
+        <div aria-label="Severity" role="group">
+          {severities.map((severity) => (
+            <button
+              aria-label={`Filter suggestions by ${severity === "all" ? "all" : severity} severity`}
+              aria-pressed={severityFilter === severity}
+              key={severity}
+              onClick={() => setSeverityFilter(severity)}
+              type="button"
+            >
+              {severity === "all" ? "All severities" : severity}
+            </button>
+          ))}
+        </div>
+        <div aria-label="Suggestion state" role="group">
+          {states.map((state) => (
+            <button
+              aria-label={`Filter suggestions by ${state} state`}
+              aria-pressed={suggestionStateFilter === state}
+              key={state}
+              onClick={() => setSuggestionStateFilter(state)}
+              type="button"
+            >
+              {state === "all" ? "All states" : state}
+            </button>
+          ))}
+        </div>
+      </section>
+      <Suspense fallback={null}>
+        <ReviewSuggestionOverview
+          entries={entries}
+          onNavigate={navigateToLine}
+          onSelectAnchor={(anchor) => {
+            const entry = entryForSuggestionAnchor(entries, anchor)
+            if (entry === undefined) return
+            navigateToLine(
+              entry.anchor,
+              anchor.line,
+              anchor.relativeFileVersion === "BEFORE" ? "deletions" : "additions"
+            )
           }}
-          {...(selectedFileId === undefined ? {} : { selectedFileId })}
+          suggestions={visibleSuggestions}
         />
-      }
-      label={`Complete diff for ${heading}`}
-      onShowAllFiles={() => setSelectedFileId(undefined)}
-      scope={
-        selectedEntry === undefined
-          ? { label: "All changed files", mode: "all-files" }
-          : { fileId: selectedEntry.anchor, label: selectedEntry.path, mode: "selected-file" }
-      }
-      statusNotice={
-        selectedEntry === undefined
-          ? "Select a supported file to load its content."
-          : selectedText === undefined
-            ? contentStates.get(selectedEntry.anchor)?.state === "loading"
-              ? "Loading this file only."
-              : "Content is not rendered for this file."
-            : undefined
-      }
-      viewer={
-        selectedEntry === undefined || selectedText === undefined ? (
-          "Select a supported text file to render its change."
-        ) : (
-          <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-            <BoundedDiffCodeView
-              key={selectedEntry.anchor}
-              initialItems={selectedCodeItems}
-              mode={layout}
-              wrap={isWrapped}
-            />
-          </Suspense>
-        )
-      }
-    />
+      </Suspense>
+      {unattachedSuggestionCount === 0 ? null : (
+        <p role="status">
+          {unattachedSuggestionCount} validated review{" "}
+          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the anchor path
+          is absent from this diff inventory.
+        </p>
+      )}
+      <DiffWorkbench
+        emptyFindings="No validated review suggestions are attached to this revision."
+        findings={findings}
+        header={
+          <DiffHeader
+            findingFilter={findingFilter}
+            heading={heading}
+            indexedCount={files.length}
+            isWrapped={isWrapped}
+            layout={layout}
+            onFindingFilterChange={setFindingFilter}
+            onLayoutChange={setLayout}
+            onWrapChange={setIsWrapped}
+            totalCount={files.length}
+            {...(selectedEntry === undefined ? {} : { selectedFileLabel: selectedEntry.path })}
+          />
+        }
+        inventory={
+          <DiffFileTree
+            data={inventory}
+            heading="Complete file inventory"
+            onSelectedFileChange={(fileId) => {
+              allFilesTargetRef.current = undefined
+              appliedAllFilesGenerationsRef.current.clear()
+              if (contentStates.get(fileId)?.state === "error") {
+                setContentStates((current) => {
+                  const next = new Map(current)
+                  next.delete(fileId)
+                  return next
+                })
+                setContentRetryKey((current) => current + 1)
+              }
+              setSelectedFileId(fileId)
+            }}
+            {...(selectedFileId === undefined ? {} : { selectedFileId })}
+          />
+        }
+        label={`Complete diff for ${heading}`}
+        onShowAllFiles={() => {
+          allFilesTargetRef.current = visibleCodeItems[0]?.id ?? loadedCodeItems.at(-1)?.id
+          appliedAllFilesGenerationsRef.current.clear()
+          setSelectedFileId(undefined)
+        }}
+        scope={
+          selectedEntry === undefined
+            ? { label: "All changed files", mode: "all-files" }
+            : { fileId: selectedEntry.anchor, label: selectedEntry.path, mode: "selected-file" }
+        }
+        statusNotice={
+          selectedEntry === undefined
+            ? loadedCodeItems.length === 0
+              ? "Select a supported file to load its content."
+              : `Showing ${String(loadedCodeItems.length)} lazily loaded ${
+                  loadedCodeItems.length === 1 ? "file" : "files"
+                }.`
+            : visibleCodeItems.length === 0
+              ? contentStates.get(selectedEntry.anchor)?.state === "loading"
+                ? "Loading this file only."
+                : "Content is not rendered for this file."
+              : undefined
+        }
+        viewer={
+          visibleCodeItems.length === 0 ? (
+            "Select a supported text file to render its change."
+          ) : (
+            <div className={styles.viewerTarget} ref={viewerRef}>
+              <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
+                <CompleteDiffCodeView
+                  annotations={annotations}
+                  key={selectedFileId ?? "all-files"}
+                  initialItems={visibleCodeItems}
+                  mode={layout}
+                  onItemRender={onDiffItemRender}
+                  ref={attachDiffCodeView}
+                  wrap={isWrapped}
+                />
+              </Suspense>
+              {focusRequest === undefined || focusRequest.fileId !== selectedFileId ? null : (
+                <Suspense fallback={null}>
+                  <DiffLineFocus
+                    fileId={focusRequest.fileId}
+                    key={focusRequest.requestId}
+                    lineNumber={focusRequest.lineNumber}
+                    root={viewerRef}
+                    side={focusRequest.side}
+                    viewer={diffCodeView}
+                  />
+                </Suspense>
+              )}
+            </div>
+          )
+        }
+      />
+    </>
   )
 }

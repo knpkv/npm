@@ -32,7 +32,7 @@ export const pullCommand = Command.make(
       const result = yield* engine.pull({
         force,
         replayHistory,
-        ...(replayHistory ? { onProgress } : {})
+        ...(replayHistory && { onProgress })
       })
       if (replayHistory) {
         yield* writeStdout("\r" + " ".repeat(80) + "\r")
@@ -54,10 +54,16 @@ const dryRunOption = Options.boolean("dry-run").pipe(
   Options.withDescription("Show changes without applying")
 )
 
+const pushForceOption = Options.boolean("force").pipe(
+  Options.withDescription(
+    "Push pages holding content markdown cannot represent (datasource cards, extensions), accepting that those nodes will be degraded"
+  )
+)
+
 export const pushCommand = Command.make(
   "push",
-  { dryRun: dryRunOption },
-  ({ dryRun }) =>
+  { dryRun: dryRunOption, force: pushForceOption },
+  ({ dryRun, force }) =>
     Effect.gen(function*() {
       const engine = yield* SyncEngine
       const git = yield* GitService
@@ -70,7 +76,7 @@ export const pushCommand = Command.make(
       }
 
       yield* Console.log(dryRun ? "Dry run - showing changes..." : "Pushing changes to Confluence...")
-      const result = yield* engine.push({ dryRun })
+      const result = yield* engine.push({ dryRun, force })
       if (result.pushed === 0 && result.created === 0 && result.deleted === 0) {
         yield* Console.log("Nothing to push")
       } else {
@@ -78,7 +84,29 @@ export const pushCommand = Command.make(
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
-        return yield* Effect.fail(new ConfigError({ message: `Push failed:\n${result.errors.join("\n")}` }))
+        // A preview performed no remote write and no branch bookkeeping, so it
+        // must not describe either — under a "Push failed" heading that reads as
+        // a real push that partly applied.
+        if (dryRun) {
+          return yield* Effect.fail(
+            new ConfigError({
+              message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
+                result.errors.join("\n")
+              }`
+            })
+          )
+        }
+        // Say that the branch was held, not just that something failed. Any
+        // error keeps `origin/confluence` where it is so the unsent work stays
+        // retryable — which also means every later push repeats this failure
+        // until it is resolved. Silently, that reads as a broken workspace.
+        return yield* Effect.fail(
+          new ConfigError({
+            message: `Push failed:\n${result.errors.join("\n")}\n` +
+              `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
+              `push retries all of it. Resolve the errors above (or remove the file) to move on.`
+          })
+        )
       }
     })
 ).pipe(Command.withDescription("Remote write: upload local markdown changes to Confluence"))

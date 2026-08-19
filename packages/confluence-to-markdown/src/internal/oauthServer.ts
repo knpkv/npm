@@ -6,9 +6,8 @@
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import type { HttpServerError } from "effect/unstable/http"
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -25,12 +24,24 @@ type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
  * @category Services
  */
 export interface HttpServerFactory {
-  readonly createServerLayer: (port: number) => Layer.Layer<
+  readonly createServerLayer: (options: CallbackServerListenOptions) => Layer.Layer<
     HttpServer.HttpServer,
     HttpServerError.ServeError,
     never
   >
 }
+
+export interface CallbackServerListenOptions {
+  readonly host: "localhost"
+  readonly port: number
+}
+
+export const callbackServerListenOptions = (port: number): CallbackServerListenOptions => ({
+  host: "localhost",
+  port
+})
+
+export const callbackUrl = (port: number): string => `http://localhost:${port}/callback`
 
 /**
  * Tag for the HttpServerFactory service.
@@ -52,7 +63,9 @@ export class HttpServerFactoryTag extends Context.Service<
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
+  createLayerFn: (
+    options: CallbackServerListenOptions
+  ) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
@@ -64,41 +77,46 @@ export const makeHttpServerFactory = (
 export interface CallbackServerResult {
   /** Promise that resolves with the authorization code */
   readonly codePromise: Effect.Effect<string, OAuthError>
-  /** Shutdown the callback server */
-  readonly shutdown: Effect.Effect<void, never>
   /** The port the server is listening on */
   readonly port: number
 }
+
+const AddressInUseCause = Schema.Struct({
+  code: Schema.Literal("EADDRINUSE")
+})
+
+const isAddressInUse = (error: HttpServerError.ServeError): boolean => Schema.is(AddressInUseCause)(error.cause)
 
 /**
  * Start a local HTTP server to receive OAuth callback.
  *
  * @param expectedState - The state parameter to verify against CSRF
- * @returns Server control interface with code promise, shutdown, and port
+ * @returns Server control interface with code promise and port
  *
  * @category OAuth
  */
 export const startCallbackServer = (
   expectedState: string
-): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag> =>
+): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag | Scope.Scope> =>
   Effect.gen(function*() {
     const factory = yield* HttpServerFactoryTag
     const deferred = yield* Deferred.make<string, OAuthError>()
     const readyDeferred = yield* Deferred.make<void, OAuthError>()
-    const scope = yield* Scope.make()
+    const scope = yield* Effect.scope
 
-    const buildServer = (port: number): Effect.Effect<HttpServerInstance, OAuthError> =>
-      Layer.build(factory.createServerLayer(port)).pipe(
+    const buildServer = (port: number): Effect.Effect<HttpServerInstance, HttpServerError.ServeError> =>
+      Layer.build(factory.createServerLayer(callbackServerListenOptions(port))).pipe(
         Scope.provide(scope),
         Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
-        Effect.catchCause((cause) =>
-          port < MAX_PORT
-            ? buildServer(port + 1)
-            : Effect.fail(new OAuthError({ step: "authorize", cause }))
+        Effect.catchIf(
+          (error) => isAddressInUse(error) && port < MAX_PORT,
+          () => buildServer(port + 1)
         )
       )
 
-    const server = yield* buildServer(DEFAULT_PORT)
+    const server = yield* buildServer(DEFAULT_PORT).pipe(
+      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+    )
 
     if (server.address._tag !== "TcpAddress") {
       return yield* Effect.fail(
@@ -113,11 +131,19 @@ export const startCallbackServer = (
       "/callback",
       Effect.gen(function*() {
         const req = yield* HttpServerRequest.HttpServerRequest
-        const url = new URL(req.url, `http://localhost:${port}`)
+        const url = new URL(req.url, callbackUrl(port))
         const code = url.searchParams.get("code")
         const state = url.searchParams.get("state")
         const error = url.searchParams.get("error")
         const errorDescription = url.searchParams.get("error_description")
+
+        if (state !== expectedState) {
+          return HttpServerResponse.html(
+            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
+          ).pipe(
+            HttpServerResponse.setStatus(403)
+          )
+        }
 
         if (error) {
           yield* Deferred.fail(
@@ -126,16 +152,6 @@ export const startCallbackServer = (
           )
           return HttpServerResponse.html(
             "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
-          )
-        }
-
-        if (state !== expectedState) {
-          yield* Deferred.fail(
-            deferred,
-            new OAuthError({ step: "authorize", cause: "State mismatch - possible CSRF attack" })
-          )
-          return HttpServerResponse.html(
-            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
           )
         }
 
@@ -156,12 +172,11 @@ export const startCallbackServer = (
       })
     )
 
-    const serverFiber = yield* HttpServer.serveEffect(router.asHttpEffect()).pipe(
+    yield* HttpServer.serveEffect(router.asHttpEffect()).pipe(
       Effect.provideService(HttpServer.HttpServer, server),
-      Scope.provide(scope),
       Effect.tap(() => Deferred.succeed(readyDeferred, undefined)),
       Effect.tapError((err) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause: err }))),
-      Effect.forkIn(scope)
+      Effect.forkScoped
     )
 
     // Wait for server to be ready (or fail)
@@ -169,10 +184,6 @@ export const startCallbackServer = (
 
     return {
       codePromise: Deferred.await(deferred),
-      shutdown: Fiber.interrupt(serverFiber).pipe(
-        Effect.andThen(Scope.close(scope, Exit.void)),
-        Effect.asVoid
-      ),
       port
     }
   })

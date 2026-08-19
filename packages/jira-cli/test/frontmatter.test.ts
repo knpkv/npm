@@ -1,4 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import * as yaml from "js-yaml"
 import { extractFrontMatter, serializeIssue } from "../src/internal/frontmatter.js"
 import type { Issue } from "../src/IssueService.js"
@@ -8,10 +10,10 @@ import type { Issue } from "../src/IssueService.js"
  * directly. We avoid gray-matter's default parser here because it calls the
  * removed `safeLoad` — the same incompatibility this module works around.
  */
-const parseFrontMatter = (output: string): Record<string, unknown> => {
+const parseFrontMatter = (output: string): Record<string, Schema.Json> => {
   const match = output.match(/^---\n([\s\S]*?)\n---/)
   const parsed = match ? yaml.load(match[1]) : {}
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+  return parsed !== null && Predicate.isObjectOrArray(parsed) && !Array.isArray(parsed)
     ? Object.fromEntries(Object.entries(parsed))
     : {}
 }

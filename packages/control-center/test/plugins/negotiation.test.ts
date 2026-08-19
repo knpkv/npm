@@ -3,7 +3,7 @@ import { Effect, Ref, Result } from "effect"
 
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 
-const descriptor = (capabilities: ReadonlyArray<unknown>, contractMajor = 1): unknown => ({
+const descriptor = (capabilities: ReadonlyArray<unknown>, contractMajor = 1) => ({
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: contractMajor, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.fake",

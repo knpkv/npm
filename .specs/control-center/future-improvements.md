@@ -32,7 +32,7 @@ complete.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
   and rejected after a referenced claim is superseded. Claim reads are batched.
 - The checkpoint passes repository formatting, linting, static Effect checks, builds, package
-  checks, packing validation, browser tests, and exact-head automated review; PR-wide Node 24
+  checks, packing validation, browser tests, and exact-head automated review; PR-wide Node 26
   verification remains authoritative for the integrated workspace.
 - R01–R16 are delivered as the publishable `@knpkv/rly` design system: generated contracts and
   tokens, light/dark themes, accessible primitives and overlays, release/relationship/people/agent
@@ -178,9 +178,8 @@ in `implementation-plan.md` and the milestone files under `plan/`.
 - The 512/513-event live-stream boundary fixtures now prepare their journal in one outer database
   transaction and retain Vitest's normal timeout. Transient SQLite WAL/SHM expectations outside
   that fixture still warrant care in future persistence tests.
-- The interactive shell exposes Node 24, but its installed `pnpm` launcher is backed by Node 22.
-  Direct local validation therefore invokes test tools with Node 24; PR CI remains the authoritative
-  Node 24 workspace check.
+- The reproducible shell and its Corepack-backed `pnpm` launcher both use Node 26; PR CI remains the
+  authoritative Node 26 workspace check.
 - The authenticated command trigger increased the raw initial JavaScript closure from the saturated
   360 KB budget to about 362 KB. The explicit cap is now 365 KB; the generated API client, portfolio
   presenter, and command implementation remain lazy. Recover shell headroom before adding another

@@ -4,16 +4,7 @@ import type { AgentThreadEntry } from "./control-center-state.js"
 
 type ThreadAction = NonNullable<AgentThreadEntry["action"]>
 
-const actionDetails: Readonly<
-  Record<
-    ThreadAction,
-    {
-      readonly completed: string
-      readonly label: string
-      readonly pending: string
-    }
-  >
-> = {
+const actionDetails = {
   checks: {
     completed: "Checks finished: 125 passed, 3 checkout tests still fail in PR #279.",
     label: "Run checks",
@@ -29,7 +20,16 @@ const actionDetails: Readonly<
     label: "Summarize blockers",
     pending: "Correlating test failures, approvals, and missing relationships…"
   }
-}
+} satisfies Readonly<
+  Record<
+    ThreadAction,
+    {
+      readonly completed: string
+      readonly label: string
+      readonly pending: string
+    }
+  >
+>
 
 const initialMessages = (release: string, state: string): ReadonlyArray<AgentThreadEntry> => [
   {

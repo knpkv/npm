@@ -8,7 +8,7 @@ import {
   securityHeaders
 } from "../../../src/server/http/security/index.js"
 
-const metadata = (overrides: Readonly<Record<string, unknown>> = {}) => ({
+const metadata = (overrides: Readonly<Record<string, Schema.Json>> = {}) => ({
   method: "POST",
   contentEncoding: null,
   contentLength: "12",
@@ -81,7 +81,33 @@ describe("HTTP request and response policy", () => {
     assert.strictEqual(insecure["x-content-type-options"], "nosniff")
 
     const secure = securityHeaders({ isSecureTransport: true })
-    assert.include(secure["content-security-policy"], "upgrade-insecure-requests")
-    assert.strictEqual(secure["strict-transport-security"], "max-age=31536000")
+    assert.deepStrictEqual(secure, {
+      "content-security-policy": [
+        "default-src 'none'",
+        "base-uri 'none'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "frame-src 'none'",
+        "form-action 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "style-src-attr 'unsafe-inline'",
+        "img-src 'self'",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "worker-src 'self'",
+        "manifest-src 'self'",
+        "media-src 'self'",
+        "upgrade-insecure-requests"
+      ].join("; "),
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "cross-origin-resource-policy": "same-origin",
+      "permissions-policy":
+        "accelerometer=(), bluetooth=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), serial=(), usb=()",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    })
   })
 })

@@ -83,6 +83,13 @@ export const PageFrontMatterSchema = Schema.Struct({
   position: Schema.optional(Schema.Number),
   /** SHA256 hash of content for change detection */
   contentHash: ContentHashSchema,
+  /**
+   * Set to `unsafe` when the page holds nodes the markdown projection cannot
+   * represent (datasource cards, extensions). Editing such a page as markdown
+   * and pushing it back corrupts those nodes, so `sync push` refuses it and
+   * points at `page put --adf` instead.
+   */
+  roundTrip: Schema.optional(Schema.Literals(["unsafe"])),
   /** Version message from Confluence (used as git commit message) */
   versionMessage: Schema.optional(Schema.String),
   /** Author display name */
@@ -463,3 +470,131 @@ export const PageVersionsResponseSchema = Schema.Struct({
  * @category Types
  */
 export type PageVersionsResponse = Schema.Schema.Type<typeof PageVersionsResponseSchema>
+
+/**
+ * Schema for a folder (v2 `/folders/{id}`).
+ *
+ * Folders are containers with no body, so they are addressed separately from
+ * pages — `/pages/{id}` 404s on a folder id and vice versa.
+ *
+ * @category Schema
+ */
+export const FolderResponseSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  type: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+  // Confluence sends an explicit null for a folder sitting at the space root.
+  parentId: Schema.optional(Schema.NullOr(Schema.String)),
+  parentType: Schema.optional(Schema.NullOr(Schema.String)),
+  spaceId: Schema.optional(Schema.String),
+  authorId: Schema.optional(Schema.String),
+  createdAt: Schema.optional(Schema.String),
+  _links: Schema.optional(
+    Schema.Struct({
+      webui: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for a folder.
+ *
+ * @category Types
+ */
+export type FolderResponse = Schema.Schema.Type<typeof FolderResponseSchema>
+
+/**
+ * Schema for one direct child of a folder. `type` distinguishes the mixed
+ * content kinds a folder can hold (page / folder / whiteboard / database /
+ * embed), which is why it is worth surfacing.
+ *
+ * @category Schema
+ */
+export const FolderChildSchema = Schema.Struct({
+  id: Schema.String,
+  // Optional upstream, and the whole page decodes at once: requiring it would
+  // let one untitled child (an embed, typically) fail the entire listing rather
+  // than degrade a single row.
+  title: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+  spaceId: Schema.optional(Schema.String)
+})
+
+/**
+ * Type for a folder child.
+ *
+ * @category Types
+ */
+export type FolderChild = Schema.Schema.Type<typeof FolderChildSchema>
+
+/**
+ * Schema for the folder direct-children API response.
+ *
+ * @category Schema
+ */
+export const FolderChildrenResponseSchema = Schema.Struct({
+  results: Schema.Array(FolderChildSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  _links: Schema.optional(
+    Schema.Struct({
+      next: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for the folder children response.
+ *
+ * @category Types
+ */
+export type FolderChildrenResponse = Schema.Schema.Type<typeof FolderChildrenResponseSchema>
+
+/**
+ * Schema for one CQL search hit (v1 `/search`).
+ *
+ * @category Schema
+ */
+export const CqlSearchHitSchema = Schema.Struct({
+  title: Schema.String,
+  url: Schema.String,
+  entityType: Schema.optional(Schema.String),
+  lastModified: Schema.optional(Schema.String),
+  content: Schema.optional(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      type: Schema.optional(Schema.String),
+      status: Schema.optional(Schema.String)
+    })
+  ),
+  space: Schema.optional(
+    Schema.Struct({
+      key: Schema.optional(Schema.String),
+      name: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for a CQL search hit.
+ *
+ * @category Types
+ */
+export type CqlSearchHit = Schema.Schema.Type<typeof CqlSearchHitSchema>
+
+/**
+ * Schema for the CQL search API response.
+ *
+ * @category Schema
+ */
+export const CqlSearchResponseSchema = Schema.Struct({
+  results: Schema.Array(CqlSearchHitSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  totalSize: Schema.optional(Schema.Number)
+})
+
+/**
+ * Type for the CQL search response.
+ *
+ * @category Types
+ */
+export type CqlSearchResponse = Schema.Schema.Type<typeof CqlSearchResponseSchema>

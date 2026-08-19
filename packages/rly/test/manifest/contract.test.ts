@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import * as TypeScript from "typescript"
 import { describe, expect, it } from "vitest"
 import {
@@ -9,6 +11,7 @@ import {
 import {
   componentStyleSources,
   findSourceDrift,
+  packageExportsMatch,
   renderContract,
   renderPackageJson,
   renderVisualCatalog,
@@ -20,8 +23,9 @@ const manifestWithEntries = (entries: ReadonlyArray<ModuleEntry>): ComponentMani
   entries
 })
 
-const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
-  typeof value === "object" && value !== null
+const isRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> => Predicate.isObjectOrArray(value) && value !== null
 
 const designExportInventory = (source: string): ReadonlyArray<string> => {
   const inventory = source
@@ -51,7 +55,7 @@ if (approvedDesignSource === undefined) throw new Error("Approved Control Center
 const exportInventoryDrift = (
   approved: ReadonlyArray<string>,
   generated: ReadonlyArray<string>
-): { readonly missing: ReadonlyArray<string>; readonly unexpected: ReadonlyArray<string> } => ({
+) => ({
   missing: generated.filter((entry) => !approved.includes(entry)),
   unexpected: approved.filter((entry) => !generated.includes(entry))
 })
@@ -340,6 +344,27 @@ describe("component manifest contract", () => {
         "./styles.css": "./dist/styles.css"
       }
     })
+  })
+
+  it("accepts publisher rewrites outside the manifest-owned exports", () => {
+    const generated: unknown = JSON.parse(renderPackageJson(componentManifest, { name: "@knpkv/rly" }))
+    if (!isRecord(generated)) throw new Error("Generated rly package manifest is missing")
+
+    const publisherSource = JSON.stringify({
+      ...generated,
+      dependencies: { react: "https://pkg.pr.new/react@preview" },
+      version: "0.0.0-preview-deadbeef"
+    })
+    const publisherManifest: unknown = JSON.parse(publisherSource)
+    if (!isRecord(publisherManifest)) throw new Error("Publisher package manifest is missing")
+
+    expect(publisherSource.endsWith("\n")).toBe(false)
+    expect(packageExportsMatch(componentManifest, publisherManifest)).toBe(true)
+
+    if (!isRecord(generated.exports)) throw new Error("Generated rly exports are missing")
+    const reorderedExports = Object.fromEntries(Object.entries(generated.exports).reverse())
+    expect(packageExportsMatch(componentManifest, { ...generated, exports: reorderedExports })).toBe(true)
+    expect(packageExportsMatch(componentManifest, { ...generated, exports: { ".": "stale" } })).toBe(false)
   })
 
   it("projects exact repository paths for the fail-safe visual classifier", () => {

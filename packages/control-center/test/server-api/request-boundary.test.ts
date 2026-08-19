@@ -1,13 +1,19 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Layer, Result, Schema } from "effect"
+import { Duration, Effect, Fiber, Layer, Result, Schema } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiError } from "effect/unstable/httpapi"
 
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import { clientRateLimitKey, requestBoundaryLayer } from "../../src/server/api/RequestBoundary.js"
-import { consumeRequestToken, RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
+import {
+  consumeRequestToken,
+  RequestLimitPolicy,
+  requestRateLimiterLayer,
+  withRequestTimeout
+} from "../../src/server/api/RequestLimits.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 
 const bindLayer = Layer.effect(ApiBindConfiguration, decodeBindConfig({}))
@@ -15,6 +21,7 @@ const limitPolicyLayer = Layer.succeed(RequestLimitPolicy, {
   maximumBodyBytes: 256 * 1024,
   pairing: { limit: 1, window: Duration.minutes(1) },
   read: { limit: 1, window: Duration.minutes(1) },
+  "agent-read": { limit: 1, window: Duration.minutes(1) },
   mutation: { limit: 1, window: Duration.minutes(1) },
   synchronization: { limit: 1, window: Duration.minutes(1) },
   agent: { limit: 1, window: Duration.minutes(1) },
@@ -35,6 +42,13 @@ const schemaDefect = (kind: HttpApiError.HttpApiSchemaError["kind"]) =>
 const webHandlerLayer = Layer.mergeAll(
   HttpRouter.add("POST", "/api/v1/session/pair", HttpServerResponse.text("ok")),
   HttpRouter.add("GET", "/api/ping", HttpServerResponse.text("pong")),
+  HttpRouter.add("GET", "/api/v1/agent/providers", HttpServerResponse.text("providers")),
+  HttpRouter.add(
+    "GET",
+    "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+    HttpServerResponse.text("preview")
+  ),
+  HttpRouter.add("POST", "/api/v1/agent/releases/release-1/jobs", HttpServerResponse.text("job")),
   HttpRouter.add("GET", "/api/schema-request", schemaDefect("Payload")),
   HttpRouter.add("POST", "/api/schema-response", schemaDefect("Body")),
   HttpRouter.add(
@@ -147,6 +161,60 @@ describe("API request boundary", () => {
     }
   })
 
+  it("isolates safe agent reads from ordinary reads and agent mutations", async () => {
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    try {
+      const request = (path: string, method: "GET" | "HEAD" | "POST", correlationId: string) =>
+        webHandler.handler(
+          new Request(`http://127.0.0.1:4173${path}`, {
+            method,
+            headers: { "x-correlation-id": correlationId }
+          })
+        )
+      const firstMutation = await request(
+        "/api/v1/agent/releases/release-1/jobs",
+        "POST",
+        "agent-mutation-1"
+      )
+      const publicationPreview = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+        "GET",
+        "publication-preview"
+      )
+      const publicationPreviewWithQuery = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview?refresh=true",
+        "GET",
+        "publication-preview-query"
+      )
+      const publicationPreviewHead = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+        "HEAD",
+        "publication-preview-head"
+      )
+      const firstRead = await request("/api/v1/agent/providers", "GET", "agent-read-1")
+      const secondRead = await request("/api/v1/agent/providers", "GET", "agent-read-2")
+      const firstOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-1")
+      const secondOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-2")
+      const secondMutation = await request(
+        "/api/v1/agent/releases/release-1/jobs",
+        "POST",
+        "agent-mutation-2"
+      )
+
+      assert.strictEqual(firstMutation.status, 200)
+      assert.strictEqual(publicationPreview.status, 429)
+      assert.strictEqual(publicationPreviewWithQuery.status, 429)
+      assert.strictEqual(publicationPreviewHead.status, 429)
+      assert.strictEqual(firstRead.status, 200)
+      assert.strictEqual(secondRead.status, 429)
+      assert.strictEqual(firstOrdinaryRead.status, 200)
+      assert.strictEqual(secondOrdinaryRead.status, 429)
+      assert.strictEqual(secondMutation.status, 429)
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
   it("marks a successful pairing response as non-cacheable", async () => {
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     try {
@@ -192,6 +260,26 @@ describe("API request boundary", () => {
       await webHandler.dispose()
     }
   })
+
+  it.effect("keeps safe agent reads on the agent execution budget", () =>
+    Effect.gen(function*() {
+      const delayedResponse = Effect.sleep(Duration.seconds(20)).pipe(Effect.as("completed"))
+      const ordinaryRead = yield* Effect.forkChild(withRequestTimeout(delayedResponse, "read"))
+      const agentRead = yield* Effect.forkChild(withRequestTimeout(delayedResponse, "agent-read"))
+      const agentMutation = yield* Effect.forkChild(withRequestTimeout(delayedResponse, "agent"))
+
+      yield* TestClock.adjust(Duration.seconds(16))
+
+      const ordinaryReadResult = yield* Fiber.join(ordinaryRead).pipe(Effect.flip)
+      assert.strictEqual(ordinaryReadResult._tag, "RequestTimeLimitExceeded")
+      assert.isUndefined(agentRead.pollUnsafe())
+      assert.isUndefined(agentMutation.pollUnsafe())
+
+      yield* TestClock.adjust(Duration.seconds(5))
+
+      assert.strictEqual(yield* Fiber.join(agentRead), "completed")
+      assert.strictEqual(yield* Fiber.join(agentMutation), "completed")
+    }).pipe(Effect.provide(RequestLimitPolicy.defaultLayer)))
 
   it("distinguishes malformed client data from invalid handler output", async () => {
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })

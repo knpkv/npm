@@ -37,19 +37,17 @@ const childEnvironment = Config.all({
   xdgConfigHome: optionalEnvironmentValue("XDG_CONFIG_HOME")
 }).pipe(
   Config.map((configured) => ({
-    ...(Option.isSome(configured.anthropicApiKey) ? { ANTHROPIC_API_KEY: configured.anthropicApiKey.value } : {}),
-    ...(Option.isSome(configured.anthropicAuthToken)
-      ? { ANTHROPIC_AUTH_TOKEN: configured.anthropicAuthToken.value }
-      : {}),
-    ...(Option.isSome(configured.anthropicBaseUrl) ? { ANTHROPIC_BASE_URL: configured.anthropicBaseUrl.value } : {}),
-    ...(Option.isSome(configured.claudeConfigDirectory)
-      ? { CLAUDE_CONFIG_DIR: configured.claudeConfigDirectory.value }
-      : {}),
-    ...(Option.isSome(configured.home) ? { HOME: configured.home.value } : {}),
-    ...(Option.isSome(configured.path) ? { PATH: configured.path.value } : {}),
-    ...(Option.isSome(configured.user) ? { USER: configured.user.value } : {}),
-    ...(Option.isSome(configured.userProfile) ? { USERPROFILE: configured.userProfile.value } : {}),
-    ...(Option.isSome(configured.xdgConfigHome) ? { XDG_CONFIG_HOME: configured.xdgConfigHome.value } : {})
+    ...((Option.isSome(configured.anthropicApiKey)) && { ANTHROPIC_API_KEY: configured.anthropicApiKey.value }),
+    ...((Option.isSome(configured.anthropicAuthToken)) &&
+      { ANTHROPIC_AUTH_TOKEN: configured.anthropicAuthToken.value }),
+    ...((Option.isSome(configured.anthropicBaseUrl)) && { ANTHROPIC_BASE_URL: configured.anthropicBaseUrl.value }),
+    ...((Option.isSome(configured.claudeConfigDirectory)) &&
+      { CLAUDE_CONFIG_DIR: configured.claudeConfigDirectory.value }),
+    ...((Option.isSome(configured.home)) && { HOME: configured.home.value }),
+    ...((Option.isSome(configured.path)) && { PATH: configured.path.value }),
+    ...((Option.isSome(configured.user)) && { USER: configured.user.value }),
+    ...((Option.isSome(configured.userProfile)) && { USERPROFILE: configured.userProfile.value }),
+    ...((Option.isSome(configured.xdgConfigHome)) && { XDG_CONFIG_HOME: configured.xdgConfigHome.value })
   }))
 )
 
@@ -96,7 +94,7 @@ const usageFrom = (usage: ClaudeResult["usage"]): typeof Response.Usage.Encoded 
   }
 })
 
-const encodeJson = (value: unknown, method: string): Effect.Effect<string, AiError.AiError> =>
+const encodeJson = <UnparsedInput>(value: UnparsedInput, method: string): Effect.Effect<string, AiError.AiError> =>
   Schema.encodeUnknownEffect(JsonString)(value).pipe(
     Effect.mapError((cause) => unsupportedSchema(cause, method))
   )

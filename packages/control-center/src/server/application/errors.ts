@@ -23,6 +23,7 @@ export const mapPersistenceWriteError = (
   error._tag === "RevisionConflictError" || error._tag === "RecordAlreadyExistsError"
     ? new ApplicationConflict()
     : error._tag === "PluginConnectionLimitError" ||
+        error._tag === "AgentJobInputError" ||
         error._tag === "SecretReferenceScopeConflictError" ||
         error._tag === "AuthorizedShareInputError" ||
         error._tag === "DeliveryGraphInputError" ||

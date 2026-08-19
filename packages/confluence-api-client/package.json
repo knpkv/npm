@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/confluence-api-client",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "Effect-based Confluence Cloud REST API client (v1 + v2)",
   "license": "MIT",
   "author": "knpkv",
@@ -54,18 +54,18 @@
     "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
-    "@effect/openapi-generator": "4.0.0-beta.98",
-    "@effect/platform-node": "4.0.0-beta.98",
-    "@effect/vitest": "4.0.0-beta.98",
+    "@effect/openapi-generator": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0-rc.109",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.98",
-    "prettier": "^3.9.5",
-    "tsx": "^4.23.0",
-    "typescript": "~6.0.3",
-    "vitest": "^4.1.10"
+    "effect": "4.0.0-rc.109",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.12",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   },
   "keywords": [
     "effect",

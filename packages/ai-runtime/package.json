@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/ai-runtime",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "Provider-neutral Effect runtime protocol for durable local AI agents",
   "license": "MIT",
   "author": "knpkv",
@@ -27,25 +27,25 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
     "check": "tsc --noEmit && pnpm check:contract",
-    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && tsc -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
+    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && ../../node_modules/.bin/tsc6 -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.98",
-    "effect": "4.0.0-beta.98",
+    "@effect/vitest": "4.0.0-rc.109",
+    "effect": "4.0.0-rc.109",
     "rimraf": "^6.1.3",
-    "typescript": "~6.0.3",
-    "vitest": "^4.1.10"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   },
   "keywords": [
     "effect",

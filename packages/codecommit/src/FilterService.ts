@@ -79,7 +79,7 @@ const failedAccount = (acct: FilterTarget, message: string): AccountCollection =
  *
  * @category models
  */
-export interface FilterServiceShape {
+export interface FilterServiceContract {
   readonly resolveTargets: Effect.Effect<ReadonlyArray<FilterTarget>, unknown>
   readonly collect: (
     preset: FilterPreset,
@@ -90,7 +90,7 @@ export interface FilterServiceShape {
 }
 
 const make: Effect.Effect<
-  FilterServiceShape,
+  FilterServiceContract,
   Errors.AwsApiError | Errors.AwsCredentialError | Errors.AwsThrottleError,
   AwsClient.AwsClient | ConfigService.ConfigService
 > = Effect.gen(function*() {
@@ -104,7 +104,7 @@ const make: Effect.Effect<
       .flatMap((a) => a.regions.map((r): FilterTarget => ({ profile: a.profile, region: r })))
   })
 
-  const collect: FilterServiceShape["collect"] = (preset, targets, opts, now) =>
+  const collect: FilterServiceContract["collect"] = (preset, targets, opts, now) =>
     Effect.gen(function*() {
       const effectiveNow = now ?? new Date(yield* Clock.currentTimeMillis)
       // Resolve caller identity once per profile (deduped per profile within this
@@ -158,7 +158,7 @@ const make: Effect.Effect<
       return { prs, failures, unresolvedProfiles: unresolvedCallerProfiles }
     })
 
-  const service: FilterServiceShape = { resolveTargets, collect }
+  const service: FilterServiceContract = { resolveTargets, collect }
   return service
 })
 
@@ -168,7 +168,7 @@ const make: Effect.Effect<
  * @category models
  */
 export declare namespace FilterService {
-  export interface Service extends FilterServiceShape {}
+  export interface Service extends FilterServiceContract {}
 }
 
 /**
@@ -178,7 +178,7 @@ export declare namespace FilterService {
  */
 export class FilterService extends Context.Service<
   FilterService,
-  FilterServiceShape
+  FilterServiceContract
 >()("@knpkv/codecommit/FilterService") {}
 
 /**

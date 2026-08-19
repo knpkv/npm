@@ -14,7 +14,7 @@
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
-import type { ReconcileServiceShape } from "../services/ReconcileService.js"
+import type { ReconcileServiceContract } from "../services/ReconcileService.js"
 import { formatDuration } from "../utils/time.js"
 import { earliestStart } from "./calendar.js"
 import { NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
@@ -120,7 +120,7 @@ export interface WriteOutcome {
 
 /** Write one confirmed proposal, sizing each side to its own gap. */
 export const applyProposal = (
-  service: Pick<ReconcileServiceShape, "applyToClockify" | "applyToJira">,
+  service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
   proposal: SessionProposal,
   description: string
 ): Effect.Effect<WriteOutcome, never, never> =>

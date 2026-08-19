@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { NodeRuntime, NodeStdio } from "@effect/platform-node"
+import { NodeRuntime } from "@effect/platform-node"
 import { Effect } from "effect"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
@@ -24,8 +24,7 @@ const cli = Command.runWith(root, {
 
 const program = processArgv.pipe(
   Effect.flatMap((argv) => cli(argv)),
-  Effect.provide(HeadlessLayer),
-  Effect.provide(NodeStdio.layer)
+  Effect.provide(HeadlessLayer)
 )
 
 // The TUI keeps long-lived resources open through its atom runtime, and OpenTUI

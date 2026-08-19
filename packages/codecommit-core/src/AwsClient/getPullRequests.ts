@@ -42,7 +42,14 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
-import { Account, ApprovalRule, codecommitConsoleUrl, PullRequest, type PullRequestStatus } from "../Domain.js"
+import {
+  Account,
+  ApprovalRule,
+  codecommitConsoleUrl,
+  normalizeAccountId,
+  PullRequest,
+  type PullRequestStatus
+} from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { parseRuleContent } from "./approvalRuleContent.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
@@ -68,7 +75,7 @@ const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const EpochFallback = new Date(0)
 
-const emptyApprovers = (): { readonly names: Array<string>; readonly arns: Array<string> } => ({
+const emptyApprovers = () => ({
   names: [],
   arns: []
 })
@@ -93,7 +100,7 @@ export const fetchApprovalEvaluation = (
       satisfiedNames: new Set(r.evaluation?.approvalRulesSatisfied ?? [])
     })),
     Effect.tapError((e) => Effect.logWarning("fetchApprovalEvaluation failed", e)),
-    Effect.catchCause(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
+    Effect.catch(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
   )
 
 /** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
@@ -128,9 +135,8 @@ export const buildApprovalRules = (
           ruleName: rule.approvalRuleName ?? "",
           satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
           ...parsed,
-          ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
-            ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
-            : {})
+          ...((rule.originApprovalRuleTemplate?.approvalRuleTemplateName) &&
+            { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName })
         }))
       )
   )
@@ -181,7 +187,7 @@ export const fetchApprovers = (
         arns: approved.map((a) => a.userArn)
       }
     }),
-    Effect.catchCause(() => Effect.succeed(emptyApprovers()))
+    Effect.catch(() => Effect.succeed(emptyApprovers()))
   )
 
 /**
@@ -290,7 +296,7 @@ const RawToPullRequest = RawPullRequest.pipe(
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodePullRequest = (raw: unknown) => Schema.decodeUnknownEffect(RawToPullRequest)(raw)
+const decodePullRequest = <UnparsedInput>(raw: UnparsedInput) => Schema.decodeUnknownEffect(RawToPullRequest)(raw)
 
 // ---------------------------------------------------------------------------
 // Stream builders
@@ -304,11 +310,11 @@ const listAllRepositories = () =>
 
 export const fetchRepoAccountId = (
   repoName: string
-): Effect.Effect<string, never, AwsStreamEnv> =>
+): Effect.Effect<string | undefined, never, AwsStreamEnv> =>
   codecommit.getRepository({ repositoryName: repoName }).pipe(
-    Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
+    Effect.map((r) => normalizeAccountId(r.repositoryMetadata?.accountId)),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
-    Effect.catchCause(() => Effect.succeed(""))
+    Effect.catch(() => Effect.succeed(undefined))
   )
 
 const listPullRequestIds = (
@@ -339,10 +345,10 @@ export const getPullRequests = (
     const status = options?.status ?? "OPEN"
 
     // Cache repo account IDs (one getRepository call per repo, not per PR)
-    const repoAccountCache = new Map<string, string>()
+    const repoAccountCache = new Map<string, string | undefined>()
     const getRepoAccount = (repoName: string) => {
       const cached = repoAccountCache.get(repoName)
-      if (cached !== undefined) return Effect.succeed(cached)
+      if (repoAccountCache.has(repoName)) return Effect.succeed(cached)
       return fetchRepoAccountId(repoName).pipe(
         Effect.tap((id) => Effect.sync(() => repoAccountCache.set(repoName, id)))
       )
@@ -370,7 +376,7 @@ export const getPullRequests = (
     )
 
     return stream.pipe(
-      Stream.provide(DistilledCredentials.fromCredentials(credentials)),
+      Stream.provide(DistilledCredentials.fromCredentials(credentials, account.region)),
       Stream.provideService(HttpClient.HttpClient, httpClient),
       Stream.provideService(DistilledRegion.Region, Effect.succeed(account.region)),
       Stream.timeout(config.streamTimeout)

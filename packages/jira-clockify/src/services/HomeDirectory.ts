@@ -8,11 +8,11 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
-export interface HomeDirectoryShape {
+export interface HomeDirectoryContract {
   readonly path: string
 }
 
-export class HomeDirectory extends Context.Service<HomeDirectory, HomeDirectoryShape>()("jcf/HomeDirectory") {}
+export class HomeDirectory extends Context.Service<HomeDirectory, HomeDirectoryContract>()("jcf/HomeDirectory") {}
 
 const homePath = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE")),

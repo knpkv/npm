@@ -14,6 +14,7 @@ import { Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
+import { BackgroundScope } from "../internal/BackgroundScope.js"
 
 const SSO_TIMEOUT = Duration.minutes(3)
 
@@ -29,14 +30,15 @@ export const NotificationsLive = HttpApiBuilder.group(
       const awsClient = yield* AwsClient.AwsClient
       const notificationRepo = yield* CacheService.NotificationRepo
       const ssoSemaphore = yield* Semaphore.make(1)
+      const ownerScope = yield* BackgroundScope
 
       return handlers
         .handle("list", ({ query }) =>
           notificationRepo.findAll({
             limit: query.limit ?? 20,
-            ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
-            ...(query.filter !== undefined ? { filter: query.filter } : {}),
-            ...(query.unreadOnly ? { unreadOnly: true } : {})
+            ...((query.cursor !== undefined) && { cursor: query.cursor }),
+            ...((query.filter !== undefined) && { filter: query.filter }),
+            ...((query.unreadOnly) && { unreadOnly: true })
           }).pipe(Effect.orDie))
         .handle("count", () =>
           notificationRepo.unreadCount().pipe(
@@ -64,7 +66,7 @@ export const NotificationsLive = HttpApiBuilder.group(
               stdout: "inherit",
               stderr: "inherit"
             })
-            yield* Effect.forkDetach(
+            yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
                 exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
@@ -104,7 +106,8 @@ export const NotificationsLive = HttpApiBuilder.group(
                       }))
                     ))
                 )
-              )
+              ),
+              ownerScope
             )
             return "ok"
           }).pipe(
@@ -116,7 +119,7 @@ export const NotificationsLive = HttpApiBuilder.group(
               stdout: "inherit",
               stderr: "inherit"
             })
-            yield* Effect.forkDetach(
+            yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
                 exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
@@ -130,7 +133,8 @@ export const NotificationsLive = HttpApiBuilder.group(
                       }))
                     ))
                 )
-              )
+              ),
+              ownerScope
             )
             return "ok"
           }).pipe(

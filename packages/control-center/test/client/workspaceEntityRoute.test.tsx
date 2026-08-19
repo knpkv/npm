@@ -1,34 +1,66 @@
 // @vitest-environment happy-dom
 
+import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
-import { type ReactElement, act } from "react"
+import { type ComponentProps, type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter, useLocation, useNavigate } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   ReleaseDeliveryGraphInspection,
+  SubmitClockifyActionResponse,
   WorkspaceEntityInspection,
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  type DurableAgentPrompt,
   PullRequestReviewNotStarted,
-  PullRequestReviewState
+  PullRequestReviewState,
+  ReviewAgentProfileId
 } from "../../src/api/agent.js"
-import { RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
-import { PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId,
+  RelationshipId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
+import { type PrReviewSuggestion, PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionSequence
+} from "../../src/domain/prReviewRevision.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
+import { confluencePageDraftTarget } from "../../src/client/AgentPage.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
-import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
+import { confluenceEditHref, WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
+import {
+  type ClockifyActionSubmissionTransport,
+  useClockifyActionSubmission
+} from "../../src/client/entities/useClockifyActionSubmission.js"
+import type { ReviewSuggestionRevisionTransport } from "../../src/client/entities/useReviewSuggestionRevisions.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
 import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
+
+describe("Confluence edit links", () => {
+  it("derives an exact HTTPS editor and rejects executable source schemes", () => {
+    expect(confluenceEditHref("https://example.test/wiki/spaces/SD/pages/42/Report", "42")).toBe(
+      "https://example.test/wiki/spaces/SD/pages/edit-v2/42"
+    )
+    expect(confluenceEditHref("javascript://host/wiki/spaces/SD/pages/42", "42")).toBeNull()
+  })
+})
 
 const encodedWorkset = Schema.encodeSync(ReleaseDeliveryGraphInspection)(releaseWorksetFixture)
 const projectionEntry = encodedWorkset.entityProjections[0]
@@ -484,12 +516,21 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
     providerId: "confluence",
     vendorImmutableId: "991",
     revision: "12",
-    sourceUrl: "https://wiki.example.test/pages/991"
+    sourceUrl: "https://acme.atlassian.net/spaces/PAY/pages/991/Payments+release+runbook"
   },
   isSourceCurrent: true,
   freshness: null,
   activity: { truncated: false, events: [] }
 })
+
+const confluenceEntityState = {
+  _tag: "ready",
+  entityId: confluenceInspection.entity.projection.entityId,
+  inspection: confluenceInspection,
+  refreshKey: "fixture",
+  sessionKey: "fixture",
+  workspaceId: confluenceInspection.entity.projection.workspaceId
+} satisfies WorkspaceEntityState
 
 const relatedClockifyIssue = encodedWorkset.entityProjections[1]
 if (relatedClockifyIssue === undefined) throw new Error("Expected a related issue fixture")
@@ -507,6 +548,7 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
         durationMinutes: 135,
         billable: true,
         approvalState: "approved",
+        locked: true,
         projectId: "project-payments",
         userId: "clockify-user-mina",
         startedAt: "2026-07-14T07:45:00.000Z",
@@ -543,7 +585,14 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
     sourceUrl: "https://app.clockify.me/tracker"
   },
   isSourceCurrent: true,
+  sourceActionsAvailable: true,
   freshness: null,
+  clockifyApproval: {
+    actionId: "01890f6f-6d6a-7cc0-98d2-000000000094",
+    decision: "approved",
+    rationale: "Reviewed against the delivery record.",
+    decidedAt: "2026-07-14T10:05:00.000Z"
+  },
   graph: {
     truncated: false,
     nodes: [
@@ -657,41 +706,71 @@ const pullRequestReviewState = {
   headRevision: pullRequestReviewSubject.headRevision,
   sessionKey: "session-a",
   action: "idle",
+  historyAction: "idle",
   provider: {
     providerId: DurableAgentProviderId.make("openai-compatible"),
-    model: AgentModelId.make("review-model")
+    model: AgentModelId.make("review-model"),
+    reviewProfile: {
+      profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+      label: "Full-project review · openai-compatible · review-model",
+      budgetMillis: 1_200_000,
+      networkAccess: "blocked",
+      sandbox: "sbx"
+    }
   },
   review: new PullRequestReviewNotStarted({ subject: pullRequestReviewSubject })
 } satisfies PullRequestReviewControllerState
+
+const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+const REVIEW_OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
 
 const completedPullRequestReviewState = {
   ...pullRequestReviewState,
   review: Schema.decodeUnknownSync(PullRequestReviewState)({
     _tag: "completed",
     subject: pullRequestReviewSubject,
-    jobId: "01890f6f-6d6a-7cc0-98d2-000000000099",
+    jobId: REVIEW_JOB_ID,
     providerId: "openai-compatible",
     model: "review-model",
+    reviewProfile: pullRequestReviewState.provider.reviewProfile,
+    activity: { events: [], truncated: false },
     requestedAt: "2026-07-14T10:00:00.000Z",
     completedAt: "2026-07-14T10:01:00.000Z",
+    outcome: "changes-required",
     report: {
-      schemaVersion: 1,
+      schemaVersion: 3,
       subject: pullRequestReviewSubject,
-      recommendation: "changes-recommended",
-      summary: "One exact-head finding needs a person to decide.",
-      findings: [
+      completion: { status: "complete" },
+      suggestions: [
         {
-          findingId: "finding-1",
-          severity: "high",
-          path: "src/capture.ts",
-          startLine: 42,
-          endLine: 42,
-          title: "Retry can duplicate capture",
-          detail: "The retry path does not reuse the original idempotency key.",
+          suggestionId: `sha256:${"1".repeat(64)}`,
+          state: "draft",
+          title: "Reuse the original idempotency key",
+          severity: "P2",
+          problem: "Retry can duplicate capture",
+          impact: "The retry path does not reuse the original idempotency key.",
+          evidence: {
+            path: "src/capture.ts",
+            startLine: 42,
+            endLine: 42,
+            excerpt: "return capture({ idempotencyKey: freshKey })"
+          },
+          recommendation: "Reuse the original idempotency key for retry attempts.",
+          anchor: {
+            _tag: "line",
+            path: "src/capture.ts",
+            line: 42
+          },
+          relatedLocations: [],
+          confidence: {
+            level: "high",
+            reason: "The added retry branch supplies a newly generated key."
+          },
           prevention: {
             summary: "Add a focused retry contract test.",
             enforcement: "test",
             existingRuleOrConfig: "capture integration suite",
+            recurrenceEvidence: "Every capture retry crosses the shared idempotency boundary.",
             targetFile: "test/capture-retry.test.ts",
             sourcePaths: ["src/capture.ts"],
             matcherOrInvariant: "Every retry reuses its original idempotency key.",
@@ -700,9 +779,63 @@ const completedPullRequestReviewState = {
             boundary: "Only capture retries are covered."
           }
         }
-      ]
+      ],
+      notes: []
     }
   })
+} satisfies PullRequestReviewControllerState
+
+const completedReview = completedPullRequestReviewState.review
+if (completedReview._tag !== "completed") throw new Error("Expected the completed review fixture")
+const reviewSuggestion = completedReview.report.suggestions[0]
+if (reviewSuggestion === undefined) throw new Error("Expected a review suggestion fixture")
+
+const reviewSuggestionRevisionPage = (
+  sequence: 1 | 2,
+  state: "dismissed" | "draft",
+  title = reviewSuggestion.title
+) => {
+  const originalRevisionId = PrReviewSuggestionRevisionId.make(`sha256:${"2".repeat(64)}`)
+  const revisionId = sequence === 1 ? originalRevisionId : PrReviewSuggestionRevisionId.make(`sha256:${"3".repeat(64)}`)
+  const revision = {
+    revisionId,
+    sequence: PrReviewSuggestionRevisionSequence.make(sequence),
+    predecessorRevisionId: sequence === 1 ? null : originalRevisionId,
+    sourceJobId: REVIEW_JOB_ID,
+    subject: pullRequestReviewSubject,
+    suggestion: { ...reviewSuggestion, state, title },
+    validation: {
+      _tag: "validated",
+      reviewedHead: pullRequestReviewSubject.headRevision,
+      validatingJobId: REVIEW_JOB_ID,
+      sourceRevisionId: revisionId
+    },
+    author: {
+      _tag: "operator",
+      personId: REVIEW_OPERATOR_ID
+    },
+    createdAt: "2026-07-27T14:00:00.000Z"
+  }
+  return Schema.decodeUnknownSync(PrReviewSuggestionRevisionPage)({
+    current: revision,
+    revisions: [revision],
+    hasMore: false,
+    nextBeforeSequence: null
+  })
+}
+
+const publishedPullRequestReviewState = {
+  ...completedPullRequestReviewState,
+  review: {
+    ...completedReview,
+    report: {
+      ...completedReview.report,
+      suggestions: completedReview.report.suggestions.map((suggestion): PrReviewSuggestion => ({
+        ...suggestion,
+        state: "published"
+      }))
+    }
+  }
 } satisfies PullRequestReviewControllerState
 
 const pipelineState = {
@@ -743,34 +876,119 @@ afterEach(async () => {
 const renderView = async (
   onAskAgent: () => void,
   viewState: WorkspaceEntityState = state,
-  onReviewStart: () => void = () => undefined,
-  reviewState: PullRequestReviewControllerState = pullRequestReviewState
+  onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
+  reviewState: PullRequestReviewControllerState = pullRequestReviewState,
+  reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport,
+  clockifyActionSubmit?: ComponentProps<typeof WorkspaceEntityView>["clockifyActionSubmit"],
+  clockifyPermissions: {
+    readonly canApprove: boolean
+    readonly canCorrect: boolean
+  } = {
+    canApprove: clockifyActionSubmit !== undefined,
+    canCorrect: clockifyActionSubmit !== undefined
+  },
+  confluenceCanEdit = false
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
   const view: ReactElement = (
-    <MemoryRouter>
-      <WorkspaceEntityView
-        onAskAgent={onAskAgent}
-        originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
-        originLabel="Back to items"
-        originState={null}
-        retry={() => undefined}
-        reviewCanEnqueue
-        reviewStart={onReviewStart}
-        reviewState={
-          viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
-            ? reviewState
-            : { _tag: "idle" }
-        }
-        state={viewState}
-        workspaceId={WORKSET_WORKSPACE_ID}
-      />
-    </MemoryRouter>
+    <PortalProvider>
+      <MemoryRouter>
+        <WorkspaceEntityView
+          clockifyActionCanApprove={clockifyPermissions.canApprove}
+          clockifyActionCanCorrect={clockifyPermissions.canCorrect}
+          confluenceCanEdit={confluenceCanEdit}
+          {...(clockifyActionSubmit === undefined ? {} : { clockifyActionSubmit })}
+          onAskAgent={onAskAgent}
+          originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
+          originLabel="Back to items"
+          originState={null}
+          retry={() => undefined}
+          reviewCanEnqueue
+          reviewStart={onReviewStart}
+          reviewState={
+            viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
+              ? reviewState
+              : { _tag: "idle" }
+          }
+          {...(reviewSuggestionRevisionTransport === undefined ? {} : { reviewSuggestionRevisionTransport })}
+          state={viewState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      </MemoryRouter>
+    </PortalProvider>
   )
   await act(async () => mountedRoot?.render(view))
+  await act(async () => vi.dynamicImportSettled())
   return host
+}
+
+const PullRequestLifecycleHarness = ({
+  revisionTransport
+}: {
+  readonly revisionTransport: ReviewSuggestionRevisionTransport
+}): ReactElement => {
+  const [reviewState, setReviewState] = useState<PullRequestReviewControllerState>(completedPullRequestReviewState)
+  return (
+    <PortalProvider>
+      <MemoryRouter>
+        <button onClick={() => setReviewState(publishedPullRequestReviewState)} type="button">
+          Publish report fixture
+        </button>
+        <WorkspaceEntityView
+          onAskAgent={() => undefined}
+          originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
+          originLabel="Back to items"
+          originState={null}
+          retry={() => undefined}
+          reviewCanEnqueue
+          reviewState={reviewState}
+          reviewSuggestionRevisionTransport={revisionTransport}
+          state={pullRequestState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      </MemoryRouter>
+    </PortalProvider>
+  )
+}
+
+const ClockifySubmissionHarness = ({
+  entityId,
+  transport
+}: {
+  readonly entityId: EntityId
+  readonly transport: ClockifyActionSubmissionTransport
+}): ReactElement => {
+  const submission = useClockifyActionSubmission(
+    entityId,
+    "session-a",
+    () => undefined,
+    () => undefined,
+    transport
+  )
+  return (
+    <>
+      <button
+        onClick={() =>
+          submission.submit({
+            _tag: "record-approval",
+            expectedRevision: Revision.make("clockify-revision-4"),
+            decision: "approved",
+            rationale: "Reviewed"
+          })
+        }
+        type="button"
+      >
+        Submit approval
+      </button>
+      <output data-clockify-submission-state>
+        {submission.state._tag === "succeeded"
+          ? `${submission.state._tag}:${submission.state.result.actionId}`
+          : submission.state._tag}
+      </output>
+    </>
+  )
 }
 
 const LocationProbe = (): ReactElement => {
@@ -905,6 +1123,7 @@ describe("canonical workspace entity", () => {
         billableLabel: "Billable",
         contributorLabel: "Mina Ortiz",
         durationLabel: "2h 15m",
+        lockLabel: "Locked",
         projectLabel: "project-payments",
         rollupLabel: "1 visible entry · 135 exact minutes",
         totalMinutes: 135
@@ -914,10 +1133,29 @@ describe("canonical workspace entity", () => {
       expect.objectContaining({ key: "OPS-429", state: "inferred" })
     ])
     expect(presentation.clockifyTimeEntry?.description).toBe("Review payment safeguards")
-
-    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
     const timeEntryDetails = clockifyInspection.entity.projection.details
     if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const historicalDetails = { ...timeEntryDetails }
+    delete historicalDetails.locked
+    const historicalProjection = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      entity: {
+        ...clockifyInspection.entity,
+        projection: {
+          ...clockifyInspection.entity.projection,
+          details: historicalDetails
+        }
+      }
+    })
+    expect(historicalProjection.clockifyTimeEntry?.lockLabel).toBe("Lock state not synchronized")
+    const advancedRevision = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      clockifyApproval: null,
+      source: { ...clockifyInspection.source, revision: Revision.make("clockify-revision-5") }
+    })
+    expect(advancedRevision.clockifyTimeEntry?.approvalLabel).toBe("Pending")
+
+    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
     const detailedPresentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
       ...clockifyInspection,
       entity: {
@@ -1296,6 +1534,12 @@ describe("canonical workspace entity", () => {
     const onAskAgent = vi.fn()
     const onReviewStart = vi.fn()
     const host = await renderView(onAskAgent, pullRequestState, onReviewStart)
+    await act(async () => {
+      await Promise.all([
+        import("../../src/client/entities/PullRequestReviewPanel.js"),
+        import("../../src/client/entities/WorkspacePullRequestDetails.js")
+      ])
+    })
 
     expect(host.textContent).toContain("feature/capture")
     expect(host.textContent).toContain("a5d8c9e4f013bdf17c2e6765579e2770f63e7b19")
@@ -1323,6 +1567,18 @@ describe("canonical workspace entity", () => {
     )
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
+    expect(host.textContent).toContain("Review this exact head")
+    expect(host.textContent).toContain(pullRequestReviewSubject.headRevision)
+    expect(host.textContent).toContain("Full-project review · openai-compatible · review-model")
+    expect(host.textContent).toContain("20 minutes")
+    expect(host.textContent).toContain("Network blocked")
+    expect(host.textContent).toContain("sbx")
+    expect(onReviewStart).not.toHaveBeenCalled()
+    const startButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Start full review"
+    )
+    if (startButton === undefined) throw new Error("Expected review confirmation")
+    await act(async () => startButton.click())
     expect(onReviewStart).toHaveBeenCalledOnce()
     expect(onAskAgent).not.toHaveBeenCalled()
   })
@@ -1335,12 +1591,147 @@ describe("canonical workspace entity", () => {
       completedPullRequestReviewState
     )
 
-    expect(host.textContent).toContain("Changes recommended")
+    expect(host.textContent).toContain("Changes Required")
     expect(host.textContent).toContain("Retry can duplicate capture")
     expect(host.textContent).toContain("src/capture.ts:42")
     expect(host.textContent).toContain("Prevention proposal · separate review required")
-    expect(host.textContent).toContain("Agent advice only. A person must still approve or request changes.")
+    expect(host.textContent).toContain(
+      "Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally."
+    )
     expect(host.textContent).toContain("Human review requested")
+  })
+
+  it("filters semantic findings with the Human, Agent, and Unresolved controls", async () => {
+    const host = await renderView(
+      () => undefined,
+      pullRequestState,
+      () => undefined,
+      completedPullRequestReviewState
+    )
+    const findingFilter = host.querySelector<HTMLElement>('[aria-label="Finding filter"]')
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (findingFilter === null || semanticFindings === null) {
+      throw new Error("Expected the pull-request finding filters and semantic findings")
+    }
+    const filterButton = (label: string): HTMLButtonElement => {
+      const button = [...findingFilter.querySelectorAll<HTMLButtonElement>("button")].find(
+        (candidate) => candidate.textContent === label
+      )
+      if (button === undefined) throw new Error(`Expected the ${label} finding filter`)
+      return button
+    }
+
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+
+    await act(async () => filterButton("Human").click())
+    expect(filterButton("Human").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).not.toContain("Reuse the original idempotency key")
+    expect(semanticFindings.textContent).toContain("No validated review suggestions are attached to this revision.")
+
+    await act(async () => filterButton("Agent").click())
+    expect(filterButton("Agent").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+
+    await act(async () => filterButton("Unresolved").click())
+    expect(filterButton("Unresolved").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+  })
+
+  it("removes a dismissed finding from the shared unresolved diff presentation", async () => {
+    const draftPage = reviewSuggestionRevisionPage(1, "draft")
+    const dismissedPage = reviewSuggestionRevisionPage(2, "dismissed")
+    const dismiss = vi.fn(() => Promise.resolve(dismissedPage.current))
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      dismiss,
+      edit: () => Promise.reject(new Error("Unexpected edit")),
+      load: () => Promise.resolve(draftPage)
+    }
+    const host = await renderView(
+      () => undefined,
+      pullRequestState,
+      () => undefined,
+      completedPullRequestReviewState,
+      revisionTransport
+    )
+    await act(async () => undefined)
+    const findingFilter = host.querySelector<HTMLElement>('[aria-label="Finding filter"]')
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (findingFilter === null || semanticFindings === null) {
+      throw new Error("Expected the pull-request finding filters and semantic findings")
+    }
+    const unresolved = [...findingFilter.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Unresolved"
+    )
+    if (unresolved === undefined) throw new Error("Expected the unresolved finding filter")
+    await act(async () => unresolved.click())
+    expect(semanticFindings.textContent).toContain(reviewSuggestion.title)
+
+    const dismissButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Dismiss"
+    )
+    if (dismissButton === undefined) throw new Error("Expected the finding dismissal action")
+    await act(async () => dismissButton.click())
+    const confirmDismissal = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Dismiss finding"
+    )
+    if (confirmDismissal === undefined) throw new Error("Expected the finding dismissal confirmation")
+    await act(async () => confirmDismissal.click())
+
+    expect(dismiss).toHaveBeenCalledOnce()
+    expect(semanticFindings.textContent).not.toContain(reviewSuggestion.title)
+    expect(semanticFindings.textContent).toContain("No validated review suggestions are attached to this revision.")
+  })
+
+  it("preserves accepted suggestion content across a published report transition", async () => {
+    const editedTitle = "Reuse the persisted idempotency key"
+    const draftPage = reviewSuggestionRevisionPage(1, "draft")
+    const editedPage = reviewSuggestionRevisionPage(2, "draft", editedTitle)
+    const edit = vi.fn(() => Promise.resolve(editedPage.current))
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      edit,
+      load: vi.fn().mockResolvedValueOnce(draftPage).mockResolvedValue(editedPage)
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<PullRequestLifecycleHarness revisionTransport={revisionTransport} />))
+    await act(async () => vi.dynamicImportSettled())
+    await act(async () => undefined)
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (semanticFindings === null) throw new Error("Expected semantic review findings")
+
+    const editButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Edit"
+    )
+    if (editButton === undefined) throw new Error("Expected the review suggestion edit action")
+    await act(async () => editButton.click())
+    const title = document.querySelector<HTMLInputElement>("input")
+    if (title === null) throw new Error("Expected the review suggestion title editor")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected the input value setter")
+      valueSetter.call(title, editedTitle)
+      title.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const save = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Save revision"
+    )
+    if (save === undefined) throw new Error("Expected the revision save action")
+    await act(async () => save.click())
+    expect(edit).toHaveBeenCalledOnce()
+    expect(semanticFindings.textContent).toContain(editedTitle)
+
+    const publish = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Publish report fixture"
+    )
+    if (publish === undefined) throw new Error("Expected the report lifecycle transition")
+    await act(async () => publish.click())
+
+    const published = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by published state']")
+    expect(published).not.toBeNull()
+    await act(async () => published?.click())
+    expect(semanticFindings.textContent).toContain(editedTitle)
+    expect(semanticFindings.textContent).not.toContain(reviewSuggestion.title)
   })
 
   it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {
@@ -1364,7 +1755,7 @@ describe("canonical workspace entity", () => {
     expect(host.querySelectorAll("a[href*='bucket'], a[href*='artifact'], a[href*='logs']")).toHaveLength(0)
   })
 
-  it("renders a read-only Clockify ledger and keeps an unattributed entry visible", async () => {
+  it("renders a Clockify ledger with distinct Control Center approval and unattributed state", async () => {
     const unattributedState = {
       ...clockifyState,
       inspection: {
@@ -1372,7 +1763,15 @@ describe("canonical workspace entity", () => {
         graph: { ...clockifyInspection.graph, relationships: [] }
       }
     } satisfies WorkspaceEntityState
-    const host = await renderView(() => undefined, unattributedState)
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      unattributedState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction
+    )
 
     expect(host.querySelector("[data-workspace-clockify-time-entry-detail]")).not.toBeNull()
     expect(host.textContent).toContain("2h 15m")
@@ -1382,8 +1781,262 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Mina Ortiz")
     expect(host.textContent).toContain("Unattributed")
     expect(host.textContent).toContain("The entry remains visible")
-    expect(host.textContent).toContain("Corrections and approval remain read-only")
-    expect(host.querySelector("input, textarea, select")).toBeNull()
+    expect(host.textContent).toContain("Locked")
+    expect(host.textContent).toContain("Control Center approval: Approved")
+    expect(host.textContent).toContain("Reviewed against the delivery record.")
+    expect(host.querySelector("[data-clockify-approval] time")?.getAttribute("datetime")).toBe(
+      "2026-07-14T10:05:00.000Z"
+    )
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    expect(actionInputs).toHaveLength(2)
+    const jiraIssueKey = actionInputs[0]
+    const rationale = actionInputs[1]
+    if (jiraIssueKey === undefined || rationale === undefined) {
+      throw new Error("Expected Clockify governed action inputs")
+    }
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    await act(async () => {
+      valueSetter.call(rationale, "Reviewed against the delivery record")
+      rationale.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const approve = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Approve revision"
+    )
+    if (approve === undefined) throw new Error("Expected the Clockify approval action")
+    await act(async () => approve.click())
+    expect(submitClockifyAction).toHaveBeenCalledWith({
+      _tag: "record-approval",
+      expectedRevision: clockifyInspection.source.revision,
+      decision: "approved",
+      rationale: "Reviewed against the delivery record"
+    })
+
+    const pendingHost = await renderView(() => undefined, {
+      ...unattributedState,
+      inspection: { ...unattributedState.inspection, clockifyApproval: null }
+    })
+    expect(pendingHost.textContent).toContain("Control Center approval: Pending")
+    expect(pendingHost.querySelector("[data-clockify-approval] time")).toBeNull()
+
+    const timeEntryDetails = clockifyInspection.entity.projection.details
+    if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const runningState = {
+      ...clockifyState,
+      inspection: {
+        ...clockifyInspection,
+        entity: {
+          ...clockifyInspection.entity,
+          projection: {
+            ...clockifyInspection.entity.projection,
+            details: { ...timeEntryDetails, locked: false, endedAt: null }
+          }
+        }
+      }
+    } satisfies WorkspaceEntityState
+    const runningHost = await renderView(() => undefined, runningState)
+    const runningPresentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, runningState.inspection)
+    expect(runningHost.textContent).toContain("Timer running")
+    expect(runningPresentation.clockifyTimeEntry?.lockLabel).toBe("Unlocked")
+    expect(runningHost.textContent).toContain("Control Center approval: Approved")
+  })
+
+  it("allows approvers to decide Clockify revisions without granting correction access", async () => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      clockifyState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: false }
+    )
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    const jiraIssueKey = actionInputs[0]
+    const rationale = actionInputs[1]
+    if (jiraIssueKey === undefined || rationale === undefined) {
+      throw new Error("Expected Clockify governed action inputs")
+    }
+    expect(jiraIssueKey.disabled).toBe(true)
+    expect(rationale.disabled).toBe(false)
+    const correction = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Correct association"
+    )
+    const approve = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Approve revision"
+    )
+    if (correction === undefined || approve === undefined) {
+      throw new Error("Expected Clockify governed action controls")
+    }
+    expect(correction.disabled).toBe(true)
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    await act(async () => {
+      valueSetter.call(rationale, "Reviewed by the workspace approver")
+      rationale.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(approve.disabled).toBe(false)
+    await act(async () => approve.click())
+    expect(submitClockifyAction).toHaveBeenCalledWith({
+      _tag: "record-approval",
+      expectedRevision: clockifyInspection.source.revision,
+      decision: "approved",
+      rationale: "Reviewed by the workspace approver"
+    })
+  })
+
+  it("fails closed for Clockify controls when the source descriptor has no action capabilities", async () => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      {
+        ...clockifyState,
+        inspection: {
+          ...clockifyInspection,
+          sourceActionsAvailable: false
+        }
+      },
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: true }
+    )
+    const actionInputs = [...host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")]
+    const actionButtons = [...host.querySelectorAll<HTMLButtonElement>("[data-clockify-governed-actions] button")]
+
+    expect(actionInputs).toHaveLength(2)
+    expect(actionButtons).toHaveLength(3)
+    expect(actionInputs.every(({ disabled }) => disabled)).toBe(true)
+    expect(actionButtons.every(({ disabled }) => disabled)).toBe(true)
+    expect(submitClockifyAction).not.toHaveBeenCalled()
+  })
+
+  it.each(["source-stale", "refreshing", "refresh-failed"] satisfies ReadonlyArray<
+    "source-stale" | "refreshing" | "refresh-failed"
+  >)("keeps Clockify mutations disabled while retained entity details are %s", async (reason) => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      {
+        ...clockifyState,
+        _tag: "stale",
+        inspection: {
+          ...clockifyState.inspection,
+          isSourceCurrent: false
+        },
+        reason
+      },
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: true }
+    )
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    const actionButtons = [...host.querySelectorAll<HTMLButtonElement>("[data-clockify-governed-actions] button")]
+
+    expect(actionInputs).toHaveLength(2)
+    expect(actionButtons).toHaveLength(3)
+    expect([...actionInputs].every(({ disabled }) => disabled)).toBe(true)
+    expect(actionButtons.every(({ disabled }) => disabled)).toBe(true)
+    await act(async () => {
+      for (const button of actionButtons) button.click()
+    })
+    expect(submitClockifyAction).not.toHaveBeenCalled()
+    expect(host.textContent).toContain(reason === "refreshing" ? "Refreshing source" : "Showing retained source data")
+  })
+
+  it("mirrors the Jira issue-key request boundary in the correction input", async () => {
+    const host = await renderView(
+      () => undefined,
+      clockifyState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      vi.fn(),
+      { canApprove: false, canCorrect: true }
+    )
+    const jiraIssueKey = host.querySelector<HTMLInputElement>("[data-clockify-governed-actions] input")
+    if (jiraIssueKey === null) throw new Error("Expected the Clockify correction input")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    const boundaryKey = `${"A".repeat(98)}-1`
+    const overlongKey = `${"A".repeat(99)}-1`
+
+    expect(boundaryKey).toHaveLength(100)
+    expect(overlongKey).toHaveLength(101)
+    expect(jiraIssueKey.maxLength).toBe(100)
+    await act(async () => {
+      valueSetter.call(jiraIssueKey, boundaryKey)
+      jiraIssueKey.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(jiraIssueKey.checkValidity()).toBe(true)
+    await act(async () => {
+      valueSetter.call(jiraIssueKey, overlongKey)
+      jiraIssueKey.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(jiraIssueKey.checkValidity()).toBe(false)
+  })
+
+  it("aborts and ignores a superseded Clockify submission when the entity changes", async () => {
+    const entityA = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000001")
+    const entityB = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000002")
+    const resultA = Schema.decodeSync(SubmitClockifyActionResponse)({
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-550000000011"),
+      state: "succeeded"
+    })
+    const resultB = Schema.decodeSync(SubmitClockifyActionResponse)({
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-550000000012"),
+      state: "authorized"
+    })
+    let resolveA: ((result: typeof resultA) => void) | undefined
+    let signalA: AbortSignal | undefined
+    const pendingA = new Promise<typeof resultA>((resolve) => {
+      resolveA = resolve
+    })
+    const transport = {
+      submit: (entityId, _request, signal) => {
+        if (entityId === entityA) {
+          signalA = signal
+          return pendingA
+        }
+        return Promise.resolve(resultB)
+      }
+    } satisfies ClockifyActionSubmissionTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    const renderHarness = async (entityId: EntityId): Promise<void> => {
+      await act(async () =>
+        mountedRoot?.render(<ClockifySubmissionHarness entityId={entityId} transport={transport} />)
+      )
+    }
+    const stateText = (): string | null => host.querySelector("[data-clockify-submission-state]")?.textContent ?? null
+    const submit = (): HTMLButtonElement => {
+      const button = host.querySelector<HTMLButtonElement>("button")
+      if (button === null) throw new Error("Expected the Clockify submission action")
+      return button
+    }
+
+    await renderHarness(entityA)
+    await act(async () => submit().click())
+    expect(stateText()).toBe("submitting")
+    await renderHarness(entityA)
+    expect(stateText()).toBe("submitting")
+    expect(signalA?.aborted).toBe(false)
+
+    await renderHarness(entityB)
+    expect(stateText()).toBe("idle")
+    expect(signalA?.aborted).toBe(true)
+    await act(async () => submit().click())
+    expect(stateText()).toBe(`succeeded:${resultB.actionId}`)
+
+    const completeA = resolveA
+    if (completeA === undefined) throw new Error("Expected the first submission resolver")
+    await act(async () => completeA(resultA))
+    expect(stateText()).toBe(`succeeded:${resultB.actionId}`)
   })
 
   it("renders the full Clockify source description", async () => {
@@ -1413,6 +2066,16 @@ describe("canonical workspace entity", () => {
     const host = await renderView(() => undefined, confluenceState)
 
     expect(host.querySelector("[data-workspace-confluence-page-detail]")).not.toBeNull()
+    expect(
+      host.querySelector<HTMLAnchorElement>(
+        'a[href="https://acme.atlassian.net/wiki/spaces/PAY/pages/991/Payments+release+runbook"]'
+      )?.textContent
+    ).toBe("View in Confluence")
+    expect(
+      host.querySelector<HTMLAnchorElement>('a[href="https://acme.atlassian.net/wiki/spaces/PAY/pages/edit-v2/991"]')
+        ?.textContent
+    ).toBe("Edit in Confluence")
+    expect(host.textContent).toContain("Draft with Relay")
     expect(host.textContent).toContain("Payments release runbook")
     expect(host.textContent).toContain("Production recovery")
     expect(host.textContent).toContain("Revision12")
@@ -1428,6 +2091,94 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector('a[href*="attachment"], a[href*="pixel.png"]')).toBeNull()
     expect(host.querySelector("textarea, input")).toBeNull()
     expect(host.textContent).not.toContain("Publish")
+  })
+
+  it("offers page-local manual synchronization with the foreground cadence visible", async () => {
+    const synchronize = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <PortalProvider>
+          <MemoryRouter>
+            <WorkspaceEntityView
+              confluenceSynchronizationState="synchronized"
+              onAskAgent={() => undefined}
+              onConfluenceSynchronize={synchronize}
+              originHref={`/w/${WORKSET_WORKSPACE_ID}/items`}
+              originLabel="Back to items"
+              originState={null}
+              retry={() => undefined}
+              state={confluenceState}
+              workspaceId={WORKSET_WORKSPACE_ID}
+            />
+          </MemoryRouter>
+        </PortalProvider>
+      )
+    )
+
+    expect(host.textContent).toContain("Up to date · live sync every 15 seconds while visible")
+    const sync = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Sync now"
+    )
+    if (sync === undefined) throw new Error("Expected the page-local synchronization control")
+    await act(async () => sync.click())
+    expect(synchronize).toHaveBeenCalledOnce()
+  })
+
+  it("disables synchronization in flight and keeps failed synchronization retryable", async () => {
+    const synchronize = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    const renderSynchronization = async (state: "syncing" | "failed"): Promise<void> =>
+      act(async () =>
+        mountedRoot?.render(
+          <PortalProvider>
+            <MemoryRouter>
+              <WorkspaceEntityView
+                confluenceSynchronizationState={state}
+                onAskAgent={() => undefined}
+                onConfluenceSynchronize={synchronize}
+                originHref={`/w/${WORKSET_WORKSPACE_ID}/items`}
+                originLabel="Back to items"
+                originState={null}
+                retry={() => undefined}
+                state={confluenceState}
+                workspaceId={WORKSET_WORKSPACE_ID}
+              />
+            </MemoryRouter>
+          </PortalProvider>
+        )
+      )
+
+    await renderSynchronization("syncing")
+    const sync = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Sync now"
+    )
+    if (sync === undefined) throw new Error("Expected the page-local synchronization control")
+    expect(sync.disabled).toBe(true)
+    expect(host.textContent).toContain("Live sync every 15 seconds while visible")
+
+    await renderSynchronization("failed")
+    expect(sync.disabled).toBe(false)
+    expect(host.textContent).toContain("Sync failed. Try again.")
+    await act(async () => sync.click())
+    expect(synchronize).toHaveBeenCalledOnce()
+  })
+
+  it("hands Relay the exact related Confluence page body and revision for owner editing", () => {
+    const releaseId = confluenceInspection.entity.releaseIds[0]
+    if (releaseId === undefined) throw new Error("Expected the page to belong to a release")
+
+    expect(confluencePageDraftTarget(confluenceEntityState, releaseId)).toMatchObject({
+      contentState: "loaded",
+      entityId: confluenceInspection.entity.projection.entityId,
+      revision: "12",
+      title: "Payments release runbook"
+    })
+    expect(confluencePageDraftTarget(confluenceEntityState, releaseId)?.markdown).toContain("Production recovery")
   })
 
   it("keeps same-name Confluence accounts distinct while collapsing an exact collaborator identity", () => {
@@ -1452,6 +2203,8 @@ describe("canonical workspace entity", () => {
     const encoded = Schema.encodeSync(WorkspaceEntityInspection)(confluenceInspection)
     const lazyInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
       ...encoded,
+      isSourceCurrent: true,
+      sourceActionsAvailable: true,
       entity: {
         ...encoded.entity,
         projection: {
@@ -1465,6 +2218,43 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Content has not been loaded")
     expect(host.textContent).toContain("Open the authenticated Confluence source")
     expect(host.querySelector("[data-workspace-rich-text]")).toBeNull()
+  })
+
+  it("requires an explicit complete-replacement choice before visually editing an unloaded page", async () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(confluenceInspection)
+    const lazyInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      isSourceCurrent: true,
+      sourceActionsAvailable: true,
+      entity: {
+        ...encoded.entity,
+        projection: {
+          ...encoded.entity.projection,
+          details: { ...encoded.entity.projection.details, content: null, contentState: "lazy" }
+        }
+      }
+    })
+    const host = await renderView(
+      () => undefined,
+      { ...confluenceState, inspection: lazyInspection },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true
+    )
+    const replace = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Write a complete replacement"
+    )
+    if (replace === undefined) throw new Error("Expected the explicit replacement control")
+
+    await act(async () => replace.click())
+
+    expect(host.textContent).toContain("Complete replacement")
+    expect(host.textContent).toContain("replaces the complete Confluence page body")
+    expect(host.querySelector('[contenteditable="true"][aria-label="Confluence page body"]')).not.toBeNull()
+    expect(host.querySelector<HTMLInputElement>("input")?.value).toBe("Payments release runbook")
   })
 
   it("renders a bounded release-membership count as a lower bound", async () => {
@@ -1509,7 +2299,9 @@ describe("canonical workspace entity", () => {
         releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
       },
       new Set([releaseWorksetFixture.releaseId]),
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      )}`
     ],
     [
       "a direct Items route with a portfolio release",
@@ -1525,7 +2317,9 @@ describe("canonical workspace entity", () => {
         releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
       },
       new Set([releaseWorksetFixture.releaseId]),
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      )}`
     ],
     [
       "a direct Items route with an out-of-portfolio release",

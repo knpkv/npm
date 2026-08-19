@@ -185,7 +185,7 @@ export const ReleaseWorkset = ({
     )
   }
 
-  const workset = presentReleaseWorkset(controller.state.inspection, workspaceId, release.stages)
+  const workset = presentReleaseWorkset(controller.state.inspection, workspaceId)
   const searchParams = new URLSearchParams(location.search)
   const selectedObjectId = searchParams.get("object")
   const selectedRelationshipId = searchParams.get("relationship")
@@ -256,7 +256,12 @@ export const ReleaseWorkset = ({
                     to={runbook.href}
                   >
                     <strong>{runbook.title}</strong>
-                    <span>{runbook.reference}</span>
+                    <span>
+                      {runbook.reference}
+                      {runbook.totalTasks === 0
+                        ? ""
+                        : ` · ${String(runbook.completedTasks)}/${String(runbook.totalTasks)} tasks`}
+                    </span>
                   </Link>
                 ))}
               </div>

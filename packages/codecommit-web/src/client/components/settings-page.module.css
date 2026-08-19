@@ -1,0 +1,107 @@
+.layout {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(var(--rly-space-24), 4vw, var(--rly-space-48));
+  min-inline-size: 0;
+}
+
+.sidebar {
+  position: sticky;
+  inset-block-start: calc(4.5rem + var(--rly-space-24));
+  display: grid;
+  min-inline-size: 0;
+  gap: var(--rly-space-16);
+}
+
+.backButton {
+  inline-size: fit-content;
+  gap: var(--rly-space-8);
+}
+
+.tabList {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.tab {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: var(--rly-space-40);
+  align-items: center;
+  gap: var(--rly-space-8);
+  padding-inline: var(--rly-space-12);
+  border: 1px solid transparent;
+  border-radius: var(--rly-radius-control);
+  background: transparent;
+  color: var(--rly-color-text-2);
+  cursor: pointer;
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  text-align: start;
+  text-decoration: none;
+  transition:
+    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+    color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: var(--rly-color-surface-2);
+  color: var(--rly-color-text-1);
+}
+
+.tab[data-active="true"] {
+  border-color: var(--rly-color-border-1);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
+.tab svg {
+  inline-size: var(--rly-space-16);
+  block-size: var(--rly-space-16);
+  flex: none;
+}
+
+.content {
+  min-inline-size: 0;
+}
+
+@media (max-width: 48rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--rly-space-32);
+  }
+
+  .sidebar {
+    position: static;
+  }
+
+  .tabList {
+    display: flex;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    padding-block-end: var(--rly-space-4);
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .tabList::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}

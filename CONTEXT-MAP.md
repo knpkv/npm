@@ -3,7 +3,7 @@
 ## Contexts
 
 - [Jira Markdown](./CONTEXT.md) — represents Jira work items as local Markdown and reconciles changes.
-- [Control Center](./packages/control-center/CONTEXT.md) — connects provider accounts and followed delivery resources into one operational view.
+- [Control Center](./packages/control-center/CONTEXT.md) — connects delivery work across followed resources and supports governed human-agent collaboration.
 
 ## Relationships
 

@@ -25,6 +25,7 @@ import {
 } from "../internal/modal.js"
 import { Button, type ButtonProps } from "./Button.js"
 import styles from "./Dialog.module.css"
+import * as Predicate from "../internal/predicates.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
@@ -44,12 +45,17 @@ const useDialogState = (): DialogState => {
 }
 
 const assignRef = <Element,>(ref: Ref<Element> | undefined, value: Element | null): void => {
-  if (typeof ref === "function") ref(value)
+  if (Predicate.isFunction(ref)) ref(value)
   else if (ref !== null && ref !== undefined) ref.current = value
 }
 
-const getActiveElement = (): HTMLElement | null =>
-  typeof document === "undefined" || !isHTMLElement(document.activeElement) ? null : document.activeElement
+const getActiveElement = (): HTMLElement | null => {
+  try {
+    return isHTMLElement(document.activeElement) ? document.activeElement : null
+  } catch {
+    return null
+  }
+}
 
 /** Semantic size metadata for the dialog surface. */
 export const RLY_DIALOG_VARIANTS = defineVariants({

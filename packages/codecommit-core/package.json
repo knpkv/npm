@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-core",
-  "version": "0.9.1",
+  "version": "0.13.0",
   "description": "Core logic for CodeCommit PR browser",
   "type": "module",
   "main": "src/index.ts",
@@ -39,13 +39,14 @@
     "docgen": "docgen"
   },
   "dependencies": {
-    "@aws-sdk/credential-providers": "^3.1085.0",
-    "@distilled.cloud/aws": "0.29.1",
-    "@effect/sql-libsql": "4.0.0-beta.98",
+    "@aws-sdk/credential-providers": "^3.1108.0",
+    "@distilled.cloud/aws": "1.0.0-rc.4",
+    "@effect/sql-libsql": "4.0.0-rc.109",
     "@libsql/client": "^0.17.4",
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.98"
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@types/node": "26.2.0"
   }
 }

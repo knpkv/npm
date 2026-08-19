@@ -25,6 +25,7 @@ import {
   type AgentThreadEvent,
   AgentThreadEventPageSize
 } from "../persistence/repositories/agentJobModels.js"
+import { assertAgentProviderAllowed } from "./agentWorkspacePolicy.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 
 const ContextIdentity = Schema.Struct({
@@ -40,9 +41,9 @@ const ProviderFailurePayload = Schema.Struct({ error: AgentProviderError })
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
-const decodePayload = <SchemaType, Encoded, Requirements>(
+const decodePayload = <SchemaType, Encoded, Requirements, UnparsedInput>(
   schema: Schema.Codec<SchemaType, Encoded, Requirements, never>,
-  payload: unknown
+  payload: UnparsedInput
 ): Effect.Effect<SchemaType, ApplicationServiceUnavailable, Requirements> =>
   Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(unavailable))
 
@@ -77,7 +78,11 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
     case "job-started": {
       const payload = yield* runtimePayload(event)
       if (payload._tag !== "started") return yield* unavailable()
-      return { _tag: "job-started", ...common }
+      return {
+        _tag: "job-started",
+        ...common,
+        ...(!(payload.runtimeMetadata === undefined) && { runtimeMetadata: payload.runtimeMetadata })
+      }
     }
     case "assistant-output": {
       const payload = yield* runtimePayload(event)
@@ -109,6 +114,8 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
       return { _tag: "job-failed", ...common, retryable: payload.error.retryable }
     }
     case "review-report":
+    case "review-suggestion-revised":
+    case "review-suggestion-published":
       return yield* unavailable()
     case "cancel-requested": {
       const payload = yield* decodePayload(CancellationRequestedPayload, event.payload)
@@ -148,7 +155,8 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       yield* runtimes.select({
         providerId,
         model: input.request.model,
-        access: input.request.profile
+        access: input.request.profile,
+        capability: "release-chat"
       }).pipe(Effect.mapError(unavailable))
       const release = yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)
@@ -167,26 +175,83 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         subjectRevision
       })
       const createdAt = yield* DateTime.now
-      yield* persistence.agentJobs.enqueue({
-        workspaceId: input.workspaceId,
-        releaseId: input.releaseId,
-        jobId,
-        providerId,
-        model: input.request.model,
-        access: input.request.profile,
-        userPrompt: input.request.prompt,
-        prompt: providerPrompt,
-        contextFingerprint,
-        subjectRevision,
-        task: { _tag: "release-chat" },
-        createdAt
-      }).pipe(
-        Effect.mapError(mapPersistenceWriteError),
-        Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
-      )
+      yield* persistence.workspaceSettings.readAtomically(input.workspaceId, (settings) =>
+        Effect.gen(function*() {
+          yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+          yield* persistence.agentJobs.enqueue({
+            workspaceId: input.workspaceId,
+            releaseId: input.releaseId,
+            jobId,
+            providerId,
+            model: input.request.model,
+            access: input.request.profile,
+            userPrompt: input.request.prompt,
+            prompt: providerPrompt,
+            contextFingerprint,
+            subjectRevision,
+            task: { _tag: "release-chat" },
+            createdAt
+          }).pipe(
+            Effect.mapError(mapPersistenceWriteError),
+            Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
+          )
+        })).pipe(
+          Effect.mapError((error) => {
+            switch (error._tag) {
+              case "ApplicationInvalidRequest":
+              case "ApplicationResourceNotFound":
+              case "ApplicationServiceUnavailable":
+                return error
+              default:
+                return unavailable()
+            }
+          })
+        )
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
-    providers: () => runtimes.catalog().pipe(Effect.mapError(unavailable)),
+    providers: Effect.fn("ReleaseAgentJobs.providers")(function*(workspaceId) {
+      const settings = yield* persistence.workspaceSettings.get(workspaceId).pipe(
+        Effect.mapError(unavailable)
+      )
+      const catalog = yield* runtimes.catalog().pipe(Effect.mapError(unavailable))
+      const providers = catalog.providers
+        .filter(({ providerId }) =>
+          settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
+        )
+        .map((provider) => {
+          if (settings.settings.agent.toolPolicy === "review-sandbox") return provider
+          const { reviewProfile: _, ...withoutReviewProfile } = provider
+          return {
+            ...withoutReviewProfile,
+            capabilities: provider.capabilities.filter((capability) => capability !== "pr-review")
+          }
+        })
+        .filter(({ capabilities }) => capabilities.length > 0)
+      const defaultProvider = settings.settings.agent.defaultProvider
+      const orderedProviders = defaultProvider === null
+        ? providers
+        : [
+          ...providers.filter(({ providerId }) => String(providerId) === defaultProvider),
+          ...providers.filter(({ providerId }) => String(providerId) !== defaultProvider)
+        ]
+      const defaultModel = settings.settings.agent.defaultModel
+      return {
+        providers: orderedProviders.map((provider) =>
+          defaultModel !== null && String(provider.providerId) === defaultProvider &&
+            provider.models.some((model) => String(model) === defaultModel)
+            ? {
+              ...provider,
+              models: [
+                ...provider.models.filter((model) => String(model) === defaultModel),
+                ...provider.models.filter((model) => String(model) !== defaultModel)
+              ]
+            }
+            : provider
+        )
+      }
+    }),
     replay: Effect.fn("ReleaseAgentJobs.replay")(function*(input) {
       yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)
@@ -247,6 +312,30 @@ export const releaseAgentJobsLayer: Layer.Layer<
   ReleaseAgentJobs,
   makeReleaseAgentJobs
 )
+
+/** Admit durable release-chat work only for the workspace owned by the supervised worker. */
+export const releaseAgentJobsLayerForWorkerWorkspace = (
+  workerWorkspaceId: WorkspaceId
+): Layer.Layer<
+  ReleaseAgentJobs,
+  never,
+  AgentRuntimeRegistry | Crypto.Crypto | Persistence
+> =>
+  Layer.effect(
+    ReleaseAgentJobs,
+    makeReleaseAgentJobs.pipe(
+      Effect.map((jobs) =>
+        ReleaseAgentJobs.of({
+          enqueue: (input) =>
+            input.workspaceId === workerWorkspaceId
+              ? jobs.enqueue(input)
+              : Effect.fail(unavailable()),
+          providers: jobs.providers,
+          replay: jobs.replay
+        })
+      )
+    )
+  )
 
 /** Durable replay remains readable while enqueue is disabled without a configured runtime. */
 export const releaseAgentJobsUnavailableLayer: Layer.Layer<

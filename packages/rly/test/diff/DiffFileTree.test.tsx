@@ -53,8 +53,52 @@ describe("DiffFileTree", () => {
       expect(tree?.querySelector(`[data-rly-diff-content-state='${state}']`)).not.toBeNull()
     }
     expect(tree?.textContent).toContain("src/generated.ts")
-    expect(tree?.textContent).toContain("src/client.ts")
+    expect(tree?.textContent).toContain("client.ts")
+    expect(tree?.querySelector("[data-rly-diff-directory='src']")).not.toBeNull()
+    expect(tree?.querySelector("[data-rly-diff-file-id='added'] button")?.textContent).toBe("added.ts")
+    expect(tree?.querySelector("[data-rly-diff-file-id='added'] [title='added']")).not.toBeNull()
     expect(tree?.querySelector("[data-rly-diff-file-id='renamed'] button")?.getAttribute("aria-current")).toBe("true")
+    const fileLabels = Array.from(
+      tree?.querySelectorAll<HTMLButtonElement>("[data-rly-diff-file-id] button") ?? []
+    ).map((button) => button.getAttribute("aria-label"))
+    expect(fileLabels).not.toEqual(expect.arrayContaining([expect.stringMatching(/^File \d+ of \d+:/)]))
+    expect(fileLabels).toEqual(
+      expect.arrayContaining(["src/added.ts, added, Ready", "assets/old.png, deleted, binary: Image content"])
+    )
+  })
+
+  it("groups paths into collapsible directories and reopens the selected file's ancestors", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const renderTree = (selectedFileId: string, files: ReadonlyArray<RlyDiffFile> = stateFiles) =>
+      root.render(
+        <DiffFileTree
+          data={{ files, state: "ready" }}
+          heading="Changed files"
+          onSelectedFileChange={() => undefined}
+          selectedFileId={selectedFileId}
+        />
+      )
+
+    await act(async () => renderTree("added"))
+    const directory = host.querySelector<HTMLButtonElement>("[data-rly-diff-directory='src'] > button")
+    expect(directory?.getAttribute("aria-expanded")).toBe("true")
+    await act(async () => directory?.click())
+    expect(directory?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector("[data-rly-diff-file-id='added']")).toBeNull()
+
+    const refreshedFiles: ReadonlyArray<RlyDiffFile> = stateFiles.map((file) =>
+      file.id === "added" ? { ...file, content: { label: "Loading content", state: "loading" } } : file
+    )
+    await act(async () => renderTree("added", refreshedFiles))
+    expect(directory?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector("[data-rly-diff-file-id='added']")).toBeNull()
+
+    await act(async () => renderTree("error", refreshedFiles))
+    expect(directory?.getAttribute("aria-expanded")).toBe("true")
+    expect(host.querySelector("[data-rly-diff-file-id='error']")).not.toBeNull()
+    await act(async () => root.unmount())
   })
 
   it("renders a complete lightweight 500-file inventory without truncation", () => {
@@ -129,6 +173,60 @@ describe("DiffFileTree", () => {
     await act(async () => target?.click())
     expect(onSelectedFileChange).toHaveBeenCalledWith("error")
     expect(host.querySelector("[data-rly-diff-file-id='added'] button")?.getAttribute("aria-current")).toBe("true")
+    await act(async () => root.unmount())
+  })
+
+  it("renders significant Git-path whitespace visibly without changing identity", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const onSelectedFileChange = vi.fn()
+    const files = [
+      { change: "modified", content: { state: "ready" }, id: "spaces", path: "   " },
+      {
+        change: "renamed",
+        content: { state: "ready" },
+        id: "renamed",
+        path: "visible.ts",
+        previousPath: "\t\t"
+      },
+      { change: "modified", content: { state: "ready" }, id: "plain", path: "file.ts" },
+      { change: "modified", content: { state: "ready" }, id: "edge", path: " file.ts " },
+      { change: "modified", content: { state: "ready" }, id: "tab", path: "file\tname.ts" },
+      { change: "modified", content: { state: "ready" }, id: "internal", path: "src/file name.ts" }
+    ] satisfies ReadonlyArray<RlyDiffFile>
+    await act(async () =>
+      root.render(
+        <DiffFileTree
+          data={{ files, state: "ready" }}
+          heading="Changed files"
+          onSelectedFileChange={onSelectedFileChange}
+        />
+      )
+    )
+
+    const spaces = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='spaces'] button")
+    expect(spaces?.getAttribute("aria-label")).toBe('"   ", modified, Ready')
+    expect(spaces?.textContent).toContain('"   "')
+    expect(host.querySelector("[data-rly-diff-file-id='renamed']")?.textContent).toContain('"\\t\\t"')
+    expect(host.querySelector("[data-rly-diff-file-id='plain'] button")?.textContent).toContain("file.ts")
+    expect(host.querySelector("[data-rly-diff-file-id='edge'] button")?.textContent).toContain('" file.ts "')
+    expect(host.querySelector("[data-rly-diff-file-id='tab'] button")?.textContent).toContain('"file\\tname.ts"')
+    expect(host.querySelector("[data-rly-diff-file-id='internal'] button")?.textContent).toContain("file name.ts")
+    expect(host.querySelector("[data-rly-diff-file-id='internal'] button")?.textContent).not.toContain('"')
+    const edge = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='edge'] button")
+    const tab = host.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='tab'] button")
+    await act(async () => edge?.click())
+    await act(async () => tab?.click())
+    expect(onSelectedFileChange.mock.calls).toEqual([["edge"], ["tab"]])
+    expect(files.map(({ path }) => path)).toEqual([
+      "   ",
+      "visible.ts",
+      "file.ts",
+      " file.ts ",
+      "file\tname.ts",
+      "src/file name.ts"
+    ])
     await act(async () => root.unmount())
   })
 

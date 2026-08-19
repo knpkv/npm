@@ -20,6 +20,7 @@ import {
 import { Actor } from "../../domain/actors.js"
 import { WorkspaceId } from "../../domain/identifiers.js"
 import { databaseLayer } from "../persistence/Database.js"
+import { nodeFileDescriptor } from "../persistence/NodeFileDescriptor.js"
 import { decodePersistenceConfig } from "../persistence/PersistenceConfig.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthRepository } from "./AuthRepository.js"
@@ -46,7 +47,7 @@ const sameIdentity = (left: FileSystemType.File.Info, right: FileSystemType.File
 
 const descriptorAliases = (
   path: PathType.Path,
-  descriptor: FileSystemType.File.Descriptor
+  descriptor: number
 ): ReadonlyArray<string> => [
   path.join("/proc/self/fd", String(descriptor)),
   path.join("/dev/fd", String(descriptor))
@@ -67,13 +68,16 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
     sameIdentity(initialDirectoryInfo, info)
 
   const resolveDirectoryAlias = Effect.fn("TerminalRecovery.resolveDirectoryAlias")(function*(
-    descriptor: FileSystemType.File.Descriptor
+    descriptor: number
   ) {
     for (const alias of descriptorAliases(path, descriptor)) {
       const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
       if (Result.isSuccess(resolved) && resolved.success === recoveryDirectory) return alias
     }
-    return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-owner-mismatch" })
+    // macOS exposes directory descriptors through /dev/fd but does not allow
+    // child traversal through that alias. The owner-only canonical path remains
+    // guarded by descriptor/path identity checks before and after every write.
+    return recoveryDirectory
   })
 
   const verifyProcessOwnership = Effect.fn("TerminalRecovery.verifyProcessOwnership")(function*() {
@@ -89,15 +93,22 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           if (!verifyDirectoryInfo(directoryInfo)) {
             return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-not-private" })
           }
-          const alias = yield* resolveDirectoryAlias(directory.fd)
+          const descriptor = nodeFileDescriptor(directory)
+          if (descriptor === undefined) {
+            return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-unavailable" })
+          }
+          const alias = yield* resolveDirectoryAlias(descriptor)
           const assertIdentity = Effect.gen(function*() {
             const current = yield* directory.stat.pipe(Effect.result)
-            const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
+            const aliasInfo = yield* fileSystem.stat(alias).pipe(Effect.result)
+            const pathInfo = yield* fileSystem.stat(recoveryDirectory).pipe(Effect.result)
             if (
               Result.isFailure(current) ||
-              Result.isFailure(resolved) ||
-              resolved.success !== recoveryDirectory ||
-              !verifyDirectoryInfo(current.success)
+              Result.isFailure(aliasInfo) ||
+              Result.isFailure(pathInfo) ||
+              !verifyDirectoryInfo(current.success) ||
+              !sameIdentity(current.success, aliasInfo.success) ||
+              !sameIdentity(current.success, pathInfo.success)
             ) {
               return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-owner-mismatch" })
             }
@@ -146,8 +157,8 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
   })
 
   return {
-    issueOwnerRecovery: Effect.fn("TerminalRecovery.issueOwnerRecovery")(function*(
-      unknownRequest: unknown
+    issueOwnerRecovery: Effect.fn("TerminalRecovery.issueOwnerRecovery")(function*<UnparsedInput>(
+      unknownRequest: UnparsedInput
     ) {
       const request = yield* Schema.decodeUnknownEffect(RecoveryRequest)(unknownRequest).pipe(
         Effect.mapError(() => new TerminalRecoveryRefusedError({ reason: "invalid-input" }))
@@ -210,8 +221,8 @@ export class TerminalRecovery extends Context.Service<
 >()("@knpkv/control-center/server/auth/TerminalRecovery") {}
 
 /** Build terminal recovery from the exact canonical parent of the configured local database. */
-export const terminalRecoveryLayer = (
-  persistenceConfigInput: unknown
+export const terminalRecoveryLayer = <UnparsedInput>(
+  persistenceConfigInput: UnparsedInput
 ): Layer.Layer<
   TerminalRecovery,
   Layer.Error<ReturnType<typeof databaseLayer>> | TerminalRecoveryRefusedError,

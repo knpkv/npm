@@ -9,7 +9,9 @@ import {
   BUSY_TIMEOUT_MILLISECONDS,
   Database,
   databaseLayer,
+  handleDatabaseConnectionCause,
   sandboxSchemaTransaction,
+  verifyDatabaseIntegrity,
   withSchemaWriteBarrier
 } from "../../src/server/persistence/Database.js"
 import { decodePersistenceConfig, PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
@@ -94,6 +96,73 @@ describe("Database", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("rejects corrupt SQLite page ownership before exposing persistence", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+      const integrity = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* verifyDatabaseIntegrity(database.sql)
+          const sql = database.sql
+          yield* sql`PRAGMA writable_schema = ON`
+          yield* sql`INSERT INTO sqlite_schema (
+              type, name, tbl_name, rootpage, sql
+            ) VALUES (
+              'table', 'corrupt_page_owner', 'corrupt_page_owner', 2147483647,
+              'CREATE TABLE corrupt_page_owner (value TEXT)'
+            )`
+          yield* sql`PRAGMA writable_schema = RESET`
+          return yield* verifyDatabaseIntegrity(database.sql).pipe(Effect.result)
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+      assert.isTrue(Result.isFailure(integrity))
+      if (Result.isFailure(integrity)) {
+        assert.strictEqual(integrity.failure.operation, "verify-integrity")
+      }
+
+      const startup = yield* Effect.scoped(
+        Layer.build(databaseLayer(config)).pipe(Effect.result)
+      )
+      assert.isTrue(Result.isFailure(startup))
+      if (Result.isFailure(startup)) {
+        assert.strictEqual(startup.failure._tag, "DatabaseInitializationError")
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects orphaned rows before exposing persistence", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+      const integrity = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* database.sql`PRAGMA foreign_keys = OFF`
+          yield* database.sql`INSERT INTO domain_event_streams (
+            workspace_id, next_cursor, pruned_through_cursor, updated_at
+          ) VALUES (
+            '01890f6f-6d6a-7cc0-98d2-000000000098', 1, 0,
+            '2026-07-30T12:00:00.000Z'
+          )`
+          yield* database.sql`PRAGMA foreign_keys = ON`
+          return yield* verifyDatabaseIntegrity(database.sql).pipe(Effect.result)
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+      assert.isTrue(Result.isFailure(integrity))
+      if (Result.isFailure(integrity)) {
+        assert.strictEqual(integrity.failure.operation, "verify-integrity")
+      }
+
+      const startup = yield* Effect.scoped(
+        Layer.build(databaseLayer(config)).pipe(Effect.result)
+      )
+      assert.isTrue(Result.isFailure(startup))
+      if (Result.isFailure(startup)) {
+        assert.strictEqual(startup.failure._tag, "DatabaseInitializationError")
+        if (startup.failure._tag === "DatabaseInitializationError") {
+          assert.strictEqual(startup.failure.operation, "verify-integrity")
+        }
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect(
     "holds a cross-client writer barrier for the complete schema-critical section",
     () =>
@@ -169,6 +238,26 @@ describe("Database", () => {
         Effect.flip
       )
       assert.strictEqual(failure, "typed-operation-failure")
+    }))
+
+  it.effect("preserves interruption across the transaction sandbox", () =>
+    Effect.gen(function*() {
+      const exit = yield* sandboxSchemaTransaction(Effect.interrupt).pipe(Effect.exit)
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) {
+        assert.isTrue(Cause.hasInterrupts(exit.cause))
+      }
+    }))
+
+  it.effect("preserves interruption across database client layer recovery", () =>
+    Effect.gen(function*() {
+      const interruptedLayer = Layer.effectContext(Effect.interrupt).pipe(
+        Layer.catchCause(handleDatabaseConnectionCause)
+      )
+      const exit = yield* Layer.build(interruptedLayer).pipe(Effect.scoped, Effect.exit)
+
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
     }))
 
   it.effect("commits success and rolls back the outer transaction after a nested savepoint failure", () =>

@@ -6,26 +6,26 @@ import { SchemaWriteBarrierError } from "./backup/errors.js"
 import { DatabaseInitializationError, type PersistenceConfigError } from "./errors.js"
 import { decodePersistenceConfig, type PersistenceConfig } from "./PersistenceConfig.js"
 import { initializeCurrentSchema, validateCurrentSchema } from "./schema.js"
-import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, JournalModePragmaRow } from "./schemas.js"
+import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, IntegrityCheckPragmaRow, JournalModePragmaRow } from "./schemas.js"
 
 /** Busy timeout used for bounded local write contention. */
 export const BUSY_TIMEOUT_MILLISECONDS = 5_000
 
 // The pinned libSQL client applies this option to every local connection, while
-// the current Effect beta has not yet surfaced it in LibsqlClientConfig.Full.
+// the current Effect RC has not yet surfaced it in LibsqlClientConfig.Full.
 interface LocalLibsqlConfig extends LibsqlClient.LibsqlClientConfig.Full {
   readonly timeout: number
 }
 
 /** Database operations shared by all workspace-scoped persistence services. */
-export interface DatabaseShape {
+export interface DatabaseContract {
   readonly sql: SqlClient.SqlClient
   readonly transaction: SqlClient.SqlClient["withTransaction"]
   readonly validateSchema: Effect.Effect<void, DatabaseInitializationError>
 }
 
 /** Scoped Control Center database service backed by one shared libSQL client. */
-export class Database extends Context.Service<Database, DatabaseShape>()(
+export class Database extends Context.Service<Database, DatabaseContract>()(
   "@knpkv/control-center/server/persistence/Database"
 ) {}
 
@@ -36,7 +36,7 @@ const schemaLock = Semaphore.makeUnsafe(1)
 const snakeToCamel = (value: string): string =>
   value.replace(/_([a-z])/gu, (_, character: string) => character.toUpperCase())
 
-const decodeRows = <SchemaType extends Schema.Top>(schema: SchemaType, rows: unknown) =>
+const decodeRows = <SchemaType extends Schema.Top, UnparsedInput>(schema: SchemaType, rows: UnparsedInput) =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows)
 
 const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas")(function*(
@@ -47,7 +47,7 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
     yield* sql`PRAGMA journal_mode = WAL`
     yield* sql`PRAGMA busy_timeout = 5000`
   }).pipe(
-    Effect.catchCause(() => new DatabaseInitializationError({ operation: "configure" }))
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "configure" }))
   )
 
   yield* Effect.gen(function*() {
@@ -69,7 +69,27 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
       busyTimeout[0]?.timeout !== BUSY_TIMEOUT_MILLISECONDS
     ) return yield* Effect.fail("SQLite pragmas did not retain their required values")
   }).pipe(
-    Effect.catchCause(() => new DatabaseInitializationError({ operation: "verify-pragmas" }))
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-pragmas" }))
+  )
+})
+
+/** Run the startup SQLite integrity boundary. @internal */
+export const verifyDatabaseIntegrity = Effect.fn("Database.verifyIntegrity")(function*(
+  sql: SqlClient.SqlClient
+): Effect.fn.Return<void, DatabaseInitializationError> {
+  yield* Effect.gen(function*() {
+    const rows = yield* sql`PRAGMA integrity_check`.pipe(
+      Effect.flatMap((result) => decodeRows(IntegrityCheckPragmaRow, result))
+    )
+    if (rows.length !== 1 || rows[0]?.integrityCheck.toLowerCase() !== "ok") {
+      return yield* Effect.fail("SQLite integrity check did not return one ok result")
+    }
+    const foreignKeyRows = yield* sql`PRAGMA foreign_key_check`
+    if (foreignKeyRows.length !== 0) {
+      return yield* Effect.fail("SQLite foreign key check returned violations")
+    }
+  }).pipe(
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-integrity" }))
   )
 })
 
@@ -77,7 +97,7 @@ const checkpointBeforeSchemaChange = Effect.fn("Database.checkpointBeforeSchemaC
   sql: SqlClient.SqlClient
 ): Effect.fn.Return<void, SchemaWriteBarrierError> {
   yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`.pipe(
-    Effect.catchCause(() => new SchemaWriteBarrierError({ phase: "acquire" }))
+    Effect.mapError(() => new SchemaWriteBarrierError({ phase: "acquire" }))
   )
 })
 
@@ -98,14 +118,16 @@ const verifyCheckpointStayedQuiescent = Effect.fn("Database.verifyCheckpointStay
   }
 })
 
-/** Convert schema transaction defects and interruption into a redacted typed failure. */
+/** Convert transaction defects into a redacted failure while preserving cancellation. */
 export const sandboxSchemaTransaction = <Value, Failure, Requirements>(
   transaction: Effect.Effect<Value, Failure, Requirements>
 ): Effect.Effect<Value, Failure | SchemaWriteBarrierError, Requirements> =>
   transaction.pipe(
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The schema barrier intentionally redacts defects; database.test.ts covers redaction and interruption.
     Effect.catchCause((cause): Effect.Effect<never, Failure | SchemaWriteBarrierError> => {
+      if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
       const typedFailure = Cause.findErrorOption(cause)
-      if (Cause.hasDies(cause) || Cause.hasInterrupts(cause) || Option.isNone(typedFailure)) {
+      if (Cause.hasDies(cause) || Option.isNone(typedFailure)) {
         return Effect.fail<Failure | SchemaWriteBarrierError>(new SchemaWriteBarrierError({ phase: "verify" }))
       }
       return Effect.fail<Failure | SchemaWriteBarrierError>(typedFailure.value)
@@ -140,9 +162,20 @@ const makeClientLayer = (
     url: databaseUrl
   }
   return LibsqlClient.layer(clientConfig).pipe(
-    Layer.catchCause(() => Layer.effectContext(Effect.fail(new DatabaseInitializationError({ operation: "connect" }))))
+    // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The database adapter redacts connection defects while retaining cancellation; database.test.ts covers both paths.
+    Layer.catchCause(handleDatabaseConnectionCause)
   )
 }
+
+/** Redact client construction defects while retaining every original interruption reason. @internal */
+export const handleDatabaseConnectionCause = <Failure>(
+  cause: Cause.Cause<Failure>
+): Layer.Layer<unknown, DatabaseInitializationError> =>
+  Cause.hasInterrupts(cause)
+    ? Layer.effectContext(
+      Effect.failCause(Cause.fromReasons(cause.reasons.filter(Cause.isInterruptReason)))
+    )
+    : Layer.effectContext(Effect.fail(new DatabaseInitializationError({ operation: "connect" })))
 
 const initializeDatabase = Effect.fn("Database.initializeDatabase")(function*(config: PersistenceConfig) {
   yield* schemaLock.withPermit(
@@ -157,6 +190,7 @@ const initializeDatabase = Effect.fn("Database.initializeDatabase")(function*(co
           Effect.mapError(() => new DatabaseInitializationError({ operation: "connect" }))
         )
         yield* configureAndVerifyPragmas(sql)
+        yield* verifyDatabaseIntegrity(sql)
         yield* withSchemaWriteBarrier(sql, databaseSourceFile, initializeCurrentSchema(sql))
       })
     )
@@ -169,6 +203,7 @@ const databaseFromSql = () =>
     Effect.gen(function*() {
       const sql = yield* SqlClient.SqlClient
       yield* configureAndVerifyPragmas(sql)
+      yield* verifyDatabaseIntegrity(sql)
       yield* validateCurrentSchema(sql)
       return Database.of({
         sql,
@@ -181,8 +216,8 @@ const databaseFromSql = () =>
 /** Verify that an existing local database has the exact current prototype schema. */
 export const validateExistingControlCenterDatabase = Effect.fn(
   "Database.validateExistingControlCenterDatabase"
-)(function*(
-  input: unknown
+)(function*<UnparsedInput>(
+  input: UnparsedInput
 ): Effect.fn.Return<void, PersistenceConfigError | DatabaseInitializationError> {
   const config = yield* decodePersistenceConfig(input)
   yield* Effect.scoped(
@@ -190,14 +225,16 @@ export const validateExistingControlCenterDatabase = Effect.fn(
       const context = yield* Layer.build(
         makeClientLayer(config.busyTimeoutMilliseconds, config.databaseUrl, config.maxConnections)
       )
-      yield* validateCurrentSchema(Context.get(context, SqlClient.SqlClient))
+      const sql = Context.get(context, SqlClient.SqlClient)
+      yield* verifyDatabaseIntegrity(sql)
+      yield* validateCurrentSchema(sql)
     })
   )
 })
 
 /** Build a scoped database layer after decoding secret-free local configuration. */
-export const databaseLayer = (
-  input: unknown
+export const databaseLayer = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Database,
   DatabaseInitializationError | SchemaWriteBarrierError | PersistenceConfigError,

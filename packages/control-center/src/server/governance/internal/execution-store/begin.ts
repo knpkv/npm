@@ -10,15 +10,24 @@ import {
   GovernedActionCommandId,
   GovernedActionPluginConnectionAuthorityDigest,
   GovernedActionPluginConnectionRevision,
-  type GovernedActionState
+  type GovernedActionState,
+  GovernedActionTargetSnapshotV1
 } from "../../../../domain/governedAction/index.js"
-import { DomainEventId, GovernedActionAttemptId, GovernedActionTransitionId } from "../../../../domain/identifiers.js"
+import {
+  DomainEventId,
+  EntityId,
+  GovernedActionAttemptId,
+  GovernedActionTransitionId
+} from "../../../../domain/identifiers.js"
 import { AuthorizedPluginActionV1 } from "../../../../domain/plugins/actions.js"
+import { Release } from "../../../../domain/release.js"
 import type { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
+import { digestReleaseSourceRevisions } from "../../../application/releasePublicationMetadata.js"
 import { Database } from "../../../persistence/Database.js"
 import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { makeGovernedActionTransactionWrite } from "../../../persistence/repositories/governed-action/write.js"
+import type { SqlRow } from "../../../persistence/repositories/sqlRow.js"
 import { PluginRuntimeAuthoritySource } from "../../../plugins/internal/PluginRuntimeAuthoritySource.js"
 import { verifyGovernedActionDispatchAuthority } from "../../governedActionAuthority.js"
 import { digestGovernedActionPolicyEvaluation } from "../../governedActionDigests.js"
@@ -34,13 +43,19 @@ import { digestGovernedActionPreparationToken, issueGovernedActionPermitToken } 
 const DISPATCH_WINDOW_SECONDS = 15
 const LEASE_GRACE_SECONDS = 30
 const RECOVERY_SAFETY_SECONDS = 60
+const AttemptCountRow = Schema.Struct({
+  count: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
+const CurrentReleaseSnapshotRow = Schema.Struct({
+  snapshotJson: Schema.String.check(Schema.isNonEmpty())
+})
 
 const inactive = (state: GovernedActionState): GovernedActionBeginResult => ({
   _tag: "inactive",
   state
 })
 
-const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+const storeFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("PluginRuntimeAuthorityUnavailable")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "begin", reason: "authority-changed" })
@@ -194,20 +209,151 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             workspaceId: record.envelope.workspaceId,
             sessionId: record.authorization.sessionId
           })
-          const currentTarget = yield* targets.read({
-            workspaceId: record.envelope.workspaceId,
-            entityId: record.envelope.targetEntityId
-          })
+          const publication = record.envelope.releasePublication
+          if (publication !== undefined) {
+            const rows = yield* sql<SqlRow>`SELECT
+                revision.snapshot_json AS snapshotJson
+              FROM releases AS release
+              JOIN release_revisions AS revision
+                ON revision.workspace_id = release.workspace_id
+                AND revision.release_id = release.release_id
+                AND revision.revision = release.current_revision
+              WHERE release.workspace_id = ${record.envelope.workspaceId}
+                AND release.release_id = ${publication.releaseId}`
+            const row = rows[0]
+            if (row === undefined || rows.length !== 1) {
+              return yield* new GovernedActionExecutionStoreError({
+                operation: "begin",
+                reason: "authority-changed"
+              })
+            }
+            const decodedRow = yield* Schema.decodeUnknownEffect(CurrentReleaseSnapshotRow)(row).pipe(
+              Effect.mapError(() =>
+                new GovernedActionExecutionStoreError({ operation: "begin", reason: "invalid-record" })
+              )
+            )
+            const release = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Release))(decodedRow.snapshotJson)
+              .pipe(
+                Effect.mapError(() =>
+                  new GovernedActionExecutionStoreError({ operation: "begin", reason: "invalid-record" })
+                )
+              )
+            const currentSourceRevisionDigest = yield* digestReleaseSourceRevisions(release.sourceRevisions).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService),
+              Effect.mapError(() =>
+                new GovernedActionExecutionStoreError({ operation: "begin", reason: "persistence-unavailable" })
+              )
+            )
+            if (currentSourceRevisionDigest !== publication.sourceRevisionDigest) {
+              return yield* new GovernedActionExecutionStoreError({
+                operation: "begin",
+                reason: "authority-changed"
+              })
+            }
+          }
+          // Release publication destinations do not exist as normalized
+          // entities before creation. Bind authority to the exact release and
+          // immutable provider request here; the negotiated executor preflight
+          // remains responsible for checking the live destination/version.
+          const currentTarget = publication !== undefined &&
+              record.envelope.targetEntityId === EntityId.make(publication.releaseId)
+            ? yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionTargetSnapshotV1))({
+              workspaceId: record.envelope.workspaceId,
+              entityId: record.envelope.targetEntityId,
+              entityType: record.envelope.proposal.request.target.entityType,
+              sourceRevision: {
+                providerId: record.envelope.providerId,
+                pluginConnectionId: record.envelope.pluginConnectionId,
+                vendorImmutableId: record.envelope.proposal.request.target.vendorImmutableId,
+                revision: record.envelope.proposal.request.expectedRevision,
+                sourceUrl: null,
+                firstObservedAt: now,
+                lastObservedAt: now,
+                synchronizedAt: now,
+                normalizationSchemaVersion: 1
+              }
+            })
+            : yield* targets.read({
+              workspaceId: record.envelope.workspaceId,
+              entityId: record.envelope.targetEntityId
+            })
           const currentEvidence = yield* evidence.read({
             workspaceId: record.envelope.workspaceId,
             evidence: record.envelope.evidence,
             now
           })
+          const attemptCountRows = yield* sql<SqlRow>`WITH RECURSIVE
+            retry_edges(source_execution_id, result_execution_id) AS (
+              SELECT source.vendor_immutable_id, retry.provider_operation_id
+              FROM governed_actions AS retry
+              JOIN governed_action_target_dimensions AS retry_dimensions
+                ON retry_dimensions.workspace_id = retry.workspace_id
+                AND retry_dimensions.action_id = retry.action_id
+                AND retry_dimensions.action_kind = 'pipeline.retry'
+              JOIN entities AS source
+                ON source.workspace_id = retry.workspace_id
+                AND source.entity_id = retry.target_entity_id
+                AND source.plugin_connection_id = retry.plugin_connection_id
+                AND source.provider_id = retry.provider_id
+              WHERE retry.workspace_id = ${record.envelope.workspaceId}
+                AND retry.plugin_connection_id = ${record.envelope.pluginConnectionId}
+                AND retry.provider_id = 'codepipeline'
+                AND retry.provider_operation_id IS NOT NULL
+            ),
+            retry_component(execution_id) AS (
+              SELECT target.vendor_immutable_id
+              FROM entities AS target
+              WHERE target.workspace_id = ${record.envelope.workspaceId}
+                AND target.entity_id = ${record.envelope.targetEntityId}
+                AND target.plugin_connection_id = ${record.envelope.pluginConnectionId}
+                AND target.provider_id = 'codepipeline'
+              UNION
+              SELECT edge.result_execution_id
+              FROM retry_edges AS edge
+              JOIN retry_component AS component
+                ON edge.source_execution_id = component.execution_id
+              UNION
+              SELECT edge.source_execution_id
+              FROM retry_edges AS edge
+              JOIN retry_component AS component
+                ON edge.result_execution_id = component.execution_id
+            )
+            SELECT COUNT(DISTINCT attempt.attempt_id) AS count
+            FROM governed_action_attempts AS attempt
+            JOIN governed_actions AS action
+              ON action.workspace_id = attempt.workspace_id
+              AND action.action_id = attempt.action_id
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            JOIN entities AS target
+              ON target.workspace_id = action.workspace_id
+              AND target.entity_id = action.target_entity_id
+              AND target.plugin_connection_id = action.plugin_connection_id
+              AND target.provider_id = action.provider_id
+            WHERE action.workspace_id = ${record.envelope.workspaceId}
+              AND action.plugin_connection_id = ${record.envelope.pluginConnectionId}
+              AND action.provider_id = 'codepipeline'
+              AND dimensions.action_kind = 'pipeline.retry'
+              AND target.vendor_immutable_id IN (
+                SELECT execution_id FROM retry_component
+              )`
+          const decodedAttemptCountRows = yield* Schema.decodeUnknownEffect(
+            Schema.Array(AttemptCountRow)
+          )(attemptCountRows)
+          const attemptCountRow = decodedAttemptCountRows[0]
+          if (decodedAttemptCountRows.length !== 1 || attemptCountRow === undefined) {
+            return yield* new GovernedActionExecutionStoreError({
+              operation: "begin",
+              reason: "persistence-unavailable"
+            })
+          }
           const currentPolicy = yield* policy.evaluate({
             envelope: record.envelope,
             currentEvidence,
             session: currentSession,
-            evaluatedAt: now
+            evaluatedAt: now,
+            priorTargetAttempts: attemptCountRow.count
           })
           if (currentPolicy.decision !== "allowed") {
             const transitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)

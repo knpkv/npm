@@ -93,7 +93,7 @@ export const AgentProposal = ({
           <Avatar
             decorative
             fallback={proposal.agent.avatarFallback}
-            shape="rounded-square"
+            form="rounded-square"
             {...(proposal.agent.avatarSrc === undefined ? {} : { src: proposal.agent.avatarSrc })}
           />
           <div className={style("agentText")}>

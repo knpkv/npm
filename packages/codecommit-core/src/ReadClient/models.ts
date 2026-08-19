@@ -10,6 +10,7 @@ import { Schema } from "effect"
 import { AwsProfileName, AwsRegion, PullRequestId, RepositoryName } from "../Domain.js"
 
 const NonEmptyString = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+const NonEmptyPath = Schema.String.check(Schema.isNonEmpty())
 
 /** Maximum blob content retained by one CodeCommit read. */
 export const CODECOMMIT_BLOB_MAXIMUM_BYTES = 1_048_576
@@ -76,6 +77,14 @@ export class CodeCommitAccountIdentity extends Schema.Class<CodeCommitAccountIde
   arn: NonEmptyString
 }) {}
 
+/** Secret-free owning account identity for one CodeCommit repository. */
+export class CodeCommitRepositoryIdentity extends Schema.Class<CodeCommitRepositoryIdentity>(
+  "CodeCommitRepositoryIdentity"
+)({
+  accountId: NonEmptyString,
+  repositoryName: RepositoryName
+}) {}
+
 /** Immutable CodeCommit pull request revision and its exact base/head commits. */
 export class CodeCommitPullRequestRevision extends Schema.Class<CodeCommitPullRequestRevision>(
   "CodeCommitPullRequestRevision"
@@ -97,6 +106,14 @@ export class CodeCommitPullRequestRevision extends Schema.Class<CodeCommitPullRe
 }) {}
 
 /** One decoded page of pull requests from a repository. */
+export class CodeCommitPullRequestIdsPage extends Schema.Class<CodeCommitPullRequestIdsPage>(
+  "CodeCommitPullRequestIdsPage"
+)({
+  pullRequestIds: Schema.Array(PullRequestId),
+  nextToken: Schema.NullOr(CodeCommitPageToken)
+}) {}
+
+/** One decoded page of hydrated pull requests from a repository. */
 export class CodeCommitPullRequestPage extends Schema.Class<CodeCommitPullRequestPage>(
   "CodeCommitPullRequestPage"
 )({
@@ -109,7 +126,7 @@ export class CodeCommitBlobMetadata extends Schema.Class<CodeCommitBlobMetadata>
   "CodeCommitBlobMetadata"
 )({
   blobId: CodeCommitBlobId,
-  path: NonEmptyString,
+  path: NonEmptyPath,
   mode: NonEmptyString
 }) {}
 

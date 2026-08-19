@@ -10,16 +10,25 @@ export {
   AgentProviderCatalogEntry,
   AgentProviderHealth,
   AgentSafeProfile,
+  AwsReviewPublicationIdentity,
   DurableAgentProviderId,
+  EditReviewSuggestionRequest,
+  EditReviewSuggestionResponse,
   EnqueuePullRequestReviewRequest,
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
+  PublishedReviewComment,
+  PublishReviewSuggestionRequest,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
+  PullRequestReviewInterrupted,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   PullRequestReviewState,
+  PullRequestReviewThreadEvent,
+  PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
   ReleaseAgentHistoryMessage,
   ReleaseAgentProvider,
@@ -29,7 +38,16 @@ export {
   ReleaseAgentThreadEventLimitFromString,
   ReleaseAgentThreadPage,
   ReleaseAgentTurnRequest,
-  ReleaseAgentTurnResponse
+  ReleaseAgentTurnResponse,
+  ReviewAgentProfile,
+  ReviewAgentProfileId,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationOperation,
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionPublicationSelection,
+  ReviewSuggestionRevisionPage,
+  ReviewSuggestionRevisionPageSizeFromString,
+  ReviewSuggestionRevisionSequenceFromString
 } from "./agent.js"
 export {
   type ControlCenterApiClient,
@@ -37,6 +55,7 @@ export {
   makeControlCenterApiClient,
   makeControlCenterApiUrls
 } from "./client.js"
+export { CodePipelineApiGroup, CodePipelineArtifactReadRequest, CodePipelineLogReadRequest } from "./codepipeline.js"
 export { ControlCenterApi } from "./controlCenterApi.js"
 export {
   CreateRelationshipRepairProposalRequest,
@@ -111,14 +130,20 @@ export {
   ExchangeAtlassianOAuthGrantRequest,
   OpaqueSecretReference,
   PatchPluginConfigurationRequest,
+  PatchProviderAccountRequest,
+  PluginAdministrationDiagnostic,
+  PluginAdministrationDiagnosticSeverity,
   PluginConfiguration,
   PluginConfigurationKey,
   PluginConfigurationMetadata,
   PluginConfigurationPatchValue,
+  PluginConnectionAdministration,
   PluginConnectionIdentity,
+  PluginConnectionPermission,
   PluginConnectionSetupFailureClass,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  PluginCredentialReplacement,
   PluginHealthResponse,
   PluginListResponse,
   PluginOverviewResponse,
@@ -126,8 +151,11 @@ export {
   PluginServiceCatalogEntry,
   PluginServiceCatalogField,
   PluginSynchronizationResult,
+  PluginSynchronizationSchedule,
   PluginSynchronizationState,
+  ReauthorizePluginConnectionRequest,
   RedactedPluginConfigurationValue,
+  RevokePluginConnectionRequest,
   SetPluginConnectionEnabledRequest
 } from "./plugins.js"
 export {
@@ -140,9 +168,12 @@ export {
   PortfolioSnapshot
 } from "./portfolio.js"
 export {
+  BrowserPairingPermission,
   CsrfToken,
   CurrentSession,
   CurrentSessionResponse,
+  IssueBrowserPairingCodeRequest,
+  IssueBrowserPairingCodeResponse,
   MutationCsrf,
   PairingCode,
   PairSessionRequest,
@@ -166,3 +197,12 @@ export {
   TimelineExportLimitFromString,
   TimelineExportResponseHeaders
 } from "./timeline.js"
+export {
+  UpdateWorkspaceSettingsRequest,
+  WorkspacePresentationReadModel,
+  WorkspaceSettingsApiGroup,
+  WorkspaceSettingsEtag,
+  workspaceSettingsEtag,
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision
+} from "./workspaceSettings.js"

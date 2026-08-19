@@ -1,9 +1,9 @@
 /**
- * Production Confluence page-read normalization for the Control Center plugin contract.
+ * Production Confluence page normalization and governed publication.
  *
- * This slice offers lazy `entity.read` plus bounded space-page synchronization.
- * Provider writes, attachment bytes, watchers, and unbounded activity stay
- * unadvertised until their complete contracts and recovery behavior exist.
+ * This slice offers lazy `entity.read`, bounded space-page synchronization,
+ * and revision-guarded page publication with no-replay reconciliation.
+ * Attachment bytes and unbounded activity stay unadvertised.
  *
  * @module
  */
@@ -33,19 +33,20 @@ import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
   PluginRateLimitFailure,
-  PluginTimeoutFailure,
-  PluginUnsupportedCapabilityFailure
+  PluginTimeoutFailure
 } from "../failures.js"
 import type { PluginConnectionV1 } from "../PluginConnection.js"
-import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { decodeConfluenceNextCursor } from "./ConfluenceCursor.js"
+import { makeConfluenceGovernedActions } from "./ConfluenceGovernedActions.js"
 import {
   ConfluencePageClient,
-  type ConfluencePageClientFailure,
-  type ConfluencePageClientShape
+  type ConfluencePageClientContract,
+  type ConfluencePageClientFailure
 } from "./ConfluencePageClient.js"
 import {
   ConfluencePageAttributesV1,
@@ -135,7 +136,14 @@ export const ConfluencePageAdapterConfiguration = Schema.Struct({
   siteId: Identifier,
   spaceId: Identifier,
   probePageId: Identifier,
-  oauthVerifiedSiteId: Schema.optionalKey(Identifier)
+  oauthVerifiedSiteId: Schema.optionalKey(Identifier),
+  oauthVerifiedUser: Schema.optionalKey(
+    Schema.Struct({
+      accountId: Identifier,
+      displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+      publicName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
+    })
+  )
 })
 
 /** Decoded Confluence page adapter configuration. @internal */
@@ -143,7 +151,7 @@ export type ConfluencePageAdapterConfiguration = typeof ConfluencePageAdapterCon
 
 /** @internal */
 export interface MakeConfluencePageAdapterInput {
-  readonly client: ConfluencePageClientShape
+  readonly client: ConfluencePageClientContract
   readonly configuration: ConfluencePageAdapterConfiguration
   readonly converter: MarkdownConverter["Service"]
   readonly cryptoService: Crypto.Crypto
@@ -153,20 +161,20 @@ export interface MakeConfluencePageAdapterInput {
 const malformed = (operation: string, diagnosticCode: string): PluginMalformedResponseFailure =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   diagnosticCode: string,
   schema: S,
-  input: unknown
+  input: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(() => malformed(operation, diagnosticCode))
   )
 
-const decodeScopedPage = Effect.fn("ConfluencePage.decodeScopedPage")(function*(
+const decodeScopedPage = Effect.fn("ConfluencePage.decodeScopedPage")(function*<UnparsedInput>(
   operation: string,
   invalidDiagnosticCode: string,
-  rawPage: unknown,
+  rawPage: UnparsedInput,
   expectedPageId: string,
   expectedSpaceId: string
 ) {
@@ -193,6 +201,15 @@ const toPluginFailure = Effect.fn("ConfluencePage.toPluginFailure")(function*(
       return new PluginAuthenticationFailure({ operation: failure.operation })
     case "authorization":
       return new PluginAuthorizationFailure({ operation: failure.operation })
+    case "conflict":
+      return new PluginConflictFailure({
+        operation: failure.operation,
+        diagnosticCode: "confluence-page-version-conflict"
+      })
+    case "invalid-request":
+      return new PluginConfigurationFailure({
+        diagnosticCode: "confluence-page-request-invalid"
+      })
     case "not-found":
       return new PluginOutageFailure({ operation: failure.operation })
     case "timeout":
@@ -216,48 +233,6 @@ const providerCall = <Value>(
     Effect.catchTag("ConfluencePageClientFailure", (failure) =>
       toPluginFailure(failure).pipe(Effect.flatMap(Effect.fail)))
   )
-
-const nextCursor = (
-  page: RawConfluenceVersionPageType
-): Effect.Effect<string | null, PluginMalformedResponseFailure> => {
-  const next = page._links?.next
-  if (next === undefined) return Effect.succeed(null)
-  const encoded = /(?:[?&])cursor=([^&#]+)/u.exec(next)?.[1]
-  if (encoded === undefined) {
-    return Effect.fail(malformed("confluence-page-versions", "confluence-version-cursor-missing"))
-  }
-  return Effect.try({
-    try: () => decodeURIComponent(encoded),
-    catch: () => malformed("confluence-page-versions", "confluence-version-cursor-invalid")
-  }).pipe(
-    Effect.flatMap((cursor) =>
-      cursor.length > 0 && cursor.length <= 2_048
-        ? Effect.succeed(cursor)
-        : Effect.fail(malformed("confluence-page-versions", "confluence-version-cursor-invalid"))
-    )
-  )
-}
-
-const cursorFromNextLink = (
-  operation: string,
-  diagnosticCode: string,
-  next: string | undefined,
-  maximumLength = MAXIMUM_CHECKPOINT_LENGTH
-): Effect.Effect<string | null, PluginMalformedResponseFailure> => {
-  if (next === undefined) return Effect.succeed(null)
-  const encoded = /(?:[?&])cursor=([^&#]+)/u.exec(next)?.[1]
-  if (encoded === undefined) return Effect.fail(malformed(operation, `${diagnosticCode}-missing`))
-  return Effect.try({
-    try: () => decodeURIComponent(encoded),
-    catch: () => malformed(operation, `${diagnosticCode}-invalid`)
-  }).pipe(
-    Effect.flatMap((cursor) =>
-      cursor.length > 0 && cursor.length <= maximumLength
-        ? Effect.succeed(cursor)
-        : Effect.fail(malformed(operation, `${diagnosticCode}-invalid`))
-    )
-  )
-}
 
 interface BoundedPrefixCheckpoint {
   readonly cursor: string
@@ -450,11 +425,12 @@ const checkpointBeforePage = (
     : `${RESTART_CURSOR_PREFIX}${cursor}`
 }
 
-const jsonByteLength = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const jsonByteLength = <UnparsedInput>(value: UnparsedInput): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength
 
-const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(function*(
+const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(function*<UnparsedInput>(
   cryptoService: Crypto.Crypto,
-  value: unknown
+  value: UnparsedInput
 ) {
   const serialized = JSON.stringify(value)
   const bytes = yield* Effect.fromResult(
@@ -469,7 +445,7 @@ const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(functi
 })
 
 const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ) {
   const versions: Array<RawConfluenceVersion> = []
@@ -487,7 +463,12 @@ const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(
     )
     for (const version of page.results ?? []) versions.push(version)
     pagesFetched += 1
-    const following: string | null = yield* nextCursor(page)
+    const following: string | null = yield* decodeConfluenceNextCursor(
+      "confluence-page-versions",
+      "confluence-version-cursor",
+      page._links?.next,
+      MAXIMUM_CHECKPOINT_LENGTH
+    )
     if (following === null) {
       complete = true
       break
@@ -510,7 +491,7 @@ const chunksOf = <Value>(values: ReadonlyArray<Value>, size: number): ReadonlyAr
 }
 
 const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   accountIds: ReadonlyArray<string>
 ) {
   const users = new Map<string, RawConfluenceUser>()
@@ -518,6 +499,7 @@ const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
     if (batch.length === 0) continue
     const raw = yield* providerCall(client.getUsers(batch)).pipe(
       Effect.map(Option.some),
+      Effect.catchTag("PluginAuthenticationFailure", () => Effect.succeed(Option.none<unknown>())),
       Effect.catchTag("PluginAuthorizationFailure", () => Effect.succeed(Option.none<unknown>()))
     )
     if (Option.isNone(raw)) return new Map<string, RawConfluenceUser>()
@@ -575,7 +557,7 @@ const contributorsFromUsers = (
 }
 
 const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   page: typeof RawConfluencePage.Type,
   versions: ReadonlyArray<RawConfluenceVersion>
 ) {
@@ -619,8 +601,8 @@ interface SyncAttributesInput {
   readonly createdAt: string
   readonly updatedAt: string
   readonly currentVersion: number
-  readonly content: null
-  readonly contentState: "lazy"
+  readonly content: { readonly representation: "safe-markdown"; readonly markdown: string } | null
+  readonly contentState: "lazy" | "loaded"
   readonly versions: ReadonlyArray<NormalizedVersion>
   readonly versionHistory: { readonly complete: boolean; readonly pagesFetched: number }
   readonly contributors: ReturnType<typeof contributorsFromUsers>
@@ -639,6 +621,8 @@ const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput
   const attachments = [...attributes.attachments]
   let compacted: SyncAttributesInput = {
     ...attributes,
+    content: null,
+    contentState: "lazy",
     versions,
     contributors,
     attachments,
@@ -695,7 +679,7 @@ const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput
 }
 
 const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ): Effect.fn.Return<WatcherInventory, PluginFailure> {
   const accountIds = new Set<string>()
@@ -707,7 +691,10 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
   while (pagesFetched < MAXIMUM_WATCHER_PAGES) {
     const loaded = yield* providerCall(client.getPageWatchers(pageId, start)).pipe(Effect.result)
     if (Result.isFailure(loaded)) {
-      if (loaded.failure._tag === "PluginAuthorizationFailure") {
+      if (
+        loaded.failure._tag === "PluginAuthenticationFailure" ||
+        loaded.failure._tag === "PluginAuthorizationFailure"
+      ) {
         return { accountIds: [...accountIds], complete: false, pagesFetched }
       }
       return yield* loaded.failure
@@ -745,7 +732,7 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
 })
 
 const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventory")(function*(
-  client: ConfluencePageClientShape,
+  client: ConfluencePageClientContract,
   pageId: string
 ): Effect.fn.Return<AttachmentInventory, PluginFailure> {
   const attachments: Array<AttachmentInventory["attachments"][number]> = []
@@ -786,10 +773,11 @@ const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventor
         version: attachment.version?.number ?? null
       })
     }
-    const following = yield* cursorFromNextLink(
+    const following = yield* decodeConfluenceNextCursor(
       "confluence-page-attachments",
       "confluence-attachment-cursor",
-      page._links?.next
+      page._links?.next,
+      MAXIMUM_CHECKPOINT_LENGTH
     )
     if (following === null) return { attachments, complete: true, pagesFetched }
     if (seenCursors.has(following)) {
@@ -869,6 +857,11 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
     Effect.fn("ConfluencePage.normalizeSyncPage")(function*(context) {
       const { history, inventory, page, versions, watchers } = context
       const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
+      const adf = page.body?.atlas_doc_format?.value
+      const converted = adf === undefined
+        ? null
+        : yield* toSafeConfluenceMarkdown(input.converter, adf)
+      const markdown = converted === null || converted.trim().length === 0 ? null : converted
       const attributesInput = fitSyncAttributes({
         schemaVersion: 1,
         status: page.status,
@@ -877,8 +870,8 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
         createdAt: page.createdAt,
         updatedAt: page.version.createdAt,
         currentVersion: page.version.number,
-        content: null,
-        contentState: "lazy",
+        content: markdown === null ? null : { representation: "safe-markdown", markdown },
+        contentState: markdown === null ? "lazy" : "loaded",
         versions: versions.map((version) => ({
           number: version.number,
           createdAt: version.createdAt,
@@ -1040,7 +1033,7 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   if (new Set(pages.map(({ id }) => id)).size !== pages.length) {
     return yield* malformed("confluence-space-pages", "confluence-page-identity-duplicate")
   }
-  const following = yield* cursorFromNextLink(
+  const following = yield* decodeConfluenceNextCursor(
     "confluence-space-pages",
     "confluence-space-page-cursor",
     page._links?.next,
@@ -1108,6 +1101,9 @@ const sourceUrl = (
   const candidate = Result.try(() => new URL(webui, siteBaseUrl))
   if (Result.isFailure(candidate) || candidate.success.origin !== siteBaseUrl.origin) return null
   if (candidate.success.username.length > 0 || candidate.success.password.length > 0) return null
+  if (candidate.success.pathname.startsWith("/spaces/")) {
+    candidate.success.pathname = `/wiki${candidate.success.pathname}`
+  }
   return candidate.success.toString()
 }
 
@@ -1204,13 +1200,6 @@ const readPageEntity = Effect.fn("ConfluencePage.readEntity")(function*(
   )
 })
 
-const unsupported = (capabilityId: "action.execute" | "action.cancel" | "action.reconcile") =>
-  new PluginUnsupportedCapabilityFailure({
-    capabilityId,
-    requestedVersion: 1,
-    diagnosticCode: "confluence-read-adapter-capability-unavailable"
-  })
-
 const currentUserDisplayName = (displayName: string | null | undefined, publicName: string | undefined): string => {
   for (const candidate of [displayName, publicName]) {
     const normalized = candidate?.trim()
@@ -1222,12 +1211,23 @@ const currentUserDisplayName = (displayName: string | null | undefined, publicNa
 /** Construct the page-read adapter against an authenticated, scoped client. @internal */
 export const makeConfluencePageAdapter = (
   input: MakeConfluencePageAdapterInput
-): {
-  readonly connection: PluginConnectionV1
-  readonly executor: AuthorizedPluginExecutorV1
-} => {
+) => {
+  const governedActions = makeConfluenceGovernedActions({
+    client: input.client,
+    converter: input.converter,
+    cryptoService: input.cryptoService,
+    siteId: input.configuration.siteId,
+    spaceId: input.configuration.spaceId,
+    ...(!(input.configuration.oauthVerifiedUser === undefined) && {
+      cachedUser: {
+        accountId: input.configuration.oauthVerifiedUser.accountId,
+        displayName: input.configuration.oauthVerifiedUser.displayName
+      }
+    })
+  })
   const connection: PluginConnectionV1 = {
     descriptor: input.descriptor,
+    actionActorIdentity: governedActions.actionActorIdentity,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
       const verifiedSite = input.configuration.oauthVerifiedSiteId === undefined
@@ -1245,13 +1245,17 @@ export const makeConfluencePageAdapter = (
       if (verifiedSite.cloudId !== input.configuration.siteId) {
         return yield* malformed("confluence-system-info", "confluence-site-identity-mismatch")
       }
-      const rawUser = yield* providerCall(input.client.getCurrentUser)
-      const user = yield* decodeProvider(
-        "confluence-current-user",
-        "confluence-current-user-invalid",
-        RawConfluenceCurrentUser,
-        rawUser
-      )
+      const user = input.configuration.oauthVerifiedUser ??
+        (yield* providerCall(input.client.getCurrentUser).pipe(
+          Effect.flatMap((rawUser) =>
+            decodeProvider(
+              "confluence-current-user",
+              "confluence-current-user-invalid",
+              RawConfluenceCurrentUser,
+              rawUser
+            )
+          )
+        ))
       const endpoint = yield* Schema.decodeUnknownEffect(SourceUrl)(
         new URL("/wiki/api/v2", input.configuration.siteBaseUrl).toString()
       ).pipe(Effect.mapError(() => malformed("confluence-discover", "confluence-endpoint-invalid")))
@@ -1297,15 +1301,7 @@ export const makeConfluencePageAdapter = (
           return syncCursorFromCheckpoint(request.checkpoint).pipe(
             Effect.map((checkpointState) => {
               if (checkpointState.cursor !== null) seenCursors.add(checkpointState.cursor)
-              const initialState: {
-                readonly checkpointGeneration: number
-                readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
-                readonly cursor: string | null
-                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
-                readonly inventoryDigest: string | null
-                readonly pageNumber: number
-                readonly usesGenerationCheckpoint: boolean
-              } = {
+              const initialState = {
                 checkpointGeneration: checkpointState.checkpointGeneration,
                 previousBoundedPrefix: checkpointState.boundedPrefix,
                 cursor: checkpointState.cursor,
@@ -1313,6 +1309,14 @@ export const makeConfluencePageAdapter = (
                 inventoryDigest: checkpointState.inventoryDigest,
                 pageNumber: 1,
                 usesGenerationCheckpoint: checkpointState.usesGenerationCheckpoint
+              } satisfies {
+                readonly checkpointGeneration: number
+                readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly cursor: string | null
+                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly inventoryDigest: string | null
+                readonly pageNumber: number
+                readonly usesGenerationCheckpoint: boolean
               }
               return Stream.paginate(
                 initialState,
@@ -1341,22 +1345,9 @@ export const makeConfluencePageAdapter = (
         ? readPageEntity(input, request.vendorImmutableId)
         : DateTime.now.pipe(Effect.map((observedAt) => ({ _tag: "missing", reference: request, observedAt }))),
     diff: Option.none(),
-    proposeAction: () =>
-      Effect.fail(
-        new PluginUnsupportedCapabilityFailure({
-          capabilityId: "action.propose",
-          requestedVersion: 1,
-          diagnosticCode: "confluence-read-adapter-capability-unavailable"
-        })
-      )
+    proposeAction: governedActions.proposeAction
   }
-  const executor: AuthorizedPluginExecutorV1 = {
-    preflight: () => Effect.fail(unsupported("action.execute")),
-    executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-    requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-    reconcile: () => Effect.fail(unsupported("action.reconcile"))
-  }
-  return { connection, executor }
+  return { connection, executor: governedActions.executor }
 }
 
 /** Acquire the adapter dependencies from a future scoped runtime registry. @internal */

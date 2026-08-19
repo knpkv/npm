@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import packageManifest from "../../package.json" with { type: "json" }
 import { controlCenterBuildPhases } from "../../scripts/build-phases.js"
 
 describe("Control Center build phases", () => {
@@ -26,5 +27,25 @@ describe("Control Center build phases", () => {
     expect(clean?.args).toContain("node_modules/.cache/tsconfig.server.tsbuildinfo")
     expect(declarations).toMatchObject({ args: ["-b", "tsconfig.server.json"], command: "tsc" })
     expect(declarations?.args).not.toContain("--force")
+  })
+
+  it("keeps browser builds on manifest-based repair instead of rebuilding every dependency", () => {
+    const command = packageManifest.scripts["test:e2e"]
+
+    expect(command).toContain("pnpm build")
+    expect(command).toContain("playwright test")
+    expect(command).not.toContain("@knpkv/control-center^...")
+  })
+
+  it("routes the live suite through dependency-artifact repair before Vitest", () => {
+    expect(packageManifest.scripts.build).toBe("tsx scripts/run-build.ts")
+    expect(packageManifest.scripts["test:integration:live"]).toBe(
+      "pnpm build && vitest run --config vitest.live.config.ts"
+    )
+    expect(controlCenterBuildPhases[0]).toMatchObject({
+      args: ["scripts/ensure-build-dependencies.ts"],
+      command: "tsx",
+      label: "ensure dependency artifacts"
+    })
   })
 })

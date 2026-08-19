@@ -59,7 +59,7 @@ export type RlyReleaseRelaySymbolIndices = readonly [
   RlyReleaseRelaySymbolIndex
 ]
 
-const symbolPaths: Readonly<Record<RlyReleaseRelaySymbolIndex, string>> = {
+const symbolPaths = {
   0: "M12 4a8 8 0 1 1-6.9 4M5.1 8H9V4.1",
   1: "M5 5v4c0 2 1 3 3 3h8c2 0 3 1 3 3v4M12 12V5",
   2: "M9 4H7v5l-3 3 3 3v5h2M15 4h2v5l3 3-3 3v5h-2",
@@ -76,7 +76,7 @@ const symbolPaths: Readonly<Record<RlyReleaseRelaySymbolIndex, string>> = {
   13: "M12 3v5M12 16v5M3 12h5M16 12h5M5.6 5.6l3.5 3.5M14.9 14.9l3.5 3.5M18.4 5.6l-3.5 3.5M9.1 14.9l-3.5 3.5",
   14: "m4 8 8-4 8 4-8 4Zm0 4 8 4 8-4M4 16l8 4 8-4",
   15: "m12 3 3 6 6 3-6 3-3 6-3-6-6-3 6-3Zm0 6v6M9 12h6"
-}
+} satisfies Readonly<Record<RlyReleaseRelaySymbolIndex, string>>
 
 const validateSymbols = (symbolIndices: RlyReleaseRelaySymbolIndices): RlyReleaseRelaySymbolIndices => {
   if (symbolIndices.length !== 3) throw new Error("ReleaseRelay symbolIndices must contain exactly three indices")

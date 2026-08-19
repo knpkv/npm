@@ -1,11 +1,23 @@
 import { BunServices } from "@effect/platform-bun"
-import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
+import {
+  AwsClient,
+  AwsClientConfig,
+  CacheService,
+  ConfigService,
+  PRService,
+  ReadClient,
+  ReviewClient
+} from "@knpkv/codecommit-core"
 import { Layer } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Atom from "effect/unstable/reactivity/Atom"
+import { WorktreeService } from "../../WorktreeService.js"
+import { tuiApplicationScopeLayer, tuiHostEnvironmentLayer, tuiTerminalSessionLayer } from "./applicationScope.js"
 
 // Leaf layers — fully closed (R = never)
 const EventsHubLive = CacheService.EventsHub.Default
+
+export { TuiApplicationScope, TuiTerminalSession } from "./applicationScope.js"
 
 const AwsLive = AwsClient.AwsClientLive.pipe(
   Layer.provide(FetchHttpClient.layer),
@@ -34,14 +46,41 @@ const PRLayer = PRService.PRServiceLive.pipe(
   Layer.provide(EventsHubLive)
 )
 
+const ReadLayer = ReadClient.CodeCommitReadClient.live.pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+
+const ReviewLayer = ReviewClient.CodeCommitReviewClient.live.pipe(
+  Layer.provide(ReadLayer),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+
+const WorktreeLayer = WorktreeService.live
+
 // Expose PRService + repos + EventsHub + AwsClient for atoms
-const MainLayer = Layer.mergeAll(PRLayer, ReposLive, EventsHubLive, AwsLive)
+const MainLayer = (get: Atom.AtomContext) =>
+  Layer.mergeAll(
+    PRLayer,
+    ReposLive,
+    EventsHubLive,
+    AwsLive,
+    ReadLayer,
+    ReviewLayer,
+    // WorktreeService's git spawns need the inherited environment, so it is provided to
+    // that layer as well as merged for the atoms that resolve it directly.
+    WorktreeLayer.pipe(Layer.provide(tuiHostEnvironmentLayer(get))),
+    tuiApplicationScopeLayer(get),
+    tuiTerminalSessionLayer(get),
+    tuiHostEnvironmentLayer(get)
+  )
 
 // Merge BunServices into output for child process actions.
-const AppLayer = MainLayer.pipe(Layer.provideMerge(BunServices.layer))
+const AppLayer = (get: Atom.AtomContext) => MainLayer(get).pipe(Layer.provideMerge(BunServices.layer))
 
 /**
  * Runtime atom providing Effect services to other atoms
  * @category atoms
  */
-export const runtimeAtom = Atom.runtime(AppLayer)
+export const runtimeAtom = Atom.runtime((get) => AppLayer(get))

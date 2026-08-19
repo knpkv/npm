@@ -107,13 +107,81 @@ Make every **Prevention** note implementation-ready:
 - name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
 - call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
 
+Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
+row may cover several flows only when each is named, and a checklist cannot pass while any item is
+`PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
+owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
+an alternate authorization path must not contradict a provider-enforced prerequisite.
+
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
+GitHub workflow guards must compare external action owner/repository names
+case-insensitively, normalize action input names before inspecting them, and
+reject duplicate inputs that collide after case normalization. In
+`pull_request_target`, treat every pull-request-derived
+revision, including `head.sha`, `head.ref`, `github.head_ref`, and
+`merge_commit_sha`, plus `head.repo.full_name` checkout repositories, in dot or
+static indexed syntax, as attacker-controlled when the job can access repository
+credentials. Match the `head.repo` expression prefix so composed owner/name
+repository inputs cannot bypass the guard. Treat effective workflow/job
+`id-token: write`, any token permission with `write` access, and `write-all` as
+credential authority too. On `pull_request_target`, omitted effective
+permissions conservatively imply privileged token authority; an explicit
+read-only permission map remains non-authoritative;
+OIDC-bearing jobs must not checkout or build pull-request revisions. After an
+attacker-controlled checkout, conservatively treat every later `run`, local
+action, or external action step as capable of executing the workspace; a
+metadata-only external action needs explicit human judgment before any narrow
+allowlist exception is added.
+Credential authority must follow static local reusable-workflow calls
+transitively, including `secrets: inherit`; reject cycles and missing local
+callees. Credential- or OIDC-bearing remote and dynamically constructed
+reusable-workflow references must emit an explicit-review diagnostic unless a
+repository-maintained reviewed allowlist proves them metadata-only. Parse `${{ ... }}` delimiters without treating
+`}}` inside quoted GitHub expression strings as the end of the expression.
+Treat mechanically recognizable `git checkout`, `git switch`, and
+`git reset --hard` commands that reference pull-request head/ref or merge
+expressions in their parsed revision operand as attacker-controlled worktree
+transitions. Account for value-taking global Git options such as `-C` and `-c`;
+only parse `git` in a simple shell executable position, and keep metadata-only
+logging of expressions or complete Git command text allowed.
+Manual local reusable-workflow calls using `secrets: inherit` require the same
+main-ref condition and protected environment as direct long-lived secret use.
+Workflow action-pin validation must distinguish job-level reusable workflows
+from step-level local actions using YAML context rather than path suffix, and
+traverse every reachable repository-local action manifest, regardless of its directory, reject missing or cyclic local
+action references, and apply immutable external-reference rules transitively;
+Docker action `runs.image` references must use a digest, while a local
+`Dockerfile` remains subject to explicit base-image review.
+
+External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
+
+Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
+Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
+Sandbox startup must not report readiness while legacy unauthenticated
+containers may remain active; transient Docker unavailability and reconciliation
+failures must retry under the supervised startup lifecycle until shutdown is
+confirmed. When the database proves there are no legacy unauthenticated rows,
+Docker may remain unavailable without blocking web readiness and ordinary
+maintenance must retry in a supervised background loop. Query terminal as well
+as active legacy rows; every legacy row must discover every container bearing
+its `codecommit.sandbox.id` label and block readiness until all discovered and
+persisted containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
+URL only after the authenticated listener layer has built successfully.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
+
+Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
+
+Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
+Every provider fixture-locator list must classify each coordinate as server-private or name its safe normalized/authenticated boundary, persisted representation, and prohibited emission surfaces.
+For `packages/control-center/README.md`, `packages/control-center/src/api/**`, and `packages/control-center/src/client/**`, an identifier that crosses an authenticated HTTP route or browser storage boundary is client-visible and must not be described as server-private. In particular, document `pluginConnectionId` as a normalized authenticated client-visible identifier when it appears in typed routes or cross-tab storage, including that persisted representation and its unauthenticated/public emission prohibition; keep raw provider site locators and credentials server-private. Generated and vendor documentation are excluded, while identifiers that never cross a transport boundary still require judgment.
 
 ### Versioning and Publishing
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
+- **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. This includes additive fields in exported interfaces and schemas, even when their producer or decoder is implemented privately. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
+- **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 ### Agent Management
@@ -135,9 +203,9 @@ Public motion-ownership props must document their default, affected surfaces and
 
 ## Effect Source Reference
 
-The Effect beta source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current beta APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
+The Effect RC source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current RC APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
 
-Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current beta APIs.
+Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current RC APIs.
 
 Recommended checks:
 
@@ -145,7 +213,7 @@ Recommended checks:
 - `rg "NodeHttpServer" repos/effect/packages`
 - `rg "Clock.currentTimeMillis" repos/effect/packages`
 
-The subtree is maintained from the `effect-smol` remote. See `docs/dependency-maintenance.md` for the exact `git subtree pull --prefix=repos/effect effect-smol main --squash` workflow and version-alignment steps.
+The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. Before fetching, fail closed unless `effect-upstream` resolves to the exact canonical HTTPS URL. Preserve subtree update merge commits: PRs that update `repos/effect` must use GitHub's merge-commit method because squash or rebase merging discards the provenance checked by CI. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
 
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 
@@ -166,7 +234,7 @@ When writing Effect code:
 - Bind services before calling methods inside generators:
   `const service = yield* SomeService`.
 - In `HttpApiBuilder.group`, acquire stable application services in the group callback before registering handlers so the resulting layer closes its requirements. Resolve only genuinely request-scoped services, such as `CurrentSession`, inside the per-request handler.
-- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
+- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedError`) and
   keep failures in the typed error channel.
 - In `packages/control-center/src/server/governance/internal/execution-store`, durable provider
   outcome decoding, canonical verification, replay-integrity checking, transition construction,
@@ -179,11 +247,123 @@ When writing Effect code:
   projection-selection policy.
 - Decode untrusted JSON/body data with Schema helpers before assigning it to a
   domain type.
+- Model provider revision and reconciliation-locator parsing as Schema
+  transformations (including template-literal parsers for structured locators);
+  reserve manual URL/cursor extraction for opaque transport pagination.
+- When advertised plugin capabilities change, update current module and service
+  documentation in the same change while keeping historical-descriptor comments
+  explicit about their older capability surface. Check the plugin's `index.ts`,
+  every ancestor barrel that exports it, public runtime JSDoc, and package README
+  section; retained public identifiers and historical documentation still require
+  compatibility judgment. Generated and vendor barrels are excluded.
+- When PR-review sandbox naming or reconciliation ownership changes in
+  `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
+  update `packages/control-center/README.md` and
+  `packages/control-center/docs/agentic-pr-review.md` in the same change, and
+  append an amendment to the governing ADR when earlier rationale changes.
+  Current docs must describe the server-private compact workspace-scoped prefix,
+  its 63-character sbx limit, and state that foreign-workspace and legacy names
+  are not automatically removed; a claim that startup removes all
+  `cc-pr-review-*` names is invalid. Keep the focused sandbox-session test
+  proving that the invalid full-UUID shape exceeds the limit while the bounded
+  compact name and foreign-workspace fixture pass. Generated and vendor docs are
+  excluded. Clearly historical implementation plans may remain unchanged, but
+  ADR history requires an amendment rather than a silent rewrite.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+- In `packages/*/src/client/**/*.css`, use Rly service-color tokens only for
+  provider-owned provenance (such as a CodeCommit revision rail or provider
+  mark), never for arbitrary user-authored links or content. Use generic
+  action/text tokens for those links. A `.prRow:hover .prTitle` rule using a
+  service token is invalid because the title is user-authored; a revision-rail
+  rule using that provider's service token remains valid. Generated and vendor
+  styles are excluded, and ambiguous selector provenance requires judgment.
+- The sole raw Node filesystem exception is
+  `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
+  it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory
+  and database handles through `fchmod` and verify path identity before return.
+  Do not broaden its ast-grep exclusion or move ordinary filesystem work into it.
+- `ChildProcess.make` options that set `env` must also state `extendEnv`; it
+  defaults to falsy, so `env` alone replaces the child environment and drops
+  `PATH`. `local-rules/require-explicit-child-process-env-inheritance` is the
+  single enforcement layer, deliberately: deciding whether a receiver named
+  `ChildProcess` is really Effect's module needs binding resolution, so a
+  syntactic ast-grep companion reported foreign APIs of the same shape and was
+  removed rather than narrowed. The rule enforces that the choice is stated, not
+  that it is correct — two things still need judgment. With `extendEnv: false`, `env` must
+  itself carry everything the child needs, including `PATH`. With
+  `extendEnv: true`, inherited variables that outrank the ones you pass must be
+  cleared: a spawn scoped to an explicit AWS profile has to drop every ambient
+  environment credential provider, which means the static keys _and_ the
+  web-identity variables, plus both `AWS_REGION` and `AWS_DEFAULT_REGION`, since
+  the AWS credential chain resolves environment variables above profile
+  configuration. Clear each family completely — clearing one variable of a pair
+  is worse than clearing neither, because which one leaks then depends on the
+  caller's shell. Use `ChildEnv.profileScopedEnv` in the `codecommit` packages
+  rather than rebuilding the exclusion list; it documents which variables are
+  deliberately left alone and why. It takes the environment the child will inherit
+  as its first argument and tombstones the spellings actually present as well as
+  the canonical names, because environment names are case-insensitive on Windows
+  and an exact-case tombstone alone leaves `Aws_Access_Key_Id` alive to outrank the
+  requested profile. Obtain that environment from `ChildEnv.HostEnvironment`, whose
+  layer is bound at each executable boundary — the only place permitted to read the
+  host process. Passing an empty map is never correct at a runtime call site: it
+  silently degrades to exact-case clearing. The folding is unconditional on every
+  platform, which is broader than POSIX strictly needs; that is deliberate and
+  documented in the module rather than gated on a platform read.
+- When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
+  required local executable, update `packages/codecommit/README.md` in the same
+  change with the corresponding IAM action and runtime prerequisite. Pure
+  presentation changes do not require a capability update.
+- Keep sandbox capability boundaries synchronized across
+  `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
+  owning policy, service, projection, and security tests. The invariant is:
+  validate before persistence and Docker execution; require immutable image
+  digests, migrating only the former built-in `codercom/code-server:latest`
+  default to the current pinned digest during load; reserve code-server
+  credential variables; accept only existing
+  canonical children of the physical `~/.codecommit/sandbox-volumes` directory
+  mounted below `/home/coder` or the exact `/tmp/.local/share/code-server`
+  runtime data subtree; keep built-in setup presets unprivileged; persist the
+  generated access password only in an owner-only `0700` cache directory and
+  `0600` database after rejecting symbolic-link paths, and expose it only
+  through the authenticated, non-cacheable
+  single-sandbox route; map the
+  non-root container identity to the workspace owner (repair root-owned clones
+  to a fixed non-root identity); drop all capabilities and publish only on
+  loopback; keep sandbox browser origins on the alternate loopback hostname so
+  the host-only owner cookie cannot reach sandbox ports; advertise the Vite
+  origin during development while proxying bootstrap/API requests through the
+  exact backend origin; redact
+  credentials and workspace paths from list/event projections; and recreate
+  legacy passwordless containers. Pass container environment, including the
+  generated password, through a protected pipe-backed Docker env file rather
+  than process arguments; environment names must be portable identifiers and
+  values must be single-line so env-file parsing cannot inject variables.
+- Keep CodeCommit merge capability copy synchronized across
+  `packages/codecommit/src/tui/ui/**`, `packages/codecommit/README.md`, and
+  `packages/codecommit-core/README.md`. The provider request pins the reviewed
+  source commit, while destination validation is preflight-only because
+  CodeCommit exposes no destination compare-and-set. Copy must not promise that
+  a three-way merge uses the reviewed base if the destination advances after
+  preflight. Generated and vendor documentation are excluded; providers with a
+  real destination compare-and-set still require capability-specific judgment.
+- Keep CodeCommit review-publication terminology synchronized across
+  `.changeset/*.md`, `packages/codecommit/README.md`, and the publication schema.
+  CodeCommit has no native file-comment target: describe file-scoped findings as
+  file-anchored PR comments unless the schema and provider operation actually add
+  a distinct capability. Generated and vendor changelogs are excluded; provider
+  terminology still requires judgment.
+- Keep CodeCommit editor documentation synchronized with exact-head behavior in
+  `packages/codecommit/README.md` and `packages/codecommit/src/tui/review-session.ts`:
+  after-side findings may open at their line, before-side findings must not apply
+  a base line to the head file, and deleted files are not launchable unless a
+  separate verified base artifact is explicitly materialized. Also document
+  `codecommit:GetBlob` as mandatory whenever exact-line publication validation
+  reads provider blobs, even when local checkout powers the displayed diff.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

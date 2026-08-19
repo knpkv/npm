@@ -2,8 +2,44 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
+import type { ReleasePublicationProvider } from "../../api/agent.js"
+import type { EntityId, GovernedActionId, ReleaseId } from "../../domain/identifiers.js"
+import type { Revision } from "../../domain/sourceRevision.js"
 import type { ReleaseAgentTurn } from "../AgentPage.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+
+export const submitBrowserReleasePublication = (input: {
+  readonly releaseId: ReleaseId
+  readonly provider: ReleasePublicationProvider
+  readonly title: string
+  readonly markdown: string
+  readonly publicationActionId?: GovernedActionId
+  readonly templateEntityId?: EntityId
+  readonly targetEntityId?: EntityId
+  readonly targetRevision?: Revision
+  readonly signal?: AbortSignal
+}): Promise<{ readonly actionId: string; readonly state: string }> =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const client = yield* makeAuthenticatedMutationClient
+      return yield* client.agent.submitReleasePublication({
+        params: { releaseId: input.releaseId },
+        payload: {
+          provider: input.provider,
+          title: input.title,
+          markdown: input.markdown,
+          parentId: null,
+          ...(!(input.publicationActionId === undefined) && {
+            publicationActionId: input.publicationActionId
+          }),
+          ...(!(input.templateEntityId === undefined) && { templateEntityId: input.templateEntityId }),
+          ...(!(input.targetEntityId === undefined) && { targetEntityId: input.targetEntityId }),
+          ...(!(input.targetRevision === undefined) && { targetRevision: input.targetRevision })
+        }
+      })
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+    input.signal === undefined ? undefined : { signal: input.signal }
+  )
 
 class ReleaseAgentProtocolError extends Data.TaggedError("ReleaseAgentProtocolError") {}
 
@@ -15,12 +51,13 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
     params: { releaseId: input.releaseId },
     payload: {
       history: input.history,
+      ...(!(input.originPath === undefined) && { originPath: input.originPath }),
       prompt: input.prompt,
-      provider: "codex"
+      provider: input.provider
     }
   })
   if (response.releaseId !== input.releaseId || response.release.releaseId !== input.releaseId) {
-    return yield* Effect.fail(new ReleaseAgentProtocolError())
+    return yield* new ReleaseAgentProtocolError()
   }
   return {
     eventCursor: response.eventCursor,
@@ -30,6 +67,29 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
   }
 })
 
-/** Browser transport for the default read-only Codex release agent. */
+const loadPresetsEffect = Effect.fn("ReleaseAgentTransport.loadPresets")(function*() {
+  const client = yield* makeAuthenticatedMutationClient
+  const catalog = yield* client.agent.providers()
+  const presets = new Array<"claude" | "codex">()
+  for (const provider of catalog.providers) {
+    const providerId = String(provider.providerId)
+    if (
+      provider.health === "available" &&
+      provider.capabilities.includes("release-chat") &&
+      (providerId === "codex" || providerId === "claude")
+    ) {
+      presets.push(providerId)
+    }
+  }
+  return presets
+})
+
+/** Browser transport for the selected read-only local release-agent preset. */
 export const runBrowserReleaseAgentTurn: ReleaseAgentTurn = (input, { signal }) =>
   Effect.runPromise(runTurnEffect(input).pipe(Effect.provide(FetchHttpClient.layer)), { signal })
+
+/** Load only configured local release-agent presets from the redacted catalog. */
+export const loadBrowserReleaseAgentPresets = (
+  signal: AbortSignal
+): Promise<ReadonlyArray<"claude" | "codex">> =>
+  Effect.runPromise(loadPresetsEffect().pipe(Effect.provide(FetchHttpClient.layer)), { signal })

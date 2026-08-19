@@ -21,7 +21,7 @@ export interface ParsedMarkdown {
   readonly isNew: boolean
 }
 
-const parseRawMarkdown = (content: string): { readonly data: Record<string, unknown>; readonly content: string } => {
+const parseRawMarkdown = (content: string) => {
   if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
     return { data: {}, content }
   }
@@ -81,7 +81,7 @@ export const parseMarkdown = (
         content: parsed.content.trim(),
         isNew: false
       })),
-      Effect.catchCause(() =>
+      Effect.catch(() =>
         // Try to parse as new page front-matter
         Schema.decodeUnknownEffect(NewPageFrontMatterSchema)(parsed.data).pipe(
           Effect.map((fm) => ({
@@ -89,7 +89,7 @@ export const parseMarkdown = (
             content: parsed.content.trim(),
             isNew: true
           })),
-          Effect.catchCause((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
+          Effect.catch((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
         )
       )
     )
@@ -115,9 +115,10 @@ export const serializeMarkdown = (
     version: frontMatter.version,
     title: frontMatter.title,
     updated: frontMatter.updated.toISOString(),
-    ...(frontMatter.parentId !== undefined ? { parentId: frontMatter.parentId } : {}),
-    ...(frontMatter.position !== undefined ? { position: frontMatter.position } : {}),
-    contentHash: frontMatter.contentHash
+    ...((frontMatter.parentId !== undefined) && { parentId: frontMatter.parentId }),
+    ...((frontMatter.position !== undefined) && { position: frontMatter.position }),
+    contentHash: frontMatter.contentHash,
+    ...((frontMatter.roundTrip !== undefined) && { roundTrip: frontMatter.roundTrip })
   }
 
   return stringifyFrontmatter(content, fm)
@@ -138,13 +139,13 @@ export const serializeNewPageMarkdown = (
 ): string => {
   const fm = {
     title: frontMatter.title,
-    ...(frontMatter.parentId !== undefined ? { parentId: frontMatter.parentId } : {})
+    ...((frontMatter.parentId !== undefined) && { parentId: frontMatter.parentId })
   }
 
   return stringifyFrontmatter(content, fm)
 }
 
-const stringifyFrontmatter = (content: string, frontMatter: Record<string, unknown>): string => {
+const stringifyFrontmatter = (content: string, frontMatter: Record<string, Schema.Json>): string => {
   const header = yaml.dump(frontMatter, {
     lineWidth: -1,
     noRefs: true,

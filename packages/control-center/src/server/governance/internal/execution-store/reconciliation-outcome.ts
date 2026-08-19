@@ -55,6 +55,15 @@ export const reconciliationInboxOutcomeObservedAt = (
     ? outcome.checkedAt
     : outcome.receipt.observedAt
 
+/** Whether reconciliation reports the immutable authorization observation of a trusted local action. */
+export const reconciliationInboxOutcomeUsesAuthorizationObservation = (
+  outcome: ReconciliationInboxOutcome
+): boolean =>
+  outcome._tag !== "pending" &&
+  outcome._tag !== "recovery-unavailable" &&
+  "observationBasis" in outcome.receipt &&
+  outcome.receipt.observationBasis === "authorization"
+
 /** Reconstruct the lifecycle command represented by one reconciliation-side inbox outcome. */
 export const reconciliationInboxOutcomeCommand = (
   outcome: ReconciliationInboxOutcome,

@@ -2,6 +2,7 @@ import starlight from "@astrojs/starlight"
 import { defineConfig } from "astro/config"
 
 export default defineConfig({
+  site: "https://knpkv.dev",
   integrations: [
     starlight({
       title: "@knpkv",
@@ -29,6 +30,10 @@ export default defineConfig({
           label: "Applications",
           items: [
             { label: "Control Center", link: "/control-center/" },
+            { label: "Control Center Setup", link: "/control-center-setup/" },
+            { label: "Control Center Operations", link: "/control-center-operations/" },
+            { label: "Control Center Governance", link: "/control-center-governance/" },
+            { label: "Control Center Troubleshooting", link: "/control-center-troubleshooting/" },
             { label: "Confluence adapter", link: "/control-center-confluence/" }
           ]
         },

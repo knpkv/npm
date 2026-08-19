@@ -11,10 +11,10 @@ const loadBrowserSession = Effect.gen(function* () {
   return yield* client.session.current()
 }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const failedSessionState = (
-  failure: unknown
+const failedSessionState = <UnparsedInput,>(
+  failure: UnparsedInput
 ): Exclude<BrowserSessionState, { readonly _tag: "authenticated" | "checking" }> => {
-  if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") {
+  if (!Predicate.hasProperty(failure, "_tag") || !Predicate.isString(failure._tag)) {
     return { _tag: "unavailable" }
   }
   if (failure._tag === "UnauthorizedApiError") return { _tag: "anonymous" }
@@ -22,14 +22,21 @@ const failedSessionState = (
   return { _tag: "unavailable" }
 }
 
+interface BrowserSessionHydratorProps {
+  readonly loadSession?: typeof loadBrowserSession
+}
+
 /** Recover this tab's mutation proof once, regardless of its initial route. */
-export const BrowserSessionHydrator = (): ReactElement | null => {
+export const BrowserSessionHydrator = ({
+  loadSession = loadBrowserSession
+}: BrowserSessionHydratorProps = {}): ReactElement | null => {
   const { beginHydration, completeHydration } = useBrowserSession()
 
   useEffect(() => {
     const attempt = beginHydration()
+    const request = new AbortController()
     let isCurrent = true
-    Effect.runPromise(loadBrowserSession).then(
+    Effect.runPromise(loadSession, { signal: request.signal }).then(
       (result) => {
         if (!isCurrent) return
         completeHydration(attempt, {
@@ -38,14 +45,15 @@ export const BrowserSessionHydrator = (): ReactElement | null => {
           session: result.session
         })
       },
-      (failure: unknown) => {
+      <UnparsedInput,>(failure: UnparsedInput) => {
         if (isCurrent) completeHydration(attempt, failedSessionState(failure))
       }
     )
     return () => {
       isCurrent = false
+      request.abort()
     }
-  }, [beginHydration, completeHydration])
+  }, [beginHydration, completeHydration, loadSession])
 
   return null
 }

@@ -1,0 +1,13 @@
+id: no-unowned-detached-fiber
+valid:
+  - |
+    const worker = Effect.forkScoped(loop)
+  - |
+    const worker = Effect.forkIn(loop, applicationScope)
+  - |
+    const worker = loop.pipe(Effect.forkIn(applicationScope))
+invalid:
+  - |
+    const worker = Effect.forkDetach(loop)
+  - |
+    const worker = loop.pipe(Effect.forkDetach)

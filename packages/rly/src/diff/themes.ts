@@ -1,12 +1,12 @@
 import { registerCustomCSSVariableTheme } from "@pierre/diffs"
 
 /** Stable custom theme identifiers registered for the isolated diff renderer. */
-export const RLY_DIFF_THEMES: { readonly dark: "rly-dark"; readonly light: "rly-light" } = {
+export const RLY_DIFF_THEMES = {
   dark: "rly-dark",
   light: "rly-light"
-}
+} satisfies { readonly dark: "rly-dark"; readonly light: "rly-light" }
 
-const VARIABLE_DEFAULTS: Record<string, string> = {
+const VARIABLE_DEFAULTS = {
   "ansi-black": "var(--rly-color-text-1)",
   "ansi-blue": "var(--rly-color-text-1)",
   "ansi-bright-black": "var(--rly-color-text-2)",
@@ -37,7 +37,7 @@ const VARIABLE_DEFAULTS: Record<string, string> = {
   "token-punctuation": "var(--rly-color-text-1)",
   "token-string": "var(--rly-color-text-1)",
   "token-string-expression": "var(--rly-color-text-1)"
-}
+} satisfies Record<string, string>
 
 let themesRegistered = false
 

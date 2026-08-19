@@ -10,6 +10,7 @@ import * as RateLimiter from "effect/unstable/persistence/RateLimiter"
 export const RequestLimitProfile = Schema.Literals([
   "pairing",
   "read",
+  "agent-read",
   "mutation",
   "synchronization",
   "agent",
@@ -22,6 +23,7 @@ export interface RequestLimitPolicyValue {
   readonly maximumBodyBytes: number
   readonly pairing: { readonly limit: number; readonly window: Duration.Duration }
   readonly read: { readonly limit: number; readonly window: Duration.Duration }
+  readonly "agent-read": { readonly limit: number; readonly window: Duration.Duration }
   readonly mutation: { readonly limit: number; readonly window: Duration.Duration }
   readonly synchronization: { readonly limit: number; readonly window: Duration.Duration }
   readonly agent: { readonly limit: number; readonly window: Duration.Duration }
@@ -32,34 +34,38 @@ export interface RequestLimitPolicyValue {
   readonly agentTimeout: Duration.Duration
 }
 
+/** Stable default request policy shared by production composition and browser integration evidence. */
+export const DEFAULT_REQUEST_LIMIT_POLICY: RequestLimitPolicyValue = {
+  maximumBodyBytes: 256 * 1024,
+  pairing: { limit: 10, window: Duration.minutes(5) },
+  read: { limit: 120, window: Duration.minutes(1) },
+  "agent-read": { limit: 120, window: Duration.minutes(1) },
+  mutation: { limit: 30, window: Duration.minutes(1) },
+  synchronization: { limit: 8, window: Duration.minutes(1) },
+  agent: { limit: 8, window: Duration.minutes(1) },
+  media: { limit: 60, window: Duration.minutes(1) },
+  readTimeout: Duration.seconds(15),
+  mutationTimeout: Duration.seconds(30),
+  synchronizationTimeout: Duration.minutes(10),
+  agentTimeout: Duration.seconds(130)
+}
+
 /** API request limits, replaceable in deterministic tests. */
 export class RequestLimitPolicy extends Context.Service<
   RequestLimitPolicy,
   RequestLimitPolicyValue
 >()("@knpkv/control-center/server/api/RequestLimitPolicy") {
-  static readonly defaultLayer = Layer.succeed(RequestLimitPolicy, {
-    maximumBodyBytes: 256 * 1024,
-    pairing: { limit: 10, window: Duration.minutes(5) },
-    read: { limit: 120, window: Duration.minutes(1) },
-    mutation: { limit: 30, window: Duration.minutes(1) },
-    synchronization: { limit: 8, window: Duration.minutes(1) },
-    agent: { limit: 8, window: Duration.minutes(1) },
-    media: { limit: 60, window: Duration.minutes(1) },
-    readTimeout: Duration.seconds(15),
-    mutationTimeout: Duration.seconds(30),
-    synchronizationTimeout: Duration.minutes(10),
-    agentTimeout: Duration.seconds(130)
-  })
+  static readonly defaultLayer = Layer.succeed(RequestLimitPolicy, DEFAULT_REQUEST_LIMIT_POLICY)
 }
 
 /** A request exceeded its bounded execution time. */
-export class RequestTimeLimitExceeded extends Schema.TaggedErrorClass<RequestTimeLimitExceeded>()(
+export class RequestTimeLimitExceeded extends Schema.TaggedError<RequestTimeLimitExceeded>()(
   "RequestTimeLimitExceeded",
   {}
 ) {}
 
 /** A request exhausted its profile-specific token bucket. */
-export class RequestRateLimitExceeded extends Schema.TaggedErrorClass<RequestRateLimitExceeded>()(
+export class RequestRateLimitExceeded extends Schema.TaggedError<RequestRateLimitExceeded>()(
   "RequestRateLimitExceeded",
   {
     limit: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -68,13 +74,13 @@ export class RequestRateLimitExceeded extends Schema.TaggedErrorClass<RequestRat
 ) {}
 
 /** The configured rate-limit store could not evaluate a request. */
-export class RequestRateLimitUnavailable extends Schema.TaggedErrorClass<RequestRateLimitUnavailable>()(
+export class RequestRateLimitUnavailable extends Schema.TaggedError<RequestRateLimitUnavailable>()(
   "RequestRateLimitUnavailable",
   {}
 ) {}
 
 /** A declared request body is larger than the API permits. */
-export class RequestBodyLimitExceeded extends Schema.TaggedErrorClass<RequestBodyLimitExceeded>()(
+export class RequestBodyLimitExceeded extends Schema.TaggedError<RequestBodyLimitExceeded>()(
   "RequestBodyLimitExceeded",
   {
     maximumBytes: Schema.Int.check(Schema.isGreaterThan(0))
@@ -136,7 +142,7 @@ export const withRequestTimeout = <A, E, R>(
 ): Effect.Effect<A, E | RequestTimeLimitExceeded, R | RequestLimitPolicy> =>
   Effect.flatMap(RequestLimitPolicy, (policy) =>
     Effect.timeoutOrElse(effect, {
-      duration: profile === "agent"
+      duration: profile === "agent" || profile === "agent-read"
         ? policy.agentTimeout
         : profile === "synchronization"
         ? policy.synchronizationTimeout

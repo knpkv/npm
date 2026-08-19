@@ -1,10 +1,14 @@
 import { createBrowserRouter } from "react-router"
 import { AppShell } from "./AppShell.js"
-import { NotFoundPage, ReleasesPage } from "./Pages.js"
 
 const overviewRoute = async () => {
   const module = await import("./portfolio/PortfolioOverview.js")
   return { Component: module.PortfolioOverview }
+}
+
+const notFoundRoute = async () => {
+  const module = await import("./Pages.js")
+  return { Component: module.NotFoundPage }
 }
 
 const pairRoute = async () => {
@@ -67,6 +71,11 @@ const servicesRoute = async () => {
   return { Component: module.ServicesPage }
 }
 
+const workspaceSettingsRoute = async () => {
+  const module = await import("./settings/WorkspaceSettingsPage.js")
+  return { Component: module.WorkspaceSettingsPage }
+}
+
 const atlassianOAuthCallbackRoute = async () => {
   const module = await import("./services/AtlassianOAuthCallbackPage.js")
   return { Component: module.AtlassianOAuthCallbackPage }
@@ -83,7 +92,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, lazy: overviewRoute },
-      { path: "releases", element: <ReleasesPage /> },
+      { path: "releases", lazy: overviewRoute },
       { path: "services", lazy: servicesRoute },
       { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
       { path: "agent", lazy: agentRoute },
@@ -98,13 +107,14 @@ export const router = createBrowserRouter([
           { path: "items/:entityId", lazy: workspaceEntityRoute },
           { path: "items", lazy: itemsRoute },
           { path: "timeline", lazy: timelineRoute },
+          { path: "settings", lazy: workspaceSettingsRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
           { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },
           { path: "*", lazy: workspaceNotFoundRoute }
         ]
       },
-      { path: "*", element: <NotFoundPage /> }
+      { path: "*", lazy: notFoundRoute }
     ]
   }
 ])

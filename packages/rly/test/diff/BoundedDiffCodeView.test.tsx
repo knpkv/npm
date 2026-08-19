@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 
+import { act } from "react"
+import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { BoundedDiffCodeView } from "../../src/diff/bounded/BoundedDiffCodeView.js"
-import type { RlyDiffCodeItem } from "../../src/diff/types.js"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../../src/diff/types.js"
 
 const item = {
   after: { contents: "const ready = true\nship()\n", name: "src/release.ts" },
@@ -56,5 +58,61 @@ describe("BoundedDiffCodeView", () => {
     expect(html).toContain(">a<")
     expect(html).toContain(">B<")
     expect(html).not.toContain("\r")
+  })
+
+  it("renders application-owned annotations in both layouts", () => {
+    const annotation: RlyDiffCodeAnnotation = {
+      accessibilityLabel: "High confidence release finding",
+      id: "release-finding",
+      location: { itemId: "release", lineNumber: 1, side: "additions" },
+      render: () => <article>High · 96% · draft finding</article>
+    }
+    const modes: ReadonlyArray<"split" | "stacked"> = ["split", "stacked"]
+
+    for (const mode of modes) {
+      const html = renderToStaticMarkup(
+        <BoundedDiffCodeView annotations={[annotation]} initialItems={[item]} mode={mode} />
+      )
+      expect(html).toContain('data-rly-diff-annotation="release-finding"')
+      expect(html).toContain("High · 96% · draft finding")
+      expect(html).toContain('tabindex="0"')
+    }
+  })
+
+  it("returns annotation focus to its exact bounded line", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () =>
+      root.render(
+        <BoundedDiffCodeView
+          annotations={[
+            {
+              accessibilityLabel: "Release finding",
+              id: "release-finding",
+              location: { itemId: "release", lineNumber: 1, side: "additions" },
+              render: ({ returnFocus }) => <button onClick={returnFocus}>Return to line</button>
+            }
+          ]}
+          initialItems={[item]}
+        />
+      )
+    )
+
+    const card = host.querySelector<HTMLElement>("[data-rly-diff-annotation='release-finding']")
+    const button = host.querySelector<HTMLButtonElement>("button")
+    button?.focus()
+    await act(async () => button?.click())
+    expect(document.activeElement).toBe(
+      host.querySelector("[data-rly-diff-item='release'][data-rly-diff-line='1'][data-rly-diff-line-side='additions']")
+    )
+
+    card?.focus()
+    card?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }))
+    expect(document.activeElement).toBe(
+      host.querySelector("[data-rly-diff-item='release'][data-rly-diff-line='1'][data-rly-diff-line-side='additions']")
+    )
+    await act(async () => root.unmount())
+    host.remove()
   })
 })

@@ -58,6 +58,8 @@ export interface WorkspaceEntityCollaboratorsPresentation {
   readonly reviewers: ReadonlyArray<RlyPerson>
 }
 
+interface CollaboratorCategories extends Record<RlyCollaboratorCategory, Array<RlyPerson>> {}
+
 export interface WorkspaceEntityEvidencePresentation {
   readonly claimCount: number
   readonly freshness: RlyFreshnessState
@@ -132,7 +134,14 @@ const kindNames = {
 const readableTimestamp = (timestamp: DateTime.DateTime): string =>
   timestampFormatter.format(DateTime.toDateUtc(timestamp))
 
-const sourceHref = (source: SourceRevision): string | null => source.sourceUrl === null ? null : source.sourceUrl.href
+const sourceHref = (source: SourceRevision): string | null => {
+  if (source.sourceUrl === null) return null
+  const href = new URL(source.sourceUrl.href)
+  if (source.providerId === "confluence" && href.pathname.startsWith("/spaces/")) {
+    href.pathname = `/wiki${href.pathname}`
+  }
+  return href.href
+}
 
 const releaseHref = (workspaceId: WorkspaceId, releaseId: ReleaseId): string =>
   `/w/${encodeURIComponent(workspaceId)}/releases/${encodeURIComponent(releaseId)}`
@@ -209,12 +218,13 @@ const collaboratorsFor = (
     "operators",
     "approvers"
   ]
-  const categories: Record<RlyCollaboratorCategory, Array<RlyPerson>> = {
-    approvers: [],
-    authors: [],
-    operators: [],
-    owners: [],
-    reviewers: []
+  const emptyPeople = (): Array<RlyPerson> => []
+  const categories: CollaboratorCategories = {
+    approvers: emptyPeople(),
+    authors: emptyPeople(),
+    operators: emptyPeople(),
+    owners: emptyPeople(),
+    reviewers: emptyPeople()
   }
   for (const owner of owners) categories[collaboratorCategory(owner.roles)].push(personFor(owner))
   const expandedCategories = categoryOrder.filter((category) => categories[category].length > 0)
@@ -410,7 +420,7 @@ const relationshipsFor = (
       ? ownerById.get(relationship.recordedBy.personId)
       : undefined
     return {
-      ...(actorOwner === undefined ? {} : { actor: personFor(actorOwner) }),
+      ...(!(actorOwner === undefined) && { actor: personFor(actorOwner) }),
       direction: "forward",
       evidence: relationshipEvidence(relationship),
       id: relationship.relationshipId,
@@ -428,9 +438,9 @@ const activityFor = (inspection: WorkspaceEntityInspection): ReadonlyArray<RlyTi
     actorKind: event.actor.kind,
     dateTime: DateTime.formatIso(event.occurredAt),
     detail: titleCase(event.sourceKind),
-    ...(event.href === null ? {} : { href: event.href }),
+    ...(!(event.href === null) && { href: event.href }),
     id: event.eventKey,
-    ...(event.service === null ? {} : { service: event.service }),
+    ...(!(event.service === null) && { service: event.service }),
     time: readableTimestamp(event.occurredAt),
     title: event.title
   }))
@@ -441,7 +451,13 @@ const primaryActionFor = (
   serviceName: string
 ): WorkspaceEntityActionPresentation => {
   const href = sourceHref(inspection.source)
-  if (href !== null) return { external: true, href, label: `Open in ${serviceName}` }
+  if (href !== null) {
+    return {
+      external: true,
+      href,
+      label: inspection.source.providerId === "confluence" ? "View in Confluence" : `Open in ${serviceName}`
+    }
+  }
   const releaseId = inspection.entity.canonicalReleaseId
   return releaseId === null
     ? { external: false, href: null, label: "Source link unavailable" }

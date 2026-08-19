@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 
+import { describe, expect, it } from "@effect/vitest"
 import { act, createRef } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
 import { Button, RLY_BUTTON_DEFAULT_VARIANTS, RLY_BUTTON_VARIANTS } from "../../src/primitives/Button.js"
 import { render } from "./render.js"
 
@@ -24,9 +24,29 @@ describe("Button", () => {
     )
     expect(button?.hasAttribute("disabled")).toBe(true)
     expect(button?.getAttribute("aria-busy")).toBe("true")
+    expect(button?.getAttribute("aria-label")).toBe("Continue")
     expect(button?.getAttribute("data-loading")).toBe("true")
     expect(button?.textContent).toContain("Continue")
     expect(button?.querySelectorAll("svg")).toHaveLength(2)
+  })
+
+  it("falls back to visible content for a blank loading label", () => {
+    const button = render(
+      <Button aria-label=" " loading>
+        Continue
+      </Button>
+    )
+    expect(button?.getAttribute("aria-label")).toBe("Continue")
+  })
+
+  it("preserves an externally labelled accessible name while loading", () => {
+    const button = render(
+      <Button aria-labelledby="external-label" loading>
+        Continue
+      </Button>
+    )
+    expect(button?.getAttribute("aria-labelledby")).toBe("external-label")
+    expect(button?.hasAttribute("aria-label")).toBe(false)
   })
 
   it("forwards its native ref and suppresses activation while loading", () => {

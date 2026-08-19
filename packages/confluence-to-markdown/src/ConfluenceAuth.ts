@@ -13,8 +13,9 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import {
   buildAuthUrl,
-  buildOAuthToken,
+  buildOAuthTokenAt,
   computeCodeChallenge,
+  CONFLUENCE_FOLDER_SCOPES,
   CONFLUENCE_SCOPES,
   exchangeCodeForTokens,
   generateCodeVerifier,
@@ -33,7 +34,7 @@ import {
   type HomeDirectoryError,
   HomeDirectoryLive,
   HomeDirectoryTag,
-  isTokenExpired,
+  isTokenExpiredAt,
   loadActiveProfile,
   loadActiveProfileToken,
   loadOAuthConfig,
@@ -46,6 +47,7 @@ import {
   saveProfileToken,
   setActiveProfileBySelector
 } from "@knpkv/atlassian-common/config"
+import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
@@ -62,11 +64,29 @@ import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { AuthMissingError } from "./ConfluenceError.js"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
-import { startCallbackServer } from "./internal/oauthServer.js"
+import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
 import { openBrowser } from "./internal/openBrowser.js"
 
 const TOOL_NAME = "confluence-to-markdown"
 const LEGACY_CONFIG_DIR_NAME = ".confluence"
+
+/**
+ * What this CLI asks for at login: the shared page/attachment set plus the
+ * folder and CQL-search scopes its `folder`/`search` commands need.
+ *
+ * The union lives here rather than in `CONFLUENCE_SCOPES` so control-center,
+ * which shares that constant for its own sign-in, keeps requesting only the
+ * scopes it actually uses.
+ *
+ * Exported so `auth create`/`auth manage` can print the scopes to enable on the
+ * OAuth app from the same source login reads. Atlassian rejects an authorization
+ * request naming a scope the app does not enable, so a hand-maintained list in
+ * the setup instructions drifts into telling users to configure an app that
+ * cannot complete a login.
+ *
+ * @category Scopes
+ */
+export const CLI_LOGIN_SCOPES = [...CONFLUENCE_SCOPES, ...CONFLUENCE_FOLDER_SCOPES]
 
 const TokenStorageLive = Layer.mergeAll(
   NodeFileSystem.layer,
@@ -74,9 +94,11 @@ const TokenStorageLive = Layer.mergeAll(
   HomeDirectoryLive
 )
 
-const parseJsonOrNull = (content: string): unknown | null => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parseJsonOrNull = (content: string): Schema.Json | null => {
   try {
-    return JSON.parse(content)
+    return decodeJson(content)
   } catch {
     return null
   }
@@ -277,17 +299,37 @@ const make = Effect.gen(function*() {
       return config
     })
 
+  // Mirrors `@knpkv/jira-cli`'s JiraAuth, deliberately: same shared
+  // `refreshToken`, same rotating-credential hazard. Atlassian consumes the
+  // token we send and returns its replacement, so an interrupt between the
+  // grant and the persist spends the credential with nothing saved and silently
+  // logs the user out. Grant and persist are therefore atomic.
+  //
+  // The deadline sits inside the region because an uninterruptible region with
+  // no bound of its own absorbs SIGINT/SIGTERM entirely — `runMain`'s handlers
+  // only interrupt the main fiber — which would leave a `confluence` command
+  // ignoring Ctrl-C against a stalled token endpoint. A deadline forked inside
+  // the region is still interruptible, so it does bound this.
+  const REFRESH_TIMEOUT = "30 seconds"
+
   const refreshTokenImpl = (
     token: OAuthToken,
     config: OAuthConfig
   ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.gen(function*() {
-      const updated = yield* refreshToken(token, config).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-      yield* saveTokenOp(updated)
-      return updated
-    })
+    Effect.uninterruptible(
+      Effect.gen(function*() {
+        const updated = yield* refreshToken(token, config).pipe(
+          Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+          Effect.timeout(REFRESH_TIMEOUT),
+          Effect.catchTag(
+            "TimeoutError",
+            () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
+          )
+        )
+        yield* saveTokenOp(updated)
+        return updated
+      })
+    )
 
   const revokeTokenImpl = (
     token: OAuthToken,
@@ -314,35 +356,44 @@ const make = Effect.gen(function*() {
         Effect.provideService(Crypto.Crypto, cryptoService)
       )
 
-      const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
-        Effect.provide(HttpServerFactoryLive),
-        Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-      )
-      const authUrl = buildAuthUrl({
-        clientId: config.clientId,
-        state,
-        port,
-        scopes: CONFLUENCE_SCOPES,
-        codeChallenge
-      })
+      const { code, port } = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const { codePromise, port } = yield* startCallbackServer(state).pipe(
+            Effect.provide(HttpServerFactoryLive),
+            Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+          )
+          const authUrl = buildAuthUrl({
+            clientId: config.clientId,
+            state,
+            port,
+            redirectUri: callbackUrl(port),
+            scopes: CLI_LOGIN_SCOPES,
+            codeChallenge
+          })
 
-      yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
-      yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
-      yield* openBrowserImpl(authUrl)
-      yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
+          yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
+          yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
+          yield* openBrowserImpl(authUrl)
+          yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
 
-      const code = yield* codePromise.pipe(
-        Effect.mapError((cause) => new OAuthError({ step: "authorize", cause })),
-        Effect.timeout("5 minutes"),
-        Effect.catchTag(
-          "TimeoutError",
-          () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
-        ),
-        Effect.ensuring(shutdown)
+          const code = yield* codePromise.pipe(
+            Effect.mapError((cause) => new OAuthError({ step: "authorize", cause })),
+            Effect.timeout("5 minutes"),
+            Effect.catchTag(
+              "TimeoutError",
+              () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
+            )
+          )
+          return { code, port }
+        })
       )
 
       yield* Console.log("Exchanging code for tokens...")
-      const tokens = yield* exchangeCodeForTokens(code, config, { port, codeVerifier }).pipe(
+      const tokens = yield* exchangeCodeForTokens(code, config, {
+        port,
+        redirectUri: callbackUrl(port),
+        codeVerifier
+      }).pipe(
         Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
       )
 
@@ -392,7 +443,8 @@ const make = Effect.gen(function*() {
         Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
       )
 
-      const tokenData = buildOAuthToken(tokens, site, user)
+      const nowMs = yield* Clock.currentTimeMillis
+      const tokenData = buildOAuthTokenAt(tokens, site, user, nowMs)
 
       yield* saveTokenOp(tokenData)
       yield* Console.log(`Logged in as ${user.name} (${user.email})`)
@@ -425,7 +477,8 @@ const make = Effect.gen(function*() {
         return yield* Effect.fail(new AuthMissingError())
       }
 
-      if (!isTokenExpired(token)) {
+      const nowMs = yield* Clock.currentTimeMillis
+      if (!isTokenExpiredAt(token, nowMs)) {
         return token.access_token
       }
 
@@ -442,17 +495,28 @@ const make = Effect.gen(function*() {
 
       const refresh = Effect.gen(function*() {
         const config = yield* getConfig()
-        yield* Console.log("Token expired, refreshing...")
+        // stderr: stdout carries machine-readable payloads (`page get --format adf`,
+        // `--json`), and a progress line there corrupts them.
+        yield* Console.error("Token expired, refreshing...")
         return yield* refreshTokenImpl(token, config)
       }).pipe(
         Effect.catchTag("OAuthError", (error) => {
-          if (error.step === "refresh") {
+          // Same rule as JiraAuth: only Atlassian explicitly saying the grant
+          // itself is spent ends the session. A timeout, a transport error, a
+          // `429` from a burst of concurrent commands, a `400 invalid_client`
+          // from a rotated client secret, or a bare `403` from a proxy are none
+          // of them evidence about the token, and deleting it is unrecoverable.
+          const { errorCode, status } = error
+          const rejected = errorCode === "invalid_grant" && (status === 400 || status === 403)
+          if (error.step === "refresh" && rejected) {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
               return yield* Effect.fail(
                 new OAuthError({
                   step: "refresh",
-                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate."
+                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
+                  status,
+                  errorCode
                 })
               )
             })

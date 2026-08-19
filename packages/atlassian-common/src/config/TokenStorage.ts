@@ -23,13 +23,16 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import { unsafeCurrentTimeMillis } from "../internal/legacyWallClock.js"
 import { type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js"
 import { ensureConfigDir, getAuthPath, getOAuthConfigPath, writeSecureFile } from "./ConfigPaths.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
 
-const parseJsonOrNull = (content: string): unknown | null => {
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+const parseJsonOrNull = (content: string): Schema.Json | null => {
   try {
-    return JSON.parse(content)
+    return decodeJson(content)
   } catch {
     return null
   }
@@ -70,7 +73,7 @@ export const loadToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     const exists = yield* fs.exists(tokenPath).pipe(
-      Effect.catchCause(() => Effect.succeed(false))
+      Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -87,7 +90,7 @@ export const loadToken = (
     }
 
     return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
-      Effect.catchCause((e) =>
+      Effect.catch((e) =>
         Effect.logWarning(`Invalid token schema in ${tokenPath}: ${e}`).pipe(
           Effect.map(() => null)
         )
@@ -136,7 +139,7 @@ export const deleteToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     yield* fs.remove(tokenPath).pipe(
-      Effect.catchCause(() => Effect.void)
+      Effect.catch(() => Effect.void)
     )
   })
 
@@ -160,7 +163,7 @@ export const loadOAuthConfig = (
     const configPath = yield* getOAuthConfigPath(toolName)
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchCause(() => Effect.succeed(false))
+      Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -177,7 +180,7 @@ export const loadOAuthConfig = (
     }
 
     return yield* Schema.decodeUnknownEffect(OAuthConfigSchema)(parsed).pipe(
-      Effect.catchCause((e) =>
+      Effect.catch((e) =>
         Effect.logWarning(`Invalid OAuth config schema in ${configPath}: ${e}`).pipe(
           Effect.map(() => null)
         )
@@ -220,5 +223,18 @@ export const saveOAuthConfig = (
  *
  * @category Utilities
  */
+export const isTokenExpiredAt = (
+  token: OAuthToken,
+  nowMs: number,
+  bufferMs: number = 5 * 60 * 1000
+): boolean => nowMs >= token.expires_at - bufferMs
+
+/**
+ * Check token expiration using the host clock.
+ *
+ * @deprecated Effect workflows should call {@link isTokenExpiredAt} with
+ * `Clock.currentTimeMillis`. This wrapper preserves the existing synchronous
+ * public API until the next major release.
+ */
 export const isTokenExpired = (token: OAuthToken, bufferMs: number = 5 * 60 * 1000): boolean =>
-  Date.now() >= token.expires_at - bufferMs
+  isTokenExpiredAt(token, unsafeCurrentTimeMillis(), bufferMs)

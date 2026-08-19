@@ -8,7 +8,7 @@ interface RelationshipClosureIdentity {
 export const selectBoundedRelationshipClosure = <Relationship extends RelationshipClosureIdentity>(
   relationships: ReadonlyArray<Relationship>,
   limits: { readonly relationships: number; readonly nodes: number; readonly evidenceClaims: number }
-): { readonly relationships: ReadonlyArray<Relationship>; readonly truncated: boolean } => {
+) => {
   const nodes = new Set<string>()
   const evidenceClaims = new Set<string>()
   const selected: Array<Relationship> = []

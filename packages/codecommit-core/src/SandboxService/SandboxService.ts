@@ -7,16 +7,17 @@
  * @module
  */
 import {
-  Cause,
   Clock,
   Config,
   Context,
+  Crypto,
   Duration,
   Effect,
   Layer,
   Option,
   Predicate,
   Random,
+  Result,
   Schedule,
   Stream
 } from "effect"
@@ -24,11 +25,18 @@ import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
-import { ConfigService, defaultSandboxConfig, type SandboxConfig } from "../ConfigService/index.js"
+import * as ChildEnv from "../ChildEnv.js"
+import {
+  ConfigService,
+  defaultSandboxConfig,
+  type SandboxConfig,
+  validateSandboxConfig
+} from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
 import { type ContainerConfig, DockerService } from "./DockerService.js"
 import { PluginService, type SandboxContext } from "./PluginService.js"
+import { SandboxWorkerScope } from "./SandboxWorkerScope.js"
 
 export interface CreateSandboxParams {
   readonly pullRequestId: string
@@ -39,7 +47,25 @@ export interface CreateSandboxParams {
   readonly region: string
 }
 
+export interface SandboxContainerIdentity {
+  readonly repairRootOwnedWorkspace: boolean
+  readonly user: string
+}
+
+/** Keep the container non-root while matching the bind-mounted workspace owner when available. */
+export const sandboxContainerIdentityForWorkspaceOwner = (
+  uid: number | undefined,
+  gid: number | undefined
+): SandboxContainerIdentity =>
+  uid === 0
+    ? { user: "1000:1000", repairRootOwnedWorkspace: true }
+    : uid !== undefined
+    ? { user: `${uid}:${gid ?? uid}`, repairRootOwnedWorkspace: false }
+    : { user: "1000:1000", repairRootOwnedWorkspace: false }
+
 const SANDBOX_BASE_PORT = 18080
+export const sandboxRuntimeHome = "/tmp"
+export const sandboxRuntimeXdgDataHome = `${sandboxRuntimeHome}/.local/share`
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -51,16 +77,19 @@ const sandboxesDir = homeDir.pipe(
 
 const expandHome = (p: string, home: string) => p.startsWith("~/") ? `${home}${p.slice(1)}` : p
 
-const makeContainerConfig = (
+export const makeContainerConfig = (
   workspacePath: string,
   port: number,
   sandboxId: string,
   pullRequestId: string,
   sandboxConfig: SandboxConfig,
-  homePath: string
+  homePath: string,
+  containerUser: string,
+  accessPassword: string
 ): ContainerConfig => ({
   Image: sandboxConfig.image,
-  Cmd: ["--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"],
+  User: containerUser,
+  Cmd: ["--bind-addr", "0.0.0.0:8080", "--auth", "password", "/workspace"],
   ExposedPorts: { "8080/tcp": {} },
   HostConfig: {
     Binds: [
@@ -69,10 +98,16 @@ const makeContainerConfig = (
         `${expandHome(m.hostPath, homePath)}:${m.containerPath}${m.readonly ? ":ro" : ""}`
       )
     ],
-    PortBindings: { "8080/tcp": [{ HostPort: String(port) }] }
+    PortBindings: { "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: String(port) }] },
+    CapDrop: ["ALL"]
   },
   Env: [
-    ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`)
+    ...Object.entries(sandboxConfig.env).map(([k, v]) => `${k}=${v}`),
+    `HOME=${sandboxRuntimeHome}`,
+    `XDG_CACHE_HOME=${sandboxRuntimeHome}/.cache`,
+    `XDG_CONFIG_HOME=${sandboxRuntimeHome}/.config`,
+    `XDG_DATA_HOME=${sandboxRuntimeXdgDataHome}`,
+    `PASSWORD=${accessPassword}`
   ],
   Labels: {
     "codecommit.sandbox.id": sandboxId,
@@ -81,16 +116,18 @@ const makeContainerConfig = (
 })
 
 const makeSandboxService = Effect.gen(function*() {
+  const ownerScope = yield* SandboxWorkerScope
   const repo = yield* SandboxRepo
   const docker = yield* DockerService
   const plugins = yield* PluginService
   const configService = yield* ConfigService
+  const cryptoService = yield* Crypto.Crypto
   const homePath = yield* homeDir.pipe(Effect.orDie)
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
-    Effect.catchCause(() => Effect.succeed(defaultSandboxConfig))
+    Effect.catch(() => Effect.succeed(defaultSandboxConfig))
   )
 
   const updateStatus = (
@@ -98,6 +135,20 @@ const makeSandboxService = Effect.gen(function*() {
     status: SandboxStatus,
     extra?: { containerId?: string; port?: number; error?: string }
   ) => repo.updateStatus(id, status, extra)
+
+  const recordCreationFailure = <UnparsedInput>(id: SandboxId, error: UnparsedInput) =>
+    Effect.gen(function*() {
+      yield* Effect.logError(`Sandbox ${id} creation failed`, error)
+      const errorDetail = Result.try(() => String(Predicate.isError(error) ? error.message : error)).pipe(
+        Result.getOrElse(() => "Unknown error")
+      )
+      yield* updateStatus(id, "error", { error: errorDetail.slice(0, 500) }).pipe(
+        Effect.catch((statusError) => Effect.logError("Failed to update sandbox error status", statusError)),
+        Effect.catchDefect((statusDefect) =>
+          Effect.logError("Defect while updating sandbox error status", statusDefect)
+        )
+      )
+    })
 
   const progress = (id: SandboxId, detail: string) =>
     Clock.currentTimeMillis.pipe(
@@ -133,10 +184,14 @@ const makeSandboxService = Effect.gen(function*() {
           return existing.value
         }
 
+        const sandboxCfg = yield* loadSandboxConfig
+        yield* validateSandboxConfig(sandboxCfg, homePath)
+
         const nowMs = yield* Clock.currentTimeMillis
         const rand = yield* Random.nextIntBetween(0, 2176782336)
         const id = SandboxId.make(`sbx-${nowMs}-${rand.toString(36).padStart(6, "0")}`)
         const port = yield* allocatePort()
+        const accessPassword = yield* cryptoService.randomUUIDv4
         const workspacePath = `${basePath}/${id}`
         const now = new Date(nowMs).toISOString()
 
@@ -146,6 +201,7 @@ const makeSandboxService = Effect.gen(function*() {
           awsAccountId: params.awsAccountId,
           repositoryName: params.repositoryName,
           sourceBranch: params.sourceBranch,
+          accessPassword,
           workspacePath,
           status: "creating",
           createdAt: now,
@@ -153,14 +209,13 @@ const makeSandboxService = Effect.gen(function*() {
         })
 
         // Fork daemon for async lifecycle
-        yield* Effect.forkDetach(
+        yield* ownerScope.fork(
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
+            const host = yield* ChildEnv.HostEnvironment
             const log = (detail: string) => progress(id, detail)
 
-            // Load config at creation time
-            yield* log("Loading sandbox config")
-            const sandboxCfg = yield* loadSandboxConfig
+            yield* log("Sandbox config validated")
 
             // Clone via HTTPS + AWS credential helper
             yield* updateStatus(id, "cloning")
@@ -188,7 +243,15 @@ const makeSandboxService = Effect.gen(function*() {
                   workspacePath
                 ],
                 {
-                  env: { AWS_PROFILE: params.profile, AWS_DEFAULT_REGION: params.region },
+                  // `git` and the `aws` credential helper both resolve from PATH, so the
+                  // profile overrides must extend the inherited environment. Ambient AWS
+                  // credentials would outrank them, so profileScopedEnv drops those.
+                  env: ChildEnv.profileScopedEnv(host.variables, {
+                    AWS_PROFILE: params.profile,
+                    AWS_DEFAULT_REGION: params.region,
+                    AWS_REGION: params.region
+                  }),
+                  extendEnv: true,
                   stderr: "pipe"
                 }
               )
@@ -207,6 +270,26 @@ const makeSandboxService = Effect.gen(function*() {
             }
             yield* log("Clone complete")
 
+            const workspaceInfo = yield* fs.stat(workspacePath)
+            const containerIdentity = sandboxContainerIdentityForWorkspaceOwner(
+              Option.getOrUndefined(workspaceInfo.uid),
+              Option.getOrUndefined(workspaceInfo.gid)
+            )
+            if (containerIdentity.repairRootOwnedWorkspace) {
+              yield* log("Preparing root-owned workspace for the non-root sandbox user")
+              const chownExitCode = yield* Effect.scoped(
+                ChildProcess.make("chown", ["-R", "1000:1000", "--", workspacePath]).pipe(
+                  Effect.flatMap((handle) => handle.exitCode)
+                )
+              )
+              if (chownExitCode !== 0) {
+                return yield* new SandboxError({
+                  sandboxId: id,
+                  message: "Failed to prepare root-owned workspace for the non-root sandbox user"
+                })
+              }
+            }
+
             // Pull image
             yield* updateStatus(id, "starting")
             yield* log(`Pulling image ${sandboxCfg.image}`)
@@ -217,13 +300,16 @@ const makeSandboxService = Effect.gen(function*() {
 
             // Create + start container
             yield* log("Creating container")
+            yield* validateSandboxConfig(sandboxCfg, homePath)
             const containerConfig = makeContainerConfig(
               workspacePath,
               port,
               id,
               params.pullRequestId,
               sandboxCfg,
-              homePath
+              homePath,
+              containerIdentity.user,
+              accessPassword
             )
             const containerId = yield* docker.createContainer(containerConfig)
             const cid = containerId.trim()
@@ -231,15 +317,6 @@ const makeSandboxService = Effect.gen(function*() {
             yield* docker.startContainer(cid)
             yield* updateStatus(id, "starting", { containerId: cid, port })
             yield* log(`Container started on port ${port}`)
-
-            // Fix ownership of dirs that Docker may have created as root (from volume mounts)
-            yield* docker.exec(cid, [
-              "sudo",
-              "chown",
-              "-R",
-              "coder:coder",
-              "/home/coder/.local"
-            ]).pipe(Effect.catchIf(() => true, () => Effect.void))
 
             // Wait for code-server to be ready (poll health)
             yield* log("Waiting for code-server health check")
@@ -286,18 +363,12 @@ const makeSandboxService = Effect.gen(function*() {
             yield* updateStatus(id, "running")
             yield* log("Sandbox ready")
           }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.gen(function*() {
-                yield* Effect.logError(`Sandbox ${id} creation failed`, cause)
-                const squashed = Cause.squash(cause)
-                const errorDetail = Predicate.isError(squashed) ? squashed.message : String(squashed)
-                yield* updateStatus(id, "error", { error: errorDetail.slice(0, 500) }).pipe(
-                  Effect.catchIf(() =>
-                    true, (statusErr) =>
-                    Effect.logError("Failed to update sandbox error status", statusErr))
-                )
-              })
-            )
+            Effect.catch((error) =>
+              recordCreationFailure(id, error)
+            ),
+            // Observe and persist unexpected defects without recovering them.
+            // `tapDefect` leaves the original Cause / Exit unchanged.
+            Effect.tapDefect((defect) => recordCreationFailure(id, defect))
           )
         )
 
@@ -335,6 +406,14 @@ const makeSandboxService = Effect.gen(function*() {
     restart: (id: SandboxId) =>
       Effect.gen(function*() {
         const row = yield* repo.findById(id)
+        if (row.accessPassword === null) {
+          return yield* Effect.fail(
+            new SandboxError({
+              sandboxId: id,
+              message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+            })
+          )
+        }
         if (!row.containerId) {
           return yield* Effect.fail(
             new SandboxError({ sandboxId: id, message: "No container to restart" })
@@ -382,8 +461,29 @@ const makeSandboxService = Effect.gen(function*() {
     reconcile: () =>
       Effect.gen(function*() {
         const active = yield* repo.findActive()
-        yield* Effect.forEach(active, (row) =>
+        const all = yield* repo.findAll()
+        const activeIds = new Set(active.map((row) => row.id))
+        const rows = all.filter((row) => row.accessPassword === null || activeIds.has(row.id))
+        yield* Effect.forEach(rows, (row) =>
           Effect.gen(function*() {
+            if (row.accessPassword === null) {
+              const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)
+              const containerIds = new Set([
+                ...(row.containerId === null ? [] : [row.containerId]),
+                ...discovered.map((container) => container.Id)
+              ])
+              // Do not consider any legacy row reconciled until every persisted
+              // or labeled passwordless container has confirmed shutdown.
+              yield* Effect.forEach(
+                containerIds,
+                (containerId) => docker.stopContainer(containerId),
+                { discard: true }
+              )
+              yield* updateStatus(SandboxId.make(row.id), "error", {
+                error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+              })
+              return
+            }
             if (!row.containerId) {
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
               return
@@ -396,7 +496,15 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Effect.logInfo(`Reconciled orphaned sandbox ${row.id}`)
             }
           }), { discard: true })
-      }).pipe(Effect.catchCause((cause) => Effect.logWarning("Sandbox reconcile failed", cause))),
+      }).pipe(
+        Effect.as(true),
+        Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause).pipe(Effect.as(false)))
+      ),
+
+    hasLegacyUnauthenticated: () =>
+      repo.findAll().pipe(
+        Effect.map((rows) => rows.some((row) => row.accessPassword === null))
+      ),
 
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>
       Effect.gen(function*() {
@@ -444,18 +552,23 @@ const makeSandboxService = Effect.gen(function*() {
           },
           { discard: true }
         )
-      }).pipe(Effect.catchCause((cause) => Effect.logWarning("Sandbox GC failed", cause)))
+      }).pipe(Effect.catch((cause) => Effect.logWarning("Sandbox GC failed", cause)))
   }
   return service
 })
 
-export interface SandboxServiceShape extends Success<typeof makeSandboxService> {}
+export interface SandboxServiceContract extends Success<typeof makeSandboxService> {}
 
 export class SandboxService extends Context.Service<
   SandboxService,
-  SandboxServiceShape
+  SandboxServiceContract
 >()("SandboxService") {
-  static readonly Default = Layer.effect(SandboxService, makeSandboxService).pipe(
-    Layer.provide(Layer.mergeAll(SandboxRepo.Default, DockerService.Default, PluginService.Default))
+  /** Dependency-requiring layer used by composition tests and custom runtimes. @internal */
+  static readonly layer = Layer.effect(SandboxService, makeSandboxService)
+
+  static readonly Default = SandboxService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(SandboxRepo.Default, DockerService.Default, PluginService.Default, SandboxWorkerScope.Default)
+    )
   )
 }

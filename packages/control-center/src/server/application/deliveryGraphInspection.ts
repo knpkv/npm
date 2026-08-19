@@ -1,6 +1,8 @@
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 
 import type {
   EvidenceInspection,
@@ -15,13 +17,17 @@ import type {
 import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
 import { evaluateFreshnessAt } from "../../domain/freshness.js"
 import type { EntityId, EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
 import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   DeliveryGraphInspection
 } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
+import { hasPluginCapability } from "../plugins/negotiation.js"
+import { projectClockifyApproval } from "./clockifyApprovalProjection.js"
 import { mapPersistenceRead } from "./errors.js"
+import { hydrateReleaseRunbookContent } from "./releaseRunbookHydration.js"
 import { presentTimelineEvent } from "./timelineReads.js"
 
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
@@ -110,7 +116,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       limit: 500
     }))
     if (result._tag !== "releaseSlice") return yield* unexpectedResult("release slice")
-    return result.value satisfies ReleaseDeliveryGraphInspection
+    return yield* hydrateReleaseRunbookContent(persistence, input.workspaceId, result.value).pipe(mapPersistenceRead)
   })
 
   const readRelationship = Effect.fn("DeliveryGraphInspection.relationship")(function*(input: {
@@ -166,12 +172,57 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       limit: 21,
       to: null
     }))
+    const clockifyActions = entityRecord.sourceRevision.providerId === "clockify"
+      ? yield* mapPersistenceRead(
+        persistence.governedActions.readLatestTerminalByTarget({
+          workspaceId: input.workspaceId,
+          providerId: "clockify",
+          targetEntityId: input.entityId,
+          actionKind: "record-approval",
+          expectedRevision: entityRecord.sourceRevision.revision,
+          limit: 20
+        })
+      )
+      : []
+    const [connection, runtime] = yield* Effect.all([
+      persistence.pluginConnections.get(
+        input.workspaceId,
+        entityRecord.sourceRevision.pluginConnectionId
+      ).pipe(Effect.result),
+      persistence.pluginRuntime.getRuntime(
+        input.workspaceId,
+        entityRecord.sourceRevision.pluginConnectionId
+      ).pipe(Effect.result)
+    ])
+    const negotiated = Result.isSuccess(runtime)
+      ? Schema.decodeUnknownResult(Schema.fromJsonString(NegotiatedPluginDescriptorV1))(
+        runtime.success.descriptorJson
+      )
+      : null
+    const sourceActionsAvailable = Result.isSuccess(connection) &&
+      connection.success.isEnabled &&
+      negotiated !== null &&
+      Result.isSuccess(negotiated) &&
+      hasPluginCapability(negotiated.success, "action.propose", 1) &&
+      hasPluginCapability(negotiated.success, "action.execute", 1)
+    const sourceSynchronizationAvailable = Result.isSuccess(connection) &&
+      connection.success.isEnabled &&
+      negotiated !== null &&
+      Result.isSuccess(negotiated) &&
+      hasPluginCapability(negotiated.success, "sync.incremental", 1)
 
     return {
       entity: result.value.entity,
       source: entityRecord.sourceRevision,
       isSourceCurrent: Number(entityRecord.revision) === Number(result.value.entity.projection.sourceEntityRevision),
+      sourceActionsAvailable,
+      sourceSynchronizationAvailable,
       freshness,
+      clockifyApproval: projectClockifyApproval(
+        input.entityId,
+        entityRecord.sourceRevision,
+        clockifyActions
+      ),
       graph: {
         truncated: result.value.truncated,
         nodes: result.value.nodes,

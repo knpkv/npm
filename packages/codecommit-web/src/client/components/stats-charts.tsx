@@ -3,6 +3,7 @@ import type { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStat
 import { StarIcon } from "lucide-react"
 import { Badge } from "./ui/badge.js"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
+import type * as Schema from "effect/Schema"
 
 export function formatMs(ms: number | null): string {
   if (ms == null) return "—"
@@ -88,7 +89,7 @@ export function RankingChart({
   title,
   valueKey
 }: {
-  data: ReadonlyArray<Record<string, unknown>>
+  data: ReadonlyArray<Record<string, Schema.Json>>
   labelKey: string
   valueKey: string
   title: string

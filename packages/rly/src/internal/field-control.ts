@@ -7,4 +7,5 @@ export const registerFieldControl = <Component extends object>(component: Compon
 }
 
 /** Distinguish rly-owned controls from consumer components that may discard DOM semantics. */
-export const isRegisteredFieldControl = (component: object): boolean => registeredFieldControls.has(component)
+export const isRegisteredFieldControl = <Component extends object>(component: Component): boolean =>
+  registeredFieldControls.has(component)

@@ -16,7 +16,7 @@ import type {
   CommandReleasePresentation,
   CommandReleasesTransport
 } from "../../src/client/command/useCommandReleases.js"
-import { contextualAgentPath } from "../../src/client/contextualAgentPath.js"
+import { contextualAgentPath, contextualReleaseAgentPath } from "../../src/client/contextualAgentPath.js"
 import type { WorkspaceItemsTransport } from "../../src/client/items/useWorkspaceItems.js"
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
@@ -97,12 +97,32 @@ describe("command search", () => {
       `/agent?from=${encodeURIComponent(`/w/${WORKSET_WORKSPACE_ID}/items?status=attention#results`)}`
     )
     expect(
+      contextualReleaseAgentPath(
+        WORKSET_WORKSPACE_ID,
+        releaseWorksetFixture.releaseId,
+        `/w/${WORKSET_WORKSPACE_ID}/items?status=attention#results`
+      )
+    ).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items?status=attention#results`
+      )}`
+    )
+    expect(
       contextualAgentPath(
         `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}`,
         "?object=issue",
         "#release-work"
       )
-    ).toBe(`/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}/agent`)
+    ).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=issue#release-work`
+      )}`
+    )
+    const canonicalAgentPath = `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}/agent`
+    const existingOrigin = `/w/${WORKSET_WORKSPACE_ID}/overview?status=attention`
+    expect(contextualAgentPath(canonicalAgentPath, `?from=${encodeURIComponent(existingOrigin)}`)).toBe(
+      `${canonicalAgentPath}?from=${encodeURIComponent(existingOrigin)}`
+    )
     const release: CommandReleasePresentation = {
       codename: "Copper Finch",
       href: `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}`,

@@ -6,6 +6,7 @@
  * @module
  */
 import { useAtom } from "@effect/atom-react"
+import { allOperations } from "@knpkv/codecommit-core/PermissionService/operations.js"
 import { ArrowLeftIcon, DownloadIcon, SearchIcon } from "lucide-react"
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
@@ -14,8 +15,17 @@ import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
+import * as Schema from "effect/Schema"
 
 const PAGE_SIZE = 50
+
+interface AuditLogQuery extends Readonly<Record<string, string | number>> {
+  readonly limit: number
+  readonly offset: number
+  readonly operation?: string
+  readonly permissionState?: string
+  readonly search?: string
+}
 type BadgeVariant = ComponentProps<typeof Badge>["variant"]
 
 const secondaryVariant: BadgeVariant = "secondary"
@@ -23,38 +33,25 @@ const defaultVariant: BadgeVariant = "default"
 const destructiveVariant: BadgeVariant = "destructive"
 const outlineVariant: BadgeVariant = "outline"
 
-interface AuditEntry {
-  readonly id: number
-  readonly timestamp: string
-  readonly operation: string
-  readonly accountProfile: string
-  readonly region: string
-  readonly permissionState: string
-  readonly context: string
-  readonly durationMs: number | null
-}
+export const auditOperationOptions = (): ReadonlyArray<string> => [
+  "all",
+  ...allOperations().map(([operation]) => operation)
+]
 
-const isAuditEntry = (value: unknown): value is AuditEntry => {
-  if (typeof value !== "object" || value === null) return false
-  const id = Reflect.get(value, "id")
-  const timestamp = Reflect.get(value, "timestamp")
-  const operation = Reflect.get(value, "operation")
-  const accountProfile = Reflect.get(value, "accountProfile")
-  const region = Reflect.get(value, "region")
-  const permissionState = Reflect.get(value, "permissionState")
-  const context = Reflect.get(value, "context")
-  const durationMs = Reflect.get(value, "durationMs")
-  return (
-    typeof id === "number" &&
-    typeof timestamp === "string" &&
-    typeof operation === "string" &&
-    typeof accountProfile === "string" &&
-    typeof region === "string" &&
-    typeof permissionState === "string" &&
-    typeof context === "string" &&
-    (typeof durationMs === "number" || durationMs === null)
-  )
-}
+const AuditEntry = Schema.Struct({
+  id: Schema.Number,
+  timestamp: Schema.String,
+  operation: Schema.String,
+  accountProfile: Schema.String,
+  region: Schema.String,
+  permissionState: Schema.String,
+  context: Schema.String,
+  durationMs: Schema.NullOr(Schema.Number)
+})
+
+type AuditEntry = typeof AuditEntry.Type
+
+const isAuditEntry = Schema.is(AuditEntry)
 
 const stateBadgeVariant = (state: string): BadgeVariant => {
   switch (state) {
@@ -84,13 +81,16 @@ export function AuditLogPage() {
   const [operationFilter, setOperationFilter] = useState<string>("")
   const [stateFilter, setStateFilter] = useState<string>("")
 
-  const urlParams = useMemo(() => {
-    const p: Record<string, string | number> = { limit: PAGE_SIZE, offset }
-    if (search) p.search = search
-    if (operationFilter) p.operation = operationFilter
-    if (stateFilter) p.permissionState = stateFilter
-    return p
-  }, [offset, search, operationFilter, stateFilter])
+  const urlParams = useMemo(
+    (): AuditLogQuery => ({
+      limit: PAGE_SIZE,
+      offset,
+      ...(search && { search }),
+      ...(operationFilter && { operation: operationFilter }),
+      ...(stateFilter && { permissionState: stateFilter })
+    }),
+    [offset, search, operationFilter, stateFilter]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -165,15 +165,11 @@ export function AuditLogPage() {
             <SelectValue placeholder="Operation" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All operations</SelectItem>
-            <SelectItem value="getPullRequests">getPullRequests</SelectItem>
-            <SelectItem value="getCallerIdentity">getCallerIdentity</SelectItem>
-            <SelectItem value="createPullRequest">createPullRequest</SelectItem>
-            <SelectItem value="listRepositories">listRepositories</SelectItem>
-            <SelectItem value="listBranches">listBranches</SelectItem>
-            <SelectItem value="getPullRequest">getPullRequest</SelectItem>
-            <SelectItem value="getDifferences">getDifferences</SelectItem>
-            <SelectItem value="getCommentsForPullRequest">getCommentsForPullRequest</SelectItem>
+            {auditOperationOptions().map((operation) => (
+              <SelectItem key={operation} value={operation}>
+                {operation === "all" ? "All operations" : operation}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select

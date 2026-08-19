@@ -71,7 +71,7 @@ export const useRelationshipDetails = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: RelationshipDetailsTransport = browserRelationshipDetailsTransport
-): { readonly retry: () => void; readonly state: RelationshipDetailsState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<RelationshipDetailsState>({ _tag: "idle" })
   const evidenceKey = evidenceIds.join(":")

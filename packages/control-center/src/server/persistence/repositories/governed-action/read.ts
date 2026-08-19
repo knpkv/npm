@@ -1,3 +1,4 @@
+import { type RenderedSql, renderGovernedActionIdempotencyQuery } from "@knpkv/control-center-sql"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
@@ -9,9 +10,12 @@ import {
   governedActionAuthorizationMatchesTransition,
   governedActionAuthorizationMismatches
 } from "../../../../domain/governedAction/index.js"
+import { GovernedActionId, ReleaseId } from "../../../../domain/identifiers.js"
+import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../errors.js"
+import type { SqlRow } from "../sqlRow.js"
 import {
   decodeGovernedActionAttemptRow,
   decodeGovernedActionAuditEventRow,
@@ -24,7 +28,13 @@ import {
   type GovernedActionQuarantineRecordKind,
   governedActionRecordError
 } from "./codec.js"
-import type { GovernedActionReadInput, GovernedActionRecord } from "./contract.js"
+import type {
+  GovernedActionIdempotencyReadInput,
+  GovernedActionReadInput,
+  GovernedActionRecord,
+  GovernedActionReleasePublicationReadInput,
+  GovernedActionTargetReadInput
+} from "./contract.js"
 import { captureMalformedGovernedActionRow } from "./quarantine.js"
 import {
   GovernedActionAttemptRow,
@@ -36,6 +46,17 @@ import {
 } from "./rows.js"
 
 const MAXIMUM_GOVERNED_ACTION_TRANSITIONS = 1_000
+const TERMINAL_TARGET_PAGE_SIZE = 100
+
+const GovernedActionTargetCandidateIdentity = Schema.Struct({
+  actionId: GovernedActionId,
+  sortAt: UtcTimestamp
+})
+
+const GovernedActionReleasePublicationCandidate = Schema.Struct({
+  actionId: GovernedActionId,
+  releaseId: ReleaseId
+})
 
 const malformed = (
   request: GovernedActionReadInput,
@@ -50,10 +71,10 @@ const malformed = (
     diagnosticCode
   })
 
-const decodeRawRow = <SchemaType extends Schema.Top>(
+const decodeRawRow = <SchemaType extends Schema.Top, UnparsedInput>(
   request: GovernedActionReadInput,
   schema: SchemaType,
-  raw: unknown,
+  raw: UnparsedInput,
   recordKind: GovernedActionQuarantineRecordKind,
   diagnosticCode: GovernedActionQuarantineReasonCode
 ) =>
@@ -70,20 +91,95 @@ const decodeRows = <SchemaType extends Schema.Top>(
   diagnosticCode: GovernedActionQuarantineReasonCode
 ) => Effect.forEach(rows, (row) => decodeRawRow(request, schema, row, recordKind, diagnosticCode))
 
-const failMalformed = (
+const failMalformed = <UnparsedInput>(
   request: GovernedActionReadInput,
   recordKind: GovernedActionQuarantineRecordKind,
   diagnosticCode: GovernedActionQuarantineReasonCode,
-  row: unknown,
+  row: UnparsedInput,
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
+
+/** Order verified target candidates by terminal observation and enforce local approval provenance. @internal */
+export const selectLatestTerminalByTarget = (
+  request: GovernedActionTargetReadInput,
+  candidates: ReadonlyArray<GovernedActionRecord>
+): ReadonlyArray<GovernedActionRecord> =>
+  candidates.filter(({ authorization, envelope, head }) =>
+    envelope.proposal.request.actionKind === request.actionKind &&
+    (
+      request.expectedRevision === undefined ||
+      envelope.proposal.request.expectedRevision === request.expectedRevision
+    ) &&
+    (
+      request.actionKind !== "record-approval" ||
+      (
+        authorization !== null &&
+        head.lineage._tag === "terminal" &&
+        head.lineage.receipt.observationBasis === "authorization" &&
+        DateTime.Order(head.lineage.receipt.observedAt, authorization.authorizedAt) === 0
+      )
+    )
+  ).sort((left, right) => {
+    if (left.head.lineage._tag !== "terminal" || right.head.lineage._tag !== "terminal") return 0
+    const newestFirst = DateTime.Order(
+      right.head.lineage.receipt.observedAt,
+      left.head.lineage.receipt.observedAt
+    )
+    return newestFirst !== 0
+      ? newestFirst
+      : right.envelope.actionId.localeCompare(left.envelope.actionId)
+  }).slice(0, request.limit)
+
+/** Decide whether verified candidates satisfy a bounded target read without another SQL page. @internal */
+export const hasEnoughTerminalByTargetCandidates = (
+  request: GovernedActionTargetReadInput,
+  candidates: ReadonlyArray<GovernedActionRecord>
+): boolean => selectLatestTerminalByTarget(request, candidates).length >= request.limit
+
+/** @internal Decode the unique action identity returned by an idempotency lookup. */
+export const decodeGovernedActionIdempotencyRows = Effect.fn(
+  "GovernedActionReader.decodeIdempotencyRows"
+)(function*(
+  request: GovernedActionIdempotencyReadInput,
+  rows: ReadonlyArray<unknown>
+) {
+  if (rows.length === 0) {
+    return yield* new RecordNotFoundError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey
+    })
+  }
+  if (rows.length !== 1) {
+    return yield* new PersistedRecordError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey,
+      diagnosticCode: "governed-action-identity-mismatch"
+    })
+  }
+  const decoded = yield* Schema.decodeUnknownEffect(
+    Schema.Struct({ actionId: GovernedActionId })
+  )(rows[0]).pipe(
+    Effect.mapError(() =>
+      new PersistedRecordError({
+        workspaceId: request.workspaceId,
+        recordKind: "governed-action",
+        recordKey: request.pluginConnectionId,
+        diagnosticCode: "governed-action-schema-invalid"
+      })
+    )
+  )
+  return decoded.actionId
+})
 
 /** Build verified governed-action aggregate reads over one transaction-local SQL client. */
 export const makeGovernedActionRead = Effect.gen(function*() {
   const { sql } = yield* Database
+  const run = (plan: RenderedSql) => sql.unsafe<SqlRow>(plan.sql, [...plan.params])
 
   const read = Effect.fn("GovernedActionReader.read")(function*(request: GovernedActionReadInput) {
-    const rootRows = yield* sql<Record<string, unknown>>`SELECT
+    const rootRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId,
       plugin_connection_id AS pluginConnectionId, provider_id AS providerId,
       target_entity_id AS targetEntityId, idempotency_key AS idempotencyKey,
@@ -130,7 +226,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
       )
     }
 
-    const transitionRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const transitionRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, transition_id AS transitionId,
       previous_transition_id AS previousTransitionId, sequence, command_id AS commandId,
       command_tag AS commandTag, authorization_id AS authorizationId, attempt_id AS attemptId,
@@ -184,7 +280,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
         )
     )
 
-    const auditRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const auditRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, transition_id AS transitionId,
       audit_event_id AS auditEventId, event_kind AS eventKind, cause_kind AS causeKind,
       actor_id AS actorId, session_id AS sessionId, job_id AS jobId,
@@ -281,7 +377,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
       )
     }
 
-    const authorizationRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const authorizationRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, authorization_id AS authorizationId,
       session_id AS sessionId, envelope_digest AS envelopeDigest,
       authorization_digest AS authorizationDigest, authorization_json AS authorizationJson,
@@ -289,13 +385,13 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     FROM governed_action_authorizations
     WHERE workspace_id = ${request.workspaceId} AND action_id = ${request.actionId}
     LIMIT 2`
-    const policyRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const policyRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, evaluation_digest AS evaluationDigest,
       evaluation_json AS evaluationJson, decision, evaluated_at AS evaluatedAt
     FROM governed_action_policy_evaluations
     WHERE workspace_id = ${request.workspaceId} AND action_id = ${request.actionId}
     LIMIT 2`
-    const attemptRawRows = yield* sql<Record<string, unknown>>`SELECT
+    const attemptRawRows = yield* sql<SqlRow>`SELECT
       workspace_id AS workspaceId, action_id AS actionId, attempt_id AS attemptId,
       authorization_id AS authorizationId, policy_evaluation_digest AS policyEvaluationDigest,
       attempt_digest AS attemptDigest, attempt_number AS attemptNumber,
@@ -451,5 +547,244 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     } satisfies GovernedActionRecord
   })
 
-  return { read }
+  const readByIdempotencyKey = Effect.fn(
+    "GovernedActionReader.readByIdempotencyKey"
+  )(function*(request: GovernedActionIdempotencyReadInput) {
+    const rows = yield* run(renderGovernedActionIdempotencyQuery(request))
+    const actionId = yield* decodeGovernedActionIdempotencyRows(request, rows).pipe(
+      Effect.catchIf(
+        (failure): failure is PersistedRecordError =>
+          Schema.is(PersistedRecordError)(failure) &&
+          failure.diagnosticCode === "governed-action-schema-invalid",
+        (failure) => Effect.fail(failure).pipe(captureMalformedGovernedActionRow(rows[0]))
+      )
+    )
+    return yield* read({ workspaceId: request.workspaceId, actionId })
+  })
+
+  const readLatestTerminalByTarget = Effect.fn(
+    "GovernedActionReader.readLatestTerminalByTarget"
+  )(function*(request: GovernedActionTargetReadInput) {
+    const candidates: Array<GovernedActionRecord> = []
+    const expectedRevision = request.expectedRevision ?? null
+    let cursor: typeof GovernedActionTargetCandidateIdentity.Type | null = null
+    while (!hasEnoughTerminalByTargetCandidates(request, candidates)) {
+      const rows: ReadonlyArray<SqlRow> = request.actionKind === "record-approval"
+        ? cursor === null
+          ? yield* sql<SqlRow>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+          : yield* sql<SqlRow>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
+              AND (
+                COALESCE(authorization.authorized_at, action.updated_at) < ${DateTime.formatIso(cursor.sortAt)}
+                OR (
+                  COALESCE(authorization.authorized_at, action.updated_at) = ${DateTime.formatIso(cursor.sortAt)}
+                  AND action.action_id < ${cursor.actionId}
+                )
+              )
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+        : cursor === null
+        ? yield* sql<SqlRow>`SELECT
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
+            AND (
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+          ORDER BY action.updated_at DESC, action.action_id DESC
+          LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+        : yield* sql<SqlRow>`SELECT
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
+            AND (
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+            AND (
+              action.updated_at < ${DateTime.formatIso(cursor.sortAt)}
+              OR (
+                action.updated_at = ${DateTime.formatIso(cursor.sortAt)}
+                AND action.action_id < ${cursor.actionId}
+              )
+            )
+          ORDER BY action.updated_at DESC, action.action_id DESC
+          LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+      const identities: ReadonlyArray<typeof GovernedActionTargetCandidateIdentity.Type> = yield* Schema
+        .decodeUnknownEffect(
+          Schema.Array(GovernedActionTargetCandidateIdentity).check(
+            Schema.isMaxLength(TERMINAL_TARGET_PAGE_SIZE)
+          )
+        )(rows).pipe(
+          Effect.mapError(() =>
+            new PersistedRecordError({
+              workspaceId: request.workspaceId,
+              recordKind: "governed-action",
+              recordKey: request.targetEntityId,
+              diagnosticCode: "governed-action-schema-invalid"
+            })
+          )
+        )
+      const verifiedPage = yield* Effect.forEach(
+        identities,
+        ({ actionId }) => read({ workspaceId: request.workspaceId, actionId })
+      )
+      for (const candidate of verifiedPage) candidates.push(candidate)
+      if (identities.length < TERMINAL_TARGET_PAGE_SIZE) break
+      cursor = identities[identities.length - 1] ?? null
+    }
+    return selectLatestTerminalByTarget(request, candidates)
+  })
+
+  const readLatestTerminalReleasePublications = Effect.fn(
+    "GovernedActionReader.readLatestTerminalReleasePublications"
+  )(function*(request: GovernedActionReleasePublicationReadInput) {
+    const releaseIdsJson = JSON.stringify(request.releaseIds)
+    const rows = yield* sql<SqlRow>`WITH requested_release_ids AS (
+        SELECT value AS releaseId
+        FROM json_each(${releaseIdsJson})
+      ),
+      ranked_publications AS (
+        SELECT
+          publication.action_id AS actionId,
+          publication.release_id AS releaseId,
+          ROW_NUMBER() OVER (
+            PARTITION BY publication.release_id
+            ORDER BY action.updated_at DESC, action.action_id DESC
+          ) AS candidateRank
+        FROM governed_action_release_publications AS publication
+        JOIN governed_actions AS action
+          ON action.workspace_id = publication.workspace_id
+          AND action.action_id = publication.action_id
+        JOIN governed_action_target_dimensions AS dimensions
+          ON dimensions.workspace_id = action.workspace_id
+          AND dimensions.action_id = action.action_id
+        JOIN requested_release_ids AS requested
+          ON requested.releaseId = publication.release_id
+        WHERE publication.workspace_id = ${request.workspaceId}
+          AND publication.provider_id = ${request.providerId}
+          AND action.state IN (
+            'proposed', 'authorized', 'started', 'cancel-requested',
+            'unknown', 'cancel-requested-unknown', 'succeeded'
+          )
+          AND dimensions.action_kind IN ('create-page', 'update-page')
+      )
+      SELECT actionId, releaseId
+      FROM ranked_publications
+      WHERE candidateRank = 1
+      ORDER BY releaseId`
+    const candidates = yield* Schema.decodeUnknownEffect(
+      Schema.Array(GovernedActionReleasePublicationCandidate).check(
+        Schema.isMaxLength(request.releaseIds.length)
+      )
+    )(rows).pipe(
+      Effect.mapError(() =>
+        new PersistedRecordError({
+          workspaceId: request.workspaceId,
+          recordKind: "governed-action",
+          recordKey: request.workspaceId,
+          diagnosticCode: "governed-action-schema-invalid"
+        })
+      )
+    )
+    return yield* Effect.forEach(
+      candidates,
+      ({ actionId, releaseId }) =>
+        read({ workspaceId: request.workspaceId, actionId }).pipe(
+          Effect.flatMap((record) => {
+            const publication = record.envelope.releasePublication
+            const actionKind = record.envelope.proposal.request.actionKind
+            return publication !== undefined &&
+                publication.releaseId === releaseId &&
+                record.envelope.providerId === request.providerId &&
+                (actionKind === "create-page" || actionKind === "update-page") &&
+                (
+                  record.head.state === "proposed" ||
+                  record.head.state === "authorized" ||
+                  record.head.state === "started" ||
+                  record.head.state === "cancel-requested" ||
+                  record.head.state === "unknown" ||
+                  record.head.state === "cancel-requested-unknown" ||
+                  (
+                    record.head.state === "succeeded" &&
+                    record.head.lineage._tag === "terminal" &&
+                    record.head.lineage.receipt.status === "succeeded"
+                  )
+                )
+              ? Effect.succeed(record)
+              : Effect.fail(
+                new PersistedRecordError({
+                  workspaceId: request.workspaceId,
+                  recordKind: "governed-action",
+                  recordKey: actionId,
+                  diagnosticCode: "governed-action-identity-mismatch"
+                })
+              )
+          })
+        )
+    )
+  })
+
+  return {
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications
+  }
 })

@@ -3,25 +3,25 @@ import { Schema } from "effect"
 import { BlobDigest } from "./BlobDigest.js"
 
 /** A blob reference or read option did not satisfy the storage contract. */
-export class BlobStoreInputError extends Schema.TaggedErrorClass<BlobStoreInputError>()("BlobStoreInputError", {
+export class BlobStoreInputError extends Schema.TaggedError<BlobStoreInputError>()("BlobStoreInputError", {
   operation: Schema.String,
   message: Schema.String
 }) {}
 
 /** The requested blob does not exist in the selected workspace. */
-export class BlobNotFoundError extends Schema.TaggedErrorClass<BlobNotFoundError>()("BlobNotFoundError", {
+export class BlobNotFoundError extends Schema.TaggedError<BlobNotFoundError>()("BlobNotFoundError", {
   digest: BlobDigest
 }) {}
 
 /** A blob exceeded the operation's configured byte bound. */
-export class BlobTooLargeError extends Schema.TaggedErrorClass<BlobTooLargeError>()("BlobTooLargeError", {
+export class BlobTooLargeError extends Schema.TaggedError<BlobTooLargeError>()("BlobTooLargeError", {
   digest: Schema.Union([BlobDigest, Schema.Null]),
   actualBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
   maximumBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 }) {}
 
 /** An opened blob ended before the exact requested byte count was read. */
-export class BlobUnexpectedEofError extends Schema.TaggedErrorClass<BlobUnexpectedEofError>()(
+export class BlobUnexpectedEofError extends Schema.TaggedError<BlobUnexpectedEofError>()(
   "BlobUnexpectedEofError",
   {
     operation: Schema.String,
@@ -31,13 +31,13 @@ export class BlobUnexpectedEofError extends Schema.TaggedErrorClass<BlobUnexpect
 ) {}
 
 /** Stored bytes no longer match their content address. */
-export class BlobIntegrityError extends Schema.TaggedErrorClass<BlobIntegrityError>()("BlobIntegrityError", {
+export class BlobIntegrityError extends Schema.TaggedError<BlobIntegrityError>()("BlobIntegrityError", {
   expectedDigest: BlobDigest,
   actualDigest: BlobDigest
 }) {}
 
 /** A path escaped the owner-only object root or crossed a symbolic link. */
-export class BlobContainmentError extends Schema.TaggedErrorClass<BlobContainmentError>()(
+export class BlobContainmentError extends Schema.TaggedError<BlobContainmentError>()(
   "BlobContainmentError",
   {
     operation: Schema.String,
@@ -46,13 +46,13 @@ export class BlobContainmentError extends Schema.TaggedErrorClass<BlobContainmen
 ) {}
 
 /** The platform object-store operation failed. */
-export class BlobStoreIoError extends Schema.TaggedErrorClass<BlobStoreIoError>()("BlobStoreIoError", {
+export class BlobStoreIoError extends Schema.TaggedError<BlobStoreIoError>()("BlobStoreIoError", {
   operation: Schema.String,
   message: Schema.String
 }) {}
 
 /** Redacts platform details before they cross the object-store boundary. */
-export const blobStoreIoError = (operation: string, _cause: unknown): BlobStoreIoError =>
+export const blobStoreIoError = <UnparsedInput>(operation: string, _cause: UnparsedInput): BlobStoreIoError =>
   new BlobStoreIoError({ operation, message: "platform storage operation failed" })
 
 /** Typed failures exposed by the blob-store boundary. */

@@ -33,6 +33,8 @@ scratchpad/**/*.ts
 .specs/*
 !.specs/control-center/
 !.specs/control-center/**
+!.specs/control-center-governed-codepipeline-actions/
+!.specs/control-center-governed-codepipeline-actions/**
 .context/
 .reference/
 .reviews/

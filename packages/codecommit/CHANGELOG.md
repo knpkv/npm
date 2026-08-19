@@ -1,5 +1,196 @@
 # @knpkv/codecommit
 
+## 0.10.0
+
+### Minor Changes
+
+- [#373](https://github.com/knpkv/npm/pull/373) [`9364cc5`](https://github.com/knpkv/npm/commit/9364cc5834eda7f57c7724b9cd7052b6c9f6f15d) Thanks [@konopkov](https://github.com/konopkov)! - Add streamed web Relay progress, configurable prompt-only review profiles and environment skills, reload-safe finding conversations and exact-head re-review, independently scrolling findings and replies, a collapsible changed-file hierarchy, local acknowledge/reject decisions, bidirectional comment-to-diff navigation, and permission-gated publication of accepted findings as native line comments or file-anchored PR comments.
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-rc.109, pin the vendored Effect reference to that exact upstream release, guard source/package alignment, and bound Control Center test concurrency for reliable CI execution.
+- Updated dependencies [[`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2), [`9364cc5`](https://github.com/knpkv/npm/commit/9364cc5834eda7f57c7724b9cd7052b6c9f6f15d)]:
+  - @knpkv/agent-skills@0.3.1
+  - @knpkv/ai-codex@0.3.1
+  - @knpkv/codecommit-core@0.13.0
+  - @knpkv/codecommit-web@0.13.0
+
+## 0.9.0
+
+### Minor Changes
+
+- [#367](https://github.com/knpkv/npm/pull/367) [`b0ceb6e`](https://github.com/knpkv/npm/commit/b0ceb6ec9957c1be3de8700168e7767a3eb68203) Thanks [@konopkov](https://github.com/konopkov)! - Add an exact-revision CodeCommit diff workbench backed by the diffs.com renderer, including bounded text rendering and file-mode changes, plus permission-gated ephemeral prompt-only Relay reviews with full, security, tests, and explanation focuses.
+
+- [#353](https://github.com/knpkv/npm/pull/353) [`d73b113`](https://github.com/knpkv/npm/commit/d73b113d6d49a9ffa9e553312c98d00e793af325) Thanks [@konopkov](https://github.com/konopkov)! - Add exact-head CodeCommit pull-request merging from the TUI with selectable squash, fast-forward, and three-way strategies.
+
+- [#359](https://github.com/knpkv/npm/pull/359) [`756ba26`](https://github.com/knpkv/npm/commit/756ba26b10c663b6768016c92ef7eab3da4f99d4) Thanks [@konopkov](https://github.com/konopkov)! - Add an "Open in CodeCommit" action to the TUI Changes tab, next to the Neovim
+  and VS Code shortcuts. Uppercase `C` opens the selected file in the AWS
+  CodeCommit console.
+
+  The link always names an exact commit, so the opened page cannot drift to a
+  newer head: a surviving file resolves to the reviewed source commit, and a
+  deleted file resolves to the destination commit, the only revision in the review
+  where the console can still render it. Unlike the editor shortcuts the action
+  reads the provider directly, so it needs no local checkout. The console hostname
+  comes from the region's AWS partition, so China and GovCloud accounts reach their
+  own console domain, and an isolated-partition region is reported as unsupported
+  instead of being sent to a commercial URL that cannot resolve.
+
+  The link is copied to the clipboard when a clipboard tool exists and is then
+  handed to Granted's `assume`, which
+  is what turns the profile into a federated console session; the TUI yields the
+  terminal for the run so an expired SSO prompt stays visible and answerable. A
+  missing `assume` executable is reported as its own case — a dialog naming the
+  install and showing the link — rather than as one more failed
+  attempt, because there is nothing to retry until it is installed and an
+  unauthenticated console link only reaches a sign-in page.
+
+  Ctrl-C during a terminal handover now ends the child instead of the session. A
+  suspended renderer leaves the tty in cooked mode with `ISIG` enabled, so the
+  keystroke raised `SIGINT` on this process, where `runMain` interrupted the main
+  fiber and exited — discarding findings, dispositions and conversations, which are
+  component state. The session's interrupt teardown is now bracketed across
+  suspend/resume and `assume` runs in the terminal's foreground process group, so the
+  signal reaches the child. `SIGTERM` is deliberately left unbracketed so another
+  shell can still end the process, and Neovim is unaffected because raw mode makes
+  Ctrl-C a keypress rather than a signal.
+
+  `ChildEnv.profileScopedEnv` now takes the environment the child will inherit and
+  tombstones the spellings actually present, not only the canonical names. Windows
+  environment names are case-insensitive, so an ambient `Aws_Access_Key_Id` used to
+  survive beside the `AWS_ACCESS_KEY_ID` tombstone and outrank the requested profile.
+  The spawn stays `extendEnv: true`, so `PATH` and every other inherited variable are
+  untouched. `ChildEnv.HostEnvironment` is the service that supplies the inherited
+  environment at a runtime call site.
+
+  `@knpkv/codecommit-web` takes a minor bump rather than a patch: it re-exports
+  `makeServer`, `makeCodeCommitServer` and `CodeCommitServerLive`, and their emitted
+  declarations now carry the `ChildEnv.HostEnvironment` requirement, so a downstream
+  layer composition that satisfied them before will no longer compile without it.
+
+  All five profile-scoped spawns now supply it — both `assume` paths, the sandbox
+  clone, and the exact-head Git commands — with the layer bound at each executable
+  boundary (the CLI, the TUI program, and the web server), since that is the only place
+  permitted to read the host process.
+
+- [#357](https://github.com/knpkv/npm/pull/357) [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79) Thanks [@konopkov](https://github.com/konopkov)! - Secure local control planes and CI credential boundaries. CodeCommit web now
+  uses a process-scoped owner session with CSRF protection and loopback-only
+  listeners; review sandboxes use authenticated loopback code-server instances,
+  digest-pinned images, constrained mounts, non-root execution, and dropped
+  capabilities. OAuth callback listeners validate state before accepting terminal
+  outcomes and bind explicitly to loopback. GitHub workflows pin external actions
+  to immutable commits and keep long-lived Atlassian credentials out of pull
+  request execution.
+
+- [#370](https://github.com/knpkv/npm/pull/370) [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc) Thanks [@konopkov](https://github.com/konopkov)! - Enforce the complete anti-slop rule set with zero accepted diagnostics and update affected APIs and implementations to satisfy the required contracts.
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Update Effect and effect-qb, migrate schema-tagged errors to the current Effect API, and adopt the dialect-scoped SQLite function and type APIs introduced by effect-qb 0.22.
+
+- [#363](https://github.com/knpkv/npm/pull/363) [`316c383`](https://github.com/knpkv/npm/commit/316c3832c64ce159b7b18d9be3d58bf355c20b8a) Thanks [@konopkov](https://github.com/konopkov)! - Require Node.js 26 or newer and align the reproducible development, CI, release,
+  benchmark, and package-validation toolchains with Node.js 26.
+
+  Keep the CodeCommit CLI on the current Bun runtime, document that executable
+  prerequisite, and require its Bun-hosted process boundaries in CI.
+
+- Updated dependencies [[`b0ceb6e`](https://github.com/knpkv/npm/commit/b0ceb6ec9957c1be3de8700168e7767a3eb68203), [`d73b113`](https://github.com/knpkv/npm/commit/d73b113d6d49a9ffa9e553312c98d00e793af325), [`756ba26`](https://github.com/knpkv/npm/commit/756ba26b10c663b6768016c92ef7eab3da4f99d4), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2), [`316c383`](https://github.com/knpkv/npm/commit/316c3832c64ce159b7b18d9be3d58bf355c20b8a), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`4dd1a0a`](https://github.com/knpkv/npm/commit/4dd1a0a5151b26fd13de29b8297c788bb0302e94), [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79), [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc)]:
+  - @knpkv/codecommit-web@0.12.0
+  - @knpkv/codecommit-core@0.12.0
+  - @knpkv/agent-skills@0.3.0
+  - @knpkv/ai-codex@0.3.0
+
+## 0.8.0
+
+### Minor Changes
+
+- [#351](https://github.com/knpkv/npm/pull/351) [`6d7947d`](https://github.com/knpkv/npm/commit/6d7947dd0ee0a84283d5f6162c5cfee62e6b775a) Thanks [@konopkov](https://github.com/konopkov)! - Open CodeCommit pull requests with API-backed diffs before any source checkout, switch to local Git only after an explicit worktree action, and prompt to update retained worktrees when the provider revision changes.
+
+- [#350](https://github.com/knpkv/npm/pull/350) [`b4e09d6`](https://github.com/knpkv/npm/commit/b4e09d659a56b8213767ffda06dffb75fa74d489) Thanks [@konopkov](https://github.com/konopkov)! - Fix real-account CodeCommit TUI authentication actions, terminal text input,
+  quick-filter commands, settings key ownership, branch pagination, and Granted
+  console destinations, and support the Codex CLI 0.147 feature inventory for
+  prompt-only Relay runs. Align the TUI shell, pull-request list, exact-revision
+  workspace, settings, and dialogs with the Control Center visual language. Add a
+  hierarchical changed-file rail and human disposition of structured Relay
+  findings, including revision-preflighted CodeCommit comment posting. Prepare an
+  exact-head checkout when opening a PR, render diffs from immutable local Git
+  objects, and cache successful previews across file navigation. Preserve complete
+  bounded file-tree names at every hierarchy depth and make long rows horizontally
+  inspectable. Render every fetched review thread with explicit general, file, or
+  line coordinates and identify coordinates from older revisions instead of
+  hiding their comments. Open the selected verified exact-head file in
+  same-terminal Neovim or external VS Code, preserving a selected finding's line
+  anchor when available. Render textual changes as a synchronized, line-numbered
+  base/head split diff by default. Add a multi-select review-skill picker and
+  snapshot the selected PR Review / PR Diff Review playbooks into each prompt-only
+  Relay run. Present and post findings as evidence-led P1–P4 issue cards with
+  separate Summary, Details, Recommendation, Verification, and Location fields.
+  Route each finding to the PR description, PR comments, file-anchored PR comments,
+  or exact line comments; add a wraparound finding deck, unresolved jump, publication
+  target picker, and finding-specific follow-up conversations that reconcile the
+  complete finding set and reopen affected local decisions. Verify an individual
+  finding against CodeCommit's latest exact revision, report whether it was
+  resolved, remains actionable, was superseded, or could not be established, and
+  reconcile every dependent finding and human decision from the refreshed patch.
+  Keep cached open pull requests when an account refresh fails, and publish newly
+  fetched and enriched pull requests to the live TUI state before that same
+  refresh completes. Preload a bounded prefix of immutable local file previews
+  before exposing an exact-head workspace, then load larger-review overflow from
+  the same local checkout, and make the second Ctrl+C consume the armed exit confirmation
+  synchronously.
+  Reject malformed or duplicate-id Relay output, isolate prior agent review text as
+  untrusted prompt evidence, validate exact changed-side line anchors before
+  posting, and keep edited or stale-posted findings attached to explicit human
+  resolution and content-bound provider receipts. Preserve finding-post and
+  conversation state across same-batch terminal input, and promote a successful
+  manual exact-head checkout into local preview and editor readiness.
+  Keep active provider-post receipts owned across workspace refreshes, base
+  comment idempotency on the resolved repository account rather than a local AWS
+  profile alias, and apply publication-target navigation synchronously.
+
+- [#352](https://github.com/knpkv/npm/pull/352) [`b9d4a96`](https://github.com/knpkv/npm/commit/b9d4a96855ab42d2c26ad514669d82e36f0e3b0a) Thanks [@konopkov](https://github.com/konopkov)! - Keep local pull-request worktrees scoped to the exact repository account and clear stale drift when the provider returns to the checked-out revision.
+
+- [#345](https://github.com/knpkv/npm/pull/345) [`471974f`](https://github.com/knpkv/npm/commit/471974f89a86d01594cb9ac08d784ec1f4770541) Thanks [@konopkov](https://github.com/konopkov)! - Move both terminal applications from an OpenTUI preview build to the stable 0.5.1 release. Replace CodeCommit's flat pull-request detail page with an exact-head review workspace: complete changed-file inventory, lazy native diff previews, human decision state, preflighted prompt-only local Codex review actions, and deterministic detached worktree checkout. Add a prompt-only Codex transport mode for reviewing supplied untrusted text without host-capable tools or inherited instructions. Clear inherited repository-local Git variables, suppress configured hooks, and disable interactive authentication before Relay and worktree Git commands.
+
+### Patch Changes
+
+- Updated dependencies [[`b4e09d6`](https://github.com/knpkv/npm/commit/b4e09d659a56b8213767ffda06dffb75fa74d489), [`471974f`](https://github.com/knpkv/npm/commit/471974f89a86d01594cb9ac08d784ec1f4770541)]:
+  - @knpkv/ai-codex@0.2.0
+  - @knpkv/codecommit-core@0.11.0
+  - @knpkv/codecommit-web@0.11.4
+
+## 0.7.3
+
+### Patch Changes
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+- Updated dependencies [[`f35e10d`](https://github.com/knpkv/npm/commit/f35e10dcf2dc7ac50538621904f7acd4420956e6), [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1)]:
+  - @knpkv/codecommit-core@0.10.1
+  - @knpkv/codecommit-web@0.11.3
+
+## 0.7.2
+
+### Patch Changes
+
+- [#309](https://github.com/knpkv/npm/pull/309) [`f804a71`](https://github.com/knpkv/npm/commit/f804a7102bdd7bb8b9732e5e5d9cb9bf66e6c00f) Thanks [@konopkov](https://github.com/konopkov)! - Fix `NotFound: ChildProcess.spawn` when opening a PR in the AWS console or cloning into a review sandbox. `ChildProcess.make` replaces the child environment unless `extendEnv` is set, so passing only `GRANTED_ALIAS_CONFIGURED` or the `AWS_PROFILE` overrides dropped `PATH` and the `assume`, `git`, and `aws` executables could no longer be resolved.
+
+  Inheriting the caller's environment also means inheriting its AWS credentials, which the credential chain resolves above profile configuration. Profile-scoped spawns now go through `ChildEnv.profileScopedEnv` so the requested profile and region stay authoritative instead of a sandbox clone silently authenticating as the host's identity.
+
+  **Behaviour change.** These ambient variables are now removed from the child environment of the `assume` and sandbox-clone spawns:
+
+  - static credentials — `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_CREDENTIAL_EXPIRATION`
+  - web identity — `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME`
+  - region — `AWS_REGION`, `AWS_DEFAULT_REGION`
+
+  If you relied on any of these to steer these commands, pass the value explicitly instead; the named profile now decides. `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` are deliberately preserved. `ChildEnv.ts` carries the authoritative list and the reasoning, including a documented Windows case-insensitivity limitation.
+
+- Updated dependencies [[`dd0163e`](https://github.com/knpkv/npm/commit/dd0163ec002ae8abbce0b19df61431b3a4701314), [`7da266b`](https://github.com/knpkv/npm/commit/7da266bbb8cbf47f0f826274cc890384011e08e0), [`f804a71`](https://github.com/knpkv/npm/commit/f804a7102bdd7bb8b9732e5e5d9cb9bf66e6c00f), [`b97fd1b`](https://github.com/knpkv/npm/commit/b97fd1b2433bcaef600e5470e2ce92d7edc71f94)]:
+  - @knpkv/codecommit-core@0.10.0
+  - @knpkv/codecommit-web@0.11.2
+
 ## 0.7.1
 
 ### Patch Changes

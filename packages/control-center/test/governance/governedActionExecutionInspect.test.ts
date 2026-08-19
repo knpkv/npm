@@ -449,7 +449,8 @@ describe("governed action blocked preflight", () => {
         }),
         "expired"
       )
-      assert.strictEqual((yield* (yield* GovernedActionRepository).read(reference)).head.state, "expired")
+      const governedActionRepository = yield* GovernedActionRepository
+      assert.strictEqual((yield* governedActionRepository.read(reference)).head.state, "expired")
       assert.lengthOf(yield* readPreparations(), 0)
     })))
 
@@ -478,7 +479,8 @@ describe("governed action blocked preflight", () => {
         }),
         "authorized"
       )
-      assert.strictEqual((yield* (yield* GovernedActionRepository).read(reference)).head.state, "authorized")
+      const governedActionRepository = yield* GovernedActionRepository
+      assert.strictEqual((yield* governedActionRepository.read(reference)).head.state, "authorized")
       assert.lengthOf(yield* readPreparations(), 0)
     })))
 })

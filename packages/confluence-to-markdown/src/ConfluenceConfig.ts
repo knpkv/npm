@@ -71,7 +71,7 @@ const loadConfig = (
     const fs = yield* FileSystem.FileSystem
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchCause(() => Effect.succeed(false))
+      Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {
       return yield* Effect.fail(new ConfigNotFoundError({ path: configPath }))
@@ -161,7 +161,7 @@ export const layer = (
       return ConfluenceConfig.of({
         rootPageId: config.rootPageId,
         baseUrl: config.baseUrl,
-        ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
+        ...((config.spaceKey !== undefined) && { spaceKey: config.spaceKey }),
         docsPath: config.docsPath,
         excludePatterns: config.excludePatterns,
         saveSource: config.saveSource,
@@ -183,7 +183,7 @@ export const layerFromValues = (
     ConfluenceConfig.of({
       rootPageId: config.rootPageId,
       baseUrl: config.baseUrl,
-      ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
+      ...((config.spaceKey !== undefined) && { spaceKey: config.spaceKey }),
       docsPath: config.docsPath,
       excludePatterns: config.excludePatterns,
       saveSource: config.saveSource,
@@ -224,7 +224,7 @@ export const createConfigFile = (
     )
 
     // Create .confluence directory if it doesn't exist
-    const dirExists = yield* fs.exists(configDir).pipe(Effect.catchCause(() => Effect.succeed(false)))
+    const dirExists = yield* fs.exists(configDir).pipe(Effect.catch(() => Effect.succeed(false)))
     if (!dirExists) {
       yield* fs.makeDirectory(configDir, { recursive: true }).pipe(
         Effect.mapError((cause) => new ConfigParseError({ path: configDir, cause }))

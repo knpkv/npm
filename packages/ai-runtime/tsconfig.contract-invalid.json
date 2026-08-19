@@ -6,7 +6,9 @@
         "name": "@effect/language-service",
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
-          "overriddenschemaconstructor": "off"
+          "overriddenSchemaConstructor": "off",
+          "strictBooleanExpressions": "suggestion",
+          "strictEffectProvide": "suggestion"
         },
         "includeSuggestionsInTsc": false,
         "ignoreEffectSuggestionsInTscExitCode": false,

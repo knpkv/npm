@@ -6,12 +6,21 @@ import type { RenderedSql } from "./types.js"
 export {
   type AgentJobClaimQueryInput,
   type AgentJobDispatchCandidatesQueryInput,
+  type AgentReviewContextEventKind,
+  type AgentReviewContextEventsQueryInput,
+  type AgentReviewThreadHistoryQueryInput,
+  type AgentThreadBeforeQueryInput,
   type AgentThreadReplayQueryInput,
+  type AgentThreadTailQueryInput,
   type ClaimableAgentJobState,
   type LatestAgentReviewQueryInput,
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
+  renderAgentReviewContextEventsQuery,
+  renderAgentReviewThreadHistoryQuery,
+  renderAgentThreadBeforeQuery,
   renderAgentThreadReplayQuery,
+  renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
 } from "./agentJobs.js"
 export {
@@ -32,6 +41,7 @@ export {
   type UpdateFollowedResourceQueryInput
 } from "./followedResources.js"
 export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
+export { type GovernedActionIdempotencyQueryInput, renderGovernedActionIdempotencyQuery } from "./governedActions.js"
 export {
   type BindPluginConnectionQueryInput,
   type CreatePluginConnectionQueryInput,

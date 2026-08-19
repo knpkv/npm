@@ -27,7 +27,7 @@ const commonErrorFields = {
 }
 
 /** A request failed schema, authority, origin, or CSRF-shape validation. */
-export class InvalidRequestApiError extends Schema.TaggedErrorClass<InvalidRequestApiError>()(
+export class InvalidRequestApiError extends Schema.TaggedError<InvalidRequestApiError>()(
   "InvalidRequestApiError",
   {
     ...commonErrorFields,
@@ -37,7 +37,7 @@ export class InvalidRequestApiError extends Schema.TaggedErrorClass<InvalidReque
 ) {}
 
 /** The browser did not present a valid active session. */
-export class UnauthorizedApiError extends Schema.TaggedErrorClass<UnauthorizedApiError>()(
+export class UnauthorizedApiError extends Schema.TaggedError<UnauthorizedApiError>()(
   "UnauthorizedApiError",
   {
     ...commonErrorFields,
@@ -47,7 +47,7 @@ export class UnauthorizedApiError extends Schema.TaggedErrorClass<UnauthorizedAp
 ) {}
 
 /** The active session cannot perform the requested capability. */
-export class ForbiddenApiError extends Schema.TaggedErrorClass<ForbiddenApiError>()(
+export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
   "ForbiddenApiError",
   {
     ...commonErrorFields,
@@ -57,7 +57,7 @@ export class ForbiddenApiError extends Schema.TaggedErrorClass<ForbiddenApiError
 ) {}
 
 /** An authenticated lookup did not resolve to a visible resource. */
-export class NotFoundApiError extends Schema.TaggedErrorClass<NotFoundApiError>()(
+export class NotFoundApiError extends Schema.TaggedError<NotFoundApiError>()(
   "NotFoundApiError",
   {
     ...commonErrorFields,
@@ -67,7 +67,7 @@ export class NotFoundApiError extends Schema.TaggedErrorClass<NotFoundApiError>(
 ) {}
 
 /** Current durable state conflicts with the requested transition. */
-export class ConflictApiError extends Schema.TaggedErrorClass<ConflictApiError>()(
+export class ConflictApiError extends Schema.TaggedError<ConflictApiError>()(
   "ConflictApiError",
   {
     ...commonErrorFields,
@@ -77,7 +77,7 @@ export class ConflictApiError extends Schema.TaggedErrorClass<ConflictApiError>(
 ) {}
 
 /** A bounded request exceeded the public API size limit. */
-export class PayloadTooLargeApiError extends Schema.TaggedErrorClass<PayloadTooLargeApiError>()(
+export class PayloadTooLargeApiError extends Schema.TaggedError<PayloadTooLargeApiError>()(
   "PayloadTooLargeApiError",
   {
     ...commonErrorFields,
@@ -87,7 +87,7 @@ export class PayloadTooLargeApiError extends Schema.TaggedErrorClass<PayloadTooL
 ) {}
 
 /** The request did not complete within its bounded server deadline. */
-export class RequestTimedOutApiError extends Schema.TaggedErrorClass<RequestTimedOutApiError>()(
+export class RequestTimedOutApiError extends Schema.TaggedError<RequestTimedOutApiError>()(
   "RequestTimedOutApiError",
   {
     ...commonErrorFields,
@@ -97,7 +97,7 @@ export class RequestTimedOutApiError extends Schema.TaggedErrorClass<RequestTime
 ) {}
 
 /** The caller must wait until the optional safe retry instant. */
-export class RateLimitedApiError extends Schema.TaggedErrorClass<RateLimitedApiError>()(
+export class RateLimitedApiError extends Schema.TaggedError<RateLimitedApiError>()(
   "RateLimitedApiError",
   {
     ...commonErrorFields,
@@ -108,7 +108,7 @@ export class RateLimitedApiError extends Schema.TaggedErrorClass<RateLimitedApiE
 ) {}
 
 /** A required local or provider service is temporarily unavailable. */
-export class ServiceUnavailableApiError extends Schema.TaggedErrorClass<ServiceUnavailableApiError>()(
+export class ServiceUnavailableApiError extends Schema.TaggedError<ServiceUnavailableApiError>()(
   "ServiceUnavailableApiError",
   {
     ...commonErrorFields,

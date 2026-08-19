@@ -6,8 +6,11 @@ import * as Schema from "effect/Schema"
 
 import {
   GovernedActionCommitInput,
+  GovernedActionIdempotencyReadInput,
   GovernedActionInputError,
-  GovernedActionReadInput
+  GovernedActionReadInput,
+  GovernedActionReleasePublicationReadInput,
+  GovernedActionTargetReadInput
 } from "./governed-action/contract.js"
 import { makeGovernedActionTransaction } from "./governed-action/transaction.js"
 import { makeGovernedActionWrite } from "./governed-action/write.js"
@@ -18,21 +21,69 @@ const makeGovernedActionRepository = Effect.gen(function*() {
   const transaction = yield* makeGovernedActionTransaction
   const writer = yield* makeGovernedActionWrite
 
-  const commit = Effect.fn("GovernedActionRepository.commit")(function*(input: unknown) {
+  const commit = Effect.fn("GovernedActionRepository.commit")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionCommitInput))(input).pipe(
       Effect.mapError(() => new GovernedActionInputError({ operation: "commit", reason: "invalid-request" }))
     )
     return yield* transaction.capture(writer.commit(request))
   })
 
-  const read = Effect.fn("GovernedActionRepository.read")(function*(input: unknown) {
+  const read = Effect.fn("GovernedActionRepository.read")(function*<UnparsedInput>(input: UnparsedInput) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionReadInput))(input).pipe(
       Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
     )
     return yield* transaction.transact("governed-action.read", transaction.read(request))
   })
 
-  return { commit, read }
+  const readByIdempotencyKey = Effect.fn(
+    "GovernedActionRepository.readByIdempotencyKey"
+  )(function*<UnparsedInput>(input: UnparsedInput) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionIdempotencyReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-by-idempotency-key",
+      transaction.readByIdempotencyKey(request)
+    )
+  })
+
+  const readLatestTerminalByTarget = Effect.fn(
+    "GovernedActionRepository.readLatestTerminalByTarget"
+  )(function*<UnparsedInput>(input: UnparsedInput) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionTargetReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-latest-terminal-by-target",
+      transaction.readLatestTerminalByTarget(request)
+    )
+  })
+
+  const readLatestTerminalReleasePublications = Effect.fn(
+    "GovernedActionRepository.readLatestTerminalReleasePublications"
+  )(function*<UnparsedInput>(input: UnparsedInput) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionReleasePublicationReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-latest-terminal-release-publications",
+      transaction.readLatestTerminalReleasePublications(request)
+    )
+  })
+
+  return {
+    commit,
+    read,
+    readByIdempotencyKey,
+    readLatestTerminalByTarget,
+    readLatestTerminalReleasePublications
+  }
 })
 
 /** Deep server-only repository for governed action authority, lifecycle, and audit. */

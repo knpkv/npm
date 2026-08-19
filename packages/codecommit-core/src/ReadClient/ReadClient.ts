@@ -22,9 +22,11 @@ import {
   CodeCommitChangedFile,
   CodeCommitChangedFilesPage,
   CodeCommitPageToken,
+  CodeCommitPullRequestIdsPage,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
   type CodeCommitReadAccount,
+  CodeCommitRepositoryIdentity,
   CodeCommitRepositoryPage
 } from "./models.js"
 import {
@@ -33,6 +35,7 @@ import {
   type GetBlobProviderRequest,
   type GetDifferencesProviderPageRequest,
   type GetPullRequestProviderRequest,
+  type GetRepositoryProviderRequest,
   type ListPullRequestsProviderPageRequest,
   type ListRepositoriesProviderPageRequest
 } from "./ReadProvider.js"
@@ -46,11 +49,18 @@ const PROVIDER_PAGE_LIMIT = 100
  * and surfaces ThrottlingException even for small repositories. Kept low so a
  * single sync stays under the limit, trading a little latency for reliability.
  */
-const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
+export const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
 
 const RawCallerIdentity = Schema.Struct({
   Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+})
+
+const RawRepositoryIdentity = Schema.Struct({
+  repositoryMetadata: Schema.Struct({
+    accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+  })
 })
 
 const RawBlobResponse = Schema.Struct({ content: Schema.Uint8Array })
@@ -94,7 +104,7 @@ const RawPullRequestPage = Schema.Struct({
 
 const RawBlob = Schema.Struct({
   blobId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
-  path: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  path: Schema.String.check(Schema.isNonEmpty()),
   mode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
 
@@ -149,10 +159,10 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
 // repository file bytes, so its message must never reach the logs.
 const operationLogsRejectedValue = (operation: string): boolean => operation !== "get-blob"
 
-const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.tapError((error) =>
@@ -165,27 +175,47 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
     Effect.mapError(() => malformed(operation))
   )
 
-const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(function*(value: unknown) {
-  const raw = yield* decodeProvider("get-pull-request", RawPullRequestResponse, value)
-  const pullRequest = raw.pullRequest
-  const target = pullRequest.pullRequestTargets[0]
-  if (target === undefined) return yield* malformed("get-pull-request")
-  return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestRevision)({
-    pullRequestId: pullRequest.pullRequestId,
-    revisionId: pullRequest.revisionId,
-    repositoryName: target.repositoryName,
-    title: pullRequest.title.trim(),
-    description: pullRequest.description,
-    authorArn: pullRequest.authorArn ?? null,
-    status: target.mergeMetadata?.isMerged === true ? "MERGED" : pullRequest.pullRequestStatus,
-    sourceReference: target.sourceReference,
-    destinationReference: target.destinationReference,
-    sourceCommit: target.sourceCommit,
-    destinationCommit: target.destinationCommit,
-    mergeBase: target.mergeBase ?? null,
-    creationDate: pullRequest.creationDate,
-    lastActivityDate: pullRequest.lastActivityDate
-  }).pipe(Effect.mapError(() => malformed("get-pull-request")))
+const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(
+  function*<UnparsedInput>(value: UnparsedInput) {
+    const raw = yield* decodeProvider("get-pull-request", RawPullRequestResponse, value)
+    const pullRequest = raw.pullRequest
+    const target = pullRequest.pullRequestTargets[0]
+    if (target === undefined) return yield* malformed("get-pull-request")
+    return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestRevision)({
+      pullRequestId: pullRequest.pullRequestId,
+      revisionId: pullRequest.revisionId,
+      repositoryName: target.repositoryName,
+      title: pullRequest.title.trim(),
+      description: pullRequest.description,
+      authorArn: pullRequest.authorArn ?? null,
+      status: target.mergeMetadata?.isMerged === true ? "MERGED" : pullRequest.pullRequestStatus,
+      sourceReference: target.sourceReference,
+      destinationReference: target.destinationReference,
+      sourceCommit: target.sourceCommit,
+      destinationCommit: target.destinationCommit,
+      mergeBase: target.mergeBase ?? null,
+      creationDate: pullRequest.creationDate,
+      lastActivityDate: pullRequest.lastActivityDate
+    }).pipe(Effect.mapError(() => malformed("get-pull-request")))
+  }
+)
+
+/** Decode caller identity evidence obtained inside an already-bound AWS runtime. @internal */
+export const decodeAccountIdentityProviderResponse = Effect.fn(
+  "CodeCommitReadClient.decodeAccountIdentityProviderResponse"
+)(function*<UnparsedInput>(value: UnparsedInput) {
+  const identity = yield* decodeProvider("discover-account", RawCallerIdentity, value)
+  return new CodeCommitAccountIdentity({ accountId: identity.Account, arn: identity.Arn })
+})
+
+/** Decode repository ownership evidence obtained inside an already-bound AWS runtime. @internal */
+export const decodeRepositoryIdentityProviderResponse = Effect.fn(
+  "CodeCommitReadClient.decodeRepositoryIdentityProviderResponse"
+)(function*<UnparsedInput>(value: UnparsedInput) {
+  const response = yield* decodeProvider("get-repository-identity", RawRepositoryIdentity, value)
+  return yield* Schema.decodeUnknownEffect(CodeCommitRepositoryIdentity)(response.repositoryMetadata).pipe(
+    Effect.mapError(() => malformed("get-repository-identity"))
+  )
 })
 
 const toBlobMetadata = (blob: typeof RawBlob.Type): CodeCommitBlobMetadata =>
@@ -224,12 +254,19 @@ export interface CodeCommitReadClientService {
   readonly listPullRequestsPage: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitPullRequestPage, CodeCommitReadError>
+  /** Decoded provider page before each pull request is hydrated. @internal */
+  readonly listPullRequestIdsPage: (
+    request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
+  ) => Effect.Effect<CodeCommitPullRequestIdsPage, CodeCommitReadError>
   readonly streamPullRequests: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults" | "nextToken">
   ) => Stream.Stream<CodeCommitPullRequestRevision, CodeCommitReadError>
   readonly getPullRequest: (
     request: GetPullRequestProviderRequest
   ) => Effect.Effect<CodeCommitPullRequestRevision, CodeCommitReadError>
+  readonly getRepositoryIdentity: (
+    request: GetRepositoryProviderRequest
+  ) => Effect.Effect<CodeCommitRepositoryIdentity, CodeCommitReadError>
   readonly getChangedFilesPage: (
     request: Omit<GetDifferencesProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitChangedFilesPage, CodeCommitReadError>
@@ -253,8 +290,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           const raw = yield* provider.getCallerIdentity(account).pipe(
             Effect.mapError(mapProviderError("discover-account"))
           )
-          const identity = yield* decodeProvider("discover-account", RawCallerIdentity, raw)
-          return new CodeCommitAccountIdentity({ accountId: identity.Account, arn: identity.Arn })
+          return yield* decodeAccountIdentityProviderResponse(raw)
         }
       )
 
@@ -265,6 +301,15 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           Effect.mapError(mapProviderError("get-pull-request"))
         )
         return yield* decodePullRequest(raw)
+      })
+
+      const getRepositoryIdentity = Effect.fn("CodeCommitReadClient.getRepositoryIdentity")(function*(
+        request: GetRepositoryProviderRequest
+      ) {
+        const raw = yield* provider.getRepository(request).pipe(
+          Effect.mapError(mapProviderError("get-repository-identity"))
+        )
+        return yield* decodeRepositoryIdentityProviderResponse(raw)
       })
 
       const listRepositoriesPage = Effect.fn("CodeCommitReadClient.listRepositoriesPage")(function*(
@@ -299,13 +344,23 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         })
       })
 
-      const listPullRequestsPage = Effect.fn("CodeCommitReadClient.listPullRequestsPage")(function*(
+      const listPullRequestIdsPage = Effect.fn("CodeCommitReadClient.listPullRequestIdsPage")(function*(
         request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
       ) {
         const raw = yield* provider.listPullRequestsPage({ ...request, maximumResults: PROVIDER_PAGE_LIMIT }).pipe(
           Effect.mapError(mapProviderError("list-pull-requests"))
         )
         const page = yield* decodeProvider("list-pull-requests", RawPullRequestPage, raw)
+        return yield* Schema.decodeUnknownEffect(CodeCommitPullRequestIdsPage)({
+          pullRequestIds: page.pullRequestIds,
+          nextToken: page.nextToken ?? null
+        }).pipe(Effect.mapError(() => malformed("list-pull-requests")))
+      })
+
+      const listPullRequestsPage = Effect.fn("CodeCommitReadClient.listPullRequestsPage")(function*(
+        request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
+      ) {
+        const page = yield* listPullRequestIdsPage(request)
         const pullRequests = yield* Effect.forEach(
           page.pullRequestIds,
           (pullRequestId) => getPullRequest({ account: request.account, pullRequestId }),
@@ -313,7 +368,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         )
         return new CodeCommitPullRequestPage({
           pullRequests,
-          nextToken: page.nextToken === undefined ? null : CodeCommitPageToken.make(page.nextToken)
+          nextToken: page.nextToken
         })
       })
 
@@ -360,6 +415,8 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         getBlob,
         getChangedFilesPage,
         getPullRequest,
+        getRepositoryIdentity,
+        listPullRequestIdsPage,
         listPullRequestsPage,
         listRepositoriesPage,
         streamChangedFiles,

@@ -21,7 +21,7 @@ const runbookNodeId = uuid(4, 41)
 const releaseNodeId = uuid(4, 51)
 const missingPullRequestNodeId = uuid(4, 61)
 
-const projection = (value: object) => ({ projection: value, recordedAt })
+const projection = <Projection extends object>(value: Projection) => ({ projection: value, recordedAt })
 
 const entityNode = (nodeId: string, entityId: string, entityKind: string) => ({
   workspaceId: WORKSET_WORKSPACE_ID,
@@ -31,14 +31,14 @@ const entityNode = (nodeId: string, entityId: string, entityKind: string) => ({
   createdAt: recordedAt
 })
 
-const relationship = (
+const relationship = <Lifecycle extends object>(
   ordinal: number,
   kind: string,
   sourceNodeId: string,
   sourceNodeKind: string,
   targetNodeId: string,
   targetNodeKind: string,
-  lifecycle: object
+  lifecycle: Lifecycle
 ) => ({
   workspaceId: WORKSET_WORKSPACE_ID,
   relationshipId: uuid(5, ordinal),
@@ -129,7 +129,11 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
         pipelineName: "payments-main",
         executionId: "1842",
         status: "running",
-        triggerRevision: "release-head"
+        triggerRevision: "release-head",
+        stages: [
+          { name: "Source", status: "succeeded", actionCount: 1, actionsTruncated: false },
+          { name: "Approval", status: "running", actionCount: 1, actionsTruncated: false }
+        ]
       }
     }),
     projection({
@@ -143,7 +147,14 @@ export const releaseWorksetFixture = Schema.decodeUnknownSync(ReleaseDeliveryGra
       entityType: "page",
       displayKey: "PAY/RUNBOOK-12",
       title: "Payments release runbook",
-      details: { _tag: "page", spaceKey: "PAY", revision: "12", status: "current" }
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "12",
+        status: "current",
+        contentState: "loaded",
+        content: { representation: "safe-markdown", markdown: "Release runbook" }
+      }
     })
   ],
   nodes: [

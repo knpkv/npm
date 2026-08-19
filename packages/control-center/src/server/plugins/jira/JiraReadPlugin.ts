@@ -35,6 +35,7 @@ import type { PluginConnectionV1 } from "../PluginConnection.js"
 import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import { makeJiraGovernedActions } from "./JiraGovernedActions.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
 import {
@@ -157,7 +158,7 @@ export const JiraReadPluginConfiguration = Schema.Struct({
 /** Decoded Jira read adapter settings. */
 export type JiraReadPluginConfiguration = typeof JiraReadPluginConfiguration.Type
 
-/** Negotiated production runtime and its scoped plugin layer. */
+/** Negotiated issue-read runtime; only create-only project-version publication crosses the execution boundary. */
 export interface JiraReadPluginRuntime {
   readonly definition: PluginDefinitionV1
   readonly layer: Layer.Layer<
@@ -172,7 +173,7 @@ export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
-  adapterVersion: { major: 0, minor: 3, patch: 0 },
+  adapterVersion: { major: 0, minor: 4, patch: 0 },
   displayName: "Jira issue reader",
   configurationFields: [
     {
@@ -253,7 +254,9 @@ export const jiraReadPluginDescriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: ["entity.read", "sync.incremental", "action.propose"].map((capabilityId) => ({
+  capabilities: ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"].map((
+    capabilityId
+  ) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -275,11 +278,6 @@ const unsupported = (
     diagnosticCode: "jira-capability-unnegotiated"
   })
 
-const JiraDescriptionDocument = Schema.Struct({
-  type: Schema.Literal("doc"),
-  version: Schema.Literal(1),
-  content: Schema.Array(Schema.Json)
-})
 const AddCommentRequestPayload = Schema.Struct({
   body: JiraDescriptionDocument
 })
@@ -351,6 +349,7 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
   provider: JiraReadProvider,
   configuration: JiraReadPluginConfiguration,
   cryptoService: Crypto.Crypto,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
   request: ProposePluginActionRequestV1
 ) {
   if (
@@ -364,18 +363,20 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
     })
   }
   const issue = yield* loadActionIssue(provider, configuration, request)
+  const attributionEnabled = yield* includeControlCenterAttribution
+  const requested = yield* Schema.decodeUnknownEffect(
+    Schema.toType(AddCommentRequestPayload)
+  )(request.payload).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "jira-action-payload-invalid"
+      })
+    )
+  )
   const payload = JiraActionPayload.make({
     _tag: "add-comment",
     issueKey: issue.key,
-    body: (yield* Schema.decodeUnknownEffect(
-      Schema.toType(AddCommentRequestPayload)
-    )(request.payload).pipe(
-      Effect.mapError(() =>
-        new PluginConfigurationFailure({
-          diagnosticCode: "jira-action-payload-invalid"
-        })
-      )
-    )).body
+    body: withJiraControlCenterAttribution(requested.body, attributionEnabled)
   })
   const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
@@ -891,23 +892,40 @@ const syncProject = (
   )
 }
 
-const makeRuntime = (
+const makeRuntime = <UnparsedInput>(
   provider: JiraReadProvider,
-  configuration: unknown,
-  verifiedSiteId: string | null
+  configuration: UnparsedInput,
+  verifiedSiteId: string | null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
+  releasePublicationEnabled: boolean
 ): JiraReadPluginRuntime => {
+  const rawDescriptor = releasePublicationEnabled
+    ? jiraReadPluginDescriptor
+    : {
+      ...jiraReadPluginDescriptor,
+      capabilities: jiraReadPluginDescriptor.capabilities.filter(
+        ({ capabilityId }) => capabilityId !== "action.execute" && capabilityId !== "action.reconcile"
+      )
+    }
   const definition = definePluginV1({
-    rawDescriptor: jiraReadPluginDescriptor,
+    rawDescriptor,
     configurationSchema: JiraReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
       syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
-      actionPropose: pluginCapabilityCodecsV1.actionPropose
+      actionPropose: pluginCapabilityCodecsV1.actionPropose,
+      actionExecute: pluginCapabilityCodecsV1.actionExecute,
+      actionReconcile: pluginCapabilityCodecsV1.actionReconcile
     },
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const cryptoService = yield* Crypto.Crypto
-        const governedActions = makeJiraGovernedActions(provider, decoded, cryptoService)
+        const governedActions = makeJiraGovernedActions(
+          provider,
+          decoded,
+          cryptoService,
+          includeControlCenterAttribution
+        )
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
           discover: Effect.gen(function*() {
@@ -989,15 +1007,18 @@ const makeRuntime = (
           diff: Option.none(),
           proposeAction: (request) =>
             request.actionKind === "add-comment"
-              ? proposeJiraAction(provider, decoded, cryptoService, request)
+              ? proposeJiraAction(
+                provider,
+                decoded,
+                cryptoService,
+                includeControlCenterAttribution,
+                request
+              )
+              : request.actionKind === "create-release-version" && !releasePublicationEnabled
+              ? Effect.fail(unsupported("action.execute"))
               : governedActions.proposeAction(request)
         }
-        const executor: AuthorizedPluginExecutorV1 = {
-          preflight: () => Effect.fail(unsupported("action.execute")),
-          executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-          requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-          reconcile: () => Effect.fail(unsupported("action.reconcile"))
-        }
+        const executor: AuthorizedPluginExecutorV1 = governedActions.executor
         return { connection, executor }
       })
   })
@@ -1008,15 +1029,30 @@ const makeRuntime = (
 }
 
 /** Build a production Jira runtime from the configured shared API client. */
-export const makeJiraReadPluginRuntime = (
-  configuration: unknown,
-  verifiedSiteId: string | null = null
+export const makeJiraReadPluginRuntime = <UnparsedInput>(
+  configuration: UnparsedInput,
+  verifiedSiteId: string | null = null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
 ): Effect.Effect<JiraReadPluginRuntime, never, JiraApiClient> =>
-  Effect.map(JiraApiClient, (client) => makeRuntime(makeJiraReadProvider(client), configuration, verifiedSiteId))
+  Effect.map(
+    JiraApiClient,
+    (client) =>
+      makeRuntime(
+        makeJiraReadProvider(client),
+        configuration,
+        verifiedSiteId,
+        includeControlCenterAttribution,
+        releasePublicationEnabled
+      )
+  )
 
 /** Build the runtime around a deterministic provider double. @internal */
-export const makeJiraReadPluginRuntimeFromProvider = (
+export const makeJiraReadPluginRuntimeFromProvider = <UnparsedInput>(
   provider: JiraReadProvider,
-  configuration: unknown,
-  verifiedSiteId: string | null = null
-): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId)
+  configuration: UnparsedInput,
+  verifiedSiteId: string | null = null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true),
+  releasePublicationEnabled = true
+): JiraReadPluginRuntime =>
+  makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution, releasePublicationEnabled)

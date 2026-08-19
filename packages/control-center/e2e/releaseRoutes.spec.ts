@@ -1,9 +1,29 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test"
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
+import {
+  AgentProviderCatalog,
+  PullRequestReviewState,
+  PullRequestReviewThreadPage,
+  ReviewAgentProfile,
+  ReviewSuggestionPublicationAuthorityBinding,
+  ReviewSuggestionPublicationPreview
+} from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
+import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../src/api/plugins.js"
+import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
+import { PrReviewSuggestionRevision, PrReviewSuggestionRevisionPage } from "../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
+import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
+import { auditProductionRoutePresentation, resetProductionRouteEntryPresentation } from "./presentationAudit.js"
+import {
+  CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
+  productionRouteAuditCase,
+  productionRouteAuditKey,
+  type ProductionRouteAuditRequirement,
+  requiredProductionRouteAuditsFor
+} from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 interface ReleaseTransitionGeometry {
@@ -77,6 +97,27 @@ const pairedSession = {
   workspaceId: snapshot.workspaceId
 }
 
+const atlassianOAuthExchange = Schema.encodeSync(AtlassianOAuthGrantExchangeResponse)(
+  Schema.decodeUnknownSync(AtlassianOAuthGrantExchangeResponse)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    grantId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.atlassianOAuthGrantId,
+    sites: [{ cloudId: "cloud-1", name: "Acme Europe", siteUrl: "https://acme.atlassian.net/" }]
+  })
+)
+const completedAtlassianProfile = Schema.encodeSync(DiscoveredAtlassianProfile)(
+  Schema.decodeUnknownSync(DiscoveredAtlassianProfile)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    cloudId: "cloud-1",
+    name: "Avery Bell @ acme.atlassian.net",
+    profileId: "account-1@cloud-1",
+    providers: ["jira", "confluence"],
+    siteUrl: "https://acme.atlassian.net/",
+    status: "valid"
+  })
+)
+
 const overviewPath = `/w/${snapshot.workspaceId}/overview`
 const previewPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}/preview`
 const fullPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}`
@@ -121,29 +162,35 @@ const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
           assigneeSourcePersonId: "account-mina",
           reporterSourcePersonId: null,
           creatorSourcePersonId: null,
-          collaborators: [{
-            sourcePersonId: "account-mina",
-            displayName: "Mina Ortiz",
-            avatarUrl: "https://images.example.test/mina.png",
-            active: true,
-            roles: ["assignee", "commenter"]
-          }],
-          comments: [{
-            sourceId: "comment-41",
-            authorSourcePersonId: "account-mina",
-            updateAuthorSourcePersonId: null,
-            body: "Sandbox replay is green. I am waiting for the final reviewer.",
-            createdAt: "2026-07-14T09:30:00.000Z",
-            updatedAt: null
-          }],
+          collaborators: [
+            {
+              sourcePersonId: "account-mina",
+              displayName: "Mina Ortiz",
+              avatarUrl: "https://images.example.test/mina.png",
+              active: true,
+              roles: ["assignee", "commenter"]
+            }
+          ],
+          comments: [
+            {
+              sourceId: "comment-41",
+              authorSourcePersonId: "account-mina",
+              updateAuthorSourcePersonId: null,
+              body: "Sandbox replay is green. I am waiting for the final reviewer.",
+              createdAt: "2026-07-14T09:30:00.000Z",
+              updatedAt: null
+            }
+          ],
           commentTotal: 1,
           commentsTruncated: false,
-          history: [{
-            sourceId: "history-9",
-            authorSourcePersonId: "account-mina",
-            createdAt: "2026-07-14T09:00:00.000Z",
-            changes: [{ field: "Status", from: "In progress", to: "In review" }]
-          }],
+          history: [
+            {
+              sourceId: "history-9",
+              authorSourcePersonId: "account-mina",
+              createdAt: "2026-07-14T09:00:00.000Z",
+              changes: [{ field: "Status", from: "In progress", to: "In review" }]
+            }
+          ],
           historyTotal: 1,
           historyTruncated: false,
           truncatedFields: []
@@ -176,6 +223,241 @@ const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
       synchronizedAt: "2026-07-14T10:01:00.000Z",
       vendorImmutableId: "jira-issue-ops-428"
     }
+  })
+)
+const reviewBaseRevision = "91c3627b4ce7447e38c906529a4af4be6bc6812d"
+const reviewHeadRevision = "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19"
+const reviewJobId = "01890f6f-6d6a-7cc0-98d2-000000000099"
+const reviewSuggestionId = `sha256:${"1".repeat(64)}`
+// EvidenceStamp's 12rem source minimum resolves against this fixture's 16px root size.
+const EVIDENCE_SOURCE_MIN_WIDTH_PX = 12 * 16
+const reviewProfile = Schema.encodeSync(ReviewAgentProfile)(
+  Schema.decodeUnknownSync(ReviewAgentProfile)({
+    profileId: "openai-compatible:review-model:sbx",
+    label: "Full-project review · openai-compatible · review-model",
+    budgetMillis: 1_200_000,
+    networkAccess: "blocked",
+    sandbox: "sbx"
+  })
+)
+const reviewSubject = Schema.encodeSync(PrReviewSubject)(
+  Schema.decodeUnknownSync(PrReviewSubject)({
+    providerId: "codecommit",
+    repository: "payments-api",
+    pullRequestId: "184",
+    baseRevision: reviewBaseRevision,
+    headRevision: reviewHeadRevision
+  })
+)
+const reviewEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
+  Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+    ...canonicalEntityInspection,
+    entity: {
+      ...canonicalEntityInspection.entity,
+      projection: {
+        ...canonicalEntityInspection.entity.projection,
+        entityType: "pull-request",
+        displayKey: "184",
+        title: "Checkout and capture",
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: "feature/capture",
+          targetBranch: "main",
+          headRevision: reviewHeadRevision,
+          baseRevision: reviewBaseRevision,
+          mergeBaseRevision: "6a2621c69c57b428e2a83f415c23ad37a875c87d",
+          reviewState: "requested",
+          lifecycle: "open",
+          description: "Protect capture retries and preserve the original payment result.",
+          authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+          createdAt: "2026-07-12T08:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      }
+    },
+    source: {
+      ...canonicalEntityInspection.source,
+      providerId: "codecommit",
+      vendorImmutableId: "184",
+      revision: "revision-9",
+      sourceUrl:
+        "https://eu-central-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/184"
+    }
+  })
+)
+const reviewReport = Schema.encodeSync(PrReviewReport)(
+  Schema.decodeUnknownSync(PrReviewReport)({
+    schemaVersion: 3,
+    subject: reviewSubject,
+    completion: { status: "complete" },
+    suggestions: [
+      {
+        suggestionId: reviewSuggestionId,
+        state: "draft",
+        title: "Reuse the original idempotency key",
+        severity: "P2",
+        problem: "Retry can duplicate capture",
+        impact: "The retry path does not reuse the original idempotency key.",
+        evidence: {
+          path: "src/capture.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "return capture({ idempotencyKey: freshKey })"
+        },
+        recommendation: "Reuse the original idempotency key for retry attempts.",
+        anchor: {
+          _tag: "file",
+          path: "src/capture.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        },
+        relatedLocations: [],
+        confidence: {
+          level: "high",
+          reason: "The added retry branch supplies a newly generated key."
+        },
+        prevention: {
+          summary: "Add a focused retry contract test.",
+          enforcement: "test",
+          existingRuleOrConfig: "capture integration suite",
+          recurrenceEvidence: "Every capture retry crosses the shared idempotency boundary.",
+          targetFile: "test/capture-retry.test.ts",
+          sourcePaths: ["src/capture.ts"],
+          matcherOrInvariant: "Every retry reuses its original idempotency key.",
+          invalidFixture: "capture({ retry: true, idempotencyKey: freshKey })",
+          validFixture: "capture({ retry: true, idempotencyKey: originalKey })",
+          boundary: "Only capture retries are covered."
+        }
+      }
+    ],
+    notes: []
+  })
+)
+const reviewSuggestion = reviewReport.suggestions[0]
+if (reviewSuggestion === undefined) throw new Error("Expected one review suggestion fixture")
+const reviewRevision = (
+  sequence: 1 | 2 | 3,
+  suggestion = reviewSuggestion,
+  validation: "validated" | "requires-revalidation" = "validated"
+) =>
+  Schema.decodeUnknownSync(PrReviewSuggestionRevision)({
+    revisionId: `sha256:${String(sequence).repeat(64)}`,
+    sequence,
+    predecessorRevisionId: sequence === 1 ? null : `sha256:${String(sequence - 1).repeat(64)}`,
+    sourceJobId: reviewJobId,
+    subject: reviewSubject,
+    suggestion,
+    validation: validation === "validated"
+      ? {
+        _tag: "validated",
+        reviewedHead: reviewHeadRevision,
+        validatingJobId: reviewJobId,
+        sourceRevisionId: `sha256:${String(sequence).repeat(64)}`
+      }
+      : {
+        _tag: "requires-revalidation",
+        reviewedHead: reviewHeadRevision,
+        sourceRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        reason: "technical-claim-edited"
+      },
+    author: { _tag: "operator", personId: pairedSession.actor.personId },
+    createdAt: "2026-07-14T10:02:00.000Z"
+  })
+const reviewRevisionPage = (current: ReturnType<typeof reviewRevision>) =>
+  Schema.encodeSync(PrReviewSuggestionRevisionPage)({
+    current,
+    revisions: [current],
+    hasMore: false,
+    nextBeforeSequence: null
+  })
+const reviewPublicationPreview = Schema.encodeSync(ReviewSuggestionPublicationPreview)(
+  Schema.decodeUnknownSync(ReviewSuggestionPublicationPreview)({
+    jobId: reviewJobId,
+    suggestionId: reviewSuggestionId,
+    revisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    subject: reviewSubject,
+    suggestionRevision: {
+      jobId: reviewJobId,
+      suggestionId: reviewSuggestionId,
+      revisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      sequence: 3,
+      reviewedHead: reviewHeadRevision
+    },
+    anchor: reviewSuggestion.anchor,
+    editableContent: "Reuse the original idempotency key.",
+    editableContentMaximumLength: 10_100,
+    finalContent: "Reuse the original idempotency key.",
+    publicationFooter: "Reviewed by Relay",
+    replacement: null,
+    connectedIdentity: {
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:role/CodeCommitReviewer"
+    },
+    authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+      "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    ),
+    proposingAgent: reviewProfile,
+    publishingOperator: pairedSession.actor.personId
+  })
+)
+const completedPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "completed",
+    subject: reviewSubject,
+    jobId: reviewJobId,
+    providerId: "openai-compatible",
+    model: "review-model",
+    reviewProfile,
+    activity: { events: [], truncated: false },
+    requestedAt: "2026-07-14T10:00:00.000Z",
+    completedAt: "2026-07-14T10:01:00.000Z",
+    outcome: "changes-required",
+    report: reviewReport
+  })
+)
+const notStartedPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "not-started",
+    subject: reviewSubject
+  })
+)
+const pendingPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "pending",
+    subject: reviewSubject,
+    jobId: reviewJobId,
+    providerId: "openai-compatible",
+    model: "review-model",
+    reviewProfile,
+    activity: { events: [], truncated: false },
+    requestedAt: "2026-07-14T10:00:00.000Z",
+    state: "queued"
+  })
+)
+const reviewProviderCatalog = Schema.encodeSync(AgentProviderCatalog)(
+  Schema.decodeUnknownSync(AgentProviderCatalog)({
+    providers: [
+      {
+        providerId: "openai-compatible",
+        models: ["review-model"],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available",
+        reviewProfile
+      }
+    ]
+  })
+)
+const releaseAgentProviderCatalog = Schema.encodeSync(AgentProviderCatalog)(
+  Schema.decodeUnknownSync(AgentProviderCatalog)({
+    providers: [
+      {
+        providerId: "codex",
+        models: ["codex"],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available"
+      }
+    ]
   })
 )
 
@@ -231,9 +513,49 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
   })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/exchange", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(atlassianOAuthExchange),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/complete", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(completedAtlassianProfile),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(releaseAgentProviderCatalog),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await context.route("**/api/v1/items/*", async (route) => {
     await route.fulfill({
       body: JSON.stringify(canonicalEntityInspection),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/shares/*/*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: canonicalEntityInspection.entity,
+        share: {
+          createdAt: "2026-07-14T10:00:00.000Z",
+          entityId: canonicalEntityId,
+          expiresAt: "2026-07-21T10:00:00.000Z",
+          granteePersonId: pairedSession.actor.personId,
+          revokedAt: null,
+          shareId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.shareId
+        }
+      }),
       contentType: "application/json",
       status: 200
     })
@@ -361,6 +683,210 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
 
 test.beforeEach(async ({ context }) => installReleaseMocks(context))
 
+interface AuthenticatedPresentationRoute {
+  readonly audit: ProductionRouteAuditRequirement
+  readonly exercise?: (primaryAction: Locator) => Promise<void>
+  readonly expectOutcome?: () => Promise<void>
+  readonly landmark: () => Locator
+  readonly primaryAction: () => Locator | null
+}
+
+test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.route("**/api/v1/items**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/items") {
+      await route.fallback()
+      return
+    }
+    const items = encodedWorkset.entityProjections.map((entry) => ({
+      ...entry,
+      canonicalReleaseId: encodedWorkset.releaseId,
+      owners: [],
+      ownersTruncated: false,
+      releaseIds: [encodedWorkset.releaseId],
+      releaseMembershipsTruncated: false
+    }))
+    await route.fulfill({
+      body: JSON.stringify({
+        items,
+        matchedCount: items.length,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
+        totalCount: items.length,
+        truncated: false
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/timeline**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/timeline") {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({ events: [], nextCursor: null }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/plugins/overview", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [],
+        catalog: firstPartyServiceCatalog.map(({ metadata }) => metadata),
+        connections: []
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  const routes: ReadonlyArray<AuthenticatedPresentationRoute> = [
+    {
+      audit: productionRouteAuditCase("release-routes", "overview", "authenticated", "overview"),
+      expectOutcome: async () =>
+        expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Every release. One view." }),
+      primaryAction: () => page.getByRole("button", { name: "Preview Solar Grove" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "work", "authenticated", "work"),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: /Decisions,\s+not tickets\./u }),
+      primaryAction: () => page.getByRole("link", { name: "Open full release" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "items", "authenticated", "items"),
+      exercise: async (primaryAction) => primaryAction.fill("OPS-428"),
+      expectOutcome: async () => expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("OPS-428"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Find release work." }),
+      primaryAction: () => page.getByRole("searchbox", { name: "Search" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Review payment capture safeguards" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to items" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "timeline", "authenticated", "timeline"),
+      exercise: async (primaryAction) => {
+        await primaryAction.selectOption("human")
+      },
+      expectOutcome: async () => expect(page.getByRole("combobox", { name: "Actor" })).toHaveValue("human"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Everything that moved." }),
+      primaryAction: () => page.getByRole("combobox", { name: "Actor" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "release-preview",
+        "authenticated",
+        "releases/:releaseId/preview"
+      ),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" }),
+      primaryAction: () => page.getByRole("button", { name: /^Close(?: preview| Release preview:)/u })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "release", "authenticated", "releases/:releaseId"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "payments-api" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to overview" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "agent",
+        "authenticated",
+        "releases/:releaseId/agent"
+      ),
+      exercise: async (primaryAction) => primaryAction.press("Enter"),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
+          "Which evidence is still missing?"
+        ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Ask Solar Grove." }),
+      primaryAction: () => page.getByRole("button", { name: "Which evidence is still missing?" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "not-found", "authenticated", "*"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByText("Page not found", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Open workspace overview" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "services", "authenticated", "services"),
+      expectOutcome: async () => expect(page.getByLabel("Account name")).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
+      primaryAction: () => page.getByRole("button", { name: "Configure AWS account" }).first()
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Choose your Atlassian site" }),
+      primaryAction: () => page.getByRole("button", { name: "Use this site" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated-error",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByText("Atlassian sign-in did not finish", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "authorized-share",
+        "authenticated",
+        "shares/:workspaceId/:shareId"
+      ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Exact scope. Nothing adjacent." }),
+      primaryAction: () => null
+    }
+  ]
+
+  for (const route of routes) {
+    await resetProductionRouteEntryPresentation(page)
+    await page.goto(route.audit.canonicalPath)
+    const primaryAction = route.primaryAction()
+    if (primaryAction === null) {
+      if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
+      await auditProductionRoutePresentation(page, {
+        landmark: route.landmark(),
+        noActionReason: route.audit.action.reason,
+        primaryAction
+      })
+    } else {
+      if (route.expectOutcome === undefined) throw new Error(`${route.audit.family} requires an interaction outcome`)
+      await auditProductionRoutePresentation(page, {
+        exercise: route.exercise ?? (async (action) => action.press("Enter")),
+        expectOutcome: route.expectOutcome,
+        landmark: route.landmark(),
+        primaryAction
+      })
+    }
+  }
+  expect(routes.map(({ audit }) => productionRouteAuditKey(audit)).sort()).toEqual(
+    requiredProductionRouteAuditsFor("release-routes")
+      .map(productionRouteAuditKey)
+      .sort()
+  )
+})
+
 const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): void => {
   expect(geometry.clientRectCount).toBeGreaterThan(0)
   expect(geometry.display).not.toBe("none")
@@ -376,9 +902,10 @@ const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): v
   expect(geometry.computedName).toBe(geometry.name)
 }
 
-const transitionIdentity = (
-  geometry: ReleaseTransitionGeometry
-): { readonly name: string; readonly part: string } => ({ name: geometry.name, part: geometry.part })
+const transitionIdentity = (geometry: ReleaseTransitionGeometry) => ({
+  name: geometry.name,
+  part: geometry.part
+})
 
 test("canonicalizes the root before any release activation renders", async ({ page }) => {
   await page.goto("/")
@@ -542,6 +1069,402 @@ test("renders a synchronized Jira issue as a complete read-only document", async
   await expect(page.getByRole("textbox")).toHaveCount(0)
 })
 
+test("launches an exact-head review and presents its durable findings", async ({ page }) => {
+  await page.addInitScript({
+    content: `Object.defineProperty(window, "Worker", {
+      configurable: true,
+      value: function UnavailableDiffWorker() {
+        throw new Error("Worker blocked by browser policy")
+      }
+    })`
+  })
+  let enqueued = false
+  let enqueuePayload: unknown
+  let remainingPendingReviewPolls = 1
+  let targetedReview = false
+  let remainingTargetedReviewPolls = 1
+  let dismissed = false
+  let changedHead = false
+  let edited = false
+  let targetedPayload: unknown
+  const editedSuggestion = { ...reviewSuggestion, title: "Reuse the original idempotency key after retry" }
+  let releaseRenderer: (() => void) | undefined
+  const rendererGate = new Promise<void>((resolve) => {
+    releaseRenderer = resolve
+  })
+  const threadEvents = Schema.encodeSync(PullRequestReviewThreadPage)(
+    Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
+      events: [
+        {
+          _tag: "run-queued",
+          eventSequence: 1,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:00:00.000Z",
+          providerId: "openai-compatible",
+          model: "review-model",
+          reviewProfile,
+          subject: reviewSubject
+        },
+        {
+          _tag: "run-started",
+          eventSequence: 2,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:00:01.000Z"
+        },
+        {
+          _tag: "review-report",
+          eventSequence: 3,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:01:00.000Z",
+          report: reviewReport
+        },
+        {
+          _tag: "run-completed",
+          eventSequence: 4,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:01:00.000Z",
+          outcome: "success"
+        }
+      ],
+      hasMore: false,
+      nextCursor: 4
+    })
+  ).events
+
+  await page.route(`**/api/v1/items/${canonicalEntityId}`, async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(reviewEntityInspection),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  const captureDiffAnchor = `sha256:${"a".repeat(64)}`
+  const helperDiffAnchor = `sha256:${"b".repeat(64)}`
+  let diffContentRequests = 0
+  await page.route("**/api/v1/diffs/*/pull-requests/*/inventory**", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        entries: [
+          {
+            anchor: captureDiffAnchor,
+            path: "src/capture.ts",
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: helperDiffAnchor,
+            path: "src/helper.ts",
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          }
+        ],
+        ready: true
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/diffs/*/pull-requests/*/content", async (route) => {
+    const body = Schema.decodeUnknownSync(
+      Schema.Struct({
+        path: Schema.String,
+        side: Schema.Literals(["before", "after"])
+      })
+    )(route.request().postDataJSON())
+    diffContentRequests += 1
+    const text = body.path === "src/helper.ts"
+      ? body.side === "before"
+        ? "export const helper = false"
+        : "export const helper = true"
+      : Array.from({ length: 80 }, (_, index) =>
+        index === 41
+          ? body.side === "before"
+            ? "export const capture = false"
+            : "export const capture = true"
+          : `// ${body.side} line ${String(index + 1)}`).join("\n")
+    await route.fulfill({
+      body: JSON.stringify({
+        bytesBase64: Buffer.from(text).toString("base64"),
+        totalBytes: Buffer.byteLength(text),
+        unavailableReason: null
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(reviewProviderCatalog),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review`, async (route) => {
+    const review = changedHead
+      ? Schema.encodeSync(PullRequestReviewState)(
+        Schema.decodeUnknownSync(PullRequestReviewState)({
+          _tag: "stale",
+          subject: reviewSubject,
+          previousHead: reviewHeadRevision,
+          previousJobId: reviewJobId
+        })
+      )
+      : !enqueued
+      ? notStartedPullRequestReview
+      : targetedReview && remainingTargetedReviewPolls > 0
+      ? pendingPullRequestReview
+      : remainingPendingReviewPolls > 0
+      ? pendingPullRequestReview
+      : dismissed
+      ? completedPullRequestReview
+      : completedPullRequestReview
+    if (enqueued && remainingPendingReviewPolls > 0) {
+      remainingPendingReviewPolls -= 1
+    }
+    if (targetedReview && remainingTargetedReviewPolls > 0) remainingTargetedReviewPolls -= 1
+    await route.fulfill({
+      body: JSON.stringify(review),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review-thread/events**`, async (route) => {
+    const after = Number.parseInt(new URL(route.request().url()).searchParams.get("after") ?? "0", 10)
+    const events = enqueued ? threadEvents.filter(({ eventSequence }) => eventSequence > after) : []
+    await route.fulfill({
+      body: JSON.stringify({
+        events,
+        hasMore: false,
+        nextCursor: events.at(-1)?.eventSequence ?? after
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/reviews`, async (route) => {
+    expect(route.request().method()).toBe("POST")
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    enqueuePayload = route.request().postDataJSON()
+    enqueued = true
+    await route.fulfill({
+      body: JSON.stringify(pendingPullRequestReview),
+      contentType: "application/json",
+      status: 202
+    })
+  })
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/revisions**",
+    async (route) => {
+      if (route.request().method() === "GET") {
+        const current = targetedReview
+          ? reviewRevision(3)
+          : reviewRevision(
+            edited ? 2 : 1,
+            edited ? editedSuggestion : reviewSuggestion,
+            edited ? "requires-revalidation" : "validated"
+          )
+        await route.fulfill({
+          body: JSON.stringify(reviewRevisionPage(current)),
+          contentType: "application/json",
+          status: 200
+        })
+        return
+      }
+      edited = true
+      await route.fulfill({
+        body: JSON.stringify(
+          Schema.encodeSync(PrReviewSuggestionRevision)(reviewRevision(2, editedSuggestion, "requires-revalidation"))
+        ),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/agent",
+    async (route) => {
+      targetedReview = true
+      targetedPayload = route.request().postDataJSON()
+      await route.fulfill({
+        body: JSON.stringify(pendingPullRequestReview),
+        contentType: "application/json",
+        status: 202
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/dismissal",
+    async (route) => {
+      dismissed = true
+      changedHead = true
+      await route.fulfill({
+        body: JSON.stringify(
+          Schema.encodeSync(PrReviewSuggestionRevision)(
+            reviewRevision(3, { ...reviewSuggestion, state: "dismissed" })
+          )
+        ),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
+  await page.route(
+    "**/api/v1/agent/**/suggestions/**/publication-preview**",
+    async (route) => {
+      await route.fulfill({
+        body: JSON.stringify(reviewPublicationPreview),
+        contentType: "application/json",
+        status: 200
+      })
+    }
+  )
+  await page.route("**/assets/diff-*.js", async (route) => {
+    await rendererGate
+    await route.continue()
+  })
+
+  await page.clock.install()
+  await page.goto(canonicalEntityPath)
+  await expect(page.getByText("Rendering complete diff…")).toBeVisible()
+  const evidenceStamp = page.locator("[data-rly-evidence-stamp]")
+  const evidenceSource = evidenceStamp.locator("[data-rly-evidence-source]")
+  await expect(evidenceStamp.locator("[data-rly-evidence-freshness]")).toBeVisible()
+  const evidenceSourceBox = await evidenceSource.boundingBox()
+  if (evidenceSourceBox === null) throw new Error("Evidence source geometry was unavailable")
+  expect(evidenceSourceBox.width).toBeGreaterThanOrEqual(EVIDENCE_SOURCE_MIN_WIDTH_PX)
+
+  const reviewTrigger = page.getByRole("button", { name: "Review exact head" })
+  await expect(reviewTrigger).toBeVisible()
+  await reviewTrigger.focus()
+  await reviewTrigger.click()
+
+  const launchDialog = page.getByRole("dialog", { name: "Review this exact head" })
+  await expect(launchDialog).toBeVisible()
+  await expect(launchDialog.getByRole("button", { name: "Keep reading" })).toBeFocused()
+  await expect(launchDialog).toContainText(reviewHeadRevision)
+  await expect(launchDialog).toContainText(reviewProfile.label)
+  await expect(launchDialog).toContainText("20 minutes")
+  await expect(launchDialog).toContainText("Network blocked · sbx")
+  await expect(page.locator("[inert]")).not.toHaveCount(0)
+  await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
+
+  await page.keyboard.press("Escape")
+  await expect(launchDialog).toHaveCount(0)
+  await expect(reviewTrigger).toBeFocused()
+  await expect(page.locator("[inert]")).toHaveCount(0)
+  await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked", "1")
+
+  await reviewTrigger.click()
+  await launchDialog.getByRole("button", { name: "Start full review" }).click()
+  await expect
+    .poll(() => enqueuePayload)
+    .toEqual({
+      providerId: "openai-compatible",
+      model: "review-model",
+      profile: "read-only",
+      reviewProfileId: reviewProfile.profileId
+    })
+  await expect(page.getByText("Review queued")).toBeVisible()
+
+  await expect(page.getByText("Changes Required")).toBeVisible()
+  await expect(
+    page
+      .locator("strong")
+      .filter({ hasText: /^Reuse the original idempotency key$/u })
+      .first()
+  ).toBeVisible()
+  await page.getByRole("button", { name: "src/capture.ts:42" }).click()
+  await page.clock.runFor(1_100)
+  if (releaseRenderer === undefined) throw new Error("Expected the deferred diff renderer gate")
+  releaseRenderer()
+  await page.clock.resume()
+  await expect(page.locator("[data-rly-diff-code-view]")).toBeVisible()
+  await expect(page.getByText("Worker acceleration is unavailable")).toBeVisible()
+  await expect(page.getByText("export const capture = true")).toBeVisible()
+  const focusedDiffLine = page.locator("diffs-container [data-code][data-additions] [data-line=\"42\"]")
+  await expect(focusedDiffLine).toBeFocused()
+  const replaceFocusedDiffLine = () =>
+    focusedDiffLine.evaluate((line) => {
+      if (
+        !("cloneNode" in line) ||
+        !("replaceWith" in line)
+      ) {
+        throw new Error("Expected a replaceable rendered diff line")
+      }
+      line.replaceWith(line.cloneNode(true))
+    })
+  await replaceFocusedDiffLine()
+  await expect(focusedDiffLine).toBeFocused()
+  const wrapLines = page.getByRole("button", { name: "Wrap lines" })
+  await wrapLines.focus()
+  await expect(wrapLines).toBeFocused()
+  await replaceFocusedDiffLine()
+  await expect(wrapLines).toBeFocused()
+  await expect(page.getByText("Review sandbox started")).toBeVisible()
+  await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
+  await expect(page.getByText("Run completed · success")).toBeVisible()
+  await expect(
+    page.getByText("Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.")
+  ).toBeVisible()
+  await page.locator(`[data-rly-diff-file-id="${helperDiffAnchor}"] button`).click()
+  await expect(page.getByText("export const helper = true")).toBeVisible()
+  await expect.poll(() => diffContentRequests).toBe(4)
+  await page.getByRole("button", { name: "Show all files" }).click()
+  await expect(page.locator("[data-rly-diff-scope=\"all-files\"]")).toBeVisible()
+  await expect(page.getByText("Showing 2 lazily loaded files.")).toBeVisible()
+  const allFilesTarget = page.locator(`diffs-container[data-rly-diff-item="${helperDiffAnchor}"]`)
+  await expect(allFilesTarget).toBeVisible()
+  await expect(allFilesTarget).toBeInViewport()
+  expect(diffContentRequests).toBe(4)
+
+  await expect(page.getByText("Revision 1")).toBeVisible()
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  const editDialog = page.getByRole("dialog", { name: "Edit review suggestion" })
+  await expect(editDialog).toBeVisible()
+  await editDialog.locator("input").fill(editedSuggestion.title)
+  await editDialog.getByRole("button", { name: "Save revision" }).click()
+  await editDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByText("Needs revalidation", { exact: true })).toBeVisible()
+  await expect(page.getByText(editedSuggestion.title, { exact: true }).first()).toBeVisible()
+
+  await page.getByRole("button", { name: "Revalidate" }).click()
+  await expect
+    .poll(() => targetedPayload)
+    .toEqual({
+      providerId: "openai-compatible",
+      model: "review-model",
+      profile: "read-only",
+      reviewProfileId: reviewProfile.profileId,
+      intent: "suggestion-revalidation",
+      expectedRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      expectedSequence: 2
+    })
+  await expect(page.getByText("Review queued")).toBeVisible()
+  await page.clock.runFor(2_100)
+  await expect(page.getByText("Run completed · success")).toBeVisible()
+
+  await page.getByRole("button", { name: "Review & approve" }).click()
+  const publicationDialog = page.getByRole("dialog", { name: "Approve finding" })
+  await expect(publicationDialog).toBeVisible()
+  await expect(publicationDialog).toContainText("arn:aws:iam::123456789012:role/CodeCommitReviewer")
+  await expect(publicationDialog).toContainText(reviewHeadRevision)
+  await publicationDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(publicationDialog).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Dismiss" }).click()
+  await page.getByRole("dialog", { name: "Dismiss finding?" }).getByRole("button", { name: "Dismiss finding" }).click()
+  await expect(page.getByText("Dismissed · high confidence", { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("Agent review not run")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review exact head" })).toBeVisible()
+})
+
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {
   const filteredOverviewPath = `${overviewPath}?status=attention`
   await page.goto(filteredOverviewPath)
@@ -649,9 +1572,9 @@ test("keeps the complete release workset readable on a compact viewport", async 
 
   await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
   await expect(page.locator("[data-rly-workset-dimension]")).toHaveCount(3)
-  await expect.poll(() => page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
-    true
-  )
+  await expect
+    .poll(() => page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth"))
+    .toBe(true)
 })
 
 test("keeps one human-first Relay thread per canonical release", async ({ page }) => {
@@ -663,12 +1586,11 @@ test("keeps one human-first Relay thread per canonical release", async ({ page }
   await expect(page.getByText("Mara Singh")).toBeVisible()
 
   await page.getByRole("button", { name: "Which evidence is still missing?" }).click()
-  await expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
-    "Which evidence is still missing?"
-  )
+  await expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue("Which evidence is still missing?")
   await page.getByRole("button", { name: "Ask Relay" }).click()
   await expect(page.getByText("Approval is current. Production deployment evidence is still missing.")).toBeVisible()
-  await expect(page.getByText("Local codex")).toBeVisible()
+  await expect(page.getByText("Preset codex")).toBeVisible()
+  await expect(page.getByText("Last answer codex")).toBeVisible()
 
   await page.reload()
   const restoredMessages = page.getByLabel("Release thread messages")
@@ -722,8 +1644,35 @@ test("uses semantic fallback when direct Active work changes release", async ({ 
 test("opens the selected Active work release from the shell agent control", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
   await page.getByRole("link", { name: "Ask Relay" }).click()
-  await expect(page).toHaveURL(`${heldFullPath}/agent`)
+  await expect(page).toHaveURL(
+    `${heldFullPath}/agent?from=${
+      encodeURIComponent(
+        `/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`
+      )
+    }`
+  )
   await expect(page.getByRole("heading", { level: 1, name: `Ask ${heldRelease.relay.codename}.` })).toBeVisible()
+})
+
+test("opens Relay from any primary page and preserves the calling context", async ({ page }) => {
+  const originPath = `${overviewPath}?status=attention`
+  await page.goto(originPath)
+  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await expect(page).toHaveURL(`/agent?from=${encodeURIComponent(originPath)}`)
+  await expect(page.getByRole("heading", { level: 1, name: "Choose a release." })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 2, name: "Workspace overview" })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Solar Grove/u })).toHaveAttribute(
+    "href",
+    `/w/${snapshot.workspaceId}/releases/${release.releaseId}/agent?from=${encodeURIComponent(originPath)}`
+  )
+
+  await page.getByRole("link", { name: /Solar Grove/u }).click()
+  await expect(page).toHaveURL(
+    `/w/${snapshot.workspaceId}/releases/${release.releaseId}/agent?from=${encodeURIComponent(originPath)}`
+  )
+  await expect(page.getByRole("heading", { level: 1, name: "Ask Solar Grove." })).toBeVisible()
+  await expect(page.getByText("Workspace overview")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Return to calling page" })).toHaveAttribute("href", originPath)
 })
 
 test("keeps an invalid Active work agent context on the safe generic fallback", async ({ page }) => {
@@ -765,9 +1714,7 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
     { name: `release-${release.releaseId}-version`, part: "version" },
     { name: `release-${release.releaseId}-verdict`, part: "verdict" }
   ]
-  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
-    "window.__releaseTransitionSnapshots"
-  )
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>("window.__releaseTransitionSnapshots")
   expect(snapshots).toHaveLength(2)
   for (const snapshot of snapshots) {
     expect(snapshot.before.map(transitionIdentity)).toEqual(expectedIdentities)
@@ -802,25 +1749,18 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
   await page.waitForFunction(
     "window.__releaseTransitionReadiness.length === 1 && window.__releaseTransitionReadiness[0].state !== 'pending'"
   )
-  await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute(
-    "data-rly-sheet-entry-motion",
-    "external"
-  )
+  await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute("data-rly-sheet-entry-motion", "external")
   await expect(sheet).toHaveCSS("animation-name", "none")
   await expect(page.locator("[data-rly-sheet-overlay]")).toHaveCSS("animation-name", "none")
 
-  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
-    "window.__releaseTransitionSnapshots"
-  )
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>("window.__releaseTransitionSnapshots")
   expect(snapshots).toHaveLength(1)
   const snapshot = snapshots[0]
   if (snapshot === undefined) throw new Error("Compact release transition snapshot was unavailable")
   expect(snapshot.before.map(transitionIdentity)).toEqual(snapshot.after.map(transitionIdentity))
   for (const geometry of snapshot.after) expectVisibleTransitionGeometry(geometry)
   expect(await page.evaluate<ReadonlyArray<ReleaseTransitionReadiness>>("window.__releaseTransitionReadiness")).toEqual(
-    [
-      { state: "resolved" }
-    ]
+    [{ state: "resolved" }]
   )
   await expect(page.getByRole("button", { name: "Open Solar Grove full view" })).toBeInViewport()
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)

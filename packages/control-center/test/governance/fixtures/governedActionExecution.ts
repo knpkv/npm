@@ -130,7 +130,8 @@ export const withBegin = <Success, Failure>(
     | PluginRuntimeAuthoritySource
     | QuarantineRepository
   >,
-  authorityLayer = runtimeAuthorityLayer
+  authorityLayer = runtimeAuthorityLayer,
+  policyLayer = GovernedActionPolicyEvaluator.layer
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-governed-action-begin-")
@@ -144,7 +145,7 @@ export const withBegin = <Success, Failure>(
         actions,
         graph,
         authority,
-        GovernedActionPolicyEvaluator.layer
+        policyLayer
       ))
     )
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)

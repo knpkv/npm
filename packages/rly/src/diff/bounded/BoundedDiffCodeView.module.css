@@ -101,3 +101,34 @@
   width: 50%;
   border-right: 1px solid var(--rly-color-border-1);
 }
+
+.annotationRow > td {
+  background: var(--rly-color-surface-2);
+  border-block: 1px solid var(--rly-color-border-1);
+}
+
+.annotationRow > .annotationCell {
+  padding: var(--rly-space-8);
+}
+
+.annotation {
+  background: var(--rly-color-held-tint);
+  border-inline-start: var(--rly-space-2) solid var(--rly-color-held-ink);
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  padding: var(--rly-space-8) var(--rly-space-12);
+}
+
+.annotation:focus-visible,
+[data-rly-diff-line]:focus-visible {
+  outline: var(--rly-space-2) solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
+@media (forced-colors: active) {
+  .annotation,
+  [data-rly-diff-line]:focus-visible {
+    forced-color-adjust: auto;
+  }
+}

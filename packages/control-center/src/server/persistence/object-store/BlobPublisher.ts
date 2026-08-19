@@ -7,12 +7,22 @@ import type { PinnedDirectory } from "./PinnedDirectory.js"
 export const BLOB_FILE_MODE = 0o600
 const TEMPORARY_NAME_ATTEMPTS = 4
 
-const openFailure = <E>(error: E): { readonly _tag: "OpenFailure"; readonly error: E } => ({
+interface OpenFailure<E> {
+  readonly _tag: "OpenFailure"
+  readonly error: E
+}
+
+interface LinkResult<A> {
+  readonly _tag: "LinkResult"
+  readonly linked: A
+}
+
+const openFailure = <E>(error: E): OpenFailure<E> => ({
   _tag: "OpenFailure",
   error
 })
 
-const linkResult = <A>(linked: A): { readonly _tag: "LinkResult"; readonly linked: A } => ({
+const linkResult = <A>(linked: A): LinkResult<A> => ({
   _tag: "LinkResult",
   linked
 })
@@ -51,6 +61,9 @@ export const makeBlobPublisher = (
             }
 
             yield* Effect.addFinalizer(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
+            // Every child path is descriptor-relative. Identity checks remain
+            // defense in depth around the write and atomic publication.
+            yield* directory.assertIdentity
             yield* restore(opened.success.writeAll(bytes)).pipe(
               Effect.mapError((cause) => blobStoreIoError("write temporary blob", cause))
             )
@@ -58,10 +71,14 @@ export const makeBlobPublisher = (
               Effect.mapError((cause) => blobStoreIoError("sync temporary blob", cause))
             )
 
+            yield* directory.assertIdentity
             const linked = yield* (mode === "replace"
               ? fs.rename(temporary, destination)
               : fs.link(temporary, destination)).pipe(Effect.result)
-            if (Result.isSuccess(linked) && commit !== undefined) yield* commit(destination)
+            if (Result.isSuccess(linked)) {
+              yield* directory.assertIdentity
+              if (commit !== undefined) yield* commit(destination)
+            }
             return linkResult(linked)
           })
         )

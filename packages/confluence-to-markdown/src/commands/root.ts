@@ -11,11 +11,16 @@ import {
   commitCommand,
   deleteCommand,
   diffCommand,
+  folderCommand,
   logCommand,
   newCommand,
+  pageCreateCommand,
   pageGetCommand,
+  pagePatchCommand,
+  pagePutCommand,
   pullCommand,
   pushCommand,
+  searchCommand,
   statusCommand
 } from "./index.js"
 
@@ -67,11 +72,14 @@ const pageCommand = (pageGet: typeof pageGetCommand) =>
   Command.make(
     "page",
     {},
-    () => Console.log("Usage: confluence page get|new|delete|attachment")
+    () => Console.log("Usage: confluence page get|create|put|patch|new|delete|attachment")
   ).pipe(
     Command.withDescription("Confluence page resource commands"),
     Command.withSubcommands([
       pageGet,
+      pageCreateCommand,
+      pagePutCommand,
+      pagePatchCommand,
       attachmentCommand,
       newCommand,
       deleteCommand
@@ -86,6 +94,8 @@ export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
       workspaceCommand,
       syncCommand,
       pageCommand(options.pageGet ?? pageGetCommand),
+      folderCommand,
+      searchCommand,
       skillsCommand
     ])
   )

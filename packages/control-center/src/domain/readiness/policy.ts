@@ -25,7 +25,7 @@ export const sortedReadinessUnique = <Value extends string>(
 ): Array<Value> => Array.from(new Set(values)).sort(compareReadinessText)
 
 /** Whether definitions form the complete provider-neutral V1 delivery policy. */
-export const readinessDefinitionsShapeIsV1 = (
+export const readinessDefinitionsContractIsV1 = (
   definitions: ReadonlyArray<ReadinessFactDefinition>
 ): boolean => {
   const deployments = definitions.filter(({ kind }) => kind === "deployment")
@@ -38,11 +38,11 @@ export const readinessDefinitionsShapeIsV1 = (
 }
 
 /** Whether definitions and observations form a complete V1 delivery policy shape. */
-export const readinessPolicyShapeIsV1 = (
+export const readinessPolicyContractIsV1 = (
   definitions: ReadonlyArray<ReadinessFactDefinition>,
   observations: ReadonlyArray<ReadinessFactObservation>
 ): boolean =>
-  readinessDefinitionsShapeIsV1(definitions) &&
+  readinessDefinitionsContractIsV1(definitions) &&
   observations.some(({ state }) => state._tag === "deployment")
 
 /** Whether one exact evidence dependency is current enough for a verdict. */
@@ -286,11 +286,7 @@ const normalizedFindings = (
 export const deriveReadinessFindings = (
   facts: ReadonlyArray<ReadinessFactEvaluation>,
   complete: boolean
-): {
-  readonly blockers: Array<ReadinessFinding>
-  readonly warnings: Array<ReadinessFinding>
-  readonly gaps: Array<ReadinessFinding>
-} => {
+) => {
   const blockers: Array<ReadinessFinding> = []
   const warnings: Array<ReadinessFinding> = []
   const gaps: Array<ReadinessFinding> = complete
@@ -538,11 +534,7 @@ type ReleaseEnvironmentReadiness = {
 /** Exact merged findings implied by retained environment summaries. */
 export const deriveReleaseReadinessFindings = (
   environments: ReadonlyArray<ReleaseEnvironmentReadiness>
-): {
-  readonly blockers: Array<ReadinessFinding>
-  readonly warnings: Array<ReadinessFinding>
-  readonly gaps: Array<ReadinessFinding>
-} => ({
+) => ({
   blockers: normalizedFindings(environments.flatMap(({ blockers }) => blockers)),
   warnings: normalizedFindings(environments.flatMap(({ warnings }) => warnings)),
   gaps: normalizedFindings(environments.flatMap(({ gaps }) => gaps))

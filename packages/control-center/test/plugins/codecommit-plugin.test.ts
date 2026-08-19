@@ -116,6 +116,7 @@ const baseReadClient = (
         bytes: new Uint8Array([1, 2, 3])
       })
     ),
+  listPullRequestIdsPage: () => Effect.die("unused"),
   listPullRequestsPage: () =>
     Effect.succeed(
       new ReadClient.CodeCommitPullRequestPage({
@@ -125,6 +126,13 @@ const baseReadClient = (
     ),
   streamPullRequests: () => Stream.make(pullRequest),
   getPullRequest: () => Effect.succeed(pullRequest),
+  getRepositoryIdentity: () =>
+    Effect.succeed(
+      new ReadClient.CodeCommitRepositoryIdentity({
+        accountId: "123456789012",
+        repositoryName: pullRequest.repositoryName
+      })
+    ),
   getChangedFilesPage: () =>
     Effect.succeed(
       new ReadClient.CodeCommitChangedFilesPage({
@@ -198,6 +206,21 @@ const requestChangesProposal = Schema.decodeUnknownSync(ProposePluginActionReque
   expectedRevision: "revision-17",
   payload: { content: "Please preserve the authorization binding." },
   evidenceIds: ["review-finding-1"]
+})
+
+const inlineCommentProposal = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "comment",
+  target: { entityType: "pull-request", vendorImmutableId: "17" },
+  expectedRevision: "revision-17",
+  payload: {
+    content: "Preserve the authorization binding.",
+    location: {
+      filePath: "src/authorization.ts",
+      filePosition: 42,
+      relativeFileVersion: "AFTER"
+    }
+  },
+  evidenceIds: ["review-suggestion-1"]
 })
 
 const authorizeProposal = (
@@ -314,14 +337,17 @@ describe("CodeCommitPlugin", () => {
         { status: "CLOSED", nextToken: null }
       ])
       assert.strictEqual(pages.first.length, 3)
-      assert.strictEqual(pages.first[0]?.checkpointAfterPage, "next:provider-page-2")
+      assert.match(
+        pages.first[0]?.checkpointAfterPage ?? "",
+        /^next:v1:[0-9a-f]{64}:provider-page-2$/u
+      )
       assert.isTrue(pages.first[0]?.hasMore)
-      assert.strictEqual(pages.first[1]?.checkpointAfterPage, "closed")
+      assert.match(pages.first[1]?.checkpointAfterPage ?? "", /^closed:v1:[0-9a-f]{64}$/u)
       assert.isTrue(pages.first[1]?.hasMore)
-      assert.strictEqual(pages.first[2]?.checkpointAfterPage, "complete")
+      assert.match(pages.first[2]?.checkpointAfterPage ?? "", /^complete:v1:[0-9a-f]{64}$/u)
       assert.isFalse(pages.first[2]?.hasMore)
-      assert.strictEqual(pages.resumed[0]?.checkpointAfterPage, "closed")
-      assert.strictEqual(pages.resumed[1]?.checkpointAfterPage, "complete")
+      assert.match(pages.resumed[0]?.checkpointAfterPage ?? "", /^closed:v1:[0-9a-f]{64}$/u)
+      assert.match(pages.resumed[1]?.checkpointAfterPage ?? "", /^complete:v1:[0-9a-f]{64}$/u)
       const event = pages.first[0]?.events[0]
       assert.strictEqual(event?._tag, "UpsertEntity")
       if (event?._tag === "UpsertEntity") {
@@ -333,10 +359,10 @@ describe("CodeCommitPlugin", () => {
       }
     }))
 
-  it.effect("emits a terminal revision when a previously open pull request is merged", () =>
+  it.effect("emits a distinct terminal event when CodeCommit preserves the revision across merge", () =>
     Effect.gen(function*() {
       const terminal = yield* Ref.make(false)
-      const mergedPullRequest = makePullRequest(configuration.repositoryName, "MERGED", "revision-18")
+      const mergedPullRequest = makePullRequest(configuration.repositoryName, "MERGED", "revision-17")
       const client = baseReadClient({
         listPullRequestsPage: (request) =>
           Ref.get(terminal).pipe(
@@ -377,9 +403,67 @@ describe("CodeCommitPlugin", () => {
       const mergedEvent = mergedEvents[0]
       assert.strictEqual(mergedEvent?._tag, "UpsertEntity")
       if (mergedEvent?._tag === "UpsertEntity") {
-        assert.strictEqual(mergedEvent.revision, "revision-18")
+        assert.strictEqual(mergedEvent.revision, "revision-17")
         assert.strictEqual(mergedEvent.attributes.status, "MERGED")
       }
+      assert.notStrictEqual(openEvent?.eventId, mergedEvent?.eventId)
+    }))
+
+  it.effect("emits a distinct event when mutable pull-request metadata changes without a new revision", () =>
+    Effect.gen(function*() {
+      const updated = yield* Ref.make(false)
+      const renamedPullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        ...pullRequest,
+        title: "KAN-3 Preserve exact revisions",
+        lastActivityDate: new Date("2026-07-16T10:00:00.000Z")
+      })
+      const client = baseReadClient({
+        listPullRequestsPage: (request) =>
+          Ref.get(updated).pipe(
+            Effect.map((isUpdated) =>
+              new ReadClient.CodeCommitPullRequestPage({
+                pullRequests: request.status === "OPEN"
+                  ? [isUpdated ? renamedPullRequest : pullRequest]
+                  : [],
+                nextToken: null
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+        streamKey: "pull-requests",
+        checkpoint: null
+      })
+      const pages = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const original = yield* connection.sync(request).pipe(Stream.runCollect)
+          yield* Ref.set(updated, true)
+          const renamed = yield* connection.sync(request).pipe(Stream.runCollect)
+          const replay = yield* connection.sync(request).pipe(Stream.runCollect)
+          return { original, renamed, replay }
+        })
+      )
+      const originalEvent = pages.original.flatMap(({ events }) => events)[0]
+      const renamedEvent = pages.renamed.flatMap(({ events }) => events)[0]
+
+      assert.strictEqual(originalEvent?._tag, "UpsertEntity")
+      assert.strictEqual(renamedEvent?._tag, "UpsertEntity")
+      if (originalEvent?._tag === "UpsertEntity" && renamedEvent?._tag === "UpsertEntity") {
+        assert.strictEqual(originalEvent.revision, "revision-17")
+        assert.strictEqual(renamedEvent.revision, "revision-17")
+        assert.strictEqual(renamedEvent.title, "KAN-3 Preserve exact revisions")
+      }
+      assert.notStrictEqual(originalEvent?.eventId, renamedEvent?.eventId)
+      assert.notStrictEqual(
+        pages.original.at(-1)?.checkpointAfterPage,
+        pages.renamed.at(-1)?.checkpointAfterPage
+      )
+      assert.strictEqual(
+        pages.renamed.at(-1)?.checkpointAfterPage,
+        pages.replay.at(-1)?.checkpointAfterPage
+      )
     }))
 
   it.effect("normalizes complete changed-file pages with stable rename paths", () =>
@@ -1345,6 +1429,76 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(action?._tag, "request-changes")
       assert.strictEqual(action?.target.revisionId, "revision-17")
       assert.strictEqual(action?.target.sourceCommit, "head-commit-17")
+    }))
+
+  it.effect("preserves an inline location from proposal through authorized dispatch", () =>
+    Effect.gen(function*() {
+      const executed = yield* Ref.make<ReviewClient.CodeCommitReviewAction | null>(null)
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(inlineCommentProposal)
+          yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+          return proposal
+        }),
+        baseReviewClient({
+          execute: (action) =>
+            Ref.set(executed, action).pipe(
+              Effect.as(
+                new ReviewClient.CodeCommitReviewReceipt({
+                  operationId: "comment:inline-42",
+                  summary: "Inline comment posted"
+                })
+              )
+            )
+        })
+      )
+
+      assert.deepInclude(result.request.payload, {
+        _tag: "comment",
+        location: {
+          filePath: "src/authorization.ts",
+          filePosition: 42,
+          relativeFileVersion: "AFTER"
+        }
+      })
+      const action = yield* Ref.get(executed)
+      assert.strictEqual(action?._tag, "comment")
+      assert.property(action, "location")
+      if (action?._tag === "comment" && action.location !== undefined) {
+        assert.strictEqual(action.location.filePath, "src/authorization.ts")
+        assert.strictEqual(action.location.filePosition, 42)
+        assert.strictEqual(action.location.relativeFileVersion, "AFTER")
+      }
+    }))
+
+  it.effect("records an invalid inline location as a terminal failed receipt", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(inlineCommentProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "postPullRequestComment",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "InvalidFilePositionException" }
+              })
+            )
+        })
+      )
+
+      assert.strictEqual(result._tag, "confirmed")
+      if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
     }))
 
   it.effect("blocks stale actions before the executor can call the review mutation", () =>

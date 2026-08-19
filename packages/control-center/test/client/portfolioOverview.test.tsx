@@ -14,6 +14,7 @@ import {
   type PortfolioSnapshotLoadState,
   resolvePortfolioFailure
 } from "../../src/client/portfolio/usePortfolioSnapshot.js"
+import { workspaceDefaultLandingPath } from "../../src/client/settings/useWorkspaceDefaultLanding.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 const livePortfolioState: Pick<
@@ -44,6 +45,13 @@ const renderOverview = (state: PortfolioOverviewState, initialEntry = "/"): stri
   )
 
 describe("PortfolioOverviewView", () => {
+  it("maps the workspace presentation default to the configured landing route", () => {
+    const { workspaceId } = makePortfolioSnapshot()
+
+    expect(workspaceDefaultLandingPath(workspaceId, "overview")).toBe(`/w/${workspaceId}/overview`)
+    expect(workspaceDefaultLandingPath(workspaceId, "active-work")).toBe(`/w/${workspaceId}/work`)
+  })
+
   it("reserves stable, accessible geometry while releases load", () => {
     const markup = renderOverview({ _tag: "loading" })
     expect(markup).toContain("Every release. One view.")

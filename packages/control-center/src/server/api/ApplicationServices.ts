@@ -9,14 +9,25 @@ import type {
   AgentPrompt,
   AgentProvider,
   AgentProviderCatalog,
+  DismissReviewSuggestionRequest,
+  DismissReviewSuggestionResponse,
+  EditReviewSuggestionRequest,
+  EditReviewSuggestionResponse,
   EnqueuePullRequestReviewRequest,
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
+  PublishedReviewComment,
+  PublishReviewSuggestionRequest,
   PullRequestReviewState,
+  PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor,
   ReleaseAgentThreadPage,
-  ReleaseAgentTurnResponse
+  ReleaseAgentTurnResponse,
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionRevisionPage,
+  TargetReviewSuggestionRequest,
+  TargetReviewSuggestionResponse
 } from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
@@ -49,10 +60,13 @@ import type {
   CreatePluginConnectionsResponse,
   DiscoveredAtlassianProfile,
   PatchPluginConfigurationRequest,
+  PatchProviderAccountRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
+  PluginConnectionAdministration,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  PluginCredentialReplacement,
   PluginHealthResponse,
   PluginSynchronizationState,
   ProviderAccountSummary
@@ -63,6 +77,7 @@ import type {
   AuthorizedShareSummary,
   CreateAuthorizedShareRequest
 } from "../../api/shares.js"
+import type { UpdateWorkspaceSettingsRequest, WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
 import type { Actor } from "../../domain/actors.js"
 import type {
   DeliveryEntityKind,
@@ -76,8 +91,10 @@ import type {
   EnvironmentId,
   EventCursor,
   EvidenceId,
+  JobId,
   PersonId,
   PluginConnectionId,
+  ProviderAccountId,
   RelationshipId,
   RelationshipRepairProposalId,
   ReleaseId,
@@ -85,40 +102,69 @@ import type {
   ShareId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import type {
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineLogPageRequestV1,
+  PluginPipelineLogPageV1
+} from "../../domain/plugins/index.js"
+import type { PrReviewSuggestionId } from "../../domain/prReview.js"
+import type {
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../../domain/prReviewRevision.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import type { SessionSummary } from "../auth/models.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
-export class ApplicationResourceNotFound extends Schema.TaggedErrorClass<ApplicationResourceNotFound>()(
+export class ApplicationResourceNotFound extends Schema.TaggedError<ApplicationResourceNotFound>()(
   "ApplicationResourceNotFound",
   {}
 ) {}
 
 /** A bounded application operation cannot currently be served. */
-export class ApplicationServiceUnavailable extends Schema.TaggedErrorClass<ApplicationServiceUnavailable>()(
+export class ApplicationServiceUnavailable extends Schema.TaggedError<ApplicationServiceUnavailable>()(
   "ApplicationServiceUnavailable",
   { retryAt: Schema.NullOr(UtcTimestamp) }
 ) {}
 
 /** A provider-specific read budget was exhausted. */
-export class ApplicationRateLimited extends Schema.TaggedErrorClass<ApplicationRateLimited>()(
+export class ApplicationRateLimited extends Schema.TaggedError<ApplicationRateLimited>()(
   "ApplicationRateLimited",
   { retryAt: Schema.NullOr(UtcTimestamp) }
 ) {}
 
 /** Durable state changed since the caller read its compare-and-swap revision. */
-export class ApplicationConflict extends Schema.TaggedErrorClass<ApplicationConflict>()(
+export class ApplicationConflict extends Schema.TaggedError<ApplicationConflict>()(
   "ApplicationConflict",
   {}
 ) {}
 
 /** An application-level mutation failed validation after transport decoding. */
-export class ApplicationInvalidRequest extends Schema.TaggedErrorClass<ApplicationInvalidRequest>()(
+export class ApplicationInvalidRequest extends Schema.TaggedError<ApplicationInvalidRequest>()(
   "ApplicationInvalidRequest",
   {}
 ) {}
+
+/** Authenticated read and owner-only compare-and-swap mutation boundary for workspace settings. */
+export class WorkspaceSettingsAdministration extends Context.Service<
+  WorkspaceSettingsAdministration,
+  {
+    readonly read: (
+      workspaceId: WorkspaceId
+    ) => Effect.Effect<WorkspaceSettingsReadModel, ApplicationServiceUnavailable>
+    readonly update: (input: {
+      readonly workspaceId: WorkspaceId
+      readonly request: UpdateWorkspaceSettingsRequest
+      readonly session: SessionSummary
+    }) => Effect.Effect<
+      WorkspaceSettingsReadModel,
+      ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable
+    >
+  }
+>()("@knpkv/control-center/server/api/WorkspaceSettingsAdministration") {}
 
 export type PluginAdministrationError =
   | ApplicationRateLimited
@@ -133,6 +179,14 @@ export interface PluginAdministrationService {
   readonly accounts?: (
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<ProviderAccountSummary>, ApplicationServiceUnavailable>
+  readonly patchProviderAccount?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly providerAccountId: ProviderAccountId
+    readonly patch: PatchProviderAccountRequest
+  }) => Effect.Effect<
+    ProviderAccountSummary,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly discoverAwsProfiles?: () => Effect.Effect<AwsProfileDiscoveryResponse, ApplicationServiceUnavailable>
   readonly discoverAwsResources?: (
     request: AwsResourceDiscoveryRequest
@@ -212,6 +266,30 @@ export interface PluginAdministrationService {
     PluginSynchronizationState,
     ApplicationInvalidRequest | PluginAdministrationError
   >
+  readonly administration?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) => Effect.Effect<
+    PluginConnectionAdministration,
+    ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly reauthorizeConnection?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly expectedRevision: number
+    readonly credentials: ReadonlyArray<PluginCredentialReplacement>
+  }) => Effect.Effect<
+    CreatePluginConnectionResponse,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly revokeConnection?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly expectedRevision: number
+  }) => Effect.Effect<
+    PluginConnectionSummary,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly configurationMetadata: (input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId
@@ -266,6 +344,29 @@ export class CompleteDiffReads extends Context.Service<CompleteDiffReads, {
     readonly revision: Revision
   }) => Effect.Effect<CompleteDiffInventory, CompleteDiffReadError>
 }>()("@knpkv/control-center/server/api/CompleteDiffReads") {}
+
+/** Fully authorized artifact bytes with provider storage coordinates removed. */
+export interface CodePipelineArtifactRead {
+  readonly body: Uint8Array
+  readonly contentLength: number
+  readonly filename: string
+  readonly offset: number
+  readonly totalBytes: number
+}
+
+/** Workspace-scoped bounded CodePipeline evidence reads. */
+export class CodePipelineReads extends Context.Service<CodePipelineReads, {
+  readonly logs: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly request: PluginPipelineLogPageRequestV1
+  }) => Effect.Effect<PluginPipelineLogPageV1, CompleteDiffReadError>
+  readonly artifact: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly request: PluginPipelineArtifactRangeRequestV1
+  }) => Effect.Effect<CodePipelineArtifactRead, CompleteDiffReadError>
+}>()("@knpkv/control-center/server/api/CodePipelineReads") {}
 
 /** Injectable bird's-eye portfolio projection boundary. */
 export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
@@ -462,16 +563,35 @@ export class RelationshipRepairProposals extends Context.Service<RelationshipRep
  * Release-aware conversational boundary. Implementations own context projection,
  * provider selection, prompt hardening, cancellation, and provider error redaction.
  */
+export interface ReleaseAgentTurnAdmission {
+  readonly eventCursor: ReleaseAgentTurnResponse["eventCursor"]
+  readonly provider: ReleaseAgentTurnResponse["provider"]
+  readonly release: ReleaseAgentTurnResponse["release"]
+  readonly releaseId: ReleaseAgentTurnResponse["releaseId"]
+  readonly workspaceId: WorkspaceId
+}
+
 export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
-  readonly runTurn: (input: {
+  readonly admitTurn?: (input: {
     readonly workspaceId: WorkspaceId
     readonly releaseId: ReleaseId
     readonly provider: AgentProvider
+  }) => Effect.Effect<
+    ReleaseAgentTurnAdmission,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly runTurn: (input: {
+    readonly admission?: ReleaseAgentTurnAdmission
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly originPath?: string
+    readonly provider: AgentProvider
     readonly prompt: AgentPrompt
     readonly history: ReadonlyArray<AgentHistoryMessage>
+    readonly publicationResult?: string
   }) => Effect.Effect<
     ReleaseAgentTurnResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/ReleaseAgentTurns") {}
 
@@ -486,9 +606,9 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
     readonly request: EnqueueReleaseAgentJobRequest
   }) => Effect.Effect<
     EnqueueReleaseAgentJobResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
-  readonly providers: () => Effect.Effect<
+  readonly providers: (workspaceId: WorkspaceId) => Effect.Effect<
     AgentProviderCatalog,
     ApplicationServiceUnavailable
   >
@@ -505,6 +625,16 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
 
 /** Server-owned orchestration for one exact immutable pull-request review. */
 export class PullRequestReviews extends Context.Service<PullRequestReviews, {
+  readonly thread: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly after: ReleaseAgentThreadCursor | null
+    readonly before?: ReleaseAgentThreadCursor | null
+    readonly limit: number
+  }) => Effect.Effect<
+    PullRequestReviewThreadPage,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly current: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
@@ -518,6 +648,96 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly request: EnqueuePullRequestReviewRequest
   }) => Effect.Effect<
     EnqueuePullRequestReviewResponse,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly cancel: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly extendBudget: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly revisions: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly beforeSequence: PrReviewSuggestionRevisionSequence | null
+    readonly limit: PrReviewSuggestionRevisionPageSize
+  }) => Effect.Effect<
+    ReviewSuggestionRevisionPage,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly editSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: EditReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    EditReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
+  readonly targetSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: TargetReviewSuggestionRequest
+  }) => Effect.Effect<
+    TargetReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
+  readonly dismissSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: DismissReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    DismissReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
+  readonly previewPublication: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: PublishReviewSuggestionRequest["jobId"]
+    readonly suggestionId: PublishReviewSuggestionRequest["suggestionId"]
+    readonly revisionId: PublishReviewSuggestionRequest["revisionId"]
+    readonly operation?: PublishReviewSuggestionRequest["operation"]
+    readonly commentId?: PublishReviewSuggestionRequest["commentId"]
+    readonly publishingOperator: Extract<Actor, { readonly _tag: "human" }>["personId"]
+  }) => Effect.Effect<
+    ReviewSuggestionPublicationPreview,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly publishSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly request: PublishReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    PublishedReviewComment,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/PullRequestReviews") {}

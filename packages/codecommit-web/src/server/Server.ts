@@ -6,6 +6,8 @@ import {
   ConfigService,
   PermissionService,
   PRService,
+  ReadClient,
+  ReviewClient,
   SandboxService,
   StatsService
 } from "@knpkv/codecommit-core"
@@ -15,9 +17,10 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Cause, Config, Duration, Effect, Layer, Predicate, Ref } from "effect"
+import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Stdio from "effect/Stdio"
 import {
   Etag,
   FetchHttpClient,
@@ -40,9 +43,38 @@ import {
   StatsLive,
   SubscriptionsLive
 } from "./handlers/index.js"
+import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
+import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
+import {
+  activateOwnerSessionBootstrap,
+  makeOwnerSessionSecrets,
+  ownerSessionAuthLayer,
+  OwnerSessionBootstrapRouter,
+  ownerSessionOrigin,
+  OwnerSessionSecrets,
+  type OwnerSessionSecretsContract,
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
+} from "./internal/OwnerSessionSecurity.js"
+import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
+import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
+
+export {
+  makeOwnerSessionSecrets,
+  ownerSessionOrigin,
+  OwnerSessionSecrets,
+  type OwnerSessionSecretsContract,
+  ownerSessionUrl,
+  ownerSessionUrlForOrigin,
+  requireLoopbackHostname,
+  requireLoopbackOrigin
+} from "./internal/OwnerSessionSecurity.js"
 
 // MIME types for common files
-const mimeTypes: Record<string, string> = {
+interface MimeTypeLookup extends Readonly<Record<string, string>> {}
+
+const mimeTypes: MimeTypeLookup = {
   ".html": "text/html",
   ".js": "application/javascript",
   ".css": "text/css",
@@ -121,7 +153,7 @@ const HandlersLive = Layer.mergeAll(
   StatsLive,
   PermissionsLive,
   AuditLive
-)
+).pipe(Layer.provideMerge(BackgroundScopeLive))
 
 // Platform dependencies
 const PlatformLive = Layer.mergeAll(
@@ -196,6 +228,42 @@ const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRService
 // AwsClient for handlers that call AWS directly (e.g., createPR)
 const AwsClientLive_ = GatedAwsClientLive
 
+// Immutable diff and Relay reads use the Schema-decoded provider boundary
+// wrapped by the same permission and audit policy as the legacy AWS client.
+const InnerReadClientLive = Layer.effect(
+  InnerCodeCommitReadClient,
+  ReadClient.CodeCommitReadClient
+).pipe(
+  Layer.provide(ReadClient.CodeCommitReadClient.live),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+const ReadClientLive = Layer.effect(
+  ReadClient.CodeCommitReadClient,
+  Effect.flatMap(InnerCodeCommitReadClient, makePermissionedReadClient)
+).pipe(
+  Layer.provide(InnerReadClientLive),
+  Layer.provide(PermissionLive),
+  Layer.provide(PermissionGateLive_)
+)
+
+// The full core review client stays private to this layer. HTTP handlers receive
+// only the permission-gated Relay comment capability, never approval or merge.
+const CoreReviewClientLive = ReviewClient.CodeCommitReviewClient.layer.pipe(
+  Layer.provide(ReviewClient.CodeCommitReviewProviderLive),
+  Layer.provide(ReadClientLive),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(AwsClientConfig.Default)
+)
+const RelayFindingPublisherLive = Layer.effect(
+  RelayFindingPublisher,
+  makeRelayFindingPublisher()
+).pipe(
+  Layer.provide(CoreReviewClientLive),
+  Layer.provide(PermissionLive),
+  Layer.provide(PermissionGateLive_)
+)
+
 // Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
 const SandboxServicesLive = Layer.mergeAll(
@@ -219,9 +287,11 @@ const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
   AwsClientLive_,
+  ReadClientLive,
   SandboxServicesLive,
   StatsServiceLive,
-  PermissionLive
+  PermissionLive,
+  PlatformLive
 )
 
 // Prune old audit log entries on startup
@@ -235,78 +305,16 @@ const AuditPrune = Layer.effectDiscard(
   })
 )
 
-// Fork auto-refresh loop: initial refresh + recurring based on config
-const AutoRefresh = Layer.effectDiscard(
-  Effect.gen(function*() {
-    const prService = yield* PRService.PRService
-    const configService = yield* ConfigService.ConfigService
-    const defaultRefreshConfig = { autoRefresh: true, refreshIntervalSeconds: 300 }
-
-    const refreshIteration = Effect.gen(function*() {
-      const config = yield* configService.load.pipe(
-        Effect.catchIf(() => true, () => Effect.succeed(defaultRefreshConfig))
-      )
-      if (config.autoRefresh) {
-        yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
-        yield* prService.refresh
-        yield* Effect.logInfo("Auto-refresh complete")
-      } else {
-        yield* Effect.sleep(Duration.seconds(30))
-      }
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logError("Auto-refresh failed", cause).pipe(
-          Effect.andThen(Effect.sleep(Duration.seconds(10)))
-        )
-      )
-    )
-
-    yield* Effect.forkDetach(
-      Effect.gen(function*() {
-        yield* prService.refresh
-        yield* Effect.logInfo("Initial PR refresh complete")
-        return yield* Effect.forever(refreshIteration)
-      })
-    )
-  })
-)
-
-// Sandbox startup: Docker check + reconcile orphans + GC daemon
-const SandboxStartup = Layer.effectDiscard(
-  Effect.gen(function*() {
-    const sandboxService = yield* SandboxService.SandboxService
-    const docker = yield* SandboxService.DockerService
-    const available = yield* docker.isAvailable()
-    if (!available) {
-      yield* Effect.logWarning("Docker not available — sandbox feature disabled")
-      return
-    }
-    yield* sandboxService.reconcile()
-    yield* Effect.logInfo("Sandbox service ready")
-
-    // GC daemon — stop idle sandboxes, cleanup stopped ones
-    yield* Effect.forkDetach(
-      Effect.forever(
-        Effect.gen(function*() {
-          yield* Effect.sleep(Duration.minutes(5))
-          yield* sandboxService.gcIdle()
-        }).pipe(Effect.catchCause((c) =>
-          Cause.hasInterruptsOnly(c)
-            ? Effect.failCause(c)
-            : Effect.logWarning("Sandbox GC failed", c)
-        ))
-      )
-    )
-  })
-)
-
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.mergeAll(
-  HttpApiBuilder.layer(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
-  AutoRefresh,
+  HttpApiBuilder.layer(CodeCommitApi).pipe(
+    Layer.provide(HandlersLive.pipe(Layer.provide(RelayFindingPublisherLive)))
+  ),
+  autoRefreshLayer,
   AuditPrune,
-  SandboxStartup
+  sandboxStartupLayer
 ).pipe(
+  Layer.provide(ownerSessionAuthLayer),
   Layer.provide(AllServicesLive),
   Layer.provide(FetchHttpClient.layer)
 )
@@ -325,12 +333,12 @@ const CorsLive = Layer.unwrap(
     HttpRouter.cors({
       allowedOrigins,
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"]
+      allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"]
     }))
 )
 
 // Combined routes with CORS — orDie for remaining service construction errors
-const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
+const AllRoutes = Layer.mergeAll(ApiLive, OwnerSessionBootstrapRouter, StaticRouter).pipe(
   Layer.provide(CorsLive),
   Layer.orDie
 )
@@ -338,17 +346,46 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
 // HttpPlatform + Etag — required by addHttpApi for OpenAPI/multipart support
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.layer))
 
-export const makeServer = (options: { port: number; hostname?: string }) =>
-  HttpRouter.serve(AllRoutes).pipe(
-    // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
-    Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 0 })),
-    Layer.provide(Etag.layer),
-    Layer.provide(HttpPlatformLive)
-  )
+export interface CodeCommitServerOptions {
+  readonly hostname?: string
+  readonly port: number
+  readonly ready?: Deferred.Deferred<void>
+  readonly security: OwnerSessionSecretsContract
+}
 
-export const makeCodeCommitServer = (port: number) => makeServer({ port })
+export const makeServer = (options: CodeCommitServerOptions) => {
+  const hostname = options.hostname ?? "127.0.0.1"
+  return Layer.unwrap(
+    requireLoopbackHostname(hostname).pipe(
+      Effect.map(() => {
+        const server = HttpRouter.serve(AllRoutes).pipe(
+          // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
+          Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
+          Layer.provide(Etag.layer),
+          Layer.provide(HttpPlatformLive),
+          Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security))
+        )
+        return server.pipe(
+          Layer.tap(() =>
+            activateOwnerSessionBootstrap(options.security).pipe(
+              Effect.andThen(
+                options.ready === undefined
+                  ? Effect.void
+                  : Deferred.succeed(options.ready, undefined)
+              )
+            )
+          )
+        )
+      })
+    )
+  )
+}
+
+export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsContract) =>
+  makeServer({ port, security })
 
 export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
+const PublicOrigin = Config.option(Config.string("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
 const updatePortOnConflict = (
   portRef: Ref.Ref<number>,
@@ -369,14 +406,31 @@ const updatePortOnConflict = (
   )
 
 export const CodeCommitServerLive = Effect.gen(function*() {
+  const stdio = yield* Stdio.Stdio
   const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
   const retriesRef = yield* Ref.make(10)
+  const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      yield* Effect.logInfo(`Starting server on http://localhost:${p}`)
-      return yield* Layer.launch(makeCodeCommitServer(p))
+      // Rotate every authority-bearing secret on each bind attempt so a URL
+      // emitted for an occupied port cannot authenticate to a later retry.
+      const security = yield* makeOwnerSessionSecrets()
+      const ready = yield* Deferred.make<void>()
+      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
+      const publicOrigin = yield* requireLoopbackOrigin(
+        Option.getOrElse(publicOriginOverride, () => directOrigin)
+      )
+      const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
+      yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
+      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
+        Stream.run(stdio.stdout())
+      )
+      return yield* Fiber.join(serverFiber)
     }).pipe(updatePortOnConflict(portRef, retriesRef))
   )
 })

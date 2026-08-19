@@ -290,6 +290,7 @@ export const QuarantineRecordKind = Schema.Literals([
   "role-assignment",
   "session",
   "pairing-code",
+  "workspace-settings",
   "workspace"
 ])
 
@@ -352,6 +353,8 @@ export const QuarantineReasonCode = Schema.Literals([
   "snapshot-beyond-head",
   "snapshot-digest-mismatch",
   "snapshot-identity-mismatch",
+  "workspace-settings-digest-mismatch",
+  "workspace-settings-schema-invalid",
   "workspace-schema-invalid"
 ])
 
@@ -416,6 +419,8 @@ export const QuarantineDiagnosticSummary = Schema.Literals([
   "Stored role assignment failed schema validation.",
   "Stored session failed schema validation.",
   "Stored pairing code failed schema validation.",
+  "Stored workspace settings digest does not match its content.",
+  "Stored workspace settings failed schema validation.",
   "Stored workspace failed schema validation."
 ])
 

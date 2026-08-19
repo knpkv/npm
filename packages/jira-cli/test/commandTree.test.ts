@@ -20,6 +20,9 @@ interface CommandCalls {
   readonly versionUpdate: number
   readonly relatedWorkList: number
   readonly relatedWorkAdd: number
+  readonly relatedWorkDelete: number
+  readonly issueEdit: number
+  readonly versionCreate: number
   readonly writeMulti: number
 }
 
@@ -28,10 +31,13 @@ const emptyCalls: CommandCalls = {
   issueAttachmentUpload: 0,
   issueSearch: 0,
   relatedWorkAdd: 0,
+  relatedWorkDelete: 0,
   relatedWorkList: 0,
   versionGet: 0,
   versionList: 0,
   versionUpdate: 0,
+  issueEdit: 0,
+  versionCreate: 0,
   writeMulti: 0
 }
 
@@ -117,6 +123,10 @@ const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
           Ref.update(calls, (state) => ({ ...state, issueGet: state.issueGet + 1 })).pipe(
             Effect.as(sampleIssue)
           ),
+        edit: () =>
+          Ref.update(calls, (state) => ({ ...state, issueEdit: state.issueEdit + 1 })).pipe(
+            Effect.as(sampleIssue)
+          ),
         search: () => Effect.die("IssueService.search should not be called"),
         searchAll: () =>
           Ref.update(calls, (state) => ({ ...state, issueSearch: state.issueSearch + 1 })).pipe(
@@ -138,6 +148,12 @@ const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
           Ref.update(calls, (state) => ({ ...state, relatedWorkAdd: state.relatedWorkAdd + 1 })).pipe(
             Effect.as(sampleRelatedWork)
           ),
+        createVersion: () =>
+          Ref.update(calls, (state) => ({ ...state, versionCreate: state.versionCreate + 1 })).pipe(
+            Effect.as(sampleVersion)
+          ),
+        deleteRelatedWork: () =>
+          Ref.update(calls, (state) => ({ ...state, relatedWorkDelete: state.relatedWorkDelete + 1 })),
         getVersion: () =>
           Ref.update(calls, (state) => ({ ...state, versionGet: state.versionGet + 1 })).pipe(
             Effect.as(sampleVersion)
@@ -261,6 +277,21 @@ describe("Jira command tree", () => {
         calls,
         output
       )
+      // The sample related work already links this URL, so the reconcile keeps
+      // it and adds nothing — what this covers is that the command resolves and
+      // the service's new deleteRelatedWork member is actually wired up.
+      const relatedWorkSyncExit = yield* runJiraCommand(
+        [
+          "version",
+          "related-work",
+          "sync",
+          "10042",
+          "--link",
+          `Release notes=${sampleRelatedWork.url}`
+        ],
+        calls,
+        output
+      )
       const legacyViewExit = yield* runJiraCommand(["version", "view", "10042"], calls, legacyViewOutput)
       const legacySetExit = yield* runJiraCommand(
         [
@@ -289,16 +320,141 @@ describe("Jira command tree", () => {
       expect(updateExit._tag).toBe("Success")
       expect(relatedWorkListExit._tag).toBe("Success")
       expect(relatedWorkAddExit._tag).toBe("Success")
+      expect(relatedWorkSyncExit._tag).toBe("Success")
       expect(legacyViewExit._tag).toBe("Failure")
       expect(legacySetExit._tag).toBe("Failure")
       expect(legacyRelatedWorkExit._tag).toBe("Failure")
 
       expect(yield* Ref.get(calls)).toMatchObject({
         relatedWorkAdd: 1,
-        relatedWorkList: 1,
+        // The desired link already exists, so sync neither adds nor deletes.
+        relatedWorkDelete: 0,
+        relatedWorkList: 2,
         versionGet: 1,
         versionList: 1,
         versionUpdate: 1
       })
+    }))
+
+  // `--link " =url"` and `--link "title= "` both have a non-empty span either
+  // side of the `=`, so a check on the separator position alone lets them
+  // through and Jira receives a link with an empty title or url.
+  it.effect("rejects a --link whose title or url is only whitespace", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const blankTitle = yield* runJiraCommand(
+        ["version", "related-work", "sync", "10042", "--link", " =https://example.atlassian.net/wiki/pages/1"],
+        calls,
+        output
+      )
+      const blankUrl = yield* runJiraCommand(
+        ["version", "related-work", "sync", "10042", "--link", "Release notes=   "],
+        calls,
+        output
+      )
+
+      expect(blankTitle._tag).toBe("Failure")
+      expect(blankUrl._tag).toBe("Failure")
+      // Rejected before the remote write, not after it.
+      expect(yield* Ref.get(calls)).toMatchObject({
+        relatedWorkAdd: 0,
+        relatedWorkDelete: 0,
+        relatedWorkList: 0
+      })
+    }))
+
+  // The nearby valid fixture: surrounding whitespace is normalized, not
+  // rejected.
+  it.effect("normalizes a --link padded with whitespace", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["version", "related-work", "sync", "10042", "--link", `  Release notes = ${sampleRelatedWork.url}  `],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      // Matched the existing link by URL, so nothing was added or removed.
+      expect(yield* Ref.get(calls)).toMatchObject({
+        relatedWorkAdd: 0,
+        relatedWorkDelete: 0,
+        relatedWorkList: 1
+      })
+    }))
+
+  it.effect("wires up issue edit and reaches IssueService.edit", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["issue", "edit", "PROJ-123", "--add-fix-version", "OOB 100", "--add-label", "domain:oob"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ issueEdit: 1 })
+    }))
+
+  // `Options.atLeast(0)` reports an absent repeatable flag as `[]`, which
+  // `buildEditIssuePayload` reads as "not supplied". Pin that here: with only
+  // one flag passed the command must still resolve, rather than the other five
+  // empty arrays being taken as replacements that clear their fields.
+  it.effect("treats the repeatable flags a caller omits as absent", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["issue", "edit", "PROJ-123", "--add-label", "domain:oob"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ issueEdit: 1 })
+    }))
+
+  // Note: `issue edit PROJ-123` with no flags parses fine and reaches the
+  // service — the "nothing to edit" refusal lives in `buildEditIssuePayload`
+  // inside `IssueService.edit`, which this suite stubs out. That path is covered
+  // by editIssuePayload.test.ts and remoteWrites.test.ts.
+
+  it.effect("wires up version create and reaches VersionService.createVersion", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["version", "create", "--project", "PROJ", "--name", "OOB 100"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(yield* Ref.get(calls)).toMatchObject({ versionCreate: 1 })
+    }))
+
+  // Shape-only date validation would let this through and Jira would answer
+  // with an unattributed 400 — after the version was already created.
+  it.effect("rejects a non-existent --start-date before the remote write", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(emptyCalls)
+      const output = yield* Ref.make("")
+
+      const exit = yield* runJiraCommand(
+        ["version", "create", "--project", "PROJ", "--name", "OOB 100", "--start-date", "2026-02-30"],
+        calls,
+        output
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(yield* Ref.get(calls)).toMatchObject({ versionCreate: 0 })
     }))
 })

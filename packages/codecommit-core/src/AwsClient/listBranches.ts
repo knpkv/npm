@@ -36,8 +36,6 @@ const fetchBranchPages = (repositoryName: string) =>
           )
         )
       )
-  ).pipe(
-    Stream.flatMap(Stream.fromIterable)
   )
 
 export const listBranches = (params: ListBranchesParams) =>

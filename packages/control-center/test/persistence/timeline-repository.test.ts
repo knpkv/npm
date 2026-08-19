@@ -567,12 +567,12 @@ describe("TimelineRepository", () => {
         to: "2026-07-31T23:59:59.999Z",
         workspaceId
       })
-      const expectedIndexes: Readonly<Record<"action" | "plugin-sync" | "relationship" | "system", string>> = {
+      const expectedIndexes = {
         action: "governed_action_audit_timeline_idx",
         "plugin-sync": "plugin_sync_pages_timeline_idx",
         relationship: "relationship_revision_timeline_idx",
         system: "domain_events_timeline_idx"
-      }
+      } satisfies Readonly<Record<"action" | "plugin-sync" | "relationship" | "system", string>>
 
       for (const plan of plans) {
         const rows = yield* sql.unsafe(`EXPLAIN QUERY PLAN ${plan.sql}`, [...plan.params]).pipe(

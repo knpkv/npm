@@ -10,31 +10,31 @@ const BackupOperation = Schema.String.check(
 )
 
 /** Untrusted archive or destination input did not satisfy the local operation contract. */
-export class BackupInputError extends Schema.TaggedErrorClass<BackupInputError>()("BackupInputError", {
+export class BackupInputError extends Schema.TaggedError<BackupInputError>()("BackupInputError", {
   operation: BackupOperation,
   reason: Schema.Literals(["already-exists", "invalid-path", "overlap", "target-raced"])
 }) {}
 
 /** An archive artifact exceeded a documented bounded-read limit. */
-export class BackupLimitError extends Schema.TaggedErrorClass<BackupLimitError>()("BackupLimitError", {
+export class BackupLimitError extends Schema.TaggedError<BackupLimitError>()("BackupLimitError", {
   artifact: Schema.Literals(["blob", "database", "manifest"]),
   maximumBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 }) {}
 
 /** A platform storage operation failed; callers retain its cause for redacted diagnostics. */
-export class BackupStorageError extends Schema.TaggedErrorClass<BackupStorageError>()("BackupStorageError", {
+export class BackupStorageError extends Schema.TaggedError<BackupStorageError>()("BackupStorageError", {
   cause: Schema.Defect(),
   operation: BackupOperation
 }) {}
 
 /** A database snapshot or integrity operation failed with its diagnostic cause retained. */
-export class BackupSqlError extends Schema.TaggedErrorClass<BackupSqlError>()("BackupSqlError", {
+export class BackupSqlError extends Schema.TaggedError<BackupSqlError>()("BackupSqlError", {
   cause: Schema.Defect(),
   operation: BackupOperation
 }) {}
 
 /** The manifest is malformed, unsupported, or inconsistent with its snapshot. */
-export class BackupManifestError extends Schema.TaggedErrorClass<BackupManifestError>()(
+export class BackupManifestError extends Schema.TaggedError<BackupManifestError>()(
   "BackupManifestError",
   {
     reason: Schema.Literals([
@@ -51,7 +51,7 @@ export class BackupManifestError extends Schema.TaggedErrorClass<BackupManifestE
 ) {}
 
 /** Authoritative database or blob evidence did not pass integrity verification. */
-export class BackupIntegrityError extends Schema.TaggedErrorClass<BackupIntegrityError>()(
+export class BackupIntegrityError extends Schema.TaggedError<BackupIntegrityError>()(
   "BackupIntegrityError",
   {
     digest: Schema.NullOr(BlobDigest),
@@ -69,7 +69,7 @@ export class BackupIntegrityError extends Schema.TaggedErrorClass<BackupIntegrit
 ) {}
 
 /** The scoped SQLite write barrier could not be acquired for schema initialization. */
-export class SchemaWriteBarrierError extends Schema.TaggedErrorClass<SchemaWriteBarrierError>()(
+export class SchemaWriteBarrierError extends Schema.TaggedError<SchemaWriteBarrierError>()(
   "SchemaWriteBarrierError",
   { phase: Schema.Literals(["acquire", "verify"]) }
 ) {}

@@ -23,7 +23,7 @@ interface ParsedRule {
 
 const ruleDefaults: ParsedRule = { requiredApprovals: 1, poolMembers: [], poolMemberArns: [] }
 
-const coerceApprovalCount = (raw: unknown): number => {
+const coerceApprovalCount = <UnparsedInput>(raw: UnparsedInput): number => {
   const n = Number(raw ?? 1)
   return Number.isFinite(n) ? n : 1
 }

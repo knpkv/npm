@@ -94,9 +94,9 @@ const persistedInvalid = (input: {
     diagnosticCode: input.diagnosticCode
   })
 
-const decodeOne = <SchemaType extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeOne = <SchemaType extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   schema: SchemaType,
-  row: unknown,
+  row: UnparsedInput,
   scope: PublishPluginRuntimeAuthority["scope"],
   diagnosticCode: string
 ): Effect.Effect<SchemaType["Type"], PersistedRecordError, SchemaType["DecodingServices"]> => {

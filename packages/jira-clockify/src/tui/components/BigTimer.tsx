@@ -7,7 +7,9 @@ import { useElapsedTimer } from "../hooks/useElapsedTimer.js"
 import { useTerminalSize } from "../hooks/useTerminalSize.js"
 
 // 5-line tall digit font (each digit is 5 rows × 5 cols)
-const DIGITS: Record<string, ReadonlyArray<string>> = {
+interface DigitLookup extends Readonly<Record<string, ReadonlyArray<string>>> {}
+
+const DIGITS: DigitLookup = {
   "0": ["╔═══╗", "║   ║", "║   ║", "║   ║", "╚═══╝"],
   "1": ["    ╗", "    ║", "    ║", "    ║", "    ╝"],
   "2": ["╔═══╗", "    ║", "╔═══╝", "║    ", "╚═══╝"],

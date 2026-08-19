@@ -21,7 +21,9 @@ import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
 import {
   decodeControlCenterDataPaths,
+  optionalNonBlankConfigurationValue,
   prepareControlCenterDataRoot,
+  PrReviewTimingConfiguration,
   resolvePreparedControlCenterDataRoot
 } from "./cliConfiguration.js"
 import { ControlCenterObservabilityLive } from "./observability.js"
@@ -32,6 +34,7 @@ import {
   verifyBackup
 } from "./persistence/backup/index.js"
 import { DatabaseInitializationError } from "./persistence/errors.js"
+import { AgentLeaseOwner } from "./persistence/repositories/agentJobModels.js"
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
@@ -61,6 +64,21 @@ const serverConfiguration = Config.all({
   agentOpenAiModel: Config.string("CONTROL_CENTER_AGENT_OPENAI_MODEL").pipe(Config.withDefault("")),
   agentCwd: Config.string("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
   agentProviders: Config.string("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
+  prReviewSbxEnabled: Config.boolean("CONTROL_CENTER_PR_REVIEW_SBX_ENABLED").pipe(Config.withDefault(false)),
+  prReviewSbxExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE").pipe(Config.withDefault("sbx")),
+  prReviewSbxTemplate: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE").pipe(Config.withDefault("")),
+  prReviewCodexExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE").pipe(
+    Config.withDefault("codex")
+  ),
+  prReviewClaudeExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE").pipe(
+    Config.withDefault("claude")
+  ),
+  prReviewBudgetMillis: Config.int("CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS").pipe(
+    Config.withDefault(1_200_000)
+  ),
+  prReviewMaximumDurationMillis: Config.int("CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS").pipe(
+    Config.withDefault(1_200_000)
+  ),
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
   allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
   allowInsecureLan: Config.boolean("CONTROL_CENTER_ALLOW_INSECURE_LAN").pipe(Config.withDefault(false)),
@@ -83,10 +101,16 @@ const verificationLine = (complete: string, degraded: string, verification: Back
     ? complete
     : `${degraded} ${verification.reproducibleBlobGaps.length} reproducible cache gaps.`
 
-class ControlCenterCliUsageError extends Schema.TaggedErrorClass<ControlCenterCliUsageError>()(
+class ControlCenterCliUsageError extends Schema.TaggedError<ControlCenterCliUsageError>()(
   "ControlCenterCliUsageError",
   { command: Schema.String }
 ) {}
+
+class ControlCenterCliConfigurationError extends Schema.TaggedError<
+  ControlCenterCliConfigurationError
+>()("ControlCenterCliConfigurationError", {
+  reason: Schema.Literal("pr-review-provider-unavailable")
+}) {}
 
 const program = Effect.scoped(
   Effect.gen(function*() {
@@ -169,11 +193,37 @@ const program = Effect.scoped(
             Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000))
           )(configured.agentOpenAiApiUrl),
           model: yield* Schema.decodeUnknownEffect(AgentModelId)(configured.agentOpenAiModel),
-          ...(Redacted.value(configured.agentOpenAiApiKey).length === 0
-            ? {}
-            : { apiKey: configured.agentOpenAiApiKey })
+          ...(!(Redacted.value(configured.agentOpenAiApiKey).length === 0) && { apiKey: configured.agentOpenAiApiKey })
         }
         : undefined
+      if (
+        configured.prReviewSbxEnabled &&
+        openAiCompatible === undefined &&
+        !agentProviders.includes("codex") &&
+        !agentProviders.includes("claude")
+      ) {
+        return yield* new ControlCenterCliConfigurationError({
+          reason: "pr-review-provider-unavailable"
+        })
+      }
+      const prReviewTiming = yield* Schema.decodeUnknownEffect(
+        PrReviewTimingConfiguration
+      )({
+        budgetMillis: configured.prReviewBudgetMillis,
+        maximumSandboxDurationMillis: configured.prReviewMaximumDurationMillis
+      })
+      const sbxExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewSbxExecutable
+      )
+      const sbxTemplate = optionalNonBlankConfigurationValue(
+        configured.prReviewSbxTemplate
+      )
+      const prReviewCodexExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewCodexExecutable
+      )
+      const prReviewClaudeExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewClaudeExecutable
+      )
       const allowedHosts = commaSeparated(configured.allowedHosts)
       const allowedOrigins = commaSeparated(configured.allowedOrigins)
       const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -183,44 +233,55 @@ const program = Effect.scoped(
         host: configured.host,
         port: configured.port,
         allowInsecureLan: configured.allowInsecureLan,
-        ...(configured.publicOrigin.length > 0 ? { publicOrigin: configured.publicOrigin } : {}),
-        ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
-        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-        ...(trustedProxyAddresses.length > 0 ? { trustedProxyAddresses } : {}),
-        ...(hasDirectTlsInput
-          ? {
-            directTls: {
-              certificateRef: configured.directTlsCertificateRef,
-              privateKeyRef: configured.directTlsPrivateKeyRef
-            }
+        ...((configured.publicOrigin.length > 0) && { publicOrigin: configured.publicOrigin }),
+        ...((allowedHosts.length > 0) && { allowedHosts }),
+        ...((allowedOrigins.length > 0) && { allowedOrigins }),
+        ...((trustedProxyAddresses.length > 0) && { trustedProxyAddresses }),
+        ...(hasDirectTlsInput && {
+          directTls: {
+            certificateRef: configured.directTlsCertificateRef,
+            privateKeyRef: configured.directTlsPrivateKeyRef
           }
-          : {})
+        })
       })
       const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
       const services = yield* Layer.build(
         makeControlCenterServer({
           bindConfig,
           firstPartyPluginRuntime: true,
+          governedActionExecution: {
+            workspaceId: DEFAULT_WORKSPACE_ID
+          },
           bootstrap: {
             owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
             workspaceId: DEFAULT_WORKSPACE_ID,
             workspaceName: WorkspaceName.make("Control Center")
           },
           persistenceConfig: dataPaths.persistenceConfig,
+          prReviewWorker: configured.prReviewSbxEnabled
+            ? {
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              workspaceRoot: path.join(dataPaths.dataRoot, "pr-review-workspaces"),
+              ...(!(sbxExecutable === undefined) && { sbxExecutable }),
+              ...(!(sbxTemplate === undefined) && { sbxTemplate }),
+              ...(!(prReviewCodexExecutable === undefined) && { codexExecutable: prReviewCodexExecutable }),
+              ...(!(prReviewClaudeExecutable === undefined) && { claudeExecutable: prReviewClaudeExecutable }),
+              reviewBudgetMillis: prReviewTiming.budgetMillis,
+              leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
+              maximumSandboxDurationMillis: prReviewTiming.maximumSandboxDurationMillis
+            }
+            : null,
           releaseAgent: agentCwd === null && openAiCompatible === undefined
             ? null
             : {
               cwd: agentCwd ?? ".",
               enabledProviders: agentProviders,
-              ...(configured.agentCodexExecutable.length > 0
-                ? { codexExecutable: configured.agentCodexExecutable }
-                : {}),
-              ...(codexModel === undefined ? {} : { codexModel }),
-              ...(configured.agentClaudeExecutable.length > 0
-                ? { claudeExecutable: configured.agentClaudeExecutable }
-                : {}),
-              ...(claudeModel === undefined ? {} : { claudeModel }),
-              ...(openAiCompatible === undefined ? {} : { openAiCompatible })
+              ...((configured.agentCodexExecutable.length > 0) && { codexExecutable: configured.agentCodexExecutable }),
+              ...(!(codexModel === undefined) && { codexModel }),
+              ...((configured.agentClaudeExecutable.length > 0) &&
+                { claudeExecutable: configured.agentClaudeExecutable }),
+              ...(!(claudeModel === undefined) && { claudeModel }),
+              ...(!(openAiCompatible === undefined) && { openAiCompatible })
             },
           secretRoot: dataPaths.secretRoot,
           staticAssets: { root: staticRoot }
@@ -260,8 +321,8 @@ const program = Effect.scoped(
   })
 )
 
-const findDatabaseInitializationError = (
-  value: unknown,
+const findDatabaseInitializationError = <UnparsedInput>(
+  value: UnparsedInput,
   remainingWrapperDepth = 2
 ): DatabaseInitializationError | null => {
   if (Schema.is(DatabaseInitializationError)(value)) return value
@@ -282,7 +343,7 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     error,
     (value) => Predicate.hasProperty(value, "_tag") && value._tag === "ControlCenterCliUsageError"
   )
-  if (isUsageError) return Effect.failCause(cause)
+  if (isUsageError) return Effect.void
   const databaseInitializationError = Option.flatMap(
     error,
     (value) => Option.fromNullishOr(findDatabaseInitializationError(value))
@@ -298,14 +359,13 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
               "Automatic migrations are disabled until schema stability."
           )
           : Effect.void
-      ),
-      Effect.andThen(Effect.failCause(cause))
+      )
     )
   }
   const errorTag = Option.flatMap(
     error,
     (value) =>
-      Predicate.hasProperty(value, "_tag") && typeof value._tag === "string"
+      Predicate.hasProperty(value, "_tag") && Predicate.isString(value._tag)
         ? Option.some(value._tag)
         : Option.none<string>()
   )
@@ -313,12 +373,12 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     onNone: () => "Control Center command failed unexpectedly.",
     onSome: (tag) => `Control Center command failed (${tag}).`
   })
-  return writeStderrLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
+  return writeStderrLine(message)
 }
 
 NodeRuntime.runMain(
   program.pipe(
-    Effect.catchCause(reportProgramFailure),
+    Effect.tapCause(reportProgramFailure),
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }

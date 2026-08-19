@@ -47,8 +47,8 @@ export interface GitLogEntry {
 /**
  * Convert PlatformError to GitError or GitNotInstalledError.
  */
-const mapPlatformError = (
-  error: unknown,
+const mapPlatformError = <UnparsedInput>(
+  error: UnparsedInput,
   commandStr: string
 ): GitError | GitNotInstalledError => {
   if (

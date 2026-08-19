@@ -6,7 +6,7 @@ import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Error
 const OperationName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
 /** Untrusted provider output failed Schema decoding. */
-export class CodeCommitMalformedResponseError extends Schema.TaggedErrorClass<CodeCommitMalformedResponseError>()(
+export class CodeCommitMalformedResponseError extends Schema.TaggedError<CodeCommitMalformedResponseError>()(
   "CodeCommitMalformedResponseError",
   {
     operation: OperationName,
@@ -15,13 +15,13 @@ export class CodeCommitMalformedResponseError extends Schema.TaggedErrorClass<Co
 ) {}
 
 /** The requested CodeCommit object does not exist in the configured account. */
-export class CodeCommitReadNotFoundError extends Schema.TaggedErrorClass<CodeCommitReadNotFoundError>()(
+export class CodeCommitReadNotFoundError extends Schema.TaggedError<CodeCommitReadNotFoundError>()(
   "CodeCommitReadNotFoundError",
   { operation: OperationName }
 ) {}
 
 /** CodeCommit or the bounded read client refused blob content that was too large. */
-export class CodeCommitBlobTooLargeError extends Schema.TaggedErrorClass<CodeCommitBlobTooLargeError>()(
+export class CodeCommitBlobTooLargeError extends Schema.TaggedError<CodeCommitBlobTooLargeError>()(
   "CodeCommitBlobTooLargeError",
   {
     operation: OperationName,

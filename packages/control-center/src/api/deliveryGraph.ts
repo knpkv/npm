@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
@@ -14,10 +15,12 @@ import {
   LedgerRevision
 } from "../domain/deliveryGraph.js"
 import { Freshness } from "../domain/freshness.js"
+import { GovernedActionState } from "../domain/governedAction/index.js"
 import {
   EntityId,
   EnvironmentId,
   EvidenceId,
+  GovernedActionId,
   PersonId,
   RelationshipId,
   RelationshipRepairProposalId,
@@ -31,7 +34,7 @@ import {
   RelationshipRepairRationale,
   RelationshipRepairReviewDecision
 } from "../domain/relationshipRepair.js"
-import { SourceRevision } from "../domain/sourceRevision.js"
+import { Revision, SourceRevision } from "../domain/sourceRevision.js"
 import { TimelineEvent } from "../domain/timeline.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
@@ -180,12 +183,32 @@ export const WorkspaceEntityActivity = Schema.Struct({
 /** Decoded exact entity activity. */
 export type WorkspaceEntityActivity = typeof WorkspaceEntityActivity.Type
 
+/** Current revision-scoped Control Center approval for a Clockify entry. */
+export const ClockifyApproval = Schema.Struct({
+  actionId: GovernedActionId,
+  decision: Schema.Literals(["approved", "rejected"]),
+  rationale: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
+  decidedAt: UtcTimestamp
+}).annotate({ identifier: "ClockifyApproval" })
+
+/** Decoded browser-safe Clockify approval projection. */
+export type ClockifyApproval = typeof ClockifyApproval.Type
+
 /** Canonical provider-neutral full-page read model for one workspace entity. */
 export const WorkspaceEntityInspection = Schema.Struct({
   entity: WorkspaceEntityProjection,
   source: SourceRevision,
   isSourceCurrent: Schema.Boolean,
+  sourceActionsAvailable: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
+  ),
+  sourceSynchronizationAvailable: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
+  ),
   freshness: Schema.NullOr(Freshness),
+  clockifyApproval: Schema.NullOr(ClockifyApproval).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null))
+  ),
   graph: WorkspaceEntityGraph,
   activity: WorkspaceEntityActivity
 }).annotate({ identifier: "WorkspaceEntityInspection" })
@@ -336,6 +359,48 @@ const workspaceEntity = HttpApiEndpoint.get("workspaceEntity", "/api/v1/items/:e
   error: readErrors
 }).middleware(SessionCookieAuth)
 
+/** Human-confirmed governed action against one exact Clockify source revision. */
+export const SubmitClockifyActionRequest = Schema.TaggedUnion({
+  "correct-association": {
+    expectedRevision: Revision,
+    jiraIssueKey: Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isPattern(/^[A-Z][A-Z0-9]*-[1-9][0-9]*$/u),
+      Schema.isMaxLength(100)
+    )
+  },
+  "record-approval": {
+    expectedRevision: Revision,
+    decision: Schema.Literals(["approved", "rejected"]),
+    rationale: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+  }
+})
+export type SubmitClockifyActionRequest = typeof SubmitClockifyActionRequest.Type
+
+/** Durable identity and resulting lifecycle state of a submitted Clockify action. */
+export const SubmitClockifyActionResponse = Schema.Struct({
+  actionId: GovernedActionId,
+  state: GovernedActionState
+})
+export type SubmitClockifyActionResponse = typeof SubmitClockifyActionResponse.Type
+
+const submitClockifyAction = HttpApiEndpoint.post(
+  "submitClockifyAction",
+  "/api/v1/items/:entityId/clockify-actions",
+  {
+    params: { entityId: EntityId },
+    payload: SubmitClockifyActionRequest,
+    success: SubmitClockifyActionResponse,
+    error: [
+      ...readErrors,
+      InvalidRequestApiError,
+      ConflictApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const relationship = HttpApiEndpoint.get("relationship", "/api/v1/relationships/:relationshipId", {
   params: { relationshipId: RelationshipId },
   query: {
@@ -467,6 +532,7 @@ export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
   .add(
     workspaceEntityProjections,
     workspaceEntity,
+    submitClockifyAction,
     releaseSlice,
     repairCandidates,
     repairProposalDraft,

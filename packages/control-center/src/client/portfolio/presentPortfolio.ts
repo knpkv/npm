@@ -21,20 +21,20 @@ import type { ReleaseLifecycle } from "../../domain/release.js"
 
 const READINESS_STAGES: ReadonlyArray<string> = ["Build", "Verify", "Production"]
 
-const lifecyclePresentation: Readonly<
-  Record<ReleaseLifecycle, { readonly label: string; readonly tone: RlyStateTone }>
-> = {
+const lifecyclePresentation = {
   assembling: { label: "Assembling", tone: "progress" },
   candidate: { label: "Candidate", tone: "neutral" },
   deploying: { label: "Deploying", tone: "progress" },
   released: { label: "Released", tone: "positive" },
   cancelled: { label: "Cancelled", tone: "caution" }
-}
+} satisfies Readonly<
+  Record<ReleaseLifecycle, { readonly label: string; readonly tone: RlyStateTone }>
+>
 
-const releaseRoleLabels: Readonly<Record<PortfolioReleaseRole, string>> = {
+const releaseRoleLabels = {
   "release-owner": "Release owner",
   "release-approver": "Release approver"
-}
+} satisfies Readonly<Record<PortfolioReleaseRole, string>>
 
 interface SourceHealthPresentation {
   readonly label: string
@@ -66,6 +66,7 @@ export interface PortfolioReleasePresentation {
   readonly collaboratorCount: number
   readonly facts: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
   readonly id: PortfolioSnapshot["releases"][number]["releaseId"]
+  readonly releasePageAwareness: PortfolioSnapshot["releases"][number]["releasePageAwareness"]
   readonly lifecycleLabel: string
   readonly lifecycleTone: RlyStateTone
   readonly readinessVerdict: ReadinessVerdict | "unknown"
@@ -80,7 +81,7 @@ export interface PortfolioReleasePresentation {
   readonly source: PortfolioSourcePresentation
   readonly stages: ReadonlyArray<RlyStage>
   readonly targetEnvironmentIds: PortfolioSnapshot["releases"][number]["targetEnvironmentIds"]
-  readonly version: string
+  readonly version: PortfolioSnapshot["releases"][number]["version"]
 }
 
 export interface PortfolioPresentation {
@@ -285,16 +286,16 @@ const readinessStages = (stages: ReadinessStages): ReadonlyArray<RlyStage> => [
   )
 ]
 
-const verdictPresentation: Readonly<
-  Record<ReadinessVerdict, { readonly label: string; readonly tone: RlyStateTone }>
-> = {
+const verdictPresentation = {
   blocked: { label: "Can't ship", tone: "critical" },
   ready: { label: "Can ship", tone: "positive" },
   deploying: { label: "Deploying", tone: "progress" },
   building: { label: "Building", tone: "progress" },
   shipped: { label: "Shipped", tone: "positive" },
   held: { label: "Needs links", tone: "caution" }
-}
+} satisfies Readonly<
+  Record<ReadinessVerdict, { readonly label: string; readonly tone: RlyStateTone }>
+>
 
 const findingReason = (finding: ReadinessFinding): string => {
   switch (finding.code) {
@@ -411,21 +412,21 @@ const releasePresentation = (
     collaboratorCount: release.collaboratorCount,
     facts,
     id: release.releaseId,
+    releasePageAwareness: release.releasePageAwareness,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
     readinessVerdict: readiness?.verdict ?? "unknown",
     readinessReason,
     release: {
       algorithm: release.relay.algorithm,
-      ...(approver === undefined ? {} : { approver }),
+      ...(!(approver === undefined) && { approver }),
       codename: release.relay.codename,
       facts,
       freshness: source.freshness,
-      ...(source.freshnessDateTime === null || source.freshnessTime === null
-        ? {}
-        : { freshnessDateTime: source.freshnessDateTime, freshnessTime: source.freshnessTime }),
+      ...(!(source.freshnessDateTime === null || source.freshnessTime === null) &&
+        { freshnessDateTime: source.freshnessDateTime, freshnessTime: source.freshnessTime }),
       id: release.releaseId,
-      ...(owner === undefined ? {} : { owner }),
+      ...(!(owner === undefined) && { owner }),
       reason: readinessReason,
       state: readiness?.verdict ?? "unknown",
       symbolIndices: release.relay.symbolIndices,

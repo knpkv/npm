@@ -61,6 +61,7 @@ export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
 export type SettingsTab =
   | "accounts"
   | "refresh"
+  | "relay"
   | "sandbox"
   | "notifications"
   | "permissions"
@@ -71,6 +72,7 @@ export type SettingsTab =
 export const SettingsTabs: ReadonlyArray<SettingsTab> = [
   "accounts",
   "refresh",
+  "relay",
   "sandbox",
   "notifications",
   "permissions",

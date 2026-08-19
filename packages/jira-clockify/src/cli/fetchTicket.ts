@@ -20,6 +20,7 @@
 import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Effect } from "effect"
+import * as Predicate from "effect/Predicate"
 import { type JiraTicket, mapIssueToTicket } from "../services/TicketService.js"
 
 /** Shared user hint for the {@link FetchTicketResult} `NotLoggedIn` case. */
@@ -55,7 +56,7 @@ export const fetchTicketByKey = (
       }
     }).pipe(
       Effect.map((issue): FetchTicketResult => {
-        const record = issue !== null && typeof issue === "object" && !Array.isArray(issue)
+        const record = issue !== null && Predicate.isObjectOrArray(issue) && !Array.isArray(issue)
           ? Object.fromEntries(Object.entries(issue))
           : {}
         return {

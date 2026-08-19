@@ -15,7 +15,7 @@ const jsonText = (maximum: number) =>
   bounded(maximum).check(
     Schema.isMinLength(2),
     Schema.makeFilter(
-      (value) => Result.isSuccess(Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(value)),
+      (value) => Result.isSuccess(Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(value)),
       { expected: "bounded valid JSON text" }
     )
   )

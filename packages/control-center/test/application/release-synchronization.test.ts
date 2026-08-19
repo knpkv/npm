@@ -9,7 +9,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
-import { Person } from "../../src/domain/actors.js"
+import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
@@ -23,7 +23,10 @@ import {
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { makePortfolioSnapshots } from "../../src/server/application/portfolioSnapshots.js"
+import {
+  classifyReleasePageAwareness,
+  makePortfolioSnapshots
+} from "../../src/server/application/portfolioSnapshots.js"
 import {
   reconcileFakeReleaseProjection,
   recoverFakeReleaseProjection,
@@ -45,6 +48,18 @@ import { PluginConnectionMap, type PluginConnectionMapV1 } from "../../src/serve
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
+describe("release page awareness", () => {
+  const releaseUpdatedAt = Schema.decodeSync(UtcTimestamp)("2026-08-03T10:00:00.000Z")
+  const publicationAt = Schema.decodeSync(UtcTimestamp)("2026-08-03T09:00:00.000Z")
+
+  it("detects a release projection that changed after publication", () => {
+    assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, publicationAt), "stale")
+    assert.equal(classifyReleasePageAwareness(publicationAt, releaseUpdatedAt), "current")
+    assert.equal(classifyReleasePageAwareness(publicationAt, publicationAt), "current")
+    assert.equal(classifyReleasePageAwareness(releaseUpdatedAt, null), "not-published")
+  })
+})
+
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000101")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000102")
 const CODECOMMIT_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000109")
@@ -63,6 +78,8 @@ const RECENT_FAILURE_AT = "2026-07-14T09:03:00.000Z"
 const STALE_BOUNDARY_AT = "2026-07-14T09:06:00.000Z"
 const STALE_BOUNDARY_CROSSED_AT = "2026-07-14T09:06:00.001Z"
 const STALE_FAILURE_AT = "2026-07-14T09:12:00.000Z"
+const EXISTING_PERSON_UPDATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-15T09:02:00.000Z")
+const NEWER_PERSON_UPDATED_AT = "2026-07-16T09:02:00.000Z"
 
 const epochMillis = (timestamp: string): number => DateTime.toEpochMillis(Schema.decodeSync(UtcTimestamp)(timestamp))
 
@@ -80,13 +97,14 @@ const descriptor = {
   }]
 }
 
-const success = (value: unknown): FakePluginResponse => ({ _tag: "success", value })
+const success = <UnparsedInput>(value: UnparsedInput): FakePluginResponse => ({ _tag: "success", value })
 
 const releasePage = (
   includeApprover = true,
   checkpointAfterPage = "checkpoint-1",
   serviceName = "payments-api",
-  hasMore = false
+  hasMore = false,
+  ownerDisplayName = "Ada Lovelace"
 ) => ({
   checkpointAfterPage,
   hasMore,
@@ -129,7 +147,7 @@ const releasePage = (
       observedAt: OBSERVED_AT,
       revision: "person-r1",
       vendorPersonId: "person-ada",
-      displayName: "Ada Lovelace",
+      displayName: ownerDisplayName,
       avatarUrl: null,
       active: true
     },
@@ -611,6 +629,67 @@ describe("fake release synchronization", () => {
           vendorPersonId: VendorImmutableId.make("person-ada")
         }
       ])
+    })))
+
+  it.effect("merges identities without letting an older projection overwrite newer person fields", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      const existing = Schema.decodeSync(Person)({
+        personId: OWNER_ID,
+        displayName: "New Owner",
+        avatar: { _tag: "initials", text: derivePersonInitials("New Owner") },
+        isActive: true,
+        sourceIdentities: [{
+          pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+          providerId: "codecommit",
+          vendorPersonId: VendorImmutableId.make("codecommit-user-owner")
+        }]
+      })
+      yield* persistence.people.createPerson(WORKSPACE_ID, existing, EXISTING_PERSON_UPDATED_AT)
+
+      yield* runScenario(scenario(success(releasePage(true, "checkpoint-1", "payments-api", false, "Old Owner"))))
+
+      const afterOlderProjection = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
+      assert.strictEqual(afterOlderProjection.person.displayName, "New Owner")
+      assert.strictEqual(
+        DateTime.formatIso(afterOlderProjection.updatedAt),
+        DateTime.formatIso(EXISTING_PERSON_UPDATED_AT)
+      )
+      assert.deepStrictEqual(afterOlderProjection.person.sourceIdentities, [
+        {
+          pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+          providerId: "codecommit",
+          vendorPersonId: VendorImmutableId.make("codecommit-user-owner")
+        },
+        {
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          vendorPersonId: VendorImmutableId.make("person-ada")
+        }
+      ])
+
+      const newerPage = releasePage(true, "checkpoint-2", "payments-api", false, "Newest Owner")
+      const newerOwnerPage = {
+        ...newerPage,
+        events: newerPage.events.map((event) =>
+          event._tag === "UpsertPerson" && event.vendorPersonId === "person-ada"
+            ? {
+              ...event,
+              eventId: "person-event-3",
+              observedAt: "2026-07-16T09:01:00.000Z",
+              revision: "person-r2"
+            }
+            : event
+        )
+      }
+      yield* runScenario(scenario(
+        success(newerOwnerPage),
+        NEWER_PERSON_UPDATED_AT,
+        "checkpoint-1"
+      ))
+      const afterNewerProjection = yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)
+      assert.strictEqual(afterNewerProjection.person.displayName, "Newest Owner")
+      assert.strictEqual(DateTime.formatIso(afterNewerProjection.updatedAt), NEWER_PERSON_UPDATED_AT)
     })))
 
   it.effect("requires a terminal page and keeps the committed prefix as last-valid cache", () =>

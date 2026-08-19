@@ -28,7 +28,8 @@ const DummyIssueServiceLayer = Layer.succeed(
   IssueService.of({
     getByKey: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     search: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
-    searchAll: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
+    searchAll: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    edit: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 
@@ -52,9 +53,11 @@ const DummyVersionServiceLayer = Layer.succeed(
   VersionService.of({
     listProjectVersions: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     getVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    createVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     updateVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     listRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
-    addRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
+    addRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    deleteRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 

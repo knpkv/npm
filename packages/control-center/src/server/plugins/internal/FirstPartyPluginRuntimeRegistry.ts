@@ -1,3 +1,4 @@
+import { missingScopes } from "@knpkv/atlassian-common/config"
 import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
@@ -9,7 +10,7 @@ import {
   AtlaskitTransformersLayer,
   MarkdownConverterLayer
 } from "@knpkv/confluence-to-markdown"
-import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig, type JiraApiConfigContract } from "@knpkv/jira-api-client"
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -30,9 +31,11 @@ import type { StoredPluginConfiguration } from "../../persistence/repositories/p
 import type { PluginRuntimeRecord } from "../../persistence/repositories/pluginRuntimeModels.js"
 import type { SecretRef } from "../../secrets/SecretRef.js"
 import { SecretStore } from "../../secrets/SecretStore.js"
+import { CONTROL_CENTER_JIRA_OAUTH_SCOPES } from "../atlassian/AtlassianOAuthScopes.js"
 import { loadAtlassianProfile } from "../atlassian/AtlassianProfiles.js"
 import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
+  clockifyReadOnlyPluginDescriptor,
   ClockifyReadPluginConfiguration,
   clockifyReadPluginDescriptor,
   makeClockifyReadPluginRuntime
@@ -42,13 +45,21 @@ import {
   codeCommitPluginDefinition,
   codeCommitPluginDescriptor
 } from "../codecommit/CodeCommitPluginDefinition.js"
-import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
-import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
+import {
+  codePipelinePluginDefinition,
+  codePipelinePluginDescriptor
+} from "../codepipeline/CodePipelinePluginDefinition.js"
+import {
+  canonicalCodePipelinePrincipalArn,
+  CodePipelineReadClient,
+  type CodePipelineReadClientService
+} from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
 import { confluencePageClientLayer } from "../confluence/ConfluencePageClient.js"
 import {
   confluencePagePluginDefinition,
-  confluencePagePluginDescriptor
+  confluencePagePluginDescriptor,
+  historicalConfluenceReadPluginDescriptor
 } from "../confluence/ConfluencePagePluginDefinition.js"
 import { PluginConfigurationFailure, PluginUnsupportedCapabilityFailure } from "../failures.js"
 import {
@@ -58,7 +69,7 @@ import {
 } from "../jira/JiraReadPlugin.js"
 import { negotiatePluginDescriptorV1 } from "../negotiation.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
-import { buildPluginDefinitionLayer, buildPluginDefinitionLayerFromNegotiatedDescriptor } from "../PluginDefinition.js"
+import { buildPluginDefinitionLayerFromNegotiatedDescriptor } from "../PluginDefinition.js"
 import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
 import {
   PluginRuntimeAccountDigest,
@@ -117,9 +128,20 @@ interface LoadedRuntime {
     | "current"
     | "compatible-atlassian"
     | "compatible-codecommit"
+    | "compatible-clockify"
+    | "compatible-codepipeline"
     | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
+
+const withoutReleasePublicationCapabilities = (
+  descriptor: NegotiatedPluginDescriptorV1
+): NegotiatedPluginDescriptorV1 => ({
+  ...descriptor,
+  capabilities: descriptor.capabilities.filter(
+    ({ capabilityId }) => capabilityId !== "action.execute" && capabilityId !== "action.reconcile"
+  )
+})
 
 const configurationFailure = (diagnosticCode: string): PluginConfigurationFailure =>
   new PluginConfigurationFailure({ diagnosticCode })
@@ -209,7 +231,7 @@ const decodeDescriptor = (
     runtime.descriptorJson
   ).pipe(Effect.mapError(() => configurationFailure("plugin-runtime-descriptor-invalid")))
 
-const expectedDescriptor = (providerId: ProviderId): unknown => {
+const expectedDescriptor = (providerId: ProviderId) => {
   switch (providerId) {
     case "codecommit":
       return codeCommitPluginDefinition.rawDescriptor
@@ -358,7 +380,7 @@ const historicalJiraDescriptors = [
   jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
 ]
 
-const historicalConfluenceDescriptors = [{
+const historicalConfluenceDescriptors = [historicalConfluenceReadPluginDescriptor, {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.confluence",
@@ -572,6 +594,88 @@ export const historicalCompleteDiffCodeCommitDescriptor = {
   ]
 }
 
+/** Frozen read-only CodePipeline descriptor accepted before governed actions and evidence reads. @internal */
+export const historicalReadOnlyCodePipelineDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.aws-codepipeline",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "AWS CodePipeline",
+  configurationFields: [
+    {
+      _tag: "text",
+      key: "profile",
+      label: "AWS profile",
+      description: "Local AWS credential profile resolved only by the server-side adapter.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "region",
+      label: "AWS region",
+      description: "AWS region containing the configured pipeline.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "pipelineName",
+      label: "Pipeline",
+      description: "One CodePipeline pipeline normalized by this connection.",
+      required: true
+    },
+    {
+      _tag: "integer",
+      key: "maximumExecutionPages",
+      label: "Execution pages",
+      description: "Maximum single-execution provider pages read by one synchronization run.",
+      required: true,
+      minimum: 1,
+      maximum: 20
+    },
+    {
+      _tag: "integer",
+      key: "actionPageSize",
+      label: "Action page size",
+      description: "Maximum action executions requested from one provider page.",
+      required: true,
+      minimum: 1,
+      maximum: 100
+    },
+    {
+      _tag: "integer",
+      key: "maximumActionPages",
+      label: "Action pages",
+      description: "Maximum action-execution pages read for one pipeline execution.",
+      required: true,
+      minimum: 1,
+      maximum: 5
+    },
+    {
+      _tag: "integer",
+      key: "maximumActionsPerExecution",
+      label: "Actions per execution",
+      description: "Hard normalization limit for action executions under one execution.",
+      required: true,
+      minimum: 1,
+      maximum: 200
+    },
+    {
+      _tag: "integer",
+      key: "operationTimeoutMillis",
+      label: "Request timeout",
+      description: "Maximum milliseconds for credential and CodePipeline provider requests.",
+      required: true,
+      minimum: 1_000,
+      maximum: 120_000
+    }
+  ],
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
+
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
@@ -584,6 +688,12 @@ const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => 
       historicalActionCodeCommitDescriptor,
       historicalCodeCommitDescriptor
     ]
+  }
+  if (providerId === "codepipeline") {
+    return [codePipelinePluginDescriptor, historicalReadOnlyCodePipelineDescriptor]
+  }
+  if (providerId === "clockify") {
+    return [clockifyReadPluginDescriptor, clockifyReadOnlyPluginDescriptor]
   }
   return [expectedDescriptor(providerId)]
 }
@@ -630,6 +740,10 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
       ? "current"
       : connection.providerId === "codecommit"
       ? "compatible-codecommit"
+      : connection.providerId === "codepipeline"
+      ? "compatible-codepipeline"
+      : connection.providerId === "clockify"
+      ? "compatible-clockify"
       : connection.providerId === "jira" && (descriptorGeneration === 1 || descriptorGeneration === 2)
       ? "compatible-atlassian"
       : "legacy-atlassian",
@@ -719,8 +833,8 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   expectedCloudId?: string
 ) {
   if (authMode === "oauth") {
-    const profileId = yield* textValue(loaded.configuration, "oauthProfileId")
-    const profile = yield* loadAtlassianProfile(provider, profileId).pipe(
+    const profileCredential = yield* credentialTextValue(loaded.configuration, "oauthProfileId")
+    const profile = yield* loadAtlassianProfile(provider, profileCredential.value).pipe(
       Effect.provide(HomeDirectoryLive),
       Effect.mapError(() => configurationFailure("plugin-oauth-profile-unavailable"))
     )
@@ -739,12 +853,30 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
     }
     return {
       credentialGeneration: `oauth:${profile.id}:${profile.updated_at}`,
+      releasePublicationEnabled: provider !== "jira" ||
+        missingScopes(profile.token, CONTROL_CENTER_JIRA_OAUTH_SCOPES).length === 0,
       auth: {
         type: "oauth2",
         accessToken: Redacted.make(profile.token.access_token),
         cloudId: profile.token.cloud_id
-      }
-    } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+      },
+      verifiedUser: profile.token.user === undefined
+        ? null
+        : {
+          accountId: profile.token.user.account_id,
+          displayName: profile.token.user.name,
+          publicName: profile.token.user.name
+        }
+    } satisfies {
+      readonly credentialGeneration: string
+      readonly releasePublicationEnabled: boolean
+      readonly auth: JiraApiConfigContract["auth"]
+      readonly verifiedUser: {
+        readonly accountId: string
+        readonly displayName: string
+        readonly publicName: string
+      } | null
+    }
   }
   if (authMode !== "api-token") return yield* configurationFailure("plugin-authentication-mode-invalid")
   const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
@@ -755,11 +887,37 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   const apiToken = yield* decodeSecret(apiTokenRef)
   return {
     credentialGeneration: `api-token:${emailCredential.generation}\0${apiTokenRef}`,
-    auth: { type: "basic", email, apiToken: Redacted.make(apiToken) }
-  } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+    releasePublicationEnabled: true,
+    auth: { type: "basic", email, apiToken: Redacted.make(apiToken) },
+    verifiedUser: null
+  } satisfies {
+    readonly credentialGeneration: string
+    readonly releasePublicationEnabled: boolean
+    readonly auth: JiraApiConfigContract["auth"]
+    readonly verifiedUser: {
+      readonly accountId: string
+      readonly displayName: string
+      readonly publicName: string
+    } | null
+  }
 })
 
-const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
+const MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH = 200
+
+const boundedConfluenceUserName = (value: string): string => {
+  let bounded = ""
+  for (const codePoint of value.trim()) {
+    if (bounded.length + codePoint.length > MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH) break
+    bounded += codePoint
+  }
+  return bounded.trimEnd()
+}
+
+const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(
+  loaded: LoadedRuntime,
+  scope: PluginRuntimeScope
+) {
+  const persistence = yield* Persistence
   // Pre-stability persistence is intentionally breaking: old Jira connections
   // have neither a verified cloud ID nor an immutable project scope. Recreate
   // them rather than silently loading an unscoped reader.
@@ -805,13 +963,22 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const plugin = Layer.unwrap(
     makeJiraReadPluginRuntime(
       configurationInput,
-      authMode.value === "oauth" ? configuration.siteId : null
+      authMode.value === "oauth" ? configuration.siteId : null,
+      mapConfigurationFailure(
+        "workspace-settings-unavailable",
+        persistence.workspaceSettings.get(scope.workspaceId)
+      ).pipe(
+        Effect.map(({ settings }) => settings.jira.includeControlCenterAttribution)
+      ),
+      authentication.releasePublicationEnabled
     ).pipe(
       Effect.map(({ definition }) =>
         buildPluginDefinitionLayerFromNegotiatedDescriptor(
           definition,
           configurationInput,
-          loaded.descriptor
+          authentication.releasePublicationEnabled
+            ? loaded.descriptor
+            : withoutReleasePublicationCapabilities(loaded.descriptor)
         )
       )
     )
@@ -854,7 +1021,15 @@ const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(functio
     }))
   )
   const plugin = Layer.unwrap(
-    makeClockifyReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
+    makeClockifyReadPluginRuntime(configurationInput).pipe(
+      Effect.map(({ definition }) =>
+        buildPluginDefinitionLayerFromNegotiatedDescriptor(
+          definition,
+          configurationInput,
+          loaded.descriptor
+        )
+      )
+    )
   ).pipe(Layer.provide(client))
   return { credentialGeneration: apiKeyRef, layer: plugin }
 })
@@ -870,14 +1045,16 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const configurationInput = {
+  const storedConfigurationInput = {
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
     spaceId: yield* textValue(loaded.configuration, "spaceId"),
     probePageId: yield* textValue(loaded.configuration, "probePageId"),
-    ...(authMode.value === "oauth" ? { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") } : {})
+    ...((authMode.value === "oauth") && { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") })
   }
-  const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
+  const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(
+    storedConfigurationInput
+  ).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
   const authentication = yield* atlassianAuthentication(
@@ -887,6 +1064,21 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     configuration.siteBaseUrl.origin,
     configuration.siteId
   )
+  const configurationWithCachedIdentity = {
+    ...storedConfigurationInput,
+    ...(!(authentication.verifiedUser === null) && {
+      oauthVerifiedUser: {
+        ...authentication.verifiedUser,
+        displayName: boundedConfluenceUserName(authentication.verifiedUser.displayName),
+        publicName: boundedConfluenceUserName(authentication.verifiedUser.publicName)
+      }
+    })
+  }
+  const configurationInput = Option.isSome(
+      Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)
+    )
+    ? configurationWithCachedIdentity
+    : storedConfigurationInput
   const apiClient = ConfluenceApiClient.layer.pipe(
     Layer.provide(Layer.succeed(ConfluenceApiConfig, {
       baseUrl: configuration.siteBaseUrl.origin,
@@ -931,10 +1123,10 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
 ) {
   const expectedKeys = new Set(["profile", "region", "repositoryName"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const profile = yield* textValue(loaded.configuration, "profile")
+  const profile = yield* credentialTextValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
   const configuration = yield* Schema.decodeUnknownEffect(CodeCommitPluginConfiguration)({
-    profile,
+    profile: profile.value,
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
   }).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
@@ -946,7 +1138,7 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
     Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
   )
   return {
-    credentialGeneration: `${profile}\0${region}\0${identity.accountId}\0${identity.arn}`,
+    credentialGeneration: `${profile.generation}\0${region}\0${identity.accountId}\0${identity.arn}`,
     layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
       codeCommitPluginDefinition,
       { ...configuration, runtimeIdentity: identity },
@@ -955,7 +1147,10 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
   }
 })
 
-const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(loaded: LoadedRuntime) {
+const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(
+  loaded: LoadedRuntime,
+  client: CodePipelineReadClientService | undefined
+) {
   const expectedKeys = new Set([
     "actionPageSize",
     "maximumActionPages",
@@ -966,34 +1161,60 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
     "profile",
     "region"
   ])
+  if (loaded.descriptorGeneration === "current") expectedKeys.add("maximumLogBytes")
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const profile = yield* textValue(loaded.configuration, "profile")
+  const profile = yield* credentialTextValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
   const configuration = {
-    profile,
+    profile: profile.value,
     region,
     pipelineName: yield* textValue(loaded.configuration, "pipelineName"),
     maximumExecutionPages: yield* integerValue(loaded.configuration, "maximumExecutionPages"),
     actionPageSize: yield* integerValue(loaded.configuration, "actionPageSize"),
     maximumActionPages: yield* integerValue(loaded.configuration, "maximumActionPages"),
     maximumActionsPerExecution: yield* integerValue(loaded.configuration, "maximumActionsPerExecution"),
+    maximumLogBytes: loaded.descriptorGeneration === "current"
+      ? yield* integerValue(loaded.configuration, "maximumLogBytes")
+      : 262_144,
     operationTimeoutMillis: yield* integerValue(loaded.configuration, "operationTimeoutMillis")
   }
+  const clientLayer = client === undefined
+    ? CodePipelineReadClient.live
+    : Layer.succeed(CodePipelineReadClient, client)
+  const identity = yield* Effect.gen(function*() {
+    const readClient = yield* CodePipelineReadClient
+    return yield* readClient.discoverAccount({
+      profile: configuration.profile,
+      region: configuration.region,
+      operationTimeoutMillis: configuration.operationTimeoutMillis
+    })
+  }).pipe(
+    Effect.provide(clientLayer),
+    Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
+  )
+  const canonicalIdentity = {
+    ...identity,
+    arn: canonicalCodePipelinePrincipalArn(identity.arn)
+  }
   return {
-    credentialGeneration: `${profile}\0${region}`,
-    layer: buildPluginDefinitionLayer(codePipelinePluginDefinition, configuration).pipe(
-      Layer.provide(CodePipelineReadClient.live)
-    )
+    credentialGeneration: `${profile.generation}\0${region}\0${canonicalIdentity.accountId}\0${canonicalIdentity.arn}`,
+    layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
+      codePipelinePluginDefinition,
+      { ...configuration, runtimeIdentity: canonicalIdentity },
+      loaded.descriptor
+    ).pipe(Layer.provide(clientLayer))
   }
 })
 
 const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
   loaded: LoadedRuntime,
-  codeCommitClients: CodeCommitClientsLayer
+  scope: PluginRuntimeScope,
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   switch (loaded.runtime.providerId) {
     case "jira":
-      return yield* jiraLayer(loaded)
+      return yield* jiraLayer(loaded, scope)
     case "clockify":
       return yield* clockifyLayer(loaded)
     case "confluence":
@@ -1001,12 +1222,13 @@ const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(functio
     case "codecommit":
       return yield* codeCommitLayer(loaded, codeCommitClients)
     case "codepipeline":
-      return yield* codePipelineLayer(loaded)
+      return yield* codePipelineLayer(loaded, codePipelineClient)
   }
 })
 
 const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*(
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
@@ -1031,7 +1253,12 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded, codeCommitClients)
+          const provider = yield* providerLayer(
+            loaded,
+            scope,
+            codeCommitClients,
+            codePipelineClient
+          )
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
           return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
@@ -1045,7 +1272,8 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
 
 /** Injectable first-party registry used to verify complete owning-package runtime wiring. @internal */
 export const makeFirstPartyPluginRuntimeRegistry = (
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient?: CodePipelineReadClientService
 ): Layer.Layer<
   PluginRuntimeRegistry,
   never,
@@ -1056,7 +1284,7 @@ export const makeFirstPartyPluginRuntimeRegistry = (
   | FileSystem.FileSystem
   | Path.Path
   | PluginRuntimeAuthoritySource
-> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
+> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients, codePipelineClient))
 
 /** Production registry for the fixed first-party provider catalog. @internal */
 export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)

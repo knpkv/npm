@@ -1,5 +1,138 @@
 # @knpkv/confluence-to-markdown
 
+## 2.2.1
+
+### Patch Changes
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-rc.109, pin the vendored Effect reference to that exact upstream release, guard source/package alignment, and bound Control Center test concurrency for reliable CI execution.
+- Updated dependencies [[`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2)]:
+  - @knpkv/agent-skills@0.3.1
+  - @knpkv/atlassian-common@1.4.1
+  - @knpkv/confluence-api-client@1.1.1
+
+## 2.2.0
+
+### Minor Changes
+
+- [#366](https://github.com/knpkv/npm/pull/366) [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd) Thanks [@konopkov](https://github.com/konopkov)! - Add `confluence folder` and `confluence search`, so folders and content lookup no longer need the Confluence UI or a separate MCP client.
+
+  `folder get`, `folder children` and `folder create` cover the container the page commands cannot address — `/pages/{id}` 404s on a folder id and vice versa. `folder get` and `folder children` accept either `--folder-id` or `--url`, and a folder URL pasted into either is read for its id, because the URL bar is the only place a folder id is actually visible: it appears in no page's front-matter. `folder children` follows pagination and reports each child's type, since a folder holds mixed content (pages, sub-folders, whiteboards, databases, embeds).
+
+  `confluence search --cql "<query>"` runs a CQL query — the only way to find content by title or by parent, as there is no children-by-title endpoint. It sits at the top level rather than under `page` because CQL matches any content type.
+
+  Request the OAuth scopes these endpoints need: `read:folder:confluence`, `write:folder:confluence`, `read:hierarchical-content:confluence` (direct children) and `read:content-details:confluence` (CQL search). They are requested on every `confluence auth login`, so add them to the OAuth app **before** logging in again — Atlassian rejects an authorization request naming a scope the app does not enable, which makes `auth login` itself fail at the authorize step. Existing tokens keep working for page and attachment commands until then; `folder` and `search` fail with 401/403 until the re-login lands. The scopes are kept in a separate `CONFLUENCE_FOLDER_SCOPES` constant so control-center, which shares `CONFLUENCE_SCOPES` for its own sign-in, keeps requesting only what it uses.
+
+  Add `confluence auth manage`, which opens the Developer Console app list and prints the scopes to enable. It opens the list rather than the app itself because the console addresses an app by an id that is not the OAuth client id, and the client id is all this CLI stores. Both it and `auth create` derive the printed scopes from the constant `auth login` reads, so the setup instructions cannot drift from what login requests — the previous hardcoded list in `auth create` had already fallen behind the attachment scopes.
+
+  `folder` and `search` refuse a site mismatch rather than acting on the wrong site. Content ids are per-site, so a `--base-url` disagreeing with the URL, a `--parent` pasted from another site, and — under OAuth — a `--base-url` that is not the active profile's site are all rejected. The OAuth case is the one that bites: those requests route by the profile's cloud id and ignore `--base-url` entirely, so `folder create --base-url site-a` while signed in to site B would otherwise create the folder on site B with no warning.
+
+  Accept a folder's `createdAt` as epoch milliseconds. The v2 folder endpoints return a number there even though the upstream spec declares an ISO-8601 string and every other content type honours it — so before this, `folder get` and `folder create` failed to decode every real folder. The spec patch widens the generated schema to accept both shapes and the client normalizes to ISO-8601, so callers see one representation.
+
+  Patch the Confluence v2 spec so `FolderSingle.position`/`parentId`/`parentType` and `ChildrenResponse.childPosition` generate as nullable rather than `never`. The generator turns the upstream `{"type": "integer", "nullable": true}` shape into `never`, so a folder or child payload carrying any of these fields failed the generated decode before the response reached the caller — the same fix already applied to `Page`, `PageBulk` and `ChildPage`.
+
+- [#370](https://github.com/knpkv/npm/pull/370) [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc) Thanks [@konopkov](https://github.com/konopkov)! - Enforce the complete anti-slop rule set with zero accepted diagnostics and update affected APIs and implementations to satisfy the required contracts.
+
+- [#354](https://github.com/knpkv/npm/pull/354) [`2e26e30`](https://github.com/knpkv/npm/commit/2e26e3032ce527260a4e4d9fca8af43039f762d6) Thanks [@konopkov](https://github.com/konopkov)! - Fix round-trip duplication of nested blocks, and add ADF-level page commands.
+
+  `sync push` duplicated any block nested inside another encoded block — most
+  visibly a Jira datasource card inside an expand. The reverter's scan for a
+  closing marker stopped at the first _nested_ open marker, so the parent never
+  paired: it was restored from its payload and the inner marker was reverted
+  again as a sibling. One extra copy per push, compounding silently.
+
+  - Pair encoded block markers by depth, so nested blocks round-trip. Covered by
+    a new ADF → markdown → ADF fixpoint suite that asserts the structural node
+    census is unchanged across repeated cycles.
+  - `sync push` now refuses a page whose remote ADF holds nodes markdown cannot
+    represent and points at the ADF commands; `--force` overrides. Other
+    structural drift is logged rather than blocked. The unsafe set is narrow: a
+    `blockCard`/`embedCard` with no resolvable url, a `multiBodiedExtension`, and
+    a bodied macro inside a table cell. Datasource cards, ordinary macros such as
+    TOC and excerpt, and anything nested inside a table all round-trip via their
+    markers and stay pushable. A refused push no longer advances
+    `origin/confluence`, so the retry — with or without `--force` — still has
+    something to push, and a deletion already applied in Confluence is replayed
+    harmlessly rather than counted as a failure that would park the branch for
+    good. Note that _any_ push error holds the branch, not only a refusal, so
+    unsent work is never recorded as pushed — the failure then repeats on every
+    push until it is resolved, and the command now says so. `--force` covers the
+    round-trip refusal only, and applies to the whole run rather than one page.
+  - `page put --if-version <n>` opts into the optimistic-version check `page
+patch` always makes, so the read-modify-write the refusal message recommends
+    cannot silently overwrite an edit made in Confluence in between. `page get
+--format adf` reports that version on stderr, leaving stdout the
+    machine-readable document.
+  - `sync push --dry-run` now runs the round-trip guard, so a preview reports the
+    refusal that the real push would raise instead of a clean plan. It also counts
+    pending deletions and reports a new page as created, so a workspace whose only
+    change is a deleted page no longer previews as "Nothing to push" immediately
+    before the real run deletes it remotely.
+  - `page create` sets the v2 editor property, as the workspace create path
+    already did; without it an ADF-bodied page can open in the legacy editor.
+  - `page patch --dry-run` validates the patched document, so a preview no longer
+    passes where the real write fails.
+  - A `roundTrip: unsafe` flag is recomputed after a push instead of inherited, so
+    a `--force` push that flattened the unsafe nodes stops warning about them.
+  - Pages holding such nodes are marked `roundTrip: unsafe` in front-matter on
+    pull, so the warning is visible before editing.
+  - New `confluence page get --format adf`, `page put --adf`, `page create --adf`
+    and `page patch` (`--replace/--with`, `--delete-node`, `--dry-run`) — edit or
+    create a page without the markdown projection. `page put`/`page create`
+    support `{{slot}}` substitution via `--set name=value`. `page patch` writes
+    the version it read, so a concurrent edit surfaces as a conflict rather than
+    being overwritten, and `page create --base-url` is checked against the same
+    host allowlist as every other entry point.
+  - `--base-url` accepts the `/wiki` form users copy from the browser, and is
+    inferred from a surrounding workspace when omitted.
+  - The OAuth token-refresh notice goes to stderr, so `--format adf` output is
+    machine-readable.
+
+### Patch Changes
+
+- [#358](https://github.com/knpkv/npm/pull/358) [`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d) Thanks [@konopkov](https://github.com/konopkov)! - Apply the same OAuth rotation hardening as `@knpkv/jira-cli` to
+  `ConfluenceAuth`, which is built on the same shared `refreshToken` and carried
+  both halves of the defect.
+
+  `refreshTokenImpl` did an interruptible rotate-then-persist with no deadline.
+  Atlassian rotates refresh tokens, so an interrupt between the grant and the save
+  spends the credential without storing its replacement and silently logs the user
+  out; an unbounded stall hung the command indefinitely. Grant and persist are now
+  one `Effect.uninterruptible` region with its own 30s deadline inside it — inside,
+  because an uninterruptible region with no bound of its own also absorbs
+  SIGINT/SIGTERM and would leave `confluence` ignoring Ctrl-C.
+
+  `getAccessToken` also deleted the stored token on any `step: "refresh"` failure,
+  so a timeout, a transport error, a `429`, or a `400 invalid_client` from a
+  rotated client secret all logged the user out unrecoverably. It now deletes only
+  on `400 invalid_grant` or a `403` revocation, using `OAuthError.status` and
+  `OAuthError.errorCode` from `@knpkv/atlassian-common`.
+
+- [#361](https://github.com/knpkv/npm/pull/361) [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2) Thanks [@konopkov](https://github.com/konopkov)! - Update Effect and effect-qb, migrate schema-tagged errors to the current Effect API, and adopt the dialect-scoped SQLite function and type APIs introduced by effect-qb 0.22.
+
+- [#357](https://github.com/knpkv/npm/pull/357) [`77e3257`](https://github.com/knpkv/npm/commit/77e3257743aacfaf9e11e016a60206f416c5fe79) Thanks [@konopkov](https://github.com/konopkov)! - Secure local control planes and CI credential boundaries. CodeCommit web now
+  uses a process-scoped owner session with CSRF protection and loopback-only
+  listeners; review sandboxes use authenticated loopback code-server instances,
+  digest-pinned images, constrained mounts, non-root execution, and dropped
+  capabilities. OAuth callback listeners validate state before accepting terminal
+  outcomes and bind explicitly to loopback. GitHub workflows pin external actions
+  to immutable commits and keep long-lived Atlassian credentials out of pull
+  request execution.
+- Updated dependencies [[`503d345`](https://github.com/knpkv/npm/commit/503d3459b419a3c9fd366715d5916e41086f493d), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`676419e`](https://github.com/knpkv/npm/commit/676419e39c395dd4cfea6d9ffaee7d002a3f75e2), [`b08ca20`](https://github.com/knpkv/npm/commit/b08ca2004b3efcd72a695b44c72b56dae20afdfd), [`27d2ca1`](https://github.com/knpkv/npm/commit/27d2ca18b0c0b0f8a252d461c0aaf10eb92e9ffc)]:
+  - @knpkv/atlassian-common@1.4.0
+  - @knpkv/confluence-api-client@1.1.0
+  - @knpkv/agent-skills@0.3.0
+
+## 2.1.3
+
+### Patch Changes
+
+- [#343](https://github.com/knpkv/npm/pull/343) [`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1) Thanks [@konopkov](https://github.com/konopkov)! - Align runtime ownership, cancellation, caching, time, failure handling, polling,
+  decoding, and executable entrypoints with Effect v4 idioms. Expose clock-injected
+  Atlassian token construction and expiry helpers, and enable workspace-wide
+  Effect diagnostics and prevention checks.
+- Updated dependencies [[`4def7db`](https://github.com/knpkv/npm/commit/4def7db2f400cf68218262994d67ed90a7154bf1), [`a9d5408`](https://github.com/knpkv/npm/commit/a9d54085f6fc25cde1d5b298f50cb6e06e2bc93f)]:
+  - @knpkv/atlassian-common@1.3.0
+
 ## 2.1.2
 
 ### Patch Changes

@@ -36,13 +36,13 @@ export const RLY_STATE_LABEL_VARIANTS = defineVariants({
 })
 export const RLY_STATE_LABEL_DEFAULT_VARIANTS = defineVariants({ tone: "neutral", size: "default" })
 export type RlyStateLabelSize = keyof typeof RLY_STATE_LABEL_VARIANTS.size
-const toneIcons: Readonly<Record<RlyStateTone, RlyIconName>> = {
+const toneIcons = {
   neutral: "minus",
   positive: "check",
   critical: "alert",
   caution: "clock",
   progress: "loader"
-}
+} satisfies Readonly<Record<RlyStateTone, RlyIconName>>
 export type StateLabelProps = Omit<ComponentPropsWithRef<"span">, "children"> & {
   readonly icon?: RlyIconName
   readonly label: string

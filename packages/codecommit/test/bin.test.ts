@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import { execFile } from "node:child_process"
 import { describe, expect, it } from "vitest"
 
@@ -25,7 +26,7 @@ const runCodecommit = (args: ReadonlyArray<string>): Promise<CliResult> =>
         timeout: 10_000
       },
       (error, stdout, stderr) => {
-        const code = typeof error?.code === "number" ? error.code : error ? 1 : 0
+        const code = Predicate.isNumber(error?.code) ? error.code : error ? 1 : 0
         resolve({ code, stderr, stdout })
       }
     )
@@ -38,13 +39,13 @@ const hasBun = (): Promise<boolean> =>
     })
   })
 
-describe("codecommit CLI", () => {
-  it("prints help without an Undici teardown crash", async () => {
-    if (!(await hasBun())) return
+const bunAvailable = await hasBun()
 
+describe("codecommit CLI", () => {
+  it.skipIf(!bunAvailable)("prints help without an Undici teardown crash", async () => {
     const result = await runCodecommit(["--help"])
 
-    expect(result.code).toBe(0)
+    expect(result.code, result.stderr).toBe(0)
     expect(result.stdout).toContain("USAGE")
     expect(result.stdout).toContain("codecommit <subcommand> [flags]")
     expect(result.stdout).not.toContain("dispatcher.destroy")

@@ -8,14 +8,18 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 
+import * as Predicate from "effect/Predicate"
 import { PluginHealth } from "../../domain/freshness.js"
 import {
   type DiffContentRangeRequestV1,
   type DiffContentRangeRequestV2,
   type DiffContentRangeV1,
   type NegotiatedPluginDescriptorV1,
+  PluginActionActorIdentityV1,
   type PluginCapabilityId,
-  PluginDiscoveryV1
+  PluginDiscoveryV1,
+  type PluginPipelineArtifactRangeRequestV1,
+  type PluginPipelineArtifactRangeV1
 } from "../../domain/plugins/index.js"
 import {
   PluginConfigurationFailure,
@@ -26,7 +30,12 @@ import {
 import { AuthorizedPluginExecutor } from "./internal/AuthorizedPluginExecutor.js"
 import { hasPluginCapability, negotiatePluginDescriptorV1 } from "./negotiation.js"
 import type { PluginCapabilityCodecsV1 } from "./PluginCapabilityCodecs.js"
-import { PluginConnection, type PluginConnectionV1, type PluginDiffReaderV1 } from "./PluginConnection.js"
+import {
+  PluginConnection,
+  type PluginConnectionV1,
+  type PluginDiffReaderV1,
+  type PluginPipelineReaderV1
+} from "./PluginConnection.js"
 import { makePluginDefinitionV1, type PluginDefinitionV1 } from "./PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "./PluginExecutor.js"
 import { retryPluginOperation, retryPluginStream } from "./retryPolicy.js"
@@ -48,8 +57,8 @@ const PluginDefinitionRuntimeTypeId: unique symbol = Symbol.for(
 export interface DefinedPluginV1<R> extends PluginDefinitionV1 {
   readonly [PluginDefinitionRuntimeTypeId]: {
     readonly requirements: (requirements: R) => R
-    readonly build: (
-      configuration: unknown,
+    readonly build: <UnparsedInput>(
+      configuration: UnparsedInput,
       descriptor: NegotiatedPluginDescriptorV1
     ) => Layer.Layer<PluginServices, PluginFailure, R>
   }
@@ -94,6 +103,10 @@ const validateCapabilityCodecs = Effect.fn("PluginDefinition.validateCapabilityC
           return capability.version === 2 ? codecs.diffInventoryV2 : codecs.diffInventory
         case "diff.content":
           return capability.version === 2 ? codecs.diffContentV2 : codecs.diffContent
+        case "pipeline.logs":
+          return codecs.pipelineLogs
+        case "pipeline.artifact":
+          return codecs.pipelineArtifact
       }
     })()
     if (registered === undefined || registered.version !== capability.version) {
@@ -102,11 +115,11 @@ const validateCapabilityCodecs = Effect.fn("PluginDefinition.validateCapabilityC
   }
 })
 
-const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   boundary: "input" | "output",
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError(
@@ -118,8 +131,8 @@ const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>>(
     )
   )
 
-const normalizeLegacyDiscoveryOutput = (value: unknown): unknown =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && !Object.hasOwn(value, "resource")
+const normalizeLegacyDiscoveryOutput = <UnparsedInput>(value: UnparsedInput) =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value) && !Object.hasOwn(value, "resource")
     ? { ...value, resource: null }
     : value
 
@@ -143,6 +156,29 @@ const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContent
     return yield* new PluginMalformedResponseFailure({
       operation: "diff-content",
       diagnosticCode: "plugin-diff-content-range-invalid"
+    })
+  }
+  return response
+})
+
+const validatePipelineArtifactRange = Effect.fn("PluginDefinition.validatePipelineArtifactRange")(function*(
+  request: PluginPipelineArtifactRangeRequestV1,
+  response: PluginPipelineArtifactRangeV1
+) {
+  const decoded = Encoding.decodeBase64(response.bytesBase64)
+  if (Result.isFailure(decoded)) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "pipeline-artifact",
+      diagnosticCode: "plugin-pipeline-artifact-range-invalid"
+    })
+  }
+  const expectedLength = request.offset >= response.totalBytes
+    ? 0
+    : Math.min(request.length, response.totalBytes - request.offset)
+  if (decoded.success.byteLength !== expectedLength) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "pipeline-artifact",
+      diagnosticCode: "plugin-pipeline-artifact-range-invalid"
     })
   }
   return response
@@ -186,11 +222,15 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
   const diffContent = codecs.diffContent
   const diffInventoryV2 = codecs.diffInventoryV2
   const diffContentV2 = codecs.diffContentV2
+  const pipelineLogs = codecs.pipelineLogs
+  const pipelineArtifact = codecs.pipelineArtifact
 
   const requiresDiff = hasPluginCapability(descriptor, "diff.inventory", 1) ||
     hasPluginCapability(descriptor, "diff.content", 1) ||
     hasPluginCapability(descriptor, "diff.inventory", 2) ||
     hasPluginCapability(descriptor, "diff.content", 2)
+  const requiresPipeline = hasPluginCapability(descriptor, "pipeline.logs", 1) ||
+    hasPluginCapability(descriptor, "pipeline.artifact", 1)
   if (requiresDiff && Option.isNone(services.connection.diff)) {
     return yield* new PluginConfigurationFailure({
       diagnosticCode: "plugin-negotiated-diff-implementation-missing"
@@ -214,9 +254,32 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
       })
     }
   }
+  if (
+    requiresPipeline &&
+    (services.connection.pipeline === undefined || Option.isNone(services.connection.pipeline))
+  ) {
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "plugin-negotiated-pipeline-implementation-missing"
+    })
+  }
 
   const connection: PluginConnectionV1 = {
     descriptor,
+    ...(!(services.connection.actionActorIdentity === undefined) && {
+      actionActorIdentity: retryPluginOperation({
+        operation: services.connection.actionActorIdentity,
+        safety: "safe-read"
+      }).pipe(
+        Effect.flatMap((value) =>
+          decodeBoundary(
+            "action-actor-identity",
+            "output",
+            PluginActionActorIdentityV1,
+            value
+          )
+        )
+      )
+    }),
     discover: retryPluginOperation({
       operation: services.connection.discover,
       safety: "safe-read"
@@ -298,53 +361,90 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
                 )
               )
           ),
-        ...(diff.readInventoryPageV2 === undefined
-          ? {}
-          : {
-            readInventoryPageV2: (request) =>
-              withCapability(
-                descriptor,
-                "diff.inventory",
-                diffInventoryV2 === undefined
-                  ? Effect.fail(missingCapabilityCodec("diff.inventory"))
-                  : decodeBoundary("diff-inventory", "input", diffInventoryV2.input, request).pipe(
-                    Effect.flatMap((decoded) =>
-                      retryPluginOperation({
-                        operation: diff.readInventoryPageV2!(decoded),
-                        safety: "safe-read"
-                      })
-                    ),
-                    Effect.flatMap((page) => decodeBoundary("diff-inventory", "output", diffInventoryV2.output, page))
+        ...(!(diff.readInventoryPageV2 === undefined) && {
+          readInventoryPageV2: (request) =>
+            withCapability(
+              descriptor,
+              "diff.inventory",
+              diffInventoryV2 === undefined
+                ? Effect.fail(missingCapabilityCodec("diff.inventory"))
+                : decodeBoundary("diff-inventory", "input", diffInventoryV2.input, request).pipe(
+                  Effect.flatMap((decoded) =>
+                    retryPluginOperation({
+                      operation: diff.readInventoryPageV2!(decoded),
+                      safety: "safe-read"
+                    })
                   ),
-                2
-              )
-          }),
-        ...(diff.readContentRangeV2 === undefined
-          ? {}
-          : {
-            readContentRangeV2: (request) =>
-              withCapability(
-                descriptor,
-                "diff.content",
-                diffContentV2 === undefined
-                  ? Effect.fail(missingCapabilityCodec("diff.content"))
-                  : decodeBoundary("diff-content", "input", diffContentV2.input, request).pipe(
-                    Effect.flatMap((decodedRequest) =>
-                      retryPluginOperation({
-                        operation: diff.readContentRangeV2!(decodedRequest),
-                        safety: "safe-read"
-                      }).pipe(
-                        Effect.flatMap((range) =>
-                          decodeBoundary("diff-content", "output", diffContentV2.output, range)
-                        ),
-                        Effect.flatMap((range) => validateDiffContentRange(decodedRequest, range))
-                      )
+                  Effect.flatMap((page) => decodeBoundary("diff-inventory", "output", diffInventoryV2.output, page))
+                ),
+              2
+            )
+        }),
+        ...(!(diff.readContentRangeV2 === undefined) && {
+          readContentRangeV2: (request) =>
+            withCapability(
+              descriptor,
+              "diff.content",
+              diffContentV2 === undefined
+                ? Effect.fail(missingCapabilityCodec("diff.content"))
+                : decodeBoundary("diff-content", "input", diffContentV2.input, request).pipe(
+                  Effect.flatMap((decodedRequest) =>
+                    retryPluginOperation({
+                      operation: diff.readContentRangeV2!(decodedRequest),
+                      safety: "safe-read"
+                    }).pipe(
+                      Effect.flatMap((range) => decodeBoundary("diff-content", "output", diffContentV2.output, range)),
+                      Effect.flatMap((range) => validateDiffContentRange(decodedRequest, range))
                     )
-                  ),
-                2
-              )
-          })
+                  )
+                ),
+              2
+            )
+        })
       }))
+      : Option.none(),
+    pipeline: requiresPipeline
+      ? Option.map(
+        services.connection.pipeline ?? Option.none(),
+        (pipeline): PluginPipelineReaderV1 => ({
+          readLogPage: (request) =>
+            withCapability(
+              descriptor,
+              "pipeline.logs",
+              pipelineLogs === undefined
+                ? Effect.fail(missingCapabilityCodec("pipeline.logs"))
+                : decodeBoundary("pipeline-logs", "input", pipelineLogs.input, request).pipe(
+                  Effect.flatMap((decoded) =>
+                    retryPluginOperation({
+                      operation: pipeline.readLogPage(decoded),
+                      safety: "safe-read"
+                    })
+                  ),
+                  Effect.flatMap((page) => decodeBoundary("pipeline-logs", "output", pipelineLogs.output, page))
+                )
+            ),
+          readArtifactRange: (request) =>
+            withCapability(
+              descriptor,
+              "pipeline.artifact",
+              pipelineArtifact === undefined
+                ? Effect.fail(missingCapabilityCodec("pipeline.artifact"))
+                : decodeBoundary("pipeline-artifact", "input", pipelineArtifact.input, request).pipe(
+                  Effect.flatMap((decodedRequest) =>
+                    retryPluginOperation({
+                      operation: pipeline.readArtifactRange(decodedRequest),
+                      safety: "safe-read"
+                    }).pipe(
+                      Effect.flatMap((range) =>
+                        decodeBoundary("pipeline-artifact", "output", pipelineArtifact.output, range)
+                      ),
+                      Effect.flatMap((range) => validatePipelineArtifactRange(decodedRequest, range))
+                    )
+                  )
+                )
+            )
+        })
+      )
       : Option.none(),
     proposeAction: (request) =>
       withCapability(
@@ -471,9 +571,9 @@ const hasDefinitionRuntime = (definition: PluginDefinitionV1): definition is Def
   PluginDefinitionRuntimeTypeId in definition
 
 /** Build a registered definition with a descriptor already authenticated by its owning runtime registry. @internal */
-export const buildPluginDefinitionLayerFromNegotiatedDescriptor = (
+export const buildPluginDefinitionLayerFromNegotiatedDescriptor = <UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown,
+  configuration: UnparsedInput,
   descriptor: NegotiatedPluginDescriptorV1
 ): Layer.Layer<PluginServices, PluginFailure> =>
   hasDefinitionRuntime(definition)
@@ -483,17 +583,17 @@ export const buildPluginDefinitionLayerFromNegotiatedDescriptor = (
     )
 
 /** Negotiate and decode before constructing the scoped adapter layer. @internal */
-export function buildPluginDefinitionLayer<R>(
+export function buildPluginDefinitionLayer<R, UnparsedInput>(
   definition: DefinedPluginV1<R>,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure, R>
-export function buildPluginDefinitionLayer(
+export function buildPluginDefinitionLayer<UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure>
-export function buildPluginDefinitionLayer(
+export function buildPluginDefinitionLayer<UnparsedInput>(
   definition: PluginDefinitionV1,
-  configuration: unknown
+  configuration: UnparsedInput
 ): Layer.Layer<PluginServices, PluginFailure> {
   if (!hasDefinitionRuntime(definition)) {
     return Layer.effectContext(

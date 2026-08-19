@@ -1,11 +1,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
+import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
+import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -33,14 +38,26 @@ const eventId = (index: number) =>
   )
 
 const withLivePersistence = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, DomainEventWakeups | Persistence | Scope.Scope>
+  use: Effect.Effect<Success, Failure, Crypto.Crypto | DomainEventWakeups | Persistence | Scope.Scope>,
+  wakeupsLayer: Layer.Layer<DomainEventWakeups> = DomainEventWakeups.layer
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-live-events-")
     return yield* use.pipe(
-      Effect.provide(Layer.merge(persistenceLayer(config), DomainEventWakeups.layer))
+      Effect.provide(Layer.merge(persistenceLayer(config), wakeupsLayer))
     )
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+
+const staticWakeupsLayer = (
+  wakeStream: Stream.Stream<typeof WorkspaceId.Type>
+): Layer.Layer<DomainEventWakeups> =>
+  Layer.succeed(
+    DomainEventWakeups,
+    DomainEventWakeups.of({
+      notify: (_workspaceId: typeof WorkspaceId.Type) => Effect.void,
+      subscribe: (_workspaceId: typeof WorkspaceId.Type) => Effect.succeed(wakeStream)
+    })
+  )
 
 const createWorkspace = (persistence: Persistence["Service"], workspaceId: WorkspaceId) =>
   persistence.workspaces.create(workspaceId, {
@@ -88,6 +105,52 @@ const liveServices = Effect.gen(function*() {
 
 const collect = (stream: Stream.Stream<ControlCenterLiveEvent>, count: number) =>
   stream.pipe(Stream.take(count), Stream.runCollect)
+
+const collectAfterWakeTermination = (
+  wakeStream: Stream.Stream<typeof WorkspaceId.Type>
+) =>
+  withLivePersistence(
+    Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* createWorkspace(persistence, WORKSPACE_ID)
+      const pageAfterCalls = yield* Ref.make(0)
+      const countedPersistence = Persistence.of({
+        ...persistence,
+        events: {
+          ...persistence.events,
+          pageAfter: (...args: Parameters<typeof persistence.events.pageAfter>) =>
+            Ref.update(pageAfterCalls, (count) => count + 1).pipe(
+              Effect.andThen(persistence.events.pageAfter(...args))
+            )
+        }
+      })
+      const portfolio = yield* makePortfolioSnapshots
+      const events = yield* makeLiveEvents.pipe(
+        Effect.provideService(Persistence, countedPersistence),
+        Effect.provideService(PortfolioSnapshots, portfolio)
+      )
+      const loggedCauses: Array<Cause.Cause<unknown>> = []
+      const loggedMessages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        loggedCauses.push(entry.cause)
+        loggedMessages.push(entry.message)
+      })
+      const frames = yield* events.open({
+        workspaceId: WORKSPACE_ID,
+        after: EventCursor.make(0)
+      }).pipe(
+        Effect.flatMap((stream) => collect(stream, 2)),
+        Effect.withLogger(logger)
+      )
+      return {
+        frames,
+        loggedCauses,
+        loggedMessages,
+        pageAfterCalls: yield* Ref.get(pageAfterCalls)
+      }
+    }),
+    staticWakeupsLayer(wakeStream)
+  )
 
 describe("durable live events", () => {
   it.effect("starts fresh with an authoritative snapshot and immediate catch-up heartbeat", () =>
@@ -249,6 +312,39 @@ describe("durable live events", () => {
       assert.strictEqual(repaired[0]?.event, "portfolio.invalidated")
       assert.strictEqual(repaired[0]?.id, 1)
     })))
+
+  it.effect("completes without repolling when the wake subscription ends", () =>
+    Effect.gen(function*() {
+      const result = yield* collectAfterWakeTermination(Stream.empty)
+
+      assert.lengthOf(result.frames, 1)
+      assert.strictEqual(result.frames[0]?.event, "stream.heartbeat")
+      assert.lengthOf(result.loggedCauses, 0)
+      assert.strictEqual(result.pageAfterCalls, 1)
+    }))
+
+  it.effect("closes without repolling when the wake subscription defects", () =>
+    Effect.gen(function*() {
+      const result = yield* collectAfterWakeTermination(Stream.die("wake subscription defect"))
+
+      assert.lengthOf(result.frames, 1)
+      assert.strictEqual(result.frames[0]?.event, "stream.heartbeat")
+      assert.lengthOf(result.loggedCauses, 1)
+      const defect = Cause.findDie(result.loggedCauses[0] ?? Cause.empty)
+      assert.isTrue(Result.isSuccess(defect))
+      if (Result.isSuccess(defect)) assert.strictEqual(defect.success.defect, "wake subscription defect")
+      assert.include(String(result.loggedMessages[0]), "live event stream after terminal failure")
+      assert.notInclude(String(result.loggedMessages[0]), "durable replay failure")
+      assert.strictEqual(result.pageAfterCalls, 1)
+    }))
+
+  it.effect("preserves wake subscription interruption without logging a replay failure", () =>
+    Effect.gen(function*() {
+      const exit = yield* collectAfterWakeTermination(Stream.fromEffect(Effect.interrupt)).pipe(Effect.exit)
+
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+    }))
 
   it.effect("delivers a post-commit wake to an already-open stream immediately", () =>
     withLivePersistence(Effect.gen(function*() {

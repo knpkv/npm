@@ -79,7 +79,7 @@ export const useWorkspaceEntity = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: WorkspaceEntityTransport = browserWorkspaceEntityTransport
-): { readonly retry: () => void; readonly state: WorkspaceEntityState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<WorkspaceEntityState>({ _tag: "idle" })
 

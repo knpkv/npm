@@ -26,14 +26,45 @@ import {
   SandboxId,
   SandboxStatus
 } from "@knpkv/codecommit-core/Domain.js"
+import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
+import {
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+  MAXIMUM_RELAY_REVIEW_TURNS_BYTES
+} from "./review/ReviewPromptBudget.js"
+
+const jsonByteEncoder = new TextEncoder()
 
 // API error returned to clients for AWS failures
-export class ApiError extends Schema.TaggedErrorClass<ApiError>()("ApiError", {
+export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
   message: Schema.String
 }) {}
+
+export class UnauthorizedApiError extends Schema.TaggedError<UnauthorizedApiError>()(
+  "UnauthorizedApiError",
+  { message: Schema.String },
+  { httpApiStatus: 401 }
+) {}
+
+export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
+  "ForbiddenApiError",
+  { message: Schema.String },
+  { httpApiStatus: 403 }
+) {}
+
+/** Process-scoped owner session required by every CodeCommit API endpoint. */
+export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth>()(
+  "@knpkv/codecommit-web/OwnerSessionAuth",
+  {
+    error: [UnauthorizedApiError, ForbiddenApiError],
+    security: {
+      ownerCookie: HttpApiSecurity.apiKey({ in: "cookie", key: "cc_owner" })
+    }
+  }
+) {}
 
 // Cached PR schema (flat row from SQLite)
 export const CachedPullRequestResponse = Schema.Struct({
@@ -56,6 +87,227 @@ export const CachedPullRequestResponse = Schema.Struct({
   link: Schema.String,
   fetchedAt: Schema.String
 })
+
+const PullRequestDiffFileResponse = Schema.Struct({
+  index: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  status: Schema.Literals(["added", "modified", "deleted", "renamed"]),
+  path: Schema.String,
+  previousPath: Schema.NullOr(Schema.String),
+  beforeMode: Schema.NullOr(Schema.String),
+  afterMode: Schema.NullOr(Schema.String)
+})
+
+/** Complete changed-file inventory bound to one immutable CodeCommit revision. */
+export const PullRequestDiffResponse = Schema.Struct({
+  pullRequestId: PullRequestId,
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  files: Schema.Array(PullRequestDiffFileResponse)
+})
+export type PullRequestDiffResponse = typeof PullRequestDiffResponse.Type
+
+/** Exact provider revision observed by a completed single-PR refresh. */
+export const PullRequestRefreshResponse = Schema.Struct({
+  revisionId: Schema.String,
+  headCommit: Schema.String
+})
+export type PullRequestRefreshResponse = typeof PullRequestRefreshResponse.Type
+
+/** Bounded text for one inventory entry; exceptional content remains explicit. */
+export const PullRequestDiffContentResponse = Schema.Struct({
+  fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  revisionId: Schema.String,
+  state: Schema.Literals(["text", "binary", "oversized"]),
+  before: Schema.NullOr(Schema.String),
+  after: Schema.NullOr(Schema.String)
+})
+export type PullRequestDiffContentResponse = typeof PullRequestDiffContentResponse.Type
+
+export const RelayReviewKind = Schema.Literals(["review", "security", "tests", "explain"])
+export type RelayReviewKind = typeof RelayReviewKind.Type
+
+const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
+export const RelayReviewSkillId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256)
+)
+export const RelayReviewSkillIds = Schema.Array(RelayReviewSkillId).check(
+  Schema.isMaxLength(reviewProfileSkillLimit),
+  Schema.isUnique()
+)
+
+const RelayReviewLocation = Schema.Union([
+  Schema.Struct({ scope: Schema.Literal("general") }),
+  Schema.Struct({
+    scope: Schema.Literal("file"),
+    filePath: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))
+  }),
+  Schema.Struct({
+    scope: Schema.Literal("line"),
+    filePath: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+    line: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+    side: Schema.Literals(["before", "after"])
+  })
+])
+
+export const RelayReviewFinding = Schema.Struct({
+  id: RelayReviewFindingId,
+  priority: Schema.Literals(["P1", "P2", "P3", "P4"]),
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  details: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_000)),
+  recommendation: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  verification: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
+  publicationTarget: Schema.Literals(["pr-comment", "line-comment"]),
+  location: RelayReviewLocation
+}).check(
+  Schema.makeFilter(
+    (finding) => (finding.location.scope === "line") === (finding.publicationTarget === "line-comment"),
+    { expected: "line-comment paired with a line location and pr-comment paired with a general or file location" }
+  )
+)
+export type RelayReviewFinding = typeof RelayReviewFinding.Type
+
+export const RelayReviewResult = Schema.Struct({
+  findings: Schema.Array(RelayReviewFinding).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter((findings) => new Set(findings.map((finding) => finding.id)).size === findings.length, {
+      expected: "unique Relay finding ids"
+    })
+  ),
+  verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
+  explanation: Schema.optional(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(12_000))
+  )
+}).check(
+  Schema.makeFilter(
+    (result) => jsonByteEncoder.encode(JSON.stringify(result)).byteLength <= MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+    { expected: `a Relay review result no larger than ${String(MAXIMUM_RELAY_REVIEW_RESULT_BYTES)} UTF-8 bytes` }
+  )
+)
+export type RelayReviewResult = typeof RelayReviewResult.Type
+
+/** Explain-mode results must be explanatory rather than a hidden findings response. */
+export const RelayExplainResult = RelayReviewResult.check(
+  Schema.makeFilter(
+    (result) => result.explanation !== undefined && result.findings.length === 0,
+    { expected: "a nonempty explanation and no findings for Explain mode" }
+  )
+)
+
+/** One ephemeral Relay result bound to the exact diff that was reviewed. */
+export const PullRequestRelayReviewResponse = Schema.Struct({
+  pullRequestId: PullRequestId,
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  kind: RelayReviewKind,
+  result: RelayReviewResult
+}).check(
+  Schema.makeFilter(
+    (response) =>
+      response.kind !== "explain" ||
+      (response.result.explanation !== undefined && response.result.findings.length === 0),
+    { expected: "an Explain response with a nonempty explanation and no findings" }
+  )
+)
+export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
+
+export const RelayReviewMessage = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(8_000),
+  Schema.makeFilter(
+    (message) => jsonByteEncoder.encode(message).byteLength <= MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+    {
+      expected: `a Relay conversation message no larger than ${String(MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES)} UTF-8 bytes`
+    }
+  ),
+  Schema.makeFilter(
+    (message) =>
+      jsonByteEncoder.encode(JSON.stringify(message)).byteLength <=
+        Math.floor((MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128) / 2),
+    { expected: "a Relay conversation message retainable as one half of a completed exchange" }
+  )
+)
+
+export const RelayReviewConversationTurn = Schema.Struct({
+  findingId: RelayReviewFindingId,
+  role: Schema.Literals(["user", "assistant"]),
+  message: RelayReviewMessage
+})
+export type RelayReviewConversationTurn = typeof RelayReviewConversationTurn.Type
+
+export const RelayReviewProgressPhase = Schema.Literals([
+  "revision",
+  "files",
+  "patch",
+  "agent",
+  "validation",
+  "posting"
+])
+export type RelayReviewProgressPhase = typeof RelayReviewProgressPhase.Type
+
+export const RelayReviewStreamEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("progress"),
+    phase: RelayReviewProgressPhase,
+    message: Schema.String,
+    detail: Schema.optional(Schema.String)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("complete"),
+    review: PullRequestRelayReviewResponse,
+    reply: Schema.optional(RelayReviewMessage)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("error"),
+    message: Schema.String
+  })
+])
+export type RelayReviewStreamEvent = typeof RelayReviewStreamEvent.Type
+
+export const RelayFindingPostResponse = Schema.Struct({
+  findingId: RelayReviewFindingId,
+  operationId: Schema.String,
+  summary: Schema.String
+})
+export type RelayFindingPostResponse = typeof RelayFindingPostResponse.Type
+
+export const RelayReviewStreamRequest = Schema.Struct({
+  revisionId: Schema.String,
+  baseCommit: Schema.String,
+  headCommit: Schema.String,
+  kind: RelayReviewKind,
+  skillIds: RelayReviewSkillIds
+})
+export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
+
+export const MAXIMUM_RELAY_REVIEW_TURNS = 40
+
+export const RelayReviewConversationTurns = Schema.Array(RelayReviewConversationTurn).check(
+  Schema.isMaxLength(MAXIMUM_RELAY_REVIEW_TURNS),
+  Schema.makeFilter(
+    (turns) => jsonByteEncoder.encode(JSON.stringify(turns)).byteLength <= MAXIMUM_RELAY_REVIEW_TURNS_BYTES,
+    { expected: `Relay conversation turns no larger than ${String(MAXIMUM_RELAY_REVIEW_TURNS_BYTES)} UTF-8 bytes` }
+  )
+)
+
+export const RelayReviewContinueStreamRequest = Schema.Struct({
+  ...RelayReviewStreamRequest.fields,
+  currentReview: RelayReviewResult,
+  turns: RelayReviewConversationTurns,
+  findingId: RelayReviewFindingId,
+  message: RelayReviewMessage
+}).check(
+  Schema.makeFilter(
+    ({ findingId, message }) => Schema.is(RelayReviewConversationTurn)({ findingId, role: "user", message }),
+    { expected: "a continuation message retainable as its user conversation turn" }
+  )
+)
+export type RelayReviewContinueStreamRequest = typeof RelayReviewContinueStreamRequest.Type
 
 // Notification schema (unified)
 export const NotificationResponse = Schema.Struct({
@@ -98,7 +350,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
-      success: Schema.String,
+      success: PullRequestRefreshResponse,
       error: ApiError
     })
   )
@@ -137,6 +389,73 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         region: AwsRegion
       }),
       success: Schema.Array(PRCommentLocationJson),
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("diff", "/:awsAccountId/:prId/diff", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      success: PullRequestDiffResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("diffContent", "/:awsAccountId/:prId/diff/:fileIndex", {
+      params: Schema.Struct({
+        awsAccountId: Schema.String,
+        prId: PullRequestId,
+        fileIndex: Schema.NumberFromString.pipe(
+          Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+        )
+      }),
+      query: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String
+      }),
+      success: PullRequestDiffContentResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("relayReview", "/:awsAccountId/:prId/relay-review", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      payload: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String,
+        kind: RelayReviewKind
+      }),
+      success: PullRequestRelayReviewResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("relayReviewStream", "/:awsAccountId/:prId/relay-review/stream", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      payload: RelayReviewStreamRequest,
+      success: Schema.String,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("relayReviewContinueStream", "/:awsAccountId/:prId/relay-review/continue", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      payload: RelayReviewContinueStreamRequest,
+      success: Schema.String,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("postRelayFinding", "/:awsAccountId/:prId/relay-review/findings/:findingId/post", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, findingId: RelayReviewFindingId }),
+      payload: Schema.Struct({
+        revisionId: Schema.String,
+        baseCommit: Schema.String,
+        headCommit: Schema.String,
+        finding: RelayReviewFinding
+      }),
+      success: RelayFindingPostResponse,
       error: ApiError
     })
   )
@@ -202,6 +521,26 @@ const SandboxSettingsResponse = Schema.Struct({
   cloneDepth: Schema.Number
 })
 
+const ReviewProfileResponse = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: RelayReviewKind,
+  skillIds: Schema.Array(Schema.String)
+})
+
+const ReviewSettingsResponse = Schema.Struct({
+  defaultProfileId: Schema.String,
+  profiles: Schema.Array(ReviewProfileResponse)
+})
+
+export const ReviewSkillResponse = Schema.Struct({
+  id: RelayReviewSkillId,
+  name: Schema.String,
+  description: Schema.String,
+  source: Schema.String
+})
+export type ReviewSkillResponse = typeof ReviewSkillResponse.Type
+
 const ConfigResponse = Schema.Struct({
   accounts: Schema.Array(
     Schema.Struct({
@@ -214,6 +553,7 @@ const ConfigResponse = Schema.Struct({
   autoRefresh: Schema.Boolean,
   refreshIntervalSeconds: Schema.Number,
   currentUser: Schema.optional(Schema.String),
+  review: ReviewSettingsResponse,
   sandbox: Schema.optional(SandboxSettingsResponse)
 })
 
@@ -247,12 +587,16 @@ const ConfigSavePayload = Schema.Struct({
   autoDetect: Schema.Boolean,
   autoRefresh: Schema.Boolean,
   refreshIntervalSeconds: Schema.Number,
+  review: Schema.optional(ReviewSettingsResponse),
   sandbox: Schema.optional(SandboxSettingsResponse)
 })
 
+const ConfigRefreshStatus = Schema.Literals(["refreshed", "failed"])
+
 const ConfigResetResponse = Schema.Struct({
   backupPath: Schema.optional(Schema.String),
-  config: ConfigResponse
+  config: ConfigResponse,
+  refreshStatus: ConfigRefreshStatus
 })
 
 export class ConfigGroup extends HttpApiGroup.make("config")
@@ -260,7 +604,15 @@ export class ConfigGroup extends HttpApiGroup.make("config")
   .add(HttpApiEndpoint.get("path", "/path", { success: ConfigPathResponse, error: ApiError }))
   .add(HttpApiEndpoint.get("database", "/database", { success: DatabaseInfoResponse, error: ApiError }))
   .add(HttpApiEndpoint.get("validate", "/validate", { success: ConfigValidationResponse, error: ApiError }))
-  .add(HttpApiEndpoint.post("save", "/save", { payload: ConfigSavePayload, success: Schema.String, error: ApiError }))
+  .add(HttpApiEndpoint.get("reviewSkills", "/review-skills", {
+    success: Schema.Array(ReviewSkillResponse),
+    error: ApiError
+  }))
+  .add(HttpApiEndpoint.post("save", "/save", {
+    payload: ConfigSavePayload,
+    success: Schema.Literals(["saved", "saved-refresh-failed"]),
+    error: ApiError
+  }))
   .add(HttpApiEndpoint.post("reset", "/reset", { success: ConfigResetResponse, error: ApiError }))
   .prefix("/api/config")
 {}
@@ -371,6 +723,10 @@ export const SandboxResponse = Schema.Struct({
   lastActivityAt: Schema.String
 })
 
+export const SandboxCredentialsResponse = Schema.Struct({
+  password: Schema.String
+})
+
 const CreateSandboxPayload = Schema.Struct({
   pullRequestId: PullRequestId,
   awsAccountId: Schema.String,
@@ -397,6 +753,13 @@ export class SandboxGroup extends HttpApiGroup.make("sandbox")
     HttpApiEndpoint.get("get", "/:sandboxId", {
       params: SandboxIdPath,
       success: SandboxResponse,
+      error: ApiError
+    })
+  )
+  .add(
+    HttpApiEndpoint.get("credentials", "/:sandboxId/credentials", {
+      params: SandboxIdPath,
+      success: SandboxCredentialsResponse,
       error: ApiError
     })
   )
@@ -574,4 +937,5 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(StatsGroup)
   .add(PermissionsGroup)
   .add(AuditGroup)
+  .middleware(OwnerSessionAuth)
 {}

@@ -1,10 +1,10 @@
 import type { FileSystem, Path } from "effect"
-import { Context, Crypto, Effect, Layer, Predicate } from "effect"
+import { Context, Crypto, Effect, Layer, Predicate, Result } from "effect"
 import type { Success } from "effect/Effect"
 
 import type { BackupFailure, SchemaWriteBarrierError } from "./backup/index.js"
-import { ContentStore, type ContentStoreService } from "./ContentStore.js"
-import { Database, databaseLayer } from "./Database.js"
+import { ContentStore, type ContentStoreService, type ReproduciblePutContentInput } from "./ContentStore.js"
+import { Database, type DatabaseContract, databaseLayer } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
   type DatabaseInitializationError,
@@ -18,7 +18,10 @@ import {
   type ReproducibleContentUnavailableError,
   type RevisionConflictError,
   type SecretReferenceScopeConflictError,
-  type SourceIdentityMismatchError
+  type SourceIdentityMismatchError,
+  type WorkspaceSettingsGovernanceError,
+  type WorkspaceSettingsMutationConflictError,
+  type WorkspaceSettingsNoChangesError
 } from "./errors.js"
 import { BlobStore } from "./object-store/BlobStore.js"
 import type { BlobStoreError } from "./object-store/BlobStoreError.js"
@@ -34,6 +37,8 @@ import {
   type DeliveryGraphInputError,
   DeliveryGraphRepository,
   type DeliveryGraphRepositoryService,
+  DiffContentCacheRepository,
+  type DiffContentCacheRepositoryService,
   DomainEventRepository,
   type DomainEventRepositoryService,
   EntityRepository,
@@ -61,16 +66,19 @@ import {
   type RelationshipRepairProposalRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
+  RetentionRepository,
+  type RetentionRepositoryService,
   type TimelineExportAuditInputError,
   TimelineExportAuditRepository,
   type TimelineExportAuditRepositoryService,
   TimelineRepository,
   type TimelineRepositoryService,
   WorkspaceRepository,
-  type WorkspaceRepositoryService
+  type WorkspaceRepositoryService,
+  WorkspaceSettingsRepository,
+  type WorkspaceSettingsRepositoryService
 } from "./repositories/index.js"
 import { mapPersistenceOperation } from "./repositories/internal.js"
-
 /** Typed failures that may cross the public persistence operation boundary. */
 export type PersistenceOperationFailure =
   | AgentJobInputError
@@ -93,6 +101,9 @@ export type PersistenceOperationFailure =
   | SecretReferenceScopeConflictError
   | SourceIdentityMismatchError
   | TimelineExportAuditInputError
+  | WorkspaceSettingsGovernanceError
+  | WorkspaceSettingsMutationConflictError
+  | WorkspaceSettingsNoChangesError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "AgentJobInputError",
@@ -120,12 +131,17 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "RevisionConflictError",
   "SecretReferenceScopeConflictError",
   "SourceIdentityMismatchError",
-  "TimelineExportAuditInputError"
+  "TimelineExportAuditInputError",
+  "WorkspaceSettingsGovernanceError",
+  "WorkspaceSettingsMutationConflictError",
+  "WorkspaceSettingsNoChangesError"
 ])
 
-const isPersistenceOperationFailure = (error: unknown): error is PersistenceOperationFailure =>
+const isPersistenceOperationFailure = <UnparsedInput>(
+  error: UnparsedInput
+): error is UnparsedInput & PersistenceOperationFailure =>
   Predicate.hasProperty(error, "_tag") &&
-  typeof error._tag === "string" &&
+  Predicate.isString(error._tag) &&
   PUBLIC_OPERATION_ERROR_TAGS.has(error._tag)
 
 const publicOperation = <Value, Failure, Requirements>(
@@ -146,6 +162,132 @@ const publicOperation = <Value, Failure, Requirements>(
         )
   )
 
+/** Reclaim a bounded durable batch while publication holds the same writer lock. */
+export const sweepDiffContentCacheCleanup = Effect.fn("Persistence.sweepDiffContentCacheCleanup")(
+  function*(
+    database: DatabaseContract,
+    content: Pick<ContentStoreService, "removeReproducible">,
+    diffContentCache: DiffContentCacheRepositoryService
+  ) {
+    const candidates = yield* diffContentCache.pendingCleanup()
+    for (const candidate of candidates) {
+      yield* database.transaction(
+        Effect.gen(function*() {
+          yield* database.sql`UPDATE workspaces
+            SET workspace_id = workspace_id
+            WHERE workspace_id = ${candidate.workspaceId}`
+          if (yield* diffContentCache.isReferenced(candidate.workspaceId, candidate.digest)) {
+            yield* diffContentCache.cancelCleanup(candidate.workspaceId, candidate.digest)
+            return
+          }
+          yield* content.removeReproducible(candidate.workspaceId, candidate.digest)
+          yield* diffContentCache.completeCleanup(candidate.workspaceId, candidate.digest)
+        })
+      ).pipe(
+        mapPersistenceOperation("diff-content-cache.cleanup"),
+        Effect.catch(() =>
+          diffContentCache.deferCleanup(candidate.workspaceId, candidate.digest).pipe(
+            Effect.catch(() => Effect.logWarning("A diff content cache cleanup retry could not be rescheduled")),
+            Effect.andThen(
+              Effect.logWarning("One deferred diff content cache cleanup remains pending")
+            )
+          )
+        )
+      )
+    }
+  }
+)
+
+/** Keep deferred blob reclamation outside the outcome of an already committed write. @internal */
+export const completeDeferredCleanupBestEffort = Effect.fn(
+  "Persistence.completeDeferredCleanupBestEffort"
+)(function*<Requirements>(
+  cleanup: Effect.Effect<void, unknown, Requirements>
+) {
+  yield* cleanup.pipe(
+    Effect.catch(() =>
+      Effect.logWarning(
+        "Deferred diff content cache cleanup remains pending for a later retry"
+      )
+    )
+  )
+})
+
+/** Publish a mapping, persist orphan intent even on failure, then drain one retryable batch. */
+export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDiffContentCache")(
+  function*(
+    database: DatabaseContract,
+    content: ContentStoreService,
+    diffContentCache: DiffContentCacheRepositoryService,
+    ...args: Parameters<DiffContentCacheRepositoryService["put"]>
+  ) {
+    const [key, digest] = args
+    const publication = yield* Effect.uninterruptible(
+      database.transaction(
+        Effect.gen(function*() {
+          yield* database.sql`UPDATE workspaces
+            SET workspace_id = workspace_id
+            WHERE workspace_id = ${key.workspaceId}`
+          const requestResult = yield* diffContentCache.requestCleanup(
+            key.workspaceId,
+            digest
+          ).pipe(Effect.result)
+          const putResult = yield* diffContentCache.put(...args).pipe(Effect.result)
+          return { requestResult, putResult }
+        })
+      ).pipe(mapPersistenceOperation("diff-content-cache.publish"))
+    )
+    const cleanupResult = yield* sweepDiffContentCacheCleanup(
+      database,
+      content,
+      diffContentCache
+    ).pipe(Effect.result)
+    if (Result.isFailure(publication.requestResult)) return yield* publication.requestResult.failure
+    if (Result.isFailure(publication.putResult)) return yield* publication.putResult.failure
+    if (Result.isFailure(cleanupResult)) return yield* cleanupResult.failure
+    return yield* Effect.void
+  }
+)
+
+/** Atomically publish metadata, cleanup intent, and the diff ownership mapping. */
+export const putContentAndSweepDiffContentCache = Effect.fn(
+  "Persistence.putContentAndSweepDiffContentCache"
+)(function*(
+  database: DatabaseContract,
+  content: ContentStoreService,
+  diffContentCache: DiffContentCacheRepositoryService,
+  key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
+  input: ReproduciblePutContentInput
+) {
+  const staged = yield* Effect.uninterruptible(
+    database.transaction(
+      Effect.gen(function*() {
+        yield* database.sql`UPDATE workspaces
+          SET workspace_id = workspace_id
+          WHERE workspace_id = ${key.workspaceId}`
+        const published = yield* content.put(key.workspaceId, input)
+        yield* diffContentCache.requestCleanup(
+          key.workspaceId,
+          published.metadata.digest
+        )
+        const putResult = yield* diffContentCache.put(
+          key,
+          published.metadata.digest
+        ).pipe(Effect.result)
+        return { published, putResult }
+      })
+    ).pipe(mapPersistenceOperation("diff-content-cache.stage-content"))
+  )
+  const cleanupResult = yield* sweepDiffContentCacheCleanup(
+    database,
+    content,
+    diffContentCache
+  ).pipe(Effect.result)
+  if (Result.isFailure(staged.putResult)) return yield* staged.putResult.failure
+  if (Result.isFailure(cleanupResult)) return yield* cleanupResult.failure
+  return staged.published
+})
+
 /** Failures possible while acquiring the durable persistence service. */
 export type PersistenceLayerError =
   | BackupFailure
@@ -160,6 +302,7 @@ const makePersistence = Effect.gen(function*() {
   const agentJobs = yield* AgentJobRepository
   const authorizedShares = yield* AuthorizedShareRepository
   const content = yield* ContentStore
+  const diffContentCache = yield* DiffContentCacheRepository
   const deliveryGraph = yield* DeliveryGraphRepository
   const events = yield* DomainEventRepository
   const governedActions = yield* GovernedActionRepository
@@ -172,28 +315,118 @@ const makePersistence = Effect.gen(function*() {
   const readiness = yield* ReadinessRepository
   const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
+  const retention = yield* RetentionRepository
   const timeline = yield* TimelineRepository
   const timelineExportAudits = yield* TimelineExportAuditRepository
   const workspaces = yield* WorkspaceRepository
+  const workspaceSettings = yield* WorkspaceSettingsRepository
+
+  yield* completeDeferredCleanupBestEffort(
+    sweepDiffContentCacheCleanup(database, content, diffContentCache)
+  )
 
   return {
     agentJobs: {
       appendEvent: (...args: Parameters<AgentJobRepositoryService["appendEvent"]>) =>
         publicOperation("agent-job.append-event", agentJobs.appendEvent(...args)),
+      appendReviewSuggestionRevision: (
+        ...args: Parameters<
+          AgentJobRepositoryService["appendReviewSuggestionRevision"]
+        >
+      ) =>
+        publicOperation(
+          "agent-job.append-review-suggestion-revision",
+          agentJobs.appendReviewSuggestionRevision(...args)
+        ),
       claimNext: (...args: Parameters<AgentJobRepositoryService["claimNext"]>) =>
         publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
       completeReview: (...args: Parameters<AgentJobRepositoryService["completeReview"]>) =>
         publicOperation("agent-job.complete-review", agentJobs.completeReview(...args)),
+      recordReviewProgress: (...args: Parameters<AgentJobRepositoryService["recordReviewProgress"]>) =>
+        publicOperation("agent-job.record-review-progress", agentJobs.recordReviewProgress(...args)),
       enqueue: (...args: Parameters<AgentJobRepositoryService["enqueue"]>) =>
         publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
       failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
         publicOperation("agent-job.fail-attempt", agentJobs.failAttempt(...args)),
       latestReview: (...args: Parameters<AgentJobRepositoryService["latestReview"]>) =>
         publicOperation("agent-job.latest-review", agentJobs.latestReview(...args)),
+      latestReviewForPullRequest: (
+        ...args: Parameters<AgentJobRepositoryService["latestReview"]>
+      ) =>
+        publicOperation(
+          "agent-job.latest-review-for-pull-request",
+          agentJobs.latestReview({ ...args[0], allowDifferentHead: true })
+        ),
+      listRunningPrReviewAttempts: (
+        ...args: Parameters<AgentJobRepositoryService["listRunningPrReviewAttempts"]>
+      ) =>
+        publicOperation(
+          "agent-job.list-running-pr-review-attempts",
+          agentJobs.listRunningPrReviewAttempts(...args)
+        ),
+      attachRunningPrReviewSession: (
+        ...args: Parameters<AgentJobRepositoryService["attachRunningPrReviewSession"]>
+      ) =>
+        publicOperation(
+          "agent-job.attach-running-pr-review-session",
+          agentJobs.attachRunningPrReviewSession(...args)
+        ),
+      readReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["readReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.read-review-suggestion-publication",
+          agentJobs.readReviewSuggestionPublication(...args)
+        ),
+      releaseReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["releaseReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.release-review-suggestion-publication",
+          agentJobs.releaseReviewSuggestionPublication(...args)
+        ),
+      reserveReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["reserveReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.reserve-review-suggestion-publication",
+          agentJobs.reserveReviewSuggestionPublication(...args)
+        ),
+      recordReviewSuggestionPublication: (
+        ...args: Parameters<AgentJobRepositoryService["recordReviewSuggestionPublication"]>
+      ) =>
+        publicOperation(
+          "agent-job.record-review-suggestion-publication",
+          agentJobs.recordReviewSuggestionPublication(...args)
+        ),
+      reviewBudget: (...args: Parameters<AgentJobRepositoryService["reviewBudget"]>) =>
+        publicOperation("agent-job.review-budget", agentJobs.reviewBudget(...args)),
       requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
+      extendReviewBudget: (...args: Parameters<AgentJobRepositoryService["extendReviewBudget"]>) =>
+        publicOperation("agent-job.extend-review-budget", agentJobs.extendReviewBudget(...args)),
+      interruptRunningReviews: (
+        ...args: Parameters<AgentJobRepositoryService["interruptRunningReviews"]>
+      ) =>
+        publicOperation(
+          "agent-job.interrupt-running-reviews",
+          agentJobs.interruptRunningReviews(...args)
+        ),
+      reviewThreadAfter: (...args: Parameters<AgentJobRepositoryService["reviewThreadAfter"]>) =>
+        publicOperation("agent-job.review-thread-after", agentJobs.reviewThreadAfter(...args)),
+      reviewThreadBefore: (...args: Parameters<AgentJobRepositoryService["reviewThreadBefore"]>) =>
+        publicOperation("agent-job.review-thread-before", agentJobs.reviewThreadBefore(...args)),
+      reviewThreadTail: (...args: Parameters<AgentJobRepositoryService["reviewThreadTail"]>) =>
+        publicOperation("agent-job.review-thread-tail", agentJobs.reviewThreadTail(...args)),
       reviewResult: (...args: Parameters<AgentJobRepositoryService["reviewResult"]>) =>
         publicOperation("agent-job.review-result", agentJobs.reviewResult(...args)),
+      reviewSuggestionRevisions: (
+        ...args: Parameters<AgentJobRepositoryService["reviewSuggestionRevisions"]>
+      ) =>
+        publicOperation(
+          "agent-job.review-suggestion-revisions",
+          agentJobs.reviewSuggestionRevisions(...args)
+        ),
       threadAfter: (...args: Parameters<AgentJobRepositoryService["threadAfter"]>) =>
         publicOperation("agent-job.thread-after", agentJobs.threadAfter(...args))
     },
@@ -222,6 +455,29 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("content.read-stream", content.readStream(...args)),
       verify: (...args: Parameters<ContentStoreService["verify"]>) =>
         publicOperation("content.verify", content.verify(...args))
+    },
+    diffContentCache: {
+      get: (...args: Parameters<DiffContentCacheRepositoryService["get"]>) =>
+        publicOperation("diff-content-cache.get", diffContentCache.get(...args)),
+      put: (...args: Parameters<DiffContentCacheRepositoryService["put"]>) =>
+        publicOperation(
+          "diff-content-cache.put",
+          putAndSweepDiffContentCache(database, content, diffContentCache, ...args).pipe(Effect.asVoid)
+        ),
+      putContent: (
+        key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
+        input: ReproduciblePutContentInput
+      ) =>
+        publicOperation(
+          "diff-content-cache.put-content",
+          putContentAndSweepDiffContentCache(
+            database,
+            content,
+            diffContentCache,
+            key,
+            input
+          )
+        )
     },
     deliveryGraph: {
       read: (...args: Parameters<DeliveryGraphRepositoryService["read"]>) =>
@@ -255,7 +511,28 @@ const makePersistence = Effect.gen(function*() {
       commit: (...args: Parameters<GovernedActionRepositoryService["commit"]>) =>
         publicOperation("governed-action.commit", governedActions.commit(...args)),
       read: (...args: Parameters<GovernedActionRepositoryService["read"]>) =>
-        publicOperation("governed-action.read", governedActions.read(...args))
+        publicOperation("governed-action.read", governedActions.read(...args)),
+      readByIdempotencyKey: (
+        ...args: Parameters<GovernedActionRepositoryService["readByIdempotencyKey"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-by-idempotency-key",
+          governedActions.readByIdempotencyKey(...args)
+        ),
+      readLatestTerminalByTarget: (
+        ...args: Parameters<GovernedActionRepositoryService["readLatestTerminalByTarget"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-latest-terminal-by-target",
+          governedActions.readLatestTerminalByTarget(...args)
+        ),
+      readLatestTerminalReleasePublications: (
+        ...args: Parameters<GovernedActionRepositoryService["readLatestTerminalReleasePublications"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-latest-terminal-release-publications",
+          governedActions.readLatestTerminalReleasePublications(...args)
+        )
     },
     people: {
       createPerson: (...args: Parameters<PeopleRepositoryService["createPerson"]>) =>
@@ -290,8 +567,23 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-connection.update", pluginConnections.updateMetadata(...args))
     },
     pluginConfigurations: {
+      completeSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["completeSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.complete-secret-cleanup",
+          pluginConfigurations.completeSecretCleanup(...args)
+        ),
       get: (...args: Parameters<PluginConfigurationRepositoryService["get"]>) =>
         publicOperation("plugin-configuration.get", pluginConfigurations.get(...args)),
+      pendingSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["pendingSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.pending-secret-cleanup",
+          pluginConfigurations.pendingSecretCleanup(...args)
+        ),
+      requestSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["requestSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.request-secret-cleanup",
+          pluginConfigurations.requestSecretCleanup(...args)
+        ),
       update: (...args: Parameters<PluginConfigurationRepositoryService["update"]>) =>
         publicOperation("plugin-configuration.update", pluginConfigurations.update(...args))
     },
@@ -422,6 +714,30 @@ const makePersistence = Effect.gen(function*() {
       list: (...args: Parameters<ReleaseRepositoryService["list"]>) =>
         publicOperation("release.list", releases.list(...args))
     },
+    retention: {
+      listRuns: (...args: Parameters<RetentionRepositoryService["listRuns"]>) =>
+        publicOperation("retention.list-runs", retention.listRuns(...args)),
+      recordSandboxReconciliation: (
+        ...args: Parameters<
+          RetentionRepositoryService["recordSandboxReconciliation"]
+        >
+      ) =>
+        publicOperation(
+          "retention.record-sandbox-reconciliation",
+          retention.recordSandboxReconciliation(...args)
+        ),
+      sweepWorkspace: (...args: Parameters<RetentionRepositoryService["sweepWorkspace"]>) =>
+        publicOperation(
+          "retention.sweep-workspace",
+          retention.sweepWorkspace(...args).pipe(
+            Effect.tap(() =>
+              completeDeferredCleanupBestEffort(
+                sweepDiffContentCacheCleanup(database, content, diffContentCache)
+              )
+            )
+          )
+        )
+    },
     timeline: {
       detail: (...args: Parameters<TimelineRepositoryService["detail"]>) =>
         publicOperation("timeline.detail", timeline.detail(...args)),
@@ -439,12 +755,32 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("workspace.get", workspaces.get(...args)),
       updateDisplayName: (...args: Parameters<WorkspaceRepositoryService["updateDisplayName"]>) =>
         publicOperation("workspace.update", workspaces.updateDisplayName(...args))
+    },
+    workspaceSettings: {
+      audits: (...args: Parameters<WorkspaceSettingsRepositoryService["audits"]>) =>
+        publicOperation("workspace-settings.audits", workspaceSettings.audits(...args)),
+      get: (...args: Parameters<WorkspaceSettingsRepositoryService["get"]>) =>
+        publicOperation("workspace-settings.get", workspaceSettings.get(...args)),
+      readAtomically: workspaceSettings.readAtomically,
+      update: (...args: Parameters<WorkspaceSettingsRepositoryService["update"]>) =>
+        publicOperation("workspace-settings.update", workspaceSettings.update(...args)),
+      updateAtomically: (...args: Parameters<WorkspaceSettingsRepositoryService["updateAtomically"]>) =>
+        publicOperation("workspace-settings.update-atomically", workspaceSettings.updateAtomically(...args))
     }
   }
 })
 
 /** Public repository collection exposed to authenticated server workflows. */
-export interface PersistenceService extends Success<typeof makePersistence> {}
+export interface PersistenceService extends Omit<Success<typeof makePersistence>, "agentJobs"> {
+  readonly agentJobs:
+    & Omit<Success<typeof makePersistence>["agentJobs"], "attachRunningPrReviewSession" | "interruptRunningReviews">
+    & {
+      readonly attachRunningPrReviewSession?: Success<
+        typeof makePersistence
+      >["agentJobs"]["attachRunningPrReviewSession"]
+      readonly interruptRunningReviews?: Success<typeof makePersistence>["agentJobs"]["interruptRunningReviews"]
+    }
+}
 
 /** Server-only durable state boundary; the database and filesystem stay private. */
 export class Persistence extends Context.Service<Persistence, PersistenceService>()(
@@ -454,8 +790,8 @@ export class Persistence extends Context.Service<Persistence, PersistenceService
 const PersistenceFromServices = Layer.effect(Persistence, makePersistence)
 
 /** Build persistence repositories from a caller-owned shared database service. */
-export const persistenceLayerFromDatabase = (
-  input: unknown
+export const persistenceLayerFromDatabase = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Persistence,
   BlobStoreError | PersistenceConfigError,
@@ -485,7 +821,10 @@ export const persistenceLayerFromDatabase = (
         const timeline = TimelineRepository.layer
         const timelineExportAudits = TimelineExportAuditRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
+        const workspaceSettings = WorkspaceSettingsRepository.layer.pipe(Layer.provide(foundation))
+        const retention = RetentionRepository.layer.pipe(Layer.provide(workspaceSettings))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
+        const diffContentCache = DiffContentCacheRepository.layer
         const content = ContentStore.layer.pipe(
           Layer.provide(Layer.merge(contentMetadata, blobs))
         )
@@ -495,6 +834,7 @@ export const persistenceLayerFromDatabase = (
           authorizedShares,
           contentMetadata,
           deliveryGraph,
+          diffContentCache,
           entities,
           events,
           governedActions,
@@ -506,10 +846,12 @@ export const persistenceLayerFromDatabase = (
           readiness,
           relationshipRepairProposals,
           release,
+          retention,
           timeline,
           timelineExportAudits,
           content,
-          workspaces
+          workspaces,
+          workspaceSettings
         )
         return PersistenceFromServices.pipe(Layer.provide(services))
       })
@@ -517,8 +859,8 @@ export const persistenceLayerFromDatabase = (
   )
 
 /** Build one shared libSQL client and owner-only blob service from decoded input. */
-export const persistenceLayer = (
-  input: unknown
+export const persistenceLayer = <UnparsedInput>(
+  input: UnparsedInput
 ): Layer.Layer<
   Persistence,
   PersistenceLayerError,

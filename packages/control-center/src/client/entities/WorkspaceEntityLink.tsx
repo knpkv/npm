@@ -17,7 +17,7 @@ interface RouterLocationParts {
 }
 
 /** Preserve the validated root origin when an Rly relationship opens another canonical entity. */
-export const workspaceEntityStateForHref = (href: string, location: RouterLocationParts): unknown => {
+export const workspaceEntityStateForHref = (href: string, location: RouterLocationParts) => {
   const target = workspaceEntityTargetFromHref(href)
   return target === null
     ? undefined

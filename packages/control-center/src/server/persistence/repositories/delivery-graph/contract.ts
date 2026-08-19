@@ -269,7 +269,7 @@ export const DeliveryGraphWriteReceipt = Schema.Struct({
 export type DeliveryGraphWriteReceipt = typeof DeliveryGraphWriteReceipt.Type
 
 /** Invalid unknown input rejected before any graph SQL is run. */
-export class DeliveryGraphInputError extends Schema.TaggedErrorClass<DeliveryGraphInputError>()(
+export class DeliveryGraphInputError extends Schema.TaggedError<DeliveryGraphInputError>()(
   "DeliveryGraphInputError",
   { operation: Schema.Literals(["read", "write"]) }
 ) {}

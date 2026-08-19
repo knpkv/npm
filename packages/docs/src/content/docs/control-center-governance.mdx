@@ -1,0 +1,206 @@
+---
+title: Control Center Governance
+description: Understand authorization, governed provider actions, reconciliation, and contained agent review.
+---
+
+## Authority stays on the server
+
+The browser receives versioned API contracts and bounded projections. It never receives provider
+clients, executor services, filesystem handles, storage paths, credential bytes, or raw provider
+causes.
+
+The exported plugin connection can read, synchronize, fetch diffs, and construct governed proposals.
+It cannot execute them. Provider executors are sealed behind a private runtime projection that only
+the governed-action engine can acquire. Source-boundary validation rejects imports of that authority
+from browser, adapter, and agent modules.
+
+Every request is scoped by the authenticated session workspace. Owners can configure connections and
+policies, run agents, and inspect expanded audit details. Approvers can use the governed decision
+surfaces granted to their role. Watchers have intentionally narrower reads and cannot use broad
+workspace, Timeline, plugin, media, or delivery-graph APIs through a shared-item session.
+
+## Governed action lifecycle
+
+A provider action moves through explicit durable stages:
+
+1. **Inspect** reloads the exact current entity and source revision.
+2. **Propose** creates a schema-valid, bounded, canonical payload and digest.
+3. **Authorize** binds the human/session decision to that digest, target, provider, and expected
+   revision.
+4. **Preflight** rechecks provider state immediately before mutation.
+5. **Dispatch** owns one provider call and records its locator or safe outcome.
+6. **Fold** verifies the result, constructs the transition, and persists the durable event in one
+   transaction.
+7. **Reconcile** reads provider state for ambiguous outcomes without replaying the mutation.
+
+Confirmed no-write outcomes may release a reservation for a corrected retry. Timeouts, conflicts,
+outages, malformed post-write responses, and other ambiguous outcomes remain reconciliation work.
+They never become an automatic second write.
+
+Safe reads and explicitly idempotent writes use at most three attempts with capped full jitter and a
+decoded `Retry-After`. A stream can retry only before its first emitted page.
+
+## Provider-specific behavior
+
+### CodeCommit
+
+Actions are request review, comment, request changes, approve, and revoke approval. They bind the
+immutable pull-request/base/head revisions and use provider reads to verify the exact review target.
+Publication reserves the confirmed content digest so concurrent edits cannot both reach the
+provider. Successful retries replay the durable receipt rather than writing a second comment.
+
+### CodePipeline
+
+Start binds explicit source revisions and derives its deterministic AWS client request token from
+`authorizationId`, `idempotencyKey`, and `payloadDigest`. Stop and manual approval revalidate the
+exact pipeline definition plus execution/action revision. Retry starts a new execution from captured
+source revisions, derives its client request token from the same three authorization inputs, and
+records the original execution as `retryOf`. Reconciliation locators are decoded and rebound to the
+authorized kind and payload digest before provider access.
+
+The canonical persistence and idempotency boundaries are:
+
+{/* governance-example:CodePipeline:canonical */}
+
+```text
+governed_actions.envelope_json.proposal.request.payload = {
+  pipelineRevision,
+  sourceRevisions,
+  variables
+}
+governed_action_authorizations = {
+  authorizationId,
+  idempotencyKey,
+  payloadDigest
+}
+```
+
+{/* governance-example:CodePipeline:idempotency */}
+
+```text
+clientRequestToken = digest({
+  authorizationId,
+  idempotencyKey,
+  payloadDigest
+})
+```
+
+These durable records contain normalized revisions, variables, identifiers, and digests—not AWS
+credential material or the raw one-time manual-approval token.
+
+### Jira
+
+Jira constructs revision-inspected proposals for comments, reply fallbacks, exact fix-version
+assignments, and typed issue links. Provider execution and reconciliation remain disabled because the
+used Jira operations do not provide the required portable atomic revision guard. A useful proposal is
+not presented as an executable capability.
+
+### Confluence
+
+An update proposal freezes title, space, expected version, next version, Markdown-derived canonical
+ADF, and payload marker. Preflight blocks changed revisions and visible drafts. The provider update
+uses exactly `expectedVersion + 1`; reconciliation reads the authorized historical version and marker
+without replaying publication.
+
+### Clockify
+
+`correct-association` freezes the complete replacement and scopes it to `workspaceId`, `userId`,
+`entryId`, `expectedRevision`, and `desiredRevision`. A final reread recognizes an already-visible
+desired state; ambiguous provider responses become reconciliation-only. `record-approval` is a
+Control Center-owned ledger decision and does not claim to call a Clockify approval endpoint.
+
+The canonical payload and submission idempotency key are persisted as:
+
+{/* governance-example:Clockify:canonical */}
+
+```text
+governed_actions.envelope_json.proposal.request.payload = {
+  _tag: "correct-association",
+  workspaceId,
+  userId,
+  entryId,
+  expectedRevision,
+  desiredRevision,
+  jiraIssueKey,
+  completeReplacementFields
+}
+```
+
+{/* governance-example:Clockify:idempotency */}
+
+```text
+idempotencyKey = digest({
+  schemaVersion: 1,
+  workspaceId,
+  entityId,
+  request: {
+    _tag: "correct-association",
+    expectedRevision,
+    jiraIssueKey
+  }
+})
+```
+
+The complete replacement fields are normalized time-entry content and provider identifiers. The
+durable payload does not contain Clockify credentials.
+
+## Secrets and content
+
+Provider credentials are converted to opaque `SecretStore` references before SQL configuration is
+written. Resolution occurs inside a scoped zeroizing lease. Rotation is copy-on-write and retains the
+old generation until consumers drain.
+
+Large content uses a content-addressed object store outside normal SQL rows. Authenticated media
+routes accept only opaque persisted identifiers; they do not fetch arbitrary URLs or resolve
+request-controlled paths. CodePipeline log and artifact proxies reload the selected action and return
+bounded private responses without exposing S3 coordinates, log ARNs, signed URLs, or credentials.
+
+## Contained pull-request review
+
+The PR-review worker is separate from release chat and requires explicit configuration. One durable
+claim resolves one enabled CodeCommit connection, clones the exact immutable head into a private
+data-root workspace, removes Git remotes and credential helpers, and verifies the full object ID.
+
+The selected model runs inside a named `sbx` sandbox:
+
+- the typed-tool path denies sandbox network access;
+- native Codex enables only its selected agent connection and disables session persistence,
+  project-document loading, and unrelated MCP configuration;
+- native Claude disables project/local/user settings and automatic project-memory discovery;
+- ambient provider credential variables are not forwarded;
+- cancellation interrupts checkout, sandbox, and model scopes before durable completion.
+
+Model output is untrusted. The host validates structured output, exact diff excerpts, normalized paths,
+line ranges, related locations, and replacement patches. Line suggestions must anchor to added lines;
+file suggestions may use deleted base-side lines for deletion-only changes. Suggested replacements
+must pass `git apply --check` against the immutable head.
+
+Suggestions remain drafts. Editing appends an immutable revision instead of rewriting history.
+Material edits require revalidation. Only a current validated revision can be previewed, authorized,
+reserved, and published.
+
+## Prevention proposals
+
+Every actionable review finding should name the most durable prevention layer:
+
+- `ast-grep` for a stable syntax pattern;
+- ESLint for scope, bindings, control flow, or type-aware semantics;
+- type-checking for an expressible public contract;
+- a focused test for behavioral or integration invariants;
+- a concise repository instruction only when judgment is unavoidable.
+
+The proposal must identify its rule/configuration path and source scope, one invalid fixture, one
+nearby valid fixture, exclusions, likely false positives, and remaining judgment cases. A remediation
+implements the guardrail with the defect fix or records evidence that the proposal is brittle and
+moves to the next durable layer.
+
+## Audit and retention
+
+The authenticated Timeline exposes default-redacted governed-action, sync, relationship, and domain
+events. CSV/JSON exports are bounded to 1,000 events and record an immutable export audit before
+streaming. Owners may inspect one expanded event; approvers retain the redacted view.
+
+Canonical governed actions, settings, exports, cleanup summaries, authorization revisions, provider
+receipts, reconciliation outcomes, and review publication history are immutable. Retention applies
+only to the explicitly configured replay, reproducible cache, expired unreferenced evidence, and
+terminal unreferenced agent-history classes.

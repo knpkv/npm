@@ -46,9 +46,10 @@ import {
 } from "./models.js"
 import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
+import type { SqlRow } from "./sqlRow.js"
 
 /** Invalid provider/resource combination rejected before persistence. */
-export class ProviderAccountInputError extends Schema.TaggedErrorClass<ProviderAccountInputError>()(
+export class ProviderAccountInputError extends Schema.TaggedError<ProviderAccountInputError>()(
   "ProviderAccountInputError",
   {
     operation: Schema.Literals(["follow-resource"]),
@@ -120,13 +121,13 @@ const makeProviderAccountRepository = Effect.gen(function*() {
   const quarantineRow = makePersistedRowQuarantine(cryptoService, quarantine)
   const sql = database.sql
 
-  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
+  const run = (plan: RenderedSql) => sql.unsafe<SqlRow>(plan.sql, [...plan.params])
 
-  const quarantineMalformed = Effect.fn("ProviderAccountRepository.quarantineMalformed")(function*(
+  const quarantineMalformed = Effect.fn("ProviderAccountRepository.quarantineMalformed")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     recordKind: "provider-account" | "followed-resource",
     recordKey: string,
-    row: unknown
+    row: UnparsedInput
   ) {
     yield* quarantineRow({
       workspaceId,
@@ -139,10 +140,10 @@ const makeProviderAccountRepository = Effect.gen(function*() {
     })
   })
 
-  const decodeProviderAccount = Effect.fn("ProviderAccountRepository.decodeProviderAccount")(function*(
+  const decodeProviderAccount = Effect.fn("ProviderAccountRepository.decodeProviderAccount")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     fallbackKey: string,
-    row: unknown
+    row: UnparsedInput
   ) {
     const decoded = Schema.decodeUnknownResult(ProviderAccountRecord)(row)
     if (Result.isSuccess(decoded)) return decoded.success
@@ -155,10 +156,10 @@ const makeProviderAccountRepository = Effect.gen(function*() {
     })
   })
 
-  const decodeFollowedResource = Effect.fn("ProviderAccountRepository.decodeFollowedResource")(function*(
+  const decodeFollowedResource = Effect.fn("ProviderAccountRepository.decodeFollowedResource")(function*<UnparsedInput>(
     workspaceId: WorkspaceId,
     fallbackKey: string,
-    row: unknown
+    row: UnparsedInput
   ) {
     const decoded = Schema.decodeUnknownResult(FollowedResourceRow)(row)
     if (Result.isSuccess(decoded)) {

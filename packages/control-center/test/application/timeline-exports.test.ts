@@ -121,12 +121,17 @@ describe("Timeline exports", () => {
 
   it.effect("JSON-encodes redacted events with explicit truncation metadata", () =>
     Effect.gen(function*() {
-      const actorWithSecrets: {
+      const actorWithSecrets = {
+        actorId: "person-secret",
+        kind: "human",
+        label: "Ada",
+        rawPrompt: "prompt-secret"
+      } satisfies {
         readonly actorId: string
         readonly kind: "human"
         readonly label: string
         readonly rawPrompt: string
-      } = { actorId: "person-secret", kind: "human", label: "Ada", rawPrompt: "prompt-secret" }
+      }
       const timelineExport = {
         events: [event("audit:1", { actor: actorWithSecrets, title: "Quoted \"title\"\nnext" })],
         metadata: { eventCount: 1, eventLimit: 1, truncated: true }

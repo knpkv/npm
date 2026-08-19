@@ -7,14 +7,19 @@
  *
  * @internal
  */
-import type { JiraApi, JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraApi, type JiraApiClientContract } from "@knpkv/jira-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
+import * as Stream from "effect/Stream"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
+import * as Predicate from "effect/Predicate"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -26,6 +31,7 @@ import {
   PluginRateLimitFailure,
   PluginTimeoutFailure
 } from "../failures.js"
+import { JiraReleaseVersionDescription, JiraReleaseVersionName } from "./JiraReleaseVersionLimits.js"
 
 /** One provider page request; limits are validated by adapter configuration. @internal */
 export interface JiraPageRequest {
@@ -62,9 +68,24 @@ export const JiraProviderPathIdentifier = JiraProviderIdentifier.check(
   )
 )
 
+const JiraNumericProjectId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isMaxLength(15),
+  Schema.isPattern(/^[1-9][0-9]*$/u, { expected: "a canonical numeric Jira project id" }),
+  Schema.makeFilter(
+    (value) => Number.isSafeInteger(Number(value)),
+    { expected: "a safe integer Jira project id" }
+  )
+).pipe(
+  Schema.decodeTo(Schema.Int, {
+    decode: SchemaGetter.transform((value) => Number(value)),
+    encode: SchemaGetter.transform((value) => String(value))
+  })
+)
+
 /** Decode an untrusted Jira path parameter before crossing the provider boundary. @internal */
-export const decodeJiraProviderPathIdentifier = (
-  value: unknown
+export const decodeJiraProviderPathIdentifier = <UnparsedInput>(
+  value: UnparsedInput
 ): Effect.Effect<string, PluginConfigurationFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(JiraProviderPathIdentifier))(value).pipe(
     Effect.mapError(() =>
@@ -125,9 +146,17 @@ export interface JiraIssueTransition {
 
 /** Stable project-version data needed by the governed proposal boundary. @internal */
 export interface JiraProjectVersion {
+  readonly description?: string | null
   readonly id: string
   readonly name: string
   readonly projectId: string | null
+}
+
+/** Append-only project-version material accepted by the governed release publisher. @internal */
+export interface JiraProjectVersionCreation {
+  readonly name: string
+  readonly description: string | null
+  readonly projectId: string
 }
 
 /** Stable issue-link type data needed by the governed proposal boundary. @internal */
@@ -180,6 +209,13 @@ export interface JiraReadProvider {
   readonly getProjectVersion: (
     versionId: string
   ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
+  readonly findProjectVersionsByName: (
+    projectId: string,
+    name: string
+  ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
+  readonly createProjectVersion: (
+    input: JiraProjectVersionCreation
+  ) => Effect.Effect<JiraProjectVersion, PluginFailure>
   readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
 }
 
@@ -187,15 +223,15 @@ const StatusResponse = Schema.Struct({
   response: Schema.Struct({ status: Schema.Number })
 })
 
-const statusOf = (error: unknown): number | undefined => {
+const statusOf = <UnparsedInput>(error: UnparsedInput): number | undefined => {
   if (HttpClientError.isHttpClientError(error)) return error.response?.status
   const decoded = Schema.decodeUnknownResult(StatusResponse)(error)
   return Result.isSuccess(decoded) ? decoded.success.response.status : undefined
 }
 
-const isNotFound = (error: unknown): boolean => statusOf(error) === 404
+const isNotFound = <UnparsedInput>(error: UnparsedInput): boolean => statusOf(error) === 404
 
-const retryAfterSeconds = (error: unknown, now: DateTime.DateTime): number => {
+const retryAfterSeconds = <UnparsedInput>(error: UnparsedInput, now: DateTime.DateTime): number => {
   if (!HttpClientError.isHttpClientError(error)) return 60
   const value = error.response?.headers["retry-after"]
   if (value === undefined) return 60
@@ -207,9 +243,9 @@ const retryAfterSeconds = (error: unknown, now: DateTime.DateTime): number => {
   return Math.min(Math.max(Math.ceil(delayMillis / 1_000), 0), 3_600)
 }
 
-const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
+const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*<UnparsedInput>(
   operation: string,
-  error: unknown
+  error: UnparsedInput
 ): Effect.fn.Return<never, PluginFailure> {
   const status = statusOf(error)
   if (status === 401) return yield* new PluginAuthenticationFailure({ operation })
@@ -247,10 +283,66 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
 /** Translate a generated-client failure at the provider boundary. @internal */
 export const mapJiraReadProviderFailure = mapFailure
 
+/** Keep only duplicate-name conflicts eligible for post-create ambiguity recovery. @internal */
+export const mapJiraCreateProjectVersionFailure = (error: PluginFailure): PluginFailure =>
+  Schema.is(PluginConflictFailure)(error) &&
+    error.diagnosticCode !== "jira-provider-rejected-409"
+    ? new PluginConfigurationFailure({ diagnosticCode: error.diagnosticCode })
+    : error
+
 const providerCall = <Value, Error>(
   operation: string,
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> => Effect.catch(effect, (error) => mapFailure(operation, error))
+
+const nullableChangelogValueKeys = new Set(["from", "fromString", "to", "toString"])
+
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  value !== null && !Array.isArray(value) && Predicate.isObjectOrArray(value)
+
+const omitNullableChangelogItemValues = (item: Schema.Json): Schema.Json =>
+  isJsonObject(item)
+    ? Object.fromEntries(
+      Object.entries(item).filter(([key, field]) => field !== null || !nullableChangelogValueKeys.has(key))
+    )
+    : item
+
+const omitNullableChangelogValues = (response: Schema.Json): Schema.Json => {
+  if (!isJsonObject(response) || !Array.isArray(response.values)) {
+    return response
+  }
+  return {
+    ...response,
+    values: response.values.map((history) => {
+      if (!isJsonObject(history) || !Array.isArray(history.items)) {
+        return history
+      }
+      return { ...history, items: history.items.map(omitNullableChangelogItemValues) }
+    })
+  }
+}
+
+const getChangelogs = (
+  client: JiraApiClientContract,
+  issueId: string,
+  request: JiraPageRequest
+): Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure> =>
+  providerCall(
+    "jira-get-changelogs",
+    client.httpClient.execute(
+      HttpClientRequest.get(`/rest/api/3/issue/${encodeURIComponent(issueId)}/changelog`).pipe(
+        HttpClientRequest.setUrlParams({
+          startAt: request.startAt,
+          maxResults: request.maxResults
+        })
+      )
+    ).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Json)),
+      Effect.map(omitNullableChangelogValues),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraApi.PageBeanChangelog))
+    )
+  )
 
 const ISSUE_FIELDS = [
   "summary",
@@ -283,11 +375,20 @@ const JiraTransitions = Schema.Struct({
   })))
 })
 const JiraProjectVersionResponse = Schema.Struct({
+  description: Schema.optionalKey(JiraReleaseVersionDescription),
   id: Schema.String,
   name: Schema.String,
   projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
   project: Schema.optionalKey(Schema.String)
 })
+const JiraProjectVersionPageResponse = Schema.Struct({
+  isLast: Schema.optionalKey(Schema.Boolean),
+  total: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  values: Schema.optionalKey(Schema.Array(JiraProjectVersionResponse))
+})
+
+const RELEASE_VERSION_LOOKUP_PAGE_SIZE = 50
+const RELEASE_VERSION_LOOKUP_MAX_PAGES = 20
 const JiraIssueLinkTypes = Schema.Struct({
   issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
     id: JiraProviderIdentifier,
@@ -329,8 +430,8 @@ const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
   return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, key ASC`
 })
 
-const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
-  response: unknown
+const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*<UnparsedInput>(
+  response: UnparsedInput
 ): Effect.fn.Return<JiraProjectIssuePage, PluginMalformedResponseFailure> {
   const decoded = yield* Schema.decodeUnknownEffect(JiraProjectIssuePageResponse)(response).pipe(
     Effect.mapError(() =>
@@ -354,7 +455,7 @@ const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePag
 })
 
 /** Build the production provider boundary from the shared generated Jira client. @internal */
-export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
+export const makeJiraReadProvider = (client: JiraApiClientContract): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
   getServerInfo: providerCall("jira-server-info", client.getServerInfo(undefined)),
   getProject: (projectId) =>
@@ -408,12 +509,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     ),
   getChangelogs: (issueId, request) =>
     decodeJiraProviderPathIdentifier(issueId).pipe(
-      Effect.flatMap((issueId) =>
-        providerCall(
-          "jira-get-changelogs",
-          client.getChangeLogs(issueId, { params: request })
-        )
-      )
+      Effect.flatMap((issueId) => getChangelogs(client, issueId, request))
     ),
   searchProjectIssues: (request) =>
     projectJql(request).pipe(
@@ -425,7 +521,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               jql,
               maxResults: request.maxResults,
               fields: ISSUE_FIELDS,
-              ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
+              ...(!(request.nextPageToken === null) && { nextPageToken: request.nextPageToken })
             }
           })
         )
@@ -546,6 +642,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               ),
               Effect.map((version) =>
                 Option.some({
+                  description: version.description ?? null,
                   id: version.id,
                   name: version.name,
                   projectId: version.projectId === undefined
@@ -555,6 +652,109 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
               )
             )
         })
+      )
+    ),
+  findProjectVersionsByName: (projectId, name) =>
+    decodeJiraProviderPathIdentifier(projectId).pipe(
+      Effect.flatMap((projectId) =>
+        Stream.paginate(
+          { page: 0, startAt: 0 },
+          Effect.fn("JiraReadProvider.findProjectVersionsByNamePage")(function*(state) {
+            const pageNumber = state.page + 1
+            const page = yield* providerCall(
+              "jira-find-project-versions-by-name",
+              client.getProjectVersionsPaginated(projectId, {
+                params: {
+                  startAt: state.startAt,
+                  maxResults: RELEASE_VERSION_LOOKUP_PAGE_SIZE,
+                  orderBy: "name",
+                  query: name
+                }
+              })
+            ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionPageResponse)))
+            const versions = page.values ?? []
+            const reachedTotal = page.total !== undefined && state.startAt + versions.length >= page.total
+            if (page.isLast === true || reachedTotal) {
+              return [versions, Option.none()]
+            }
+            if (versions.length === 0 || pageNumber >= RELEASE_VERSION_LOOKUP_MAX_PAGES) {
+              return yield* new PluginMalformedResponseFailure({
+                operation: "jira-find-project-versions-by-name",
+                diagnosticCode: "jira-project-version-lookup-incomplete"
+              })
+            }
+            return [
+              versions,
+              Option.some({ page: pageNumber, startAt: state.startAt + versions.length })
+            ]
+          })
+        ).pipe(Stream.runCollect, Effect.map((pages) => pages.flat()))
+      ),
+      Effect.map((versions) =>
+        versions.map((version) => ({
+          description: version.description ?? null,
+          id: version.id,
+          name: version.name,
+          projectId: version.projectId === undefined || version.projectId === null
+            ? version.project ?? null
+            : String(version.projectId)
+        }))
+      ),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-find-project-versions-by-name",
+            diagnosticCode: "jira-project-versions-response-invalid"
+          })
+          : error
+      )
+    ),
+  createProjectVersion: (input) =>
+    Effect.all([
+      Schema.decodeUnknownEffect(JiraNumericProjectId)(input.projectId).pipe(
+        Effect.mapError(() =>
+          new PluginConfigurationFailure({
+            diagnosticCode: "jira-project-version-project-id-invalid"
+          })
+        )
+      ),
+      Schema.decodeUnknownEffect(JiraReleaseVersionName)(input.name).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-project-version-name-invalid" }))
+      ),
+      Schema.decodeUnknownEffect(JiraReleaseVersionDescription)(input.description).pipe(
+        Effect.mapError(() =>
+          new PluginConfigurationFailure({ diagnosticCode: "jira-project-version-description-invalid" })
+        )
+      )
+    ]).pipe(
+      Effect.flatMap(([projectId, name, description]) =>
+        providerCall(
+          "jira-create-project-version",
+          client.createVersion({
+            payload: {
+              name,
+              projectId,
+              ...(!(description === null) && { description })
+            }
+          })
+        )
+      ),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersionResponse)),
+      Effect.map((version) => ({
+        description: version.description ?? null,
+        id: version.id,
+        name: version.name,
+        projectId: version.projectId === undefined || version.projectId === null
+          ? version.project ?? null
+          : String(version.projectId)
+      })),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-create-project-version",
+            diagnosticCode: "jira-created-project-version-response-invalid"
+          })
+          : mapJiraCreateProjectVersionFailure(error)
       )
     ),
   getIssueLinkTypes: providerCall(

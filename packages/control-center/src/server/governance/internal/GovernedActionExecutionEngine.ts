@@ -1,4 +1,3 @@
-import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -24,20 +23,20 @@ import {
 } from "./GovernedActionExecutionStore.js"
 
 /** Invalid untrusted action identity at the private worker boundary. */
-export class GovernedActionExecutionInputError extends Schema.TaggedErrorClass<GovernedActionExecutionInputError>()(
+export class GovernedActionExecutionInputError extends Schema.TaggedError<GovernedActionExecutionInputError>()(
   "GovernedActionExecutionInputError",
   {}
 ) {}
 
 /** The durable provider-call window closed before a confirmed result was received. */
-class GovernedActionDispatchDeadlineExceeded extends Schema.TaggedErrorClass<GovernedActionDispatchDeadlineExceeded>()(
+class GovernedActionDispatchDeadlineExceeded extends Schema.TaggedError<GovernedActionDispatchDeadlineExceeded>()(
   "GovernedActionDispatchDeadlineExceeded",
   {}
 ) {}
 
 /** The recovery claim expired before the provider reconciliation completed. */
 class GovernedActionReconciliationDeadlineExceeded
-  extends Schema.TaggedErrorClass<GovernedActionReconciliationDeadlineExceeded>()(
+  extends Schema.TaggedError<GovernedActionReconciliationDeadlineExceeded>()(
     "GovernedActionReconciliationDeadlineExceeded",
     {}
   )
@@ -250,7 +249,7 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
     )
   })
 
-  const run = Effect.fn("GovernedActionExecutionEngine.run")(function*(input: unknown) {
+  const run = Effect.fn("GovernedActionExecutionEngine.run")(function*<UnparsedInput>(input: UnparsedInput) {
     const reference: GovernedActionExecutionReferenceType = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionExecutionReference)
     )(input).pipe(Effect.mapError(() => new GovernedActionExecutionInputError()))
@@ -271,7 +270,6 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
       references,
       (reference) =>
         run(reference).pipe(
-          Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(cause)),
           Effect.result
         ),
       { concurrency: 1 }

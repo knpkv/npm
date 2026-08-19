@@ -44,19 +44,23 @@ export function Header() {
 
   if (state.error) {
     return (
-      <box style={{ height: 1, width: "100%", backgroundColor: theme.backgroundHeaderError }}>
-        <text fg={theme.text}>{`  [X] ERROR: ${state.error}`}</text>
+      <box
+        border={["bottom"]}
+        borderColor={theme.textError}
+        style={{ height: 2, width: "100%", backgroundColor: theme.backgroundHeaderError, paddingLeft: 1 }}
+      >
+        <text fg={theme.textError}>{`CodeCommit unavailable · ${state.error}`}</text>
       </box>
     )
   }
 
   const lastUpdateStr = creatingPr
-    ? `  ${SPINNER_FRAMES[spinnerFrame]} [+] Creating: ${creatingPr}`
+    ? `${SPINNER_FRAMES[spinnerFrame]} creating ${creatingPr}`
     : state.status === "loading"
-      ? `  ${SPINNER_FRAMES[spinnerFrame]} [@] Fetching ${state.statusDetail ?? "..."}`
+      ? `${SPINNER_FRAMES[spinnerFrame]} syncing`
       : state.lastUpdated
-        ? `  [@] ${DateUtils.formatRelativeTime(state.lastUpdated, new Date())}`
-        : ""
+        ? DateUtils.formatRelativeTime(state.lastUpdated, new Date()).toLowerCase()
+        : "not synced"
   const count =
     view === "prs"
       ? state.pullRequests.length
@@ -64,15 +68,35 @@ export function Header() {
         ? notifications.items.length
         : state.accounts.length
 
-  const title = (VIEW_TITLES[view] || "TUI").toUpperCase()
-  const userStr = state.currentUser ? ` [${state.currentUser}]` : ""
-  const headerText = `  AWS ${title} (${count}) ${lastUpdateStr}${userStr}`
-
-  const bgColor = theme.backgroundHeader
+  const title = VIEW_TITLES[view] || "CodeCommit"
+  const userStr = state.status === "idle" && state.currentUser ? ` · ${state.currentUser}` : ""
+  const countLabel =
+    view === "prs"
+      ? `${count} PR${count === 1 ? "" : "s"}`
+      : view === "notifications"
+        ? `${count} alert${count === 1 ? "" : "s"}`
+        : view === "settings"
+          ? `${count} account${count === 1 ? "" : "s"}`
+          : "exact head"
 
   return (
-    <box style={{ height: 1, width: "100%", backgroundColor: bgColor }}>
-      <text fg={theme.text}>{headerText}</text>
+    <box
+      border={["bottom"]}
+      borderColor={theme.border}
+      style={{ height: 2, width: "100%", backgroundColor: theme.backgroundHeader, paddingLeft: 1, paddingRight: 1 }}
+    >
+      <box style={{ flexDirection: "row", width: "100%" }}>
+        <text fg={theme.textAccent} bg={theme.accentTint}>
+          {" CC "}
+        </text>
+        <text fg={theme.text}>{" Control Center"}</text>
+        <text fg={theme.textMuted}>{" / CodeCommit / "}</text>
+        <text fg={theme.text}>{title}</text>
+        <box style={{ flexGrow: 1 }} />
+        <text fg={state.status === "loading" || creatingPr ? theme.textAccent : theme.textMuted}>
+          {`${countLabel} · ${lastUpdateStr}${userStr}`}
+        </text>
+      </box>
     </box>
   )
 }

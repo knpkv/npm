@@ -1,0 +1,139 @@
+id: no-raw-application-dialog
+snapshots:
+  ? |
+    <aside aria-modal={"true"}>Review</aside>
+  : labels:
+      - source: aria-modal={"true"}
+        style: primary
+        start: 7
+        end: 26
+  ? |
+    <aside aria-modal={'true'}>Review</aside>
+  : labels:
+      - source: aria-modal={'true'}
+        style: primary
+        start: 7
+        end: 26
+  ? |
+    <aside aria-modal={true}>Review</aside>
+  : labels:
+      - source: aria-modal={true}
+        style: primary
+        start: 7
+        end: 24
+  ? |
+    <dialog />
+  : labels:
+      - source: <dialog />
+        style: primary
+        start: 0
+        end: 10
+  ? |
+    <dialog open aria-label="Confirm">Confirm</dialog>
+  : labels:
+      - source: <dialog open aria-label="Confirm">Confirm</dialog>
+        style: primary
+        start: 0
+        end: 50
+  ? |
+    <dialog>Confirm</dialog>
+  : labels:
+      - source: <dialog>Confirm</dialog>
+        style: primary
+        start: 0
+        end: 24
+  ? |
+    <div aria-modal="true" role="dialog">
+      Review
+    </div>
+  : labels:
+      - source: aria-modal="true"
+        style: primary
+        start: 5
+        end: 22
+  ? |
+    <div aria-modal={`true`}>Review</div>
+  : labels:
+      - source: aria-modal={`true`}
+        style: primary
+        start: 5
+        end: 24
+  ? |
+    <div aria-modal>Review</div>
+  : labels:
+      - source: aria-modal
+        style: primary
+        start: 5
+        end: 15
+  ? |
+    <div role='dialog'>Review</div>
+  : labels:
+      - source: role='dialog'
+        style: primary
+        start: 5
+        end: 18
+  ? |
+    <div role={"dialog" as const}>Review</div>
+  : labels:
+      - source: role={"dialog" as const}
+        style: primary
+        start: 5
+        end: 29
+  ? |
+    <div role={"dialog"}>Review</div>
+  : labels:
+      - source: role={"dialog"}
+        style: primary
+        start: 5
+        end: 20
+  ? |
+    <div role={'dialog'}>Review</div>
+  : labels:
+      - source: role={'dialog'}
+        style: primary
+        start: 5
+        end: 20
+  ? |
+    <div role={`dialog`}>Review</div>
+  : labels:
+      - source: role={`dialog`}
+        style: primary
+        start: 5
+        end: 20
+  ? |
+    <section aria-modal="true">
+      Review
+    </section>
+  : labels:
+      - source: aria-modal="true"
+        style: primary
+        start: 9
+        end: 26
+  ? |
+    <section role="alertdialog">Confirm</section>
+  : labels:
+      - source: role="alertdialog"
+        style: primary
+        start: 9
+        end: 27
+  ? |
+    <section role={"alertdialog" as const}>Confirm</section>
+  : labels:
+      - source: role={"alertdialog" as const}
+        style: primary
+        start: 9
+        end: 38
+  ? |
+    <section role={"alertdialog"}>Confirm</section>
+  : labels:
+      - source: role={"alertdialog"}
+        style: primary
+        start: 9
+        end: 29
+  ? |
+    <section role={`alertdialog`}>Confirm</section>
+  : labels:
+      - source: role={`alertdialog`}
+        style: primary
+        start: 9
+        end: 29

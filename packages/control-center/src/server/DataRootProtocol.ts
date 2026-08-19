@@ -74,12 +74,12 @@ export const boundDataRootMarkerContent = (claimBasename: string, targetBasename
     Encoding.encodeBase64Url(targetBasename)
   }\n`
 
-export class FreshDataRootClaimConflict extends Schema.TaggedErrorClass<FreshDataRootClaimConflict>()(
+export class FreshDataRootClaimConflict extends Schema.TaggedError<FreshDataRootClaimConflict>()(
   "FreshDataRootClaimConflict",
   { reason: Schema.Literal("target-raced") }
 ) {}
 
-export class DataRootProtocolError extends Schema.TaggedErrorClass<DataRootProtocolError>()(
+export class DataRootProtocolError extends Schema.TaggedError<DataRootProtocolError>()(
   "DataRootProtocolError",
   {
     reason: Schema.Literals([

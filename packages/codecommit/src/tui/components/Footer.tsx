@@ -17,29 +17,31 @@ export function Footer() {
 
   if (exitPending) {
     return (
-      <box style={{ height: 1, width: "100%", backgroundColor: theme.backgroundHeaderWarning }}>
-        <text fg={theme.textError}>Press Ctrl+C again to exit</text>
+      <box style={{ height: 1, width: "100%", backgroundColor: theme.warningTint, paddingLeft: 1 }}>
+        <text fg={theme.textWarning}>Press Ctrl+C again to exit</text>
       </box>
     )
   }
 
   if (uiError) {
     return (
-      <box style={{ height: 1, width: "100%", backgroundColor: theme.backgroundHeaderError }}>
-        <text fg={theme.textError}>{`ERROR: ${uiError}`}</text>
+      <box style={{ height: 1, width: "100%", backgroundColor: theme.errorTint, paddingLeft: 1 }}>
+        <text fg={theme.textError}>{uiError}</text>
       </box>
     )
   }
 
   if (isFiltering) {
     return (
-      <box style={{ height: 1, width: "100%", backgroundColor: theme.backgroundElement, flexDirection: "row" }}>
-        <text fg={theme.background} bg={theme.primary}>
+      <box
+        style={{ height: 1, width: "100%", backgroundColor: theme.background, flexDirection: "row", paddingLeft: 1 }}
+      >
+        <text fg={theme.textAccent} bg={theme.accentTint}>
           {" / "}
         </text>
-        <text fg={theme.textMuted}>{" Filter: "}</text>
+        <text fg={theme.textMuted}>{" Filter pull requests  "}</text>
         <text fg={theme.text}>{filterText}</text>
-        <text fg={theme.primary}>{"│"}</text>
+        <text fg={theme.textAccent}>{"│"}</text>
       </box>
     )
   }
@@ -47,8 +49,8 @@ export function Footer() {
   const hintText = HINTS[view] || ""
 
   return (
-    <box style={{ height: 1, width: "100%", backgroundColor: theme.backgroundPanel }}>
-      <text fg={theme.textMuted}>{`  >  ${hintText}`}</text>
+    <box style={{ height: 1, width: "100%", backgroundColor: theme.background, paddingLeft: 1 }}>
+      <text fg={theme.textMuted}>{hintText}</text>
     </box>
   )
 }

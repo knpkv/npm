@@ -6,7 +6,7 @@
 
 export {
   ClockifyApiClient,
-  type ClockifyApiClientShape,
+  type ClockifyApiClientContract,
   type ClockifyClientError,
   layer,
   make
@@ -16,6 +16,7 @@ export type {
   AuthenticatedClockifyApi,
   CreateTimeEntryParams,
   GetTimeEntriesParams,
+  GetTimeEntryParams,
   Project,
   StopTimeEntryParams,
   Tag,
@@ -27,6 +28,6 @@ export type {
   WorkspaceUser
 } from "./ClockifyApiClient.js"
 
-export { ClockifyApiConfig, type ClockifyApiConfigShape } from "./ClockifyApiConfig.js"
+export { ClockifyApiConfig, type ClockifyApiConfigContract } from "./ClockifyApiConfig.js"
 
 export * as ClockifyApi from "./generated/ClockifyApi.js"

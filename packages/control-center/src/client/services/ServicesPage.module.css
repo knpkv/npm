@@ -31,9 +31,14 @@
 
 .sectionHeading,
 .accountIdentity,
-.resource,
-.resourceList {
+.resourceBody {
   gap: var(--rly-space-8);
+}
+
+.resourceList {
+  overflow: hidden;
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
 }
 
 .accountGrid {
@@ -42,7 +47,8 @@
 }
 
 .accountHeading,
-.resourceHeading,
+.resourceSummary,
+.resourceStatus,
 .accountActions,
 .resourceActions {
   display: flex;
@@ -51,7 +57,7 @@
 }
 
 .accountHeading,
-.resourceHeading {
+.resourceSummary {
   justify-content: space-between;
 }
 
@@ -64,10 +70,77 @@
   padding-block-start: var(--rly-space-4);
 }
 
-.resource {
+.resource + .resource {
+  border-block-start: 1px solid var(--rly-color-border-2);
+}
+
+.resource[data-status-tone="positive"] {
+  box-shadow: inset 3px 0 var(--rly-color-success-ink);
+}
+
+.resource[data-status-tone="positive"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-success-ink);
+}
+
+.resource[data-status-tone="critical"] {
+  box-shadow: inset 3px 0 var(--rly-color-blocked-ink);
+}
+
+.resource[data-status-tone="critical"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-blocked-ink);
+}
+
+.resource[data-status-tone="caution"],
+.resource[data-status-tone="progress"] {
+  box-shadow: inset 3px 0 var(--rly-color-text-2);
+}
+
+.resource[data-status-tone="caution"]:dir(rtl),
+.resource[data-status-tone="progress"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-text-2);
+}
+
+.resourceSummary {
+  min-block-size: var(--rly-space-48);
   padding: var(--rly-space-16);
-  border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.resourceSummary::-webkit-details-marker {
+  display: none;
+}
+
+.resourceSummary:focus-visible {
+  outline: 2px solid var(--rly-color-text-1);
+  outline-offset: -2px;
+}
+
+.resourceStatus {
+  flex: none;
+}
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  gap: var(--rly-space-4);
+}
+
+.disclosure span {
+  font-size: 1.1em;
+}
+
+.resource[open] .disclosure span {
+  transform: rotate(90deg);
+}
+
+.resourceBody {
+  display: grid;
+  padding: 0 var(--rly-space-16) var(--rly-space-16);
   background: var(--rly-color-surface-2);
 }
 
@@ -89,6 +162,41 @@
 .syncState {
   display: grid;
   gap: var(--rly-space-6);
+}
+
+.administration,
+.administrationSection,
+.credentialRecovery,
+.diagnostics,
+.accountEdit {
+  display: grid;
+  gap: var(--rly-space-12);
+}
+
+.administration {
+  padding-block: var(--rly-space-16);
+  border-block: 1px solid var(--rly-color-border-2);
+}
+
+.administrationLabels,
+.diagnostic,
+.accountEditAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+
+.diagnostic {
+  flex-wrap: nowrap;
+}
+
+.accountEdit {
+  max-inline-size: 32rem;
+}
+
+.accountEditAction {
+  justify-content: flex-end;
 }
 
 .syncActions {
@@ -142,8 +250,13 @@
   .cardHeading,
   .cardAction,
   .accountHeading,
-  .resourceHeading {
+  .resourceSummary {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .resourceStatus {
+    inline-size: 100%;
+    justify-content: space-between;
   }
 }

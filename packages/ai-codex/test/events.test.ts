@@ -66,6 +66,19 @@ const expectProviderPhase = (
 }
 
 describe("streamEvents", () => {
+  it.effect("keeps ordinary streams filesystem-free", () =>
+    Effect.gen(function*() {
+      const ordinaryCalls: Array<ChildProcess.Command> = []
+      yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(
+          ordinaryCalls,
+          Stream.make("{\"type\":\"turn.completed\"}\n").pipe(Stream.encodeText)
+        )),
+        Stream.runDrain
+      )
+      expect(ordinaryCalls).toHaveLength(1)
+    }))
+
   it.effect("streams every validated raw event including native tool calls", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []

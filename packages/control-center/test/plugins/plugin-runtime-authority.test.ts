@@ -36,7 +36,7 @@ const ACCOUNT_A = PluginRuntimeAccountDigest.make(`sha256:${"b".repeat(64)}`)
 const ACCOUNT_B = PluginRuntimeAccountDigest.make(`sha256:${"c".repeat(64)}`)
 const BASE_URL_KEY = StoredPluginConfigurationKey.make("base-url")
 
-const descriptor = (adapterPatch = 0): unknown => ({
+const descriptor = (adapterPatch = 0) => ({
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira",

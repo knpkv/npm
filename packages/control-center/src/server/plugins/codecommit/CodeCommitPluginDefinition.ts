@@ -2,7 +2,9 @@
  * Production CodeCommit read adapter for one configured repository.
  *
  * Owns pull-request discovery, immutable revision reads, complete paginated
- * changed-file inventory, and governed review actions. CodeCommit exposes
+ * changed-file inventory, and governed review actions. Governed review actions
+ * include exact-head create, update, and reply comment mutations alongside
+ * native approval state changes. CodeCommit exposes
  * native approval and revoke mutations; request-review and
  * request-changes are represented by idempotent comments on the exact commits
  * because the provider has no corresponding review-state API. Governed merge
@@ -36,6 +38,7 @@ import {
   type DiffInventoryPageRequestV1,
   type DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
+  PluginActionActorIdentityV1,
   type PluginActionDispatchResultV1,
   PluginActionPreflightV1,
   PluginActionProposalV1,
@@ -73,9 +76,14 @@ import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 
 const PULL_REQUEST_STREAM_KEY = "pull-requests"
 const COMPLETED_CHECKPOINT = "complete"
+const DURABLE_COMPLETED_CHECKPOINT_PREFIX = "complete:v1:"
 const NEXT_CHECKPOINT_PREFIX = "next:"
+const DURABLE_NEXT_CHECKPOINT_PREFIX = "next:v1:"
 const CLOSED_CHECKPOINT = "closed"
 const CLOSED_NEXT_CHECKPOINT_PREFIX = "closed:"
+const DURABLE_CLOSED_CHECKPOINT_PREFIX = "closed:v1:"
+const DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX = "closed-next:v1:"
+const SYNC_INVENTORY_DIGEST_LENGTH = 64
 const RETRY_DELAY_SECONDS = 30
 
 type PullRequestStatus = "OPEN" | "CLOSED"
@@ -83,6 +91,7 @@ type PullRequestStatus = "OPEN" | "CLOSED"
 interface SyncCursor {
   readonly status: PullRequestStatus
   readonly nextToken: string | null
+  readonly inventoryDigest: string | null
 }
 
 /** Secret-free production adapter configuration. @internal */
@@ -142,10 +151,10 @@ const descriptor = {
 /** Current persisted descriptor snapshot used by first-party compatibility checks. @internal */
 export const codeCommitPluginDescriptor = descriptor
 
-const output = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const output = <S extends Schema.Codec<unknown, unknown, never, never>, UnparsedInput>(
   operation: string,
   schema: S,
-  value: unknown
+  value: UnparsedInput
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError(() =>
@@ -298,7 +307,12 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
     case "AwsApiError":
       return causeHasTag(error.cause, [
         "IdempotencyParameterMismatchException",
+        "InvalidFileLocationException",
+        "InvalidFilePositionException",
+        "InvalidPathException",
+        "InvalidRelativeFileVersionEnumException",
         "MaximumNumberOfApprovalsExceededException",
+        "PathDoesNotExistException",
         "PullRequestCannotBeApprovedByAuthorException"
       ])
   }
@@ -325,6 +339,13 @@ const ReviewCommentPayload = Schema.Struct({
   content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_100))
 })
 
+const ReviewCommentLocation = Schema.Struct(ReviewClient.CodeCommitReviewLocation.fields)
+
+const InlineReviewCommentPayload = Schema.Struct({
+  ...ReviewCommentPayload.fields,
+  location: Schema.optionalKey(ReviewCommentLocation)
+})
+
 const RequestReviewPayload = Schema.Struct({
   reviewerArns: Schema.Array(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_048))
@@ -342,6 +363,7 @@ const ReviewClientRequestToken = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(64)
 )
+const ReviewCommentId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 
 const CodeCommitActionPayload = Schema.Union([
   Schema.TaggedStruct("request-review", {
@@ -357,12 +379,29 @@ const CodeCommitActionPayload = Schema.Union([
     destinationCommit: ReviewCommitId,
     destinationReference: ReviewReference,
     content: ReviewCommentPayload.fields.content,
+    location: Schema.optionalKey(ReviewCommentLocation),
     clientRequestToken: ReviewClientRequestToken
   }),
   Schema.TaggedStruct("request-changes", {
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
     destinationReference: ReviewReference,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
+  }),
+  Schema.TaggedStruct("update-comment", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference,
+    commentId: ReviewCommentId,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
+  }),
+  Schema.TaggedStruct("reply-comment", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference,
+    commentId: ReviewCommentId,
     content: ReviewCommentPayload.fields.content,
     clientRequestToken: ReviewClientRequestToken
   }),
@@ -380,16 +419,26 @@ const CodeCommitActionPayload = Schema.Union([
 
 type CodeCommitActionPayload = typeof CodeCommitActionPayload.Type
 
+/** Review mutations governed by Control Center; TUI-only merge is intentionally excluded. */
+type GovernedCodeCommitReviewAction = Exclude<
+  ReviewClient.CodeCommitReviewAction,
+  { readonly _tag: "merge" }
+>
+
 const actionKinds: readonly [
   "request-review",
   "comment",
   "request-changes",
+  "update-comment",
+  "reply-comment",
   "approve",
   "revoke-approval"
 ] = [
   "request-review",
   "comment",
   "request-changes",
+  "update-comment",
+  "reply-comment",
   "approve",
   "revoke-approval"
 ]
@@ -407,6 +456,10 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
       return `Comment on CodeCommit pull request #${pullRequestId}`
     case "request-changes":
       return `Request changes on CodeCommit pull request #${pullRequestId}`
+    case "update-comment":
+      return `Update a comment on CodeCommit pull request #${pullRequestId}`
+    case "reply-comment":
+      return `Reply to a comment on CodeCommit pull request #${pullRequestId}`
     case "approve":
       return `Approve CodeCommit pull request #${pullRequestId}`
     case "revoke-approval":
@@ -416,10 +469,14 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
 
 const actionImpact = (
   actionKind: CodeCommitActionKind
-): { readonly level: "medium"; readonly summary: string } => ({
+) => ({
   level: "medium",
   summary: actionKind === "approve" || actionKind === "revoke-approval"
     ? "Changes the signed-in AWS identity's approval state"
+    : actionKind === "update-comment"
+    ? "Updates an existing durable review comment"
+    : actionKind === "reply-comment"
+    ? "Adds a durable reply to an existing review comment"
     : "Adds a durable review comment to the pull request"
 })
 
@@ -429,8 +486,15 @@ const decodeRequestedPayload = Effect.fn("CodeCommitPlugin.decodeRequestedPayloa
 ) {
   const schema = actionKind === "request-review"
     ? RequestReviewPayload
-    : actionKind === "comment" || actionKind === "request-changes"
+    : actionKind === "comment"
+    ? InlineReviewCommentPayload
+    : actionKind === "request-changes"
     ? ReviewCommentPayload
+    : actionKind === "update-comment" || actionKind === "reply-comment"
+    ? Schema.Struct({
+      ...ReviewCommentPayload.fields,
+      commentId: ReviewCommentId
+    })
     : EmptyPayload
   return yield* Schema.decodeUnknownEffect(Schema.toType(schema))(payload).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
@@ -446,18 +510,20 @@ const reviewRequestContent = (
   }\n\nRequested reviewers:\n${reviewers}`
 }
 
-const decodeNormalizedActionPayload = (
-  value: unknown
+const decodeNormalizedActionPayload = <UnparsedInput>(
+  value: UnparsedInput
 ): Effect.Effect<CodeCommitActionPayload, PluginConfigurationFailure> =>
   Schema.decodeUnknownEffect(Schema.toType(CodeCommitActionPayload))(value).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
   )
 
 const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientRequestToken")(function*(
-  actionKind: "comment" | "request-changes" | "request-review",
+  actionKind: "comment" | "request-changes" | "request-review" | "update-comment" | "reply-comment",
   content: string,
   pullRequest: ReadClient.CodeCommitPullRequestRevision,
-  cryptoService: Crypto.Crypto
+  cryptoService: Crypto.Crypto,
+  location?: typeof ReviewCommentLocation.Type,
+  commentId?: string
 ) {
   return yield* digestGovernedActionPayload({
     actionKind,
@@ -466,7 +532,9 @@ const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientReque
     revisionId: pullRequest.revisionId,
     sourceCommit: pullRequest.sourceCommit,
     destinationCommit: pullRequest.destinationCommit,
-    content
+    content,
+    ...(!(commentId === undefined) && { commentId }),
+    ...(!(location === undefined) && { location })
   }).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
     Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
@@ -496,7 +564,26 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         clientRequestToken: yield* commentClientRequestToken(actionKind, content, pullRequest, cryptoService)
       })
     }
-    case "comment":
+    case "comment": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(InlineReviewCommentPayload))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference,
+        content: decoded.content,
+        ...(!(decoded.location === undefined) && { location: decoded.location }),
+        clientRequestToken: yield* commentClientRequestToken(
+          actionKind,
+          decoded.content,
+          pullRequest,
+          cryptoService,
+          decoded.location
+        )
+      })
+    }
     case "request-changes": {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(ReviewCommentPayload))(requested).pipe(
         Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
@@ -510,6 +597,31 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         clientRequestToken: yield* commentClientRequestToken(actionKind, decoded.content, pullRequest, cryptoService)
       })
     }
+    case "update-comment":
+    case "reply-comment": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(Schema.Struct({
+        ...ReviewCommentPayload.fields,
+        commentId: ReviewCommentId
+      })))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference,
+        commentId: decoded.commentId,
+        content: decoded.content,
+        clientRequestToken: yield* commentClientRequestToken(
+          actionKind,
+          decoded.content,
+          pullRequest,
+          cryptoService,
+          undefined,
+          decoded.commentId
+        )
+      })
+    }
     case "approve":
     case "revoke-approval":
       return yield* decodeNormalizedActionPayload({
@@ -521,7 +633,7 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
   }
 })
 
-const ReconciliationLocatorWire = Schema.Tuple([
+const ReconciliationLocatorWireV1 = Schema.Tuple([
   Schema.Literals(actionKinds),
   Domain.PullRequestId.check(Schema.isMaxLength(64)),
   Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
@@ -531,10 +643,31 @@ const ReconciliationLocatorWire = Schema.Tuple([
 ]).check(
   Schema.makeFilter(
     ([actionKind, _pullRequestId, _revisionId, _sourceCommit, _destinationCommit, clientRequestToken]) =>
-      actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes"
+      actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes" ||
+        actionKind === "update-comment" || actionKind === "reply-comment"
         ? clientRequestToken !== null
         : clientRequestToken === null,
     { expected: "a comment token only for comment-backed review actions" }
+  )
+)
+
+const ReconciliationLocatorWireV2 = Schema.Tuple([
+  Schema.Literals(actionKinds),
+  Domain.PullRequestId.check(Schema.isMaxLength(64)),
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ReviewCommitId,
+  ReviewCommitId,
+  Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64))),
+  Schema.NullOr(ReviewCommentId)
+]).check(
+  Schema.makeFilter(
+    ([actionKind, _pullRequestId, _revisionId, _sourceCommit, _destinationCommit, clientRequestToken, commentId]) =>
+      (actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes" ||
+          actionKind === "update-comment" || actionKind === "reply-comment")
+        ? clientRequestToken !== null &&
+          (actionKind === "update-comment" || actionKind === "reply-comment" ? commentId !== null : commentId === null)
+        : clientRequestToken === null && commentId === null,
+    { expected: "comment identity fields must match the review action" }
   )
 )
 
@@ -545,26 +678,43 @@ interface ReconciliationLocator {
   readonly sourceCommit: ReadClient.CodeCommitCommitId
   readonly destinationCommit: ReadClient.CodeCommitCommitId
   readonly clientRequestToken: string | null
+  /**
+   * Provider-issued opaque comment coordinate. It is persisted in the local
+   * publication record and in the server-private `ccmt:v2` locator, then
+   * emitted only in authenticated server action payloads; it must not enter
+   * browser state, synchronized entities, or diff URLs.
+   */
+  readonly commentId: string | null
 }
 
 const encodeReconciliationLocator = (
   locator: ReconciliationLocator
-): PluginActionReconciliationKey =>
-  PluginActionReconciliationKey.make(`ccmt:v1:${
-    Encoding.encodeBase64Url(JSON.stringify([
-      locator.actionKind,
-      locator.pullRequestId,
-      locator.revisionId,
-      locator.sourceCommit,
-      locator.destinationCommit,
-      locator.clientRequestToken
-    ]))
-  }`)
+): PluginActionReconciliationKey => {
+  const values = [
+    locator.actionKind,
+    locator.pullRequestId,
+    locator.revisionId,
+    locator.sourceCommit,
+    locator.destinationCommit,
+    locator.clientRequestToken
+  ]
+  if (locator.commentId === null) {
+    return PluginActionReconciliationKey.make(`ccmt:v1:${Encoding.encodeBase64Url(JSON.stringify(values))}`)
+  }
+  return PluginActionReconciliationKey.make(
+    `ccmt:v2:${Encoding.encodeBase64Url(JSON.stringify([...values, locator.commentId]))}`
+  )
+}
 
 const decodeReconciliationLocator = (
   key: PluginActionReconciliationKey
 ): Effect.Effect<ReconciliationLocator, PluginConfigurationFailure> => {
-  const encoded = key.startsWith("ccmt:v1:") ? key.slice("ccmt:v1:".length) : ""
+  const isV2 = key.startsWith("ccmt:v2:")
+  const encoded = isV2
+    ? key.slice("ccmt:v2:".length)
+    : key.startsWith("ccmt:v1:")
+    ? key.slice("ccmt:v1:".length)
+    : ""
   const decoded = Encoding.decodeBase64UrlString(encoded)
   if (Result.isFailure(decoded)) {
     return Effect.fail(
@@ -573,15 +723,29 @@ const decodeReconciliationLocator = (
       })
     )
   }
-  return Schema.decodeUnknownEffect(Schema.fromJsonString(ReconciliationLocatorWire))(decoded.success).pipe(
-    Effect.map(([actionKind, pullRequestId, revisionId, sourceCommit, destinationCommit, clientRequestToken]) => ({
-      actionKind,
-      pullRequestId,
-      revisionId,
-      sourceCommit,
-      destinationCommit,
-      clientRequestToken
-    })),
+  const wire = isV2 ? ReconciliationLocatorWireV2 : ReconciliationLocatorWireV1
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(wire))(decoded.success).pipe(
+    Effect.map((value) =>
+      value.length === 7
+        ? {
+          actionKind: value[0],
+          pullRequestId: value[1],
+          revisionId: value[2],
+          sourceCommit: value[3],
+          destinationCommit: value[4],
+          clientRequestToken: value[5],
+          commentId: value[6]
+        }
+        : {
+          actionKind: value[0],
+          pullRequestId: value[1],
+          revisionId: value[2],
+          sourceCommit: value[3],
+          destinationCommit: value[4],
+          clientRequestToken: value[5],
+          commentId: null
+        }
+    ),
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-reconciliation-key-invalid" }))
   )
 }
@@ -592,7 +756,7 @@ const actionFromPayload = (
   pullRequestId: Domain.PullRequestId,
   revisionId: string,
   payload: CodeCommitActionPayload
-): ReviewClient.CodeCommitReviewAction => {
+): GovernedCodeCommitReviewAction => {
   const target = {
     account,
     repositoryName,
@@ -604,11 +768,27 @@ const actionFromPayload = (
   }
   switch (payload._tag) {
     case "request-review":
-    case "comment":
     case "request-changes":
       return {
         _tag: payload._tag,
         target,
+        content: payload.content,
+        clientRequestToken: payload.clientRequestToken
+      }
+    case "comment":
+      return {
+        _tag: payload._tag,
+        target,
+        content: payload.content,
+        clientRequestToken: payload.clientRequestToken,
+        ...(!(payload.location === undefined) && { location: payload.location })
+      }
+    case "update-comment":
+    case "reply-comment":
+      return {
+        _tag: payload._tag,
+        target,
+        commentId: payload.commentId,
         content: payload.content,
         clientRequestToken: payload.clientRequestToken
       }
@@ -622,7 +802,7 @@ const actionFromLocator = (
   account: ReadClient.CodeCommitReadAccount,
   repositoryName: Domain.RepositoryName,
   locator: ReconciliationLocator
-): ReviewClient.CodeCommitReviewAction => {
+): GovernedCodeCommitReviewAction => {
   const target = {
     account,
     repositoryName,
@@ -642,6 +822,15 @@ const actionFromLocator = (
         content: "Reconcile the previously dispatched review comment",
         clientRequestToken: locator.clientRequestToken ?? "invalid-missing-client-request-token"
       }
+    case "update-comment":
+    case "reply-comment":
+      return {
+        _tag: locator.actionKind,
+        target,
+        commentId: locator.commentId ?? "invalid-missing-comment-id",
+        content: "Reconcile the previously dispatched review comment",
+        clientRequestToken: locator.clientRequestToken ?? "invalid-missing-client-request-token"
+      }
     case "approve":
     case "revoke-approval":
       return { _tag: locator.actionKind, target }
@@ -649,7 +838,7 @@ const actionFromLocator = (
 }
 
 const locatorForAction = (
-  action: ReviewClient.CodeCommitReviewAction
+  action: GovernedCodeCommitReviewAction
 ): PluginActionReconciliationKey =>
   encodeReconciliationLocator({
     actionKind: action._tag,
@@ -659,8 +848,13 @@ const locatorForAction = (
     destinationCommit: action.target.destinationCommit,
     clientRequestToken: action._tag === "request-review" ||
         action._tag === "comment" ||
-        action._tag === "request-changes"
+        action._tag === "request-changes" ||
+        action._tag === "update-comment" ||
+        action._tag === "reply-comment"
       ? action.clientRequestToken
+      : null,
+    commentId: action._tag === "update-comment" || action._tag === "reply-comment"
+      ? action.commentId
       : null
   })
 
@@ -717,7 +911,8 @@ const toPullRequestEvent = (
   pullRequest: ReadClient.CodeCommitPullRequestRevision
 ) => ({
   _tag: "UpsertEntity",
-  eventId: `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}`,
+  eventId:
+    `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}:${pullRequest.status}:${pullRequest.lastActivityDate.toISOString()}`,
   observedAt: pullRequest.lastActivityDate.toISOString(),
   revision: pullRequest.revisionId,
   entityType: "pull-request",
@@ -742,37 +937,91 @@ const toPullRequestEvent = (
 const syncCursorFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"]
 ): Effect.Effect<SyncCursor, PluginConfigurationFailure> => {
-  if (checkpoint === null || checkpoint === COMPLETED_CHECKPOINT) {
-    return Effect.succeed({ status: "OPEN", nextToken: null })
+  if (
+    checkpoint === null ||
+    checkpoint === COMPLETED_CHECKPOINT ||
+    (
+      checkpoint.startsWith(DURABLE_COMPLETED_CHECKPOINT_PREFIX) &&
+      /^[0-9a-f]{64}$/u.test(checkpoint.slice(DURABLE_COMPLETED_CHECKPOINT_PREFIX.length))
+    )
+  ) {
+    return Effect.succeed({ status: "OPEN", nextToken: null, inventoryDigest: null })
   }
-  if (checkpoint === CLOSED_CHECKPOINT) return Effect.succeed({ status: "CLOSED", nextToken: null })
+  if (checkpoint.startsWith(DURABLE_CLOSED_CHECKPOINT_PREFIX)) {
+    const inventoryDigest = checkpoint.slice(DURABLE_CLOSED_CHECKPOINT_PREFIX.length)
+    return /^[0-9a-f]{64}$/u.test(inventoryDigest)
+      ? Effect.succeed({ status: "CLOSED", nextToken: null, inventoryDigest })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint === CLOSED_CHECKPOINT) {
+    return Effect.succeed({ status: "CLOSED", nextToken: null, inventoryDigest: null })
+  }
+  const durablePagePrefixes: ReadonlyArray<readonly [string, PullRequestStatus]> = [
+    [DURABLE_NEXT_CHECKPOINT_PREFIX, "OPEN"],
+    [DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX, "CLOSED"]
+  ]
+  for (
+    const [prefix, status] of durablePagePrefixes
+  ) {
+    if (!checkpoint.startsWith(prefix)) continue
+    const payload = checkpoint.slice(prefix.length)
+    const separator = payload.indexOf(":")
+    const inventoryDigest = payload.slice(0, separator)
+    const nextToken = payload.slice(separator + 1)
+    return separator === SYNC_INVENTORY_DIGEST_LENGTH &&
+        /^[0-9a-f]{64}$/u.test(inventoryDigest) &&
+        nextToken.length > 0
+      ? Effect.succeed({ status, nextToken, inventoryDigest })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
+  }
   if (checkpoint.startsWith(NEXT_CHECKPOINT_PREFIX)) {
     const token = checkpoint.slice(NEXT_CHECKPOINT_PREFIX.length)
     return token.length > 0
-      ? Effect.succeed({ status: "OPEN", nextToken: token })
+      ? Effect.succeed({ status: "OPEN", nextToken: token, inventoryDigest: null })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
   }
   if (checkpoint.startsWith(CLOSED_NEXT_CHECKPOINT_PREFIX)) {
     const token = checkpoint.slice(CLOSED_NEXT_CHECKPOINT_PREFIX.length)
     return token.length > 0
-      ? Effect.succeed({ status: "CLOSED", nextToken: token })
+      ? Effect.succeed({ status: "CLOSED", nextToken: token, inventoryDigest: null })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
   }
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
 }
 
-const checkpointFromSyncCursor = (cursor: SyncCursor | null): string => {
-  if (cursor === null) return COMPLETED_CHECKPOINT
-  if (cursor.nextToken === null) return CLOSED_CHECKPOINT
+const checkpointFromSyncCursor = (cursor: SyncCursor | null, inventoryDigest: string): string => {
+  if (cursor === null) return `${DURABLE_COMPLETED_CHECKPOINT_PREFIX}${inventoryDigest}`
+  if (cursor.nextToken === null) return `${DURABLE_CLOSED_CHECKPOINT_PREFIX}${inventoryDigest}`
   return cursor.status === "OPEN"
-    ? `${NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
-    : `${CLOSED_NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
+    ? `${DURABLE_NEXT_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor.nextToken}`
+    : `${DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor.nextToken}`
 }
 
-const nextSyncCursor = (status: PullRequestStatus, nextToken: string | null): SyncCursor | null => {
-  if (nextToken !== null) return { status, nextToken }
-  return status === "OPEN" ? { status: "CLOSED", nextToken: null } : null
+const nextSyncCursor = (
+  status: PullRequestStatus,
+  nextToken: string | null,
+  inventoryDigest: string
+): SyncCursor | null => {
+  if (nextToken !== null) return { status, nextToken, inventoryDigest }
+  return status === "OPEN" ? { status: "CLOSED", nextToken: null, inventoryDigest } : null
 }
+
+const digestSyncInventory = Effect.fn("CodeCommitPlugin.digestSyncInventory")(function*(
+  cryptoService: Crypto.Crypto,
+  events: ReadonlyArray<unknown>,
+  previousInventoryDigest: string | null
+) {
+  const serialized = JSON.stringify({ events, previousInventoryDigest })
+  const bytes = yield* Effect.fromResult(
+    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+  ).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
+  )
+  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
+  )
+  return Encoding.encodeHex(digest)
+})
 
 const enforceConfiguredRepository = Effect.fn("CodeCommitPlugin.enforceConfiguredRepository")(function*(
   configuredRepositoryName: string,
@@ -849,6 +1098,17 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       })
     }
   })
+  const actionActorIdentity = yield* Schema.decodeUnknownEffect(PluginActionActorIdentityV1)({
+    providerId: "codecommit",
+    providerAccountId: runtimeIdentity.accountId,
+    principal: runtimeIdentity.arn
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "codecommit-runtime-identity-invalid"
+      })
+    )
+  )
   const probeRepository = readClient.listPullRequestsPage({
     account,
     repositoryName: configuration.repositoryName,
@@ -905,10 +1165,15 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       (pullRequest) => enforceConfiguredRepository(configuration.repositoryName, pullRequest)
     )
     const events = pullRequests.map((pullRequest) => toPullRequestEvent(configuration, pullRequest))
-    const nextCursor = nextSyncCursor(cursor.status, page.nextToken)
+    const inventoryDigest = yield* digestSyncInventory(
+      cryptoService,
+      events,
+      cursor.inventoryDigest
+    )
+    const nextCursor = nextSyncCursor(cursor.status, page.nextToken, inventoryDigest)
     const normalized = yield* output("sync", PluginSyncPageV1, {
       events,
-      checkpointAfterPage: checkpointFromSyncCursor(nextCursor),
+      checkpointAfterPage: checkpointFromSyncCursor(nextCursor, inventoryDigest),
       hasMore: nextCursor !== null
     })
     return { normalized, nextCursor }
@@ -1237,6 +1502,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const connection: PluginConnectionV1 = {
     descriptor,
+    actionActorIdentity: Effect.succeed(actionActorIdentity),
     discover,
     health,
     sync,
@@ -1283,7 +1549,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const dispatchAuthorizedAction = Effect.fn("CodeCommitPlugin.dispatchAuthorizedAction")(function*(
     request: AuthorizedPluginActionV1
-  ) {
+  ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
     const reconciliationKey = locatorForAction(action)
     const result = yield* reviewClient.execute(action).pipe(Effect.result)

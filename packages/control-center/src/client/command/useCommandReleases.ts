@@ -64,7 +64,7 @@ export const useCommandReleases = (
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: CommandReleasesTransport = browserCommandReleasesTransport
-): { readonly retry: () => void; readonly state: CommandReleasesState } => {
+) => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<CommandReleasesState>({ _tag: "idle" })
 

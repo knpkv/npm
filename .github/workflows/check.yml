@@ -20,11 +20,13 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm format
 
   lint:
@@ -34,12 +36,26 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify checkout credentials were not persisted
+        shell: bash
+        run: |
+          if git config --local --get-regexp '^http\..*\.extraheader$'; then
+            echo "actions/checkout persisted an HTTP authorization header"
+            exit 1
+          fi
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
+      - name: Configure canonical Effect remote
+        run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
       - run: pnpm lint
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
   audit:
     name: Audit
@@ -48,11 +64,13 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm run audit
 
   types:
@@ -62,11 +80,13 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - run: pnpm build
       - run: pnpm check
 
@@ -75,29 +95,85 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 10
+    # Recent successful baseline runs need almost the full ten minutes; leave
+    # enough runner variance for teardown to complete after assertions pass.
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
+          bun-version: 1.3.14
+      - name: Verify runtime pins
+        run: |
+          test "$(node --version)" = "v26.7.0"
+          test "$(bun --version)" = "1.3.14"
+      # @knpkv/jira-clockify ships an nvim plugin whose specs run under
+      # `nvim --headless`. Without the binary those specs skip, and the plugin's
+      # single-flight and cache invariants would have no automated cover.
+      - name: Install neovim for nvim plugin specs
+        run: sudo apt-get update && sudo apt-get install -y neovim
       - run: pnpm build
       - run: pnpm test
+
+  edge-runtimes:
+    name: Edge runtimes
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install edge runtimes and dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+          bun-version: 1.3.14
+      - name: Verify runtime pins
+        run: |
+          test "$(node --version)" = "v26.7.0"
+          test "$(bun --version)" = "1.3.14"
+      - name: Build CodeCommit runtime graph
+        run: pnpm --filter @knpkv/codecommit... build
+      - name: Test Node/Bun runtime boundaries on Ubuntu 26.04
+        run: pnpm exec vitest run --configLoader native packages/codecommit/test/bin.test.ts packages/codecommit-core/test/ChildEnv.test.ts
 
   browser:
     name: Browser
     runs-on: ubuntu-latest
+    # GitHub-hosted storage is declared, not attested. The timing-noise quarantine
+    # and rerun policy is documented in .github/workflows/README.md.
+    env:
+      CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:
       contents: read
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
-          node-version: 24.10.0
+          node-version: 26.7.0
       - name: Install bounded Chromium runtime
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Test browser applications and catalogs
         run: pnpm test:browser
+      - name: Validate Control Center large-fixture contracts
+        run: pnpm --filter @knpkv/control-center benchmark:contracts
+      - name: Validate Control Center runtime benchmark evidence
+        run: pnpm --filter @knpkv/control-center benchmark:validate-runtime
+      - name: Upload Control Center runtime benchmark evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-center-runtime-benchmark
+          path: packages/control-center/test-results/control-center/runtime-benchmark.json
+          if-no-files-found: error
+          retention-days: 14

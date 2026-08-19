@@ -5,19 +5,11 @@
  *
  * @internal
  */
+import { pullRequestSelectionKey, resolvePullRequestSelection } from "../details-model.js"
 import type { ListItem } from "../ListBuilder.js"
+import { parseSettingsFilter } from "../text-filter-input.js"
 
-export interface ParsedSettingsFilter {
-  readonly status: "all" | "on" | "off"
-  readonly name: string
-}
-
-export const parseSettingsFilter = (raw: string): ParsedSettingsFilter => {
-  const lower = raw.toLowerCase()
-  if (lower.startsWith("on:")) return { status: "on", name: lower.slice(3) }
-  if (lower.startsWith("off:")) return { status: "off", name: lower.slice(4) }
-  return { status: "all", name: lower }
-}
+export { parseSettingsFilter } from "../text-filter-input.js"
 
 export const applySettingsFilter = (items: ReadonlyArray<ListItem>, filter: string): ReadonlyArray<ListItem> => {
   if (!filter) return items
@@ -34,11 +26,19 @@ export const applySettingsFilter = (items: ReadonlyArray<ListItem>, filter: stri
 export const findStableIndex = (
   items: ReadonlyArray<ListItem>,
   view: string,
-  selectedPrId: string | null,
+  selectedPrKey: string | null,
   selectedIndex: number
 ): number => {
-  if ((view === "prs" || view === "details") && selectedPrId) {
-    const idx = items.findIndex((item) => item.type === "pr" && item.pr.id === selectedPrId)
+  if ((view === "prs" || view === "details") && selectedPrKey) {
+    const resolution = resolvePullRequestSelection(
+      items.flatMap((item) => item.type === "pr" ? [item.pr] : []),
+      selectedPrKey
+    )
+    const idx = resolution === null
+      ? -1
+      : items.findIndex(
+        (item) => item.type === "pr" && pullRequestSelectionKey(item.pr) === resolution.key
+      )
     if (idx !== -1) return idx
   }
   if (selectedIndex >= items.length) return Math.max(0, items.length - 1)
@@ -73,8 +73,8 @@ export const computeItemPositions = (items: ReadonlyArray<ListItem>): ReadonlyAr
     if (item.type === "header") {
       height = i === 0 ? 2 : 3
     } else if (item.type === "pr") {
-      const descLines = item.pr.description ? Math.min(item.pr.description.split("\n").length, 5) : 0
-      height = 1 + 1 + descLines + 1 + 1
+      const hasDescription = item.pr.description?.split("\n").some((line) => line.trim().length > 0) ?? false
+      height = hasDescription ? 4 : 3
     }
     y += height
     positions.push({ start, end: y })

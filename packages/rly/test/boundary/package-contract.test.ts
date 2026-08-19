@@ -1,3 +1,5 @@
+import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import { componentManifest } from "../../component-manifest.js"
 import packageSource from "../../package.json?raw"
@@ -8,8 +10,9 @@ const sourceModules = import.meta.glob<string>("../../src/**/*.{ts,tsx}", {
   query: "?raw"
 })
 
-const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
-  typeof value === "object" && value !== null
+const isRecord = <UnparsedInput>(
+  value: UnparsedInput
+): value is UnparsedInput & Readonly<Record<string, Schema.Json>> => Predicate.isObjectOrArray(value) && value !== null
 
 describe("package contract", () => {
   it("keeps runtime dependencies on the exact approved implementation set", () => {
@@ -19,11 +22,11 @@ describe("package contract", () => {
     if (!isRecord(manifest)) return
 
     expect(manifest.dependencies).toEqual({
-      "@fontsource-variable/geist": "5.2.9",
-      "@fontsource-variable/geist-mono": "5.2.8",
-      "@pierre/diffs": "1.2.12",
-      "lucide-react": "1.24.0",
-      "radix-ui": "1.6.2"
+      "@fontsource-variable/geist": "5.3.0",
+      "@fontsource-variable/geist-mono": "5.3.0",
+      "@pierre/diffs": "1.3.5",
+      "lucide-react": "1.31.0",
+      "radix-ui": "1.6.7"
     })
     expect(manifest.name).toBe("@knpkv/rly")
   })

@@ -4,6 +4,9 @@ inputs:
   node-version:
     description: The version of Node.js to install
     required: false
+  registry-url:
+    description: Optional npm registry URL used to configure publishing authentication
+    required: false
   deno-version:
     description: The version of Deno to install
     required: false
@@ -17,8 +20,8 @@ runs:
     - name: Install Socket Firewall
       shell: bash
       env:
-        SOCKET_FIREWALL_SHA256: 4dc46b626a7c5b81c0b54e1984ee53be5a628dbfb2f55ab14e9b04c8a134db6a
-        SOCKET_FIREWALL_URL: https://github.com/SocketDev/sfw-free/releases/download/v1.13.1/sfw-free-linux-x86_64
+        SOCKET_FIREWALL_SHA256: c80371910a808ea5c68916c48e5451716a91ca411cf5e422fdbd8119729b742c
+        SOCKET_FIREWALL_URL: https://github.com/SocketDev/sfw-free/releases/download/v1.15.0/sfw-free-linux-x86_64
       run: |
         install_directory="${RUNNER_TEMP}/socket-firewall"
         binary_path="${install_directory}/sfw"
@@ -30,19 +33,20 @@ runs:
         chmod +x "${binary_path}"
         echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm
-      uses: pnpm/action-setup@v6
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
     - name: Install node
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       if: ${{ inputs.node-version != '' }}
       with:
         node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
     - name: Install deno
-      uses: denoland/setup-deno@v2
+      uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2
       if: ${{ inputs.deno-version != '' }}
       with:
         deno-version: ${{ inputs.deno-version }}
     - name: Install bun
-      uses: oven-sh/setup-bun@v2
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       if: ${{ inputs.bun-version != '' }}
       with:
         bun-version: ${{ inputs.bun-version }}

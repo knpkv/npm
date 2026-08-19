@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef } from "react"
 import { toast } from "sonner"
+import { readNotificationApi } from "../host-globals.js"
 import { StorageKeys } from "../storage-keys.js"
 
 const DEFAULT_INTERVAL = 60 * 60 * 1000 // 1 hour
@@ -54,12 +55,13 @@ export function useReviewReminder(pendingReviewCount: number) {
         })
 
         // Desktop notification if enabled
+        const NotificationApi = readNotificationApi()
         if (
-          typeof Notification !== "undefined" &&
-          Notification.permission === "granted" &&
+          NotificationApi !== undefined &&
+          NotificationApi.permission === "granted" &&
           readBool(StorageKeys.desktopNotifications, false)
         ) {
-          new Notification("Review Reminder", {
+          new NotificationApi("Review Reminder", {
             body: `${countRef.current} PR${countRef.current > 1 ? "s" : ""} awaiting your review`,
             icon: "/favicon.ico",
             tag: "review-reminder"

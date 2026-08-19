@@ -17,7 +17,9 @@ import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { Config, Effect, Layer, Option } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
+import type * as Schema from "effect/Schema"
 import * as yaml from "js-yaml"
 import { AttachmentService, layer as AttachmentServiceLayer } from "../src/AttachmentService.js"
 import { insertJiraAttachmentReference } from "../src/internal/attachmentInsertion.js"
@@ -160,10 +162,10 @@ const expectCanonicalIssueIncludesAttachmentMedia = (
   expect(markdown).toContain("image/svg+xml")
 }
 
-const parseFrontMatter = (markdown: string): Record<string, unknown> => {
+const parseFrontMatter = (markdown: string): Record<string, Schema.Json> => {
   const match = /^---\n([\s\S]*?)\n---/.exec(markdown)
   const parsed = match?.[1] ? yaml.load(match[1]) : {}
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+  return parsed !== null && Predicate.isObjectOrArray(parsed) && !Array.isArray(parsed)
     ? Object.fromEntries(Object.entries(parsed))
     : {}
 }
@@ -191,7 +193,7 @@ const getIssueAsMarkdown = (config: IntegrationConfig, testDir: string) =>
     expect(frontMatter.url).toBe(`${config.baseUrl}/browse/${config.issueKey}`)
     expect(frontMatter.id).toBe(issue.id)
     expect(frontMatter.summary).toBe(issue.summary)
-    expect(typeof frontMatter.status).toBe("string")
+    expect(Predicate.isString(frontMatter.status)).toBe(true)
     expect(markdown).toContain(`# ${config.issueKey}:`)
     expectCanonicalIssueIncludesAttachmentMedia(config, issue, markdown)
 

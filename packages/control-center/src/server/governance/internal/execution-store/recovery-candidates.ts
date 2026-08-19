@@ -17,7 +17,7 @@ const RecoveryCandidateRow = Schema.Struct({
   actionId: GovernedActionId
 })
 
-const listFailure = (failure: unknown): GovernedActionExecutionStoreError =>
+const listFailure = <UnparsedInput>(failure: UnparsedInput): GovernedActionExecutionStoreError =>
   new GovernedActionExecutionStoreError({
     operation: "list-recovery",
     reason: Predicate.isTagged("SchemaError")(failure) ? "invalid-record" : "persistence-unavailable"

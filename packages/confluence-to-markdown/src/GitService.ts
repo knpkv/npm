@@ -114,7 +114,7 @@ export type GitServiceError =
  *
  * @category Service
  */
-export interface GitServiceShape {
+export interface GitServiceContract {
   /** Validate git is installed, return version. */
   readonly validateGit: () => Effect.Effect<string, GitNotInstalledError>
 
@@ -247,7 +247,7 @@ export interface GitServiceShape {
  */
 export class GitService extends Context.Service<
   GitService,
-  GitServiceShape
+  GitServiceContract
 >()("@knpkv/confluence-to-markdown/GitService") {}
 
 /**

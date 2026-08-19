@@ -18,7 +18,7 @@ const RequestBodyMetadata = Schema.Struct({
 })
 
 /** A request body failed the centralized transport and size policy. */
-export class RequestBodyPolicyError extends Schema.TaggedErrorClass<RequestBodyPolicyError>()(
+export class RequestBodyPolicyError extends Schema.TaggedError<RequestBodyPolicyError>()(
   "RequestBodyPolicyError",
   {
     reason: Schema.Literals([

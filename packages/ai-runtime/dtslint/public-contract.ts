@@ -33,7 +33,9 @@ export const providerFailureAdapter: AgentAdapter = {
     )
 }
 
+const validatorOwnedFailure = Stream.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" }))
+
 export const runtimeFailureAdapter: AgentAdapter = {
   // @ts-expect-error adapters cannot spoof validator-owned protocol failures
-  run: () => Stream.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" }))
+  run: () => validatorOwnedFailure
 }

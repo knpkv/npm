@@ -1,49 +1,233 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
+import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/unstable/http"
+import { createServer } from "node:http"
 import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
-import { startCallbackServer } from "../src/internal/oauthServer.js"
+import {
+  callbackServerListenOptions,
+  callbackUrl,
+  HttpServerFactoryTag,
+  makeHttpServerFactory,
+  startCallbackServer
+} from "../src/internal/oauthServer.js"
 
 const HttpClientLive = NodeHttpClient.layerUndici
+const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
+  () => NodeHttpServer.layerServer(createServer, { port: 0 })
+)
+const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
+  HttpServer.make({
+    address: { _tag: "TcpAddress", hostname: "127.0.0.1", port },
+    serve: () => Effect.void
+  })
 
 describe("oauthServer", () => {
   describe("startCallbackServer", () => {
+    it.effect("binds the same localhost name advertised by the callback URL", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const listenOptions = callbackServerListenOptions(0)
+          const factory = yield* HttpServerFactoryTag
+          const server = yield* HttpServer.HttpServer.pipe(
+            Effect.provide(factory.createServerLayer(listenOptions))
+          )
+          const advertisedUrl = new URL(callbackUrl(8585))
+          const ipv6OnlyLocalhost = (hostname: string) => (hostname === "localhost" ? "::1" : undefined)
+          expect(server.address._tag).toBe("TcpAddress")
+          expect(listenOptions.host).toBe(advertisedUrl.hostname)
+          expect(ipv6OnlyLocalhost(listenOptions.host)).toBe("::1")
+          expect(ipv6OnlyLocalhost(advertisedUrl.hostname)).toBe("::1")
+        }).pipe(Effect.provide(HttpServerFactoryLive))
+      ))
+
     it.effect("starts server and returns port", () =>
-      Effect.gen(function*() {
-        const expectedState = "test-state-123"
-        const result = yield* startCallbackServer(expectedState)
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "test-state-123"
+          const result = yield* startCallbackServer(expectedState)
 
-        expect(result.port).toBe(8585)
-        expect(typeof result.codePromise).toBe("object")
-        expect(typeof result.shutdown).toBe("object")
-
-        // Clean up
-        yield* result.shutdown
-      }).pipe(Effect.provide(HttpServerFactoryLive)))
+          expect(result.port).toBeGreaterThan(0)
+          expect(Predicate.isObject(result.codePromise)).toBe(true)
+        }).pipe(Effect.provide(EphemeralHttpServerFactoryLive))
+      ))
 
     it.effect("handles successful callback with code", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "test-state-456"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+
+          // Make callback request in background
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+
+          // Simulate OAuth callback using Effect HttpClient
+          const client = yield* HttpClient.HttpClient
+          const request = HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+            HttpClientRequest.setUrlParam("code", "auth_code_123"),
+            HttpClientRequest.setUrlParam("state", expectedState)
+          )
+          yield* client.execute(request)
+
+          const code = yield* Fiber.join(codeReceiver)
+          expect(code).toBe("auth_code_123")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
+
+    it.effect("releases the callback port when the owning workflow fails", () =>
       Effect.gen(function*() {
-        const expectedState = "test-state-456"
-        const { codePromise, port, shutdown } = yield* startCallbackServer(expectedState)
-
-        // Make callback request in background
-        const codeReceiver = yield* Effect.forkChild(codePromise)
-
-        // Simulate OAuth callback using Effect HttpClient
-        const client = yield* HttpClient.HttpClient
-        const request = HttpClientRequest.get(`http://localhost:${port}/callback`).pipe(
-          HttpClientRequest.setUrlParam("code", "auth_code_123"),
-          HttpClientRequest.setUrlParam("state", expectedState)
+        yield* Effect.scoped(
+          startCallbackServer("first").pipe(
+            Effect.provide(EphemeralHttpServerFactoryLive),
+            Effect.andThen(Effect.fail("browser-open-failed")),
+            Effect.flip
+          )
         )
-        yield* client.execute(request)
 
-        const code = yield* Fiber.join(codeReceiver)
-        expect(code).toBe("auth_code_123")
+        const port = yield* Effect.scoped(
+          startCallbackServer("second").pipe(
+            Effect.provide(EphemeralHttpServerFactoryLive),
+            Effect.map((server) => server.port)
+          )
+        )
+        expect(port).toBeGreaterThan(0)
+      }))
 
-        yield* shutdown
-      }).pipe(Effect.provide(Layer.mergeAll(HttpServerFactoryLive, HttpClientLive))))
+    it.effect("starts concurrent real callback servers on distinct OS-assigned ports", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const [first, second] = yield* Effect.all(
+            [startCallbackServer("first"), startCallbackServer("second")],
+            { concurrency: "unbounded" }
+          )
+          expect(first.port).toBeGreaterThan(0)
+          expect(second.port).toBeGreaterThan(0)
+          expect(first.port).not.toBe(second.port)
+        }).pipe(Effect.provide(EphemeralHttpServerFactoryLive))
+      ))
+
+    it.effect("retries occupied fixed-range ports with the injected factory", () => {
+      const attempts = Ref.makeUnsafe<ReadonlyArray<number>>([])
+      const occupiedFactory = makeHttpServerFactory(({ port }) =>
+        Layer.effect(
+          HttpServer.HttpServer,
+          Ref.update(attempts, (ports) => [...ports, port]).pipe(
+            Effect.andThen(
+              port < 8587
+                ? Effect.fail(new HttpServerError.ServeError({ cause: { code: "EADDRINUSE" } }))
+                : Effect.succeed(fakeHttpServer(port))
+            )
+          )
+        )
+      )
+
+      return Effect.scoped(
+        Effect.gen(function*() {
+          const server = yield* startCallbackServer("state")
+          expect(server.port).toBe(8587)
+          expect(yield* Ref.get(attempts)).toEqual([8585, 8586, 8587])
+        }).pipe(Effect.provide(occupiedFactory))
+      )
+    })
+
+    it.effect("maps a multiply retried server failure to one OAuth error", () => {
+      const attempts = Ref.makeUnsafe<ReadonlyArray<number>>([])
+      const terminalFailure = new HttpServerError.ServeError({ cause: { code: "EACCES" } })
+      const failingFactory = makeHttpServerFactory(({ port }) =>
+        Layer.effect(
+          HttpServer.HttpServer,
+          Ref.update(attempts, (ports) => [...ports, port]).pipe(
+            Effect.andThen(
+              port < 8587
+                ? Effect.fail(new HttpServerError.ServeError({ cause: { code: "EADDRINUSE" } }))
+                : Effect.fail(terminalFailure)
+            )
+          )
+        )
+      )
+
+      return Effect.scoped(
+        Effect.gen(function*() {
+          const error = yield* startCallbackServer("state").pipe(Effect.flip)
+          expect(error.cause).toBe(terminalFailure)
+          expect(error.message.split("OAuth authorize failed:").length - 1).toBe(1)
+          expect(yield* Ref.get(attempts)).toEqual([8585, 8586, 8587])
+        }).pipe(Effect.provide(failingFactory))
+      )
+    })
+
+    it.effect("does not retry a non-address-in-use server failure", () => {
+      const attempts = Ref.makeUnsafe(0)
+      const failingFactory = makeHttpServerFactory(() =>
+        Layer.effect(
+          HttpServer.HttpServer,
+          Ref.update(attempts, (count) => count + 1).pipe(
+            Effect.andThen(Effect.fail(
+              new HttpServerError.ServeError({
+                cause: { code: "ECONNREFUSED" }
+              })
+            ))
+          )
+        )
+      )
+
+      return Effect.scoped(
+        startCallbackServer("state").pipe(
+          Effect.provide(failingFactory),
+          Effect.flip,
+          Effect.tap(() => Ref.get(attempts).pipe(Effect.map((count) => expect(count).toBe(1))))
+        )
+      )
+    })
+
+    it.effect("ignores a forged error callback before accepting the legitimate state", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "expected-state"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+          const client = yield* HttpClient.HttpClient
+
+          const forgedResponse = yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("error", "access_denied")
+            )
+          )
+          expect(forgedResponse.status).toBe(403)
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("code", "legitimate-code"),
+              HttpClientRequest.setUrlParam("state", expectedState)
+            )
+          )
+
+          expect(yield* Fiber.join(codeReceiver)).toBe("legitimate-code")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
+
+    it.effect("accepts a provider error only after validating state", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "expected-state"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+          const client = yield* HttpClient.HttpClient
+
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("error", "access_denied"),
+              HttpClientRequest.setUrlParam("state", expectedState)
+            )
+          )
+
+          const error = yield* Fiber.join(codeReceiver).pipe(Effect.flip)
+          expect(String(error.cause)).toContain("access_denied")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
   })
 })

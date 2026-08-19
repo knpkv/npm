@@ -106,21 +106,40 @@ const MarkdownConverterLayer = Layer.succeed(
   })
 )
 
+/**
+ * Every `ConfluenceClient` member, dying with `reason`.
+ *
+ * Spread this and override only what a test actually exercises, so a stub keeps
+ * a real guard for the members it does not care about. Centralised on purpose:
+ * `test/**` is excluded from the package `tsconfig.json`, so `ConfluenceClient.of`
+ * is never checked against the service shape and a member added to the service
+ * but missed here fails at runtime with `client.x is not a function` instead of
+ * the intended die. One list to update beats nine that drift.
+ */
+export const notCalledConfluenceClient = (reason = "ConfluenceClient should not be called") => ({
+  getPage: () => Effect.die(reason),
+  getChildren: () => Effect.die(reason),
+  getAllChildren: () => Effect.die(reason),
+  createPage: () => Effect.die(reason),
+  updatePage: () => Effect.die(reason),
+  deletePage: () => Effect.die(reason),
+  getPageVersions: () => Effect.die(reason),
+  getPageAttachments: () => Effect.die(reason),
+  uploadAttachmentToPage: () => Effect.die(reason),
+  getUser: () => Effect.die(reason),
+  getSpaceId: () => Effect.die(reason),
+  setEditorVersion: () => Effect.die(reason),
+  getFolder: () => Effect.die(reason),
+  getFolderChildren: () => Effect.die(reason),
+  createFolder: () => Effect.die(reason),
+  searchByCql: () => Effect.die(reason)
+})
+
 const DummyConfluenceClientLayer = Layer.succeed(
   ConfluenceClient,
   ConfluenceClient.of({
-    getPage: () => Effect.die("Use an injected fetch client layer in command tests"),
-    getChildren: () => Effect.die("ConfluenceClient should not be called"),
-    getAllChildren: () => Effect.die("ConfluenceClient should not be called"),
-    createPage: () => Effect.die("ConfluenceClient should not be called"),
-    updatePage: () => Effect.die("ConfluenceClient should not be called"),
-    deletePage: () => Effect.die("ConfluenceClient should not be called"),
-    getPageVersions: () => Effect.die("ConfluenceClient should not be called"),
-    getPageAttachments: () => Effect.die("ConfluenceClient should not be called"),
-    uploadAttachmentToPage: () => Effect.die("ConfluenceClient should not be called"),
-    getUser: () => Effect.die("ConfluenceClient should not be called"),
-    getSpaceId: () => Effect.die("ConfluenceClient should not be called"),
-    setEditorVersion: () => Effect.die("ConfluenceClient should not be called")
+    ...notCalledConfluenceClient(),
+    getPage: () => Effect.die("Use an injected fetch client layer in command tests")
   })
 )
 

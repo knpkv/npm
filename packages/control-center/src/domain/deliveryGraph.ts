@@ -215,6 +215,7 @@ const TimeEntryDetails = Schema.TaggedStruct("time-entry", {
   durationMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   billable: Schema.Boolean,
   approvalState: Schema.Literals(["pending", "approved", "rejected", "not-required"]),
+  locked: Schema.optionalKey(Schema.Boolean),
   description: Schema.optionalKey(Schema.NullOr(boundedText(4_000, "ClockifyTimeEntryDescription"))),
   projectId: Schema.optionalKey(Schema.NullOr(boundedText(512, "ClockifyProjectId"))),
   userId: Schema.optionalKey(boundedText(512, "ClockifyUserId")),
@@ -356,9 +357,7 @@ type RelationshipEndpointRule = Readonly<{
  * source to target: for example, a pull request is `delivered-by` a pipeline
  * execution. `depends-on` is intentionally the one generic graph edge.
  */
-export const RELATIONSHIP_ENDPOINT_MATRIX_V1: Readonly<
-  Record<RelationshipKind, RelationshipEndpointRule>
-> = {
+export const RELATIONSHIP_ENDPOINT_MATRIX_V1 = {
   "contains": { source: ["release"], target: ALL_ENTITY_ENDPOINT_KINDS },
   "implements": { source: ["pull-request"], target: ["issue"] },
   "depends-on": {
@@ -369,7 +368,9 @@ export const RELATIONSHIP_ENDPOINT_MATRIX_V1: Readonly<
   "delivered-by": { source: ["pull-request"], target: ["pipeline-execution"] },
   "documented-by": { source: ["issue", "release"], target: ["page"] },
   "tracks-time-for": { source: ["time-entry"], target: ["issue"] }
-}
+} satisfies Readonly<
+  Record<RelationshipKind, RelationshipEndpointRule>
+>
 
 const relationshipEndpointIsAllowed = (
   kind: RelationshipKind,

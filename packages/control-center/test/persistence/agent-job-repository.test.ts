@@ -1,7 +1,18 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { AgentContextFingerprint, AgentProviderError, AgentProviderId, AgentSessionRef } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Layer, Option, Result, Schema } from "effect"
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  AgentRunId,
+  AgentRuntimeEvent,
+  AgentSessionRef,
+  makeAgentRuntime,
+  makeToolAgentAdapter,
+  MAXIMUM_AGENT_RUNTIME_EVENT_BYTES,
+  type ToolAgentEvent
+} from "@knpkv/ai-runtime"
+import { DateTime, Effect, Layer, Option, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
@@ -188,7 +199,7 @@ describe("agent job repository", () => {
             eventKind: "job-queued",
             eventSequence: AgentEventCursor.make(2),
             jobId: JOB_ID,
-            payload: { providerId: PROVIDER_ID },
+            payload: { model: "fake-model", providerId: PROVIDER_ID },
             task: { _tag: "release-chat" }
           },
           {
@@ -202,7 +213,7 @@ describe("agent job repository", () => {
             eventKind: "job-queued",
             eventSequence: AgentEventCursor.make(4),
             jobId: SECOND_JOB_ID,
-            payload: { providerId: PROVIDER_ID },
+            payload: { model: "fake-model", providerId: PROVIDER_ID },
             task: { _tag: "release-chat" }
           }
         ]
@@ -272,6 +283,7 @@ describe("agent job repository", () => {
         fingerprint: FINGERPRINT,
         task: { _tag: "release-chat" }
       })
+      assert.isTrue(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
 
       const activeClaim = yield* repository.claimNext(claimInput(THIRD_TOKEN))
       assert.isTrue(Option.isNone(activeClaim))
@@ -290,12 +302,14 @@ describe("agent job repository", () => {
       })
 
       yield* TestClock.setTime(DateTime.toEpochMillis(T3))
+      assert.isFalse(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
       const reclaimed = yield* repository.claimNext(claimInput(THIRD_TOKEN, T3, T4))
       assert.isTrue(Option.isSome(reclaimed))
       if (Option.isNone(reclaimed)) return yield* Effect.die("reclaim missing")
       assert.strictEqual(reclaimed.value.attemptSequence, 2)
       assert.strictEqual(reclaimed.value.sessionRef, SESSION_REF)
       assert.isTrue(reclaimed.value.cancellationRequested)
+      assert.isTrue(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
       yield* repository.appendEvent({
         workspaceId: WORKSPACE_ID,
         jobId: JOB_ID,
@@ -523,6 +537,75 @@ describe("agent job repository", () => {
         replayed.events.map(({ eventKind }) => eventKind),
         ["user-message", "job-queued", "job-completed"]
       )
+    })))
+
+  it.effect("round-trips adapter chunks within the durable event byte bound", () =>
+    withRepository(Effect.gen(function*() {
+      const database = yield* Database
+      const repository = yield* AgentJobRepository
+      yield* setupFoundation
+      yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
+      const claimed = yield* repository.claimNext(claimInput(FIRST_TOKEN, T1, T5))
+      if (Option.isNone(claimed)) return yield* Effect.die("claim missing")
+
+      const summary = "ascii\"🙂".repeat(10_000)
+      const toolEvents: ReadonlyArray<ToolAgentEvent<{ readonly summary: string }>> = [
+        { _tag: "run-started", budgetMillis: 1_000, maximumSteps: 4 },
+        { _tag: "output-validated", output: { summary }, step: 1 },
+        { _tag: "completed", outcome: "success", steps: 1 }
+      ]
+      const runtime = makeAgentRuntime(
+        makeToolAgentAdapter(() => Stream.fromIterable(toolEvents))
+      )
+      const runtimeEvents = yield* runtime.run({
+        access: "read-only",
+        context: {
+          fingerprint: FINGERPRINT,
+          releaseId: RELEASE_ID,
+          subjectRevision: "release-revision-7",
+          workspaceId: WORKSPACE_ID
+        },
+        continuation: { _tag: "fresh" },
+        model: "fake-model",
+        prompt: "Inspect the project",
+        providerId: PROVIDER_ID,
+        runId: AgentRunId.make("persistence-boundary")
+      }).pipe(Stream.runCollect)
+
+      for (const event of runtimeEvents) {
+        yield* repository.appendEvent({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claimed.value.attemptSequence,
+          leaseToken: FIRST_TOKEN,
+          event,
+          occurredAt: T2
+        })
+      }
+
+      const rows = yield* database.sql<{ readonly payloadByteLength: number }>`
+        SELECT payload_byte_length AS payloadByteLength
+        FROM agent_thread_events
+        WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}
+          AND event_kind IN ('job-started', 'assistant-output', 'job-completed')`
+      assert.isTrue(
+        rows.every(
+          ({ payloadByteLength }) => payloadByteLength <= MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
+        )
+      )
+
+      const page = yield* replay
+      const assistant = page.events
+        .filter(({ eventKind }) => eventKind === "assistant-output")
+        .map(({ payload }) => Schema.decodeUnknownSync(AgentRuntimeEvent)(payload))
+        .filter((event) => event._tag === "output" && event.channel === "assistant")
+        .map((event) => event._tag === "output" ? event.text : "")
+        .join("")
+      const decoded = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ summary: Schema.String }))
+      )(assistant)
+      assert.strictEqual(decoded.summary, summary)
     })))
 
   it.effect("persists provider failure as one typed failed terminal boundary", () =>

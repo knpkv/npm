@@ -5,7 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { FIELD_SHAPES } from "./types.js"
+import { FIELD_CONTRACTS } from "./types.js"
 
 const SiteUrl = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^https:\/\/[a-z0-9][a-z0-9-]*\.atlassian\.net$/))
@@ -14,14 +14,14 @@ const SiteUrl = Schema.String.pipe(
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1)))
 const FilenameModes: readonly ["convention", "custom"] = ["convention", "custom"]
 
-export const FieldShapeSchema = Schema.Literals(FIELD_SHAPES)
+export const FieldContractSchema = Schema.Literals(FIELD_CONTRACTS)
 
 export const RequestedCustomFieldSchema = Schema.Struct({
   displayName: NonEmptyString,
   fieldId: Schema.optional(NonEmptyString),
-  shape: FieldShapeSchema,
+  form: FieldContractSchema,
   ordered: Schema.optional(Schema.Boolean)
-})
+}).pipe(Schema.encodeKeys({ form: "shape" }))
 
 export const WorkspaceConfigSchema = Schema.Struct({
   version: Schema.Literal(1).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(1))),
@@ -82,9 +82,9 @@ export const SyncFieldValueSchema = Schema.Union([
 export const BaselineCustomFieldSchema = Schema.Struct({
   fieldId: NonEmptyString,
   displayName: NonEmptyString,
-  shape: FieldShapeSchema,
+  form: FieldContractSchema,
   value: SyncFieldValueSchema
-})
+}).pipe(Schema.encodeKeys({ form: "shape" }))
 
 export const SyncBaselineSchema = Schema.Struct({
   version: Schema.Literal(1),

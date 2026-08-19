@@ -9,6 +9,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as TestClock from "effect/testing/TestClock"
 
+import { descriptorIt } from "../fixtures/descriptorPublication.js"
+
 import {
   AtlassianOAuthGrantId,
   type CreatePluginConnectionRequest,
@@ -75,6 +77,7 @@ import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConne
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
+import { SecretStoreIoError } from "../../src/server/secrets/SecretStoreError.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000071")
@@ -846,9 +849,9 @@ describe("application adapters", () => {
         }
       })
       assert.deepInclude(codeCommit.configuration.values, {
-        _tag: "text",
+        _tag: "secret-reference",
         key: PluginConfigurationKey.make("profile"),
-        value: "delivery"
+        state: "configured"
       })
       assert.strictEqual(yield* Ref.get(invalidations), 4)
     })))
@@ -1437,6 +1440,171 @@ describe("application adapters", () => {
           { displayName: "payments-release", providerId: "codepipeline" }
         ]
       )
+      const account = accountOverview[0]
+      if (account === undefined) return assert.fail("AWS account overview is missing")
+      const patchProviderAccount = administration.patchProviderAccount
+      assert.isDefined(patchProviderAccount)
+      const renamedAccount = yield* patchProviderAccount({
+        workspaceId: WORKSPACE_ID,
+        providerAccountId: account.providerAccountId,
+        patch: { expectedRevision: account.revision, displayName: "Production AWS" }
+      })
+      assert.strictEqual(renamedAccount.displayName, "Production AWS")
+      assert.strictEqual(renamedAccount.providerImmutableId, "123456789012")
+      const staleRename = yield* patchProviderAccount({
+        workspaceId: WORKSPACE_ID,
+        providerAccountId: account.providerAccountId,
+        patch: { expectedRevision: account.revision, displayName: "Stale name" }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(staleRename))
+      if (Result.isFailure(staleRename)) assert.instanceOf(staleRename.failure, ApplicationConflict)
+
+      const administrationRead = administration.administration
+      assert.isDefined(administrationRead)
+      const initialAdministration = yield* administrationRead({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID
+      })
+      assert.strictEqual(initialAdministration.schedule.mode, "manual")
+      assert.isTrue(initialAdministration.credentialFields.some(({ key }) => key === "profile"))
+      assert.isTrue(initialAdministration.permissions.some(
+        ({ capabilityId, state, version }) => capabilityId === "entity.read" && state === "available" && version === 1
+      ))
+      assert.isTrue(initialAdministration.diagnostics.some(
+        ({ code, severity }) => code === "connection-healthy" && severity === "information"
+      ))
+
+      const durableBeforeRecovery = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      )
+      const oldProfile = durableBeforeRecovery.values.find(({ key }) => key === "profile")
+      if (oldProfile?._tag !== "secret-reference") {
+        return assert.fail("AWS profile was not isolated in the machine-local secret store")
+      }
+      const database = yield* Database
+      const storedBeforeRecovery = yield* database.sql<{ readonly configuration: string }>`SELECT
+        configuration_json AS configuration
+        FROM plugin_configurations
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${PROVISIONED_PLUGIN_ID}`
+      assert.notInclude(storedBeforeRecovery[0]?.configuration ?? "", "delivery")
+
+      const reauthorize = administration.reauthorizeConnection
+      assert.isDefined(reauthorize)
+      const secrets = yield* SecretStore
+      const wrongIdentityCreated = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const wrongIdentityRemoved = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const wrongIdentitySecrets = SecretStore.of({
+        ...secrets,
+        create: (value) =>
+          secrets.create(value).pipe(
+            Effect.tap((ref) => Ref.update(wrongIdentityCreated, (refs) => [...refs, ref]))
+          ),
+        remove: (ref) =>
+          secrets.remove(ref).pipe(
+            Effect.tap(() => Ref.update(wrongIdentityRemoved, (refs) => [...refs, ref]))
+          )
+      })
+      const wrongIdentityAdministration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () =>
+          Effect.succeed(Context.make(PluginConnection, {
+            ...repositoryConnection,
+            discover: Effect.succeed({
+              account: { providerImmutableId: "999999999999", displayName: "intruder" },
+              workspace: null,
+              resource: { providerImmutableId: "eu-west-1:intruder", displayName: "intruder" },
+              endpoints: [],
+              discoveredAt: T0
+            })
+          })),
+        invalidate: () => Effect.void
+      }).pipe(Effect.provideService(SecretStore, wrongIdentitySecrets))
+      const wrongIdentityReauthorize = wrongIdentityAdministration.reauthorizeConnection
+      assert.isDefined(wrongIdentityReauthorize)
+      const wrongIdentity = yield* wrongIdentityReauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        expectedRevision: durableBeforeRecovery.revision,
+        credentials: [{ key: PluginConfigurationKey.make("profile"), value: "intruder-profile" }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(wrongIdentity))
+      if (Result.isFailure(wrongIdentity)) {
+        assert.instanceOf(wrongIdentity.failure, ApplicationInvalidRequest)
+      }
+      const rejectedReferences = yield* Ref.get(wrongIdentityCreated)
+      assert.lengthOf(rejectedReferences, 1)
+      assert.deepStrictEqual(yield* Ref.get(wrongIdentityRemoved), rejectedReferences)
+      const durableAfterRejectedIdentity = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      )
+      assert.strictEqual(durableAfterRejectedIdentity.revision, durableBeforeRecovery.revision)
+      assert.deepStrictEqual(durableAfterRejectedIdentity.values, durableBeforeRecovery.values)
+      assert.isTrue(Result.isSuccess(
+        yield* Effect.scoped(secrets.resolve(oldProfile.ref)).pipe(Effect.result)
+      ))
+      const cleanupAfterRejectedIdentity = yield* database.sql<{ readonly cleanupCount: number }>`SELECT
+        COUNT(*) AS cleanup_count
+        FROM plugin_secret_cleanup`
+      assert.strictEqual(cleanupAfterRejectedIdentity[0]?.cleanupCount, 0)
+
+      const recovered = yield* reauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        expectedRevision: durableBeforeRecovery.revision,
+        credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated-profile" }]
+      })
+      assert.strictEqual(recovered.configuration.revision, durableBeforeRecovery.revision + 1)
+      assert.strictEqual(recovered.test._tag, "healthy")
+      const durableAfterRecovery = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      )
+      const rotatedProfile = durableAfterRecovery.values.find(({ key }) => key === "profile")
+      if (rotatedProfile?._tag !== "secret-reference") {
+        return assert.fail("replacement AWS profile was not stored as an opaque reference")
+      }
+      assert.isTrue(Result.isFailure(
+        yield* Effect.scoped((yield* SecretStore).resolve(oldProfile.ref)).pipe(Effect.result)
+      ))
+      const storedAfterRecovery = yield* database.sql<{ readonly configuration: string }>`SELECT
+        configuration_json AS configuration
+        FROM plugin_configurations
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${PROVISIONED_PLUGIN_ID}`
+      assert.notInclude(storedAfterRecovery[0]?.configuration ?? "", "rotated-profile")
+
+      const revoke = administration.revokeConnection
+      assert.isDefined(revoke)
+      const revoked = yield* revoke({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        expectedRevision: durableAfterRecovery.revision
+      })
+      assert.isFalse(revoked.isEnabled)
+      const durableAfterRevocation = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      )
+      assert.isFalse(durableAfterRevocation.values.some(({ key }) => key === "profile"))
+      assert.isTrue(Result.isFailure(
+        yield* Effect.scoped((yield* SecretStore).resolve(rotatedProfile.ref)).pipe(Effect.result)
+      ))
+      const historicalBindings = yield* database.sql<{ readonly bindingCount: number }>`SELECT
+        COUNT(*) AS binding_count
+        FROM plugin_secret_bindings
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${PROVISIONED_PLUGIN_ID}`
+      assert.strictEqual(historicalBindings[0]?.bindingCount, 2)
+      const completedCleanup = yield* database.sql<{ readonly cleanupCount: number }>`SELECT
+        COUNT(*) AS cleanup_count
+        FROM plugin_secret_cleanup`
+      assert.strictEqual(completedCleanup[0]?.cleanupCount, 0)
+      const revokedAdministration = yield* administrationRead({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID
+      })
+      assert.isTrue(revokedAdministration.diagnostics.some(
+        ({ code, severity }) => code === "connection-credentials-missing" && severity === "critical"
+      ))
+
       const setEnabled = administration.setConnectionEnabled
       assert.isDefined(setEnabled)
       yield* setEnabled({
@@ -1451,14 +1619,14 @@ describe("application adapters", () => {
         )?.isEnabled
       )
       assert.deepInclude(repository.configuration.values, {
-        _tag: "text",
+        _tag: "secret-reference",
         key: PluginConfigurationKey.make("profile"),
-        value: "delivery"
+        state: "configured"
       })
       assert.deepInclude(pipeline.configuration.values, {
-        _tag: "text",
+        _tag: "secret-reference",
         key: PluginConfigurationKey.make("profile"),
-        value: "delivery"
+        state: "configured"
       })
       assert.isFalse(
         (yield* persistence.pluginConnections.get(WORKSPACE_ID, DUPLICATE_AWS_PLUGIN_ID)).isEnabled
@@ -1697,6 +1865,30 @@ describe("application adapters", () => {
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
       assert.strictEqual(connected.configuration.revision, 1)
+      const reauthorize = administration.reauthorizeConnection
+      assert.isDefined(reauthorize)
+      yield* writeStore("control-center", [profile(1)])
+      const expiredRecovery = yield* reauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: INVALID_PLUGIN_ID,
+        expectedRevision: 1,
+        credentials: [{ key: PluginConfigurationKey.make("oauthProfileId"), value: profileId }]
+      }).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(expiredRecovery))
+      if (Result.isFailure(expiredRecovery)) {
+        assert.instanceOf(expiredRecovery.failure, ApplicationInvalidRequest)
+      }
+      yield* writeStore("control-center", [profile(4_102_444_800_000)])
+      const recovered = yield* reauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: INVALID_PLUGIN_ID,
+        expectedRevision: 1,
+        credentials: [{ key: PluginConfigurationKey.make("oauthProfileId"), value: profileId }]
+      }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(recovered.configuration.revision, 2)
 
       const adapterValues: ReadonlyArray<PluginConfigurationPatchValue> = [
         { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
@@ -1710,10 +1902,14 @@ describe("application adapters", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: INVALID_PLUGIN_ID,
         patch: {
-          expectedRevision: 1,
+          expectedRevision: 2,
           values: [
             { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" },
-            { _tag: "text", key: PluginConfigurationKey.make("oauthProfileId"), value: profileId },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("oauthProfileId"),
+              operation: { _tag: "keep" }
+            },
             ...adapterValues.map((value): PluginConfigurationPatchValue =>
               value._tag === "text" && value.key === "projectId"
                 ? { ...value, value: "project-other" }
@@ -1725,7 +1921,7 @@ describe("application adapters", () => {
       assert.isTrue(Result.isFailure(changedProject))
       assert.strictEqual(
         Option.getOrThrow(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)).revision,
-        1
+        2
       )
       const invalidPatches: ReadonlyArray<ReadonlyArray<PluginConfigurationPatchValue>> = [
         [{ _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" }, ...adapterValues],
@@ -1735,7 +1931,7 @@ describe("application adapters", () => {
         const patched = yield* administration.patchConfiguration({
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: INVALID_PLUGIN_ID,
-          patch: { expectedRevision: 1, values }
+          patch: { expectedRevision: 2, values }
         }).pipe(
           Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
           Effect.result
@@ -1748,18 +1944,22 @@ describe("application adapters", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: INVALID_PLUGIN_ID,
         patch: {
-          expectedRevision: 1,
+          expectedRevision: 2,
           values: [
             { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" },
-            { _tag: "text", key: PluginConfigurationKey.make("oauthProfileId"), value: profileId },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("oauthProfileId"),
+              operation: { _tag: "keep" }
+            },
             ...adapterValues
           ]
         }
       }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
-      assert.strictEqual(patched.revision, 2)
+      assert.strictEqual(patched.revision, 3)
       const durable = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)
       assert.isTrue(Option.isSome(durable))
-      if (Option.isSome(durable)) assert.strictEqual(durable.value.revision, 2)
+      if (Option.isSome(durable)) assert.strictEqual(durable.value.revision, 3)
     }))))
 
   it.effect("invalidates connections that use a successfully completed Atlassian OAuth profile", () =>
@@ -2155,6 +2355,230 @@ describe("application adapters", () => {
       assert.deepStrictEqual(yield* Ref.get(removals), [reference])
       const persistence = yield* Persistence
       assert.isTrue(Option.isNone(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)))
+    })))
+
+  it.effect("removes replacement credentials when reauthorization loses its configuration CAS", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const secrets = yield* SecretStore
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        providerId: "codecommit",
+        displayName: PluginConnectionDisplayName.make("Recoverable CodeCommit"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        FAILED_PLUGIN_ID,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "legacy-profile" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments" }
+        ]),
+        0,
+        T0
+      )
+      const catalog = firstPartyService("codecommit")
+      if (catalog === undefined) return assert.fail("CodeCommit catalog is missing")
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        FAILED_PLUGIN_ID,
+        "codecommit",
+        catalog.rawDescriptor,
+        0,
+        T0
+      )
+
+      const created = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const removed = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const instrumentedSecrets = SecretStore.of({
+        ...secrets,
+        create: (value) =>
+          secrets.create(value).pipe(Effect.tap((ref) => Ref.update(created, (refs) => [...refs, ref]))),
+        remove: (ref) => secrets.remove(ref).pipe(Effect.tap(() => Ref.update(removed, (refs) => [...refs, ref])))
+      })
+      const instrumentedPersistence = Persistence.of({
+        ...persistence,
+        pluginConfigurations: {
+          ...persistence.pluginConfigurations,
+          update: (workspaceId, pluginConnectionId, values, expectedRevision, updatedAt) =>
+            persistence.pluginConfigurations.update(
+              workspaceId,
+              pluginConnectionId,
+              values,
+              expectedRevision + 1,
+              updatedAt
+            )
+        }
+      })
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.die("failed CAS must not acquire a provider runtime"),
+        invalidate: () => Effect.die("failed CAS must not invalidate a provider runtime")
+      }).pipe(
+        Effect.provideService(Persistence, instrumentedPersistence),
+        Effect.provideService(SecretStore, instrumentedSecrets)
+      )
+      const reauthorize = administration.reauthorizeConnection
+      assert.isDefined(reauthorize)
+      const outcome = yield* reauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        expectedRevision: 1,
+        credentials: [{ key: PluginConfigurationKey.make("profile"), value: "replacement-profile" }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.instanceOf(outcome.failure, ApplicationConflict)
+      const createdReferences = yield* Ref.get(created)
+      assert.lengthOf(createdReferences, 1)
+      assert.deepStrictEqual(yield* Ref.get(removed), createdReferences)
+      const current = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      )
+      assert.isTrue(current.values.some(
+        (value) => value._tag === "text" && value.key === "profile" && value.value === "legacy-profile"
+      ))
+    })))
+
+  it.effect("rejects reauthorization before mutation when no provider runtime is available", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const secrets = yield* SecretStore
+      const connectionBefore = yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        providerId: "codecommit",
+        displayName: PluginConnectionDisplayName.make("Runtime-less CodeCommit"),
+        isEnabled: false,
+        createdAt: T0
+      })
+      const configurationBefore = yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        FAILED_PLUGIN_ID,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "legacy-profile" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments" }
+        ]),
+        0,
+        T0
+      )
+      const guardedSecrets = SecretStore.of({
+        ...secrets,
+        create: () => Effect.die("runtime-less reauthorization must not create credentials")
+      })
+      const administration = yield* makePluginAdministration.pipe(
+        Effect.provideService(SecretStore, guardedSecrets)
+      )
+      const reauthorize = administration.reauthorizeConnection
+      assert.isDefined(reauthorize)
+      const outcome = yield* reauthorize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        expectedRevision: configurationBefore.revision,
+        credentials: [{ key: PluginConfigurationKey.make("profile"), value: "replacement-profile" }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.instanceOf(outcome.failure, ApplicationServiceUnavailable)
+      }
+      assert.deepStrictEqual(
+        yield* persistence.pluginConnections.get(WORKSPACE_ID, FAILED_PLUGIN_ID),
+        connectionBefore
+      )
+      assert.deepStrictEqual(
+        Option.getOrThrow(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)),
+        configurationBefore
+      )
+    })))
+
+  it.effect("retries durable credential cleanup after a secret-store failure", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const secrets = yield* SecretStore
+      const createdAt = yield* DateTime.now
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        providerId: "codecommit",
+        displayName: PluginConnectionDisplayName.make("Revocable CodeCommit"),
+        isEnabled: true,
+        createdAt
+      })
+      const oldReference = yield* secrets.create(new TextEncoder().encode("legacy-profile"))
+      const configured = yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        FAILED_PLUGIN_ID,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "profile", ref: oldReference },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments" }
+        ]),
+        0,
+        createdAt
+      )
+      const catalog = firstPartyService("codecommit")
+      if (catalog === undefined) return assert.fail("CodeCommit catalog is missing")
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        FAILED_PLUGIN_ID,
+        "codecommit",
+        catalog.rawDescriptor,
+        0,
+        createdAt
+      )
+      const failedRemovals = yield* Ref.make(0)
+      const failingSecrets = SecretStore.of({
+        ...secrets,
+        remove: (ref) =>
+          ref === oldReference
+            ? Ref.update(failedRemovals, (count) => count + 1).pipe(
+              Effect.andThen(
+                new SecretStoreIoError({
+                  operation: "remove",
+                  message: "simulated cleanup failure"
+                })
+              )
+            )
+            : secrets.remove(ref)
+      })
+      const firstAdministration = yield* makePluginAdministration.pipe(
+        Effect.provideService(SecretStore, failingSecrets)
+      )
+      const firstRevoke = firstAdministration.revokeConnection
+      assert.isDefined(firstRevoke)
+      const firstOutcome = yield* firstRevoke({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        expectedRevision: configured.revision
+      })
+      assert.isFalse(firstOutcome.isEnabled)
+      assert.strictEqual(yield* Ref.get(failedRemovals), 1)
+      assert.isTrue(Result.isSuccess(
+        yield* Effect.scoped(secrets.resolve(oldReference)).pipe(Effect.result)
+      ))
+      const database = yield* Database
+      const queued = yield* database.sql<{ readonly secretRef: string }>`SELECT
+        secret_ref AS secret_ref
+        FROM plugin_secret_cleanup`
+      assert.deepStrictEqual(queued, [{ secretRef: oldReference }])
+
+      const secondAdministration = yield* makePluginAdministration
+      const secondRevoke = secondAdministration.revokeConnection
+      assert.isDefined(secondRevoke)
+      const durableAfterFirstRevoke = Option.getOrThrow(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      )
+      yield* secondRevoke({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        expectedRevision: durableAfterFirstRevoke.revision
+      })
+      assert.isTrue(Result.isFailure(
+        yield* Effect.scoped(secrets.resolve(oldReference)).pipe(Effect.result)
+      ))
+      const completed = yield* database.sql<{ readonly cleanupCount: number }>`SELECT
+        COUNT(*) AS cleanup_count
+        FROM plugin_secret_cleanup`
+      assert.strictEqual(completed[0]?.cleanupCount, 0)
     })))
 
   it.effect("retains setup secrets when interruption follows the durable configuration commit", () =>
@@ -3866,60 +4290,63 @@ describe("application adapters", () => {
       }
     })))
 
-  it.effect("resolves only workspace-owned, bounded safe raster media", () =>
-    withApplication(Effect.gen(function*() {
-      const persistence = yield* setup
-      const media = yield* makeMediaReads
-      const png = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array([137, 80, 78, 71]),
-        classification: "reproducible-cache",
-        mimeType: "image/png",
-        createdAt: T0
-      })
-      const mediaId = OpaqueMediaId.make(`media_${png.metadata.digest}`)
-      assert.instanceOf(
-        mapPersistenceReadError(new BlobNotFoundError({ digest: png.metadata.digest })),
-        ApplicationServiceUnavailable
-      )
-      const opened = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId })
-      assert.strictEqual(opened.contentType, "image/png")
-      const chunks = yield* Stream.runCollect(opened.body)
-      assert.deepStrictEqual(
-        Array.from(chunks[0] ?? []),
-        [137, 80, 78, 71]
-      )
+  descriptorIt.effect(
+    "resolves only workspace-owned, bounded safe raster media",
+    () =>
+      withApplication(Effect.gen(function*() {
+        const persistence = yield* setup
+        const media = yield* makeMediaReads
+        const png = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array([137, 80, 78, 71]),
+          classification: "reproducible-cache",
+          mimeType: "image/png",
+          createdAt: T0
+        })
+        const mediaId = OpaqueMediaId.make(`media_${png.metadata.digest}`)
+        assert.instanceOf(
+          mapPersistenceReadError(new BlobNotFoundError({ digest: png.metadata.digest })),
+          ApplicationServiceUnavailable
+        )
+        const opened = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId })
+        assert.strictEqual(opened.contentType, "image/png")
+        const chunks = yield* Stream.runCollect(opened.body)
+        assert.deepStrictEqual(
+          Array.from(chunks[0] ?? []),
+          [137, 80, 78, 71]
+        )
 
-      const crossWorkspace = yield* media.read({ workspaceId: OTHER_WORKSPACE_ID, mediaId }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(crossWorkspace))
-      if (Result.isFailure(crossWorkspace)) {
-        assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
-      }
+        const crossWorkspace = yield* media.read({ workspaceId: OTHER_WORKSPACE_ID, mediaId }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(crossWorkspace))
+        if (Result.isFailure(crossWorkspace)) {
+          assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
+        }
 
-      const text = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array([60, 115, 118, 103, 62]),
-        classification: "reproducible-cache",
-        mimeType: "image/svg+xml",
-        createdAt: T0
-      })
-      const unsafeMediaId = OpaqueMediaId.make(`media_${text.metadata.digest}`)
-      const unsafe = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId: unsafeMediaId }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(unsafe))
-      if (Result.isFailure(unsafe)) assert.instanceOf(unsafe.failure, ApplicationResourceNotFound)
+        const text = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array([60, 115, 118, 103, 62]),
+          classification: "reproducible-cache",
+          mimeType: "image/svg+xml",
+          createdAt: T0
+        })
+        const unsafeMediaId = OpaqueMediaId.make(`media_${text.metadata.digest}`)
+        const unsafe = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId: unsafeMediaId }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(unsafe))
+        if (Result.isFailure(unsafe)) assert.instanceOf(unsafe.failure, ApplicationResourceNotFound)
 
-      const oversized = yield* persistence.content.put(WORKSPACE_ID, {
-        bytes: new Uint8Array((8 * 1024 * 1024) + 1),
-        classification: "reproducible-cache",
-        mimeType: "image/png",
-        createdAt: T0
-      })
-      const oversizedMediaId = OpaqueMediaId.make(`media_${oversized.metadata.digest}`)
-      const rejectedSize = yield* media.read({
-        workspaceId: WORKSPACE_ID,
-        mediaId: oversizedMediaId
-      }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(rejectedSize))
-      if (Result.isFailure(rejectedSize)) {
-        assert.instanceOf(rejectedSize.failure, ApplicationResourceNotFound)
-      }
-    })))
+        const oversized = yield* persistence.content.put(WORKSPACE_ID, {
+          bytes: new Uint8Array((8 * 1024 * 1024) + 1),
+          classification: "reproducible-cache",
+          mimeType: "image/png",
+          createdAt: T0
+        })
+        const oversizedMediaId = OpaqueMediaId.make(`media_${oversized.metadata.digest}`)
+        const rejectedSize = yield* media.read({
+          workspaceId: WORKSPACE_ID,
+          mediaId: oversizedMediaId
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(rejectedSize))
+        if (Result.isFailure(rejectedSize)) {
+          assert.instanceOf(rejectedSize.failure, ApplicationResourceNotFound)
+        }
+      }))
+  )
 })

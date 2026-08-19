@@ -2,12 +2,14 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import { AtlassianOAuthGrantId, AtlassianOAuthProviderIntent } from "../../api/plugins.js"
+import { PluginConnectionId } from "../../domain/identifiers.js"
 
 const activeGrantStorageKey = "cc_atlassian_oauth_setup_intent_state"
 const StoredAtlassianOAuthSetupIntent = Schema.fromJsonString(Schema.Struct({
   preferredSiteId: Schema.NullOr(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
   ),
+  recoveryConnectionId: Schema.optionalKey(PluginConnectionId),
   providers: AtlassianOAuthProviderIntent
 }))
 

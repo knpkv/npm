@@ -17,12 +17,25 @@ export interface RlyDiffCodeItem {
 }
 
 /** One semantic annotation anchored to a rendered diff line. */
-export interface RlyDiffCodeAnnotation {
-  readonly id: string
+export interface RlyDiffCodeAnnotationLocation {
   readonly itemId: string
   readonly lineNumber: number
-  readonly message: string
   readonly side: "additions" | "deletions"
+}
+
+/** Rly-owned context supplied to an application's annotation renderer. */
+export interface RlyDiffCodeAnnotationRenderContext {
+  readonly annotationId: string
+  readonly location: RlyDiffCodeAnnotationLocation
+  returnFocus(): void
+}
+
+/** One stable annotation identity, anchor, accessible name, and application-owned presentation. */
+export interface RlyDiffCodeAnnotation {
+  readonly accessibilityLabel: string
+  readonly id: string
+  readonly location: RlyDiffCodeAnnotationLocation
+  readonly render: (context: RlyDiffCodeAnnotationRenderContext) => ReactNode
 }
 
 /** The caller-controlled selected line range for one diff item. */
@@ -58,9 +71,17 @@ export type RlyDiffCodeScrollTarget =
 /** Stable imperative operations exposed by DiffCodeView. */
 export interface RlyDiffCodeViewHandle {
   addItems(items: ReadonlyArray<RlyDiffCodeItem>): void
+  focusLine(
+    target: Extract<RlyDiffCodeScrollTarget, { readonly type: "line" }> & {
+      readonly side: "additions" | "deletions"
+    }
+  ): boolean
   scrollTo(target: RlyDiffCodeScrollTarget): void
   updateItem(item: RlyDiffCodeItem): boolean
 }
+
+/** Renderer lifecycle generation used to replay virtual item ownership after worker transitions. */
+export type RlyDiffRendererGeneration = "fallback" | "main-thread" | "worker"
 
 /** Controlled presentation options for the pinned diff renderer adapter. */
 export interface RlyDiffCodeViewProps {
@@ -71,6 +92,7 @@ export interface RlyDiffCodeViewProps {
   readonly expandContext?: boolean
   readonly initialItems: ReadonlyArray<RlyDiffCodeItem>
   readonly mode?: "split" | "stacked"
+  readonly onItemRender?: (itemId: string, generation: RlyDiffRendererGeneration) => void
   readonly onSelectedLinesChange?: (selection: RlyDiffCodeSelection | null) => void
   readonly selectedLines?: RlyDiffCodeSelection | null
   readonly virtualization?: "buffered" | "strict"

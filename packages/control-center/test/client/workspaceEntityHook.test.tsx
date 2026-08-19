@@ -79,14 +79,14 @@ const staleInspection = inspection(true)
 
 const deferred = <Value,>() => {
   let resolveValue: ((value: Value) => void) | undefined
-  let rejectValue: ((reason?: unknown) => void) | undefined
+  let rejectValue: (<UnparsedInput>(reason?: UnparsedInput) => void) | undefined
   const promise = new Promise<Value>((resolve, reject) => {
     resolveValue = resolve
     rejectValue = reject
   })
   return {
     promise,
-    reject: (reason: unknown): void => {
+    reject: <UnparsedInput,>(reason: UnparsedInput): void => {
       if (rejectValue === undefined) throw new Error("Deferred rejection unavailable")
       rejectValue(reason)
     },

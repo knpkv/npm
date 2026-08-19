@@ -49,7 +49,13 @@ type BoundaryApiError =
 
 const profileFor = (request: HttpServerRequest.HttpServerRequest): RequestLimitProfile => {
   if (request.url.startsWith("/api/v1/session/pair")) return "pairing"
-  if (request.url.startsWith("/api/v1/agent/")) return "agent"
+  if (request.url.startsWith("/api/v1/agent/")) {
+    if (
+      /^\/api\/v1\/agent\/pull-requests\/[^/?]+\/reviews\/[^/?]+\/suggestions\/[^/?]+\/publication-preview(?:\?|$)/u
+        .test(request.url)
+    ) return "agent"
+    return request.method === "GET" || request.method === "HEAD" ? "agent-read" : "agent"
+  }
   if (request.url.startsWith("/api/v1/media/")) return "media"
   if (
     request.method === "POST" &&
@@ -152,6 +158,7 @@ const mapBodyPolicyFailure = (
 const transformSchemaDefect = <A, E, R>(
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A, E | InvalidRequestApiError | ServiceUnavailableApiError, R> =>
+  // eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The HTTP boundary translates only identified schema defects; request-boundary.test.ts covers translation and unrelated-cause preservation.
   Effect.catchCause(effect, (cause): Effect.Effect<never, E | InvalidRequestApiError | ServiceUnavailableApiError> => {
     const defect = Cause.findDefect(cause)
     if (Result.isFailure(defect) || !HttpApiError.HttpApiSchemaError.is(defect.success)) {
@@ -224,9 +231,8 @@ export const requestBoundaryLayer = HttpRouter.middleware(
               response,
               {
                 ...securityHeaders({ isSecureTransport: bindConfig.cookieSecure }),
-                ...(isApiRequest && !hasNoStoreDirective(response.headers["cache-control"])
-                  ? { "cache-control": "no-store" }
-                  : {})
+                ...((isApiRequest && !hasNoStoreDirective(response.headers["cache-control"])) &&
+                  { "cache-control": "no-store" })
               }
             ))
         )

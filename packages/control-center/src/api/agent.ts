@@ -1,11 +1,39 @@
-import { MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
+import { AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
-import { EntityId, EventCursor, JobId, ReleaseId } from "../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject } from "../domain/prReview.js"
+import { AgentProviderIdentifier } from "../domain/agentProviderIdentifier.js"
+import { GovernedActionState } from "../domain/governedAction/index.js"
+import {
+  EntityId,
+  EventCursor,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId,
+  ReleaseId
+} from "../domain/identifiers.js"
+import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
+import {
+  PrReviewDismissalReason,
+  PrReviewOutcome,
+  PrReviewReport,
+  PrReviewSubject,
+  PrReviewSuggestion,
+  PrReviewSuggestionId
+} from "../domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../domain/prReviewRevision.js"
+import { Revision } from "../domain/sourceRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
+  ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
   NotFoundApiError,
@@ -24,7 +52,11 @@ const MAXIMUM_HISTORY_MESSAGES = 12
 const MAXIMUM_HISTORY_MESSAGE_LENGTH = 12_000
 const MAXIMUM_HISTORY_CONTENT_LENGTH = 64_000
 const MAXIMUM_REPLY_LENGTH = 32_000
+const MAXIMUM_ORIGIN_PATH_LENGTH = 2_048
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
+/** Maximum targeted request length retained in a pull-request review thread. */
+export const MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH = 2_500
+const MAXIMUM_AGENT_PROVIDERS = 32
 const MAXIMUM_THREAD_EVENT_PAGE_SIZE = 128
 const MAXIMUM_AGENT_MODELS_PER_PROVIDER = 32
 
@@ -51,11 +83,9 @@ export const AgentProvider = Schema.Literals(["codex", "claude"])
 export type AgentProvider = typeof AgentProvider.Type
 
 /** Provider-neutral configured runtime identity accepted by durable jobs. */
-export const DurableAgentProviderId = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(200)
-).pipe(Schema.brand("DurableAgentProviderId"))
+export const DurableAgentProviderId = AgentProviderIdentifier.pipe(
+  Schema.brand("DurableAgentProviderId")
+)
 
 /** Decoded provider-neutral durable runtime identity. */
 export type DurableAgentProviderId = typeof DurableAgentProviderId.Type
@@ -76,6 +106,29 @@ export const AgentSafeProfile = Schema.Literal("read-only")
 /** Decoded safe execution profile. */
 export type AgentSafeProfile = typeof AgentSafeProfile.Type
 
+/** Stable server-owned profile selected before an immutable review starts. */
+export const ReviewAgentProfileId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(500),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)
+).pipe(Schema.brand("ReviewAgentProfileId"))
+
+/** Decoded Review Agent Profile identity. */
+export type ReviewAgentProfileId = typeof ReviewAgentProfileId.Type
+
+/** Browser-safe Review Agent Profile metadata. */
+export const ReviewAgentProfile = Schema.Struct({
+  profileId: ReviewAgentProfileId,
+  label: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  budgetMillis: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 })),
+  networkAccess: Schema.Literals(["blocked", "provider-enabled"]),
+  sandbox: Schema.Literal("sbx")
+})
+
+/** Decoded browser-safe Review Agent Profile metadata. */
+export type ReviewAgentProfile = typeof ReviewAgentProfile.Type
+
 /** Redacted provider health; configuration and transport diagnostics remain server-only. */
 export const AgentProviderHealth = Schema.Literals(["available", "not-configured"])
 
@@ -91,6 +144,9 @@ export type AgentProviderCapability = typeof AgentProviderCapability.Type
 /** Browser-safe catalog entry for one server-owned agent provider. */
 export const AgentProviderCatalogEntry = Schema.Struct({
   providerId: DurableAgentProviderId,
+  displayName: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+  ),
   models: Schema.Array(AgentModelId).check(
     Schema.makeFilter((models) => models.length <= MAXIMUM_AGENT_MODELS_PER_PROVIDER, {
       expected: `at most ${MAXIMUM_AGENT_MODELS_PER_PROVIDER} agent models`
@@ -102,7 +158,8 @@ export const AgentProviderCatalogEntry = Schema.Struct({
     Schema.isMaxLength(AgentProviderCapability.literals.length),
     Schema.isUnique()
   ),
-  health: AgentProviderHealth
+  health: AgentProviderHealth,
+  reviewProfile: Schema.optionalKey(ReviewAgentProfile)
 })
 
 /** Decoded browser-safe provider catalog entry. */
@@ -111,8 +168,8 @@ export type AgentProviderCatalogEntry = typeof AgentProviderCatalogEntry.Type
 /** Redacted catalog for the fixed server-side provider registry. */
 export const AgentProviderCatalog = Schema.Struct({
   providers: Schema.Array(AgentProviderCatalogEntry).check(
-    Schema.makeFilter((providers) => providers.length <= 3, {
-      expected: "at most three agent providers"
+    Schema.makeFilter((providers) => providers.length <= MAXIMUM_AGENT_PROVIDERS, {
+      expected: `at most ${MAXIMUM_AGENT_PROVIDERS} agent providers`
     }),
     Schema.makeFilter(
       (providers) => new Set(providers.map(({ providerId }) => providerId)).size === providers.length,
@@ -138,6 +195,33 @@ export const ReleaseAgentProvider = AgentProvider
 
 /** Decoded release-agent provider. */
 export type ReleaseAgentProvider = AgentProvider
+
+/** Provider destination that Relay may create or update after human confirmation. */
+export const ReleasePublicationProvider = Schema.Literals(["jira", "confluence"])
+export type ReleasePublicationProvider = typeof ReleasePublicationProvider.Type
+
+export const SubmitReleasePublicationRequest = Schema.Struct({
+  provider: ReleasePublicationProvider,
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  markdown: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+  parentId: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
+  publicationActionId: Schema.optionalKey(GovernedActionId),
+  /** Exact synchronized Confluence page selected before its first governed release update. */
+  targetEntityId: Schema.optionalKey(EntityId),
+  /** Revision displayed to the owner before an exact-page update is submitted. */
+  targetRevision: Schema.optionalKey(Revision),
+  /** Existing synchronized Confluence page copied into a new release-owned page. */
+  templateEntityId: Schema.optionalKey(EntityId)
+})
+export type SubmitReleasePublicationRequest = typeof SubmitReleasePublicationRequest.Type
+
+export const SubmitReleasePublicationResponse = Schema.Struct({
+  actionId: GovernedActionId,
+  state: GovernedActionState
+})
+export type SubmitReleasePublicationResponse = typeof SubmitReleasePublicationResponse.Type
 
 /** One bounded prior turn supplied to preserve release-thread context. */
 export const AgentHistoryMessage = Schema.Struct({
@@ -169,7 +253,14 @@ const ReleaseAgentHistory = Schema.Array(AgentHistoryMessage).check(
 export const ReleaseAgentTurnRequest = Schema.Struct({
   provider: AgentProvider,
   prompt: AgentPrompt,
-  history: ReleaseAgentHistory
+  history: ReleaseAgentHistory,
+  originPath: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isPattern(/^\/(?![\\/])[^\\]*$/u, { expected: "a same-origin Control Center path" }),
+      Schema.isMaxLength(MAXIMUM_ORIGIN_PATH_LENGTH)
+    )
+  )
 }).annotate({ identifier: "ReleaseAgentTurnRequest" })
 
 /** Decoded release-aware model request. */
@@ -228,7 +319,10 @@ const ReleaseAgentJobQueuedEvent = Schema.TaggedStruct("job-queued", {
   providerId: DurableAgentProviderId
 })
 
-const ReleaseAgentJobStartedEvent = Schema.TaggedStruct("job-started", releaseAgentThreadEventFields)
+const ReleaseAgentJobStartedEvent = Schema.TaggedStruct("job-started", {
+  ...releaseAgentThreadEventFields,
+  runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
+})
 
 const ReleaseAgentAssistantOutputEvent = Schema.TaggedStruct("assistant-output", {
   ...releaseAgentThreadEventFields,
@@ -302,7 +396,14 @@ export type EnqueueReleaseAgentJobResponse = typeof EnqueueReleaseAgentJobRespon
 export const EnqueuePullRequestReviewRequest = Schema.Struct({
   providerId: DurableAgentProviderId,
   model: AgentModelId,
-  profile: AgentSafeProfile
+  profile: AgentSafeProfile,
+  reviewProfileId: ReviewAgentProfileId,
+  prompt: Schema.optionalKey(
+    DurableAgentPrompt.check(
+      Schema.isTrimmed(),
+      Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+    )
+  )
 })
 
 /** Decoded immutable pull-request review enqueue request. */
@@ -317,6 +418,25 @@ const pullRequestReviewJob = {
   jobId: JobId,
   providerId: DurableAgentProviderId,
   model: AgentModelId,
+  reviewProfile: ReviewAgentProfile,
+  activity: Schema.Struct({
+    events: Schema.Array(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
+    ).check(Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)),
+    truncated: Schema.Boolean
+  }),
+  budgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(1_200_000)),
+    Schema.withConstructorDefault(Effect.succeed(1_200_000))
+  ),
+  budgetExtensionCount: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0))
+  ),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  ),
   requestedAt: UtcTimestamp
 }
 
@@ -336,6 +456,13 @@ export class PullRequestReviewNotStarted
   extends Schema.TaggedClass<PullRequestReviewNotStarted>()("not-started", pullRequestReviewIdentity)
 {}
 
+/** A prior completed review exists, but its evidence is bound to an older head. */
+export class PullRequestReviewStale extends Schema.TaggedClass<PullRequestReviewStale>()("stale", {
+  ...pullRequestReviewIdentity,
+  previousHead: PrReviewSubject.fields.headRevision,
+  previousJobId: JobId
+}) {}
+
 /** One durable exact-head review is queued or running. */
 export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestReviewPending>()("pending", {
   ...pullRequestReviewJob,
@@ -346,33 +473,357 @@ export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestRevi
 export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestReviewCompleted>()("completed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
-  report: PrReviewReport
+  report: PrReviewReport,
+  outcome: PrReviewOutcome
 }) {}
 
 /** Durable exact-head review stopped without publishing a recommendation. */
 export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestReviewFailed>()("failed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
-  state: Schema.Literals(["failed", "cancelled"])
+  state: Schema.Literals(["failed", "cancelled"]),
+  report: Schema.optionalKey(Schema.NullOr(PrReviewReport)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  )
+}) {}
+
+/** Review interrupted by process restart; its partial evidence remains inspectable. */
+export class PullRequestReviewInterrupted extends Schema.TaggedClass<PullRequestReviewInterrupted>()("interrupted", {
+  ...pullRequestReviewJob,
+  completedAt: UtcTimestamp,
+  report: PrReviewReport
 }) {}
 
 /** Browser-safe current review state for one canonical pull-request entity. */
 export const PullRequestReviewState = Schema.Union([
   PullRequestReviewUnavailable,
   PullRequestReviewNotStarted,
+  PullRequestReviewStale,
   PullRequestReviewPending,
   PullRequestReviewCompleted,
-  PullRequestReviewFailed
+  PullRequestReviewFailed,
+  PullRequestReviewInterrupted
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Decoded current pull-request review state. */
 export type PullRequestReviewState = typeof PullRequestReviewState.Type
+
+const pullRequestReviewThreadEventFields = {
+  eventSequence: ReleaseAgentThreadCursor.check(Schema.isGreaterThan(0)),
+  jobId: JobId,
+  occurredAt: UtcTimestamp
+}
+
+const PullRequestReviewOperatorMessageEvent = Schema.TaggedStruct("operator-message", {
+  ...pullRequestReviewThreadEventFields,
+  prompt: DurableAgentPrompt.check(
+    Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+  )
+})
+
+const PullRequestReviewRunQueuedEvent = Schema.TaggedStruct("run-queued", {
+  ...pullRequestReviewThreadEventFields,
+  providerId: DurableAgentProviderId,
+  model: Schema.NullOr(AgentModelId),
+  reviewProfile: ReviewAgentProfile,
+  subject: PrReviewSubject
+})
+
+const PullRequestReviewRunStartedEvent = Schema.TaggedStruct(
+  "run-started",
+  {
+    ...pullRequestReviewThreadEventFields,
+    runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
+  }
+)
+
+const PullRequestReviewProgressEvent = Schema.TaggedStruct("progress", {
+  ...pullRequestReviewThreadEventFields,
+  text: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH)
+  )
+})
+
+const PullRequestReviewUsageEvent = Schema.TaggedStruct("usage", {
+  ...pullRequestReviewThreadEventFields,
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
+const PullRequestReviewReportEvent = Schema.TaggedStruct("review-report", {
+  ...pullRequestReviewThreadEventFields,
+  report: PrReviewReport
+})
+
+const PullRequestReviewSuggestionRevisedEvent = Schema.TaggedStruct(
+  "suggestion-revised",
+  {
+    ...pullRequestReviewThreadEventFields,
+    suggestionId: PrReviewSuggestionId,
+    revisionId: PrReviewSuggestionRevisionId,
+    sequence: PrReviewSuggestionRevisionSequence,
+    authorKind: Schema.Literals(["operator", "agent"]),
+    validationState: Schema.Literals(["validated", "requires-revalidation"]),
+    suggestionState: Schema.optionalKey(PrReviewSuggestion.fields.state)
+  }
+)
+
+const PullRequestReviewSuggestionPublishedEvent = Schema.TaggedStruct(
+  "suggestion-published",
+  {
+    ...pullRequestReviewThreadEventFields,
+    suggestionId: PrReviewSuggestionId,
+    revisionId: PrReviewSuggestionRevisionId
+  }
+)
+
+const PullRequestReviewRunCompletedEvent = Schema.TaggedStruct("run-completed", {
+  ...pullRequestReviewThreadEventFields,
+  outcome: Schema.Literals(["success", "cancelled", "max-steps"])
+})
+
+const PullRequestReviewRunFailedEvent = Schema.TaggedStruct("run-failed", {
+  ...pullRequestReviewThreadEventFields,
+  retryable: Schema.Boolean
+})
+
+const PullRequestReviewRunInterruptedEvent = Schema.TaggedStruct("run-interrupted", {
+  ...pullRequestReviewThreadEventFields
+})
+
+const PullRequestReviewCancellationRequestedEvent = Schema.TaggedStruct(
+  "cancellation-requested",
+  {
+    ...pullRequestReviewThreadEventFields,
+    requestedAt: UtcTimestamp
+  }
+)
+
+/** Browser-safe immutable activity in one stable pull-request review thread. */
+export const PullRequestReviewThreadEvent = Schema.Union([
+  PullRequestReviewOperatorMessageEvent,
+  PullRequestReviewRunQueuedEvent,
+  PullRequestReviewRunStartedEvent,
+  PullRequestReviewProgressEvent,
+  PullRequestReviewUsageEvent,
+  PullRequestReviewReportEvent,
+  PullRequestReviewSuggestionRevisedEvent,
+  PullRequestReviewSuggestionPublishedEvent,
+  PullRequestReviewRunCompletedEvent,
+  PullRequestReviewRunFailedEvent,
+  PullRequestReviewRunInterruptedEvent,
+  PullRequestReviewCancellationRequestedEvent
+]).pipe(Schema.toTaggedUnion("_tag"))
+export type PullRequestReviewThreadEvent = typeof PullRequestReviewThreadEvent.Type
+
+/**
+ * One explicit cursor page from the stable pull-request review thread.
+ * `hasMore` follows the requested cursor direction; `hasEarlier` reports a truncated tail.
+ */
+export const PullRequestReviewThreadPage = Schema.Struct({
+  events: Schema.Array(PullRequestReviewThreadEvent).check(
+    Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)
+  ),
+  hasEarlier: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false))
+  ),
+  hasMore: Schema.Boolean,
+  nextCursor: ReleaseAgentThreadCursor
+})
+export type PullRequestReviewThreadPage = typeof PullRequestReviewThreadPage.Type
 
 /** Accepted durable review job, including idempotent recovery of active work. */
 export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
 
 /** Decoded accepted durable review job. */
 export type EnqueuePullRequestReviewResponse = typeof EnqueuePullRequestReviewResponse.Type
+
+/** Complete compare-and-append payload for one manually edited suggestion. */
+export const EditReviewSuggestionRequest = Schema.Struct({
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  edit: PrReviewSuggestionEdit
+})
+
+/** Decoded manual suggestion edit. */
+export type EditReviewSuggestionRequest = typeof EditReviewSuggestionRequest.Type
+
+/** Durable targeted agent operation over one optimistic suggestion revision. */
+export const TargetReviewSuggestionRequest = Schema.Struct({
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  profile: AgentSafeProfile,
+  reviewProfileId: ReviewAgentProfileId,
+  intent: Schema.Literals(["suggestion-edit", "suggestion-revalidation"]),
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  prompt: Schema.optionalKey(
+    DurableAgentPrompt.check(Schema.isTrimmed(), Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH))
+  )
+})
+
+/** Decoded targeted agent operation request. */
+export type TargetReviewSuggestionRequest = typeof TargetReviewSuggestionRequest.Type
+
+/** Accepted targeted review job. */
+export const TargetReviewSuggestionResponse = PullRequestReviewPending
+
+/** Decoded targeted review job response. */
+export type TargetReviewSuggestionResponse = typeof TargetReviewSuggestionResponse.Type
+
+/** Browser-safe immutable suggestion revision returned after an edit. */
+export const EditReviewSuggestionResponse = PrReviewSuggestionRevision
+
+/** Decoded manual suggestion-edit result. */
+export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.Type
+
+/** Optimistic concurrency boundary for one explicit human dismissal. */
+export const DismissReviewSuggestionRequest = Schema.Struct({
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  reason: PrReviewDismissalReason
+})
+
+/** Decoded human dismissal request. */
+export type DismissReviewSuggestionRequest = typeof DismissReviewSuggestionRequest.Type
+
+/** Durable human-authored revision carrying the dismissed lifecycle state. */
+export const DismissReviewSuggestionResponse = PrReviewSuggestionRevision
+
+/** Decoded durable dismissal result. */
+export type DismissReviewSuggestionResponse = typeof DismissReviewSuggestionResponse.Type
+
+/** Canonical positive revision cursor decoded from an HTTP query string. */
+export const ReviewSuggestionRevisionSequenceFromString = CanonicalNonNegativeIntegerFromString.pipe(
+  Schema.decodeTo(PrReviewSuggestionRevisionSequence)
+)
+
+/** Canonical bounded revision page size decoded from an HTTP query string. */
+export const ReviewSuggestionRevisionPageSizeFromString = CanonicalNonNegativeIntegerFromString.pipe(
+  Schema.decodeTo(PrReviewSuggestionRevisionPageSize)
+)
+
+/** Browser-safe bounded revision history. */
+export const ReviewSuggestionRevisionPage = PrReviewSuggestionRevisionPage
+
+/** Decoded bounded revision history. */
+export type ReviewSuggestionRevisionPage = typeof ReviewSuggestionRevisionPage.Type
+
+/** Editable CodeCommit comment content bounded by the provider contract. */
+export const MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH = 10_100
+
+export const ReviewSuggestionPublicationContent = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH)
+)
+
+/** Decoded final review-comment content. */
+export type ReviewSuggestionPublicationContent = typeof ReviewSuggestionPublicationContent.Type
+
+/** Provider comment mutation selected by an explicit local publication preview. */
+export const ReviewSuggestionPublicationOperation = Schema.Literals(["create", "update", "reply"])
+
+/** Decoded provider comment mutation. */
+export type ReviewSuggestionPublicationOperation = typeof ReviewSuggestionPublicationOperation.Type
+
+/** Exact completed review suggestion selected for publication. */
+export const ReviewSuggestionPublicationSelection = Schema.Struct({
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId
+})
+
+/** Decoded review-suggestion publication selection. */
+export type ReviewSuggestionPublicationSelection = typeof ReviewSuggestionPublicationSelection.Type
+
+/** Connected AWS principal that will author the CodeCommit comment. */
+export const AwsReviewPublicationIdentity = Schema.Struct({
+  accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_048))
+})
+
+/** Decoded browser-safe AWS publication identity. */
+export type AwsReviewPublicationIdentity = typeof AwsReviewPublicationIdentity.Type
+
+/** Opaque digest binding operator confirmation to one exact provider runtime generation. */
+export const ReviewSuggestionPublicationAuthorityBinding = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, {
+    expected: "a lowercase SHA-256 runtime authority digest"
+  })
+).pipe(Schema.brand("ReviewSuggestionPublicationAuthorityBinding"))
+
+/** Decoded immutable provider-generation binding. */
+export type ReviewSuggestionPublicationAuthorityBinding = typeof ReviewSuggestionPublicationAuthorityBinding.Type
+
+/** Read-only preview shown before the operator grants publication authority. */
+export class ReviewSuggestionPublicationPreview
+  extends Schema.Class<ReviewSuggestionPublicationPreview>("ReviewSuggestionPublicationPreview")({
+    ...ReviewSuggestionPublicationSelection.fields,
+    operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+    commentId: Schema.optionalKey(
+      Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+    ),
+    subject: PrReviewSubject,
+    suggestionRevision: Schema.Struct({
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId,
+      revisionId: PrReviewSuggestionRevisionId,
+      sequence: PrReviewSuggestionRevisionSequence,
+      reviewedHead: PrReviewSubject.fields.headRevision
+    }),
+    anchor: PrReviewSuggestion.fields.anchor,
+    editableContent: ReviewSuggestionPublicationContent,
+    editableContentMaximumLength: Schema.Int.check(Schema.isGreaterThan(0)),
+    finalContent: ReviewSuggestionPublicationContent,
+    publicationFooter: Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(4_096)
+    ),
+    replacement: Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_000))
+    ),
+    connectedIdentity: AwsReviewPublicationIdentity,
+    authorityBinding: ReviewSuggestionPublicationAuthorityBinding,
+    proposingAgent: ReviewAgentProfile,
+    publishingOperator: PersonId
+  })
+{}
+
+/** Explicit operator confirmation containing the final editable snapshot. */
+export const PublishReviewSuggestionRequest = Schema.Struct({
+  ...ReviewSuggestionPublicationSelection.fields,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))),
+  finalContent: ReviewSuggestionPublicationContent,
+  authorityBinding: ReviewSuggestionPublicationAuthorityBinding
+})
+
+/** Decoded explicit review-suggestion publication confirmation. */
+export type PublishReviewSuggestionRequest = typeof PublishReviewSuggestionRequest.Type
+
+/** Durable local snapshot of one successfully published CodeCommit comment. */
+export class PublishedReviewComment extends Schema.Class<PublishedReviewComment>("PublishedReviewComment")({
+  publicationId: GovernedActionId,
+  /** Provider comment targeted by a lifecycle operation, when available. */
+  commentId: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
+  ...ReviewSuggestionPublicationSelection.fields,
+  subject: PrReviewSubject,
+  suggestionRevision: ReviewSuggestionPublicationPreview.fields.suggestionRevision,
+  anchor: ReviewSuggestionPublicationPreview.fields.anchor,
+  content: ReviewSuggestionPublicationContent,
+  connectedIdentity: AwsReviewPublicationIdentity,
+  proposingAgent: ReviewAgentProfile,
+  publishingOperator: PersonId,
+  receipt: PluginProviderReceiptV1,
+  publishedAt: UtcTimestamp
+}) {}
 
 /** Ordered, bounded release-thread replay page. */
 export const ReleaseAgentThreadPage = Schema.Struct({
@@ -396,6 +847,7 @@ const turn = HttpApiEndpoint.post("turn", "/releases/:releaseId/turns", {
     InvalidRequestApiError,
     UnauthorizedApiError,
     ForbiddenApiError,
+    ConflictApiError,
     NotFoundApiError,
     RequestTimedOutApiError,
     RateLimitedApiError,
@@ -470,6 +922,31 @@ const pullRequestReview = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const PullRequestReviewThreadQuery = Schema.Struct({
+  after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  before: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
+})
+
+const pullRequestReviewThread = HttpApiEndpoint.get(
+  "pullRequestReviewThread",
+  "/pull-requests/:entityId/review-thread/events",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    query: PullRequestReviewThreadQuery,
+    success: PullRequestReviewThreadPage,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
 const enqueuePullRequestReview = HttpApiEndpoint.post(
   "enqueuePullRequestReview",
   "/pull-requests/:entityId/reviews",
@@ -492,6 +969,224 @@ const enqueuePullRequestReview = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const cancelPullRequestReview = HttpApiEndpoint.post(
+  "cancelPullRequestReview",
+  "/pull-requests/:entityId/reviews/:jobId/cancellation",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const extendPullRequestReviewBudget = HttpApiEndpoint.post(
+  "extendPullRequestReviewBudget",
+  "/pull-requests/:entityId/reviews/:jobId/budget-extension",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const reviewSuggestionRevisions = HttpApiEndpoint.get(
+  "reviewSuggestionRevisions",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    query: Schema.Struct({
+      before: Schema.optionalKey(ReviewSuggestionRevisionSequenceFromString),
+      limit: Schema.optionalKey(ReviewSuggestionRevisionPageSizeFromString)
+    }),
+    success: ReviewSuggestionRevisionPage,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
+const editReviewSuggestion = HttpApiEndpoint.post(
+  "editReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: EditReviewSuggestionRequest,
+    success: EditReviewSuggestionResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const targetReviewSuggestion = HttpApiEndpoint.post(
+  "targetReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/agent",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: TargetReviewSuggestionRequest,
+    success: TargetReviewSuggestionResponse.pipe(HttpApiSchema.status(202)),
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const dismissReviewSuggestion = HttpApiEndpoint.post(
+  "dismissReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: DismissReviewSuggestionRequest,
+    success: DismissReviewSuggestionResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const previewReviewSuggestionPublication = HttpApiEndpoint.get(
+  "previewReviewSuggestionPublication",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    query: Schema.Struct({
+      revisionId: PrReviewSuggestionRevisionId,
+      operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+      commentId: Schema.optionalKey(
+        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+      )
+    }),
+    success: ReviewSuggestionPublicationPreview,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
+const publishReviewSuggestion = HttpApiEndpoint.post(
+  "publishReviewSuggestion",
+  "/pull-requests/:entityId/review-comments",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    payload: PublishReviewSuggestionRequest,
+    success: PublishedReviewComment,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const submitReleasePublication = HttpApiEndpoint.post(
+  "submitReleasePublication",
+  "/releases/:releaseId/publications",
+  {
+    params: { releaseId: ReleaseId },
+    payload: SubmitReleasePublicationRequest,
+    success: SubmitReleasePublicationResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(providers)
@@ -499,6 +1194,16 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(enqueueJob)
   .add(replayThread)
   .add(pullRequestReview)
+  .add(pullRequestReviewThread)
   .add(enqueuePullRequestReview)
+  .add(cancelPullRequestReview)
+  .add(extendPullRequestReviewBudget)
+  .add(reviewSuggestionRevisions)
+  .add(editReviewSuggestion)
+  .add(targetReviewSuggestion)
+  .add(dismissReviewSuggestion)
+  .add(previewReviewSuggestionPublication)
+  .add(publishReviewSuggestion)
+  .add(submitReleasePublication)
   .prefix("/api/v1/agent")
 {}

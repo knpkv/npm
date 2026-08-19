@@ -81,7 +81,10 @@ export const FileStates: Story = {
     const completeInventory = canvas.getByRole("navigation", { name: "PR-184 file inventory" })
     await expect(completeInventory.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(7)
     await expect(completeInventory).toHaveTextContent("src/generated/payment-api.ts")
-    await expect(completeInventory).toHaveTextContent("src/client/payment-api.ts")
+    await expect(completeInventory.querySelector("[data-rly-diff-directory='src/client']")).not.toBeNull()
+    await expect(completeInventory.querySelector("[data-rly-diff-file-id='generated']")).toHaveTextContent(
+      "payment-api.ts"
+    )
     const lastFile = completeInventory.querySelector<HTMLButtonElement>("[data-rly-diff-file-id='error'] button")
     if (lastFile === null) throw new Error("Last complete inventory file did not render")
     await userEvent.click(lastFile)

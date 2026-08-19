@@ -1,8 +1,6 @@
-/** Bounded, provider-neutral pull-request review result contracts. @module */
+/** Evidence-anchored pull-request review suggestion contracts. @module */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-
-/** Maximum number of findings retained in one durable review report. */
-export const MAXIMUM_PR_REVIEW_FINDINGS = 12
 
 /** Maximum UTF-8 JSON size retained inside the existing durable event envelope. */
 export const MAXIMUM_PR_REVIEW_REPORT_BYTES = 32_768
@@ -77,7 +75,7 @@ export const PrReviewSubject = Schema.Struct({
 /** Decoded immutable pull request review subject. */
 export type PrReviewSubject = typeof PrReviewSubject.Type
 
-/** Static or behavioral enforcement layer proposed by one finding. */
+/** Static or behavioral enforcement layer proposed by one suggestion. */
 export const PrReviewPreventionEnforcement = Schema.Literals([
   "ast-grep",
   "ESLint",
@@ -93,6 +91,7 @@ const PreventionProposal = Schema.Struct({
   summary: boundedSingleLine(500, "PrReviewPreventionSummary"),
   enforcement: PrReviewPreventionEnforcement,
   existingRuleOrConfig: boundedSingleLine(500, "PrReviewExistingRuleOrConfig"),
+  recurrenceEvidence: boundedMultiline(2_000, "PrReviewPreventionRecurrenceEvidence"),
   targetFile: PrReviewPath,
   sourcePaths: Schema.Array(PrReviewPath).check(Schema.isMinLength(1), Schema.isMaxLength(32), Schema.isUnique()),
   matcherOrInvariant: boundedMultiline(4_000, "PrReviewPreventionMatcherOrInvariant"),
@@ -117,83 +116,468 @@ export const PrReviewPrevention = Schema.Union([PreventionProposal, NoPrevention
 /** Decoded PR-review prevention note. */
 export type PrReviewPrevention = typeof PrReviewPrevention.Type
 
-/** Stable model-authored identity within one review report. */
-export const PrReviewFindingId = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u, {
-    expected: "a domain-safe finding identifier"
+/** Stable host-derived suggestion identity within one immutable review. */
+export const PrReviewSuggestionId = Schema.String.check(
+  Schema.isPattern(/^sha256:[a-f0-9]{64}$/u, {
+    expected: "a sha256 suggestion identity"
   })
-).pipe(Schema.brand("PrReviewFindingId"))
+).pipe(Schema.brand("PrReviewSuggestionId"))
 
-/** Decoded PR-review finding identity. */
-export type PrReviewFindingId = typeof PrReviewFindingId.Type
+/** Decoded PR-review suggestion identity. */
+export type PrReviewSuggestionId = typeof PrReviewSuggestionId.Type
+
+/** Current durable presentation state; lifecycle transitions remain host-owned. */
+export const PrReviewSuggestionState = Schema.Literals([
+  "draft",
+  "published",
+  "stale",
+  "resolved",
+  "dismissed",
+  "reopened"
+])
+
+/** Decoded suggestion presentation state. */
+export type PrReviewSuggestionState = typeof PrReviewSuggestionState.Type
+
+/** Human-selected reason a suggestion was dismissed. */
+export const PrReviewDismissalReason = Schema.Literals([
+  "false-positive",
+  "not-applicable",
+  "accepted-risk",
+  "duplicate",
+  "other"
+])
+
+/** Decoded dismissal reason retained with the immutable suggestion history. */
+export type PrReviewDismissalReason = typeof PrReviewDismissalReason.Type
+
+/** Explicit lifecycle result when comparing one immutable review head to another. */
+export const PrReviewSuggestionTransition = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  transition: Schema.Literals(["new", "still-present", "resolved", "reopened"]),
+  previousState: Schema.NullOr(PrReviewSuggestionState),
+  currentState: Schema.NullOr(PrReviewSuggestionState),
+  previousDismissalReason: Schema.optionalKey(PrReviewDismissalReason),
+  previousHead: Schema.NullOr(PrReviewSubject.fields.headRevision),
+  currentHead: PrReviewSubject.fields.headRevision
+})
+
+/** Decoded immutable-head suggestion transition. */
+export type PrReviewSuggestionTransition = typeof PrReviewSuggestionTransition.Type
 
 const PrReviewLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
 
-/** One bounded, file-specific finding awaiting stable diff-anchor resolution. */
-export const PrReviewFinding = Schema.Struct({
-  findingId: PrReviewFindingId,
-  severity: Schema.Literals(["critical", "high", "medium", "low", "info"]),
+const PrReviewLocation = Schema.Struct({
   path: PrReviewPath,
   startLine: PrReviewLine,
-  endLine: PrReviewLine,
-  title: boundedSingleLine(500, "PrReviewFindingTitle"),
-  detail: boundedMultiline(4_000, "PrReviewFindingDetail"),
-  prevention: PrReviewPrevention
+  endLine: PrReviewLine
+}).check(
+  Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
+    expected: "a location end line at or after its start line"
+  })
+)
+
+/** Exact source evidence which must be verified against an added diff line. */
+export const PrReviewSuggestionEvidence = Schema.Struct({
+  ...PrReviewLocation.fields,
+  excerpt: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(8_000),
+    Schema.makeFilter(hasNoUnsafeMultilineControlCharacters, {
+      expected: "source evidence without unsafe control characters"
+    })
+  )
 })
   .check(
     Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
-      expected: "a finding end line at or after its start line"
+      expected: "an evidence end line at or after its start line"
     })
   )
-  .annotate({ identifier: "PrReviewFinding" })
+  .annotate({ identifier: "PrReviewSuggestionEvidence" })
 
-/** Decoded PR-review finding. */
-export type PrReviewFinding = typeof PrReviewFinding.Type
+/** Decoded PR-review suggestion evidence. */
+export type PrReviewSuggestionEvidence = typeof PrReviewSuggestionEvidence.Type
 
-/**
- * Model-authored recommendation vocabulary.
- *
- * These values intentionally cannot encode the human `approve` or
- * `request-changes` disposition.
- */
-export const PrReviewAgentRecommendation = Schema.Literals([
-  "no-material-findings",
-  "changes-recommended",
-  "unable-to-conclude"
-])
+/** Model-authored anchor before the host resolves file-level positions. */
+export const PrReviewSuggestionDraftAnchor = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("line"),
+    path: PrReviewPath,
+    line: PrReviewLine
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("file"),
+    path: PrReviewPath
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("changes")
+  })
+]).annotate({ identifier: "PrReviewSuggestionDraftAnchor" })
 
-/** Decoded model-authored PR recommendation. */
-export type PrReviewAgentRecommendation = typeof PrReviewAgentRecommendation.Type
+/** Decoded unresolved model-authored suggestion anchor. */
+export type PrReviewSuggestionDraftAnchor = typeof PrReviewSuggestionDraftAnchor.Type
 
-/** Separate human authority vocabulary, not accepted in an agent report. */
-export const PrReviewHumanDisposition = Schema.Literals(["approve", "request-changes"])
-
-/** Decoded human PR-review disposition. */
-export type PrReviewHumanDisposition = typeof PrReviewHumanDisposition.Type
-
-const hasMaximumReportBytes = Schema.makeFilter(
-  (value: unknown) => {
-    const serialized = JSON.stringify(value)
-    return serialized !== undefined && jsonEncoder.encode(serialized).byteLength <= MAXIMUM_PR_REVIEW_REPORT_BYTES
-  },
-  { expected: `JSON encoded as at most ${MAXIMUM_PR_REVIEW_REPORT_BYTES} UTF-8 bytes` }
+/** Host-resolved primary anchor for line, file, or whole-change advice. */
+const PrReviewAfterRelativeFileVersion = Schema.Literal("AFTER").pipe(
+  Schema.withDecodingDefaultTypeKey(Effect.succeed("AFTER"))
+)
+const PrReviewRelativeFileVersion = Schema.Literals(["BEFORE", "AFTER"]).pipe(
+  Schema.withDecodingDefaultTypeKey(Effect.succeed("AFTER"))
 )
 
-/** Complete sanitized result produced for one exact immutable PR subject. */
-export const PrReviewReport = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
-  subject: PrReviewSubject,
-  recommendation: PrReviewAgentRecommendation,
-  summary: boundedMultiline(4_000, "PrReviewSummary"),
-  findings: Schema.Array(PrReviewFinding).check(
-    Schema.isMaxLength(MAXIMUM_PR_REVIEW_FINDINGS),
-    Schema.makeFilter((findings) => new Set(findings.map(({ findingId }) => findingId)).size === findings.length, {
-      expected: "unique PR review finding identifiers"
+export const PrReviewSuggestionAnchor = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("line"),
+    path: PrReviewPath,
+    line: PrReviewLine,
+    relativeFileVersion: PrReviewAfterRelativeFileVersion
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("file"),
+    path: PrReviewPath,
+    line: PrReviewLine,
+    relativeFileVersion: PrReviewRelativeFileVersion
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("changes")
+  })
+]).annotate({ identifier: "PrReviewSuggestionAnchor" })
+
+/** Decoded host-resolved suggestion anchor. */
+export type PrReviewSuggestionAnchor = typeof PrReviewSuggestionAnchor.Type
+
+/** Secondary code location grouped under one root-cause suggestion. */
+export const PrReviewRelatedLocation = Schema.Struct({
+  ...PrReviewLocation.fields,
+  label: boundedSingleLine(500, "PrReviewRelatedLocationLabel")
+})
+  .check(
+    Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
+      expected: "a related-location end line at or after its start line"
     })
   )
+  .annotate({ identifier: "PrReviewRelatedLocation" })
+
+/** Decoded related suggestion location. */
+export type PrReviewRelatedLocation = typeof PrReviewRelatedLocation.Type
+
+const isUnifiedDiff = (value: string): boolean => {
+  const lines = value.split("\n")
+  return (
+    lines.some((line) => line.startsWith("--- ")) &&
+    lines.some((line) => line.startsWith("+++ ")) &&
+    lines.some((line) => line.startsWith("@@ "))
+  )
+}
+
+/** Optional inert unified-diff replacement for the exact reviewed head. */
+export const PrReviewReplacement = Schema.Struct({
+  reviewedHead: boundedSingleLine(512, "PrReviewReplacementReviewedHead"),
+  unifiedDiff: boundedMultiline(16_000, "PrReviewReplacementUnifiedDiff").check(
+    Schema.makeFilter(isUnifiedDiff, { expected: "a unified diff with file headers and at least one hunk" })
+  ),
+  explanation: boundedMultiline(2_000, "PrReviewReplacementExplanation")
+}).annotate({ identifier: "PrReviewReplacement" })
+
+/** Decoded PR-review replacement. */
+export type PrReviewReplacement = typeof PrReviewReplacement.Type
+
+/** Confidence is explicit and always accompanied by model reasoning. */
+export const PrReviewConfidence = Schema.Struct({
+  level: Schema.Literals(["low", "medium", "high"]),
+  reason: boundedMultiline(2_000, "PrReviewConfidenceReason")
+}).annotate({ identifier: "PrReviewConfidence" })
+
+/** Decoded PR-review confidence. */
+export type PrReviewConfidence = typeof PrReviewConfidence.Type
+
+const prReviewSuggestionDraftFields = {
+  title: boundedSingleLine(500, "PrReviewSuggestionTitle"),
+  severity: Schema.Literals(["P1", "P2", "P3", "P4"]),
+  problem: boundedMultiline(4_000, "PrReviewSuggestionProblem"),
+  impact: boundedMultiline(4_000, "PrReviewSuggestionImpact"),
+  evidence: PrReviewSuggestionEvidence,
+  recommendation: boundedMultiline(8_000, "PrReviewSuggestionRecommendation"),
+  confidence: PrReviewConfidence,
+  relatedLocations: Schema.Array(PrReviewRelatedLocation).check(
+    Schema.isMaxLength(32),
+    Schema.makeFilter(
+      (locations) =>
+        new Set(locations.map(({ endLine, path, startLine }) => `${path}:${String(startLine)}:${String(endLine)}`))
+          .size === locations.length,
+      { expected: "unique related suggestion locations" }
+    )
+  ),
+  prevention: Schema.optionalKey(PrReviewPrevention),
+  replacement: Schema.optionalKey(PrReviewReplacement)
+}
+
+/** Model output for one suggestion before immutable identity is derived. */
+export const PrReviewSuggestionDraft = Schema.Struct({
+  ...prReviewSuggestionDraftFields,
+  anchor: PrReviewSuggestionDraftAnchor
 })
+  .check(
+    Schema.makeFilter(
+      ({ anchor, confidence, evidence }) =>
+        confidence.level !== "low" &&
+        (anchor._tag === "changes" ||
+          (anchor.path === evidence.path &&
+            (anchor._tag === "file" || anchor.line === evidence.startLine))),
+      { expected: "a medium/high-confidence suggestion whose file or line anchor matches its exact evidence" }
+    ),
+    Schema.makeFilter(
+      ({ prevention, severity }) =>
+        prevention === undefined ||
+        prevention.enforcement === "none" ||
+        severity === "P1" ||
+        severity === "P2",
+      { expected: "prevention proposals only for high-impact P1 or P2 defect classes" }
+    )
+  )
+  .annotate({ identifier: "PrReviewSuggestionDraft" })
+
+/** Decoded model-authored suggestion awaiting evidence verification. */
+export type PrReviewSuggestionDraft = typeof PrReviewSuggestionDraft.Type
+
+/** One schema-valid and evidence-verified suggestion. */
+export const PrReviewSuggestion = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  state: PrReviewSuggestionState,
+  dismissalReason: Schema.optionalKey(PrReviewDismissalReason),
+  ...prReviewSuggestionDraftFields,
+  anchor: PrReviewSuggestionAnchor
+})
+  .check(
+    Schema.makeFilter(
+      ({ anchor, confidence, evidence }) =>
+        confidence.level !== "low" &&
+        (anchor._tag === "changes" ||
+          (anchor.path === evidence.path &&
+            (anchor._tag === "file" || anchor.line === evidence.startLine))),
+      { expected: "a medium/high-confidence suggestion whose file or line anchor matches its exact evidence" }
+    ),
+    Schema.makeFilter(
+      ({ prevention, severity }) =>
+        prevention === undefined ||
+        prevention.enforcement === "none" ||
+        severity === "P1" ||
+        severity === "P2",
+      { expected: "prevention proposals only for high-impact P1 or P2 defect classes" }
+    )
+  )
+  .annotate({ identifier: "PrReviewSuggestion" })
+
+/** Decoded PR-review suggestion. */
+export type PrReviewSuggestion = typeof PrReviewSuggestion.Type
+
+/**
+ * Canonical identity material for one suggestion across immutable review heads.
+ *
+ * Coordinates that move when a patch is edited (head revision, anchors, and
+ * line numbers) deliberately stay out of this material. The pull-request
+ * identity and the technical claim are the stable seam used by reconciliation.
+ */
+export const prReviewSuggestionIdentityMaterial = (
+  subject: PrReviewSubject,
+  suggestion: Pick<PrReviewSuggestionDraft, "title" | "problem" | "recommendation" | "evidence">
+): string =>
+  JSON.stringify([
+    subject.providerId,
+    subject.repository,
+    subject.pullRequestId,
+    suggestion.title,
+    suggestion.evidence.path,
+    suggestion.evidence.excerpt,
+    suggestion.problem,
+    suggestion.recommendation
+  ])
+
+/** Stable host-derived identity for a non-publishable review note. */
+export const PrReviewNoteId = Schema.String.check(
+  Schema.isPattern(/^sha256:[a-f0-9]{64}$/u, {
+    expected: "a sha256 review-note identity"
+  })
+).pipe(Schema.brand("PrReviewNoteId"))
+
+/** Decoded review-note identity. */
+export type PrReviewNoteId = typeof PrReviewNoteId.Type
+
+const prReviewNoteDraftFields = {
+  reason: Schema.Literals(["low-confidence", "pre-existing"]),
+  title: boundedSingleLine(500, "PrReviewNoteTitle"),
+  observation: boundedMultiline(4_000, "PrReviewNoteObservation"),
+  confidence: PrReviewConfidence,
+  location: Schema.optionalKey(PrReviewLocation)
+}
+
+/** Model output for a concern that must not be published. */
+export const PrReviewNoteDraft = Schema.Struct(prReviewNoteDraftFields)
+  .check(
+    Schema.makeFilter(
+      ({ confidence, reason }) => reason !== "low-confidence" || confidence.level === "low",
+      { expected: "a low-confidence note with explicitly low confidence" }
+    )
+  )
+  .annotate({ identifier: "PrReviewNoteDraft" })
+
+/** Decoded model-authored review note awaiting host identity. */
+export type PrReviewNoteDraft = typeof PrReviewNoteDraft.Type
+
+/** Durable non-publishable concern separated from Review Suggestions. */
+export const PrReviewNote = Schema.Struct({
+  noteId: PrReviewNoteId,
+  ...prReviewNoteDraftFields
+})
+  .check(
+    Schema.makeFilter(
+      ({ confidence, reason }) => reason !== "low-confidence" || confidence.level === "low",
+      { expected: "a low-confidence note with explicitly low confidence" }
+    )
+  )
+  .annotate({ identifier: "PrReviewNote" })
+
+/** Decoded durable review note. */
+export type PrReviewNote = typeof PrReviewNote.Type
+
+/** Epistemic completion state; this is not an approval or overall model verdict. */
+export const PrReviewCompletion = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("complete") }),
+  Schema.Struct({
+    status: Schema.Literal("unable-to-conclude"),
+    reason: boundedMultiline(4_000, "PrReviewUnableToConcludeReason")
+  })
+]).annotate({ identifier: "PrReviewCompletion" })
+
+/** Decoded review completion state. */
+export type PrReviewCompletion = typeof PrReviewCompletion.Type
+
+const hasMaximumReportBytes = Schema.makeFilter(
+  <UnparsedInput>(value: UnparsedInput) => {
+    const serialized = JSON.stringify(value)
+    if (serialized === undefined) return false
+    const maximumLifecycleProjection = serialized.replace(
+      /"state":"(?:draft|stale|resolved|reopened)"/gu,
+      "\"state\":\"published\""
+    )
+    return jsonEncoder.encode(maximumLifecycleProjection).byteLength <= MAXIMUM_PR_REVIEW_REPORT_BYTES
+  },
+  {
+    expected:
+      `JSON encoded as at most ${MAXIMUM_PR_REVIEW_REPORT_BYTES} UTF-8 bytes after the longest lifecycle projection`
+  }
+)
+
+/**
+ * Complete sanitized result for one immutable PR subject.
+ *
+ * Suggestions have no count cap. The durable event byte envelope remains the
+ * only aggregate storage bound.
+ */
+export const PrReviewReport = Schema.Struct({
+  schemaVersion: Schema.Literal(3),
+  subject: PrReviewSubject,
+  completion: PrReviewCompletion,
+  suggestions: Schema.Array(PrReviewSuggestion).check(
+    Schema.makeFilter(
+      (suggestions) => new Set(suggestions.map(({ suggestionId }) => suggestionId)).size === suggestions.length,
+      { expected: "unique PR review suggestion identifiers" }
+    )
+  ),
+  notes: Schema.Array(PrReviewNote).check(
+    Schema.makeFilter(
+      (notes) => new Set(notes.map(({ noteId }) => noteId)).size === notes.length,
+      { expected: "unique PR review note identifiers" }
+    )
+  ),
+  /** Host-derived lifecycle transitions; absent on agent-authored input. */
+  transitions: Schema.optionalKey(Schema.Array(PrReviewSuggestionTransition))
+})
+  .check(
+    Schema.makeFilter(
+      ({ subject, suggestions }) =>
+        suggestions.every(
+          ({ replacement }) => replacement === undefined || replacement.reviewedHead === subject.headRevision
+        ),
+      { expected: "replacement patches bound to the exact reviewed head" }
+    )
+  )
   .check(hasMaximumReportBytes)
   .annotate({ identifier: "PrReviewReport" })
 
 /** Decoded complete PR-review report. */
 export type PrReviewReport = typeof PrReviewReport.Type
+
+/** Reconcile stable suggestion identities across two immutable review heads. */
+export const reconcilePrReviewReports = (
+  previous: PrReviewReport,
+  current: PrReviewReport
+): ReadonlyArray<PrReviewSuggestionTransition> => {
+  const previousSuggestions = new Map(previous.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const currentSuggestions = new Map(current.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion]))
+  const transitions = new Array<PrReviewSuggestionTransition>()
+
+  for (const suggestion of current.suggestions) {
+    const prior = previousSuggestions.get(suggestion.suggestionId)
+    const materiallyChanged = prior === undefined
+      ? false
+      : prior.evidence.path !== suggestion.evidence.path ||
+        prior.evidence.startLine !== suggestion.evidence.startLine ||
+        prior.evidence.endLine !== suggestion.evidence.endLine ||
+        JSON.stringify(prior.anchor) !== JSON.stringify(suggestion.anchor)
+    const transition = prior === undefined
+      ? "new"
+      : (prior.state === "dismissed" || prior.state === "resolved") &&
+          suggestion.state === "reopened" &&
+          materiallyChanged
+      ? "reopened"
+      : "still-present"
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition,
+      previousState: prior?.state ?? null,
+      currentState: suggestion.state,
+      ...(!(prior?.dismissalReason === undefined) && { previousDismissalReason: prior.dismissalReason }),
+      previousHead: prior === undefined ? null : previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  for (const suggestion of previous.suggestions) {
+    if (currentSuggestions.has(suggestion.suggestionId)) continue
+    if (suggestion.state === "dismissed" || suggestion.state === "resolved") continue
+    transitions.push({
+      suggestionId: suggestion.suggestionId,
+      transition: "resolved",
+      previousState: suggestion.state,
+      currentState: null,
+      previousHead: previous.subject.headRevision,
+      currentHead: current.subject.headRevision
+    })
+  }
+
+  return transitions
+}
+
+/** Outcome derived by Control Center, never authored by the model. */
+export const PrReviewOutcome = Schema.Literals([
+  "changes-required",
+  "non-blocking-suggestions",
+  "no-issues-found",
+  "unable-to-conclude"
+])
+
+/** Decoded derived PR-review outcome. */
+export type PrReviewOutcome = typeof PrReviewOutcome.Type
+
+/** Derive the browser verdict from validated durable suggestions. */
+export const derivePrReviewOutcome = (report: PrReviewReport): PrReviewOutcome => {
+  if (report.completion.status === "unable-to-conclude") return "unable-to-conclude"
+  const openSuggestions = report.suggestions.filter(
+    ({ state }) => state === "draft" || state === "published" || state === "reopened"
+  )
+  if (openSuggestions.some(({ severity }) => severity === "P1" || severity === "P2")) {
+    return "changes-required"
+  }
+  return openSuggestions.length > 0 ? "non-blocking-suggestions" : "no-issues-found"
+}

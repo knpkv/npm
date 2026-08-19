@@ -11,32 +11,31 @@ import { save } from "./save.js"
 
 const emptyDetectedProfiles = (): ReadonlyArray<DetectedProfile> => []
 
-export const makeReset = (
+export const makeReset = Effect.fn("ConfigService.reset")(function*(
   detectProfiles: Effect.Effect<
     ReadonlyArray<DetectedProfile>,
     ProfileDetectionError,
     FileSystem.FileSystem | Path.Path | ConfigPaths
   >
-) =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const paths = yield* ConfigPaths
-    const configPath = yield* paths.configPath
+) {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* ConfigPaths
+  const configPath = yield* paths.configPath
 
-    const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchCause(() => Effect.succeed(false))
-    )
+  const exists = yield* fs.exists(configPath).pipe(
+    Effect.catch(() => Effect.succeed(false))
+  )
 
-    if (exists) {
-      yield* backup
-    }
+  if (exists) {
+    yield* backup
+  }
 
-    const detected = yield* detectProfiles.pipe(
-      Effect.catchCause(() => Effect.succeed(emptyDetectedProfiles()))
-    )
+  const detected = yield* detectProfiles.pipe(
+    Effect.catch(() => Effect.succeed(emptyDetectedProfiles()))
+  )
 
-    const config = makeDefaultConfig(detected)
+  const config = makeDefaultConfig(detected)
 
-    yield* save(config)
-    return config
-  }).pipe(Effect.withSpan("ConfigService.reset"))
+  yield* save(config)
+  return config
+})

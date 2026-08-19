@@ -4,7 +4,13 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { SystemError } from "effect/PlatformError"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
-import { ConfigService, ConfigServiceLive, discoverAwsProfiles } from "../src/ConfigService/index.js"
+import {
+  ConfigService,
+  ConfigServiceLive,
+  defaultReviewConfig,
+  defaultSandboxImage,
+  discoverAwsProfiles
+} from "../src/ConfigService/index.js"
 
 const MockPath = Path.layer
 
@@ -20,7 +26,8 @@ const makeMockFS = (files: Record<string, string>) => {
   const store = { ...files }
   const partial: Partial<FileSystem.FileSystem> = {
     exists: (path) => Effect.succeed(path in store),
-    readFileString: (path) => path in store ? Effect.succeed(store[path]!) : fsError("readFileString"),
+    readFileString: (path): Effect.Effect<string, SystemError> =>
+      path in store ? Effect.succeed(store[path]!) : fsError("readFileString"),
     writeFileString: (path: string, content: string) => {
       store[path] = content
       return Effect.void
@@ -61,6 +68,8 @@ const makeTestLayer = (files: Record<string, string>) => {
 
 const run = <A>(files: Record<string, string>, effect: Effect.Effect<A, unknown, ConfigService>) => {
   const { layer } = makeTestLayer(files)
+  // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+  // @effect-diagnostics-next-line strictEffectProvide:off
   return Effect.runPromise(Effect.provide(effect, layer))
 }
 
@@ -72,6 +81,8 @@ describe("ConfigService", () => {
         "[production]\naws_access_key_id = redacted\n[shared]\nregion = eu-central-1\n[personal]\naws_access_key_id = redacted"
     })
     const profiles = await Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       discoverAwsProfiles(TEST_HOME).pipe(Effect.provide(Layer.mergeAll(mock.layer, MockPath)))
     )
 
@@ -84,6 +95,20 @@ describe("ConfigService", () => {
     expect(profiles.find(({ name }) => name === "personal")?.region).toBeUndefined()
   })
 
+  it("omits blank detected regions while preserving configured regions", () =>
+    run(
+      {
+        [`${TEST_HOME}/.aws/config`]: "[profile blank]\nregion =   \n[profile configured]\nregion = eu-west-1"
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const config = yield* service.load
+
+        expect(config.accounts.find(({ profile }) => profile === "blank")?.regions).toEqual([])
+        expect(config.accounts.find(({ profile }) => profile === "configured")?.regions).toEqual(["eu-west-1"])
+      })
+    ))
+
   it("returns empty accounts when no file exists", () =>
     run(
       {},
@@ -92,6 +117,7 @@ describe("ConfigService", () => {
         const config = yield* service.load
         expect(config.accounts).toEqual([])
         expect(config.autoDetect).toBe(true)
+        expect(config.review).toEqual(defaultReviewConfig)
       })
     ))
 
@@ -127,6 +153,84 @@ describe("ConfigService", () => {
         expect(config.accounts[0]!.regions).toEqual(["us-east-1"])
         expect(config.accounts[0]!.enabled).toBe(true)
         expect(config.autoDetect).toBe(true)
+        expect(config.review.defaultProfileId).toBe("thorough")
+      })
+    ))
+
+  it("persists selected prompt-only review skills", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "security",
+            profiles: [{
+              id: "security",
+              name: "Security",
+              kind: "security",
+              skillIds: ["builtin:pr-review-diff"]
+            }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.review.defaultProfileId).toBe("security")
+        expect(loaded.review.profiles[0]?.skillIds).toEqual(["builtin:pr-review-diff"])
+        yield* service.save(loaded)
+        expect((yield* service.load).review).toEqual(loaded.review)
+      })
+    ))
+
+  it("rejects review profiles whose default id is missing", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "missing",
+            profiles: [{ id: "security", name: "Security", kind: "security", skillIds: [] }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const validation = yield* service.validate
+        expect(validation.status).toBe("corrupted")
+      })
+    ))
+
+  it("migrates the former default sandbox image to the pinned digest", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          sandbox: { image: "codercom/code-server:latest" }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.sandbox.image).toBe(defaultSandboxImage)
+        yield* service.save(loaded)
+        const reloaded = yield* service.load
+        expect(reloaded.sandbox.image).toBe(defaultSandboxImage)
+      })
+    ))
+
+  it("preserves an already pinned sandbox image while loading", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          sandbox: { image: defaultSandboxImage }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.sandbox.image).toBe(defaultSandboxImage)
       })
     ))
 
@@ -181,6 +285,8 @@ describe("ConfigService", () => {
       [configPath]: JSON.stringify({ accounts: [] })
     })
     return Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService
@@ -219,6 +325,8 @@ describe("ConfigService", () => {
       [configPath]: JSON.stringify({ accounts: [{ profile: "old" }] })
     })
     return Effect.runPromise(
+      // Effect.runPromise is the test entry point and owns the complete layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService

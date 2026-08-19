@@ -16,7 +16,7 @@ export const DEFAULT_MAXIMUM_LIVE_STREAMS = 128
 export const DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION = 4
 
 /** Internal live-stream capacity was exhausted before subscription acquisition. */
-export class LiveStreamAdmissionExceeded extends Schema.TaggedErrorClass<LiveStreamAdmissionExceeded>()(
+export class LiveStreamAdmissionExceeded extends Schema.TaggedError<LiveStreamAdmissionExceeded>()(
   "LiveStreamAdmissionExceeded",
   { scope: Schema.Literals(["process", "session"]) }
 ) {}

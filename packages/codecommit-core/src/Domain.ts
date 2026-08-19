@@ -106,6 +106,12 @@ export type SandboxId = typeof SandboxId.Type
 export const PullRequestStatus = Schema.Literals(["OPEN", "CLOSED", "MERGED"])
 export type PullRequestStatus = typeof PullRequestStatus.Type
 
+/** Normalizes provider/cache account identifiers; blank values are unresolved, not identities. */
+export const normalizeAccountId = (value: string | null | undefined): string | undefined => {
+  const normalized = value?.trim()
+  return normalized === undefined || normalized.length === 0 ? undefined : normalized
+}
+
 /**
  * Notification severity type.
  *
@@ -301,6 +307,10 @@ export interface CommentThread {
   readonly replies: ReadonlyArray<CommentThread>
 }
 
+/** Provider-relative side of a pull-request file position. */
+export const RelativeFileVersion = Schema.Literals(["BEFORE", "AFTER"])
+export type RelativeFileVersion = typeof RelativeFileVersion.Type
+
 /**
  * Comments grouped by file location in a pull request.
  *
@@ -310,6 +320,7 @@ export interface PRCommentLocation {
   readonly filePath?: string
   readonly beforeCommitId?: string
   readonly afterCommitId?: string
+  readonly relativeFileVersion?: RelativeFileVersion
   readonly comments: ReadonlyArray<CommentThread>
 }
 
@@ -333,9 +344,9 @@ export interface CommentThreadJsonEncoded {
   readonly replies: ReadonlyArray<CommentThreadJsonEncoded>
 }
 
-const CommentThreadJson: Schema.Schema<CommentThreadJsonEncoded> = Schema.Struct({
+const CommentThreadJson: Schema.Codec<CommentThreadJsonEncoded> = Schema.Struct({
   root: PRCommentJson,
-  replies: Schema.Array(Schema.suspend((): Schema.Schema<CommentThreadJsonEncoded> => CommentThreadJson))
+  replies: Schema.Array(Schema.suspend((): Schema.Codec<CommentThreadJsonEncoded> => CommentThreadJson))
 })
 
 /**
@@ -348,6 +359,7 @@ export const PRCommentLocationJson = Schema.Struct({
   filePath: Schema.optional(Schema.String),
   beforeCommitId: Schema.optional(Schema.String),
   afterCommitId: Schema.optional(Schema.String),
+  relativeFileVersion: Schema.optional(RelativeFileVersion),
   comments: Schema.Array(CommentThreadJson)
 })
 
@@ -359,10 +371,10 @@ const serializeThread = (t: CommentThread): CommentThreadJsonEncoded => ({
     content: t.root.content,
     author: t.root.author,
     creationDate: t.root.creationDate.toISOString(),
-    ...(t.root.inReplyTo != null ? { inReplyTo: t.root.inReplyTo } : {}),
+    ...((t.root.inReplyTo != null) && { inReplyTo: t.root.inReplyTo }),
     deleted: t.root.deleted,
-    ...(t.root.filePath != null ? { filePath: t.root.filePath } : {}),
-    ...(t.root.lineNumber != null ? { lineNumber: t.root.lineNumber } : {})
+    ...((t.root.filePath != null) && { filePath: t.root.filePath }),
+    ...((t.root.lineNumber != null) && { lineNumber: t.root.lineNumber })
   },
   replies: t.root.deleted ? [] : t.replies.map(serializeThread)
 })
@@ -376,9 +388,10 @@ export const encodeCommentLocations = (
   locations: ReadonlyArray<PRCommentLocation>
 ): ReadonlyArray<typeof PRCommentLocationJson.Type> =>
   locations.map((loc) => ({
-    ...(loc.filePath != null ? { filePath: loc.filePath } : {}),
-    ...(loc.beforeCommitId != null ? { beforeCommitId: loc.beforeCommitId } : {}),
-    ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
+    ...((loc.filePath != null) && { filePath: loc.filePath }),
+    ...((loc.beforeCommitId != null) && { beforeCommitId: loc.beforeCommitId }),
+    ...((loc.afterCommitId != null) && { afterCommitId: loc.afterCommitId }),
+    ...((loc.relativeFileVersion != null) && { relativeFileVersion: loc.relativeFileVersion }),
     comments: loc.comments.map(serializeThread)
   }))
 
@@ -457,6 +470,13 @@ export interface AccountState {
   readonly enabled: boolean
 }
 
+/** Account-region scope whose pull-request list completed in the latest refresh. */
+export interface PullRequestRefreshScope {
+  readonly profile: AwsProfileName
+  readonly region: AwsRegion
+  readonly awsAccountId: string
+}
+
 /**
  * Application state.
  *
@@ -471,4 +491,7 @@ export interface AppState {
   readonly lastUpdated?: Date
   readonly currentUser?: string
   readonly pendingReviewCount?: number
+  /** Monotonic sequence incremented when a list refresh starts. */
+  readonly refreshGeneration?: number
+  readonly successfulRefreshScopes?: ReadonlyArray<PullRequestRefreshScope>
 }

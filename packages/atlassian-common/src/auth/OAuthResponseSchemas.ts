@@ -12,6 +12,18 @@
 import * as Schema from "effect/Schema"
 
 /**
+ * OAuth 2.0 error response body (RFC 6749 §5.2).
+ *
+ * Only `error` is required; providers vary on the rest, so nothing else is
+ * modelled — the code is the part callers act on.
+ *
+ * @category Schema
+ */
+export const TokenErrorSchema = Schema.Struct({
+  error: Schema.String
+})
+
+/**
  * Schema for OAuth2 token response from Atlassian.
  *
  * @category Schema

@@ -80,8 +80,8 @@ export const edit = Command.make(
         )
         yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
           start: current.startedAt.toISOString(),
-          ...(selected ? { projectId: selected } : {}),
-          ...(entry?.tagIds && entry.tagIds.length > 0 ? { tagIds: [...entry.tagIds] } : {})
+          ...(selected && { projectId: selected }),
+          ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
         }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         const name = projects.find((p) => p.id === selected)?.name ?? null
@@ -103,8 +103,8 @@ export const edit = Command.make(
         yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
           start: current.startedAt.toISOString(),
           billable: val,
-          ...(entry?.projectId ? { projectId: entry.projectId } : {}),
-          ...(entry?.tagIds && entry.tagIds.length > 0 ? { tagIds: [...entry.tagIds] } : {})
+          ...((entry?.projectId) && { projectId: entry.projectId }),
+          ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
         }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         yield* Console.log(`Billable updated: ${val ? "yes" : "no"}`)
@@ -147,8 +147,8 @@ export const edit = Command.make(
           yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
             start: current.startedAt.toISOString(),
             tagIds: newTagIds,
-            ...(entry?.projectId ? { projectId: entry.projectId } : {}),
-            ...(entry?.billable !== undefined ? { billable: entry.billable } : {})
+            ...((entry?.projectId) && { projectId: entry.projectId }),
+            ...((entry?.billable !== undefined) && { billable: entry.billable })
           }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
           yield* Console.log(`Tag added: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
@@ -168,8 +168,8 @@ export const edit = Command.make(
           yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
             start: current.startedAt.toISOString(),
             tagIds: newTagIds,
-            ...(entry?.projectId ? { projectId: entry.projectId } : {}),
-            ...(entry?.billable !== undefined ? { billable: entry.billable } : {})
+            ...((entry?.projectId) && { projectId: entry.projectId }),
+            ...((entry?.billable !== undefined) && { billable: entry.billable })
           }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
           yield* Console.log(`Tag removed: ${allTags.find((t) => t.id === tagId)?.name}`)
         }

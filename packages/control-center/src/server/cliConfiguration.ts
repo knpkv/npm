@@ -6,7 +6,9 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 
+import { MINIMUM_PR_REVIEW_BUDGET_MILLIS } from "./agent/PrReviewTiming.js"
 import {
   boundDataRootMarkerContent as boundMarkerContent,
   type ControlCenterDataPaths,
@@ -33,6 +35,30 @@ import { PersistenceConfigError } from "./persistence/errors.js"
 /** Validated filesystem paths derived from the untrusted data-root environment value. */
 export { decodeControlCenterDataPaths }
 export type { ControlCenterDataPaths }
+
+const PrReviewBudgetMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: MINIMUM_PR_REVIEW_BUDGET_MILLIS, maximum: 1_800_000 })
+)
+
+const PrReviewSandboxDurationMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 1_800_000 })
+)
+
+/** Cross-field timing contract for one Review Agent Profile and its sbx lifetime. */
+export const PrReviewTimingConfiguration = Schema.Struct({
+  budgetMillis: PrReviewBudgetMillis,
+  maximumSandboxDurationMillis: PrReviewSandboxDurationMillis
+}).check(
+  Schema.makeFilter(
+    ({ budgetMillis, maximumSandboxDurationMillis }) => budgetMillis <= maximumSandboxDurationMillis,
+    { expected: "a review budget no greater than the sbx session duration" }
+  )
+)
+
+/** Treat blank optional executable/template configuration as absent. */
+export const optionalNonBlankConfigurationValue = (
+  value: string
+): string | undefined => value.trim().length === 0 ? undefined : value
 
 const DATA_ROOT_OWNER_PROBE_PREFIX = ".control-center-owner-"
 const SQLITE_HEADER = Uint8Array.from([

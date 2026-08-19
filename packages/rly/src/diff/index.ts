@@ -13,11 +13,14 @@ export type {
 export { RLY_DIFF_THEMES } from "./themes.js"
 export type {
   RlyDiffCodeAnnotation,
+  RlyDiffCodeAnnotationLocation,
+  RlyDiffCodeAnnotationRenderContext,
   RlyDiffCodeItem,
   RlyDiffCodeScrollTarget,
   RlyDiffCodeSelection,
   RlyDiffCodeViewHandle,
   RlyDiffCodeViewProps,
+  RlyDiffRendererGeneration,
   RlyDiffTextFile
 } from "./types.js"
 export * from "./workbench/index.js"

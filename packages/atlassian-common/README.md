@@ -60,6 +60,12 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(NodeCrypto.layer))
 ```
 
+`JIRA_SCOPES` is the broad legacy CLI set and includes Jira issue-mutation scopes. Control Center
+defines its own least-privilege release-publication set: it adds `manage:jira-project` to the
+read/identity scopes required for create-only project-version publication, but excludes
+`write:jira-work` and `manage:jira-configuration`. Jira issue edits remain proposal-only in Control
+Center and must not be presented as atomic Jira writes.
+
 ## Token And Profile Storage
 
 Stores OAuth config, auth profiles, and the active token mirror in `~/.config/atlassian/<tool>/` with 0600 permissions.

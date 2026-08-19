@@ -1,16 +1,21 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { JIRA_PROPOSAL_REQUIRED_SCOPES } from "@knpkv/atlassian-common/config"
 import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -18,18 +23,52 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
-import { EntityId, GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import { ReviewAgentProfile, ReviewAgentProfileId, ReviewSuggestionPublicationContent } from "../../src/api/agent.js"
+import { SubmitClockifyActionRequest } from "../../src/api/deliveryGraph.js"
+import { PluginConfigurationKey } from "../../src/api/plugins.js"
+import { GovernedActionUnknownOutcome } from "../../src/domain/governedAction/index.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PluginConnectionId,
+  PrReviewSuggestionRevisionId,
+  SessionId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
+import {
+  AuthorizedPluginActionV1,
+  PluginActionPreflightV1,
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineLogPageRequestV1,
+  PluginSyncRequestV1,
+  ProposePluginActionRequestV1
+} from "../../src/domain/plugins/index.js"
+import { PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
+import { RequestLimitPolicy, withRequestTimeout } from "../../src/server/api/RequestLimits.js"
+import { ClockifyActionSubmissions } from "../../src/server/application/clockifyActionSubmissions.js"
+import { projectClockifyApproval } from "../../src/server/application/clockifyApprovalProjection.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
+import { materializeNormalizedPluginPage } from "../../src/server/application/normalizedPluginPageMaterialization.js"
+import {
+  ReviewSuggestionPublicationGateway,
+  type ReviewSuggestionPublicationTarget
+} from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
+import { SessionSummary } from "../../src/server/auth/models.js"
 import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
-import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
-import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { GovernedActionExecutionStore } from "../../src/server/governance/internal/GovernedActionExecutionStore.js"
+import {
+  GovernedActionPolicyEvaluator,
+  makeWorkspaceGovernedActionPolicyDefinitions
+} from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import {
@@ -38,43 +77,68 @@ import {
   WorkspaceName
 } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
-import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
+import {
+  clockifyReadOnlyPluginDescriptor,
+  clockifyReadPluginDescriptor
+} from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import {
   codeCommitPluginDefinition,
   codeCommitPluginDescriptor
 } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
-import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import {
+  codePipelinePluginDefinition,
+  codePipelinePluginDescriptor
+} from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
+import {
+  canonicalCodePipelinePrincipalArn,
+  type CodePipelineExecutionSnapshot,
+  type CodePipelinePipeline,
+  type CodePipelineReadClientService
+} from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
+import { codePipelineRuntimeIdentityMatches } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
+import {
+  confluencePagePluginDescriptor,
+  historicalConfluenceReadPluginDescriptor
+} from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { PluginConflictFailure } from "../../src/server/plugins/failures.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
 import {
   historicalActionCodeCommitDescriptor,
   historicalCodeCommitDescriptor,
   historicalCompleteDiffCodeCommitDescriptor,
+  historicalReadOnlyCodePipelineDescriptor,
   makeFirstPartyPluginRuntimeRegistry
 } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
-import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
-import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
 import {
-  PluginConnectionMapLive,
-  pluginRuntimeKey,
-  PluginRuntimeMap
-} from "../../src/server/plugins/internal/PluginRuntimeMap.js"
+  PluginRuntimeAuthority,
+  PluginRuntimeAuthorityToken
+} from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
+import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { pluginRuntimeKey, PluginRuntimeMap } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMap.js"
-import { liveApplicationServices } from "../../src/server/runtime/ControlCenterServer.js"
+import { makeControlCenterApplicationComposition } from "../../src/server/runtime/ControlCenterServer.js"
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
+import { GovernedActionExecutionStartup } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
+import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
   ACTION_ID as GOVERNED_ACTION_ID,
   CONNECTION_ID as GOVERNED_CONNECTION_ID,
+  ENTITY_ID as GOVERNED_ENTITY_ID,
+  PERSON_ID as GOVERNED_PERSON_ID,
   seedGovernedAction,
   seedGovernedActionAuthorityRoots,
   seedGovernedActionCurrentInputs,
+  SESSION_ID as GOVERNED_SESSION_ID,
   WORKSPACE_ID as GOVERNED_WORKSPACE_ID
 } from "../governance/fixtures/authorizedGovernedAction.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -85,6 +149,7 @@ const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
 const PREVIOUS_CODECOMMIT_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000085")
 const FUTURE_CODECOMMIT_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000086")
+const HISTORICAL_CLOCKIFY_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
 const GOVERNED_WORKSPACE = WorkspaceId.make(GOVERNED_WORKSPACE_ID)
 const GOVERNED_CONNECTION = PluginConnectionId.make(GOVERNED_CONNECTION_ID)
 const GOVERNED_ACTION = GovernedActionId.make(GOVERNED_ACTION_ID)
@@ -204,17 +269,22 @@ const jiraOAuthDescriptorWithSiteOnly = {
   configurationFields: historicalJiraDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
 }
 
-const oauthProfile = (id: string, expiresAt: number) => ({
+const oauthProfile = (
+  id: string,
+  expiresAt: number,
+  userName = "Avery Bell",
+  scopes: ReadonlyArray<string> = Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES]))
+) => ({
   id,
   name: `${id} @ knpkv.atlassian.net`,
   token: {
     access_token: `${id}-access-token`,
     refresh_token: `${id}-refresh-token`,
     expires_at: expiresAt,
-    scope: Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).join(" "),
+    scope: scopes.join(" "),
     cloud_id: "cloud-1",
     site_url: "https://knpkv.atlassian.net/",
-    user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+    user: { account_id: "account-1", name: userName, email: "avery@example.com" }
   },
   created_at: "2026-07-18T10:00:00.000Z",
   updated_at: "2026-07-18T10:00:00.000Z"
@@ -246,15 +316,20 @@ const unusedCodeCommitClients = (() => {
     discoverAccount: () => Effect.die("unused discoverAccount"),
     listRepositoriesPage: () => Effect.die("unused listRepositoriesPage"),
     getBlob: () => Effect.die("unused getBlob"),
+    listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
     listPullRequestsPage: () => Effect.die("unused listPullRequestsPage"),
     streamPullRequests: () => Stream.empty,
     getPullRequest: () => Effect.die("unused getPullRequest"),
+    getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
     getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
     streamChangedFiles: () => Stream.empty
   })
   const reviewProvider = Layer.succeed(ReviewClient.CodeCommitReviewProvider, {
     postComment: () => Effect.die("unused postComment"),
+    updateComment: () => Effect.die("unused updateComment"),
+    postReply: () => Effect.die("unused postReply"),
     updateApprovalState: () => Effect.die("unused updateApprovalState"),
+    mergePullRequest: () => Effect.die("unused mergePullRequest"),
     getApprovalStates: () => Effect.die("unused getApprovalStates"),
     getCommentsPage: () => Effect.die("unused getCommentsPage")
   })
@@ -265,6 +340,23 @@ const unusedCodeCommitClients = (() => {
 })()
 
 describe("first-party plugin runtime", () => {
+  it("canonicalizes only assumed-role sessions for stable CodePipeline authority", () => {
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn(
+        "arn:aws:sts::123456789012:assumed-role/team/control-center/session-a"
+      ),
+      "arn:aws:iam::123456789012:role/team/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:iam::123456789012:user/control-center"),
+      "arn:aws:iam::123456789012:user/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:sts::123456789012:federated-user/control-center"),
+      "arn:aws:sts::123456789012:federated-user/control-center"
+    )
+  })
+
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
@@ -304,10 +396,12 @@ describe("first-party plugin runtime", () => {
             })
           ),
         getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>
           Effect.succeed(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
         streamPullRequests: () => Stream.make(pullRequest),
         getPullRequest: () => Ref.update(readCalls, (count) => count + 1).pipe(Effect.as(pullRequest)),
+        getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
         getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
         streamChangedFiles: () => Stream.empty
       })
@@ -321,7 +415,10 @@ describe("first-party plugin runtime", () => {
               }
             })
           ),
+        updateComment: () => Effect.die("unused updateComment"),
+        postReply: () => Effect.die("unused postReply"),
         updateApprovalState: () => Effect.die("unused updateApprovalState"),
+        mergePullRequest: () => Effect.die("unused mergePullRequest"),
         getApprovalStates: () => Effect.die("unused getApprovalStates"),
         getCommentsPage: () => Effect.die("unused getCommentsPage")
       })
@@ -487,7 +584,8 @@ describe("first-party plugin runtime", () => {
             actionId: GOVERNED_ACTION
           })
         }).pipe(Effect.provide(engineLayer))
-        const governedRecord = yield* (yield* GovernedActionRepository).read({
+        const governedActionRepository = yield* GovernedActionRepository
+        const governedRecord = yield* governedActionRepository.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
         })
@@ -628,12 +726,11 @@ describe("first-party plugin runtime", () => {
           }
         }
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients)),
-        Effect.provide(dependencies)
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients).pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("keeps the current Jira runtime proposal-only in the production registry", () =>
+  it.effect("exposes governed Jira release publication in the production registry", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-jira-proposal-")
@@ -693,7 +790,6 @@ describe("first-party plugin runtime", () => {
           0,
           CREATED_AT
         )
-
         const registry = yield* PluginRuntimeRegistry
         const connection = yield* Effect.gen(function*() {
           return yield* PluginConnection
@@ -707,14 +803,934 @@ describe("first-party plugin runtime", () => {
 
         assert.deepStrictEqual(
           connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
-          ["entity.read", "sync.incremental", "action.propose"]
+          ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
         )
-        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
-        assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+        assert.isTrue(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isTrue(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
-        Effect.provide(dependencies)
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("executes an authorized Confluence publication once after two safety reads", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      ))
+      const readCalls = yield* Ref.make(0)
+      const mutationCalls = yield* Ref.make(0)
+      const httpClient = HttpClient.make((request) =>
+        Effect.gen(function*() {
+          const currentPage = {
+            id: "42",
+            status: "current",
+            title: "Payments release runbook",
+            spaceId: "space-payments",
+            createdAt: "2026-07-15T09:00:00.000Z",
+            version: {
+              number: 3,
+              createdAt: "2026-07-15T09:50:00.000Z",
+              message: "Initial publication"
+            }
+          }
+          if (
+            request.method === "GET" &&
+            request.url.endsWith("/wiki/api/v2/pages/42") &&
+            new Map(request.urlParams).get("get-draft") === "true"
+          ) {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ message: "No draft" }), {
+                status: 404,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          if (request.method === "GET" && request.url.endsWith("/wiki/api/v2/pages/42")) {
+            yield* Ref.update(readCalls, (count) => count + 1)
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify(currentPage), {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          if (request.method === "PUT" && request.url.endsWith("/wiki/api/v2/pages/42")) {
+            yield* Ref.update(mutationCalls, (count) => count + 1)
+            if (request.body._tag !== "Uint8Array") return yield* Effect.die("missing Confluence update body")
+            const payload = Schema.decodeUnknownSync(Schema.Struct({
+              title: Schema.String,
+              version: Schema.Struct({
+                number: Schema.Int,
+                message: Schema.String
+              })
+            }))(JSON.parse(new TextDecoder().decode(request.body.body)))
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(
+                JSON.stringify({
+                  ...currentPage,
+                  title: payload.title,
+                  version: {
+                    ...currentPage.version,
+                    number: payload.version.number,
+                    message: payload.version.message,
+                    createdAt: "2026-07-15T10:02:00.000Z"
+                  }
+                }),
+                {
+                  status: 200,
+                  headers: { "content-type": "application/json" }
+                }
+              )
+            )
+          }
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(JSON.stringify({ message: "unexpected request" }), {
+              status: 500,
+              headers: { "content-type": "application/json" }
+            })
+          )
+        })
+      )
+      const config = yield* makePersistenceTestConfig("control-center-first-party-confluence-governed-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, httpClient)
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        yield* seedGovernedActionAuthorityRoots("confluence")
+        const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+          { _tag: "text", key: "authMode", value: "api-token" },
+          { _tag: "text", key: "email", value: "owner@example.com" },
+          { _tag: "text", key: "probePageId", value: "42" },
+          { _tag: "url", key: "siteBaseUrl", value: "https://acme.atlassian.net/" },
+          { _tag: "text", key: "siteId", value: "site-acme" },
+          { _tag: "text", key: "spaceId", value: "space-payments" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "confluence",
+          confluencePagePluginDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const authority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authority,
+          seedAuthorityRoots: false,
+          variant: "confluence"
+        })
+        yield* seedGovernedActionCurrentInputs("confluence")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(
+          Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+            Layer.provide(store),
+            Layer.provide(executors)
+          ))
+        )
+        const governedActionRepository = yield* GovernedActionRepository
+        const record = yield* governedActionRepository.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(record.head.state, "succeeded")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        if (record.head.lineage._tag === "terminal") {
+          assert.strictEqual(record.head.lineage.receipt.status, "succeeded")
+        }
+        assert.strictEqual(yield* Ref.get(readCalls), 2)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      }).pipe(
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("starts from a synchronized durable pipeline authority and blocks stale definitions", () => {
+    const runScenario = (mode: "current" | "rotated" | "stale") =>
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+        ))
+        const pipelineVersion = yield* Ref.make(7)
+        const mutationCalls = yield* Ref.make(0)
+        const mutationIdentity = mode === "rotated"
+          ? {
+            accountId: "210987654321",
+            arn: "arn:aws:iam::210987654321:role/rotated-control-center"
+          }
+          : {
+            accountId: "123456789012",
+            arn: "arn:aws:sts::123456789012:assumed-role/control-center/mutation-session"
+          }
+        const pipelineFor = (version: number): CodePipelinePipeline => ({
+          name: "release",
+          arn: "arn:aws:codepipeline:eu-west-1:123456789012:release",
+          version,
+          pipelineType: "V2",
+          executionMode: "SUPERSEDED",
+          createdAt: new Date("2026-07-15T08:00:00.000Z"),
+          updatedAt: new Date(
+            version === 7
+              ? "2026-07-15T09:40:00.000Z"
+              : "2026-07-15T09:41:00.000Z"
+          ),
+          variables: [],
+          stages: [{
+            name: "Source",
+            actions: [{
+              name: "Checkout",
+              actionType: {
+                category: "Source",
+                owner: "AWS",
+                provider: "CodeCommit",
+                version: "1"
+              },
+              allowS3ObjectKeyOverride: false,
+              codeCommitSource: null,
+              runOrder: 1,
+              region: "eu-west-1",
+              roleArn: null,
+              inputArtifactNames: [],
+              outputArtifactNames: ["Source"]
+            }]
+          }]
+        })
+        const codePipelineClient: CodePipelineReadClientService = {
+          discoverAccount: () =>
+            Effect.succeed({
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/control-center/start-session"
+            }),
+          getPipeline: () => Ref.get(pipelineVersion).pipe(Effect.map(pipelineFor)),
+          listExecutionsPage: () =>
+            Effect.succeed({
+              executions: [],
+              nextToken: null,
+              providerPageLimit: 1
+            }),
+          listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+          findActionExecution: () => Effect.die("unused findActionExecution"),
+          getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
+          getPipelineState: () => Effect.die("unused getPipelineState"),
+          getLogPage: () => Effect.die("unused getLogPage"),
+          getArtifactRange: () => Effect.die("unused getArtifactRange"),
+          startPipelineExecution: (request) =>
+            codePipelineRuntimeIdentityMatches(request.runtimeIdentity, mutationIdentity)
+              ? Ref.update(mutationCalls, (count) => count + 1).pipe(
+                Effect.as("execution-started-from-declaration")
+              )
+              : Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-runtime-identity-changed"
+                })
+              ),
+          stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+          putApprovalResult: () => Effect.die("unused putApprovalResult")
+        }
+        const config = yield* makePersistenceTestConfig(
+          `control-center-first-party-codepipeline-start-${mode}-`
+        )
+        const root = config.blobRoot.slice(0, -"/blobs".length)
+        const database = databaseLayer(config)
+        const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+        const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+        const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+        const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+        const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+        const dependencies = Layer.mergeAll(
+          persistence,
+          database,
+          foundation,
+          governedActions,
+          deliveryGraph,
+          runtimeAuthority,
+          SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+          Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+        )
+
+        return yield* Effect.gen(function*() {
+          const persistenceService = yield* Persistence
+          yield* seedGovernedActionAuthorityRoots("codepipeline-start")
+          const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+            { _tag: "integer", key: "actionPageSize", value: 20 },
+            { _tag: "integer", key: "maximumActionPages", value: 2 },
+            { _tag: "integer", key: "maximumActionsPerExecution", value: 40 },
+            { _tag: "integer", key: "maximumExecutionPages", value: 2 },
+            { _tag: "integer", key: "maximumLogBytes", value: 262_144 },
+            { _tag: "integer", key: "operationTimeoutMillis", value: 10_000 },
+            { _tag: "text", key: "pipelineName", value: "release" },
+            { _tag: "text", key: "profile", value: "production" },
+            { _tag: "text", key: "region", value: "eu-west-1" }
+          ])
+          const synchronizedAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+          yield* persistenceService.pluginConfigurations.update(
+            GOVERNED_WORKSPACE,
+            GOVERNED_CONNECTION,
+            configuration,
+            0,
+            synchronizedAt
+          )
+          yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+            GOVERNED_WORKSPACE,
+            GOVERNED_CONNECTION,
+            "codepipeline",
+            codePipelinePluginDefinition.rawDescriptor,
+            0,
+            synchronizedAt
+          )
+
+          const registry = yield* PluginRuntimeRegistry
+          const authority = yield* PluginRuntimeAuthority.pipe(
+            Effect.provide(registry.layer(pluginRuntimeKey({
+              workspaceId: GOVERNED_WORKSPACE,
+              pluginConnectionId: GOVERNED_CONNECTION
+            }))),
+            Effect.scoped
+          )
+          const syncRequest = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+            streamKey: "executions",
+            checkpoint: null
+          })
+          const pages = yield* Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            return yield* connection.sync(syncRequest).pipe(Stream.runCollect)
+          }).pipe(
+            Effect.provide(registry.layer(pluginRuntimeKey({
+              workspaceId: GOVERNED_WORKSPACE,
+              pluginConnectionId: GOVERNED_CONNECTION
+            }))),
+            Effect.scoped
+          )
+          assert.strictEqual(pages.length, 1)
+          const page = pages[0]
+          if (page === undefined) return yield* Effect.die("expected one CodePipeline synchronization page")
+          yield* materializeNormalizedPluginPage({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION,
+            providerId: "codepipeline",
+            streamKey: PluginStreamKey.make("executions"),
+            expectedRevision: 0,
+            committedAt: synchronizedAt,
+            successfulHealth: { _tag: "healthy", checkedAt: synchronizedAt }
+          }, page)
+          const target = yield* persistenceService.entities.findBySourceIdentity(
+            GOVERNED_WORKSPACE,
+            {
+              pluginConnectionId: GOVERNED_CONNECTION,
+              providerId: "codepipeline",
+              vendorImmutableId: VendorImmutableId.make(
+                "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              )
+            }
+          )
+          assert.strictEqual(target.entityType, "pipeline")
+          assert.strictEqual(target.sourceRevision.revision, "7:2026-07-15T09:40:00.000Z")
+          yield* seedGovernedAction({
+            pluginConnectionAuthorityDigest: authority,
+            seedAuthorityRoots: false,
+            targetEntityId: target.entityId,
+            variant: "codepipeline-start"
+          })
+          if (mode === "stale") yield* Ref.set(pipelineVersion, 8)
+
+          const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+          const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+          const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+          const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+            Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+            Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+            Layer.provideMerge(QuarantineRepository.layer)
+          )
+          const execution = yield* Effect.gen(function*() {
+            const engine = yield* GovernedActionExecutionEngine
+            return yield* engine.run({
+              workspaceId: GOVERNED_WORKSPACE,
+              actionId: GOVERNED_ACTION
+            })
+          }).pipe(
+            Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+              Layer.provide(store),
+              Layer.provide(executors)
+            ))
+          )
+          const record = yield* GovernedActionRepository.pipe(
+            Effect.flatMap((repository) =>
+              repository.read({
+                workspaceId: GOVERNED_WORKSPACE,
+                actionId: GOVERNED_ACTION
+              })
+            )
+          )
+          return {
+            execution,
+            mutationCalls: yield* Ref.get(mutationCalls),
+            record
+          }
+        }).pipe(
+          Effect.provide(
+            makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient).pipe(
+              Layer.provideMerge(dependencies)
+            )
+          )
+        )
+      })
+
+    return Effect.gen(function*() {
+      const current = yield* runScenario("current")
+      assert.deepStrictEqual(current.execution, { _tag: "advanced", state: "started" })
+      assert.strictEqual(current.record.head.state, "started")
+      assert.strictEqual(current.record.head.lineage._tag, "accepted")
+      assert.strictEqual(current.mutationCalls, 1)
+
+      const rotated = yield* runScenario("rotated")
+      assert.deepStrictEqual(rotated.execution, { _tag: "advanced", state: "failed" })
+      assert.strictEqual(rotated.record.head.state, "failed")
+      assert.strictEqual(rotated.record.head.lineage._tag, "terminal")
+      if (rotated.record.head.lineage._tag === "terminal") {
+        assert.strictEqual(rotated.record.head.lineage.receipt.status, "failed")
+        assert.include(rotated.record.head.lineage.receipt.providerOperationId, "rejected:start:")
+      }
+      assert.strictEqual(rotated.mutationCalls, 0)
+
+      const stale = yield* runScenario("stale")
+      assert.deepStrictEqual(stale.execution, { _tag: "advanced", state: "denied" })
+      assert.strictEqual(stale.record.head.state, "denied")
+      assert.strictEqual(stale.mutationCalls, 0)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  })
+
+  it.effect("folds a deterministic CodePipeline rejection through the production registry exactly once", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      ))
+      const mutationCalls = yield* Ref.make(0)
+      const logCalls = yield* Ref.make(0)
+      const artifactCalls = yield* Ref.make(0)
+      const identityArn = yield* Ref.make(
+        "arn:aws:sts::123456789012:assumed-role/control-center/registry-session"
+      )
+      const identityCalls = yield* Ref.make(0)
+      const pipeline = {
+        name: "release",
+        arn: "arn:aws:codepipeline:eu-west-1:123456789012:release",
+        version: 7,
+        pipelineType: "V2",
+        executionMode: "SUPERSEDED",
+        createdAt: new Date("2026-07-15T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-15T09:40:00.000Z"),
+        variables: [],
+        stages: [{
+          name: "Source",
+          actions: [{
+            name: "Checkout",
+            actionType: {
+              category: "Source",
+              owner: "AWS",
+              provider: "CodeCommit",
+              version: "1"
+            },
+            allowS3ObjectKeyOverride: false,
+            codeCommitSource: null,
+            runOrder: 1,
+            region: "eu-west-1",
+            roleArn: null,
+            inputArtifactNames: [],
+            outputArtifactNames: ["Source"]
+          }]
+        }]
+      } satisfies CodePipelinePipeline
+      const snapshot = {
+        execution: {
+          pipelineName: "release",
+          pipelineVersion: 7,
+          executionId: "execution-failed-1",
+          status: "Failed",
+          statusSummary: "Build failed",
+          updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+          artifactRevisions: [{
+            name: "Source",
+            revisionId: "commit-abc",
+            revisionSummary: "main",
+            createdAt: new Date("2026-07-15T09:44:00.000Z")
+          }],
+          variables: [],
+          triggerType: "StartPipelineExecution",
+          triggerDetail: "release-operator",
+          executionMode: "SUPERSEDED",
+          executionType: "STANDARD",
+          rollbackTargetExecutionId: null
+        },
+        summary: {
+          executionId: "execution-failed-1",
+          status: "Failed",
+          statusSummary: "Build failed",
+          startedAt: new Date("2026-07-15T09:45:00.000Z"),
+          updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+          sourceRevisions: [{
+            actionName: "Checkout",
+            revisionId: "commit-abc",
+            revisionSummary: "main"
+          }],
+          triggerType: "StartPipelineExecution",
+          triggerDetail: "release-operator",
+          executionMode: "SUPERSEDED",
+          executionType: "STANDARD",
+          rollbackTargetExecutionId: null
+        },
+        actionCollection: {
+          actions: [{
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            pipelineVersion: 7,
+            stageName: "Build",
+            actionName: "Compile",
+            status: "Failed",
+            startedAt: new Date("2026-07-15T09:45:00.000Z"),
+            updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+            updatedBy: null,
+            actionType: {
+              category: "Build",
+              owner: "AWS",
+              provider: "CodeBuild",
+              version: "1"
+            },
+            roleArn: null,
+            region: "eu-west-1",
+            inputArtifacts: [],
+            outputArtifacts: [{
+              name: "BuildOutput",
+              bucket: "private-artifacts",
+              key: "build.zip",
+              access: "proxy-required"
+            }],
+            externalExecutionId: null,
+            externalExecutionSummary: null,
+            errorCode: null,
+            errorMessage: null,
+            logStreamArn: "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+          }],
+          truncated: false,
+          pagesRead: 1
+        }
+      } satisfies CodePipelineExecutionSnapshot
+      const codePipelineClient: CodePipelineReadClientService = {
+        discoverAccount: () =>
+          Effect.all([
+            Ref.update(identityCalls, (count) => count + 1),
+            Ref.get(identityArn)
+          ]).pipe(
+            Effect.map(([, arn]) => ({
+              accountId: "123456789012",
+              arn
+            }))
+          ),
+        getPipeline: () => Effect.succeed(pipeline),
+        listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
+        listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
+        getExecutionSnapshot: () => Effect.succeed(snapshot),
+        getPipelineState: () => Effect.die("unused getPipelineState"),
+        getLogPage: () =>
+          Ref.update(logCalls, (count) => count + 1).pipe(
+            Effect.as({ events: [], nextToken: null })
+          ),
+        getArtifactRange: () =>
+          Ref.update(artifactCalls, (count) => count + 1).pipe(
+            Effect.as({ bytesBase64: "AQID", totalBytes: 3 })
+          ),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-provider-state-conflict"
+                })
+              )
+            )
+          ),
+        stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+        putApprovalResult: () => Effect.die("unused putApprovalResult")
+      }
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codepipeline-governed-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* seedGovernedActionAuthorityRoots("codepipeline")
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "integer", key: "actionPageSize", value: 20 },
+          { _tag: "integer", key: "maximumActionPages", value: 2 },
+          { _tag: "integer", key: "maximumActionsPerExecution", value: 40 },
+          { _tag: "integer", key: "maximumExecutionPages", value: 2 },
+          { _tag: "integer", key: "maximumLogBytes", value: 262_144 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 10_000 },
+          { _tag: "text", key: "pipelineName", value: "release" },
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "codepipeline",
+          codePipelinePluginDefinition.rawDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const authority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        assert.strictEqual(yield* Ref.get(identityCalls), 1)
+        yield* Ref.set(
+          identityArn,
+          "arn:aws:sts::123456789012:assumed-role/control-center/executor-session"
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authority,
+          seedAuthorityRoots: false,
+          variant: "codepipeline"
+        })
+        yield* seedGovernedActionCurrentInputs("codepipeline")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(
+          Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+            Layer.provide(store),
+            Layer.provide(executors)
+          ))
+        )
+        const governedActionRepository = yield* GovernedActionRepository
+        const record = yield* governedActionRepository.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "failed" })
+        assert.strictEqual(record.head.state, "failed")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        if (record.head.lineage._tag === "terminal") {
+          assert.strictEqual(record.head.lineage.receipt.status, "failed")
+          assert.include(record.head.lineage.receipt.providerOperationId, "rejected:retry:")
+          assert.include(record.head.lineage.receipt.safeSummary, "without applying")
+        }
+        const stableAuthority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        const identityCallsBeforePinnedRuntime = yield* Ref.get(identityCalls)
+        const blockedAfterIdentityChange = yield* Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          assert.strictEqual(
+            yield* Ref.get(identityCalls),
+            identityCallsBeforePinnedRuntime + 1
+          )
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.retry",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-failed-1"
+              },
+              expectedRevision: "7:Failed:2026-07-15T09:50:00.000Z",
+              payload: {},
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "registry-identity-change",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "registry-identity-change-authorization",
+            authorizedAt: DateTime.makeUnsafe("2026-07-15T10:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-15T11:00:00.000Z")
+          })
+          const pipelineCapability = connection.pipeline
+          if (pipelineCapability === undefined || Option.isNone(pipelineCapability)) {
+            return yield* Effect.die("pipeline evidence capability missing")
+          }
+          const evidenceAction = {
+            entity: {
+              entityType: "aws.codepipeline.action",
+              vendorImmutableId: "execution-failed-1#execution-failed-1-action-1"
+            },
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            expectedRevision: "Failed:2026-07-15T09:50:00.000Z"
+          }
+          const logRequest = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+            action: evidenceAction,
+            cursor: null,
+            limit: 10
+          })
+          const artifactRequest = Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+            action: evidenceAction,
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset: 0,
+            length: 3
+          })
+          yield* Ref.set(
+            identityArn,
+            "arn:aws:sts::123456789012:assumed-role/control-center/evidence-session"
+          )
+          const sameRoleLogs = yield* pipelineCapability.value.readLogPage(logRequest)
+          const sameRoleArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest)
+          yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-control-center")
+          const blockedLogs = yield* pipelineCapability.value.readLogPage(logRequest).pipe(Effect.result)
+          const blockedArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest).pipe(Effect.result)
+          const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
+          return {
+            blockedArtifact,
+            blockedLogs,
+            preflight,
+            sameRoleArtifact,
+            sameRoleLogs
+          }
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        const rotatedAuthority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        assert.strictEqual(stableAuthority, authority)
+        assert.deepStrictEqual(blockedAfterIdentityChange.sameRoleLogs.events, [])
+        assert.strictEqual(blockedAfterIdentityChange.sameRoleArtifact.bytesBase64, "AQID")
+        assert.strictEqual(blockedAfterIdentityChange.blockedLogs._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedLogs._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedLogs.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.blockedArtifact._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedArtifact._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedArtifact.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.preflight._tag, "Failure")
+        if (blockedAfterIdentityChange.preflight._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.preflight.failure._tag, "PluginConflictFailure")
+        }
+        assert.notStrictEqual(rotatedAuthority, authority)
+        assert.strictEqual(yield* Ref.get(logCalls), 1)
+        assert.strictEqual(yield* Ref.get(artifactCalls), 1)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      }).pipe(
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient).pipe(
+            Layer.provideMerge(dependencies)
+          )
+        )
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("loads a persisted read-only CodePipeline runtime with its historical configuration", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const identityCalls = yield* Ref.make(0)
+      const historicalClient: CodePipelineReadClientService = {
+        discoverAccount: () =>
+          Ref.update(identityCalls, (count) => count + 1).pipe(
+            Effect.as({
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:role/historical-control-center"
+            })
+          ),
+        getPipeline: () => Effect.die("unused getPipeline"),
+        listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
+        listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
+        getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
+        getPipelineState: () => Effect.die("unused getPipelineState"),
+        getLogPage: () => Effect.die("unused getLogPage"),
+        getArtifactRange: () => Effect.die("unused getArtifactRange"),
+        startPipelineExecution: () => Effect.die("unused startPipelineExecution"),
+        stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+        putApprovalResult: () => Effect.die("unused putApprovalResult")
+      }
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codepipeline-historical-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Historical pipeline"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "codepipeline",
+          displayName: PluginConnectionDisplayName.make("Historical CodePipeline"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const historicalConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "integer", key: "actionPageSize", value: 50 },
+          { _tag: "integer", key: "maximumActionPages", value: 3 },
+          { _tag: "integer", key: "maximumActionsPerExecution", value: 100 },
+          { _tag: "integer", key: "maximumExecutionPages", value: 5 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 30_000 },
+          { _tag: "text", key: "pipelineName", value: "release" },
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          historicalConfiguration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "codepipeline",
+          historicalReadOnlyCodePipelineDescriptor,
+          0,
+          CREATED_AT
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const connection = yield* PluginConnection.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+
+        assert.isTrue(hasPluginCapability(connection.descriptor, "entity.read", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "pipeline.logs", 1))
+        assert.strictEqual(yield* Ref.get(identityCalls), 1)
+      }).pipe(
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, historicalClient).pipe(
+            Layer.provideMerge(dependencies)
+          )
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -740,6 +1756,14 @@ describe("first-party plugin runtime", () => {
       supportedVersions: [1],
       requirement: "required"
     }])
+    assert.deepStrictEqual(
+      historicalConfluenceReadPluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental"]
+    )
+    assert.deepStrictEqual(
+      confluencePagePluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
+    )
   })
 
   it("keeps the historical CodeCommit descriptor independent of future current fields", () => {
@@ -784,6 +1808,57 @@ describe("first-party plugin runtime", () => {
         "action.reconcile",
         "diff.inventory",
         "diff.content"
+      ]
+    )
+  })
+
+  it("keeps the historical CodePipeline descriptor independent of current governed fields", () => {
+    const futureCurrent = {
+      ...codePipelinePluginDescriptor,
+      configurationFields: [
+        ...codePipelinePluginDescriptor.configurationFields,
+        {
+          _tag: "text",
+          key: "futureField",
+          label: "Future field",
+          description: "A field added after the historical descriptor was persisted.",
+          required: false
+        }
+      ]
+    }
+
+    assert.isTrue(futureCurrent.configurationFields.some(({ key }) => key === "futureField"))
+    assert.isFalse(
+      historicalReadOnlyCodePipelineDescriptor.configurationFields.some(({ key }) =>
+        key === "futureField" || key === "maximumLogBytes"
+      )
+    )
+    assert.deepStrictEqual(
+      historicalReadOnlyCodePipelineDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental"]
+    )
+    assert.deepStrictEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      { major: 0, minor: 1, patch: 0 }
+    )
+    assert.deepStrictEqual(
+      codePipelinePluginDescriptor.adapterVersion,
+      { major: 0, minor: 2, patch: 0 }
+    )
+    assert.notDeepEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      codePipelinePluginDescriptor.adapterVersion
+    )
+    assert.deepStrictEqual(
+      codePipelinePluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      [
+        "entity.read",
+        "sync.incremental",
+        "action.propose",
+        "action.execute",
+        "action.reconcile",
+        "pipeline.logs",
+        "pipeline.artifact"
       ]
     )
   })
@@ -942,8 +2017,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -957,7 +2031,18 @@ describe("first-party plugin runtime", () => {
       yield* TestClock.setTime(now)
       const storePath = path.join(configRoot, "atlassian", "control-center")
       yield* fileSystem.makeDirectory(storePath, { recursive: true })
-      const profiles = [oauthProfile("valid-profile", now + 60_000), oauthProfile("expired-profile", now - 1)]
+      const longUserName = `Avery ${"B".repeat(195)}`
+      const supplementaryUserName = `${"A".repeat(199)}😀`
+      const exactBoundaryUserName = `${"A".repeat(199)}B`
+      const profiles = [
+        oauthProfile("valid-profile", now + 60_000),
+        oauthProfile("legacy-jira-profile", now + 60_000, "Avery Bell", JIRA_PROPOSAL_REQUIRED_SCOPES),
+        oauthProfile("expired-profile", now - 1),
+        oauthProfile("legacy-spaced-name-profile", now + 60_000, " Avery Bell"),
+        oauthProfile("long-name-profile", now + 60_000, longUserName),
+        oauthProfile("supplementary-name-profile", now + 60_000, supplementaryUserName),
+        oauthProfile("exact-boundary-profile", now + 60_000, exactBoundaryUserName)
+      ]
       yield* fileSystem.writeFileString(
         path.join(storePath, "profiles.json"),
         JSON.stringify({ activeProfileId: "valid-profile", profiles })
@@ -985,12 +2070,54 @@ describe("first-party plugin runtime", () => {
         const cases: ReadonlyArray<{
           readonly expectedDiagnosticCode: string | null
           readonly historicalDescriptor?: boolean
-          readonly profileId: "valid-profile" | "expired-profile"
+          readonly expectedDisplayName?: string
+          readonly profileId:
+            | "valid-profile"
+            | "legacy-jira-profile"
+            | "expired-profile"
+            | "legacy-spaced-name-profile"
+            | "long-name-profile"
+            | "supplementary-name-profile"
+            | "exact-boundary-profile"
           readonly providerId: "jira" | "confluence"
           readonly siteId: string
         }> = [
           { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            providerId: "jira",
+            profileId: "legacy-jira-profile",
+            siteId: "cloud-1"
+          },
           { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "Avery Bell",
+            providerId: "confluence",
+            profileId: "legacy-spaced-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: longUserName.slice(0, 200),
+            providerId: "confluence",
+            profileId: "long-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "A".repeat(199),
+            providerId: "confluence",
+            profileId: "supplementary-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: exactBoundaryUserName,
+            providerId: "confluence",
+            profileId: "exact-boundary-profile",
+            siteId: "cloud-1"
+          },
           {
             expectedDiagnosticCode: null,
             historicalDescriptor: true,
@@ -1078,6 +2205,19 @@ describe("first-party plugin runtime", () => {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") {
               const connection = Context.get(outcome.success, PluginConnection)
+              if (testCase.profileId === "legacy-jira-profile") {
+                assert.isTrue(hasPluginCapability(connection.descriptor, "entity.read", 1))
+                assert.isTrue(hasPluginCapability(connection.descriptor, "action.propose", 1))
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+              }
+              if (testCase.providerId === "confluence") {
+                const discovery = yield* connection.discover
+                assert.deepStrictEqual(discovery.account, {
+                  providerImmutableId: "account-1",
+                  displayName: testCase.expectedDisplayName ?? "Avery Bell"
+                })
+              }
               if (testCase.historicalDescriptor === true) {
                 assert.isFalse(hasPluginCapability(connection.descriptor, "sync.incremental", 1))
                 const driver = firstPartyManualPluginSyncDrivers.get("confluence")
@@ -1131,8 +2271,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 1)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies),
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies))),
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
@@ -1253,8 +2392,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -1358,12 +2496,11 @@ describe("first-party plugin runtime", () => {
         }
         assert.lengthOf(requests, 0)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("shares first-party diff runtime reuse and administration invalidation", () =>
+  it.effect("shares first-party proposal, diff, and executor invalidation through administration", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-shared-diff-")
@@ -1374,11 +2511,13 @@ describe("first-party plugin runtime", () => {
       const runtimeAuthority = pluginRuntimeAuthoritySourceLayer
       const discoveredProfiles = yield* Ref.make<Array<string>>([])
       const changedFileProfiles = yield* Ref.make<Array<string>>([])
-      const mapBuilds = yield* Ref.make(0)
-      const invalidations = yield* Ref.make(0)
+      const providerMutations = yield* Ref.make(0)
+      const pauseProposalRead = yield* Ref.make(false)
+      const proposalReadStarted = yield* Deferred.make<void>()
+      const resumeProposalRead = yield* Deferred.make<void>()
       const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
         pullRequestId: "17",
-        revisionId: "revision-advanced",
+        revisionId: "revision-17",
         repositoryName: "payments-api",
         title: "Shared diff runtime",
         description: "Reuse one runtime until administration invalidates it.",
@@ -1417,6 +2556,7 @@ describe("first-party plugin runtime", () => {
             })
           ),
         getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestIdsPage: () => Effect.die("unused listPullRequestIdsPage"),
         listPullRequestsPage: () =>
           Effect.succeed(
             new ReadClient.CodeCommitPullRequestPage({
@@ -1425,7 +2565,18 @@ describe("first-party plugin runtime", () => {
             })
           ),
         streamPullRequests: () => Stream.make(pullRequest),
-        getPullRequest: () => Effect.succeed(pullRequest),
+        getPullRequest: () =>
+          Ref.get(pauseProposalRead).pipe(
+            Effect.flatMap((pause) =>
+              pause
+                ? Deferred.succeed(proposalReadStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(resumeProposalRead)),
+                  Effect.as(pullRequest)
+                )
+                : Effect.succeed(pullRequest)
+            )
+          ),
+        getRepositoryIdentity: () => Effect.die("unused getRepositoryIdentity"),
         getChangedFilesPage: ({ account }) =>
           Ref.update(changedFileProfiles, (profiles) => [...profiles, account.profile]).pipe(
             Effect.as(
@@ -1440,39 +2591,30 @@ describe("first-party plugin runtime", () => {
       })
       const reviewClient = Layer.succeed(ReviewClient.CodeCommitReviewClient, {
         preflight: () => Effect.succeed(pullRequest),
-        execute: () => Effect.die("unused execute"),
+        execute: () =>
+          Ref.update(providerMutations, (count) => count + 1).pipe(
+            Effect.as(
+              new ReviewClient.CodeCommitReviewReceipt({
+                operationId: "comment:shared-runtime",
+                summary: "Posted a pull-request comment"
+              })
+            )
+          ),
         reconcile: () => Effect.die("unused reconcile")
       })
       const clients = Layer.merge(readClient, reviewClient)
       const registry = makeFirstPartyPluginRuntimeRegistry(clients)
-      const baseConnections = PluginConnectionMapLive.pipe(
-        Layer.provide(PluginRuntimeMap.layer.pipe(Layer.provide(registry)))
-      )
-      const connections = Layer.effect(
-        PluginConnectionMap,
-        Effect.gen(function*() {
-          const connectionMap = yield* PluginConnectionMap
-          yield* Ref.update(mapBuilds, (count) => count + 1)
-          return PluginConnectionMap.of({
-            contextEffect: connectionMap.contextEffect,
-            invalidate: (scope) =>
-              Ref.update(invalidations, (count) => count + 1).pipe(
-                Effect.andThen(connectionMap.invalidate(scope))
-              )
-          })
-        })
-      ).pipe(
-        Layer.provide(baseConnections),
-        Layer.provide(runtimeAuthority)
-      )
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
       const dependencies = Layer.mergeAll(
         persistence,
-        foundation,
+        governedActions,
+        deliveryGraph,
         runtimeAuthority,
         DomainEventWakeups.layer,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
-      ).pipe(Layer.provideMerge(database))
+      ).pipe(Layer.provideMerge(foundation))
 
       yield* Effect.gen(function*() {
         const persistenceService = yield* Persistence
@@ -1506,6 +2648,32 @@ describe("first-party plugin runtime", () => {
           codeCommitPluginDefinition.rawDescriptor,
           0,
           CREATED_AT
+        )
+        const registryService = yield* PluginRuntimeRegistry
+        const composition = makeControlCenterApplicationComposition({
+          bindConfig: yield* decodeBindConfig({ port: 4173 }),
+          persistenceConfig: Schema.decodeUnknownSync(PersistenceConfig)(config),
+          secretRoot: SecretRoot.make(`${root}/secrets`),
+          staticAssets: { root },
+          firstPartyPluginRuntime: true,
+          firstPartyPluginRuntimes: registryService,
+          governedActionExecution: { workspaceId: GOVERNED_WORKSPACE }
+        })
+        if (
+          composition.firstPartyRuntime === null ||
+          composition.firstPartyGovernedActionStartup === null ||
+          composition.firstPartyGovernedActionExecutors === null
+        ) {
+          return yield* Effect.die("first-party governed runtime composition is unavailable")
+        }
+        const composed = yield* Layer.build(
+          Layer.mergeAll(
+            composition.applicationServices,
+            composition.firstPartyRuntime.connections,
+            composition.firstPartyGovernedActionStartup,
+            composition.firstPartyGovernedActionExecutors,
+            composition.reviewSuggestionPublications
+          ).pipe(Layer.provide(composition.lifecycle))
         )
         const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
         const observedAt = DateTime.formatIso(CREATED_AT)
@@ -1558,8 +2726,8 @@ describe("first-party plugin runtime", () => {
           relationships: []
         })
 
-        const reads = yield* CompleteDiffReads
-        const administration = yield* PluginAdministration
+        const reads = Context.get(composed, CompleteDiffReads)
+        const administration = Context.get(composed, PluginAdministration)
         const request = {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
@@ -1572,37 +2740,1087 @@ describe("first-party plugin runtime", () => {
         assert.deepStrictEqual(yield* Ref.get(discoveredProfiles), ["production"])
         assert.deepStrictEqual(yield* Ref.get(changedFileProfiles), ["production", "production"])
 
-        const patch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
-          expectedRevision: 1,
-          values: [
-            { _tag: "text", key: "profile", value: "rotated" },
-            { _tag: "text", key: "region", value: "eu-west-1" },
-            { _tag: "text", key: "repositoryName", value: "payments-api" }
-          ]
-        })
-        const updated = yield* administration.patchConfiguration({
+        const reauthorize = administration.reauthorizeConnection
+        assert.isDefined(reauthorize)
+        const updated = yield* reauthorize({
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
-          patch
+          expectedRevision: 1,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
         })
-        assert.strictEqual(updated.revision, 2)
+        assert.strictEqual(updated.configuration.revision, 2)
 
         const third = yield* reads.inventory(request)
         assert.deepStrictEqual(third, first)
         assert.deepStrictEqual({
-          mapBuilds: yield* Ref.get(mapBuilds),
-          invalidations: yield* Ref.get(invalidations),
           discoveredProfiles: yield* Ref.get(discoveredProfiles),
           changedFileProfiles: yield* Ref.get(changedFileProfiles)
         }, {
-          mapBuilds: 1,
-          invalidations: 1,
-          discoveredProfiles: ["production", "rotated"],
+          discoveredProfiles: ["production", "rotated", "rotated", "rotated", "rotated"],
           changedFileProfiles: ["production", "production", "rotated"]
         })
+
+        const publicationGateway = Context.get(composed, ReviewSuggestionPublicationGateway)
+        const publicationTarget = {
+          workspaceId: WORKSPACE_ID,
+          entityId,
+          pluginConnectionId: CONNECTION_ID,
+          sourceRevision: "revision-17",
+          subject: {
+            providerId: "codecommit",
+            repository: "payments-api",
+            pullRequestId: "17",
+            baseRevision: "live-base",
+            headRevision: "live-head"
+          }
+        } satisfies ReviewSuggestionPublicationTarget
+        const publicationIdentity = yield* publicationGateway.identity(publicationTarget)
+        const suggestion = Schema.decodeSync(PrReviewSuggestion)({
+          suggestionId: PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`),
+          state: "draft",
+          title: "Revalidate runtime authority before publication",
+          severity: "P2",
+          problem: "The shared runtime can rotate before publication commits.",
+          impact: "A stale action would become permanently unexecutable.",
+          evidence: {
+            path: "src/runtime.ts",
+            startLine: 1,
+            endLine: 1,
+            excerpt: "export const runtime = shared"
+          },
+          recommendation: "Revalidate authority in the same transaction as the durable commit.",
+          anchor: {
+            _tag: "line",
+            path: "src/runtime.ts",
+            line: 1,
+            relativeFileVersion: "AFTER"
+          },
+          relatedLocations: [],
+          confidence: {
+            level: "high",
+            reason: "The deterministic barrier crosses the administration invalidation boundary."
+          }
+        })
+        const proposingAgent = Schema.decodeSync(ReviewAgentProfile)({
+          profileId: ReviewAgentProfileId.make("codex:test-sbx"),
+          label: "Codex test review",
+          budgetMillis: 60_000,
+          networkAccess: "blocked",
+          sandbox: "sbx"
+        })
+        yield* Ref.set(pauseProposalRead, true)
+        const publication = yield* Effect.forkScoped(
+          publicationGateway.publish({
+            target: publicationTarget,
+            jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000088"),
+            revisionId: PrReviewSuggestionRevisionId.make(
+              `sha256:${"4".repeat(64)}`
+            ),
+            suggestion,
+            finalContent: ReviewSuggestionPublicationContent.make(
+              "Revalidate authority before committing this review comment."
+            ),
+            authorityBinding: publicationIdentity.authorityBinding,
+            proposingAgent,
+            session: {
+              sessionId: SessionId.make("01890f6f-6d6a-7cc0-98d2-000000000089"),
+              workspaceId: WORKSPACE_ID,
+              actor: {
+                _tag: "human",
+                personId: PersonId.make("01890f6f-6d6a-7cc0-98d2-00000000008a")
+              },
+              permission: "workspace-owner",
+              createdAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T09:00:00.000Z"),
+              lastSeenAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z"),
+              idleExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T11:00:00.000Z"),
+              absoluteExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-08-18T10:00:00.000Z"),
+              revokedAt: null
+            }
+          }).pipe(Effect.result)
+        )
+        yield* Deferred.await(proposalReadStarted)
+        const raceUpdated = yield* reauthorize({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CONNECTION_ID,
+          expectedRevision: 2,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "race-rotated" }]
+        })
+        assert.strictEqual(raceUpdated.configuration.revision, 3)
+        yield* Ref.set(pauseProposalRead, false)
+        yield* Deferred.succeed(resumeProposalRead, undefined)
+        const publicationResult = yield* Fiber.join(publication)
+        assert.isTrue(publicationResult._tag === "Failure")
+        const { sql } = yield* Database
+        const staleActions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM governed_actions WHERE workspace_id = ${WORKSPACE_ID}`
+        assert.strictEqual(staleActions[0]?.count, 0)
+        assert.strictEqual(yield* Ref.get(providerMutations), 0)
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+        ))
+        yield* seedGovernedActionAuthorityRoots("codecommit")
+        const governedConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          governedConfiguration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const connectionMap = Context.get(composed, PluginConnectionMap)
+        const executorMap = Context.get(composed, AuthorizedPluginExecutorMap)
+        const governedExecution = Context.get(composed, GovernedActionExecutionStartup)
+        const governedScope = {
+          workspaceId: GOVERNED_WORKSPACE,
+          pluginConnectionId: GOVERNED_CONNECTION
+        }
+        if (connectionMap.proposalContextEffect === undefined) {
+          return yield* Effect.die("production proposal projection is unavailable")
+        }
+        const authorityA = Schema.decodeSync(PluginRuntimeAuthorityToken)(
+          (yield* connectionMap.proposalContextEffect(governedScope)).runtimeAuthorityToken
+        )
+        yield* executorMap.contextEffectForAuthority(governedScope, authorityA)
+        assert.strictEqual(yield* Ref.get(providerMutations), 0)
+
+        const governedUpdated = yield* reauthorize({
+          workspaceId: GOVERNED_WORKSPACE,
+          pluginConnectionId: GOVERNED_CONNECTION,
+          expectedRevision: 1,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
+        })
+        assert.strictEqual(governedUpdated.configuration.revision, 2)
+        const authorityB = Schema.decodeSync(PluginRuntimeAuthorityToken)(
+          (yield* connectionMap.proposalContextEffect(governedScope)).runtimeAuthorityToken
+        )
+        assert.notStrictEqual(authorityB, authorityA)
+
+        const settings = yield* persistenceService.workspaceSettings.get(GOVERNED_WORKSPACE)
+        const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(settings)
+        const ownerPolicy = definitions.find(
+          ({ binding }) => binding.requiredPermission === "workspace-owner"
+        )
+        if (ownerPolicy === undefined) {
+          return yield* Effect.die("workspace-owner governed-action policy is unavailable")
+        }
+        yield* seedGovernedAction({
+          policy: ownerPolicy.binding,
+          pluginConnectionAuthorityDigest: authorityB,
+          seedAuthorityRoots: false,
+          variant: "codecommit"
+        })
+        yield* seedGovernedActionCurrentInputs("codecommit")
+        assert.strictEqual(governedExecution._tag, "ready")
+        if (governedExecution._tag !== "ready") {
+          return yield* Effect.die("governed execution composition is unavailable")
+        }
+        const execution = yield* governedExecution.advance({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+        const governedActionRepository = yield* GovernedActionRepository
+        const governedRecord = yield* governedActionRepository.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(governedRecord.head.state, "succeeded")
+        assert.strictEqual(yield* Ref.get(providerMutations), 1)
       }).pipe(
-        Effect.provide(liveApplicationServices(null, true, "http://127.0.0.1:4173", connections)),
-        Effect.provide(dependencies)
+        Effect.provide(registry.pipe(Layer.provideMerge(dependencies)))
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("persists successful, rejected, and stale Clockify corrections through the production registry", () =>
+    Effect.gen(function*() {
+      const executionTime = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
+      const scenarios: ReadonlyArray<
+        | "succeeded"
+        | "rate-limited"
+        | "rate-limit-exhausted"
+        | "provider-rejected"
+        | "authorization-rejected"
+        | "ambiguous-timeout"
+        | "pre-mutation-outage"
+        | "stale-denied"
+        | "manual-recovery"
+      > = [
+        "succeeded",
+        "rate-limited",
+        "rate-limit-exhausted",
+        "provider-rejected",
+        "authorization-rejected",
+        "ambiguous-timeout",
+        "pre-mutation-outage",
+        "stale-denied",
+        "manual-recovery"
+      ]
+      yield* Effect.forEach(
+        scenarios,
+        (scenario) =>
+          Effect.gen(function*() {
+            yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
+            const entryReads = yield* Ref.make(0)
+            const mutations = yield* Ref.make(0)
+            const rateLimitObserved = yield* Deferred.make<void>()
+            const originalTimeEntry = {
+              id: "clockify-entry-42",
+              workspaceId: "clockify-workspace",
+              userId: "user-1",
+              description: "Review payment safeguards",
+              billable: true,
+              customFieldValues: [],
+              projectId: null,
+              taskId: null,
+              tagIds: [],
+              isLocked: false,
+              type: "REGULAR",
+              timeInterval: {
+                start: "2026-07-15T08:00:00.000Z",
+                end: "2026-07-15T09:00:00.000Z",
+                duration: "PT1H"
+              }
+            }
+            const correctedTimeEntry = {
+              ...originalTimeEntry,
+              description: "[OPS-42] Review payment safeguards"
+            }
+            const providerState = yield* Ref.make(
+              scenario === "stale-denied"
+                ? { ...originalTimeEntry, description: "[OTHER-1] Review payment safeguards" }
+                : originalTimeEntry
+            )
+            const httpClient = HttpClient.make((request) =>
+              Effect.gen(function*() {
+                const entryUrl = request.url.endsWith(
+                  "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
+                )
+                if (entryUrl && request.method === "GET") {
+                  const read = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
+                  const unavailable = scenario === "pre-mutation-outage" && read === 2
+                  return HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      JSON.stringify(
+                        unavailable
+                          ? { message: "provider unavailable before mutation" }
+                          : yield* Ref.get(providerState)
+                      ),
+                      {
+                        status: unavailable ? 503 : 200,
+                        headers: { "content-type": "application/json" }
+                      }
+                    )
+                  )
+                }
+                if (entryUrl && request.method === "PUT") {
+                  const mutation = yield* Ref.updateAndGet(mutations, (count) => count + 1)
+                  const rateLimited = (scenario === "rate-limited" || scenario === "rate-limit-exhausted") &&
+                    mutation === 1
+                  if (rateLimited) yield* Deferred.succeed(rateLimitObserved, undefined)
+                  return HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      JSON.stringify(
+                        scenario === "succeeded" || (scenario === "rate-limited" && !rateLimited)
+                          ? correctedTimeEntry
+                          : { message: "provider rejected correction" }
+                      ),
+                      {
+                        status: scenario === "succeeded" || (scenario === "rate-limited" && !rateLimited)
+                          ? 200
+                          : rateLimited
+                          ? 429
+                          : scenario === "authorization-rejected"
+                          ? 403
+                          : scenario === "ambiguous-timeout"
+                          ? 504
+                          : 409,
+                        headers: {
+                          "content-type": "application/json",
+                          ...((scenario === "rate-limited" && rateLimited) && { "retry-after": "1" })
+                        }
+                      }
+                    )
+                  )
+                }
+                const body = request.url.endsWith("/v1/user")
+                  ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
+                  : [{ id: "clockify-workspace", name: "Delivery" }]
+                return HttpClientResponse.fromWeb(
+                  request,
+                  new Response(JSON.stringify(body), {
+                    status: 200,
+                    headers: { "content-type": "application/json" }
+                  })
+                )
+              })
+            )
+            const config = yield* makePersistenceTestConfig(
+              `control-center-clockify-correction-${scenario}-`
+            )
+            const root = config.blobRoot.slice(0, -"/blobs".length)
+            const database = databaseLayer(config)
+            const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+            const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+            const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+            const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+            const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+            const dependencies = Layer.mergeAll(
+              persistence,
+              database,
+              foundation,
+              governedActions,
+              deliveryGraph,
+              runtimeAuthority,
+              SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+              Layer.succeed(HttpClient.HttpClient, httpClient)
+            )
+
+            yield* Effect.gen(function*() {
+              const persistenceService = yield* Persistence
+              const secretStore = yield* SecretStore
+              yield* seedGovernedActionAuthorityRoots("clockify-correction")
+              const apiKeyRef = yield* secretStore.create(new TextEncoder().encode("clockify-secret"))
+              const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+                { _tag: "secret-reference", key: "apiKey", ref: apiKeyRef },
+                { _tag: "integer", key: "maximumConcurrency", value: 2 },
+                { _tag: "integer", key: "maximumPages", value: 3 },
+                { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+                { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "userIds", value: "user-1" },
+                { _tag: "url", key: "webBaseUrl", value: "https://app.clockify.me" },
+                { _tag: "text", key: "workspaceId", value: "clockify-workspace" }
+              ])
+              yield* persistenceService.pluginConfigurations.update(
+                GOVERNED_WORKSPACE,
+                GOVERNED_CONNECTION,
+                configuration,
+                0,
+                Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+              )
+              yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+                GOVERNED_WORKSPACE,
+                GOVERNED_CONNECTION,
+                "clockify",
+                clockifyReadPluginDescriptor,
+                0,
+                Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+              )
+
+              const registry = yield* PluginRuntimeRegistry
+              const authority = yield* Effect.gen(function*() {
+                return yield* PluginRuntimeAuthority
+              }).pipe(
+                Effect.provide(registry.layer(pluginRuntimeKey({
+                  workspaceId: GOVERNED_WORKSPACE,
+                  pluginConnectionId: GOVERNED_CONNECTION
+                }))),
+                Effect.scoped
+              )
+              yield* seedGovernedAction({
+                pluginConnectionAuthorityDigest: authority,
+                seedAuthorityRoots: false,
+                variant: "clockify-correction"
+              })
+              yield* seedGovernedActionCurrentInputs("clockify-correction")
+
+              const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+              const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+              const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+              const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+                Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+                Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+                Layer.provideMerge(QuarantineRepository.layer)
+              )
+              const engineLayer = GovernedActionExecutionEngine.layer.pipe(
+                Layer.provide(store),
+                Layer.provide(executors)
+              )
+              const execution = scenario === "manual-recovery"
+                ? yield* Effect.gen(function*() {
+                  const executionStore = yield* GovernedActionExecutionStore
+                  const preparation = yield* executionStore.inspect({
+                    workspaceId: GOVERNED_WORKSPACE,
+                    actionId: GOVERNED_ACTION
+                  })
+                  if (preparation._tag !== "dispatch") {
+                    return yield* Effect.die("expected Clockify dispatch preparation")
+                  }
+                  const preflight = Schema.decodeSync(PluginActionPreflightV1)({
+                    _tag: "ready",
+                    checkedRevision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+                    checkedAt: "2026-07-15T10:02:00.000Z"
+                  })
+                  if (preflight._tag !== "ready") {
+                    return yield* Effect.die("expected ready Clockify preflight")
+                  }
+                  const begun = yield* executionStore.begin({
+                    preparationToken: preparation.preparationToken,
+                    preflight,
+                    runtimeAuthorityToken: authority,
+                    scope: preparation.scope
+                  })
+                  if (begun._tag !== "permitted") {
+                    return yield* Effect.die("expected Clockify dispatch permit")
+                  }
+                  yield* TestClock.setTime(DateTime.toEpochMillis(begun.dispatchDeadline))
+                  yield* executionStore.recordUnknown({
+                    permitToken: begun.permitToken,
+                    outcome: Schema.decodeSync(GovernedActionUnknownOutcome)({
+                      _tag: "manual",
+                      observedAt: DateTime.formatIso(begun.dispatchDeadline),
+                      safeSummary: "Clockify dispatch crossed the provider intent boundary",
+                      reason: "interrupted-after-intent"
+                    })
+                  })
+                  yield* Ref.set(providerState, correctedTimeEntry)
+                  yield* TestClock.setTime(DateTime.toEpochMillis(begun.leaseExpiresAt) + 61_000)
+                  const engine = yield* GovernedActionExecutionEngine
+                  return yield* engine.run({
+                    workspaceId: GOVERNED_WORKSPACE,
+                    actionId: GOVERNED_ACTION
+                  })
+                }).pipe(
+                  Effect.provide(engineLayer.pipe(Layer.provideMerge(store)))
+                )
+                : scenario === "rate-limit-exhausted"
+                ? yield* Effect.gen(function*() {
+                  const engine = yield* GovernedActionExecutionEngine
+                  const fiber = yield* withRequestTimeout(
+                    engine.run({
+                      workspaceId: GOVERNED_WORKSPACE,
+                      actionId: GOVERNED_ACTION
+                    }),
+                    "mutation"
+                  ).pipe(
+                    Effect.provide(RequestLimitPolicy.defaultLayer),
+                    Effect.forkChild
+                  )
+                  yield* Deferred.await(rateLimitObserved)
+                  yield* TestClock.adjust(Duration.seconds(30))
+                  return yield* Fiber.join(fiber)
+                }).pipe(Effect.provide(engineLayer))
+                : scenario === "rate-limited"
+                ? yield* Effect.gen(function*() {
+                  const engine = yield* GovernedActionExecutionEngine
+                  const fiber = yield* engine.run({
+                    workspaceId: GOVERNED_WORKSPACE,
+                    actionId: GOVERNED_ACTION
+                  }).pipe(Effect.forkChild)
+                  yield* Deferred.await(rateLimitObserved)
+                  yield* TestClock.adjust(Duration.seconds(1))
+                  return yield* Fiber.join(fiber)
+                }).pipe(Effect.provide(engineLayer))
+                : yield* Effect.gen(function*() {
+                  const engine = yield* GovernedActionExecutionEngine
+                  return yield* engine.run({
+                    workspaceId: GOVERNED_WORKSPACE,
+                    actionId: GOVERNED_ACTION
+                  })
+                }).pipe(Effect.provide(engineLayer))
+              const repository = yield* GovernedActionRepository
+              const record = yield* repository.read({
+                workspaceId: GOVERNED_WORKSPACE,
+                actionId: GOVERNED_ACTION
+              })
+              const expectedState = scenario === "succeeded" ||
+                  scenario === "rate-limited" ||
+                  scenario === "manual-recovery"
+                ? "succeeded"
+                : scenario === "provider-rejected" ||
+                    scenario === "authorization-rejected" ||
+                    scenario === "rate-limit-exhausted" ||
+                    scenario === "pre-mutation-outage"
+                ? "failed"
+                : scenario === "ambiguous-timeout"
+                ? "unknown"
+                : "denied"
+
+              assert.deepStrictEqual(execution, { _tag: "advanced", state: expectedState })
+              assert.strictEqual(record.head.state, expectedState)
+              assert.strictEqual(
+                record.head.lineage._tag,
+                scenario === "stale-denied"
+                  ? "none"
+                  : scenario === "ambiguous-timeout"
+                  ? "reconcilable"
+                  : "terminal"
+              )
+              assert.strictEqual(
+                yield* Ref.get(entryReads),
+                scenario === "stale-denied" || scenario === "manual-recovery" ? 1 : 2
+              )
+              assert.strictEqual(
+                yield* Ref.get(mutations),
+                scenario === "stale-denied" ||
+                  scenario === "manual-recovery" ||
+                  scenario === "pre-mutation-outage"
+                  ? 0
+                  : scenario === "rate-limited"
+                  ? 2
+                  : 1
+              )
+            }).pipe(
+              Effect.provide(
+                makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+              )
+            )
+          }),
+        { discard: true }
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("converges concurrent approvals and retries corrections before mutable Clockify checks", () =>
+    Effect.gen(function*() {
+      const submittedAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(submittedAt))
+      const entryReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      const concurrentProposalReads = yield* Deferred.make<void>()
+      const timeEntry = {
+        id: "clockify-entry-42",
+        workspaceId: "clockify-workspace",
+        userId: "user-1",
+        description: "Review payment safeguards",
+        billable: true,
+        projectId: null,
+        taskId: null,
+        tagIds: [],
+        customFieldValues: [],
+        isLocked: false,
+        type: "REGULAR",
+        timeInterval: {
+          start: "2026-07-15T08:00:00.000Z",
+          end: "2026-07-15T09:00:00.000Z",
+          duration: "PT1H"
+        }
+      }
+      const correctedTimeEntry = {
+        ...timeEntry,
+        description: "[OPS-42] Review payment safeguards"
+      }
+      const providerState = yield* Ref.make(timeEntry)
+      const httpClient = HttpClient.make((request) =>
+        Effect.gen(function*() {
+          const mutationCount = request.method === "GET"
+            ? null
+            : yield* Ref.updateAndGet(mutations, (count) => count + 1)
+          const entryUrl = request.url.endsWith(
+            "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
+          )
+          if (entryUrl && mutationCount === 1) {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ message: "rate limited" }), {
+                status: 429,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          const body = entryUrl
+            ? request.method === "GET"
+              ? yield* Effect.gen(function*() {
+                const readCount = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
+                if (readCount === 2) {
+                  yield* Deferred.succeed(concurrentProposalReads, undefined)
+                }
+                if (readCount <= 2) yield* Deferred.await(concurrentProposalReads)
+                if (readCount === 4) yield* TestClock.adjust(Duration.seconds(1))
+                return yield* Ref.get(providerState)
+              })
+              : yield* Ref.set(providerState, correctedTimeEntry).pipe(
+                Effect.as(correctedTimeEntry)
+              )
+            : request.url.endsWith("/v1/user")
+            ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
+            : [{ id: "clockify-workspace", name: "Delivery" }]
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(JSON.stringify(body), {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            })
+          )
+        })
+      )
+      const config = yield* makePersistenceTestConfig("control-center-clockify-submission-composition-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, httpClient)
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        const { sql } = yield* Database
+        yield* seedGovernedActionAuthorityRoots("clockify-approval")
+        yield* sql`UPDATE sessions SET permission = 'workspace-approver'
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND session_id = ${SessionId.make(GOVERNED_SESSION_ID)}`
+        const changedSessions = yield* sql<{ readonly changes: number }>`SELECT changes() AS changes`
+        assert.strictEqual(changedSessions[0]?.changes, 1)
+        const apiKeyRef = yield* secretStore.create(new TextEncoder().encode("clockify-secret"))
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiKey", ref: apiKeyRef },
+          { _tag: "integer", key: "maximumConcurrency", value: 2 },
+          { _tag: "integer", key: "maximumPages", value: 3 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+          { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "text", key: "userIds", value: "user-1" },
+          { _tag: "url", key: "webBaseUrl", value: "https://app.clockify.me" },
+          { _tag: "text", key: "workspaceId", value: "clockify-workspace" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "clockify",
+          clockifyReadPluginDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* seedGovernedActionCurrentInputs("clockify-approval")
+
+        const registryService = yield* PluginRuntimeRegistry
+        const composition = makeControlCenterApplicationComposition({
+          bindConfig: yield* decodeBindConfig({ port: 4173 }),
+          persistenceConfig: Schema.decodeUnknownSync(PersistenceConfig)(config),
+          secretRoot: SecretRoot.make(`${root}/secrets`),
+          staticAssets: { root },
+          firstPartyPluginRuntime: true,
+          firstPartyPluginRuntimes: registryService,
+          governedActionExecution: { workspaceId: GOVERNED_WORKSPACE }
+        })
+        if (
+          composition.firstPartyRuntime === null ||
+          composition.firstPartyGovernedActionStartup === null ||
+          composition.firstPartyGovernedActionExecutors === null
+        ) {
+          return yield* Effect.die("first-party governed runtime composition is unavailable")
+        }
+        const composed = yield* Layer.build(
+          Layer.mergeAll(
+            composition.clockifyActionSubmissions,
+            composition.firstPartyRuntime.connections,
+            composition.firstPartyGovernedActionStartup,
+            composition.firstPartyGovernedActionExecutors
+          ).pipe(Layer.provide(composition.lifecycle))
+        )
+        const submissions = Context.get(composed, ClockifyActionSubmissions)
+        const session = Schema.decodeSync(SessionSummary)({
+          sessionId: GOVERNED_SESSION_ID,
+          workspaceId: GOVERNED_WORKSPACE,
+          actor: {
+            _tag: "human",
+            personId: GOVERNED_PERSON_ID
+          },
+          permission: "workspace-approver",
+          createdAt: "2026-07-15T09:00:00.000Z",
+          lastSeenAt: "2026-07-15T09:30:00.000Z",
+          idleExpiresAt: "2026-07-15T11:00:00.000Z",
+          absoluteExpiresAt: "2026-08-15T10:00:00.000Z",
+          revokedAt: null
+        })
+        const request = {
+          workspaceId: GOVERNED_WORKSPACE,
+          entityId: EntityId.make(GOVERNED_ENTITY_ID),
+          request: Schema.decodeSync(SubmitClockifyActionRequest)({
+            _tag: "record-approval",
+            expectedRevision: Revision.make(
+              "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
+            ),
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }),
+          session
+        }
+        const results = yield* Effect.all(
+          [submissions.submit(request), submissions.submit(request)],
+          { concurrency: "unbounded" }
+        )
+        const result = results[0]
+        assert.strictEqual(results[1]?.actionId, result?.actionId)
+        assert.strictEqual(results[1]?.state, "succeeded")
+        if (result === undefined) return yield* Effect.die("expected concurrent submission result")
+        const conflictingActor = yield* submissions.submit({
+          ...request,
+          session: {
+            ...session,
+            actor: {
+              _tag: "human",
+              personId: PersonId.make("01890f6f-6d6a-7cc0-98d2-440000000099")
+            }
+          }
+        }).pipe(Effect.result)
+        const forbiddenCorrection = yield* submissions.submit({
+          workspaceId: GOVERNED_WORKSPACE,
+          entityId: EntityId.make(GOVERNED_ENTITY_ID),
+          request: {
+            _tag: "correct-association",
+            expectedRevision: Revision.make(
+              "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
+            ),
+            jiraIssueKey: "OPS-42"
+          },
+          session
+        }).pipe(Effect.result)
+        const record = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: result.actionId
+        })
+
+        assert.strictEqual(result.state, "succeeded")
+        assert.strictEqual(record.head.state, "succeeded")
+        assert.strictEqual(record.envelope.policy.requiredPermission, "workspace-approver")
+        assert.isNotNull(record.authorization)
+        if (record.authorization !== null) {
+          assert.isTrue(
+            DateTime.Order(record.authorization.authorizedAt, record.envelope.proposal.proposedAt) >= 0
+          )
+        }
+        assert.isTrue(Result.isFailure(conflictingActor))
+        if (Result.isFailure(conflictingActor)) {
+          assert.strictEqual(conflictingActor.failure.reason, "conflict")
+        }
+        assert.isTrue(Result.isFailure(forbiddenCorrection))
+        if (Result.isFailure(forbiddenCorrection)) {
+          assert.strictEqual(forbiddenCorrection.failure.reason, "forbidden")
+        }
+        assert.strictEqual(yield* Ref.get(entryReads), 4)
+        assert.strictEqual(yield* Ref.get(mutations), 0)
+
+        yield* sql`UPDATE sessions SET permission = 'workspace-owner'
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND session_id = ${SessionId.make(GOVERNED_SESSION_ID)}`
+        const ownerSession = {
+          ...session,
+          permission: "workspace-owner"
+        } satisfies SessionSummary
+        const correctionRequest = {
+          workspaceId: GOVERNED_WORKSPACE,
+          entityId: EntityId.make(GOVERNED_ENTITY_ID),
+          request: Schema.decodeSync(SubmitClockifyActionRequest)({
+            _tag: "correct-association",
+            expectedRevision: Revision.make(
+              "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
+            ),
+            jiraIssueKey: "OPS-42"
+          }),
+          session: ownerSession
+        }
+        const failedCorrection = yield* submissions.submit(correctionRequest)
+        const failedCorrectionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: failedCorrection.actionId
+        })
+        assert.strictEqual(failedCorrection.state, "failed")
+        assert.strictEqual(failedCorrectionRecord.head.state, "failed")
+        assert.strictEqual(yield* Ref.get(mutations), 1)
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const correction = yield* submissions.submit(correctionRequest)
+        const correctionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: correction.actionId
+        })
+        assert.notStrictEqual(correction.actionId, failedCorrection.actionId)
+        assert.strictEqual(correction.state, "succeeded")
+        assert.isNotNull(correctionRecord.authorization)
+        if (correctionRecord.authorization !== null) {
+          assert.isTrue(
+            DateTime.Order(
+              correctionRecord.authorization.authorizedAt,
+              correctionRecord.envelope.proposal.proposedAt
+            ) >= 0
+          )
+        }
+        assert.strictEqual(yield* Ref.get(mutations), 2)
+        const readsAfterCorrection = yield* Ref.get(entryReads)
+
+        yield* sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+          source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+        ) VALUES (
+          ${GOVERNED_WORKSPACE}, ${EntityId.make(GOVERNED_ENTITY_ID)}, 2, ${"f".repeat(64)}, 1,
+          'https://app.clockify.me/tracker', '2026-07-15T10:03:00.000Z',
+          '2026-07-15T10:03:00.000Z', '2026-07-15T10:03:00.000Z', '2026-07-15T10:03:00.000Z'
+        )`
+        yield* sql`UPDATE entities SET current_revision = 2, updated_at = '2026-07-15T10:03:00.000Z'
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND entity_id = ${EntityId.make(GOVERNED_ENTITY_ID)}`
+
+        const correctionRetry = yield* submissions.submit(correctionRequest)
+        const approvalRetry = yield* submissions.submit({ ...request, session: ownerSession })
+        assert.deepStrictEqual(correctionRetry, correction)
+        assert.deepStrictEqual(approvalRetry, result)
+        assert.strictEqual(yield* Ref.get(entryReads), readsAfterCorrection)
+        assert.strictEqual(yield* Ref.get(mutations), 2)
+      }).pipe(
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("executes authorized Clockify approval through the production registry without provider mutation", () =>
+    Effect.gen(function*() {
+      const executionTime = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      const authorizationTime = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:01:00.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
+      const entryReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      const timeEntry = {
+        id: "clockify-entry-42",
+        workspaceId: "clockify-workspace",
+        userId: "user-1",
+        description: "Review payment safeguards",
+        billable: true,
+        projectId: null,
+        taskId: null,
+        tagIds: [],
+        isLocked: false,
+        type: "REGULAR",
+        timeInterval: {
+          start: "2026-07-15T08:00:00.000Z",
+          end: "2026-07-15T09:00:00.000Z",
+          duration: "PT1H"
+        }
+      }
+      const httpClient = HttpClient.make((request) =>
+        Effect.gen(function*() {
+          if (request.method !== "GET") yield* Ref.update(mutations, (count) => count + 1)
+          const body = request.url.endsWith(
+              "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
+            )
+            ? yield* Ref.updateAndGet(entryReads, (count) => count + 1).pipe(
+              Effect.as(timeEntry)
+            )
+            : request.url.endsWith("/v1/user")
+            ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
+            : [{ id: "clockify-workspace", name: "Delivery" }]
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(JSON.stringify(body), {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            })
+          )
+        })
+      )
+      const config = yield* makePersistenceTestConfig("control-center-clockify-governed-runtime-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, httpClient)
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        yield* seedGovernedActionAuthorityRoots("clockify-approval")
+        const apiKeyRef = yield* secretStore.create(new TextEncoder().encode("clockify-secret"))
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiKey", ref: apiKeyRef },
+          { _tag: "integer", key: "maximumConcurrency", value: 2 },
+          { _tag: "integer", key: "maximumPages", value: 3 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+          { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "text", key: "userIds", value: "user-1" },
+          { _tag: "url", key: "webBaseUrl", value: "https://app.clockify.me" },
+          { _tag: "text", key: "workspaceId", value: "clockify-workspace" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "clockify",
+          clockifyReadPluginDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const authority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authority,
+          seedAuthorityRoots: false,
+          variant: "clockify-approval"
+        })
+        yield* seedGovernedActionCurrentInputs("clockify-approval")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const engineLayer = GovernedActionExecutionEngine.layer.pipe(
+          Layer.provide(store),
+          Layer.provide(executors)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(Effect.provide(engineLayer))
+        const repository = yield* GovernedActionRepository
+        const record = yield* repository.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+        const terminalApprovals = yield* repository.readLatestTerminalByTarget({
+          workspaceId: GOVERNED_WORKSPACE,
+          providerId: "clockify",
+          targetEntityId: EntityId.make(GOVERNED_ENTITY_ID),
+          actionKind: "record-approval",
+          limit: 20
+        })
+        const sourceRevision = Schema.decodeSync(SourceRevision)({
+          providerId: "clockify",
+          pluginConnectionId: GOVERNED_CONNECTION,
+          vendorImmutableId: "clockify-entry-42",
+          revision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+          sourceUrl: "https://app.clockify.me/tracker",
+          firstObservedAt: "2026-07-15T09:45:00.000Z",
+          lastObservedAt: "2026-07-15T09:50:00.000Z",
+          synchronizedAt: "2026-07-15T09:55:00.000Z",
+          normalizationSchemaVersion: 1
+        })
+        const approval = projectClockifyApproval(
+          EntityId.make(GOVERNED_ENTITY_ID),
+          sourceRevision,
+          terminalApprovals
+        )
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(record.head.state, "succeeded")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        assert.deepStrictEqual(
+          terminalApprovals.map(({ envelope }) => envelope.actionId),
+          [GOVERNED_ACTION]
+        )
+        assert.deepStrictEqual(approval, {
+          actionId: GOVERNED_ACTION,
+          decision: "approved",
+          rationale: "Reviewed against the delivery record",
+          decidedAt: authorizationTime
+        })
+        if (record.head.lineage._tag !== "terminal") {
+          return yield* Effect.die("expected terminal Clockify approval")
+        }
+        const laterApprovalAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:01:01.000Z")
+        const laterActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-440000000097")
+        const tieActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-440000000098")
+        const laterRecord = {
+          ...record,
+          envelope: { ...record.envelope, actionId: laterActionId },
+          head: {
+            ...record.head,
+            lineage: {
+              ...record.head.lineage,
+              receipt: { ...record.head.lineage.receipt, observedAt: laterApprovalAt }
+            }
+          }
+        }
+        const tieRecord = {
+          ...laterRecord,
+          envelope: { ...laterRecord.envelope, actionId: tieActionId }
+        }
+        assert.strictEqual(
+          projectClockifyApproval(
+            EntityId.make(GOVERNED_ENTITY_ID),
+            sourceRevision,
+            [record, laterRecord]
+          )?.actionId,
+          laterActionId
+        )
+        assert.strictEqual(
+          projectClockifyApproval(
+            EntityId.make(GOVERNED_ENTITY_ID),
+            sourceRevision,
+            [tieRecord, laterRecord]
+          )?.actionId,
+          tieActionId
+        )
+        assert.isNull(projectClockifyApproval(
+          EntityId.make(GOVERNED_ENTITY_ID),
+          { ...sourceRevision, revision: Revision.make("next-clockify-revision") },
+          terminalApprovals
+        ))
+        assert.isNull(projectClockifyApproval(
+          EntityId.make(GOVERNED_ENTITY_ID),
+          { ...sourceRevision, pluginConnectionId: UNCONFIGURED_CONNECTION_ID },
+          terminalApprovals
+        ))
+        assert.strictEqual(yield* Ref.get(entryReads), 2)
+        assert.strictEqual(yield* Ref.get(mutations), 0)
+      }).pipe(
+        Effect.provide(
+          makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients).pipe(Layer.provideMerge(dependencies))
+        )
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -1648,9 +3866,29 @@ describe("first-party plugin runtime", () => {
           isEnabled: true,
           createdAt: CREATED_AT
         })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: HISTORICAL_CLOCKIFY_CONNECTION_ID,
+          providerId: "clockify",
+          displayName: PluginConnectionDisplayName.make("Historical Clockify"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
         const apiKeyRef = yield* secretStore.create(new TextEncoder().encode("clockify-secret"))
+        const historicalApiKeyRef = yield* secretStore.create(
+          new TextEncoder().encode("historical-clockify-secret")
+        )
         const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
           { _tag: "secret-reference", key: "apiKey", ref: apiKeyRef },
+          { _tag: "integer", key: "maximumConcurrency", value: 2 },
+          { _tag: "integer", key: "maximumPages", value: 3 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+          { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "text", key: "userIds", value: "user-1" },
+          { _tag: "url", key: "webBaseUrl", value: "https://app.clockify.me" },
+          { _tag: "text", key: "workspaceId", value: "clockify-workspace" }
+        ])
+        const historicalConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiKey", ref: historicalApiKeyRef },
           { _tag: "integer", key: "maximumConcurrency", value: 2 },
           { _tag: "integer", key: "maximumPages", value: 3 },
           { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -1666,11 +3904,26 @@ describe("first-party plugin runtime", () => {
           0,
           CREATED_AT
         )
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          HISTORICAL_CLOCKIFY_CONNECTION_ID,
+          historicalConfiguration,
+          0,
+          CREATED_AT
+        )
         yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
           WORKSPACE_ID,
           CONNECTION_ID,
           "clockify",
           clockifyReadPluginDescriptor,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          HISTORICAL_CLOCKIFY_CONNECTION_ID,
+          "clockify",
+          clockifyReadOnlyPluginDescriptor,
           0,
           CREATED_AT
         )
@@ -1695,6 +3948,35 @@ describe("first-party plugin runtime", () => {
         assert.isNull(discovery.resource)
         assert.strictEqual(requests.length, 2)
         assert.isTrue(requests.every(({ headers }) => headers["x-api-key"] === "clockify-secret"))
+
+        const historicalContext = yield* connections.contextEffect({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: HISTORICAL_CLOCKIFY_CONNECTION_ID
+        })
+        const historical = Context.get(historicalContext, PluginConnection)
+        assert.isTrue(hasPluginCapability(historical.descriptor, "entity.read", 1))
+        assert.isFalse(hasPluginCapability(historical.descriptor, "action.propose", 1))
+        assert.isFalse(hasPluginCapability(historical.descriptor, "action.execute", 1))
+        const historicalProposal = yield* historical.proposeAction(
+          Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+            actionKind: "record-approval",
+            target: {
+              entityType: "time-entry",
+              vendorImmutableId: "clockify-entry-42"
+            },
+            expectedRevision: "historical-revision",
+            payload: {
+              decision: "approved",
+              rationale: "Historical runtime must remain read-only"
+            },
+            evidenceIds: []
+          })
+        ).pipe(Effect.result)
+        assert.strictEqual(historicalProposal._tag, "Failure")
+        if (historicalProposal._tag === "Failure") {
+          assert.strictEqual(historicalProposal.failure._tag, "PluginUnsupportedCapabilityFailure")
+        }
+        assert.strictEqual(requests.length, 2)
 
         const isolated = yield* Effect.result(connections.contextEffect({
           workspaceId: OTHER_WORKSPACE_ID,
@@ -1737,8 +4019,7 @@ describe("first-party plugin runtime", () => {
         }
         assert.strictEqual(requests.length, 2)
       }).pipe(
-        Effect.provide(firstPartyPluginConnectionMapLayer),
-        Effect.provide(dependencies)
+        Effect.provide(firstPartyPluginConnectionMapLayer.pipe(Layer.provideMerge(dependencies)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

@@ -16,55 +16,55 @@ const SafeDiagnosticCode = Schema.String.check(
 )
 
 /** Provider credentials are missing, expired, or rejected. */
-export class PluginAuthenticationFailure extends Schema.TaggedErrorClass<PluginAuthenticationFailure>()(
+export class PluginAuthenticationFailure extends Schema.TaggedError<PluginAuthenticationFailure>()(
   "PluginAuthenticationFailure",
   { operation: SafeOperation }
 ) {}
 
 /** Provider credentials are valid but lack the requested permission. */
-export class PluginAuthorizationFailure extends Schema.TaggedErrorClass<PluginAuthorizationFailure>()(
+export class PluginAuthorizationFailure extends Schema.TaggedError<PluginAuthorizationFailure>()(
   "PluginAuthorizationFailure",
   { operation: SafeOperation }
 ) {}
 
 /** Provider rate limit with a decoded absolute retry time. */
-export class PluginRateLimitFailure extends Schema.TaggedErrorClass<PluginRateLimitFailure>()(
+export class PluginRateLimitFailure extends Schema.TaggedError<PluginRateLimitFailure>()(
   "PluginRateLimitFailure",
   { operation: SafeOperation, retryAt: UtcTimestamp }
 ) {}
 
 /** Bounded provider operation exceeded its configured timeout. */
-export class PluginTimeoutFailure extends Schema.TaggedErrorClass<PluginTimeoutFailure>()(
+export class PluginTimeoutFailure extends Schema.TaggedError<PluginTimeoutFailure>()(
   "PluginTimeoutFailure",
   { operation: SafeOperation }
 ) {}
 
 /** Untrusted provider output did not satisfy the versioned contract. */
-export class PluginMalformedResponseFailure extends Schema.TaggedErrorClass<PluginMalformedResponseFailure>()(
+export class PluginMalformedResponseFailure extends Schema.TaggedError<PluginMalformedResponseFailure>()(
   "PluginMalformedResponseFailure",
   { operation: SafeOperation, diagnosticCode: SafeDiagnosticCode }
 ) {}
 
 /** Provider was unavailable independently of credentials and rate limits. */
-export class PluginOutageFailure extends Schema.TaggedErrorClass<PluginOutageFailure>()(
+export class PluginOutageFailure extends Schema.TaggedError<PluginOutageFailure>()(
   "PluginOutageFailure",
   { operation: SafeOperation }
 ) {}
 
 /** Scoped plugin operation was interrupted by cancellation. */
-export class PluginCancellationFailure extends Schema.TaggedErrorClass<PluginCancellationFailure>()(
+export class PluginCancellationFailure extends Schema.TaggedError<PluginCancellationFailure>()(
   "PluginCancellationFailure",
   { operation: SafeOperation }
 ) {}
 
 /** Provider state or idempotency identity conflicts with the requested action. */
-export class PluginConflictFailure extends Schema.TaggedErrorClass<PluginConflictFailure>()(
+export class PluginConflictFailure extends Schema.TaggedError<PluginConflictFailure>()(
   "PluginConflictFailure",
   { operation: SafeOperation, diagnosticCode: SafeDiagnosticCode }
 ) {}
 
 /** Required contract capability or version is unavailable. */
-export class PluginUnsupportedCapabilityFailure extends Schema.TaggedErrorClass<PluginUnsupportedCapabilityFailure>()(
+export class PluginUnsupportedCapabilityFailure extends Schema.TaggedError<PluginUnsupportedCapabilityFailure>()(
   "PluginUnsupportedCapabilityFailure",
   {
     capabilityId: Schema.NullOr(PluginCapabilityId),
@@ -74,13 +74,13 @@ export class PluginUnsupportedCapabilityFailure extends Schema.TaggedErrorClass<
 ) {}
 
 /** Secret-free plugin configuration cannot construct a valid connection. */
-export class PluginConfigurationFailure extends Schema.TaggedErrorClass<PluginConfigurationFailure>()(
+export class PluginConfigurationFailure extends Schema.TaggedError<PluginConfigurationFailure>()(
   "PluginConfigurationFailure",
   { diagnosticCode: SafeDiagnosticCode }
 ) {}
 
 /** Provider mutation may have occurred and must be reconciled, never retried blindly. */
-export class PluginUnknownOutcomeFailure extends Schema.TaggedErrorClass<PluginUnknownOutcomeFailure>()(
+export class PluginUnknownOutcomeFailure extends Schema.TaggedError<PluginUnknownOutcomeFailure>()(
   "PluginUnknownOutcomeFailure",
   { operation: SafeOperation, reconciliationKey: PluginActionReconciliationKey }
 ) {}

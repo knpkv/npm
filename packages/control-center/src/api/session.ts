@@ -32,6 +32,12 @@ export const PairingCode = Schema.String.check(
 /** Decoded single-use pairing credential. */
 export type PairingCode = typeof PairingCode.Type
 
+/** Workspace-scoped access available to a newly paired browser. */
+export const BrowserPairingPermission = Schema.Literals(["workspace-owner", "workspace-approver"])
+
+/** Decoded access available to a newly paired browser. */
+export type BrowserPairingPermission = typeof BrowserPairingPermission.Type
+
 /** Mutation proof issued separately from the opaque session cookie. */
 export const CsrfToken = Schema.String.check(
   Schema.isPattern(LOWERCASE_SECRET_PATTERN, { expected: "a lowercase 256-bit CSRF credential" })
@@ -70,6 +76,23 @@ export const PairSessionResponse = Schema.Struct({
 
 /** Decoded session-pairing response. */
 export type PairSessionResponse = typeof PairSessionResponse.Type
+
+/** Owner-authorized request for a single-use code for another browser. */
+export const IssueBrowserPairingCodeRequest = Schema.Struct({
+  permission: BrowserPairingPermission
+})
+
+/** Decoded request for a single-use code for another browser. */
+export type IssueBrowserPairingCodeRequest = typeof IssueBrowserPairingCodeRequest.Type
+
+/** One-time browser-pairing material. It must never be persisted by the client. */
+export const IssueBrowserPairingCodeResponse = Schema.Struct({
+  pairingCode: PairingCode,
+  expiresAt: UtcTimestamp
+})
+
+/** Decoded one-time browser-pairing material. */
+export type IssueBrowserPairingCodeResponse = typeof IssueBrowserPairingCodeResponse.Type
 
 /** Authenticated session metadata with a recoverable, session-bound mutation proof. */
 export const CurrentSessionResponse = Schema.Struct({
@@ -149,6 +172,14 @@ const list = HttpApiEndpoint.get("list", "/", {
   error: authenticatedErrors
 }).middleware(SessionCookieAuth)
 
+const issueBrowserPairingCode = HttpApiEndpoint.post("issueBrowserPairingCode", "/device-code", {
+  payload: IssueBrowserPairingCodeRequest,
+  success: IssueBrowserPairingCodeResponse,
+  error: authenticatedErrors
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const revoke = HttpApiEndpoint.delete("revoke", "/:sessionId", {
   params: Schema.Struct({ sessionId: SessionId }),
   success: HttpApiSchema.NoContent,
@@ -166,6 +197,6 @@ const logout = HttpApiEndpoint.post("logout", "/logout", {
 
 /** Session pairing, inspection, administration, and logout contract. */
 export class SessionApiGroup extends HttpApiGroup.make("session")
-  .add(pair, current, list, revoke, logout)
+  .add(pair, current, list, issueBrowserPairingCode, revoke, logout)
   .prefix("/api/v1/session")
 {}

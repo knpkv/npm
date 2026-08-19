@@ -1,5 +1,5 @@
 import { HomeDirectoryLive, isTokenExpired } from "@knpkv/atlassian-common/profile-storage"
-import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
+import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService/detectProfiles.js"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -15,25 +15,30 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 
+import * as Predicate from "effect/Predicate"
 import type {
   CreatePluginConnectionBatchResult,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionsResponse,
   PatchPluginConfigurationRequest,
+  PatchProviderAccountRequest,
+  PluginAdministrationDiagnostic,
   PluginConfiguration,
   PluginConfigurationMetadata,
   PluginConfigurationPatchValue,
+  PluginConnectionAdministration,
   PluginConnectionIdentity,
   PluginConnectionSetupFailureClass,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  PluginCredentialReplacement,
   ProviderAccountSummary,
   RedactedPluginConfigurationValue
 } from "../../api/plugins.js"
 import { CreatePluginConnectionValue, PluginConfigurationKey } from "../../api/plugins.js"
 import type { PluginHealth } from "../../domain/freshness.js"
-import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import type { PluginConnectionId, ProviderAccountId, WorkspaceId } from "../../domain/identifiers.js"
 import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
 import type { PluginDiscoveryV1 } from "../../domain/plugins/discovery.js"
 import {
@@ -45,9 +50,9 @@ import {
   PluginAdministration,
   type PluginAdministrationService
 } from "../api/ApplicationServices.js"
-import { Persistence } from "../persistence/Persistence.js"
-import type { PluginConnectionRecord } from "../persistence/repositories/models.js"
-import { PluginConnectionDisplayName } from "../persistence/repositories/models.js"
+import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
+import type { PluginConnectionRecord, ProviderAccountRecord } from "../persistence/repositories/models.js"
+import { PluginConnectionDisplayName, ProviderAccountDisplayName } from "../persistence/repositories/models.js"
 import type { StoredPluginConfigurationValue } from "../persistence/repositories/pluginConfigurationModels.js"
 import {
   StoredPluginConfiguration,
@@ -68,7 +73,7 @@ import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
 import { AwsResourceDiscovery, awsResourceDiscoveryLayer } from "./awsResourceDiscovery.js"
-import { materializeConnectionOwnership } from "./connectionOwnership.js"
+import { assertConnectionOwnership, materializeConnectionOwnership } from "./connectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
@@ -79,6 +84,26 @@ const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
+const secretDecoder = new TextDecoder("utf-8", { fatal: true })
+
+const mapAdministrationWriteError = (
+  error:
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+    | PersistenceOperationFailure
+) => {
+  switch (error._tag) {
+    case "ApplicationConflict":
+    case "ApplicationInvalidRequest":
+    case "ApplicationResourceNotFound":
+    case "ApplicationServiceUnavailable":
+      return error
+    default:
+      return mapPersistenceWriteError(error)
+  }
+}
 
 type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
 type AtlassianConfigurationValue =
@@ -162,6 +187,7 @@ const invalidateAtlassianOAuthProfileRuntimes = Effect.fn(
   "PluginAdministration.invalidateAtlassianOAuthProfileRuntimes"
 )(function*(
   persistence: Persistence["Service"],
+  secrets: SecretStore["Service"],
   pluginConnections: PluginConnectionMapV1 | null,
   workspaceId: WorkspaceId,
   profileId: string
@@ -177,11 +203,27 @@ const invalidateAtlassianOAuthProfileRuntimes = Effect.fn(
       workspaceId,
       connection.pluginConnectionId
     ).pipe(Effect.mapError(() => unavailable()))
-    if (
-      Option.isSome(configuration) &&
-      configuredText(configuration.value.values, "authMode") === "oauth" &&
-      configuredText(configuration.value.values, "oauthProfileId") === profileId
-    ) {
+    if (Option.isNone(configuration) || configuredText(configuration.value.values, "authMode") !== "oauth") continue
+    const storedProfile = configuration.value.values.find(({ key }) => key === "oauthProfileId")
+    const usesCompletedProfile = storedProfile?._tag === "text"
+      ? storedProfile.value === profileId
+      : storedProfile?._tag === "secret-reference"
+      ? yield* Effect.scoped(
+        secrets.resolve(storedProfile.ref).pipe(
+          Effect.flatMap((lease) =>
+            lease.withBytes((bytes) =>
+              Effect.try({
+                try: () => secretDecoder.decode(bytes) === profileId,
+                catch: () => unavailable()
+              })
+            )
+          ),
+          Effect.catchTag("SecretNotFoundError", () => Effect.succeed(false)),
+          Effect.mapError(() => unavailable())
+        )
+      )
+      : false
+    if (usesCompletedProfile) {
       yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: connection.pluginConnectionId })
     }
   }
@@ -193,6 +235,7 @@ const validateStoredAtlassianAuthentication = Effect.fn(
   providerId: PluginConnectionRecord["providerId"],
   descriptor: typeof NegotiatedPluginDescriptorV1.Type,
   values: ReadonlyArray<StoredPluginConfigurationValue>,
+  secrets: SecretStore["Service"],
   fileSystem: FileSystem.FileSystem,
   path: Path.Path
 ) {
@@ -224,17 +267,36 @@ const validateStoredAtlassianAuthentication = Effect.fn(
   }
   if (
     authMode !== "oauth" ||
-    configuredText(values, "oauthProfileId") === null ||
+    !hasCredential("oauthProfileId") ||
     valuesByKey.has("email") ||
     valuesByKey.has("apiToken")
   ) {
     return yield* new ApplicationInvalidRequest()
   }
-  yield* validateAtlassianOAuthProfile(providerId, values, fileSystem, path)
+  const storedProfile = valuesByKey.get("oauthProfileId")
+  if (storedProfile?._tag !== "secret-reference") return yield* new ApplicationInvalidRequest()
+  const profileId = yield* Effect.scoped(
+    secrets.resolve(storedProfile.ref).pipe(
+      Effect.flatMap((lease) =>
+        lease.withBytes((bytes) =>
+          Effect.try({
+            try: () => secretDecoder.decode(bytes),
+            catch: () => new ApplicationInvalidRequest()
+          })
+        )
+      )
+    )
+  ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+  yield* validateAtlassianOAuthProfile(
+    providerId,
+    values.map((value) => value.key === "oauthProfileId" ? { _tag: "text", key: value.key, value: profileId } : value),
+    fileSystem,
+    path
+  )
 })
 
 const decodeNegotiatedDescriptor = (descriptorJson: string) => {
-  const json = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorJson)
+  const json = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(descriptorJson)
   return Result.isSuccess(json)
     ? Schema.decodeUnknownResult(NegotiatedPluginDescriptorV1)(json.success)
     : json
@@ -301,6 +363,34 @@ const listPluginConnections = Effect.fn("PluginAdministration.listConnections")(
   return summaries
 })
 
+const providerAccountSummary = Effect.fn("PluginAdministration.providerAccountSummary")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  account: ProviderAccountRecord
+) {
+  const resources = yield* persistence.providerAccounts.listResources(
+    workspaceId,
+    account.providerAccountId
+  ).pipe(Effect.mapError(() => unavailable()))
+  if (resources.length > MAXIMUM_FOLLOWED_RESOURCES) return yield* unavailable()
+  return {
+    providerAccountId: account.providerAccountId,
+    providerFamily: account.providerFamily,
+    displayName: account.displayName,
+    providerImmutableId: account.vendorAccountId,
+    revision: account.revision,
+    resources: resources
+      .map((resource) => ({
+        followedResourceId: resource.followedResourceId,
+        providerId: resource.providerId,
+        displayName: resource.displayName,
+        providerImmutableId: resource.vendorResourceId,
+        isEnabled: resource.isEnabled
+      }))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+  } satisfies ProviderAccountSummary
+})
+
 const listProviderAccounts = Effect.fn("PluginAdministration.listProviderAccounts")(function*(
   persistence: Persistence["Service"],
   workspaceId: WorkspaceId
@@ -311,26 +401,7 @@ const listProviderAccounts = Effect.fn("PluginAdministration.listProviderAccount
   if (accounts.length > MAXIMUM_PROVIDER_ACCOUNTS) return yield* unavailable()
   const summaries: Array<ProviderAccountSummary> = []
   for (const account of accounts) {
-    const resources = yield* persistence.providerAccounts.listResources(
-      workspaceId,
-      account.providerAccountId
-    ).pipe(Effect.mapError(() => unavailable()))
-    if (resources.length > MAXIMUM_FOLLOWED_RESOURCES) return yield* unavailable()
-    summaries.push({
-      providerAccountId: account.providerAccountId,
-      providerFamily: account.providerFamily,
-      displayName: account.displayName,
-      providerImmutableId: account.vendorAccountId,
-      resources: resources
-        .map((resource) => ({
-          followedResourceId: resource.followedResourceId,
-          providerId: resource.providerId,
-          displayName: resource.displayName,
-          providerImmutableId: resource.vendorResourceId,
-          isEnabled: resource.isEnabled
-        }))
-        .sort((left, right) => left.displayName.localeCompare(right.displayName))
-    })
+    summaries.push(yield* providerAccountSummary(persistence, workspaceId, account))
   }
   return summaries.sort((left, right) => left.displayName.localeCompare(right.displayName))
 })
@@ -470,11 +541,12 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
   persistence: Persistence["Service"],
   pluginConnections: PluginConnectionMapV1 | null,
   workspaceId: WorkspaceId,
-  pluginConnectionId: PluginConnectionId
+  pluginConnectionId: PluginConnectionId,
+  allowTransactionallyEnabled: boolean = false
 ) {
   const record = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
   const startedAt = yield* Clock.currentTimeNanos
-  if (!record.isEnabled) {
+  if (record.isEnabled !== true && !allowTransactionallyEnabled) {
     return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,
@@ -684,6 +756,116 @@ const configuration = Effect.fn("PluginAdministration.configuration")(function*(
   } satisfies PluginConfiguration
 })
 
+const administrationDiagnostics = (
+  connection: PluginConnectionSummary,
+  configured: PluginConfiguration,
+  synchronization: PluginConnectionAdministration["synchronization"]
+): ReadonlyArray<PluginAdministrationDiagnostic> => {
+  const diagnostics: Array<PluginAdministrationDiagnostic> = []
+  const missingCredential = configured.values.some(
+    (value) => value._tag === "secret-reference" && value.state === "missing"
+  )
+  if (missingCredential) {
+    diagnostics.push({
+      code: "connection-credentials-missing",
+      severity: "critical",
+      summary: "One or more local credential or profile references are unavailable.",
+      observedAt: configured.updatedAt
+    })
+  }
+  if (connection.health === null) {
+    diagnostics.push({
+      code: "connection-health-unverified",
+      severity: "warning",
+      summary: "The connection has not produced a current health result.",
+      observedAt: connection.updatedAt
+    })
+  } else {
+    switch (connection.health._tag) {
+      case "healthy":
+        diagnostics.push({
+          code: "connection-healthy",
+          severity: "information",
+          summary: "The provider connection is healthy.",
+          observedAt: connection.health.checkedAt
+        })
+        break
+      case "degraded":
+        diagnostics.push({
+          code: `connection-degraded-${connection.health.failureClass}`,
+          severity: "warning",
+          summary: connection.health.safeMessage,
+          observedAt: connection.health.checkedAt
+        })
+        break
+      case "unavailable":
+        diagnostics.push({
+          code: `connection-unavailable-${connection.health.failureClass}`,
+          severity: "critical",
+          summary: connection.health.safeMessage,
+          observedAt: connection.health.checkedAt
+        })
+        break
+      case "disabled":
+        diagnostics.push({
+          code: "connection-disabled",
+          severity: "information",
+          summary: "The connection is disabled and cannot access the provider.",
+          observedAt: connection.health.checkedAt
+        })
+        break
+    }
+  }
+  if (synchronization?.result === "source-unavailable" || synchronization?.result === "interrupted") {
+    diagnostics.push({
+      code: `connection-synchronization-${synchronization.result}`,
+      severity: "warning",
+      summary: synchronization.result === "source-unavailable"
+        ? "The most recent synchronization could not reach the provider."
+        : "The most recent synchronization was interrupted.",
+      observedAt: synchronization.lastAttemptAt
+    })
+  }
+  return diagnostics
+}
+
+const connectionAdministration = Effect.fn("PluginAdministration.connectionAdministration")(function*(
+  persistence: Persistence["Service"],
+  secrets: SecretStore["Service"],
+  synchronizationState: PluginAdministrationService["synchronization"],
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId
+) {
+  const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  const [summary, configured, configurationMetadata] = yield* Effect.all([
+    connectionSummary(persistence, connection),
+    configuration(persistence, secrets, workspaceId, pluginConnectionId),
+    metadata(persistence, workspaceId, pluginConnectionId)
+  ])
+  const synchronization = summary.supportsSynchronization && synchronizationState !== undefined
+    ? yield* synchronizationState({ workspaceId, pluginConnectionId })
+    : null
+  const catalog = firstPartyService(connection.providerId)
+  const credentialFields = catalog?.metadata.configurationFields.filter(({ scope }) => scope === "credential") ?? []
+  return {
+    connection: summary,
+    configuration: configured,
+    metadata: configurationMetadata,
+    credentialFields,
+    permissions: configurationMetadata.capabilities.map(({ capabilityId, version }) => ({
+      capabilityId,
+      version,
+      state: summary.isEnabled ? "available" : "disabled"
+    })),
+    schedule: {
+      mode: summary.supportsSynchronization ? "manual" : "unsupported",
+      nextRunAt: null
+    },
+    synchronization,
+    diagnostics: administrationDiagnostics(summary, configured, synchronization)
+  } satisfies PluginConnectionAdministration
+})
+
 const matchesField = (
   field: typeof NegotiatedPluginDescriptorV1.Type["descriptor"]["configurationFields"][number],
   value: PluginConfigurationPatchValue,
@@ -857,7 +1039,7 @@ const storeSetupValues = Effect.fn("PluginAdministration.storeSetupValues")(func
     const field = catalog.metadata.configurationFields.find((candidate) => candidate.key === value.key)
     if (field === undefined) return yield* new ApplicationInvalidRequest()
     if (value._tag === "secret" || field.scope === "credential") {
-      if (typeof value.value !== "string") return yield* new ApplicationInvalidRequest()
+      if (!Predicate.isString(value.value)) return yield* new ApplicationInvalidRequest()
       const ref = yield* secrets.create(secretEncoder.encode(value.value)).pipe(
         Effect.mapError(() => unavailable())
       )
@@ -882,6 +1064,46 @@ const removeSetupSecrets = (
     (reference) => secrets.remove(reference).pipe(Effect.catch(() => Effect.void)),
     { discard: true }
   )
+
+const removeCreatedSecretsUnlessConfigured = Effect.fn(
+  "PluginAdministration.removeCreatedSecretsUnlessConfigured"
+)(function*(
+  persistence: Persistence["Service"],
+  secrets: SecretStore["Service"],
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  references: ReadonlyArray<SecretRef>
+) {
+  if (references.length === 0) return
+  const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+    Effect.result
+  )
+  const configuredReferences = Result.isSuccess(current) && Option.isSome(current.success)
+    ? new Set(
+      current.success.value.values.flatMap((value) => value._tag === "secret-reference" ? [value.ref] : [])
+    )
+    : new Set<SecretRef>()
+  if (references.every((reference) => configuredReferences.has(reference))) return
+  yield* removeSetupSecrets(secrets, references)
+})
+
+const sweepSecretCleanup = Effect.fn("PluginAdministration.sweepSecretCleanup")(function*(
+  persistence: Persistence["Service"],
+  secrets: SecretStore["Service"]
+) {
+  const pending = yield* persistence.pluginConfigurations.pendingSecretCleanup()
+  for (const { secretRef } of pending) {
+    const removal = yield* secrets.remove(secretRef).pipe(
+      Effect.catchTag("SecretNotFoundError", () => Effect.void),
+      Effect.result
+    )
+    if (Result.isSuccess(removal)) {
+      yield* persistence.pluginConfigurations.completeSecretCleanup(secretRef)
+    } else {
+      yield* Effect.logWarning("A superseded plugin credential remains queued for deletion")
+    }
+  }
+})
 
 const removeSetupSecretsUnlessConfigured = Effect.fn(
   "PluginAdministration.removeSetupSecretsUnlessConfigured"
@@ -1118,9 +1340,280 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       ({ makeManualPluginSynchronization }) => makeManualPluginSynchronization(pluginConnections)
     )
 
+  const patchProviderAccount = Effect.fn("PluginAdministration.patchProviderAccount")(function*(
+    workspaceId: WorkspaceId,
+    providerAccountId: ProviderAccountId,
+    patch: PatchProviderAccountRequest
+  ) {
+    const displayName = yield* Schema.decodeUnknownEffect(ProviderAccountDisplayName)(patch.displayName).pipe(
+      Effect.mapError(() => new ApplicationInvalidRequest())
+    )
+    const current = yield* persistence.providerAccounts.get(workspaceId, providerAccountId).pipe(
+      Effect.mapError(mapPersistenceReadError)
+    )
+    if (current.revision !== patch.expectedRevision) return yield* new ApplicationConflict()
+    const updated = yield* persistence.providerAccounts.updateMetadata(workspaceId, providerAccountId, {
+      displayName,
+      expectedRevision: current.revision,
+      updatedAt: yield* DateTime.now
+    }).pipe(Effect.mapError(mapPersistenceWriteError))
+    yield* wakeups.notify(workspaceId)
+    return yield* providerAccountSummary(persistence, workspaceId, updated)
+  })
+
+  const reauthorizeConnection = Effect.fn("PluginAdministration.reauthorizeConnection")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    expectedRevision: number,
+    credentials: ReadonlyArray<PluginCredentialReplacement>
+  ) {
+    yield* sweepSecretCleanup(persistence, secrets).pipe(
+      Effect.catch(() => Effect.logWarning("Deferred plugin credential cleanup remains queued"))
+    )
+    const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+    const catalog = firstPartyService(connection.providerId)
+    if (catalog === undefined) return yield* new ApplicationInvalidRequest()
+    if (pluginConnections === null) return yield* unavailable()
+    const credentialFields = catalog.metadata.configurationFields.filter(({ scope }) => scope === "credential")
+    const normalizedCredentials = credentials.map(({ key, value }) => {
+      const field = credentialFields.find((candidate) => candidate.key === key)
+      return { key, value: field?.kind === "secret" ? value : value.trim() }
+    })
+    const replacementKeys = new Set(normalizedCredentials.map(({ key }) => key))
+    if (
+      normalizedCredentials.length === 0 ||
+      replacementKeys.size !== normalizedCredentials.length ||
+      normalizedCredentials.some(
+        ({ key, value }) => value.length === 0 || !credentialFields.some((field) => field.key === key)
+      )
+    ) return yield* new ApplicationInvalidRequest()
+    const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+      Effect.mapError(mapPersistenceReadError)
+    )
+    const currentRevision = Option.isSome(current) ? current.value.revision : 0
+    if (currentRevision !== expectedRevision) return yield* new ApplicationConflict()
+    const descriptor = yield* negotiatedDescriptor(persistence, workspaceId, pluginConnectionId)
+    const replacementsByKey = new Map<string, PluginCredentialReplacement>(
+      normalizedCredentials.map((replacement) => [replacement.key, replacement])
+    )
+    const validationValues: Array<AtlassianConfigurationValue> = [
+      ...(Option.isSome(current)
+        ? current.value.values.filter(({ key }) => !replacementsByKey.has(key))
+        : []),
+      ...normalizedCredentials.map(({ key, value }): AtlassianConfigurationValue => ({
+        _tag: "text",
+        key,
+        value
+      }))
+    ]
+    yield* validateAtlassianOAuthProfile(connection.providerId, validationValues, fileSystem, path)
+
+    const createdReferences: Array<SecretRef> = []
+    let candidateRuntimeLoaded = false
+    const oldReferences = Option.isSome(current)
+      ? current.value.values.flatMap((value) =>
+        value._tag === "secret-reference" && replacementsByKey.has(value.key) ? [value.ref] : []
+      )
+      : []
+    const updatedAt = yield* DateTime.now
+    const staged = yield* Effect.gen(function*() {
+      const replacementValues: Array<StoredPluginConfigurationValue> = []
+      for (const { key, value } of normalizedCredentials) {
+        const storedKey = yield* Schema.decodeUnknownEffect(StoredPluginConfigurationKey)(key).pipe(
+          Effect.mapError(() => new ApplicationInvalidRequest())
+        )
+        const ref = yield* Effect.uninterruptibleMask((restore) =>
+          restore(secrets.create(secretEncoder.encode(value))).pipe(
+            Effect.mapError(() => unavailable()),
+            Effect.tap((created) =>
+              Effect.sync(() => {
+                createdReferences.push(created)
+              })
+            )
+          )
+        )
+        replacementValues.push({ _tag: "secret-reference", key: storedKey, ref })
+      }
+      const values = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+        ...(Option.isSome(current)
+          ? current.value.values.filter(({ key }) => !replacementsByKey.has(key))
+          : []),
+        ...replacementValues
+      ].sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)).pipe(
+        Effect.mapError(() => new ApplicationInvalidRequest())
+      )
+      yield* validateStoredAtlassianAuthentication(
+        connection.providerId,
+        descriptor,
+        values,
+        secrets,
+        fileSystem,
+        path
+      )
+      return yield* persistence.transact(Effect.gen(function*() {
+        yield* persistence.pluginConfigurations.update(
+          workspaceId,
+          pluginConnectionId,
+          values,
+          expectedRevision,
+          updatedAt
+        )
+        const latest = yield* persistence.pluginConnections.get(workspaceId, pluginConnectionId)
+        const enabled = latest.isEnabled
+          ? latest
+          : yield* persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
+            displayName: latest.displayName,
+            isEnabled: true,
+            expectedRevision: latest.revision,
+            updatedAt
+          })
+        if (!latest.isEnabled) {
+          yield* setBoundResourceEnabled(
+            persistence,
+            workspaceId,
+            enabled.followedResourceId,
+            true,
+            updatedAt
+          )
+        }
+        candidateRuntimeLoaded = true
+        yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+        const tested = yield* testPluginConnection(
+          persistence,
+          pluginConnections,
+          workspaceId,
+          pluginConnectionId,
+          true
+        )
+        if (tested.test._tag !== "healthy" || tested.discovery === null) {
+          return yield* new ApplicationInvalidRequest()
+        }
+        yield* assertConnectionOwnership(persistence, enabled, tested.discovery)
+        for (const reference of oldReferences) {
+          yield* persistence.pluginConfigurations.requestSecretCleanup(reference, updatedAt)
+        }
+        return { connection: enabled, tested }
+      })).pipe(Effect.mapError(mapAdministrationWriteError))
+    }).pipe(
+      Effect.onExit(() =>
+        Effect.all([
+          removeCreatedSecretsUnlessConfigured(
+            persistence,
+            secrets,
+            workspaceId,
+            pluginConnectionId,
+            createdReferences
+          ),
+          candidateRuntimeLoaded
+            ? pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+            : Effect.void
+        ], { discard: true })
+      )
+    )
+    yield* sweepSecretCleanup(persistence, secrets).pipe(
+      Effect.catch(() => Effect.logWarning("Superseded plugin credentials remain queued for deletion"))
+    )
+    yield* persistSetupTestHealth(
+      persistence,
+      cryptoService,
+      wakeups,
+      workspaceId,
+      pluginConnectionId,
+      staged.tested.test
+    ).pipe(Effect.mapError(() => unavailable()))
+    return {
+      connection: yield* connectionSummary(persistence, staged.connection),
+      configuration: yield* configuration(persistence, secrets, workspaceId, pluginConnectionId),
+      test: staged.tested.test
+    } satisfies CreatePluginConnectionResponse
+  })
+
+  const revokeConnection = Effect.fn("PluginAdministration.revokeConnection")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    expectedRevision: number
+  ) {
+    yield* sweepSecretCleanup(persistence, secrets).pipe(
+      Effect.catch(() => Effect.logWarning("Deferred plugin credential cleanup remains queued"))
+    )
+    const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+    const catalog = firstPartyService(connection.providerId)
+    if (catalog === undefined) return yield* new ApplicationInvalidRequest()
+    const credentialKeys = new Set<string>(
+      catalog.metadata.configurationFields.filter(({ scope }) => scope === "credential").map(({ key }) => key)
+    )
+    const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+      Effect.mapError(mapPersistenceReadError)
+    )
+    const currentRevision = Option.isSome(current) ? current.value.revision : 0
+    if (currentRevision !== expectedRevision) return yield* new ApplicationConflict()
+    const oldReferences = Option.isSome(current)
+      ? current.value.values.flatMap((value) =>
+        value._tag === "secret-reference" && credentialKeys.has(value.key) ? [value.ref] : []
+      )
+      : []
+    const retained = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+      Option.isSome(current)
+        ? current.value.values.filter(({ key }) => !credentialKeys.has(key))
+        : []
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    const updatedAt = yield* DateTime.now
+    const updated = yield* persistence.transact(Effect.gen(function*() {
+      yield* persistence.pluginConfigurations.update(
+        workspaceId,
+        pluginConnectionId,
+        retained,
+        expectedRevision,
+        updatedAt
+      )
+      const latest = yield* persistence.pluginConnections.get(workspaceId, pluginConnectionId)
+      const disabled = latest.isEnabled
+        ? yield* persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
+          displayName: latest.displayName,
+          isEnabled: false,
+          expectedRevision: latest.revision,
+          updatedAt
+        })
+        : latest
+      if (latest.isEnabled) {
+        yield* setBoundResourceEnabled(
+          persistence,
+          workspaceId,
+          disabled.followedResourceId,
+          false,
+          updatedAt
+        )
+      }
+      for (const reference of oldReferences) {
+        yield* persistence.pluginConfigurations.requestSecretCleanup(reference, updatedAt)
+      }
+      yield* appendPortfolioInvalidation({
+        workspaceId,
+        pluginConnectionId,
+        releaseId: null,
+        occurredAt: updatedAt,
+        reason: "plugin-health"
+      }).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService),
+        Effect.provideService(Persistence, persistence)
+      )
+      return disabled
+    })).pipe(Effect.mapError(mapPersistenceWriteError))
+    if (pluginConnections !== null) {
+      yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+    }
+    yield* sweepSecretCleanup(persistence, secrets).pipe(
+      Effect.catch(() => Effect.logWarning("Revoked plugin credentials remain queued for deletion"))
+    )
+    yield* wakeups.notify(workspaceId)
+    return yield* connectionSummary(persistence, updated)
+  })
+
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
     accounts: (workspaceId) => listProviderAccounts(persistence, workspaceId),
+    patchProviderAccount: ({ patch, providerAccountId, workspaceId }) =>
+      patchProviderAccount(workspaceId, providerAccountId, patch),
     discoverAwsProfiles: Effect.fn("PluginAdministration.discoverAwsProfiles")(function*() {
       const home = yield* Config.string("HOME").pipe(
         Config.orElse(() => Config.string("USERPROFILE")),
@@ -1135,9 +1628,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         .map(({ name, region }) => ({ profile: name, region: region ?? null }))
         .sort((left, right) => left.profile.localeCompare(right.profile))
     }),
-    ...(Option.isNone(awsResourceDiscovery)
-      ? {}
-      : { discoverAwsResources: awsResourceDiscovery.value.discover }),
+    ...(!(Option.isNone(awsResourceDiscovery)) && { discoverAwsResources: awsResourceDiscovery.value.discover }),
     discoverAtlassianProfiles: Effect.fn("PluginAdministration.discoverAtlassianProfiles")(function*() {
       const profiles = yield* discoverAtlassianProfiles().pipe(
         Effect.provide([
@@ -1150,31 +1641,30 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       if (profiles.length > MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES) return yield* unavailable()
       return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
-    ...(atlassianOAuthGrants === undefined
-      ? {}
-      : {
-        startAtlassianOAuthGrant: ({ configuration, providers, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers, configuration),
-        exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
-        completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
-          cloudId,
-          grantId,
-          sessionId,
-          workspaceId
-        }) {
-          return yield* Effect.uninterruptible(Effect.gen(function*() {
-            const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
-            yield* invalidateAtlassianOAuthProfileRuntimes(
-              persistence,
-              pluginConnections,
-              workspaceId,
-              profile.profileId
-            )
-            return profile
-          }))
-        })
-      }),
+    ...(!(atlassianOAuthGrants === undefined) && {
+      startAtlassianOAuthGrant: ({ configuration, providers, sessionId, workspaceId }) =>
+        atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers, configuration),
+      exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
+        atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
+      completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
+        cloudId,
+        grantId,
+        sessionId,
+        workspaceId
+      }) {
+        return yield* Effect.uninterruptible(Effect.gen(function*() {
+          const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+          yield* invalidateAtlassianOAuthProfileRuntimes(
+            persistence,
+            secrets,
+            pluginConnections,
+            workspaceId,
+            profile.profileId
+          )
+          return profile
+        }))
+      })
+    }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(
         persistence,
@@ -1253,12 +1743,27 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       }
       return tested.test
     }),
-    ...(manualSynchronization === null
-      ? {}
-      : {
-        synchronization: manualSynchronization.state,
-        synchronizeConnection: manualSynchronization.synchronize
-      }),
+    ...(!(manualSynchronization === null) && {
+      synchronization: manualSynchronization.state,
+      synchronizeConnection: manualSynchronization.synchronize
+    }),
+    administration: ({ pluginConnectionId, workspaceId }) =>
+      connectionAdministration(
+        persistence,
+        secrets,
+        manualSynchronization?.state,
+        workspaceId,
+        pluginConnectionId
+      ),
+    reauthorizeConnection: ({ credentials, expectedRevision, pluginConnectionId, workspaceId }) =>
+      reauthorizeConnection(
+        workspaceId,
+        pluginConnectionId,
+        expectedRevision,
+        credentials
+      ),
+    revokeConnection: ({ expectedRevision, pluginConnectionId, workspaceId }) =>
+      revokeConnection(workspaceId, pluginConnectionId, expectedRevision),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
     configuration: ({ pluginConnectionId, workspaceId }) =>
@@ -1299,6 +1804,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         connection.providerId,
         descriptor,
         values,
+        secrets,
         fileSystem,
         path
       )
