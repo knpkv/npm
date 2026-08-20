@@ -129,7 +129,14 @@ export const runWatch = (options: {
       )
       return
     }
+    if (lease._tag === "Unavailable") {
+      // Not the same as losing the race, and not something to shrug off: with no lease on disk there
+      // is nothing to stop a second watch deriving the same gap and writing it a second time.
+      yield* Console.error(`Cannot take the watch lease — ${lease.reason}.`)
+      return yield* new WatchUsageError({ message: `Cannot take the watch lease: ${lease.reason}` })
+    }
     const leasePath = lease.path
+    const leaseOwner = lease.owner
 
     /**
      * Where this run starts looking.
@@ -168,14 +175,31 @@ export const runWatch = (options: {
     // filter out the very prompts that made the block unsettled.
     let unresolvedFromMs = watchFromMs
 
-    const tick = Effect.gen(function*() {
-      const nowMs = yield* Clock.currentTimeMillis
-      yield* WatchLease.refresh({
+    /**
+     * Say we are still here, and stop if we are not.
+     *
+     * Called at the top of a tick and again immediately before writing. A tick can outlive its own
+     * stale window — deriving, describing and writing all take time a `--interval 1` watch does not
+     * have — and a contender that reclaimed the lease in the meantime would otherwise be writing the
+     * same blocks in parallel. Two checks bound the exposure to one tick's write phase.
+     */
+    const stillMine = Effect.gen(function*() {
+      const standing = yield* WatchLease.refresh({
         path: leasePath,
+        owner: leaseOwner,
         heldSinceMs: startedAtMs,
         intervalSeconds: options.intervalSeconds,
         unresolvedFromMs
       })
+      return standing._tag === "Mine"
+        ? null
+        : ({ _tag: "Stop", reason: `${standing.reason}, so this one is standing down.` } satisfies TickOutcome)
+    })
+
+    const tick = Effect.gen(function*() {
+      const nowMs = yield* Clock.currentTimeMillis
+      const held = yield* stillMine
+      if (held !== null) return held
       const report = yield* svc.proposeFromSessions(
         { from: new Date(watchFromMs), to: new Date(nowMs) },
         { attribution: "deterministic" }
@@ -204,15 +228,34 @@ export const runWatch = (options: {
 
       const decision = decideWatchWrites(report.proposals, { nowMs })
 
-      // Everything before the oldest still-unsettled block is finished with; with nothing held, the
-      // settle horizon is. Never moves backwards, so a quiet look cannot forget a held block.
-      const heldFrom = decision.held
-        .filter((entry) => entry.reason._tag === "Unsettled")
-        .flatMap((entry) => entry.proposal.spans.map((span) => span.startMs))
-      const horizon = heldFrom.length === 0
-        ? nowMs - settleSeconds * 1000
-        : Math.min(...heldFrom)
-      unresolvedFromMs = Math.max(unresolvedFromMs, Math.min(horizon, nowMs))
+      /**
+       * Move the cursor to the earliest instant this tick is finished with.
+       *
+       * Two things hold it back, and both must, because the cursor is what a restart trusts. An
+       * unsettled block can still grow, so its own start stays behind. And a *settled* block is not
+       * finished with either until both sides that were short have taken it: this used to advance
+       * here, before the writes below, so a Jira refusal after Clockify had succeeded persisted a
+       * cursor past the block — and the restart the message asks for then filtered out the very row
+       * whose Jira half was missing. `--dry-run` is the same shape without the failure: it writes
+       * nothing, so it must leave nothing behind.
+       *
+       * With nothing held at all, the settle horizon is the boundary. Never moves backwards, so a
+       * quiet look cannot forget a block an earlier one was holding.
+       */
+      const commitCursor = (unwritten: ReadonlyArray<number>): void => {
+        const heldFrom = decision.held
+          .filter((entry) => entry.reason._tag === "Unsettled")
+          .flatMap((entry) => entry.proposal.spans.map((span) => span.startMs))
+        const pendingFrom = [...heldFrom, ...unwritten]
+        const horizon = pendingFrom.length === 0
+          ? nowMs - settleSeconds * 1000
+          : Math.min(...pendingFrom)
+        unresolvedFromMs = Math.max(unresolvedFromMs, Math.min(horizon, nowMs))
+      }
+
+      /** The earliest instant a proposal covers — where the cursor must stop if it is not written. */
+      const proposalStart = (proposal: SessionProposal): number =>
+        Math.min(...proposal.spans.map((span) => span.startMs))
 
       for (const held of decision.held) {
         if (held.reason._tag !== "NeedsReview") continue
@@ -230,7 +273,16 @@ export const runWatch = (options: {
       if (options.dryRun) {
         for (const proposal of pending) announced.add(`preview\u0000${previewKey(proposal)}`)
       }
-      if (pending.length === 0) return carryOn
+      // Every settled proposal starts out unwritten, and only a confirmed write clears one. A dry run
+      // clears none — including a row it previewed on an earlier tick and is skipping now, which is
+      // why this covers `decision.write` rather than `pending`.
+      const unwritten = new Set(decision.write)
+      const unwrittenStarts = (): ReadonlyArray<number> => [...unwritten].map(proposalStart)
+
+      if (pending.length === 0) {
+        commitCursor(unwrittenStarts())
+        return carryOn
+      }
 
       // Looked up per write rather than cached for the run: a watch outlives the facts, and an issue
       // renamed at lunchtime should read correctly on the entry written after it.
@@ -246,6 +298,17 @@ export const runWatch = (options: {
         digests: report.digests,
         summaries
       })
+
+      // Re-checked here rather than only at the top of the tick: everything since then — the session
+      // read, a ticket lookup per key, a Coding Agent call — is unbounded, and this is the last
+      // moment before anything is written.
+      if (!options.dryRun) {
+        const stillHeld = yield* stillMine
+        if (stillHeld !== null) {
+          commitCursor(unwrittenStarts())
+          return stillHeld
+        }
+      }
 
       for (const [index, proposal] of pending.entries()) {
         const description = entryDescription({
@@ -267,13 +330,24 @@ export const runWatch = (options: {
         if (written.clockifySeconds > 0 || written.jiraSeconds > 0) totals.blocks += 1
         totals.clockifySeconds += written.clockifySeconds
         totals.jiraSeconds += written.jiraSeconds
+        // Only when both sides that were short have taken it. A half-written block stays behind the
+        // cursor, so the restart re-derives it and offers the missing side alone — the subtraction
+        // that makes every tick safe is the same thing that stops the written side repeating.
+        if (
+          written.clockifySeconds >= proposal.clockifyDelta &&
+          written.jiraSeconds >= proposal.jiraDelta
+        ) {
+          unwritten.delete(proposal)
+        }
         if (!written.keepGoing) {
+          commitCursor(unwrittenStarts())
           return {
             _tag: "Stop",
             reason: "Jira rejected the login. Run `jcf auth jira login`, then start the watch again."
           }
         }
       }
+      commitCursor(unwrittenStarts())
       return carryOn
     })
 
@@ -298,6 +372,7 @@ export const runWatch = (options: {
         Effect.suspend(() =>
           WatchLease.release({
             path: leasePath,
+            owner: leaseOwner,
             heldSinceMs: startedAtMs,
             intervalSeconds: options.intervalSeconds,
             unresolvedFromMs

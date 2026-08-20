@@ -643,6 +643,89 @@ describe("jcf watch claude", () => {
       expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
     }))
 
+  // The cursor used to move past a settled block *before* the block was written. Jira refusing then
+  // persisted a cursor past a row whose Jira half was missing, and the restart the message asks for
+  // filtered out the very row it was telling the user to come back for.
+  it.effect("keeps a half-written block behind the cursor, and finishes it on restart", () =>
+    Effect.gen(function*() {
+      // One world across both runs, so the second really does read the first one's lease.
+      const fake = makeFakeHeadless(branchWork({ jiraLoggedIn: false }))
+      const start = () =>
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "claude"]).pipe(
+          Effect.provide(fake.layer),
+          Effect.exit,
+          Effect.forkChild
+        )
+
+      yield* TestClock.setTime(at(10, 0))
+      const first = yield* start()
+      // Long enough for the 10:01-10:11 block to settle and be attempted.
+      yield* advance(Duration.minutes(25))
+      yield* Fiber.join(first)
+
+      // Clockify took it; Jira refused, so the watch stopped and said to log in and come back.
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      expect(fake.world.jiraWorklogs).toEqual([])
+
+      // The user does exactly that. The block is still inside the resumed window, so Jira's missing
+      // half is offered again — and Clockify's is not, because the entry it holds is subtracted.
+      fake.world.jiraLoggedIn = true
+      const second = yield* start()
+      yield* advance(Duration.minutes(10))
+      yield* Fiber.interrupt(second)
+
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+      expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
+      // And the side that already had it did not take it twice.
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    }))
+
+  // Nothing was written, so nothing was resolved. A dry run that moved the cursor let a real watch
+  // started inside the resume window begin *after* blocks that only ever existed as a preview.
+  it.effect("resolves nothing under --dry-run, so a real watch can still write the block", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless(branchWork())
+      const start = (args: ReadonlyArray<string>) =>
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "claude", ...args]).pipe(
+          Effect.provide(fake.layer),
+          Effect.exit,
+          Effect.forkChild
+        )
+
+      yield* TestClock.setTime(at(10, 0))
+      const preview = yield* start(["--dry-run"])
+      yield* advance(Duration.minutes(25))
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      expect(output(fake.world.stdout)).toContain("dry run — not written")
+      yield* Fiber.interrupt(preview)
+
+      const real = yield* start([])
+      yield* advance(Duration.minutes(10))
+      yield* Fiber.interrupt(real)
+
+      // The same block, written in full by the run that was allowed to write.
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
+    }))
+
+  // Failing to write the lease is not the same as losing the race for it. Treating the two alike let
+  // the watch run with no lease on disk at all — the one state the lease exists to rule out.
+  it.effect("refuses to start when it cannot write the lease", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({ unwritablePaths: [`${FAKE_HOME}/.jcf/watch.lease`] })
+      })
+      yield* advance(Duration.minutes(30))
+      const exit = yield* Fiber.join(fiber)
+
+      expect(exit._tag).toBe("Failure")
+      expect(output(world.stderr)).toContain("Cannot take the watch lease")
+      // And crucially wrote nothing while unprotected.
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
   // Forward only. Work that finished before the watch started is `reconcile`'s job, where a person
   // sees the rows before they are written.
   it.effect("ignores work that was already over when it started", () =>

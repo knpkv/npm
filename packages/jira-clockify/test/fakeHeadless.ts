@@ -71,6 +71,8 @@ export interface CreatedClockifyEntry {
   readonly description: string
   readonly start: string
   readonly end: string | undefined
+  /** What the command asked Clockify to bill. `undefined` means it left the choice to Clockify. */
+  readonly billable: boolean | undefined
 }
 
 /**
@@ -159,6 +161,8 @@ export interface FakeWorld {
   readonly transcriptReads: Array<string>
   /** Files the command wrote, by path — the watch lease among them. */
   readonly writtenFiles: Record<string, string>
+  /** Whether Jira accepts worklogs. Flip it mid-test to model logging back in between two runs. */
+  jiraLoggedIn: boolean
 }
 
 /** An existing Clockify entry, in the shape a test wants to write it. */
@@ -207,6 +211,18 @@ export interface FakeHeadlessOptions {
   readonly jiraWorklogReadFails?: boolean | undefined
   /** Make every Clockify entry creation fail, to model the write half refusing. */
   readonly clockifyWritesFail?: boolean | undefined
+  /**
+   * Serve existing Clockify entries this many per page, so a caller that reads only the first page
+   * demonstrably misses the rest. Unset means one page however many entries there are.
+   */
+  readonly clockifyPageSize?: number | undefined
+  /** Paths whose writes fail with a permission error — an unwritable config directory. */
+  readonly unwritablePaths?: ReadonlyArray<string> | undefined
+  /**
+   * Transcripts whose reads fail, to model a permissions or transient read error. Matched by path
+   * suffix, so `"s2.jsonl"` is enough.
+   */
+  readonly unreadableTranscripts?: ReadonlyArray<string> | undefined
   /** The terminal's width, which is what the picker lays its rows out for. */
   readonly columns?: number | undefined
   /** Issue summaries Jira will return, keyed by issue key. Unlisted keys 404. */
@@ -271,7 +287,9 @@ const TRANSCRIPT_ROOT = `${FAKE_HOME}/.claude/projects`
 const fakeFileSystemLayer = (
   transcripts: Record<string, string>,
   reads: Array<string>,
-  written: Record<string, string>
+  written: Record<string, string>,
+  unwritable: ReadonlyArray<string>,
+  unreadable: ReadonlyArray<string>
 ) => {
   /**
    * The project directory a transcript really lives in: the Claude CLI derives it from the working
@@ -333,6 +351,19 @@ const fakeFileSystemLayer = (
       if (stored !== undefined) return Effect.succeed(stored)
       const content = files().get(path)
       reads.push(path)
+      // Matched by suffix, so a test names the fixture it wrote rather than reproducing the project
+      // directory encoding the Claude CLI derives from a session's `cwd`.
+      if (unreadable.some((suffix) => path.endsWith(suffix))) {
+        return Effect.fail(
+          systemError({
+            _tag: "PermissionDenied",
+            module: "FileSystem",
+            method: "readFileString",
+            description: "permission denied",
+            pathOrDescriptor: path
+          })
+        )
+      }
       return content === undefined ? notFound("readFileString", path) : Effect.succeed(content)
     },
     // The config service writes through this; nothing in these tests reads it back from disk.
@@ -340,7 +371,19 @@ const fakeFileSystemLayer = (
     // A real store, so anything the CLI writes and reads back — the watch lease — behaves. `wx` is
     // honoured, because an exclusive create is exactly what the lease relies on for its exclusion.
     writeFileString: (path, content, options) =>
-      options?.flag === "wx" && written[path] !== undefined
+      unwritable.includes(path)
+        // Deliberately not `AlreadyExists`: telling those two apart is the whole point of the
+        // lease's fail-closed rule, so the fake must be able to produce the other one.
+        ? Effect.fail(
+          systemError({
+            _tag: "PermissionDenied",
+            module: "FileSystem",
+            method: "writeFileString",
+            description: "permission denied",
+            pathOrDescriptor: path
+          })
+        )
+        : options?.flag === "wx" && written[path] !== undefined
         ? Effect.fail(
           systemError({
             _tag: "AlreadyExists",
@@ -463,7 +506,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     prompts: [],
     transcripts: { ...options.transcripts },
     transcriptReads: [],
-    writtenFiles: {}
+    writtenFiles: {},
+    jiraLoggedIn: options.jiraLoggedIn ?? true
   }
 
   // Ledgers, not fixed fixtures: a write lands here and the next read sees it, which is what
@@ -495,7 +539,20 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     getWorkspaces: () => Effect.succeed([{ id: FAKE_WORKSPACE_ID, name: "WS", imageUrl: "" }]),
     getProjects: () => Effect.succeed([]),
     getProjectByName: () => Effect.succeed(null),
-    getTimeEntries: () => Effect.succeed(running === null ? [...clockifyLedger] : [...clockifyLedger, running]),
+    // Paged when a test asks for it, so "reads only the first page" is observable rather than
+    // assumed. `getRunningTimer` has its own path, so the running entry rides along on page one.
+    getTimeEntries: (_ws, _user, params) => {
+      const all = running === null ? [...clockifyLedger] : [...clockifyLedger, running]
+      const page = params?.page ?? 1
+      const cap = options.clockifyPageSize
+      // One page holds everything, and the page after it is empty — a paginating caller has to be
+      // able to reach the end. Returning `all` for every page would model a server that never ends.
+      if (cap === undefined) return Effect.succeed(page === 1 ? all : [])
+      // The smaller of the two, because Clockify may serve fewer than it was asked for — which is
+      // the case a caller that stops at the first short page gets wrong.
+      const size = Math.min(params?.pageSize ?? cap, cap)
+      return Effect.succeed(all.slice((page - 1) * size, page * size))
+    },
     getRunningTimer: () => Effect.succeed(running),
     getTimeEntry: (_ws, id) => Effect.succeed(makeTimeEntry({ description: "", start: "" }, id)),
     getTags: () => Effect.succeed([]),
@@ -517,7 +574,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           world.createdClockifyEntries.push({
             description: params.description,
             start: params.start,
-            end: params.end
+            end: params.end,
+            billable: params.billable
           })
           const entry = makeTimeEntry(
             { description: params.description, start: params.start, end: params.end },
@@ -533,7 +591,9 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
       Effect.succeed(makeTimeEntry({ description: "", start: "", end: params.end }, "stopped-1"))
   }
 
-  const loggedIn = options.jiraLoggedIn ?? true
+  // Read through the world, not captured, so one world can model logging back in between two runs —
+  // which is exactly the flow the "Jira refused, go and log in, restart" message asks the user for.
+  const loggedIn = () => world.jiraLoggedIn
 
   const jsonResponse = <ResponseBody>(
     request: Parameters<typeof HttpClientResponse.fromWeb>[0],
@@ -707,18 +767,18 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   })
   const JiraAuthLayer = Layer.succeed(JiraAuth, {
     configure: () => Effect.void,
-    isConfigured: () => Effect.succeed(loggedIn),
+    isConfigured: () => Effect.succeed(loggedIn()),
     login: () => Effect.void,
     logout: () => Effect.void,
-    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn ? "jira-token" : "")),
-    getCloudId: () => Effect.succeed(loggedIn ? "cloud-fake" : ""),
+    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn() ? "jira-token" : "")),
+    getCloudId: () => Effect.succeed(loggedIn() ? "cloud-fake" : ""),
     getSiteUrl: () => Effect.succeed("https://fake.atlassian.net"),
     getCurrentUser: () => Effect.succeed(null),
     getActiveProfile: () => Effect.succeed(null),
     listProfiles: () => Effect.succeed([]),
     switchProfile: () => Effect.succeed(null),
     removeProfile: () => Effect.succeed(null),
-    isLoggedIn: () => Effect.succeed(loggedIn)
+    isLoggedIn: () => Effect.succeed(loggedIn())
   })
   const StateWriterLayer = Layer.succeed(StateWriter, {
     write: () => Effect.void,
@@ -740,7 +800,13 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     baseUrl: "https://fake.atlassian.net",
     auth: { type: "basic", email: "fake@example.com", apiToken: Redacted.make("token") }
   })
-  const FileSystemLayer = fakeFileSystemLayer(world.transcripts, world.transcriptReads, world.writtenFiles)
+  const FileSystemLayer = fakeFileSystemLayer(
+    world.transcripts,
+    world.transcriptReads,
+    world.writtenFiles,
+    options.unwritablePaths ?? [],
+    options.unreadableTranscripts ?? []
+  )
 
   const Externals = Layer.mergeAll(
     ClockifyLayer,

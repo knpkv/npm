@@ -95,6 +95,21 @@ describe("deterministic signals", () => {
     expect(ticketKeyFromPath("/dev/repo/worktrees/PROJ-1/PROJ-2/src")).toBe("PROJ-2")
     expect(ticketKeyFromPath("/dev/repo/plain")).toBeNull()
   })
+
+  // `_` is a word character, so `\b` put no boundary between it and the key. Underscore-delimited
+  // branch and directory names are ordinary, and every session in one was left unattributed —
+  // which under `jcf watch` means never logged at all.
+  it("reads a key delimited by underscores", () => {
+    expect(ticketKeyFromBranch("feature_PROJ-42_work")).toBe("PROJ-42")
+    expect(ticketKeyFromPath("/dev/repo/worktrees/feature_PROJ-42_work/src")).toBe("PROJ-42")
+    expect(mineTicketKeys("landed in feature_PROJ-5662_otel today")).toEqual(["PROJ-5662"])
+  })
+
+  // The boundary still has to stop at letters and digits, or prose starts producing keys.
+  it("still refuses a key run together with other text", () => {
+    expect(ticketKeyFromBranch("feat/xPROJ-42")).toBeNull()
+    expect(mineTicketKeys("bumped to v2-3 and bumped PROJ-42x")).toEqual([])
+  })
 })
 
 describe("prefix matching", () => {

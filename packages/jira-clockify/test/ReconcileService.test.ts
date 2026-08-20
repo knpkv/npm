@@ -185,6 +185,39 @@ describe("resolvePeriod", () => {
     const period = resolvePeriod({ week: false, since: "june 1", until: undefined })
     expect("error" in period).toBe(true)
   })
+
+  // The suite runs in America/New_York (see vitest.config.ts), so these two really are transition
+  // days. The endpoint used to be local midnight plus 24 elapsed hours, which is not the next
+  // midnight on either of them: `--day` reached into the following day in spring and stopped an hour
+  // short of its own in autumn.
+  const endpoints = [
+    { label: "spring forward", day: "2026-03-08" },
+    { label: "fall back", day: "2026-11-01" }
+  ]
+  for (const { day, label } of endpoints) {
+    it(`ends a ${label} day at the next local midnight`, () => {
+      const period = resolvePeriod({ week: false, since: day, until: day })
+      expect("error" in period).toBe(false)
+      if ("error" in period) return
+      // Both ends are a local midnight, and the span is the day the user asked for and no other.
+      expect(localDay(period.from)).toBe(day)
+      expect(period.from.getHours()).toBe(0)
+      expect(period.to.getHours()).toBe(0)
+      expect(localDay(new Date(period.to.getTime() - 1))).toBe(day)
+    })
+  }
+
+  // Same defect at the other end of `--week`: six times 24 hours from a midnight is 23:00 or 01:00
+  // across a transition, so the week began mid-day. `resolvePeriod` reads the wall clock itself, so
+  // this asserts the invariant that always holds rather than pinning a transition week — it would
+  // have caught the old arithmetic only during one, which is exactly when it mattered.
+  it("starts a week at a local midnight", () => {
+    const period = resolvePeriod({ week: true, since: undefined, until: undefined })
+    expect("error" in period).toBe(false)
+    if ("error" in period) return
+    expect(period.from.getHours()).toBe(0)
+    expect(period.from.getMinutes()).toBe(0)
+  })
 })
 
 describe("resolveAgentMode", () => {

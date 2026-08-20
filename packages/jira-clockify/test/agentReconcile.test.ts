@@ -918,6 +918,106 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.createdClockifyEntries).toEqual([])
     }))
 
+  // Clockify's own default page size is 50, and the tally asked for no page at all — so on any busy
+  // week the recorded side arrived truncated, and an entry past the first page read as time Clockify
+  // never had. Everything downstream subtracts this before writing the difference.
+  it.effect("reads every page of the recorded Clockify side", () =>
+    Effect.gen(function*() {
+      const filler = Array.from({ length: 3 }, (_, index) => ({
+        description: `[OTHER-${index}] unrelated`,
+        start: iso(at(DAY.year, DAY.month, DAY.day, 1, index)),
+        end: iso(at(DAY.year, DAY.month, DAY.day, 1, index + 1))
+      }))
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: branchSession(),
+          // The entry that matters is last, so a single-page read cannot see it.
+          clockifyEntries: [
+            ...filler,
+            {
+              description: "[PROJ-5662] earlier",
+              start: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)),
+              end: iso(at(DAY.year, DAY.month, DAY.day, 10, 35))
+            }
+          ],
+          clockifyPageSize: 2,
+          keep: [true]
+        })
+      )
+      // Clockify already holds the whole block, so its side is not short and nothing is written to it.
+      expect(world.createdClockifyEntries).toEqual([])
+    }))
+
+  // Session credits are split at each local midnight, so a recorded entry has to be too. Crediting
+  // an overnight entry entirely to the day it started left the following day looking untouched.
+  it.effect("splits a recorded entry that crosses midnight across both days", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        ["sync", "reconcile", "--agent", "claude", "--since", "2026-06-30", "--until", "2026-07-01"],
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-otel",
+              events: steady(at(2026, 6, 30, 23, 30), 60)
+            })
+          },
+          clockifyEntries: [{
+            description: "[PROJ-5662] overnight",
+            start: iso(at(2026, 6, 30, 23, 30)),
+            end: iso(at(DAY.year, DAY.month, DAY.day, 0, 35))
+          }],
+          keep: [true, true]
+        })
+      )
+      // Both days are fully accounted for by the one existing entry, so neither is written again.
+      // Crediting all 65 minutes to 30 June left 1 July looking untouched and wrote it a second time.
+      expect(world.createdClockifyEntries).toEqual([])
+    }))
+
+  // `jcf timer start` sends the configured flag; this path did not, so Clockify applied its own
+  // default and a reconciled entry could be billed differently from a timed one on the same ticket.
+  it.effect("sends the configured billable default on entries it creates", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: branchSession(),
+          config: { sessionRoots: [WORK_ROOT], defaultBillable: false },
+          keep: [true]
+        })
+      )
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.createdClockifyEntries[0]?.billable).toBe(false)
+    }))
+
+  // An in-scope transcript that cannot be read is not an absent one: it may overlap a readable
+  // session on another ticket, and skipping it takes that ticket out of the overlap sharing — so the
+  // interval it should have halved is credited whole to whichever file happened to open.
+  it.effect("fails rather than deriving proposals from a partly unreadable session set", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            ...branchSession(),
+            "work-other/s2.jsonl": transcript({
+              sessionId: "s2",
+              cwd: `${WORK_ROOT}/other`,
+              gitBranch: "feat/PROJ-9-x",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          unreadableTranscripts: ["s2.jsonl"]
+        })
+      )
+      expect(exit._tag).toBe("Failure")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
   it.effect("stops the run at the first Jira sign-in failure", () =>
     Effect.gen(function*() {
       const { world } = yield* run(

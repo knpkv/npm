@@ -480,16 +480,76 @@ export const layer = Layer.effect(
       Effect.mapError((e) => new ReconcileError({ message: e.message }))
     )
 
+    /**
+     * How many entries to ask Clockify for at a time, and how many pages to accept.
+     *
+     * The page size is explicit because Clockify's own default is 50 — small enough that an ordinary
+     * week silently arrives truncated, and a truncated *recorded* side is the dangerous direction:
+     * every caller subtracts this tally from something and writes the difference, so an entry that
+     * fell off the page reads as time Clockify never had.
+     */
+    const CLOCKIFY_PAGE_SIZE = 200
+    const CLOCKIFY_MAX_PAGES = 50
+
+    /**
+     * Split one recorded interval across the local days it actually covers.
+     *
+     * Session credits are split at each local midnight, so a recorded entry has to be too. A single
+     * 23:30–00:30 entry credited entirely to the day it started leaves the following day looking
+     * untouched, and `watch` writes the half that already exists.
+     */
+    const byLocalDay = (
+      startMs: number,
+      endMs: number
+    ): ReadonlyArray<{ readonly day: string; readonly seconds: number }> => {
+      // A zero-length entry still belongs to its day: it carries a description the row matching
+      // reads, and dropping it would change what a reconcile row says about an existing entry.
+      if (endMs <= startMs) return [{ day: localDay(new Date(startMs)), seconds: 0 }]
+      const buckets: Array<{ day: string; seconds: number }> = []
+      let cursor = startMs
+      // Bounded by the interval itself: each step consumes at least to the next midnight.
+      while (cursor < endMs) {
+        const boundary = Math.min(nextLocalMidnight(cursor), endMs)
+        buckets.push({
+          day: localDay(new Date(cursor)),
+          seconds: Math.max(0, Math.round((boundary - cursor) / 1000))
+        })
+        cursor = boundary
+      }
+      return buckets
+    }
+
     // Tally Clockify entries in the period by (ticket, day).
     const clockifyTally = (period: ReconcilePeriod) =>
       Effect.gen(function*() {
         const auth = yield* getAuth
-        const entries = yield* clockify.getTimeEntries(auth.workspaceId, auth.userId, {
-          start: period.from.toISOString(),
-          end: period.to.toISOString()
-        }).pipe(
-          Effect.mapError((e) => new ReconcileError({ message: `Clockify fetch failed: ${e.message}`, cause: e }))
-        )
+
+        const getPage = (page: number) =>
+          clockify.getTimeEntries(auth.workspaceId, auth.userId, {
+            start: period.from.toISOString(),
+            end: period.to.toISOString(),
+            page,
+            pageSize: CLOCKIFY_PAGE_SIZE
+          }).pipe(
+            Effect.mapError((e) => new ReconcileError({ message: `Clockify fetch failed: ${e.message}`, cause: e }))
+          )
+
+        const entries = []
+        let pages = 0
+        // Stops on an *empty* page rather than a short one. Clockify is free to serve fewer entries
+        // than the page size asked for, and treating a short page as the last one would truncate
+        // exactly as reading a single page did — just less often, and so less visibly.
+        for (; pages < CLOCKIFY_MAX_PAGES; pages++) {
+          const batch = yield* getPage(pages + 1)
+          if (batch.length === 0) break
+          for (const entry of batch) entries.push(entry)
+        }
+        if (pages === CLOCKIFY_MAX_PAGES) {
+          // Failing costs a run. Proceeding on a partial tally costs someone a duplicated day.
+          return yield* new ReconcileError({
+            message: "Clockify returned more entries than this run will read; narrow the window."
+          })
+        }
 
         const tally: Array<{ ticketKey: string; day: string; seconds: number; description: string | null }> = []
         for (const entry of entries) {
@@ -499,8 +559,17 @@ export const layer = Layer.effect(
           // Skip running or unparseable entries: a missing end means the time is not yet real.
           if (ticketKey === null || start === undefined || start === null) continue
           if (end === undefined || end === null) continue
-          const seconds = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000))
-          tally.push({ ticketKey, day: localDay(new Date(start)), seconds, description: entry.description ?? null })
+          const startMs = new Date(start).getTime()
+          const endMs = new Date(end).getTime()
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue
+          for (const bucket of byLocalDay(startMs, Math.max(startMs, endMs))) {
+            tally.push({
+              ticketKey,
+              day: bucket.day,
+              seconds: bucket.seconds,
+              description: entry.description ?? null
+            })
+          }
         }
         return tally
       })
@@ -512,7 +581,11 @@ export const layer = Layer.effect(
         const accountId = user?.account_id ?? null
 
         const fromDay = localDay(period.from)
-        const toDay = localDay(period.to)
+        // `period.to` is exclusive and `worklogDate <=` is not, so the last *included* instant is
+        // what names the day. Taking the endpoint's own day asked Jira for the next day's issues as
+        // well — harmless in the tally, which filters by instant, but every extra issue is another
+        // worklog request, and one failure there fails the whole run by design.
+        const toDay = localDay(new Date(Math.max(period.from.getTime(), period.to.getTime() - 1)))
         // Find issues the user logged work on in the window.
         // Every page, not just the first. A ticket that fell off page one tallies as zero Jira time,
         // and since every caller subtracts this from what a session accounts for, that reads as
@@ -538,9 +611,16 @@ export const layer = Layer.effect(
         for (let page = 0; page < 50; page++) {
           const result: unknown = yield* searchPage(pageToken)
           const issues: unknown = Predicate.isObject(result) ? result["issues"] : undefined
-          if (Array.isArray(issues)) {
-            for (const issue of issues) searched.push(issue)
+          // A page with no `issues` at all is not an empty page. The generated success schema makes
+          // the field optional, so a response Jira truncated or a shape that changed under us would
+          // otherwise read as "this user logged no work" — and every caller subtracts that from what
+          // a session accounts for before writing the difference.
+          if (!Array.isArray(issues)) {
+            return yield* new ReconcileError({
+              message: "Jira returned a worklog search page with no issues field; not tallying a partial result."
+            })
           }
+          for (const issue of issues) searched.push(issue)
           const next: string | undefined = Predicate.isObject(result) && Predicate.isString(result["nextPageToken"])
             ? result["nextPageToken"]
             : undefined
@@ -552,12 +632,18 @@ export const layer = Layer.effect(
             message: "Jira returned more worklog pages than this run will read; narrow the window."
           })
         }
-        const search = { issues: searched }
-
-        const issueKeys = (search.issues ?? []).flatMap((issue) => {
+        // An issue whose key cannot be read is an issue whose worklogs go unread, which is the same
+        // under-count as a dropped page — so it fails rather than being skipped.
+        const issueKeys: Array<string> = []
+        for (const issue of searched) {
           const key = issueKey(issue)
-          return key === null ? [] : [key]
-        })
+          if (key === null) {
+            return yield* new ReconcileError({
+              message: "Jira returned a worklog search result with no issue key; not tallying a partial result."
+            })
+          }
+          issueKeys.push(key)
+        }
 
         const fromMs = period.from.getTime()
         const toMs = period.to.getTime()
@@ -641,6 +727,10 @@ export const layer = Layer.effect(
           }`,
           start: start.toISOString(),
           end: end.toISOString(),
+          // Stated, not left to Clockify's own default. `jcf timer start` already sends it, so
+          // omitting it here made a reconciled entry's billable flag differ from a timed one's for
+          // the same ticket — visible only later, on an invoice.
+          billable: cfg.defaultBillable,
           ...((cfg.defaultProjectId) && { projectId: cfg.defaultProjectId })
         }).pipe(
           Effect.mapError((e) => new ReconcileError({ message: `Clockify create failed: ${e.message}`, cause: e }))

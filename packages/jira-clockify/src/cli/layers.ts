@@ -5,7 +5,7 @@
  */
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
-import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig, type JiraApiCredential } from "@knpkv/jira-api-client"
 import { JiraAuth, layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
 import { Effect, Layer, Redacted } from "effect"
 import * as Logger from "effect/Logger"
@@ -84,29 +84,38 @@ export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
 // `Effect.timeout` is a race, and racing an uninterruptible loser means waiting
 // for it anyway.
 //
-// Note what the `Effect.catch` below already costs. This layer is also the TUI's
-// memoized runtime (`tui/atoms/runtime.ts`), built once per session, so any
-// failure — including that 30s deadline — pins an empty credential for the rest
-// of the session and 401s every Jira call until the user restarts. Moving the
-// bound here would not change that; fixing it means making the TUI resolve the
-// credential per request instead of once at layer construction.
+// The credential is resolved per request, not once here. An access token lasts
+// about an hour, so a value captured at layer construction is a deadline on the
+// process: `jcf watch` runs all day, and the TUI's runtime
+// (`tui/atoms/runtime.ts`) is memoized for a whole session. Both used to 401
+// every Jira call from the first expiry onward, with the empty-credential
+// fallback below turning any transient failure at startup into the same thing
+// permanently. `resolveAuth` is re-read before each request, so a refresh — by
+// this process or another — reaches the next call.
+//
+// `getAccessToken` is cheap to call repeatedly: it reads the stored token and
+// returns it unless it has actually expired, and holds a lock so concurrent
+// callers share one refresh.
 //
 // `getCloudId` needs no bound; it only reads the stored token file.
 export const JiraApiConfigLive = Layer.effect(
   JiraApiConfig,
   Effect.gen(function*() {
     const auth = yield* JiraAuth
-    const accessToken = yield* auth.getAccessToken().pipe(
-      Effect.catch(() => Effect.succeed(Redacted.make("")))
-    )
-    const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
+    // Infallible by construction, because request preprocessing has nowhere to put an error. An
+    // empty token yields the same 401 as never having logged in, which is what the caller reports.
+    const resolveAuth: Effect.Effect<JiraApiCredential> = Effect.gen(function*() {
+      const accessToken = yield* auth.getAccessToken().pipe(
+        Effect.catch(() => Effect.succeed(Redacted.make("")))
+      )
+      const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
+      return { type: "oauth2", accessToken, cloudId }
+    })
     return {
       baseUrl: "",
-      auth: { type: "oauth2", accessToken, cloudId } satisfies {
-        readonly type: "oauth2"
-        readonly accessToken: typeof accessToken
-        readonly cloudId: string
-      }
+      // Read once for the snapshot every non-refreshing consumer still reads, and again per request.
+      auth: yield* resolveAuth,
+      resolveAuth
     }
   })
 ).pipe(Layer.provide(JiraAuthLive))

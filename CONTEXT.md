@@ -121,7 +121,7 @@ A user-declared mapping from a directory to the Issue Key that recurring work be
 _Avoid_: Default ticket, catch-all, fallback project
 
 **Session Root**:
-A directory the user has declared as containing billable work, making any Agent Session that ran beneath it a candidate for a Proposed Worklog. Sessions outside every Session Root are never read, so work that has not been opted in is omitted rather than misattributed.
+A directory the user has declared as containing billable work, making any Agent Session that ran beneath it a candidate for a Proposed Worklog. Work that has not been opted in is omitted rather than misattributed: no session outside every Session Root reaches a Coding Agent or a Proposed Worklog. The read boundary is one step wider than that and deliberately so — the coding agent's project directories are named after a working directory with its separators flattened, which is lossy, so a directory whose name could have come from a Session Root is opened and then discarded once the working directory recorded inside it settles the question. A name that cannot have come from any root is never opened.
 _Avoid_: Excluded path, ignore list, workspace
 
 **Unattributed Session**:

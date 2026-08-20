@@ -31,14 +31,35 @@ replace them with rules rather than simply drop the check. Four do the work:
   safe and says nothing about a _simultaneous_ one: two watches can derive the same gap before either
   writes it. A lease in the config directory, refreshed each look, settles that.
 
+  Three properties of that lease are load-bearing, and each was got wrong first. It is won by an
+  exclusive _create_, so two watches starting together cannot both read it as free. Taking over an
+  abandoned lease cannot be an exclusive create, so the taker signs it and reads it back — and every
+  refresh checks the signature, which is what bounds the case of a look that runs past its own expiry
+  and is displaced while still working. And a lease that cannot be _written_ is not a lease held: an
+  unwritable config directory once looked exactly like a lease already existing, and the watch went on
+  to write with nothing protecting it.
+
+  Machine-local is the honest scope. Two machines watching one Clockify account can still write the
+  same hours twice, and nothing here can see that; closing it needs an idempotency key the remote side
+  honours.
+
 A Session Watch therefore needs no record of what it has _written_. A proposal is still
 `session − (already recorded)`, so a failed write, a half-written row, or a laptop that slept all
 afternoon shows up as the same gap on the next look, and a block already written produces no proposal
 at all. This is the same idempotency ADR-0006 relies on, used a second time.
 
-It does keep one thing: how far it has _looked_. Without that, "resume the tail a stopped run was
+It does keep one thing: how far it has _resolved_. Without that, "resume the tail a stopped run was
 holding" and "back-date a settle window on every start" are the same behaviour, and only one of them
 is defensible.
+
+That word is exact, and the first two attempts at it were not. The cursor is not how far the watch
+_looked_ — a run stopped mid-block had looked past prompts it was still holding, so resuming from
+there filtered out the very prompts that made the block unsettled and lost the block the cursor
+existed to protect. Nor is it how far the watch _settled_: a settled block is not finished with until
+both sides that were short have taken it, so a Jira refusal after Clockify succeeded would otherwise
+persist a cursor past a row whose Jira half was missing — and the restart the command asks the user
+for would skip it. A dry run resolves nothing at all, by the same rule. The cursor is the earliest
+instant this run has not finished with, which is the start of the oldest block it still holds.
 
 ## Considered Options
 

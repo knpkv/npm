@@ -89,8 +89,13 @@ export interface SessionAttribution {
  * An Issue Key as Jira writes them: at least two leading uppercase alphanumerics then a number.
  * Deliberately stricter than the Clockify description parser — this runs over free prose and
  * directory names, where `feat/jcf-ai` and `v2-3` must not look like tickets.
+ *
+ * Bounded by explicit non-alphanumerics rather than `\b`, because `_` is a word character: `\b` put
+ * no boundary between `_` and `P`, so the branch and worktree names people actually use —
+ * `feature_PROJ-42_work` — matched nothing at all, and the session went unattributed and therefore
+ * unlogged. Underscore is the only difference; letters and digits still have to stop.
  */
-const TICKET_KEY = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/g
+const TICKET_KEY = /(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-\d{1,6}(?![A-Za-z0-9])/g
 
 const matchTicketKeys = (text: string): ReadonlyArray<string> => [...text.matchAll(TICKET_KEY)].map((m) => m[0])
 

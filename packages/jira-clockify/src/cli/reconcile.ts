@@ -21,7 +21,7 @@ import {
   type SessionProposalProgress,
   type SessionProposalReport
 } from "../services/ReconcileService.js"
-import { formatDuration, localDay } from "../utils/time.js"
+import { formatDuration, localDay, nextLocalMidnight } from "../utils/time.js"
 import { applyProposal, clip, entryDescription, proposalTargets } from "./agentWrite.js"
 import { type CalendarRow, earliestStart, formatSpanBounds, formatSpanRanges, renderDayCalendar } from "./calendar.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
@@ -44,7 +44,10 @@ export const resolvePeriod = (opts: {
   readonly until: string | undefined
 }): ReconcilePeriod | { readonly error: string } => {
   const today = new Date()
-  const endExclusive = (day: string) => new Date(startOfDay(day).getTime() + 24 * 60 * 60 * 1000)
+  // The next local midnight, not 24 elapsed hours after this one. A spring-forward day is 23 hours
+  // long, so `+24h` reached into the following day; a fall-back day is 25, so it stopped an hour
+  // short and dropped 23:00–24:00 from the day the user asked for.
+  const endExclusive = (day: string) => new Date(nextLocalMidnight(startOfDay(day).getTime()))
 
   if (opts.since !== undefined || opts.until !== undefined) {
     const fromDay = opts.since ?? localDay(today)
@@ -54,7 +57,9 @@ export const resolvePeriod = (opts: {
     return { from: startOfDay(fromDay), to: endExclusive(toDay) }
   }
   if (opts.week) {
-    const from = new Date(startOfDay(localDay(today)).getTime() - 6 * 24 * 60 * 60 * 1000)
+    // Re-anchored to a local midnight for the same reason as `endExclusive`: six times 24 hours from
+    // one midnight is 23:00 or 01:00 on the far side of a transition, not the start of a day.
+    const from = startOfDay(localDay(new Date(startOfDay(localDay(today)).getTime() - 6 * 24 * 60 * 60 * 1000)))
     return { from, to: endExclusive(localDay(today)) }
   }
   return { from: startOfDay(localDay(today)), to: endExclusive(localDay(today)) }

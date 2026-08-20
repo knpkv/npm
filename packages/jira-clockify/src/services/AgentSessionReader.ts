@@ -385,14 +385,19 @@ export const layer = Layer.effect(
         for (const filePath of paths) {
           if (!(yield* mayHoldActivity(filePath, fromMs))) continue
 
+          // Fails the run rather than skipping the file. An in-scope transcript that cannot be read
+          // is not an absent one: it may overlap a readable session on another ticket, and dropping
+          // it takes that ticket out of the overlap sharing — so the interval it should have halved
+          // is credited whole to whichever session happened to be readable, and `watch` writes it.
+          // An out-of-scope path never reaches here; `transcriptPaths` has already excluded it.
           const content = yield* fs.readFileString(filePath).pipe(
-            Effect.catch((error) =>
-              Effect.logDebug(`Skipping unreadable transcript ${filePath}: ${error.message}`).pipe(
-                Effect.as<string | null>(null)
-              )
+            Effect.mapError((error) =>
+              new AgentSessionError({
+                message: `Could not read the session transcript ${filePath}: ${error.message}`,
+                cause: error
+              })
             )
           )
-          if (content === null) continue
 
           for (const segment of decodeTranscript(content, { fromMs, toMs })) {
             // Scope check before anything is mined or digested: out-of-scope work leaves no trace.

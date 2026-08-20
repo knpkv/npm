@@ -83,12 +83,21 @@ jcf sync reconcile --agent claude --json      # Reporting only: one JSON value, 
 ```
 
 `--agent claude` is for time _neither_ side recorded: it reads the Claude Code transcripts under your
-session roots — and only those; a project outside them is never opened — works out which issue each
+session roots — and only those — works out which issue each
 session belongs to and how long it accounts for, subtracts
 what Clockify and Jira already hold, and offers each remaining gap for confirmation. Every row shows
 the signal behind it — the git branch, the directory path, a standing ticket, or a reading of the
 transcript — so a wrong attribution is visible before you accept it. It is a mode switch, not a
 direction, so combining it with `clockify-to-jira` is an error.
+
+Worth being exact about what "only those" means, because it is a _local read_ boundary and a
+_disclosure_ boundary, and they are not in the same place. Claude names each project directory after
+the working directory with the separators flattened, so `/a/b-c` and `/a/b/c` both become `-a-b-c`.
+A directory whose name cannot have come from any of your session roots is never opened at all — on
+this author's laptop, 155 of 157. One that collides with a root's encoding is opened, and its
+sessions are discarded once the working directory inside says they were out of scope. So an
+out-of-scope session can be read from disk by jcf; it can never reach a coding agent, a proposal, or
+either of the two systems.
 
 Only messages _you typed_ count as presence — the agent's own output, its tool results, and the
 prompts it sends its own subagents do not, since they show it was busy rather than that you were
@@ -171,10 +180,16 @@ first-ever run has no cursor and reaches back for nothing. Older than that is `r
 where you see the rows first.
 
 Only one watch writes at a time. A second one tells you who has been running since when and stops,
-because both would otherwise derive the same gap and write it twice. That is machine-local: two
-watches on two machines against one Clockify account is not something this can see. Nothing is remembered between looks — a proposal is always the gap the two
-sides still have — so a failed write, a closed laptop, or a restart costs nothing but a delay. If
-Jira rejects the login it stops rather than logging to Clockify alone all afternoon.
+because both would otherwise derive the same gap and write it twice. Each watch signs the lease it
+takes, so one that gets displaced — by a long look running past its own expiry, say — finds out at
+its next look and stands down rather than writing alongside the watch that replaced it. If the lease
+cannot be written at all, the watch refuses to start: an unwritable config directory means nothing
+would stop a second one. That is machine-local: two watches on two machines against one Clockify
+account is not something this can see. Nothing is remembered between looks — a proposal is always the
+gap the two sides still have — so a failed write, a closed laptop, or a restart costs nothing but a
+delay. If Jira rejects the login it stops rather than logging to Clockify alone all afternoon; the
+half-written block stays behind the cursor, so logging back in and restarting finishes it rather than
+skipping it.
 
 ## TUI Keybindings
 
