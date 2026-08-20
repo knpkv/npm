@@ -165,8 +165,14 @@ not change, so asking every five minutes would spend a call to be told the same 
 deliberate signal places is named on screen and left for `jcf sync reconcile --agent claude`. The
 coding agent is woken only to describe a block it is about to write.
 
-It only ever covers time since it started; the morning you started it in is `reconcile`'s job, where
-you see the rows first. Nothing is remembered between looks — a proposal is always the gap the two
+It covers time since it started, plus whatever a previous watch had reached but not yet written — it
+leaves a cursor behind, so a restart resumes instead of dropping the block it was holding. A
+first-ever run has no cursor and reaches back for nothing. Older than that is `reconcile`'s job,
+where you see the rows first.
+
+Only one watch writes at a time. A second one tells you who has been running since when and stops,
+because both would otherwise derive the same gap and write it twice. That is machine-local: two
+watches on two machines against one Clockify account is not something this can see. Nothing is remembered between looks — a proposal is always the gap the two
 sides still have — so a failed write, a closed laptop, or a restart costs nothing but a delay. If
 Jira rejects the login it stops rather than logging to Clockify alone all afternoon.
 

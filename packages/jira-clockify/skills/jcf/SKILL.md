@@ -161,7 +161,11 @@ jcf watch claude --interval 60
   place is reported and left for `jcf sync reconcile --agent claude`.
 - It writes a block once it has been quiet for one idle cap, so work in progress is never written
   and nothing is ever written twice.
-- It covers only time since it started. Earlier work in the same day needs `jcf sync reconcile`.
+- It covers time since it started, plus any stretch a previous watch reached but had not written —
+  it leaves a cursor, so a restart resumes rather than dropping the block. A first run reaches back
+  for nothing. Earlier work in the same day needs `jcf sync reconcile`.
+- Only one watch writes at a time, per machine. Starting a second one prints who holds the lease and
+  exits; do not start one to "check" on a running watch.
 - It stops itself if Jira rejects the login. Re-authenticate with `jcf auth jira login` and restart.
 
 ## Agent Workflow

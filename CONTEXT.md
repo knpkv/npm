@@ -145,7 +145,7 @@ An Attributed Interval far enough in the past that no later Session Activity can
 _Avoid_: Closed block, finished session, flushed interval
 
 **Session Watch**:
-A long-running command that derives Proposed Worklogs from Session Activity as it happens and writes each Settled Block once, covering only the time since it started. It writes nothing a Coding Agent had to guess at, leaving that for review, and needs no record of what it has already written because a proposal is always the gap the two sides still have.
+A long-running command that derives Proposed Worklogs from Session Activity as it happens and writes each Settled Block once, covering the time since it started together with any stretch a previous Session Watch reached but had not yet written. It writes nothing a Coding Agent had to guess at, leaving that for review, and keeps no record of what it has written — a proposal is always the gap the two sides still have — only of how far it has looked, so a restart resumes rather than losing the block it was holding. One writes at a time per machine, because two would derive the same gap before either wrote it.
 _Avoid_: Daemon, auto-logger, tracker, sync loop
 
 **Jira Custom Field**:
