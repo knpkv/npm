@@ -20,7 +20,7 @@
   "scripts": {
     "start": "tsx src/bin.ts",
     "build": "tsc -b && chmod +x dist/src/bin.js",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },
@@ -28,6 +28,7 @@
     "@effect/atom-react": "4.0.0-rc.109",
     "@effect/platform-node": "4.0.0-rc.109",
     "@knpkv/agent-skills": "workspace:^",
+    "@knpkv/ai-claude": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",

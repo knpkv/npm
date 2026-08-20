@@ -6,6 +6,6 @@
 
 export { JiraApiClient, type JiraApiClientContract, layer, make, type UploadAttachmentInput } from "./JiraApiClient.js"
 
-export { JiraApiConfig, type JiraApiConfigContract } from "./JiraApiConfig.js"
+export { JiraApiConfig, type JiraApiConfigContract, type JiraApiCredential } from "./JiraApiConfig.js"
 
 export * as JiraApi from "./generated/JiraApi.js"
