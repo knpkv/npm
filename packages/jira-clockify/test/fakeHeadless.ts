@@ -337,11 +337,22 @@ const fakeFileSystemLayer = (
     },
     // The config service writes through this; nothing in these tests reads it back from disk.
     makeDirectory: () => Effect.void,
-    // A real store, so anything the CLI writes and reads back — the watch lease — behaves.
-    writeFileString: (path, content) =>
-      Effect.sync(() => {
-        written[path] = content
-      }),
+    // A real store, so anything the CLI writes and reads back — the watch lease — behaves. `wx` is
+    // honoured, because an exclusive create is exactly what the lease relies on for its exclusion.
+    writeFileString: (path, content, options) =>
+      options?.flag === "wx" && written[path] !== undefined
+        ? Effect.fail(
+          systemError({
+            _tag: "AlreadyExists",
+            module: "FileSystem",
+            method: "writeFileString",
+            description: "file already exists",
+            pathOrDescriptor: path
+          })
+        )
+        : Effect.sync(() => {
+          written[path] = content
+        }),
     remove: (path) =>
       Effect.sync(() => {
         delete written[path]

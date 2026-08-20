@@ -52,7 +52,7 @@ interface TranscriptEvent {
   readonly sidechain?: boolean | undefined
   /** Overrides the transcript's session id for this line only — a resumed or forked session. */
   readonly sessionId?: string | undefined
-  /** Overrides the branch for this line onward — a checkout partway through a session. */
+  /** The branch for *this line only*; an event without one falls back to the transcript default. */
   readonly branch?: string | undefined
 }
 
@@ -782,6 +782,39 @@ describe("jcf sync reconcile --agent: proposals", () => {
 
     // The summary and the block times are what a wider terminal buys: at 80 columns the title is
     // clipped and the times are dropped, and neither loss should be permanent.
+    // Both lines, not just the detail one. A long key with unequal gaps overflowed 80 columns, and
+    // the prompt counts only the title lines it was handed — so the terminal wrapped the surplus and
+    // every later row sat a line out of place, mid-decision.
+    it.effect("keeps the header inside the terminal width too", () =>
+      Effect.gen(function*() {
+        const { world } = yield* run(
+          agent(),
+          baseOptions({
+            transcripts: {
+              "work-repo/s1.jsonl": transcript({
+                sessionId: "s1",
+                cwd: `${WORK_ROOT}/repo`,
+                gitBranch: "feat/PROJECTKEY-999999-a-very-long-branch-name",
+                events: steady(at(DAY.year, DAY.month, DAY.day, 9, 0), 30)
+              })
+            },
+            jiraWorklogs: {
+              "PROJECTKEY-999999": [{
+                started: iso(at(DAY.year, DAY.month, DAY.day, 9, 0)),
+                timeSpentSeconds: 60
+              }]
+            },
+            issueSummaries: { "PROJECTKEY-999999": "A title long enough to fill the second line twice over" },
+            keep: [true]
+          })
+        )
+        const drawn = listFrames(world)
+        expect(drawn.length).toBeGreaterThan(0)
+        for (const line of drawn.flatMap((frame) => frame.split("\n"))) {
+          expect(line.length).toBeLessThanOrEqual(80)
+        }
+      }))
+
     it.effect("spends a wider terminal on the summary and the block times", () =>
       Effect.gen(function*() {
         const narrow = yield* run(agent(), wordy(80))

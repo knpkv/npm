@@ -11,3 +11,5 @@ invalid:
     NodeRuntime.runMain(program, { teardown: forceExitTeardown })
   - |
     NodeRuntime.runMain(program, { disableErrorReporting: false })
+  - |
+    NodeRuntime.runMain(makeProgram({ disableErrorReporting: true }), { teardown: forceExitTeardown })

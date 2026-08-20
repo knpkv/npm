@@ -514,15 +514,45 @@ export const layer = Layer.effect(
         const fromDay = localDay(period.from)
         const toDay = localDay(period.to)
         // Find issues the user logged work on in the window.
-        const search = yield* jira.searchIssuesUsingJql({
-          params: {
-            jql: `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`,
-            maxResults: 100,
-            fields: ["key"]
+        // Every page, not just the first. A ticket that fell off page one tallies as zero Jira time,
+        // and since every caller subtracts this from what a session accounts for, that reads as
+        // "Jira is short by the whole day" — which `watch` would then post on top of hours Jira
+        // already holds. A window of more than a hundred distinct issues is an ordinary week.
+        const jql = `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`
+        const searchPage = (pageToken: string | undefined) =>
+          jira.searchIssuesUsingJql({
+            params: {
+              jql,
+              maxResults: 100,
+              fields: ["key"],
+              ...((pageToken !== undefined) && { nextPageToken: pageToken })
+            }
+          }).pipe(
+            Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e }))
+          )
+
+        const searched: Array<unknown> = []
+        let pageToken: string | undefined = undefined
+        // Bounded so a server that keeps handing back a token cannot spin here for ever; hitting the
+        // bound fails the run rather than proceeding on a partial tally.
+        for (let page = 0; page < 50; page++) {
+          const result: unknown = yield* searchPage(pageToken)
+          const issues: unknown = Predicate.isObject(result) ? result["issues"] : undefined
+          if (Array.isArray(issues)) {
+            for (const issue of issues) searched.push(issue)
           }
-        }).pipe(
-          Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e }))
-        )
+          const next: string | undefined = Predicate.isObject(result) && Predicate.isString(result["nextPageToken"])
+            ? result["nextPageToken"]
+            : undefined
+          pageToken = next
+          if (next === undefined) break
+        }
+        if (pageToken !== undefined) {
+          return yield* new ReconcileError({
+            message: "Jira returned more worklog pages than this run will read; narrow the window."
+          })
+        }
+        const search = { issues: searched }
 
         const issueKeys = (search.issues ?? []).flatMap((issue) => {
           const key = issueKey(issue)

@@ -108,7 +108,7 @@ are laid out for your terminal's width; a wider one spends the room on the issue
 times. `--calendar` draws the same evidence as a
 grid — one column per minute, one row per hour, only the hours with credited time:
 
-```
+```text
   2026-07-25   # PROJ-5663
         :00  :05  :10  :15  :20  :25  :30  :35  :40  :45  :50  :55
   00h   .................###########################################
@@ -124,7 +124,7 @@ Each entry it writes says what the time went on. The Clockify description and th
 carry the issue title and one sentence, read off the session's own prompts, describing what was
 actually done:
 
-```
+```text
   2026-07-25  PROJ-5663  +2h 35m to both
     Add SSP API for per-user application list — Researched Keycloak OIDC docs and designed an endpoint returning the caller's allowed applications (Reconciled from Claude Agent Session)
     ✓ created Clockify entry
@@ -149,7 +149,7 @@ once it has been quiet for one idle cap — six minutes by default — because u
 still grow, and its share of any parallel work can still change. So entries land at natural breaks
 rather than a minute at a time, and each says what the time went on exactly as a confirmed row does:
 
-```
+```text
 jcf watch claude
   Looking every 5m, from 10:32. A block is written once it has been quiet for 6m.
   Only branch-, path-, and standing-attributed work is written. Earlier work and anything needing review: jcf sync reconcile --agent claude

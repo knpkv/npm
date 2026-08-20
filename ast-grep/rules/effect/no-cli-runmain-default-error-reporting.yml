@@ -8,16 +8,18 @@ message: "Disable NodeRuntime error reporting when CLI code handles and re-fails
 # Any `runMain` call that does not switch reporting off. The single-argument form is the obvious
 # case, but `runMain(program, { teardown })` also leaves reporting on while *looking* configured —
 # which is how a jcf usage error came to print both a friendly line and a stack trace.
+# Matched on the *options argument* rather than anywhere inside the call. An unrestricted descendant
+# search accepted `runMain(makeProgram({ disableErrorReporting: true }), { teardown })`, where the
+# pair sits in the program expression and the runtime's own reporting is still on.
 rule:
   all:
     - pattern: NodeRuntime.runMain($$$ARGS)
     - not:
-        has:
-          pattern:
-            context: |
-              const $_ = { disableErrorReporting: true }
-            selector: pair
-          stopBy: end
+        any:
+          - pattern: "NodeRuntime.runMain($P, { $$$A, disableErrorReporting: true, $$$B })"
+          - pattern: "NodeRuntime.runMain($P, { disableErrorReporting: true, $$$B })"
+          - pattern: "NodeRuntime.runMain($P, { $$$A, disableErrorReporting: true })"
+          - pattern: "NodeRuntime.runMain($P, { disableErrorReporting: true })"
 
 files:
   - "packages/atlassian-common/src/bin.ts"

@@ -199,6 +199,12 @@ const CONTINUATION = " ".repeat(14)
 const CONFIRM_SUMMARY_WIDTH = 44
 
 /**
+ * What the picker draws before a choice's title: `" " + checkbox + " "`. Every line of a title has
+ * to fit inside the width that leaves, and the prompt appends a space and the description after it.
+ */
+const CHOICE_PREFIX_WIDTH = 4
+
+/**
  * Aligns a choice's second line under the first. The picker renders a choice as
  * `" " + checkbox + " " + title`, so the title itself starts at column 4.
  */
@@ -236,8 +242,16 @@ const choiceLines = (options: {
   const { proposal, tickets, width } = options
   const bounds = formatSpanBounds(proposal.spans)
   const when = bounds === "" ? proposal.day : `${proposal.day} ${bounds}`
-  const head = `${when}  ${proposal.ticketKey.padEnd(12)} ${proposalTargets(proposal).padEnd(17)}` +
-    ` [${signalLabel(proposal.signal, proposal.confidence)}]`
+  // Clipped like the detail line is. The fields are padded to line the columns up, not bounded — a
+  // long Issue Key with unequal gaps ("+10h Clockify, +9h Jira") already passes 80 columns, and the
+  // prompt only counts the title lines it was given. The terminal soft-wraps the surplus, the erase
+  // count is then one short, and every later row and redraw sits a line out of place while the user
+  // is choosing what to write.
+  const head = clip(
+    `${when}  ${proposal.ticketKey.padEnd(12)} ${proposalTargets(proposal).padEnd(17)}` +
+      ` [${signalLabel(proposal.signal, proposal.confidence)}]`,
+    width - 1 - CHOICE_PREFIX_WIDTH
+  )
 
   const facts = tickets.get(proposal.ticketKey)
   // A credited total below the wall-clock total means this key was worked on alongside others and

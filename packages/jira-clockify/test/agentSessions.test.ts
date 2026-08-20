@@ -381,7 +381,7 @@ describe("activeWindows and sharing", () => {
     expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300 + idleCapSeconds)
   })
 
-  it("credits nothing for adjacent identical timestamps", () => {
+  it("credits one Idle Cap for adjacent identical timestamps", () => {
     const split = creditFor(
       [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 0))],
       { s1: "PROJ-1" }

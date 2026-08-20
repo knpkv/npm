@@ -134,14 +134,13 @@ export const runWatch = (options: {
     /**
      * Where this run starts looking.
      *
-     * A *resume*, not a lookback: only as far as a previous watch demonstrably got, and never more
-     * than one settle window — the stretch that cannot have settled yet, so no watch can have
-     * written it. A first-ever run has no cursor and therefore no reach at all, which is what keeps
-     * "covers only time since it started" true rather than approximately true.
+     * The cursor alone, with no floor of its own. Taking `max(cursor, now − settleWindow)` looked
+     * safer and was the opposite: an old cursor then resolved to `now − settleWindow`, so every
+     * restart back-dated a fresh window of unreviewed work. The lease decides whether a resume is
+     * offered at all — only when the previous holder stopped recently — so by the time there is a
+     * cursor here, reaching to it is exactly resuming what that run was already holding.
      */
-    const watchFromMs = lease.resumeFromMs === null
-      ? startedAtMs
-      : Math.max(lease.resumeFromMs, startedAtMs - settleSeconds * 1000)
+    const watchFromMs = lease.resumeFromMs ?? startedAtMs
 
     yield* Console.log(
       `jcf watch ${options.agent}${options.dryRun ? "  (dry run — writes nothing)" : ""}`
@@ -163,9 +162,20 @@ export const runWatch = (options: {
      * The window starts where the watch did, so the recorded side is measured over exactly the
      * span the session side is — a Clockify entry from before the watch began belongs to neither.
      */
+    // The earliest instant this run has not resolved. Seeded at the window's start and moved forward
+    // only past work that is settled and dealt with, so a run stopped mid-block leaves the block's
+    // own start behind rather than the moment it happened to stop — resuming from the latter would
+    // filter out the very prompts that made the block unsettled.
+    let unresolvedFromMs = watchFromMs
+
     const tick = Effect.gen(function*() {
       const nowMs = yield* Clock.currentTimeMillis
-      yield* WatchLease.refresh({ path: leasePath, heldSinceMs: startedAtMs })
+      yield* WatchLease.refresh({
+        path: leasePath,
+        heldSinceMs: startedAtMs,
+        intervalSeconds: options.intervalSeconds,
+        unresolvedFromMs
+      })
       const report = yield* svc.proposeFromSessions(
         { from: new Date(watchFromMs), to: new Date(nowMs) },
         { attribution: "deterministic" }
@@ -193,6 +203,16 @@ export const runWatch = (options: {
       }
 
       const decision = decideWatchWrites(report.proposals, { nowMs })
+
+      // Everything before the oldest still-unsettled block is finished with; with nothing held, the
+      // settle horizon is. Never moves backwards, so a quiet look cannot forget a held block.
+      const heldFrom = decision.held
+        .filter((entry) => entry.reason._tag === "Unsettled")
+        .flatMap((entry) => entry.proposal.spans.map((span) => span.startMs))
+      const horizon = heldFrom.length === 0
+        ? nowMs - settleSeconds * 1000
+        : Math.min(...heldFrom)
+      unresolvedFromMs = Math.max(unresolvedFromMs, Math.min(horizon, nowMs))
 
       for (const held of decision.held) {
         if (held.reason._tag !== "NeedsReview") continue
@@ -248,7 +268,10 @@ export const runWatch = (options: {
         totals.clockifySeconds += written.clockifySeconds
         totals.jiraSeconds += written.jiraSeconds
         if (!written.keepGoing) {
-          return { _tag: "Stop", reason: "Jira rejected the login. Run `jcf auth login`, then start the watch again." }
+          return {
+            _tag: "Stop",
+            reason: "Jira rejected the login. Run `jcf auth jira login`, then start the watch again."
+          }
         }
       }
       return carryOn
@@ -271,7 +294,16 @@ export const runWatch = (options: {
     // never working look identical otherwise.
     yield* loop.pipe(
       // Released however this ends, so the next watch does not wait out the stale window.
-      Effect.ensuring(WatchLease.release({ path: leasePath, heldSinceMs: startedAtMs })),
+      Effect.ensuring(
+        Effect.suspend(() =>
+          WatchLease.release({
+            path: leasePath,
+            heldSinceMs: startedAtMs,
+            intervalSeconds: options.intervalSeconds,
+            unresolvedFromMs
+          })
+        )
+      ),
       Effect.ensuring(
         Effect.suspend(() =>
           Console.log(

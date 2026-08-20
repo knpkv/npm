@@ -201,6 +201,9 @@ describe("model", () => {
         Effect.provide(fakeProcessLayer(calls, { stdout: success("ok") }))
       )
       const command = calls[0]
+      // Asserted rather than guarded: a conditional here passes just as happily when no command was
+      // made at all, which is the one outcome this test exists to rule out.
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(command.args[command.args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep")
       }

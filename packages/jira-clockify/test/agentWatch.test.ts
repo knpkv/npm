@@ -129,11 +129,10 @@ const proposal = (overrides: Partial<SessionProposal> = {}): SessionProposal => 
 })
 
 describe("decideWatchWrites", () => {
-  // The bound the whole feature rests on. A window that could still overlap a block ending at T has
-  // to close before T + Idle Cap, so once that has passed neither the block nor its share of any
-  // parallel work can change. The grace on top is for transcript-write latency, not for arithmetic.
-  it("settles a block one Idle Cap plus the grace after its last moment", () => {
-    expect(settlesAt([{ startMs: at(10, 0), endMs: at(10, 30) }])).toBe(at(10, 30) + SETTLE * 1000)
+  // Measured from the block's own end, which already carries the Idle Cap. The grace on top is for
+  // transcript-write latency, not for the arithmetic.
+  it("settles a block one grace after its end", () => {
+    expect(settlesAt([{ startMs: at(10, 0), endMs: at(10, 30) }])).toBe(at(10, 30) + SETTLE_GRACE_SECONDS * 1000)
   })
 
   // The deadline the command advertises at startup. It was counting the Idle Cap twice — once in the
@@ -412,7 +411,8 @@ describe("jcf watch claude", () => {
       expect(world.jiraWorklogs).toEqual([])
       const printed = output(world.stdout)
       expect(printed).toContain("Stopped:")
-      expect(printed).toContain("jcf auth login")
+      // The real command is nested under `auth jira`; the watch used to print one that does not exist.
+      expect(printed).toContain("jcf auth jira login")
       // The Clockify half landed and the Jira half did not, and the summary has to say exactly
       // that. For a command whose whole purpose is making sure hours are not lost, overstating what
       // was written is the wrong direction to be wrong in.
@@ -636,10 +636,11 @@ describe("jcf watch claude", () => {
       yield* advance(Duration.minutes(20))
       yield* Fiber.interrupt(second)
 
-      // Resumed from where the first run got to — 10:08 — so three minutes of the block plus its
-      // capped tail. The seven minutes before that are `reconcile`'s to offer, not silently gone.
+      // The whole block. The cursor records the earliest instant the first run had *not resolved* —
+      // the held block's own start — rather than the moment it stopped, so resuming from it keeps
+      // the prompts that made the block unsettled in the first place.
       expect(fake.world.createdClockifyEntries).toHaveLength(1)
-      expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(180 + IDLE_CAP)
+      expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
     }))
 
   // Forward only. Work that finished before the watch started is `reconcile`'s job, where a person

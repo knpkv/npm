@@ -2,12 +2,23 @@
 
 `jcf sync reconcile --agent` puts a person in front of every write, and ADR-0006 treats that review
 as part of what makes derived time safe to log. A Session Watch removes the person, so it has to
-replace them with rules rather than simply drop the check. Three do the work:
+replace them with rules rather than simply drop the check. Four do the work:
 
-- **Only a Settled Block.** A block of presence is written no sooner than one Idle Cap after its last
-  moment. The bound is exact rather than cautious: a window that could still overlap a block ending
-  at `T` must close before `T + Idle Cap`, because a longer gap is not presence at all. Once that has
-  passed, neither the block nor its share of parallel work can change.
+- **Only a Settled Block.** A block is written once its own end has passed, plus a small grace for
+  transcript-write latency. A block already runs one Idle Cap past its last prompt, and the only way
+  a later prompt can extend it is by landing within an Idle Cap of that prompt — which is before the
+  block ends. So once the end has passed, neither the block nor its share of parallel work can
+  change.
+
+  An earlier version of this rule argued the bound differently: that a window able to overlap a block
+  ending at `T` must close before `T + Idle Cap`, so `T + Idle Cap` was safe. That is wrong, and the
+  error is worth recording. A window is _capped_, not bounded by its closing prompt — the prompt that
+  closes it may arrive arbitrarily late and the window still exists, truncated. So a late prompt could
+  conjure a window over a block already written, halve its share after the fact, and have its own
+  share written too, putting more time on two Issue Keys than the clock holds. Materialising a
+  session's trailing window as soon as its prompt is seen is what makes the bound true, because then
+  every window a prompt will ever produce exists the moment the prompt does.
+
 - **Only a person's own Attribution Signal.** A branch name, a worktree path, and a Standing
   Attribution are all things someone deliberately created. A Coding Agent's reading of a transcript
   is not, so it is reported and left for `reconcile`, where it is shown before it is written.
@@ -20,10 +31,14 @@ replace them with rules rather than simply drop the check. Three do the work:
   safe and says nothing about a _simultaneous_ one: two watches can derive the same gap before either
   writes it. A lease in the config directory, refreshed each look, settles that.
 
-A Session Watch therefore needs no record of what it has written. A proposal is still
+A Session Watch therefore needs no record of what it has _written_. A proposal is still
 `session − (already recorded)`, so a failed write, a half-written row, or a laptop that slept all
-afternoon shows up as the same gap on the next look, and a block already written produces no
-proposal at all. This is the same idempotency ADR-0006 relies on, used a second time.
+afternoon shows up as the same gap on the next look, and a block already written produces no proposal
+at all. This is the same idempotency ADR-0006 relies on, used a second time.
+
+It does keep one thing: how far it has _looked_. Without that, "resume the tail a stopped run was
+holding" and "back-date a settle window on every start" are the same behaviour, and only one of them
+is defensible.
 
 ## Considered Options
 

@@ -1,6 +1,13 @@
 id: no-cli-runmain-default-error-reporting
 snapshots:
   ? |
+    NodeRuntime.runMain(makeProgram({ disableErrorReporting: true }), { teardown: forceExitTeardown })
+  : labels:
+      - source: "NodeRuntime.runMain(makeProgram({ disableErrorReporting: true }), { teardown: forceExitTeardown })"
+        style: primary
+        start: 0
+        end: 98
+  ? |
     NodeRuntime.runMain(program)
   : labels:
       - source: NodeRuntime.runMain(program)
