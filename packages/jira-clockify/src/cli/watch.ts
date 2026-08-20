@@ -109,19 +109,6 @@ export const runWatch = (options: {
     const startedAtMs = yield* Clock.currentTimeMillis
     const settleSeconds = cfg.sessionIdleCapSeconds + SETTLE_GRACE_SECONDS
 
-    /**
-     * Where this run starts looking: one settle window before it started.
-     *
-     * Not backfill. Nothing in that window can have settled yet, so it is work no watch could have
-     * written — including the tail a previous run was holding when it was stopped or lost. Without
-     * it, a restart a minute before a block came due dropped that block for good, which is the
-     * opposite of the "a restart costs a delay, not an hour" this command claims.
-     *
-     * Bounded to exactly one settle window, so a first-ever run still cannot reach back into a
-     * morning nobody has seen.
-     */
-    const watchFromMs = startedAtMs - settleSeconds * 1000
-
     const totals: WatchTotals = { blocks: 0, clockifySeconds: 0, jiraSeconds: 0 }
     // Said once per bucket, not once per tick: a ticket that cannot be placed would otherwise
     // repeat its own line every interval until the watch is killed.
@@ -143,6 +130,18 @@ export const runWatch = (options: {
       return
     }
     const leasePath = lease.path
+
+    /**
+     * Where this run starts looking.
+     *
+     * A *resume*, not a lookback: only as far as a previous watch demonstrably got, and never more
+     * than one settle window — the stretch that cannot have settled yet, so no watch can have
+     * written it. A first-ever run has no cursor and therefore no reach at all, which is what keeps
+     * "covers only time since it started" true rather than approximately true.
+     */
+    const watchFromMs = lease.resumeFromMs === null
+      ? startedAtMs
+      : Math.max(lease.resumeFromMs, startedAtMs - settleSeconds * 1000)
 
     yield* Console.log(
       `jcf watch ${options.agent}${options.dryRun ? "  (dry run — writes nothing)" : ""}`
@@ -272,7 +271,7 @@ export const runWatch = (options: {
     // never working look identical otherwise.
     yield* loop.pipe(
       // Released however this ends, so the next watch does not wait out the stale window.
-      Effect.ensuring(WatchLease.release(leasePath)),
+      Effect.ensuring(WatchLease.release({ path: leasePath, heldSinceMs: startedAtMs })),
       Effect.ensuring(
         Effect.suspend(() =>
           Console.log(

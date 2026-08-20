@@ -35,14 +35,25 @@ const STALE_INTERVALS = 3
 
 const Lease = Schema.Struct({
   heldSinceMs: Schema.Number,
-  refreshedAtMs: Schema.Number
+  refreshedAtMs: Schema.Number,
+  /**
+   * How far the holder had got. This is the *proof* that a previous watch already owned a stretch of
+   * time, which is what lets a restart resume it — without it, "recover the tail" is
+   * indistinguishable from "back-date six minutes on every first run".
+   */
+  coveredToMs: Schema.optional(Schema.Number)
 })
 
 const decodeLease = Schema.decodeUnknownOption(Schema.fromJsonString(Lease))
 
 /** Whether this process may write, and where its lease lives. */
 export type LeaseOutcome =
-  | { readonly _tag: "Held"; readonly path: string }
+  | {
+    readonly _tag: "Held"
+    readonly path: string
+    /** Where the previous watch got to, or null when there was none. */
+    readonly resumeFromMs: number | null
+  }
   | { readonly _tag: "Taken"; readonly sinceMs: number }
 
 /**
@@ -70,27 +81,44 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
       return { _tag: "Taken", sinceMs: existing.value.heldSinceMs } satisfies LeaseOutcome
     }
 
+    const resumeFromMs = Option.isSome(existing) ? existing.value.coveredToMs ?? null : null
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
-    yield* fs.writeFileString(file, JSON.stringify({ heldSinceMs: now, refreshedAtMs: now })).pipe(
-      Effect.catch(() => Effect.void)
-    )
-    return { _tag: "Held", path: file } satisfies LeaseOutcome
+    yield* fs.writeFileString(
+      file,
+      JSON.stringify({ heldSinceMs: now, refreshedAtMs: now, coveredToMs: now })
+    ).pipe(Effect.catch(() => Effect.void))
+    return { _tag: "Held", path: file, resumeFromMs } satisfies LeaseOutcome
   })
 
-/** Say the lease is still held. Called every tick; a failure to write is not worth stopping over. */
+/**
+ * Say the lease is still held, and how far this run has got.
+ *
+ * Called every tick, so a watch killed outright still leaves an accurate cursor — the next one
+ * resumes from it rather than guessing. A failure to write is not worth stopping over.
+ */
 export const refresh = (options: { readonly path: string; readonly heldSinceMs: number }) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const now = yield* Clock.currentTimeMillis
     yield* fs.writeFileString(
       options.path,
-      JSON.stringify({ heldSinceMs: options.heldSinceMs, refreshedAtMs: now })
+      JSON.stringify({ heldSinceMs: options.heldSinceMs, refreshedAtMs: now, coveredToMs: now })
     ).pipe(Effect.catch(() => Effect.void))
   })
 
-/** Give the lease up, so the next watch does not wait out the stale window. */
-export const release = (path: string) =>
+/**
+ * Stop holding the lease, keeping the cursor.
+ *
+ * Not deleted: the record of how far this run got is what makes the next one's resume legitimate
+ * rather than a blanket licence to back-date. `refreshedAtMs: 0` is "nobody holds this", so the next
+ * watch takes it immediately instead of waiting out the stale window.
+ */
+export const release = (options: { readonly path: string; readonly heldSinceMs: number }) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    yield* fs.remove(path).pipe(Effect.catch(() => Effect.void))
+    const now = yield* Clock.currentTimeMillis
+    yield* fs.writeFileString(
+      options.path,
+      JSON.stringify({ heldSinceMs: options.heldSinceMs, refreshedAtMs: 0, coveredToMs: now })
+    ).pipe(Effect.catch(() => Effect.void))
   })

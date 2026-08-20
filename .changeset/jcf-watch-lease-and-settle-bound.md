@@ -14,10 +14,12 @@ last prompt, and the deadline added another — so a block promised after six qu
 withheld for eleven. The bound is still exact: a later prompt can only extend a block by landing
 within an Idle Cap of the last one, which is before the block's own end.
 
-A restart no longer drops the block it was holding. The window opens one settle period before the
-run starts — the stretch nothing could have written yet — so an interrupted tail is recovered
-instead of lost. Work older than that window stays `jcf sync reconcile`'s, which shows the rows
-before writing them.
+A restart no longer drops the block it was holding, and a first run still reaches back for nothing.
+The lease carries how far its holder got, so a restart _resumes_ from that point — bounded by one
+settle window, the stretch that cannot have settled and so cannot have been written. A first-ever
+watch has no such record and therefore no reach at all, which keeps "covers only time since it
+started" exactly true rather than approximately. Work older than the resume point stays
+`jcf sync reconcile`'s, which shows the rows before writing them.
 
 End a stretch's presence where the next one begins. A session that switches branch gave its old
 stretch a full Idle Cap of tail, which ran into the new branch's work and was shared back onto the

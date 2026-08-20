@@ -572,15 +572,42 @@ describe("jcf watch claude", () => {
       expect(fake.world.jiraWorklogs).toHaveLength(1)
     }))
 
-  // Released on the way out, so the next watch starts immediately instead of waiting out the window.
-  it.effect("gives the lease up when it stops", () =>
+  // The lease is stood down rather than deleted — the cursor in it is what makes a resume legitimate.
+  // What matters is that the next watch can take it at once instead of waiting out the stale window.
+  it.effect("stands the lease down when it stops, so the next watch starts at once", () =>
     Effect.gen(function*() {
-      const { fiber, world } = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
+      const fake = makeFakeHeadless(branchWork())
+      yield* TestClock.setTime(at(10, 0))
+      const start = () =>
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "claude"]).pipe(
+          Effect.provide(fake.layer),
+          Effect.exit,
+          Effect.forkChild
+        )
+
+      const first = yield* start()
       yield* breathe
-      expect(Object.keys(world.writtenFiles).some((path) => path.endsWith("watch.lease"))).toBe(true)
+      yield* Fiber.interrupt(first)
+      yield* breathe
+
+      const second = yield* start()
+      yield* breathe
+      expect(output(fake.world.stdout)).not.toContain("Two would write the same hours twice")
+      yield* Fiber.interrupt(second)
+    }))
+
+  // The resume is only ever as far as a previous run got. A first-ever watch has no cursor and so no
+  // reach at all — otherwise every start would quietly back-date a settle window of unreviewed work,
+  // which is not what the README, the skills, CONTEXT.md or ADR-0007 say this command does.
+  it.effect("writes nothing from before a first-ever start", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({ startMs: at(10, 30), fake: branchWork() })
+      // The whole fixture block (10:01-10:11) settled well before this run began.
+      yield* advance(Duration.minutes(30))
       yield* Fiber.interrupt(fiber)
-      yield* breathe
-      expect(Object.keys(world.writtenFiles).some((path) => path.endsWith("watch.lease"))).toBe(false)
+
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(output(world.stdout)).toContain("Wrote nothing this run.")
     }))
 
   // A restart used to drop an in-flight block entirely. The window now opens one settle period
@@ -589,20 +616,30 @@ describe("jcf watch claude", () => {
   // proposes whatever the sides are still short of.
   it.effect("recovers the unsettled tail of a block interrupted by a restart", () =>
     Effect.gen(function*() {
-      const first = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
+      // One world across both runs: the lease the first leaves behind is what the second resumes from.
+      const fake = makeFakeHeadless(branchWork())
+      const start = () =>
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "claude"]).pipe(
+          Effect.provide(fake.layer),
+          Effect.exit,
+          Effect.forkChild
+        )
+
+      yield* TestClock.setTime(at(10, 0))
+      const first = yield* start()
       // Stopped before the 10:01-10:11 block could settle.
       yield* advance(Duration.minutes(8))
-      yield* Fiber.interrupt(first.fiber)
-      expect(first.world.createdClockifyEntries).toEqual([])
+      yield* Fiber.interrupt(first)
+      expect(fake.world.createdClockifyEntries).toEqual([])
 
-      const second = yield* startWatch({ startMs: at(10, 14), fake: branchWork() })
+      const second = yield* start()
       yield* advance(Duration.minutes(20))
-      yield* Fiber.interrupt(second.fiber)
+      yield* Fiber.interrupt(second)
 
-      // Restarted at 10:14, so it sees back to 10:08: three minutes of the block plus its capped
-      // tail. The seven minutes before that are `reconcile`'s to offer, not silently gone.
-      expect(second.world.createdClockifyEntries).toHaveLength(1)
-      expect(second.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(180 + IDLE_CAP)
+      // Resumed from where the first run got to — 10:08 — so three minutes of the block plus its
+      // capped tail. The seven minutes before that are `reconcile`'s to offer, not silently gone.
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      expect(fake.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(180 + IDLE_CAP)
     }))
 
   // Forward only. Work that finished before the watch started is `reconcile`'s job, where a person
