@@ -25,6 +25,12 @@ import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "./fakeHea
 
 const WORK_ROOT = `${FAKE_HOME}/dev/work`
 
+/**
+ * The Idle Cap the fake config uses. Sessions credit one of these past their final prompt — the
+ * most time creditable after someone stops typing — so most expectations carry it.
+ */
+const IDLE_CAP = 300
+
 /** Local components, so a day boundary is a local midnight wherever this suite runs. */
 const at = (year: number, month: number, day: number, hour: number, minute: number): number =>
   new Date(year, month - 1, day, hour, minute, 0, 0).getTime()
@@ -46,6 +52,8 @@ interface TranscriptEvent {
   readonly sidechain?: boolean | undefined
   /** Overrides the transcript's session id for this line only — a resumed or forked session. */
   readonly sessionId?: string | undefined
+  /** Overrides the branch for this line onward — a checkout partway through a session. */
+  readonly branch?: string | undefined
 }
 
 /**
@@ -76,7 +84,7 @@ const transcript = (options: {
         sessionId: event.sessionId ?? options.sessionId,
         timestamp: iso(event.atMs),
         cwd: options.cwd,
-        gitBranch: options.gitBranch ?? null,
+        gitBranch: event.branch ?? options.gitBranch ?? null,
         isSidechain: event.sidechain ?? false,
         uuid: `${options.sessionId}-${event.atMs}`,
         version: "9.9.9",
@@ -299,7 +307,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toHaveLength(1)
       expect(world.jiraWorklogs[0]!.issueKey).toBe("PROJ-5662")
       // 30 one-minute gaps, none of which reaches the 5-minute Idle Cap.
-      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1800)
+      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1800 + IDLE_CAP)
     }))
 
   // The heart of the granularity question: a transcript is mostly the agent's own output, so
@@ -347,7 +355,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       )
       const proposals = jsonProposals(world.stdout)
       // One 90-minute gap between two prompts, capped at the 5-minute Idle Cap.
-      expect(proposals[0]).toMatchObject({ sessionSeconds: 300 })
+      expect(proposals[0]).toMatchObject({ sessionSeconds: 300 + IDLE_CAP })
     }))
 
   // A worklog someone asks about months later has to explain itself. The provenance is not
@@ -507,9 +515,9 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(picker).toContain("PROJ-5662")
       // Unclipped: at this width the fixed facts leave room for the whole title.
       expect(picker).toContain("Add OTEL spans to the ingest worker")
-      expect(picker).toContain("+30m 0s to both")
+      expect(picker).toContain(`+${String(30 + IDLE_CAP / 60)}m 0s to both`)
       // The picker is what is on screen when the decision is made, so the times belong here too.
-      expect(picker).toContain("2026-07-01 10:00-10:30")
+      expect(picker).toContain("2026-07-01 10:00-10:35")
       // ...and nothing above it, where it would have scrolled away unread. (Below it is another
       // matter: what each write says about itself is printed as it happens.)
       const beforePicker = world.stdout.slice(0, world.stdout.findIndex((line) => line.includes("Would add")))
@@ -574,7 +582,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
         })
       )
       // Steady activity from 10:00 for 30 minutes, so one contiguous block.
-      expect(output(world.prompts)).toContain("10:00-10:30")
+      expect(output(world.prompts)).toContain("10:00-10:35")
       const printed = output(world.stdout)
       expect(printed).toContain("# PROJ-5662")
       expect(printed).toMatch(/ {2}10h\s+\.*#+\.*/)
@@ -585,7 +593,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
     Effect.gen(function*() {
       const { world } = yield* run(agent(), baseOptions({ transcripts: branchSession(), keep: [true] }))
       // Steady prompts from 10:00 for 30 minutes.
-      expect(output(world.prompts)).toContain("10:00-10:30")
+      expect(output(world.prompts)).toContain("10:00-10:35")
 
       // Written at 10:00, not the local noon the service falls back to when it knows only a day.
       const start = new Date(world.createdClockifyEntries[0]!.start)
@@ -616,7 +624,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       const proposals = jsonProposals(world.stdout)
       const row = proposals[0]
       // Bounds span the interruption; the credited total does not.
-      expect(row).toMatchObject({ sessionSeconds: 10 * 60 + 10 * 60 + 300 })
+      expect(row).toMatchObject({ sessionSeconds: 10 * 60 + 10 * 60 + 300 + IDLE_CAP })
       // Returns null rather than throwing, so a missing bound fails as a readable assertion instead
       // of an exception from inside a helper.
       const instant = (field: "startedAt" | "endedAt"): Date | null => {
@@ -632,7 +640,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       const { world } = yield* run(agent(), baseOptions({ transcripts: branchSession(), keep: [true] }))
       expect(output(world.stdout)).not.toContain("# PROJ-5662")
       // The clock ranges are always on the picker row; only the grid is opt-in.
-      expect(output(world.prompts)).toContain("10:00-10:30")
+      expect(output(world.prompts)).toContain("10:00-10:35")
     }))
 
   it.effect("rejects --calendar without --agent", () =>
@@ -789,7 +797,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
         const wideList = listFrames(wide.world).at(-1)!
         // Unclipped, and the blocks named rather than just counted.
         expect(wideList).toContain("Expose a per-user application list from the service provider API")
-        expect(wideList).toContain("2 blocks · 12:00-12:25, 16:00-16:20")
+        expect(wideList).toContain("2 blocks · 12:00-12:25, 16:00-16:25")
         for (const line of wideList.split("\n")) expect(line.length).toBeLessThanOrEqual(140)
       }))
 
@@ -833,7 +841,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       )
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(world.jiraWorklogs).toHaveLength(1)
-      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1200)
+      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1200 + IDLE_CAP)
     }))
 
   it.effect("proposes nothing on an immediate second run", () =>
@@ -939,9 +947,12 @@ describe("jcf sync reconcile --agent: duration", () => {
       expect(proposals.length).toBe(3)
 
       const total = proposals.reduce((sum, proposal) => sum + proposal.sessionSeconds, 0)
-      // Three sessions overlapping for two hours account for two hours, not six.
-      const wallClock = 120 * 60 + 45
-      expect(total).toBeLessThanOrEqual(wallClock)
+      // Three sessions overlapping for two hours account for two hours, not six. The union of
+      // presence runs from the first prompt to one Idle Cap past the last, and no arrangement of
+      // overlapping sessions may sum past it — that is the property that makes a day's proposals
+      // safe to accept without auditing them against each other.
+      const presenceUnion = 120 * 60 + 45 + IDLE_CAP
+      expect(total).toBeLessThanOrEqual(presenceUnion)
     }))
 
   it.effect("bills neither the overnight gap nor the wrong day for a resumed session", () =>
@@ -968,7 +979,7 @@ describe("jcf sync reconcile --agent: duration", () => {
       )
       // 30 credited minutes on each day, plus one capped 5-minute gap on the evening side.
       expect(byDay.get("2026-07-01")).toBe(30 * 60 + 300)
-      expect(byDay.get("2026-07-02")).toBe(30 * 60)
+      expect(byDay.get("2026-07-02")).toBe(30 * 60 + IDLE_CAP)
     }))
 })
 
@@ -1095,7 +1106,7 @@ describe("jcf sync reconcile --agent: what counts as presence", () => {
         })
       )
       expect(world.jiraWorklogs).toHaveLength(1)
-      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600)
+      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
     }))
 
   // Windows are grouped by the activity's session id and attributions are looked up by the
@@ -1124,7 +1135,7 @@ describe("jcf sync reconcile --agent: what counts as presence", () => {
         })
       )
       expect(output(world.stdout)).not.toContain("unattributed")
-      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(2400)
+      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(2400 + IDLE_CAP)
     }))
 
   // Sessions are tracked per bucket *and day*. A week's run emits one row per day, and each row's
@@ -1192,6 +1203,39 @@ describe("jcf sync reconcile --agent --json", () => {
       expect(exit._tag).toBe("Failure")
       expect(world.stdout).toEqual([])
       expect(output(world.stderr)).toContain("Jira worklog fetch failed")
+    }))
+})
+
+describe("jcf sync reconcile --agent: a session that changes branch", () => {
+  // Taking the last line's branch for the whole transcript credits the morning's prompts to the
+  // afternoon's ticket. Under `jcf watch` that is worse than a misattribution: the morning can
+  // already have been written under the first ticket, and is then derived again under the second —
+  // the same wall clock on two tickets.
+  it.effect("credits each stretch to the branch it actually ran under", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-1000-first",
+              events: [
+                ...steady(at(DAY.year, DAY.month, DAY.day, 9, 0), 20),
+                ...steady(at(DAY.year, DAY.month, DAY.day, 14, 0), 20).map((event) => ({
+                  ...event,
+                  branch: "feat/PROJ-2000-second"
+                }))
+              ]
+            })
+          },
+          keep: [true, true]
+        })
+      )
+      const byKey = new Map(world.jiraWorklogs.map((worklog) => [worklog.issueKey, worklog.timeSpentSeconds]))
+      expect(byKey.get("PROJ-1000")).toBe(20 * 60 + IDLE_CAP)
+      expect(byKey.get("PROJ-2000")).toBe(20 * 60 + IDLE_CAP)
     }))
 })
 

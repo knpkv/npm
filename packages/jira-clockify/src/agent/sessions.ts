@@ -95,6 +95,19 @@ const TICKET_KEY = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/g
 const matchTicketKeys = (text: string): ReadonlyArray<string> => [...text.matchAll(TICKET_KEY)].map((m) => m[0])
 
 /**
+ * True when a string is an Issue Key and nothing else.
+ *
+ * A Standing Attribution is the one Issue Key nobody mines — it is typed into a config file — so it
+ * is also the one that can be empty or malformed. An empty key writes a Clockify description of
+ * `[] …`, which {@link parseTicketKey} then refuses to read back, so the next tally cannot see the
+ * entry and a watch writes the same time again on every settled tick, forever.
+ */
+export const isTicketKey = (value: string): boolean => {
+  const matches = matchTicketKeys(value)
+  return matches.length === 1 && matches[0] === value
+}
+
+/**
  * True for Issue Keys whose number reads as documentation filler rather than a real ticket:
  * an ascending run from 1 (`123`, `1234`) or a repeated digit (`333`, `4444`), both at least
  * three digits long. Short numbers are left alone so a young project's `PROJ-12` still counts.
@@ -340,14 +353,30 @@ export const mergeSpansWithinDays = (spans: ReadonlyArray<CreditedSpan>): Readon
  */
 const sessionActiveWindows = (
   events: ReadonlyArray<number>,
-  capMs: number
+  capMs: number,
+  observedAtMs: number
 ): ReadonlyArray<CreditedSpan> => {
   const raw: Array<CreditedSpan> = []
   const sorted = [...events].sort((a, b) => a - b)
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const from = sorted[i]!
+  for (let index = 0; index < sorted.length - 1; index++) {
+    const from = sorted[index]
+    const next = sorted[index + 1]
+    if (from === undefined || next === undefined) continue
     // Beyond the Idle Cap nobody was working, so the window ends there rather than at the next event.
-    raw.push({ startMs: from, endMs: Math.min(sorted[i + 1]!, from + capMs) })
+    raw.push({ startMs: from, endMs: Math.min(next, from + capMs) })
+  }
+
+  // The last prompt gets its window too, bounded by the Idle Cap and by how far we can see.
+  //
+  // Not cosmetic. Without it a final prompt contributes nothing *until* some later prompt arrives,
+  // and then a window appears retroactively — one that can overlap a block already settled and
+  // written, halving that block's share after the fact while the new share is written as well. Two
+  // tickets then hold more time between them than the clock has. Materialising it on sight is what
+  // makes "settled" mean settled: every window a prompt will ever produce exists as soon as the
+  // prompt does.
+  const last = sorted[sorted.length - 1]
+  if (last !== undefined && observedAtMs > last) {
+    raw.push({ startMs: last, endMs: Math.min(observedAtMs, last + capMs) })
   }
 
   return mergeSpansWithinDays(raw)
@@ -368,7 +397,15 @@ export interface SessionWindows {
  */
 export const activeWindows = (
   activity: ReadonlyArray<SessionActivity>,
-  options: { readonly idleCapSeconds: number }
+  options: {
+    readonly idleCapSeconds: number
+    /**
+     * How far presence may be credited past a session's last prompt — the end of the window being
+     * reconciled, or now for a watch. Bounds the trailing window so a period never credits time
+     * beyond what it can actually see.
+     */
+    readonly observedAtMs: number
+  }
 ): ReadonlyArray<SessionWindows> => {
   const capMs = Math.max(0, options.idleCapSeconds) * 1000
   const eventsBySession = new Map<string, Array<number>>()
@@ -378,7 +415,10 @@ export const activeWindows = (
     eventsBySession.set(event.sessionId, events)
   }
   return [...eventsBySession.entries()]
-    .map(([sessionId, events]) => ({ sessionId, spans: sessionActiveWindows(events, capMs) }))
+    .map(([sessionId, events]) => ({
+      sessionId,
+      spans: sessionActiveWindows(events, capMs, options.observedAtMs)
+    }))
     .filter((session) => session.spans.length > 0)
     .sort((a, b) => a.sessionId.localeCompare(b.sessionId))
 }

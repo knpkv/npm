@@ -15,6 +15,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import { isTicketKey } from "../agent/sessions.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface JcfConfig {
@@ -76,6 +77,13 @@ export class ConfigService extends Context.Service<ConfigService, ConfigServiceC
 const CONFIG_DIR = ".jcf"
 const CONFIG_FILE = "config.json"
 
+/** A directory-prefix → Issue Key map, keeping only the entries whose value is a real Issue Key. */
+const ticketMap = <UnparsedInput>(value: UnparsedInput): Record<string, string> | undefined => {
+  const record = stringRecord(value)
+  if (record === undefined) return undefined
+  return Object.fromEntries(Object.entries(record).filter(([, ticketKey]) => isTicketKey(ticketKey)))
+}
+
 const stringRecord = <UnparsedInput>(value: UnparsedInput): Record<string, string> | undefined => {
   if (!Predicate.isObject(value)) return undefined
   const result: Record<string, string> = {}
@@ -125,7 +133,7 @@ export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   if (!Predicate.isObject(parsed)) return {}
   const projectMap = stringRecord(parsed.projectMap)
   const sessionRoots = stringArray(parsed.sessionRoots)
-  const sessionTicketMap = stringRecord(parsed.sessionTicketMap)
+  const sessionTicketMap = ticketMap(parsed.sessionTicketMap)
   const sessionIdleCapSeconds = positiveSeconds(parsed.sessionIdleCapSeconds)
   const sessionConfidenceFloor = confidence(parsed.sessionConfidenceFloor)
   return {

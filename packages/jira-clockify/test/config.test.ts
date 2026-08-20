@@ -68,3 +68,27 @@ describe("~/.jcf/config.json", () => {
     expect(parseConfigPatch(JSON.stringify({ sessionIdleCapSeconds: -5 })).sessionIdleCapSeconds).toBeUndefined()
   })
 })
+
+describe("jcf config set session-ticket", () => {
+  it.effect("refuses a value that is not an issue key", () =>
+    Effect.gen(function*() {
+      const { stored, world } = yield* run(
+        ["config", "set", "session-ticket", "/work/docs", "not-a-key"],
+        {}
+      )
+      expect(stored.sessionTicketMap).toEqual({})
+      expect(world.stdout.join("\n")).toContain("not an issue key")
+    }))
+})
+
+describe("standing attributions", () => {
+  // An empty key writes a Clockify description of `[] …`, which the tally then refuses to read
+  // back — so a watch never sees the entry it just made and writes the same time again on every
+  // settled tick, without end.
+  it("drops a stored standing attribution that is not an issue key", () => {
+    const parsed = parseConfigPatch(JSON.stringify({
+      sessionTicketMap: { "/work/docs": "", "/work/notes": "not a key", "/work/rel": "PROJ-42" }
+    }))
+    expect(parsed.sessionTicketMap).toEqual({ "/work/rel": "PROJ-42" })
+  })
+})

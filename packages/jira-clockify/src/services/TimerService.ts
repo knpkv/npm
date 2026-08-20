@@ -196,8 +196,8 @@ export const layer = Layer.effect(
           summary: state.summary,
           project: state.project,
           startedAt: state.startedAt?.toISOString() ?? null,
-          startedAt_unix: state.startedAt ? Math.floor(state.startedAt.getTime() / 1000) : null,
-          elapsed: state.startedAt ? Math.floor((nowMs - state.startedAt.getTime()) / 1000) : 0,
+          startedAt_unix: state.startedAt === null ? null : Math.floor(state.startedAt.getTime() / 1000),
+          elapsed: state.startedAt === null ? 0 : Math.floor((nowMs - state.startedAt.getTime()) / 1000),
           clockifyEntryId: state.clockifyEntryId
         }
         return yield* stateWriter.write(file)
@@ -212,13 +212,13 @@ export const layer = Layer.effect(
       Effect.gen(function*() {
         const cfg = yield* config.get
         let projectId = explicit ?? cfg.defaultProjectId ?? null
-        if (!projectId) {
+        if (projectId === null || projectId === "") {
           const jiraProject = ticket.key.split("-")[0] ?? ""
           const clockifyProjectName = cfg.projectMap[jiraProject] ?? jiraProject
           const project = yield* clockify.getProjectByName(workspaceId, clockifyProjectName).pipe(
             Effect.catch(() => Effect.succeed(null))
           )
-          if (project) projectId = project.id
+          if (project !== null && project !== undefined) projectId = project.id
         }
         return projectId
       })
@@ -230,14 +230,14 @@ export const layer = Layer.effect(
         const tagIds: Array<string> = []
         for (const tagName of tagNames) {
           const cached = tagCache.get(tagName)
-          if (cached) {
+          if (cached !== undefined && cached !== "") {
             tagIds.push(cached)
             continue
           }
           const tag = yield* clockify.findOrCreateTag(workspaceId, tagName).pipe(
             Effect.catch(() => Effect.succeed(null))
           )
-          if (tag) {
+          if (tag !== undefined && tag !== null) {
             tagIds.push(tag.id)
             tagCache.set(tagName, tag.id)
           }
@@ -322,7 +322,7 @@ export const layer = Layer.effect(
 
         // Resolve project name
         let projectName: string | null = cfg.defaultProjectName ?? null
-        if (projectId && !projectName) {
+        if (projectId !== null && projectId !== "" && (projectName === null || projectName === "")) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
             Effect.catch(() => Effect.succeed([]))
           )
@@ -379,22 +379,22 @@ export const layer = Layer.effect(
         const auth = yield* getAuth
         const current = yield* SubscriptionRef.get(ref)
 
-        if (!current.active || !current.startedAt) {
-          return yield* Effect.fail(new TimerError({ message: "No active timer" }))
+        if (!current.active || current.startedAt === null) {
+          return yield* new TimerError({ message: "No active timer" })
         }
 
         const realNow = yield* DateTime.nowAsDate
         let now: Date
-        if (options?.endedAt) {
+        if (options?.endedAt !== undefined) {
           const corrected = options.endedAt
           if (corrected.getTime() <= current.startedAt.getTime()) {
-            return yield* Effect.fail(new TimerError({ message: "Corrected end is at or before the timer start." }))
+            return yield* new TimerError({ message: "Corrected end is at or before the timer start." })
           }
           if (corrected.getTime() > realNow.getTime()) {
-            return yield* Effect.fail(new TimerError({ message: "Corrected end is in the future." }))
+            return yield* new TimerError({ message: "Corrected end is in the future." })
           }
           now = corrected
-        } else if (endAt && endAt.getTime() >= current.startedAt.getTime()) {
+        } else if (endAt !== null && endAt !== undefined && endAt.getTime() >= current.startedAt.getTime()) {
           now = endAt
         } else {
           now = realNow
@@ -408,16 +408,16 @@ export const layer = Layer.effect(
         const comment = options?.comment
 
         // Stop via PUT — preserve existing tagIds from the entry
-        if (current.clockifyEntryId) {
+        if (current.clockifyEntryId !== null) {
           const existing = yield* clockify.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
             Effect.catch(() => Effect.succeed(null))
           )
           const tagIds = existing?.tagIds ?? []
 
           // Append comment to Clockify description if provided
-          const description = comment
-            ? `${existing?.description ?? ""} | ${comment}`
-            : undefined
+          const description = comment === undefined || comment === ""
+            ? undefined
+            : `${existing?.description ?? ""} | ${comment}`
 
           yield* clockify.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
             start: current.startedAt.toISOString(),
@@ -438,13 +438,14 @@ export const layer = Layer.effect(
         }
 
         // Log Jira worklog through the generated Jira client.
-        const worklog: WorklogParams | null = current.ticketKey
-          ? { ticketKey: current.ticketKey, startedAt: current.startedAt, durationSeconds: durationMs / 1000, comment }
-          : null
+        const ticketKey = current.ticketKey
+        const worklog: WorklogParams | null = ticketKey === null || ticketKey === ""
+          ? null
+          : { ticketKey, startedAt: current.startedAt, durationSeconds: durationMs / 1000, comment }
         // Use worklog.* throughout so the live POST and the stored retry params can never drift.
-        const jiraWorklog: JiraWorklogOutcome | null = worklog
-          ? yield* postJiraWorklog(worklog.ticketKey, worklog.startedAt, worklog.durationSeconds, worklog.comment)
-          : null
+        const jiraWorklog: JiraWorklogOutcome | null = worklog === null
+          ? null
+          : yield* postJiraWorklog(worklog.ticketKey, worklog.startedAt, worklog.durationSeconds, worklog.comment)
 
         yield* SubscriptionRef.set(ref, emptyState)
         yield* stateWriter.clear
@@ -452,7 +453,7 @@ export const layer = Layer.effect(
         return {
           duration,
           clockifyLogged: true,
-          needsProjectId: !projectId,
+          needsProjectId: projectId === null || projectId === "",
           needsBillable: billable === null,
           jiraWorklog,
           // Only a retryable `Failed` exposes retry params — `NotLoggedIn` can't be fixed by retrying.
@@ -473,15 +474,13 @@ export const layer = Layer.effect(
         // Shared future-time guard for all backdating callers (log + stop-correction).
         // Mirrors `start --since`, which rejects future starts at the command layer.
         if (options.start.getTime() > nowMs) {
-          return yield* Effect.fail(
-            new TimerError({ message: "Start time is in the future. Pick a time at or before now." })
-          )
+          return yield* new TimerError({ message: "Start time is in the future. Pick a time at or before now." })
         }
         const end = new Date(options.start.getTime() + options.durationSeconds * 1000)
         if (end.getTime() > nowMs) {
-          return yield* Effect.fail(
-            new TimerError({ message: "End time is in the future. Shorten the duration or pick an earlier start." })
-          )
+          return yield* new TimerError({
+            message: "End time is in the future. Shorten the duration or pick an earlier start."
+          })
         }
 
         const auth = yield* getAuth
@@ -525,11 +524,17 @@ export const layer = Layer.effect(
 
     const detectRunning = Effect.gen(function*() {
       const auth = yield* getAuth
+      // Propagated, not swallowed into `null`. "Could not ask" and "nothing is running" are opposite
+      // answers to a caller deciding whether time is safe to write: a running entry has no end and
+      // so is invisible to every tally, and treating an unreachable Clockify as an all-clear is how
+      // those hours get written a second time.
       const running = yield* clockify.getRunningTimer(auth.workspaceId, auth.userId).pipe(
-        Effect.catch(() => Effect.succeed(null))
+        Effect.mapError((cause) =>
+          new TimerError({ message: `Could not check for a running Clockify timer: ${cause.message}`, cause })
+        )
       )
 
-      if (running && running.timeInterval.start) {
+      if (running !== null && running.timeInterval.start !== undefined && running.timeInterval.start !== "") {
         const startedAt = new Date(running.timeInterval.start)
         // Parse "[KEY] summary" or "KEY: summary" format
         const desc = running.description ?? ""
@@ -538,7 +543,7 @@ export const layer = Layer.effect(
         const ticketKey = bracketMatch?.[1]?.trim() ?? colonMatch?.[1]?.trim() ?? null
         const summary = bracketMatch?.[2]?.trim() ?? colonMatch?.[2]?.trim() ?? null
 
-        if (!ticketKey) {
+        if (ticketKey === null || ticketKey === "") {
           yield* Effect.logWarning(
             `Running Clockify timer has unparseable description: "${desc}"`
           )
@@ -546,7 +551,7 @@ export const layer = Layer.effect(
 
         // Resolve project name
         let resolvedProjectName: string | null = null
-        if (running.projectId) {
+        if (running.projectId !== undefined && running.projectId !== null) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
             Effect.catch(() => Effect.succeed([]))
           )
@@ -568,6 +573,17 @@ export const layer = Layer.effect(
 
         yield* writeStateFile(newState)
         yield* SubscriptionRef.set(ref, newState)
+        return
+      }
+
+      // Clockify is the source of truth, so "nothing running" has to clear a stale active state —
+      // otherwise a timer stopped from the web keeps a long-lived `jcf watch` excluding its day for
+      // the rest of the run. Only once the entry was known to Clockify: a state with no entry id yet
+      // may simply be a start this poll overtook.
+      const current = yield* SubscriptionRef.get(ref)
+      if (current.active && current.clockifyEntryId !== null) {
+        yield* writeStateFile(emptyState)
+        yield* SubscriptionRef.set(ref, emptyState)
       }
     })
 
@@ -575,10 +591,10 @@ export const layer = Layer.effect(
     const discard = Effect.gen(function*() {
       const current = yield* SubscriptionRef.get(ref)
       if (!current.active) {
-        return yield* Effect.fail(new TimerError({ message: "No active timer to discard" }))
+        return yield* new TimerError({ message: "No active timer to discard" })
       }
       const auth = yield* getAuth
-      if (current.clockifyEntryId) {
+      if (current.clockifyEntryId !== null) {
         yield* clockify
           .deleteTimeEntry(auth.workspaceId, current.clockifyEntryId)
           .pipe(

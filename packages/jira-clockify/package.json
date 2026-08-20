@@ -20,7 +20,7 @@
   "scripts": {
     "start": "tsx src/bin.ts",
     "build": "tsc -b && chmod +x dist/src/bin.js",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },

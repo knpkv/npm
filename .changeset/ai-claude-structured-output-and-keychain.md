@@ -1,5 +1,5 @@
 ---
-"@knpkv/ai-claude": patch
+"@knpkv/ai-claude": minor
 ---
 
 Fix two defects that made the provider unusable in practice.

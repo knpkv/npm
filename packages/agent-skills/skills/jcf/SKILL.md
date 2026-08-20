@@ -119,7 +119,7 @@ jcf sync reconcile --agent claude --day --calendar
 
 - `--agent` is a mode switch, not a direction. Passing both is a usage error.
 - `claude` is the only supported agent; `--agent codex` fails.
-- `--agent --json` is the read-only form: it writes exactly one JSON value to stdout, sends
+- `--agent claude --json` is the read-only form: it writes exactly one JSON value to stdout, sends
   everything human-facing to stderr, and creates no Clockify entry or Jira worklog. Use it to
   inspect proposals before asking the user which to accept.
 - Without `--json`, every row needs an interactive confirmation, so this form is unsuitable for

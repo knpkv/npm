@@ -252,14 +252,15 @@ describe("jcf watch claude", () => {
       yield* advance(Duration.minutes(5))
       expect(world.createdClockifyEntries).toEqual([])
 
-      // Last prompt at 10:11, so the block settles at 10:17 and is written on the 10:20 tick.
+      // Last prompt at 10:11. Its own capped window runs to 10:16, so the block settles at 10:22
+      // and is written on the 10:25 tick.
       yield* advance(Duration.minutes(5))
       expect(world.createdClockifyEntries).toEqual([])
-      yield* advance(Duration.minutes(5))
+      yield* advance(Duration.minutes(10))
 
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(world.jiraWorklogs).toHaveLength(1)
-      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600)
+      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
 
       // Two more ticks over the same evidence: the sides now hold it, so the gap is zero.
       yield* advance(Duration.minutes(5))
@@ -277,7 +278,7 @@ describe("jcf watch claude", () => {
   it.effect("writes the issue title and a sentence about the work to both sides", () =>
     Effect.gen(function*() {
       const { fiber, world } = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       yield* Fiber.interrupt(fiber)
 
       const description = world.createdClockifyEntries[0]?.description ?? ""
@@ -308,7 +309,7 @@ describe("jcf watch claude", () => {
         args: ["--dry-run"],
         fake: branchWork()
       })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       yield* Fiber.interrupt(fiber)
 
       expect(world.createdClockifyEntries).toEqual([])
@@ -327,7 +328,7 @@ describe("jcf watch claude", () => {
         args: ["--dry-run"],
         fake: branchWork()
       })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       expect(world.describeBatches).toHaveLength(1)
 
       // Four more looks over evidence that has not changed.
@@ -393,7 +394,7 @@ describe("jcf watch claude", () => {
         startMs: at(10, 0),
         fake: branchWork({ jiraLoggedIn: false })
       })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       const exit = yield* Fiber.join(fiber)
 
       expect(exit._tag).toBe("Success")
@@ -405,7 +406,7 @@ describe("jcf watch claude", () => {
       // that. For a command whose whole purpose is making sure hours are not lost, overstating what
       // was written is the wrong direction to be wrong in.
       expect(world.createdClockifyEntries).toHaveLength(1)
-      expect(printed).toContain("Wrote 1 block(s): Clockify 10m 0s, Jira 0s")
+      expect(printed).toContain("Wrote 1 block(s): Clockify 15m 0s, Jira 0s")
     }))
 
   // The Jira half landed and the Clockify half did not. Both numbers have to say so independently:
@@ -416,12 +417,12 @@ describe("jcf watch claude", () => {
         startMs: at(10, 0),
         fake: branchWork({ clockifyWritesFail: true })
       })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       yield* Fiber.interrupt(fiber)
 
       expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toHaveLength(1)
-      expect(output(world.stdout)).toContain("Wrote 1 block(s): Clockify 0s, Jira 10m 0s")
+      expect(output(world.stdout)).toContain("Wrote 1 block(s): Clockify 0s, Jira 15m 0s")
     }))
 
   // A day is written block by block, so the second write has to say when its *own* block was —
@@ -430,7 +431,7 @@ describe("jcf watch claude", () => {
   it.effect("anchors a second block on the same ticket to that block, not the first", () =>
     Effect.gen(function*() {
       const { fiber, world } = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       expect(world.createdClockifyEntries).toHaveLength(1)
 
       // Same session, same ticket, resuming after a break longer than the Idle Cap.
@@ -456,11 +457,61 @@ describe("jcf watch claude", () => {
         .toBeGreaterThanOrEqual(new Date(first?.end ?? 0).getTime())
     }))
 
+  // The settle rule's whole claim is that a written block can never be revised. Before the trailing
+  // window was materialised, a session's final prompt produced nothing until a *later* prompt
+  // arrived — and that late prompt then created a window retroactively, overlapping a block already
+  // written and halving its share while the new share was written too. Two tickets, more time
+  // between them than the clock has.
+  it.effect("never lets a late prompt push the day's writes past the clock", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: baseOptions({
+          transcripts: {
+            "work/a.jsonl": transcript({
+              sessionId: "session-a",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feature/PROJ-1",
+              from: at(10, 1),
+              minutes: 10
+            }),
+            // One prompt inside A's block, its follow-up hours later. That follow-up used to
+            // conjure B's window after A had already been written.
+            "work/b.jsonl": transcript({
+              sessionId: "session-b",
+              cwd: `${WORK_ROOT}/other`,
+              gitBranch: "feature/PROJ-2",
+              from: at(10, 8),
+              minutes: 0
+            })
+          },
+          issueSummaries: { "PROJ-1": "First", "PROJ-2": "Second" }
+        })
+      })
+      yield* advance(Duration.minutes(30))
+
+      world.transcripts["work/b.jsonl"] += "\n" + transcript({
+        sessionId: "session-b",
+        cwd: `${WORK_ROOT}/other`,
+        gitBranch: "feature/PROJ-2",
+        from: at(13, 0),
+        minutes: 5
+      })
+      yield* advance(Duration.minutes(240))
+      yield* Fiber.interrupt(fiber)
+
+      // Presence runs 10:01 to one Idle Cap past 13:05. Nothing may sum past that.
+      const union = (at(13, 5) + IDLE_CAP * 1000 - at(10, 1)) / 1000
+      const written = world.jiraWorklogs.reduce((sum, worklog) => sum + worklog.timeSpentSeconds, 0)
+      expect(written).toBeLessThanOrEqual(union)
+      expect(written).toBeGreaterThan(0)
+    }))
+
   // A session started after the watch is exactly the case the whole command is for.
   it.effect("picks up a session that only starts after it is already running", () =>
     Effect.gen(function*() {
       const { fiber, world } = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
-      yield* advance(Duration.minutes(20))
+      yield* advance(Duration.minutes(30))
       expect(world.createdClockifyEntries).toHaveLength(1)
 
       world.transcripts["work/session-c.jsonl"] = transcript({
@@ -478,7 +529,7 @@ describe("jcf watch claude", () => {
 
       expect(world.createdClockifyEntries).toHaveLength(2)
       expect(world.createdClockifyEntries[1]?.description).toContain("[PROJ-2]")
-      expect(world.jiraWorklogs[1]?.timeSpentSeconds).toBe(480)
+      expect(world.jiraWorklogs[1]?.timeSpentSeconds).toBe(480 + IDLE_CAP)
     }))
 
   // Forward only. Work that finished before the watch started is `reconcile`'s job, where a person

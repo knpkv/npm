@@ -6,6 +6,7 @@
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { isTicketKey } from "../agent/sessions.js"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService, defaultJcfConfig, type JcfConfig } from "../services/ConfigService.js"
 
@@ -179,6 +180,10 @@ const configSetSessionTicket = Command.make(
       }
       if (ticket._tag === "None") {
         yield* Console.log("Provide an issue key, e.g. jcf config set session-ticket ~/dev/docs PROJ-42")
+        return
+      }
+      if (!isTicketKey(ticket.value)) {
+        yield* Console.log(`"${ticket.value}" is not an issue key. Use the Jira form, e.g. PROJ-42.`)
         return
       }
       const next = { ...current, [normalised.path]: ticket.value }

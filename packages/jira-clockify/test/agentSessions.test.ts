@@ -212,6 +212,9 @@ describe("attributeSession", () => {
 })
 
 describe("activeWindows and sharing", () => {
+  /** Far past every fixture, so a trailing window is bounded by the Idle Cap rather than by sight. */
+  const OBSERVED_AT = at(2027, 1, 1, 0, 0)
+
   const idleCapSeconds = 300
 
   /**
@@ -230,25 +233,39 @@ describe("activeWindows and sharing", () => {
       confidence: null,
       belowConfidenceFloor: false
     }))
-    return splitCredits(activeWindows(events, { idleCapSeconds }), attributions)
+    return splitCredits(activeWindows(events, { idleCapSeconds, observedAtMs: OBSERVED_AT }), attributions)
   }
 
   const ticketSeconds = (split: ReturnType<typeof creditFor>, ticketKey: string, day: string): number =>
     split.attributed.find((row) => row.ticketKey === ticketKey && row.day === day)?.seconds ?? 0
 
-  it("finds no window for no events, or for a single event", () => {
-    expect(activeWindows([], { idleCapSeconds })).toEqual([])
-    expect(activeWindows([activity("s1", at(2026, 7, 1, 10, 0))], { idleCapSeconds })).toEqual([])
+  it("finds no window for no events", () => {
+    expect(activeWindows([], { idleCapSeconds, observedAtMs: OBSERVED_AT })).toEqual([])
+  })
+
+  // A single prompt is still presence: someone typed, and the Idle Cap is exactly how long that is
+  // allowed to count for. Crediting it only once a *second* prompt arrived is what let a late
+  // prompt conjure a window over a block that had already been written.
+  it("credits one Idle Cap for a single prompt, once that long has passed", () => {
+    const only = [activity("s1", at(2026, 7, 1, 10, 0))]
+    expect(activeWindows(only, { idleCapSeconds, observedAtMs: at(2026, 7, 1, 10, 0) })).toEqual([])
+    const [session] = activeWindows(only, { idleCapSeconds, observedAtMs: OBSERVED_AT })
+    expect(session?.spans).toEqual([{
+      startMs: at(2026, 7, 1, 10, 0),
+      endMs: at(2026, 7, 1, 10, 0) + idleCapSeconds * 1000
+    }])
   })
 
   // Duration comes from the gap between a session's *own* events. Borrowing another session's next
   // event to invent one is what the old last-touch rule did.
-  it("credits nothing when each session has a single event", () => {
+  it("credits each single prompt its capped tail, shared where they overlap", () => {
     const split = creditFor(
       [activity("s1", at(2026, 7, 1, 10, 0)), activity("s2", at(2026, 7, 1, 10, 2))],
       { s1: "PROJ-1", s2: "PROJ-2" }
     )
-    expect(split.attributed).toEqual([])
+    // s1 alone from 10:00, then both until s1's cap runs out at 10:05, then s2 alone to 10:07.
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + 180 / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(180 / 2 + 120)
   })
 
   it("credits a session's own gap to its ticket", () => {
@@ -256,7 +273,7 @@ describe("activeWindows and sharing", () => {
       [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 2))],
       { s1: "PROJ-1" }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds)
   })
 
   // The bug this ordering exists to prevent: two sessions on ONE ticket must not halve each other.
@@ -271,8 +288,8 @@ describe("activeWindows and sharing", () => {
       ],
       { s1: "PROJ-1", s2: "PROJ-1" }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(240)
-    expect(split.attributed[0]?.activeSeconds).toBe(240)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(240 + idleCapSeconds)
+    expect(split.attributed[0]?.activeSeconds).toBe(240 + idleCapSeconds)
   })
 
   // The request: an hour on two tickets at once is half an hour each, not an hour to whichever
@@ -287,8 +304,8 @@ describe("activeWindows and sharing", () => {
       ],
       { s1: "PROJ-1", s2: "PROJ-2" }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120)
-    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(120)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
   })
 
   it("splits a three-way overlap into thirds", () => {
@@ -298,7 +315,7 @@ describe("activeWindows and sharing", () => {
     ])
     const split = creditFor(events, { s1: "PROJ-1", s2: "PROJ-2", s3: "PROJ-3" })
     for (const key of ["PROJ-1", "PROJ-2", "PROJ-3"]) {
-      expect(ticketSeconds(split, key, "2026-07-01")).toBe(60)
+      expect(ticketSeconds(split, key, "2026-07-01")).toBe(60 + idleCapSeconds / 3)
     }
   })
 
@@ -313,8 +330,8 @@ describe("activeWindows and sharing", () => {
       { s1: "PROJ-1", s2: "PROJ-2" }
     )
     // 10:00-10:02 is PROJ-1 alone (120s); 10:02-10:04 is shared (60s each).
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(180)
-    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(60)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(180 + idleCapSeconds / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(60 + idleCapSeconds / 2)
   })
 
   it("reports wall-clock active seconds next to the shared credit", () => {
@@ -328,8 +345,8 @@ describe("activeWindows and sharing", () => {
       { s1: "PROJ-1", s2: "PROJ-2" }
     )
     const row = split.attributed.find((entry) => entry.ticketKey === "PROJ-1")
-    expect(row?.seconds).toBe(120)
-    expect(row?.activeSeconds).toBe(240)
+    expect(row?.seconds).toBe(120 + idleCapSeconds / 2)
+    expect(row?.activeSeconds).toBe(240 + idleCapSeconds)
   })
 
   // Unplaced time occupied the clock too, so it takes part in the split rather than letting an
@@ -344,8 +361,8 @@ describe("activeWindows and sharing", () => {
       ],
       { s1: "PROJ-1", s2: null }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120)
-    expect(split.unattributed).toEqual([{ day: "2026-07-01", seconds: 120, sessionCount: 1 }])
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
+    expect(split.unattributed).toEqual([{ day: "2026-07-01", seconds: 120 + idleCapSeconds / 2, sessionCount: 1 }])
   })
 
   it("caps a long gap at the Idle Cap, so lunch is not billed", () => {
@@ -353,7 +370,7 @@ describe("activeWindows and sharing", () => {
       [activity("s1", at(2026, 7, 1, 12, 0)), activity("s1", at(2026, 7, 1, 13, 0))],
       { s1: "PROJ-1" }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300 + idleCapSeconds)
   })
 
   it("credits an interval exactly equal to the Idle Cap in full", () => {
@@ -361,7 +378,7 @@ describe("activeWindows and sharing", () => {
       [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 5))],
       { s1: "PROJ-1" }
     )
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300 + idleCapSeconds)
   })
 
   it("credits nothing for adjacent identical timestamps", () => {
@@ -369,7 +386,8 @@ describe("activeWindows and sharing", () => {
       [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 0))],
       { s1: "PROJ-1" }
     )
-    expect(split.attributed).toEqual([])
+    // The duplicate contributes no gap, but the prompt itself still evidences presence.
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(idleCapSeconds)
   })
 
   it("splits an interval crossing local midnight at midnight", () => {
@@ -378,7 +396,7 @@ describe("activeWindows and sharing", () => {
       { s1: "PROJ-1" }
     )
     expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120)
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(60)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(60 + idleCapSeconds)
   })
 
   it("credits an overnight gap to nobody", () => {
@@ -386,15 +404,16 @@ describe("activeWindows and sharing", () => {
       [activity("s1", at(2026, 7, 1, 14, 30)), activity("s1", at(2026, 7, 2, 9, 0))],
       { s1: "PROJ-1" }
     )
+    // The evening keeps its cap; the next morning gets its own, and the night between neither.
     expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300)
-    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(0)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(idleCapSeconds)
   })
 
   it("credits nothing when the Idle Cap is zero", () => {
     const split = splitCredits(
       activeWindows(
         [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 5))],
-        { idleCapSeconds: 0 }
+        { idleCapSeconds: 0, observedAtMs: OBSERVED_AT }
       ),
       [{ sessionId: "s1", ticketKey: "PROJ-1", signal: "branch", confidence: null, belowConfidenceFloor: false }]
     )
@@ -411,7 +430,7 @@ describe("activeWindows and sharing", () => {
     ])
     const split = creditFor(events, { s1: "PROJ-1", s2: "PROJ-2", s3: "PROJ-3" })
     const total = split.attributed.reduce((sum, row) => sum + row.seconds, 0)
-    expect(total).toBe(240)
+    expect(total).toBe(240 + idleCapSeconds)
   })
 })
 

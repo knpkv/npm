@@ -631,8 +631,12 @@ export const layer = Layer.effect(
      */
     const runningTimerExclusions = (period: ReconcilePeriod) =>
       Effect.gen(function*() {
+        // Fails the run rather than logging and carrying on. An unknown running-timer state is not
+        // an absent one, and every caller of this subtracts before writing the difference.
         yield* timer.detectRunning.pipe(
-          Effect.catch((error) => Effect.logDebug(`Running-timer check failed: ${error.message}`))
+          Effect.mapError((error) =>
+            new ReconcileError({ message: `Could not rule out a running timer: ${error.message}`, cause: error })
+          )
         )
         const state = yield* SubscriptionRef.get(timer.state)
         if (!state.active || state.startedAt === null) return []
@@ -848,7 +852,10 @@ export const layer = Layer.effect(
         // between distinct Issue Keys, not between sessions. Two sessions on one ticket must union
         // their windows rather than halve each other.
         const windows = activeWindows(sessions.flatMap((session) => session.activity), {
-          idleCapSeconds: cfg.sessionIdleCapSeconds
+          idleCapSeconds: cfg.sessionIdleCapSeconds,
+          // The end of the window being reconciled — which for a watch is now. Presence is never
+          // credited past what this run can see.
+          observedAtMs: period.to.getTime()
         })
         const split = splitCredits(windows, attributions)
 

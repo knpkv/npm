@@ -176,18 +176,51 @@ interface DecodedTranscript {
 
 /**
  * Decode one transcript into the evidence it holds, keeping only activity inside `[from, to)`.
- * Pure and total: a malformed line, an unparseable timestamp, or a file of pure noise yields a
- * transcript with no activity rather than an error.
+ *
+ * Returns one entry per *segment* — a stretch of the transcript that ran under one working
+ * directory and one branch. A session that switches branch mid-run is two pieces of work, and
+ * taking the last line's branch for all of it would credit the morning's prompts to the afternoon's
+ * ticket. Under `jcf watch` that is worse than a misattribution: the morning can already have been
+ * written under the first ticket before the switch, and would then be derived again under the
+ * second, putting the same wall clock on two tickets.
+ *
+ * Segments that resolve to the same Issue Key are unioned again downstream, so splitting costs
+ * nothing when a branch change does not change the work. What it does cost is the gap *across* a
+ * switch, which is no longer bridged — an under-count of at most one Idle Cap, which is the
+ * direction this design prefers to be wrong in.
+ *
+ * Pure and total: a malformed line, an unparseable timestamp, or a file of pure noise yields no
+ * segments rather than an error.
  */
 export const decodeTranscript = (
   content: string,
   period: { readonly fromMs: number; readonly toMs: number }
-): DecodedTranscript | null => {
-  const promptTimes: Array<number> = []
-  const texts: Array<string> = []
+): ReadonlyArray<DecodedTranscript> => {
+  const segments: Array<DecodedTranscript> = []
+  let promptTimes: Array<number> = []
+  let texts: Array<string> = []
   let sessionId: string | null = null
   let cwd: string | null = null
   let gitBranch: string | null = null
+
+  // One segment per `(cwd, branch)`. The id carries the segment index so windows, attributions and
+  // digests all key on the same thing — they are looked up from three different places.
+  const closeSegment = () => {
+    if (sessionId === null || cwd === null || promptTimes.length === 0) return
+    const base = sessionId
+    segments.push({
+      sessionId: segments.length === 0 ? base : `${base}#${String(segments.length)}`,
+      cwd,
+      gitBranch,
+      activity: promptTimes.map((atMs): SessionActivity => ({
+        sessionId: segments.length === 0 ? base : `${base}#${String(segments.length)}`,
+        atMs
+      })),
+      texts
+    })
+    promptTimes = []
+    texts = []
+  }
 
   for (const rawLine of content.split("\n")) {
     if (rawLine.trim().length === 0) continue
@@ -212,27 +245,16 @@ export const decodeTranscript = (
     const text = messageText(line.message)
     if (text !== "") texts.push(text)
 
+    const branch = line.gitBranch ?? null
+    if ((cwd !== null && cwd !== line.cwd) || (cwd !== null && gitBranch !== branch)) closeSegment()
     sessionId = line.sessionId
-    // Last in-window line wins: the directory and branch the credited work ran under.
     cwd = line.cwd
-    gitBranch = line.gitBranch ?? null
+    gitBranch = branch
     if (isHumanPrompt(line, line.message)) promptTimes.push(atMs)
   }
 
-  if (sessionId === null || cwd === null || promptTimes.length === 0) return null
-  // Stamped with the *resolved* session id rather than each line's own. Downstream, windows are
-  // grouped by the activity's id and attributions are looked up by the record's, so labelling them
-  // from two different places is a way for a transcript carrying more than one id to produce windows
-  // no attribution matches — hours that vanish into "unattributed" with nothing to explain them.
-  // One file is one session; this makes the code say that.
-  const resolved = sessionId
-  return {
-    sessionId: resolved,
-    cwd,
-    gitBranch,
-    activity: promptTimes.map((atMs): SessionActivity => ({ sessionId: resolved, atMs })),
-    texts
-  }
+  closeSegment()
+  return segments
 }
 
 // ---------------------------------------------------------------------------
@@ -355,20 +377,21 @@ export const layer = Layer.effect(
           )
           if (content === null) continue
 
-          const transcript = decodeTranscript(content, { fromMs, toMs })
-          if (transcript === null) continue
-          // Scope check before anything is mined or digested: out-of-scope work leaves no trace.
-          if (!isWithinSessionRoots(transcript.cwd, roots)) continue
+          for (const segment of decodeTranscript(content, { fromMs, toMs })) {
+            // Scope check before anything is mined or digested: out-of-scope work leaves no trace.
+            // Per segment, because a session can move between directories mid-run.
+            if (!isWithinSessionRoots(segment.cwd, roots)) continue
 
-          const text = transcript.texts.join("\n")
-          records.push({
-            sessionId: transcript.sessionId,
-            cwd: transcript.cwd,
-            gitBranch: transcript.gitBranch,
-            candidateKeys: mineTicketKeys(text),
-            digest: buildSessionDigest(transcript.texts),
-            activity: transcript.activity
-          })
+            const text = segment.texts.join("\n")
+            records.push({
+              sessionId: segment.sessionId,
+              cwd: segment.cwd,
+              gitBranch: segment.gitBranch,
+              candidateKeys: mineTicketKeys(text),
+              digest: buildSessionDigest(segment.texts),
+              activity: segment.activity
+            })
+          }
         }
 
         return records

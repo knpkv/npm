@@ -16,7 +16,6 @@ import * as Effect from "effect/Effect"
 import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
 import type { ReconcileServiceContract } from "../services/ReconcileService.js"
 import { formatDuration } from "../utils/time.js"
-import { earliestStart } from "./calendar.js"
 import { NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
 
 /** Clip `text` to `width`, marking that something was dropped. */
@@ -100,8 +99,11 @@ export const writeAnchor = (
     }
     return new Date(span.startMs + remaining * 1000)
   }
-  // Every block is spoken for, which means this side is not short and has nothing to write.
-  return earliestStart(spans)
+  // Every block is already spoken for. Reached only when a side is not short, so nothing is written
+  // with this anchor — but the end of the last block is the one instant that cannot overlap what is
+  // already recorded, where the first block is the one instant guaranteed to.
+  const last = ordered[ordered.length - 1]
+  return last === undefined ? undefined : new Date(last.endMs)
 }
 
 /**
