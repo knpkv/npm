@@ -150,3 +150,29 @@ describe("more Issue Keys than glyphs", () => {
     expect(lines[0]).toContain("? PROJ-7")
   })
 })
+
+describe("daylight saving", () => {
+  // Positions used to be measured from local midnight, which is not minute-of-day on a transition
+  // day: after a spring-forward, 03:00 is two hours from midnight and was drawn in the `02h` row.
+  it("draws a spring-forward morning under its real local hour", () => {
+    const start = new Date(2026, 2, 8, 3, 0).getTime()
+    const lines = renderDayCalendar({
+      day: "2026-03-08",
+      rows: [{ ticketKey: "PROJ-1", spans: [{ startMs: start, endMs: start + 30 * 60_000 }] }]
+    })
+    const hours = lines.filter((line) => line.trimStart().startsWith("0"))
+    expect(hours.some((line) => line.includes("03h") && line.includes("#"))).toBe(true)
+    expect(hours.some((line) => line.includes("02h") && line.includes("#"))).toBe(false)
+  })
+
+  // After a fall-back every later block shifted by an hour, and the last of them ran off the end of
+  // the fixed 1,440-cell grid and vanished.
+  it("keeps a late block on a fall-back day inside the grid", () => {
+    const start = new Date(2026, 10, 1, 23, 0).getTime()
+    const lines = renderDayCalendar({
+      day: "2026-11-01",
+      rows: [{ ticketKey: "PROJ-1", spans: [{ startMs: start, endMs: start + 30 * 60_000 }] }]
+    })
+    expect(lines.some((line) => line.includes("23h") && line.includes("#"))).toBe(true)
+  })
+})

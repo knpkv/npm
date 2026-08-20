@@ -49,8 +49,21 @@ const OVERFLOW = "?"
 
 const LABEL_WIDTH = 8
 
-/** Local midnight of a `YYYY-MM-DD` day, as epoch milliseconds. */
-const startOfDayMs = (day: string): number => new Date(`${day}T00:00:00`).getTime()
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Which grid cell an instant belongs in, by the local clock the reader is looking at.
+ *
+ * `up` rounds to the end of the minute, for a span's exclusive end. A `00:00` end rounds to the
+ * full day rather than to zero: it is the close of this day, not the start of it.
+ */
+const localMinuteOfDay = (atMs: number, rounding: "down" | "up" = "down"): number => {
+  const at = new Date(atMs)
+  const exact = at.getHours() * 60 + at.getMinutes()
+  if (rounding === "down") return exact
+  const rounded = at.getSeconds() > 0 || at.getMilliseconds() > 0 ? exact + 1 : exact
+  return rounded === 0 ? MINUTES_PER_DAY : rounded
+}
 
 /**
  * The `:00  :05  …` ruler. Each label is five characters, so label *n* begins exactly above
@@ -72,7 +85,6 @@ export const renderDayCalendar = (options: {
   readonly day: string
   readonly rows: ReadonlyArray<CalendarRow>
 }): ReadonlyArray<string> => {
-  const dayStart = startOfDayMs(options.day)
   const minutes = new Array<string>(MINUTES_PER_DAY).fill(IDLE)
   // Who owns each minute, tracked by Issue Key rather than by glyph. There are only so many glyphs,
   // and a day with more Issue Keys than glyphs would otherwise have two of them compare equal — so a
@@ -88,8 +100,13 @@ export const renderDayCalendar = (options: {
       // Spans never cross a local midnight, but a caller may pass a whole period's worth of rows,
       // so anything outside this day is skipped rather than wrapped onto it.
       if (localDay(new Date(span.startMs)) !== options.day) continue
-      const from = Math.floor((span.startMs - dayStart) / 60_000)
-      const to = Math.ceil((span.endMs - dayStart) / 60_000)
+      // Read off the local clock rather than measured from midnight. On a daylight-saving day the
+      // two disagree: after a spring-forward, work at 03:00 sits 2 hours from midnight and would be
+      // drawn in the `02h` row, and after a fall-back every later block shifts by an hour and the
+      // last of them runs off the end of the grid and disappears — exactly when the grid is being
+      // used to decide whether a proposal is right.
+      const from = localMinuteOfDay(span.startMs)
+      const to = span.endMs - span.startMs >= DAY_MS ? MINUTES_PER_DAY : localMinuteOfDay(span.endMs, "up")
       for (let minute = Math.max(0, from); minute < Math.min(MINUTES_PER_DAY, to); minute++) {
         const owner = owners[minute]
         if (owner === null || owner === undefined) {

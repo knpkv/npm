@@ -5,9 +5,10 @@
  *
  * - **Read-only evidence**: transcripts are never written, moved, or modified. This service only
  *   reports what a session touched, when, and where — see ADR-0006.
- * - **Opt-in scope**: a session is read only when its working directory sits inside a configured
- *   Session Root. Everything else is skipped before its contents are ever parsed, so scratch
- *   directories and side projects can never reach a Coding Agent or a proposal.
+ * - **Opt-in scope**: a session becomes evidence only when its working directory sits inside a
+ *   configured Session Root, and is skipped before its contents are parsed whenever the project
+ *   directory's name rules it out — see {@link mayHoldSessionRoot} for the one case that name cannot
+ *   rule out. Either way, out-of-scope work never reaches a Coding Agent or a proposal.
  * - **Tolerant decoding**: the transcript layout is an external contract that changes without
  *   notice. Unrecognised and malformed lines are skipped; a session survives on the lines it can
  *   decode rather than failing the whole run.
@@ -289,14 +290,16 @@ const encodeProjectDir = (cwd: string): string => cwd.replace(/[/.]/g, "-")
 /**
  * True when a project directory could hold a session inside one of the Session Roots.
  *
- * The encoding is many-to-one — `/a/b-c` and `/a/b/c` produce the same name — so this can admit a
- * directory that turns out to be elsewhere, and the authoritative check on the decoded `cwd`
- * still runs afterwards. What it cannot do is *exclude* one wrongly: the substitution is
- * character-by-character, so any path beneath a root encodes to a name beneath the root's.
+ * A *filter*, not a decision. The encoding is many-to-one — a root `/a/b-c` and an out-of-root
+ * `/a/b/c` both become `-a-b-c` — so a directory it admits may still turn out to be elsewhere, and
+ * the authoritative check on the decoded `cwd` runs afterwards regardless. What it cannot do is
+ * exclude one wrongly: the substitution is character-by-character, so every path beneath a root
+ * encodes to a name beneath the root's.
  *
- * Worth the subtlety because the alternative is reading every transcript on the machine to find out
- * it was out of scope — on this author's laptop, 157 project directories to reach two. Opting a
- * directory in should mean the others are never opened, not that they are read and then discarded.
+ * So the guarantee is bounded, and worth stating exactly: a transcript whose project directory
+ * cannot encode from any Session Root is never opened, which on this author's laptop is 155 of 157
+ * directories. A transcript that collides with a root's encoding is opened and then discarded
+ * unread — the honest limit of deciding scope from a lossy directory name.
  */
 export const mayHoldSessionRoot = (projectDir: string, roots: ReadonlyArray<string>): boolean =>
   roots.some((root) => {
