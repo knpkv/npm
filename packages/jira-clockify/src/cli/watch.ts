@@ -10,9 +10,11 @@
  * - **Writes what it can defend.** Unattended, it writes only blocks that have settled and only
  *   attributions a person deliberately created — a branch name, a worktree path, a Standing
  *   Attribution. Everything else is named on screen and left for `jcf sync reconcile --agent`.
- * - **Forward only.** The window starts when the watch does. It never backfills the morning it was
- *   started in, because a command that writes hours you have not seen is the one thing worse than a
- *   command that writes nothing.
+ * - **Forward only, bar one settle window.** The window opens a settle period before the watch
+ *   does — the stretch nothing could have written yet, so a restart recovers the tail it was
+ *   holding rather than dropping it. Nothing older: a command that writes hours you have not seen is
+ *   the one thing worse than a command that writes nothing. Work older than that window is
+ *   `reconcile`'s, which shows you the rows first.
  *
  * **Gotchas**
  *
@@ -35,6 +37,7 @@ import { ReconcileService } from "../services/ReconcileService.js"
 import { formatClock, formatDuration } from "../utils/time.js"
 import { applyProposal, entryDescription, proposalTargets } from "./agentWrite.js"
 import { fetchTicketByKey } from "./fetchTicket.js"
+import * as WatchLease from "./watchLease.js"
 
 /** Coding Agents whose sessions jcf can watch. Matches `reconcile --agent`. */
 const SUPPORTED_AGENTS: ReadonlyArray<string> = ["claude"]
@@ -106,6 +109,19 @@ export const runWatch = (options: {
     const startedAtMs = yield* Clock.currentTimeMillis
     const settleSeconds = cfg.sessionIdleCapSeconds + SETTLE_GRACE_SECONDS
 
+    /**
+     * Where this run starts looking: one settle window before it started.
+     *
+     * Not backfill. Nothing in that window can have settled yet, so it is work no watch could have
+     * written — including the tail a previous run was holding when it was stopped or lost. Without
+     * it, a restart a minute before a block came due dropped that block for good, which is the
+     * opposite of the "a restart costs a delay, not an hour" this command claims.
+     *
+     * Bounded to exactly one settle window, so a first-ever run still cannot reach back into a
+     * morning nobody has seen.
+     */
+    const watchFromMs = startedAtMs - settleSeconds * 1000
+
     const totals: WatchTotals = { blocks: 0, clockifySeconds: 0, jiraSeconds: 0 }
     // Said once per bucket, not once per tick: a ticket that cannot be placed would otherwise
     // repeat its own line every interval until the watch is killed.
@@ -116,11 +132,23 @@ export const runWatch = (options: {
       return
     }
 
+    // One writer at a time. Subtracting what the sides hold makes a later tick safe and says nothing
+    // about a simultaneous one: two watches can read the same gap before either writes it.
+    const lease = yield* WatchLease.acquire({ intervalSeconds: options.intervalSeconds })
+    if (lease._tag === "Taken") {
+      yield* Console.log(
+        `Another jcf watch has been running since ${formatClock(new Date(lease.sinceMs))}.` +
+          " Two would write the same hours twice, so this one is stopping."
+      )
+      return
+    }
+    const leasePath = lease.path
+
     yield* Console.log(
       `jcf watch ${options.agent}${options.dryRun ? "  (dry run — writes nothing)" : ""}`
     )
     yield* Console.log(
-      `  Looking every ${cadence(options.intervalSeconds)}, from ${formatClock(new Date(startedAtMs))}.` +
+      `  Looking every ${cadence(options.intervalSeconds)}, from ${formatClock(new Date(watchFromMs))}.` +
         ` A block is written once it has been quiet for ${cadence(settleSeconds)}.`
     )
     yield* Console.log(
@@ -138,8 +166,9 @@ export const runWatch = (options: {
      */
     const tick = Effect.gen(function*() {
       const nowMs = yield* Clock.currentTimeMillis
+      yield* WatchLease.refresh({ path: leasePath, heldSinceMs: startedAtMs })
       const report = yield* svc.proposeFromSessions(
-        { from: new Date(startedAtMs), to: new Date(nowMs) },
+        { from: new Date(watchFromMs), to: new Date(nowMs) },
         { attribution: "deterministic" }
       ).pipe(
         // A tick that cannot read is a tick that writes nothing. The next one re-derives from
@@ -164,10 +193,7 @@ export const runWatch = (options: {
         )
       }
 
-      const decision = decideWatchWrites(report.proposals, {
-        nowMs,
-        idleCapSeconds: cfg.sessionIdleCapSeconds
-      })
+      const decision = decideWatchWrites(report.proposals, { nowMs })
 
       for (const held of decision.held) {
         if (held.reason._tag !== "NeedsReview") continue
@@ -245,6 +271,8 @@ export const runWatch = (options: {
     // Printed however the watch ends, including Ctrl-C: a run that wrote nothing and a run that was
     // never working look identical otherwise.
     yield* loop.pipe(
+      // Released however this ends, so the next watch does not wait out the stale window.
+      Effect.ensuring(WatchLease.release(leasePath)),
       Effect.ensuring(
         Effect.suspend(() =>
           Console.log(

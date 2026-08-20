@@ -1237,6 +1237,37 @@ describe("jcf sync reconcile --agent: a session that changes branch", () => {
       expect(byKey.get("PROJ-1000")).toBe(20 * 60 + IDLE_CAP)
       expect(byKey.get("PROJ-2000")).toBe(20 * 60 + IDLE_CAP)
     }))
+
+  // The tail after a stretch's final prompt ends where the next stretch begins. Left unbounded it
+  // ran a full Idle Cap into the new branch's work and was shared back onto the old ticket, so a
+  // switch a minute in put those minutes on both tickets at once.
+  it.effect("ends a stretch's tail where the next branch starts, not one Idle Cap later", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-1000-first",
+              events: [
+                { atMs: at(DAY.year, DAY.month, DAY.day, 9, 0) },
+                // One minute later the same person is on another branch.
+                { atMs: at(DAY.year, DAY.month, DAY.day, 9, 1), branch: "feat/PROJ-2000-second" },
+                { atMs: at(DAY.year, DAY.month, DAY.day, 9, 3), branch: "feat/PROJ-2000-second" }
+              ]
+            })
+          },
+          keep: [true, true]
+        })
+      )
+      const byKey = new Map(world.jiraWorklogs.map((worklog) => [worklog.issueKey, worklog.timeSpentSeconds]))
+      // The first stretch is one minute and stops at the switch; the second is two minutes of gap
+      // plus its own capped tail. Nothing is credited twice.
+      expect(byKey.get("PROJ-1000")).toBe(60)
+      expect(byKey.get("PROJ-2000")).toBe(120 + IDLE_CAP)
+    }))
 })
 
 // ---------------------------------------------------------------------------

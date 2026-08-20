@@ -405,6 +405,13 @@ export const activeWindows = (
      * beyond what it can actually see.
      */
     readonly observedAtMs: number
+    /**
+     * Per-session upper bound on the trailing window, for a stretch that gave way to another under a
+     * different branch or directory. Presence after its final prompt ends where the next stretch
+     * begins: the same person carried straight on, so crediting the tail to both would put the
+     * minutes around a switch on two Issue Keys at once.
+     */
+    readonly boundsBySession?: ReadonlyMap<string, number> | undefined
   }
 ): ReadonlyArray<SessionWindows> => {
   const capMs = Math.max(0, options.idleCapSeconds) * 1000
@@ -417,7 +424,11 @@ export const activeWindows = (
   return [...eventsBySession.entries()]
     .map(([sessionId, events]) => ({
       sessionId,
-      spans: sessionActiveWindows(events, capMs, options.observedAtMs)
+      spans: sessionActiveWindows(
+        events,
+        capMs,
+        Math.min(options.observedAtMs, options.boundsBySession?.get(sessionId) ?? Number.POSITIVE_INFINITY)
+      )
     }))
     .filter((session) => session.spans.length > 0)
     .sort((a, b) => a.sessionId.localeCompare(b.sessionId))

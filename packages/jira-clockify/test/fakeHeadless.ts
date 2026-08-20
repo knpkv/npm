@@ -157,6 +157,8 @@ export interface FakeWorld {
   readonly transcripts: Record<string, string>
   /** Every transcript path actually opened, so "never even read" is assertable rather than implied. */
   readonly transcriptReads: Array<string>
+  /** Files the command wrote, by path — the watch lease among them. */
+  readonly writtenFiles: Record<string, string>
 }
 
 /** An existing Clockify entry, in the shape a test wants to write it. */
@@ -266,7 +268,11 @@ const TRANSCRIPT_ROOT = `${FAKE_HOME}/.claude/projects`
  * A watch is a command that runs while the transcripts underneath it grow, so a test has to be able
  * to append a prompt between two ticks — with a snapshot, every tick would see the same day.
  */
-const fakeFileSystemLayer = (transcripts: Record<string, string>, reads: Array<string>) => {
+const fakeFileSystemLayer = (
+  transcripts: Record<string, string>,
+  reads: Array<string>,
+  written: Record<string, string>
+) => {
   /**
    * The project directory a transcript really lives in: the Claude CLI derives it from the working
    * directory the session ran in, not from anything the test chose.
@@ -323,13 +329,23 @@ const fakeFileSystemLayer = (transcripts: Record<string, string>, reads: Array<s
       return directories().has(path) ? Effect.succeed(entries) : notFound("readDirectory", path)
     },
     readFileString: (path) => {
+      const stored = written[path]
+      if (stored !== undefined) return Effect.succeed(stored)
       const content = files().get(path)
       reads.push(path)
       return content === undefined ? notFound("readFileString", path) : Effect.succeed(content)
     },
     // The config service writes through this; nothing in these tests reads it back from disk.
     makeDirectory: () => Effect.void,
-    writeFileString: () => Effect.void
+    // A real store, so anything the CLI writes and reads back — the watch lease — behaves.
+    writeFileString: (path, content) =>
+      Effect.sync(() => {
+        written[path] = content
+      }),
+    remove: (path) =>
+      Effect.sync(() => {
+        delete written[path]
+      })
   })
 }
 
@@ -435,7 +451,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     stderr: [],
     prompts: [],
     transcripts: { ...options.transcripts },
-    transcriptReads: []
+    transcriptReads: [],
+    writtenFiles: {}
   }
 
   // Ledgers, not fixed fixtures: a write lands here and the next read sees it, which is what
@@ -712,7 +729,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     baseUrl: "https://fake.atlassian.net",
     auth: { type: "basic", email: "fake@example.com", apiToken: Redacted.make("token") }
   })
-  const FileSystemLayer = fakeFileSystemLayer(world.transcripts, world.transcriptReads)
+  const FileSystemLayer = fakeFileSystemLayer(world.transcripts, world.transcriptReads, world.writtenFiles)
 
   const Externals = Layer.mergeAll(
     ClockifyLayer,

@@ -855,7 +855,12 @@ export const layer = Layer.effect(
           idleCapSeconds: cfg.sessionIdleCapSeconds,
           // The end of the window being reconciled — which for a watch is now. Presence is never
           // credited past what this run can see.
-          observedAtMs: period.to.getTime()
+          observedAtMs: period.to.getTime(),
+          boundsBySession: new Map(
+            sessions.flatMap((session) =>
+              session.boundedAtMs === null ? [] : [[session.sessionId, session.boundedAtMs]]
+            )
+          )
         })
         const split = splitCredits(windows, attributions)
 

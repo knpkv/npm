@@ -16,11 +16,11 @@
  *
  * **Gotchas**
  *
- * - The settle deadline is `blockEnd + Idle Cap`, and that bound is exact rather than cautious. A
- *   window that could still overlap a block ending at `T` must close before `T + Idle Cap` — a
- *   longer gap is not presence at all — so once that has passed, neither the block nor its share of
- *   parallel work can change. The extra grace on top is for transcript-write latency, not for the
- *   arithmetic.
+ * - The settle deadline is the block's own end plus a small grace, and that bound is exact rather
+ *   than cautious. A block already runs one Idle Cap past its last prompt, and the only way a later
+ *   prompt can extend it is by landing within an Idle Cap of that prompt — which is before the block
+ *   ends. So once the block's end has passed, neither it nor its share of parallel work can change.
+ *   The grace on top is for transcript-write latency, not for the arithmetic.
  * - Settling is judged on the *latest* span in a bucket, so a ticket returned to after lunch is held
  *   again until the afternoon block also goes cold. The morning block is already written by then,
  *   and the proposal that follows is only the remainder — subtracting what the sides hold is what
@@ -67,13 +67,12 @@ const latestEnd = (spans: ReadonlyArray<CreditedSpan>): number =>
 /**
  * When a bucket's evidence stops being able to change.
  *
- * Exported because it is the number the command reports at startup — "blocks settle N minutes after
- * the last prompt" is the whole behavioural contract of a watch, and it should not be a mystery.
+ * The span already ends one Idle Cap past its last prompt, so only the transcript grace is added
+ * here — adding the cap again would withhold every block for twice as long as the command says it
+ * will. The bound is still exact: a later prompt can only extend this span by landing within an
+ * Idle Cap of the last one, which is before the span's own end.
  */
-export const settlesAt = (
-  spans: ReadonlyArray<CreditedSpan>,
-  idleCapSeconds: number
-): number => latestEnd(spans) + (idleCapSeconds + SETTLE_GRACE_SECONDS) * 1000
+export const settlesAt = (spans: ReadonlyArray<CreditedSpan>): number => latestEnd(spans) + SETTLE_GRACE_SECONDS * 1000
 
 /**
  * Sort one tick's proposals into what may be written now and what must wait.
@@ -83,10 +82,7 @@ export const settlesAt = (
  */
 export const decideWatchWrites = (
   proposals: ReadonlyArray<SessionProposal>,
-  options: {
-    readonly nowMs: number
-    readonly idleCapSeconds: number
-  }
+  options: { readonly nowMs: number }
 ): WatchDecision => {
   const write: Array<SessionProposal> = []
   const held: Array<HeldProposal> = []
@@ -96,7 +92,7 @@ export const decideWatchWrites = (
       held.push({ proposal, reason: { _tag: "NeedsReview" } })
       continue
     }
-    const settlesAtMs = settlesAt(proposal.spans, options.idleCapSeconds)
+    const settlesAtMs = settlesAt(proposal.spans)
     if (options.nowMs < settlesAtMs) {
       held.push({ proposal, reason: { _tag: "Unsettled", settlesAtMs } })
       continue

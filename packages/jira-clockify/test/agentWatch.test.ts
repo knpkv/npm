@@ -29,7 +29,11 @@ import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "./fakeHea
 
 const WORK_ROOT = `${FAKE_HOME}/dev/work`
 const IDLE_CAP = 300
-const SETTLE = IDLE_CAP + SETTLE_GRACE_SECONDS
+/**
+ * How long after a block's own end it becomes writable. Only the transcript grace: the block already
+ * runs one Idle Cap past its last prompt.
+ */
+const SETTLE = SETTLE_GRACE_SECONDS
 
 /** Local components, so a day boundary is a local midnight wherever this suite runs. */
 const at = (hour: number, minute: number): number => new Date(2026, 6, 1, hour, minute, 0, 0).getTime()
@@ -129,16 +133,26 @@ describe("decideWatchWrites", () => {
   // to close before T + Idle Cap, so once that has passed neither the block nor its share of any
   // parallel work can change. The grace on top is for transcript-write latency, not for arithmetic.
   it("settles a block one Idle Cap plus the grace after its last moment", () => {
-    expect(settlesAt([{ startMs: at(10, 0), endMs: at(10, 30) }], IDLE_CAP)).toBe(at(10, 30) + SETTLE * 1000)
+    expect(settlesAt([{ startMs: at(10, 0), endMs: at(10, 30) }])).toBe(at(10, 30) + SETTLE * 1000)
+  })
+
+  // The deadline the command advertises at startup. It was counting the Idle Cap twice — once in the
+  // block's own end, once again here — so a block promised after six quiet minutes was withheld for
+  // eleven.
+  it("makes a block writable exactly one Idle Cap and one grace after its final prompt", () => {
+    const finalPrompt = at(10, 30)
+    // The block already runs to `finalPrompt + Idle Cap`, which is what a materialised tail means.
+    const spans = [{ startMs: at(10, 0), endMs: finalPrompt + IDLE_CAP * 1000 }]
+    expect(settlesAt(spans)).toBe(finalPrompt + (IDLE_CAP + SETTLE_GRACE_SECONDS) * 1000)
   })
 
   it("holds a block that is still warm, and writes it once it is not", () => {
     const row = proposal()
-    const oneEarly = decideWatchWrites([row], { nowMs: at(10, 30) + SETTLE * 1000 - 1, idleCapSeconds: IDLE_CAP })
+    const oneEarly = decideWatchWrites([row], { nowMs: at(10, 30) + SETTLE * 1000 - 1 })
     expect(oneEarly.write).toEqual([])
     expect(oneEarly.held[0]?.reason).toEqual({ _tag: "Unsettled", settlesAtMs: at(10, 30) + SETTLE * 1000 })
 
-    const onTime = decideWatchWrites([row], { nowMs: at(10, 30) + SETTLE * 1000, idleCapSeconds: IDLE_CAP })
+    const onTime = decideWatchWrites([row], { nowMs: at(10, 30) + SETTLE * 1000 })
     expect(onTime.write).toEqual([row])
     expect(onTime.held).toEqual([])
   })
@@ -150,7 +164,7 @@ describe("decideWatchWrites", () => {
     const row = proposal({
       spans: [{ startMs: at(9, 0), endMs: at(9, 30) }, { startMs: at(13, 0), endMs: at(13, 30) }]
     })
-    const decision = decideWatchWrites([row], { nowMs: at(13, 10), idleCapSeconds: IDLE_CAP })
+    const decision = decideWatchWrites([row], { nowMs: at(13, 10) })
     expect(decision.write).toEqual([])
     expect(decision.held[0]?.reason._tag).toBe("Unsettled")
   })
@@ -159,17 +173,14 @@ describe("decideWatchWrites", () => {
   // Coding Agent's guess never reaches this function. If one ever did, it must be reported for
   // review rather than written by a command nobody is watching.
   it("never writes an attribution a Coding Agent had to guess at", () => {
-    const decision = decideWatchWrites([proposal({ signal: "agent", confidence: 0.9 })], {
-      nowMs: at(20, 0),
-      idleCapSeconds: IDLE_CAP
-    })
+    const decision = decideWatchWrites([proposal({ signal: "agent", confidence: 0.9 })], { nowMs: at(20, 0) })
     expect(decision.write).toEqual([])
     expect(decision.held[0]?.reason).toEqual({ _tag: "NeedsReview" })
   })
 
   it("writes path- and standing-attributed work, which a person also created deliberately", () => {
     const rows = [proposal({ signal: "path" }), proposal({ signal: "standing" })]
-    const decision = decideWatchWrites(rows, { nowMs: at(20, 0), idleCapSeconds: IDLE_CAP })
+    const decision = decideWatchWrites(rows, { nowMs: at(20, 0) })
     expect(decision.write).toEqual(rows)
   })
 })
@@ -530,6 +541,68 @@ describe("jcf watch claude", () => {
       expect(world.createdClockifyEntries).toHaveLength(2)
       expect(world.createdClockifyEntries[1]?.description).toContain("[PROJ-2]")
       expect(world.jiraWorklogs[1]?.timeSpentSeconds).toBe(480 + IDLE_CAP)
+    }))
+
+  // Subtracting what the sides hold makes a *later* tick safe and says nothing about a simultaneous
+  // one: two watches can read the same gap before either writes it, and an accidental second
+  // terminal is enough to double a day.
+  it.effect("refuses to run beside another watch, so the same hours are not written twice", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless(branchWork())
+      yield* TestClock.setTime(at(10, 0))
+      const run = () =>
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "claude"]).pipe(
+          Effect.provide(fake.layer),
+          Effect.exit,
+          Effect.forkChild
+        )
+
+      const first = yield* run()
+      yield* breathe
+      const second = yield* run()
+      yield* breathe
+
+      expect(output(fake.world.stdout)).toContain("Two would write the same hours twice")
+      yield* advance(Duration.minutes(30))
+      yield* Fiber.interrupt(first)
+      yield* Fiber.interrupt(second)
+
+      // One writer, one entry — not two.
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+    }))
+
+  // Released on the way out, so the next watch starts immediately instead of waiting out the window.
+  it.effect("gives the lease up when it stops", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
+      yield* breathe
+      expect(Object.keys(world.writtenFiles).some((path) => path.endsWith("watch.lease"))).toBe(true)
+      yield* Fiber.interrupt(fiber)
+      yield* breathe
+      expect(Object.keys(world.writtenFiles).some((path) => path.endsWith("watch.lease"))).toBe(false)
+    }))
+
+  // A restart used to drop an in-flight block entirely. The window now opens one settle period
+  // before the run starts — the stretch no watch can have written yet — so the tail is recovered.
+  // What is older than that window is not lost either, just no longer the watch's: `reconcile`
+  // proposes whatever the sides are still short of.
+  it.effect("recovers the unsettled tail of a block interrupted by a restart", () =>
+    Effect.gen(function*() {
+      const first = yield* startWatch({ startMs: at(10, 0), fake: branchWork() })
+      // Stopped before the 10:01-10:11 block could settle.
+      yield* advance(Duration.minutes(8))
+      yield* Fiber.interrupt(first.fiber)
+      expect(first.world.createdClockifyEntries).toEqual([])
+
+      const second = yield* startWatch({ startMs: at(10, 14), fake: branchWork() })
+      yield* advance(Duration.minutes(20))
+      yield* Fiber.interrupt(second.fiber)
+
+      // Restarted at 10:14, so it sees back to 10:08: three minutes of the block plus its capped
+      // tail. The seven minutes before that are `reconcile`'s to offer, not silently gone.
+      expect(second.world.createdClockifyEntries).toHaveLength(1)
+      expect(second.world.jiraWorklogs[0]?.timeSpentSeconds).toBe(180 + IDLE_CAP)
     }))
 
   // Forward only. Work that finished before the watch started is `reconcile`'s job, where a person

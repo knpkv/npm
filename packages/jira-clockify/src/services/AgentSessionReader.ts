@@ -59,6 +59,11 @@ export interface AgentSessionRecord extends AttributableSession {
   readonly activity: ReadonlyArray<SessionActivity>
   /** Bounded digest of the session's prompts, for a Coding Agent to read. */
   readonly digest: string
+  /**
+   * Where this stretch of the transcript ended, when something followed it under a different branch
+   * or directory. Presence after its final prompt stops here rather than running the full Idle Cap.
+   */
+  readonly boundedAtMs: number | null
 }
 
 export class AgentSessionError extends Data.TaggedError("AgentSessionError")<{
@@ -170,6 +175,8 @@ interface DecodedTranscript {
   readonly cwd: string
   readonly gitBranch: string | null
   readonly activity: ReadonlyArray<SessionActivity>
+  /** Where this segment gave way to the next, or null when nothing followed it. */
+  readonly boundedAtMs: number | null
   /** Prompt text in transcript order — mined for candidate keys and folded into the digest. */
   readonly texts: ReadonlyArray<string>
 }
@@ -205,19 +212,23 @@ export const decodeTranscript = (
 
   // One segment per `(cwd, branch)`. The id carries the segment index so windows, attributions and
   // digests all key on the same thing — they are looked up from three different places.
-  const closeSegment = () => {
-    if (sessionId === null || cwd === null || promptTimes.length === 0) return
-    const base = sessionId
-    segments.push({
-      sessionId: segments.length === 0 ? base : `${base}#${String(segments.length)}`,
-      cwd,
-      gitBranch,
-      activity: promptTimes.map((atMs): SessionActivity => ({
-        sessionId: segments.length === 0 ? base : `${base}#${String(segments.length)}`,
-        atMs
-      })),
-      texts
-    })
+  const closeSegment = (endedAtMs: number | null) => {
+    if (sessionId !== null && cwd !== null && promptTimes.length > 0) {
+      const id = segments.length === 0 ? sessionId : `${sessionId}#${String(segments.length)}`
+      segments.push({
+        sessionId: id,
+        cwd,
+        gitBranch,
+        // Where the segment gives way to the next. Presence after its final prompt ends there, not
+        // one whole Idle Cap later: the same person carried straight on under a different branch, so
+        // crediting the tail to both would put the switch's minutes on two tickets at once.
+        boundedAtMs: endedAtMs,
+        activity: promptTimes.map((atMs): SessionActivity => ({ sessionId: id, atMs })),
+        texts
+      })
+    }
+    // Reset unconditionally. A stretch with no typed prompt still has text, and leaving it behind
+    // leaks it into the next segment — including text from a directory that was never opted in.
     promptTimes = []
     texts = []
   }
@@ -237,6 +248,15 @@ export const decodeTranscript = (
 
     if (atMs < period.fromMs || atMs >= period.toMs) continue
 
+    // Closed *before* this line contributes anything: the first line under the new branch is
+    // evidence about the new segment, and appending it first put it in the old segment's digest and
+    // left it out of the new one's.
+    const branch = line.gitBranch ?? null
+    if (cwd !== null && (cwd !== line.cwd || gitBranch !== branch)) closeSegment(atMs)
+    sessionId = line.sessionId
+    cwd = line.cwd
+    gitBranch = branch
+
     // Inside the window only, and every kind of line: a key mentioned solely in the agent's own
     // output is still a candidate, but a prompt written after the window is not evidence about it.
     // A resumed session that moved on to something else would otherwise attribute — and describe —
@@ -244,16 +264,10 @@ export const decodeTranscript = (
     // opted in to a Coding Agent.
     const text = messageText(line.message)
     if (text !== "") texts.push(text)
-
-    const branch = line.gitBranch ?? null
-    if ((cwd !== null && cwd !== line.cwd) || (cwd !== null && gitBranch !== branch)) closeSegment()
-    sessionId = line.sessionId
-    cwd = line.cwd
-    gitBranch = branch
     if (isHumanPrompt(line, line.message)) promptTimes.push(atMs)
   }
 
-  closeSegment()
+  closeSegment(null)
   return segments
 }
 
@@ -389,7 +403,8 @@ export const layer = Layer.effect(
               gitBranch: segment.gitBranch,
               candidateKeys: mineTicketKeys(text),
               digest: buildSessionDigest(segment.texts),
-              activity: segment.activity
+              activity: segment.activity,
+              boundedAtMs: segment.boundedAtMs
             })
           }
         }
