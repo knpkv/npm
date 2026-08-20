@@ -751,7 +751,10 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   )
   const TicketLive = ticketServiceLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
 
-  const layer = Layer.mergeAll(TimerLive, ReconcileLive, TicketLive, ReaderLive, JiraLayer).pipe(
+  // `ReconcileService` is built from the timer, the reader and the Jira client, so those cannot sit
+  // beside it in a `mergeAll` — that builds its members in parallel. They go underneath.
+  const layer = Layer.mergeAll(ReconcileLive, TicketLive).pipe(
+    Layer.provideMerge(Layer.mergeAll(TimerLive, ReaderLive, JiraLayer)),
     Layer.provideMerge(Externals)
   )
 

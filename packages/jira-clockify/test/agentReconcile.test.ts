@@ -617,13 +617,14 @@ describe("jcf sync reconcile --agent: proposals", () => {
       const row = proposals[0]
       // Bounds span the interruption; the credited total does not.
       expect(row).toMatchObject({ sessionSeconds: 10 * 60 + 10 * 60 + 300 })
-      const instant = (field: "startedAt" | "endedAt"): Date => {
+      // Returns null rather than throwing, so a missing bound fails as a readable assertion instead
+      // of an exception from inside a helper.
+      const instant = (field: "startedAt" | "endedAt"): Date | null => {
         const value = row?.[field]
-        if (value === undefined || value === null) throw new Error(`${field} missing from the proposal`)
-        return new Date(value)
+        return value === undefined || value === null ? null : new Date(value)
       }
-      expect(instant("startedAt").getHours()).toBe(9)
-      expect(instant("endedAt").getHours()).toBe(11)
+      expect(instant("startedAt")?.getHours()).toBe(9)
+      expect(instant("endedAt")?.getHours()).toBe(11)
     }))
 
   it.effect("draws no grid without --calendar", () =>

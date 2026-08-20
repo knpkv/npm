@@ -164,10 +164,15 @@ export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
 // Fully closed layer for headless CLI
 // ---------------------------------------------------------------------------
 
-export const HeadlessLayer = Layer.mergeAll(
-  TimerServiceLive,
-  ReconcileServiceLive,
-  TicketServiceLive,
+/**
+ * The services the application services are built *from*.
+ *
+ * Separated because `Layer.mergeAll` builds its members in parallel: a dependency listed alongside
+ * its dependent is not guaranteed to exist when the dependent is constructed. These go underneath
+ * via `provideMerge`, which both orders them first and keeps them in the result, so a command can
+ * still reach `ConfigService` directly.
+ */
+const FoundationLayer = Layer.mergeAll(
   ConfigLive,
   StateWriterLive,
   ClockifyAuthLive,
@@ -178,3 +183,9 @@ export const HeadlessLayer = Layer.mergeAll(
   SessionAttributorLive,
   LogToStderrLive
 ).pipe(Layer.provideMerge(PlatformLayer))
+
+export const HeadlessLayer = Layer.mergeAll(
+  TimerServiceLive,
+  ReconcileServiceLive,
+  TicketServiceLive
+).pipe(Layer.provideMerge(FoundationLayer))
