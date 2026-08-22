@@ -19,17 +19,19 @@ let requests: Array<HttpClientRequest.HttpClientRequest> = []
 let respond: (request: HttpClientRequest.HttpClientRequest, callIndex: number) => Response = () =>
   new Response("null", { status: 200, headers: { "content-type": "application/json" } })
 
-const json = (status: number, body: unknown): Response =>
+const json = <ResponseBody>(status: number, body: ResponseBody): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 /** Answer every request in this test the same way. */
-const reply = (status: number, body: unknown): void => {
+const reply = <ResponseBody>(status: number, body: ResponseBody): void => {
   requests = []
   respond = () => json(status, body)
 }
 
 /** Answer request `n` of this test from a function of its index — for paging. */
-const replyPerCall = (answer: (callIndex: number) => { status: number; body: unknown }): void => {
+const replyPerCall = <ResponseBody>(
+  answer: (callIndex: number) => { status: number; body: ResponseBody }
+): void => {
   requests = []
   respond = (_request, callIndex) => {
     const { body, status } = answer(callIndex)
