@@ -713,7 +713,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       "work-b/s-b.jsonl": transcript({
         sessionId: "s-b",
         cwd: `${WORK_ROOT}/b`,
-        gitBranch: "feat/PROJ-5663-ssp",
+        gitBranch: "feat/PROJ-5663-permissions",
         events: [
           ...steady(at(DAY.year, DAY.month, DAY.day, 12, 0), 20),
           ...steady(at(DAY.year, DAY.month, DAY.day, 16, 0), 20)

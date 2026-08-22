@@ -14,7 +14,7 @@ const sourceRevision = {
   pluginConnectionId: PLUGIN_CONNECTION_ID,
   providerId: "jira",
   revision: "42",
-  sourceUrl: "https://example.atlassian.net/browse/RPS-6307",
+  sourceUrl: "https://example.atlassian.net/browse/PROJ-6307",
   synchronizedAt: "2026-07-13T08:30:30.000Z",
   vendorImmutableId: "1006307"
 }

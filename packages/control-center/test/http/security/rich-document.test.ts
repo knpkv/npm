@@ -16,7 +16,7 @@ describe("RichDocumentV1", () => {
           _tag: "paragraph",
           children: [
             text("Release ready "),
-            { _tag: "link", href: "https://jira.example/browse/RPS-6307", children: [text("RPS-6307")] },
+            { _tag: "link", href: "https://jira.example/browse/PROJ-6307", children: [text("PROJ-6307")] },
             { _tag: "mention", reference: "person:42", label: "Ava" },
             { _tag: "emoji", text: "🚀" },
             { _tag: "media", mediaRef: `media_${"a".repeat(64)}`, alt: "Ava" }

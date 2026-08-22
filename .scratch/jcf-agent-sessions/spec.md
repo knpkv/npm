@@ -14,7 +14,7 @@ Reconstructing that by hand is slow and unreliable. `jcf sync reconcile` can alr
 Clockify and Jira, but it is useless when _neither_ side has the time: it compares two empty buckets and
 reports that everything is in sync. `jcf timer log` can create a Reconstructed Interval, but only if I
 can remember which Issue Keys I touched, on which days, and for how long — across three concurrent
-sessions, a session I resumed the next morning, and a branch whose name says `RPS-5662` while I actually
+sessions, a session I resumed the next morning, and a branch whose name says `PROJ-5662` while I actually
 spent the afternoon on an unrelated hotfix.
 
 The information needed to fix this is already on my machine and completely unused.
@@ -77,7 +77,7 @@ transcript, and the tool never claims a session's derived duration is authoritat
 15. As a developer writing a release-notes or known-issues document that references dozens of tickets, I
     want the Coding Agent to be able to answer "none of these", so that referencing a ticket is never
     mistaken for working on it.
-16. As a developer, I want placeholder keys such as `RPS-123`, `RPS-1234`, `RPS-333`, and `RPS-XXXX` never
+16. As a developer, I want placeholder keys such as `PROJ-123`, `PROJ-1234`, `PROJ-333`, and `PROJ-XXXX` never
     to win an attribution, so that documentation examples and branch templates do not generate worklogs.
 17. As a developer whose transcript mentions no ticket at all, I want the session reported as an
     Unattributed Session, so that the hours are visible to me even when the tool cannot place them.

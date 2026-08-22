@@ -161,7 +161,7 @@ interface TicketFacts {
 /**
  * Jira issue facts by key, for the rows about to be shown.
  *
- * An Issue Key alone is not enough to judge a proposal — `RPS-5663` says nothing about whether that
+ * An Issue Key alone is not enough to judge a proposal — `PROJ-5663` says nothing about whether that
  * afternoon's work belongs to it, and an issue assigned to someone else is a strong hint that the
  * attribution is wrong. One request per *distinct* key, so a week of rows on the same ticket costs
  * one lookup.

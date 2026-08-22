@@ -297,8 +297,8 @@ const encodeProjectDir = (cwd: string): string => cwd.replace(/[/.]/g, "-")
  * encodes to a name beneath the root's.
  *
  * So the guarantee is bounded, and worth stating exactly: a transcript whose project directory
- * cannot encode from any Session Root is never opened, which on this author's laptop is 155 of 157
- * directories. A transcript that collides with a root's encoding is opened and then discarded
+ * cannot encode from any Session Root is never opened, which in a working set of any size is nearly
+ * all of them. A transcript that collides with a root's encoding is opened and then discarded
  * unread — the honest limit of deciding scope from a lossy directory name.
  */
 export const mayHoldSessionRoot = (projectDir: string, roots: ReadonlyArray<string>): boolean =>

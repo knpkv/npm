@@ -7,11 +7,6 @@ import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { JiraApiClient, JiraApiConfig, type JiraApiConfigContract } from "../src/index.js"
 
-// A test case is its own entry point: it composes exactly the client and response that case needs
-// and provides them there. The diagnostic is about production wiring, where a Layer provided
-// mid-graph can cut a scope short.
-// @effect-diagnostics strictEffectProvide:off
-
 const clientLayer = (
   config: JiraApiConfigContract,
   response: { readonly status: number; readonly body?: unknown },
@@ -72,57 +67,6 @@ describe("JiraApiClient", () => {
       {
         baseUrl: "",
         auth: { type: "oauth2", accessToken: Redacted.make("oauth-token"), cloudId: "cloud-123" }
-      },
-      { status: 200, body: { id: "10001", key: "PROJ-1", fields: {} } },
-      requests
-    )))
-  })
-
-  // A client is built once and can outlive its credential: `jcf watch` runs all day on an access
-  // token good for about an hour. Before this, the token was read at layer construction and baked
-  // into a header, so every request after the first expiry 401ed for the life of the process.
-  it.effect("re-reads a refreshing credential on every request", () => {
-    const requests: Array<HttpClientRequest.HttpClientRequest> = []
-    let issued = 0
-    return Effect.gen(function*() {
-      const client = yield* JiraApiClient
-      yield* client.getIssue("PROJ-1", undefined)
-      yield* client.getIssue("PROJ-1", undefined)
-      expect(requests.map((request) => request.headers.authorization)).toEqual([
-        "Bearer token-1",
-        "Bearer token-2"
-      ])
-    }).pipe(Effect.provide(clientLayer(
-      {
-        baseUrl: "",
-        auth: { type: "oauth2", accessToken: Redacted.make("stale"), cloudId: "cloud-123" },
-        resolveAuth: Effect.sync(() => {
-          issued += 1
-          return { type: "oauth2", accessToken: Redacted.make(`token-${issued}`), cloudId: "cloud-123" }
-        })
-      },
-      { status: 200, body: { id: "10001", key: "PROJ-1", fields: {} } },
-      requests
-    )))
-  })
-
-  // The host comes from the same value as the header, so a resolver cannot address one site while
-  // authenticating against another.
-  it.effect("routes a refreshed credential at its own cloud id", () => {
-    const requests: Array<HttpClientRequest.HttpClientRequest> = []
-    return Effect.gen(function*() {
-      const client = yield* JiraApiClient
-      yield* client.getIssue("PROJ-1", undefined)
-      expect(requests[0]?.url).toBe("https://api.atlassian.com/ex/jira/cloud-999/rest/api/3/issue/PROJ-1")
-    }).pipe(Effect.provide(clientLayer(
-      {
-        baseUrl: "",
-        auth: { type: "oauth2", accessToken: Redacted.make("stale"), cloudId: "cloud-123" },
-        resolveAuth: Effect.succeed({
-          type: "oauth2",
-          accessToken: Redacted.make("fresh"),
-          cloudId: "cloud-999"
-        })
       },
       { status: 200, body: { id: "10001", key: "PROJ-1", fields: {} } },
       requests

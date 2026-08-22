@@ -154,7 +154,7 @@ export const mineTicketKeys = (
 }
 
 /**
- * The Issue Key a git branch names, or null. Takes the first match so `RPS-1/RPS-2` resolves
+ * The Issue Key a git branch names, or null. Takes the first match so `PROJ-1/PROJ-2` resolves
  * predictably, and applies no placeholder filter — naming a branch is a deliberate act.
  */
 export const ticketKeyFromBranch = (branch: string | null | undefined): string | null => {
@@ -164,7 +164,7 @@ export const ticketKeyFromBranch = (branch: string | null | undefined): string |
 
 /**
  * The Issue Key a working directory path names, or null. Takes the *last* match so the deepest
- * segment wins — a worktree at `~/dev/repo/worktrees/RPS-1/RPS-2` is working on `RPS-2`.
+ * segment wins — a worktree at `~/dev/repo/worktrees/PROJ-1/PROJ-2` is working on `PROJ-2`.
  *
  * This is what makes detached worktrees (whose branch reads `HEAD`) attributable.
  */

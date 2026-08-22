@@ -93,11 +93,11 @@ direction, so combining it with `clockify-to-jira` is an error.
 Worth being exact about what "only those" means, because it is a _local read_ boundary and a
 _disclosure_ boundary, and they are not in the same place. Claude names each project directory after
 the working directory with the separators flattened, so `/a/b-c` and `/a/b/c` both become `-a-b-c`.
-A directory whose name cannot have come from any of your session roots is never opened at all — on
-this author's laptop, 155 of 157. One that collides with a root's encoding is opened, and its
-sessions are discarded once the working directory inside says they were out of scope. So an
-out-of-scope session can be read from disk by jcf; it can never reach a coding agent, a proposal, or
-either of the two systems.
+A directory whose name cannot have come from any of your session roots is never opened at all, which
+is nearly all of them. One that collides with a root's encoding is opened, and its sessions are
+discarded once the working directory inside says they were out of scope. So an out-of-scope session
+can be read from disk by jcf; it can never reach a coding agent, a proposal, or either of the two
+systems.
 
 Only messages _you typed_ count as presence — the agent's own output, its tool results, and the
 prompts it sends its own subagents do not, since they show it was busy rather than that you were
@@ -135,7 +135,7 @@ actually done:
 
 ```text
   2026-07-25  PROJ-5663  +2h 35m to both
-    Add SSP API for per-user application list — Researched Keycloak OIDC docs and designed an endpoint returning the caller's allowed applications (Reconciled from Claude Agent Session)
+    Add an endpoint for a caller's own permissions — Read the identity provider's OIDC docs and designed a route returning the applications the caller may open (Reconciled from Claude Agent Session)
     ✓ created Clockify entry
     ✓ posted to Jira
 ```
