@@ -1,7 +1,7 @@
+import { describe, expect, it } from "@effect/vitest"
 import { codecommitConsoleUrl } from "@knpkv/codecommit-core/Domain.js"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
-import { describe, expect, it } from "vitest"
 
 import {
   browserLauncherSucceeded,
@@ -20,15 +20,13 @@ import {
 } from "../src/managed-review.js"
 
 describe("controlCenterReviewUrl", () => {
-  it("keeps the complete provider link as one encoded query value", () => {
-    const providerUrl =
-      "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1"
-
-    const handoff = new URL(controlCenterReviewUrl(providerUrl))
+  it("keeps provider coordinates out of the browser request target", () => {
+    const handoff = new URL(controlCenterReviewUrl())
 
     expect(handoff.origin).toBe("http://127.0.0.1:4173")
     expect(handoff.pathname).toBe("/open-pr")
-    expect(handoff.searchParams.get("url")).toBe(providerUrl)
+    expect(handoff.search).toBe("")
+    expect(handoff.hash).toBe("")
   })
 
   it("uses an explicitly configured Control Center origin", () => {
@@ -41,7 +39,7 @@ describe("controlCenterReviewUrl", () => {
 
     expect(origin).toBe("https://reviews.example.test")
     if (origin === null) return
-    expect(new URL(controlCenterReviewUrl("https://console.aws.amazon.com/pr", origin)).origin)
+    expect(new URL(controlCenterReviewUrl(origin)).origin)
       .toBe("https://reviews.example.test")
   })
 
@@ -95,8 +93,9 @@ describe("controlCenterReviewUrl", () => {
     })
     expect(planControlCenterReviewHandoff(pullRequestUrl, "https://reviews.example.test")).toEqual({
       _tag: "automatic",
+      clipboardText: pullRequestUrl,
       identityUrl: "https://reviews.example.test/.well-known/knpkv-control-center",
-      reviewUrl: `https://reviews.example.test/open-pr?url=${encodeURIComponent(pullRequestUrl)}`
+      reviewUrl: "https://reviews.example.test/open-pr"
     })
   })
 

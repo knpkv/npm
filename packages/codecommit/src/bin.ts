@@ -447,36 +447,40 @@ const cli = Command.runWith(command, {
 // The executable boundary is the only place permitted to read the host process.
 // Profile-scoped spawns need the environment they will actually inherit so ambient AWS
 // variables are tombstoned under whatever casing the host exported them with.
-const configuredMockEndpoint = process.env.CODECOMMIT_MOCK_ENDPOINT?.trim()
-const AwsHttpClientLayer = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
-  ? NodeHttpClient.layerFetch
-  : Layer.effect(
-    HttpClient.HttpClient,
-    Effect.gen(function*() {
-      const client = yield* HttpClient.HttpClient
-      return withCodeCommitMock(client, yield* decodeCodeCommitMockEndpointEffect(configuredMockEndpoint))
-    })
-  ).pipe(Layer.provide(NodeHttpClient.layerFetch))
-const AwsConfigurationLayer = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
-  ? AwsClientConfig.Default
-  : codeCommitMockAwsClientConfig
-const AwsClientLayer = AwsClient.AwsClientLive.pipe(
-  Layer.provide(AwsHttpClientLayer),
-  Layer.provide(AwsConfigurationLayer)
-)
+const HostEnvironmentLayer = ChildEnv.layerHostEnvironment(process.env)
+const AwsRuntimeLayer = Layer.unwrap(
+  Effect.map(ChildEnv.HostEnvironment, ({ variables }) => {
+    const configuredMockEndpoint = variables.CODECOMMIT_MOCK_ENDPOINT?.trim()
+    const httpClient = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+      ? NodeHttpClient.layerFetch
+      : Layer.effect(
+        HttpClient.HttpClient,
+        Effect.gen(function*() {
+          const client = yield* HttpClient.HttpClient
+          return withCodeCommitMock(client, yield* decodeCodeCommitMockEndpointEffect(configuredMockEndpoint))
+        })
+      ).pipe(Layer.provide(NodeHttpClient.layerFetch))
+    const configuration = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+      ? AwsClientConfig.Default
+      : codeCommitMockAwsClientConfig
+    const client = AwsClient.AwsClientLive.pipe(
+      Layer.provide(httpClient),
+      Layer.provide(configuration)
+    )
+    return Layer.mergeAll(httpClient, configuration, client)
+  })
+).pipe(Layer.provide(HostEnvironmentLayer))
 const ConfigServiceLayer = ConfigService.ConfigServiceLive.pipe(
   Layer.provide(CacheService.EventsHub.Default)
 )
 const FilterServiceLayer = FilterServiceLive.pipe(
-  Layer.provide(Layer.merge(AwsClientLayer, ConfigServiceLayer))
+  Layer.provide(Layer.merge(AwsRuntimeLayer, ConfigServiceLayer))
 )
 
 const AppRuntimeLayer = Layer.mergeAll(
-  AwsHttpClientLayer,
-  AwsConfigurationLayer,
-  AwsClientLayer,
+  AwsRuntimeLayer,
   FilterServiceLayer,
-  ChildEnv.layerHostEnvironment(process.env)
+  HostEnvironmentLayer
 )
 const RuntimeLayer = AppRuntimeLayer.pipe(Layer.provideMerge(BunServices.layer))
 

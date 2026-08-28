@@ -72,11 +72,13 @@ codecommit tui
 Press `o` on a selected pull request to hand its AWS Console URL to the durable
 Control Center Managed Review. The TUI resolves `CODECOMMIT_CONTROL_CENTER_ORIGIN`,
 then Control Center's `CONTROL_CENTER_PUBLIC_ORIGIN`, then its host and port settings,
-with `http://127.0.0.1:4173` as the default. Automatic browser handoff requires an
+with `http://127.0.0.1:4173` as the default. Assisted browser handoff requires an
 HTTPS origin so TLS authenticates the server before the browser sends its host-only
-owner cookie. The ordinary local HTTP origin must be opened manually; paste the PR
-URL through **Open PR**. For HTTPS origins, the TUI also requires Control Center's
-exact bounded versioned identity response before sending the PR URL. When it is unavailable,
+owner cookie. The TUI copies the provider URL locally and opens a clean `/open-pr`
+target; paste the URL there so the authenticated resolver sends it only in a POST
+body. The ordinary local HTTP origin must be opened manually. For HTTPS origins, the
+TUI also requires Control Center's exact bounded versioned identity response before
+opening the page. When it is unavailable,
 the TUI labels its local review as **Relay-only** and **non-durable**; local
 findings never silently merge into a later Managed Review.
 

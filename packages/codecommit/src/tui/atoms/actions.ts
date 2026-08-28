@@ -295,6 +295,14 @@ export const openManagedReviewAtom = runtimeAtom.fn((pullRequestUrl: string) =>
       })
       return
     }
+    const copied = yield* copyToClipboard(handoff.clipboardText)
+    if (!copied) {
+      yield* notificationRepo.addSystem({
+        type: "warning",
+        title: "Managed Review Link",
+        message: manualReviewHandoffMessage(handoff.clipboardText, false)
+      })
+    }
     const url = handoff.reviewUrl
     const openWith = (command: string, args: ReadonlyArray<string>) =>
       successfulBrowserExit(

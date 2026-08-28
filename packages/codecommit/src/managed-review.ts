@@ -102,20 +102,19 @@ export const managedReviewPullRequestUrl = (
   pullRequest: Pick<Domain.PullRequest, "consoleUrl" | "link">
 ): string => pullRequest.consoleUrl
 
-/** Build the Control Center handoff without copying private session material into the URL. */
-export const controlCenterReviewUrl = (
-  pullRequestUrl: string,
-  origin: string = DEFAULT_CONTROL_CENTER_ORIGIN
-): string => {
-  const url = new URL("/open-pr", origin)
-  url.searchParams.set("url", pullRequestUrl)
-  return url.href
-}
+/** Build the clean browser target; provider locators stay out of request URLs and history. */
+export const controlCenterReviewUrl = (origin: string = DEFAULT_CONTROL_CENTER_ORIGIN): string =>
+  new URL("/open-pr", origin).href
 
 export type ControlCenterReviewHandoff =
   | { readonly _tag: "unavailable" }
   | { readonly _tag: "manual"; readonly clipboardText: string }
-  | { readonly _tag: "automatic"; readonly identityUrl: string; readonly reviewUrl: string }
+  | {
+    readonly _tag: "automatic"
+    readonly clipboardText: string
+    readonly identityUrl: string
+    readonly reviewUrl: string
+  }
 
 /** Decide the handoff before performing clipboard, network, or browser effects. */
 export const planControlCenterReviewHandoff = (
@@ -128,7 +127,8 @@ export const planControlCenterReviewHandoff = (
   }
   return {
     _tag: "automatic",
+    clipboardText: pullRequestUrl,
     identityUrl: new URL(CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH, origin).href,
-    reviewUrl: controlCenterReviewUrl(pullRequestUrl, origin)
+    reviewUrl: controlCenterReviewUrl(origin)
   }
 }

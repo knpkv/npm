@@ -2045,6 +2045,7 @@ export function DetailsView() {
               width: reviewCardExpanded ? "36%" : "22%"
             }}
           >
+            <text fg={theme.textWarning}>{terminalSafeText(RELAY_ONLY_REVIEW_LABEL)}</text>
             {!reviewCardExpanded && (
               <>
                 <text fg={theme.textMuted}>OPEN SELECTED</text>
@@ -2090,7 +2091,6 @@ export function DetailsView() {
                   </text>
                 )}
                 <box style={{ height: 1 }} />
-                <text fg={theme.textWarning}>{terminalSafeText(RELAY_ONLY_REVIEW_LABEL)}</text>
                 <text fg={theme.text}>{"API preview · local Codex on demand"}</text>
                 <ActionKey active={!actionCancelable && !providerDriftPending} keyName="g" label="Skills" />
                 <text fg={theme.textAccent}>{`${reviewSkills.length} SELECTED`}</text>
