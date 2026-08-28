@@ -108,6 +108,7 @@ import {
   detachedStalePublicationDiagnostic,
   detachedStalePublicationIds,
   reconcileRelayReviewSession,
+  RELAY_ONLY_REVIEW_LABEL,
   relayFindingFingerprint,
   relayFindingPostReceiptDisposition,
   relayFindingSessionReceiptMatches,
@@ -133,6 +134,10 @@ const hasTerminalControl = (value: string): boolean =>
   })
 
 describe("PR detail workspace", () => {
+  it("labels every local review deck as Relay-only and non-durable", () => {
+    expect(RELAY_ONLY_REVIEW_LABEL).toBe("Relay-only · non-durable")
+  })
+
   it("merges simultaneous successful post and reconciliation receipts without losing stale state", () => {
     const original: RelayReviewResult["findings"][number] = {
       details: "Evidence",
@@ -457,7 +462,10 @@ describe("PR detail workspace", () => {
       expect(traversal.length).toBeGreaterThan(0)
       expect(traversal.length).toBeLessThan(80)
       expect(nearby).not.toBe(traversal)
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it("escapes C0 and C1 controls in terminal text and unified diff metadata", () => {
     const file = decodeChangedFile({
@@ -1177,6 +1185,7 @@ describe("PR detail workspace", () => {
     expect(detailsKeyIntent({ ...base, keyName: "C" })).toBe("open-codecommit")
     expect(detailsKeyIntent({ ...base, keyName: "c", shifted: true })).toBe("open-codecommit")
     expect(detailsKeyIntent({ ...base, keyName: "c" })).toBe("show-comments")
+    expect(detailsKeyIntent({ ...base, keyName: "o" })).toBe("open-managed-review")
     expect(detailsKeyIntent({ ...base, keyName: "C", tab: "comments" })).toBe("yield")
     expect(detailsKeyIntent({ ...base, actionCancelable: true, keyName: "C" })).toBe("consume")
     expect(detailsKeyIntent({ ...base, keyName: "C", workspaceRefreshing: true })).toBe("consume")
@@ -2521,7 +2530,11 @@ describe("PR detail workspace", () => {
       })
 
       expect(new TextDecoder().decode(blob.bytes)).toBe("immutable\n")
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it("keys cached previews by both exact revision and immutable blob pair", () => {
     const shared = {

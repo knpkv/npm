@@ -721,7 +721,7 @@ export type DetailsKeyIntent =
   | "discuss-finding"
   | "explain-risk"
   | "next-file"
-  | "open-browser"
+  | "open-managed-review"
   | "open-codecommit"
   | "open-neovim"
   | "open-vscode"
@@ -802,7 +802,7 @@ export const detailsKeyIntent = (input: {
   if (consoleKey) return input.tab === "diff" ? "open-codecommit" : "yield"
   if (input.keyName === "1") return "show-diff"
   if (input.keyName === "2" || input.keyName === "c") return input.actionCancelable ? "yield" : "show-comments"
-  if (input.keyName === "o") return "open-browser"
+  if (input.keyName === "o") return "open-managed-review"
   if (
     input.tab === "diff" &&
     (input.keyName === "M" || (input.keyName === "m" && input.shifted === true))

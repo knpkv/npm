@@ -763,6 +763,19 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       primaryAction: () => page.getByRole("searchbox", { name: "Search" })
     },
     {
+      audit: productionRouteAuditCase("release-routes", "open-pr", "authenticated", "open-pr"),
+      exercise: async (primaryAction) =>
+        primaryAction.fill(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1"
+        ),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "Pull request URL" })).toHaveValue(
+          /pull-requests\/42/u
+        ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Open CodeCommit PR" }),
+      primaryAction: () => page.getByRole("textbox", { name: "Pull request URL" })
+    },
+    {
       audit: productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId"),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),

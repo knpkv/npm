@@ -34,6 +34,7 @@ const WORKSPACE_B = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-1000
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000003")
 const OTHER_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-10000000000e")
 const CLOCKIFY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000018")
+const CODECOMMIT_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000019")
 const NOISE_CONFLUENCE_PLUGIN_IDS = Array.from(
   { length: 16 },
   (_, index) =>
@@ -74,9 +75,11 @@ const SIX_ISSUE_NODE_IDS = Array.from(
   (_, index) => `01890f6f-6d6a-7cc0-98d2-20000000001${index + 1}`
 )
 const PR_IDS = [
-  "01890f6f-6d6a-7cc0-98d2-200000000021",
-  "01890f6f-6d6a-7cc0-98d2-200000000022"
+  Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-200000000021"),
+  Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-200000000022")
 ]
+const OTHER_REGION_PR_ID = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-200000000019")
+const NON_CODECOMMIT_PR_ID = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-200000000020")
 const PR_NODE_IDS = [
   "01890f6f-6d6a-7cc0-98d2-200000000031",
   "01890f6f-6d6a-7cc0-98d2-200000000032"
@@ -122,7 +125,7 @@ const pluginFreshnessFor = (input: {
   return {
     _tag: "current",
     pluginHealth: { _tag: "healthy", checkedAt: CREATED_AT },
-    provenance: input.cached
+    provenance: input.cached === true
       ? { _tag: "cache", cachedAt: CREATED_AT, sourceRevision }
       : { _tag: "provider", sourceRevision },
     sourceObservedAt: sourceRevision.lastObservedAt,
@@ -150,8 +153,15 @@ const withRepository = <Success, Failure>(
     const database = databaseLayer(config)
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const repository = DeliveryGraphRepository.layer.pipe(Layer.provideMerge(foundation))
-    return yield* use.pipe(Effect.provide(repository))
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+    return yield* use.pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(repository)
+    )
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 const insertFoundation = Effect.gen(function*() {
   const database = yield* Database
@@ -360,35 +370,76 @@ const initialBatch = {
 
 const insertSixIssueFoundation = Effect.gen(function*() {
   const database = yield* Database
+  yield* database.sql`INSERT INTO plugin_connections (
+    workspace_id, plugin_connection_id, provider_id, display_name,
+    revision, is_enabled, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_A}, ${CODECOMMIT_PLUGIN_ID}, 'codecommit', 'Payments CodeCommit',
+    1, 1, ${CREATED_AT}, ${CREATED_AT}
+  )`
   const entities = [
     ...SIX_ISSUE_IDS.map((entityId, index) => ({
       entityId,
       entityType: "issue",
-      vendorId: `PAY-${index + 101}`
+      vendorId: `PAY-${index + 101}`,
+      pluginConnectionId: PLUGIN_ID,
+      providerId: "jira",
+      sourceUrl: null
     })),
     ...PR_IDS.map((entityId, index) => ({
       entityId,
       entityType: "pull-request",
-      vendorId: `PR-${index + 41}`
+      vendorId: `PR-${index + 41}`,
+      pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+      providerId: "codecommit",
+      sourceUrl:
+        `https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/${
+          String(index + 41)
+        }?region=eu-west-1`
     })),
-    { entityId: PIPELINE_FIXTURE_ID, entityType: "pipeline", vendorId: "pipeline-201" }
+    {
+      entityId: OTHER_REGION_PR_ID,
+      entityType: "pull-request",
+      vendorId: "other-region-pr-41",
+      pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+      providerId: "codecommit",
+      sourceUrl:
+        "https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/41?region=us-east-1"
+    },
+    {
+      entityId: NON_CODECOMMIT_PR_ID,
+      entityType: "pull-request",
+      vendorId: "jira-pr-41",
+      pluginConnectionId: PLUGIN_ID,
+      providerId: "jira",
+      sourceUrl: null
+    },
+    {
+      entityId: PIPELINE_FIXTURE_ID,
+      entityType: "pipeline",
+      vendorId: "pipeline-201",
+      pluginConnectionId: PLUGIN_ID,
+      providerId: "jira",
+      sourceUrl: null
+    }
   ]
   yield* Effect.forEach(
     entities,
-    ({ entityId, entityType, vendorId }) =>
+    ({ entityId, entityType, pluginConnectionId, providerId, sourceUrl, vendorId }) =>
       Effect.gen(function*() {
         yield* database.sql`INSERT INTO entities (
           workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
           entity_type, current_revision, created_at, updated_at
         ) VALUES (
-          ${WORKSPACE_A}, ${entityId}, ${PLUGIN_ID}, 'jira', ${vendorId},
+          ${WORKSPACE_A}, ${entityId}, ${pluginConnectionId},
+          ${providerId}, ${vendorId},
           ${entityType}, 1, ${CREATED_AT}, ${CREATED_AT}
         )`
         yield* database.sql`INSERT INTO entity_revisions (
           workspace_id, entity_id, revision, source_revision, normalization_schema_version,
           source_url, first_observed_at, last_observed_at, synchronized_at, created_at
         ) VALUES (
-          ${WORKSPACE_A}, ${entityId}, 1, 'source-1', 1, NULL,
+          ${WORKSPACE_A}, ${entityId}, 1, 'source-1', 1, ${sourceUrl},
           ${CREATED_AT}, ${CREATED_AT}, ${CREATED_AT}, ${CREATED_AT}
         )`
       }),
@@ -430,7 +481,7 @@ const sixIssueBatch = {
         projectionSchemaVersion: 1,
         entityState: "present",
         entityType: "pull-request",
-        displayKey: `PR-${index + 41}`,
+        displayKey: `${index + 41}`,
         title: `Release pull request ${index + 1}`,
         details: {
           _tag: "pull-request",
@@ -443,6 +494,52 @@ const sixIssueBatch = {
       },
       recordedAt: CREATED_AT
     })),
+    {
+      projection: {
+        workspaceId: WORKSPACE_A,
+        entityId: OTHER_REGION_PR_ID,
+        projectionRevision: 1,
+        sourceEntityRevision: 1,
+        supersedesProjectionRevision: null,
+        projectionSchemaVersion: 1,
+        entityState: "present",
+        entityType: "pull-request",
+        displayKey: "41",
+        title: "Other-region pull request",
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: "feature/other-region",
+          targetBranch: "main",
+          headRevision: "other-region-revision",
+          reviewState: "requested"
+        }
+      },
+      recordedAt: CREATED_AT
+    },
+    {
+      projection: {
+        workspaceId: WORKSPACE_A,
+        entityId: NON_CODECOMMIT_PR_ID,
+        projectionRevision: 1,
+        sourceEntityRevision: 1,
+        supersedesProjectionRevision: null,
+        projectionSchemaVersion: 1,
+        entityState: "present",
+        entityType: "pull-request",
+        displayKey: "41",
+        title: "Jira lookalike pull request",
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: "feature/lookalike",
+          targetBranch: "main",
+          headRevision: "lookalike-revision",
+          reviewState: "requested"
+        }
+      },
+      recordedAt: CREATED_AT
+    },
     {
       projection: {
         workspaceId: WORKSPACE_A,
@@ -807,11 +904,24 @@ describe("DeliveryGraphRepository", () => {
         const repository = yield* DeliveryGraphRepository
         const receipt = yield* repository.write(WORKSPACE_A, sixIssueBatch)
         assert.deepStrictEqual(receipt, {
-          entityProjectionCount: 9,
+          entityProjectionCount: 11,
           nodeCount: 10,
           evidenceItemCount: 0,
           evidenceClaimCount: 0,
           relationshipCount: 9
+        })
+        const exactPullRequest = yield* repository.read(WORKSPACE_A, {
+          _tag: "codeCommitPullRequestCandidates",
+          region: "eu-west-1",
+          repositoryName: "payments-api",
+          pullRequestId: "41",
+          limit: 1
+        })
+        const firstPullRequestId = PR_IDS[0]
+        assert.isDefined(firstPullRequestId)
+        assert.deepStrictEqual(exactPullRequest, {
+          _tag: "codeCommitPullRequestCandidates",
+          value: { entityIds: [firstPullRequestId], truncated: false }
         })
         const slice = yield* repository.read(WORKSPACE_A, {
           _tag: "releaseSlice",
@@ -942,7 +1052,11 @@ describe("DeliveryGraphRepository", () => {
 
       assert.strictEqual(slice._tag, "releaseSlice")
       assert.strictEqual(yield* Ref.get(transactionCount), 1)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("atomically writes and reads the graph, including legacy pipeline projection mapping", () =>
     withRepository(

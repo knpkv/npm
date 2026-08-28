@@ -38,6 +38,16 @@ export const canInspectWorkspaceSettings = (state: BrowserSessionState, workspac
   )
 }
 
+/** The narrow PR resolver is available to workspace-wide readers. @internal */
+export const canOpenCodeCommitPullRequest = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
+  const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
+  return (
+    workspaceId !== null &&
+    session?.workspaceId === workspaceId &&
+    (session.permission === "workspace-owner" || session.permission === "workspace-approver")
+  )
+}
+
 const navigation = (
   overviewPath: string,
   includeSettings: boolean
@@ -89,6 +99,7 @@ export const AppShell = (): ReactElement => {
   const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
   const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
+  const includeOpenPullRequest = canOpenCodeCommitPullRequest(browserSession.state, workspaceId)
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable")
   useEffect(() => {
     setDensity("comfortable")
@@ -138,6 +149,11 @@ export const AppShell = (): ReactElement => {
               overviewPath={overviewPath}
             />
             <div className={styles.actions}>
+              {includeOpenPullRequest ? (
+                <NavLink className={styles.agent ?? ""} to="/open-pr">
+                  Open PR
+                </NavLink>
+              ) : null}
               {workspaceId === null ? null : (
                 <Suspense fallback={null}>
                   <CommandSearch workspaceId={workspaceId} />

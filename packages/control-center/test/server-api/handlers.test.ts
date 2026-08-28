@@ -1,6 +1,7 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
@@ -255,7 +256,50 @@ const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
   },
   activity: { truncated: false, events: [] }
 })
-
+const codeCommitPullRequestEntityId = Schema.decodeSync(EntityId)(
+  "01890f6f-6d6a-7cc0-98d2-00000000006a"
+)
+const codeCommitPullRequestInspectionForRegion = (region: string) =>
+  Schema.decodeSync(WorkspaceEntityInspection)({
+    ...Schema.encodeSync(WorkspaceEntityInspection)(workspaceEntityInspection),
+    entity: {
+      ...Schema.encodeSync(WorkspaceEntityInspection)(workspaceEntityInspection).entity,
+      projection: {
+        ...Schema.encodeSync(DeliveryEntityProjection)(sharedProjection),
+        entityId: codeCommitPullRequestEntityId,
+        entityType: "pull-request",
+        displayKey: "42",
+        title: "Protect payment retries",
+        details: {
+          _tag: "pull-request",
+          repository: "payments",
+          sourceBranch: "feature/retries",
+          targetBranch: "main",
+          headRevision: "a".repeat(40),
+          baseRevision: "b".repeat(40),
+          mergeBaseRevision: "c".repeat(40),
+          reviewState: "requested",
+          lifecycle: "open",
+          description: "Keep retries idempotent.",
+          authorReference: "arn:aws:iam::123456789012:user/alice",
+          createdAt: "2026-07-14T09:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      }
+    },
+    source: {
+      providerId: "codecommit",
+      pluginConnectionId: codeCommitPluginConnectionId,
+      vendorImmutableId: "42",
+      revision: "a".repeat(40),
+      sourceUrl:
+        `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=${region}`,
+      firstObservedAt: "2026-07-14T09:58:00.000Z",
+      lastObservedAt: "2026-07-14T10:00:00.000Z",
+      synchronizedAt: "2026-07-14T10:01:00.000Z",
+      normalizationSchemaVersion: 1
+    }
+  })
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
 const reviewerSession = SessionSummary.make({ ...session, permission: "reviewer" })
 const agentOwnerSession = SessionSummary.make({
@@ -908,6 +952,123 @@ describe("Control Center API handlers", () => {
         deliveryGraphHandlersTestLayer
       ])
     ))
+
+  it.effect("resolves a CodeCommit link in one authenticated server-side batch", () =>
+    Effect.gen(function*() {
+      const entityReads = yield* Ref.make(0)
+      const accountBound = yield* Ref.make(false)
+      const selectedRegion = yield* Ref.make("eu-west-1")
+      const connected = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        pluginConnectionId: codeCommitPluginConnectionId,
+        providerAccountId,
+        followedResourceId: null,
+        providerId: "codecommit",
+        displayName: "Payments repository",
+        revision: 1,
+        isEnabled: true,
+        supportsSynchronization: true,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const unbound = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        ...Schema.encodeSync(PluginConnectionSummary)(connected),
+        providerAccountId: null
+      })
+      const account = Schema.decodeUnknownSync(ProviderAccountSummary)({
+        providerAccountId,
+        providerFamily: "aws",
+        displayName: "Production",
+        providerImmutableId: "123456789012",
+        resources: []
+      })
+      const plugins = PluginAdministration.of({
+        accounts: () => Effect.succeed([account]),
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Ref.get(accountBound).pipe(Effect.map((bound) => [bound ? connected : unbound])),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const approverMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const inspection = Layer.succeed(DeliveryGraphInspection, {
+        codeCommitPullRequestCandidates: (
+          { pullRequestId, region, repositoryName, workspaceId: requestedWorkspaceId }
+        ) =>
+          Ref.get(selectedRegion).pipe(
+            Effect.flatMap((expectedRegion) =>
+              requestedWorkspaceId === session.workspaceId &&
+                region === expectedRegion &&
+                repositoryName === "payments" &&
+                pullRequestId === "42"
+                ? Effect.succeed({ entityIds: [codeCommitPullRequestEntityId], truncated: false })
+                : Effect.die("CodeCommit resolution crossed its exact lookup boundary")
+            )
+          ),
+        workspaceEntity: ({ entityId, workspaceId: requestedWorkspaceId }) =>
+          requestedWorkspaceId === session.workspaceId && entityId === codeCommitPullRequestEntityId
+            ? Ref.update(entityReads, (count) => count + 1).pipe(
+              Effect.andThen(Ref.get(selectedRegion)),
+              Effect.map(codeCommitPullRequestInspectionForRegion)
+            )
+            : Effect.die("CodeCommit resolution crossed its candidate boundary"),
+        workspaceEntityProjections: () => Effect.die("exact CodeCommit resolution used generic search"),
+        releaseSlice: () => Effect.die("not used"),
+        repairCandidates: () => Effect.die("not used"),
+        repairProposalDraft: () => Effect.die("not used"),
+        relationship: () => Effect.die("not used"),
+        relationshipHistory: () => Effect.die("not used"),
+        evidence: () => Effect.die("not used")
+      })
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(approverMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins)),
+        Layer.provide(Layer.merge(inspection, relationshipRepairProposalsLayer))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        const locator = Schema.decodeSync(CodeCommitDomain.CodeCommitPullRequestLocator)({
+          region: "eu-west-1",
+          repositoryName: "payments",
+          pullRequestId: "42"
+        })
+        const unboundResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
+          query: locator
+        })
+        yield* Ref.set(accountBound, true)
+        const boundResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({ query: locator })
+        yield* Ref.set(selectedRegion, "cn-north-1")
+        const chinaResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
+          query: { ...locator, region: CodeCommitDomain.AwsRegion.make("cn-north-1") }
+        })
+        yield* Ref.set(selectedRegion, "us-gov-west-1")
+        const govCloudResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
+          query: { ...locator, region: CodeCommitDomain.AwsRegion.make("us-gov-west-1") }
+        })
+        return { boundResult, chinaResult, govCloudResult, unboundResult }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.unboundResult, { _tag: "account-identity-unavailable" })
+      assert.deepStrictEqual(result.boundResult, {
+        _tag: "found",
+        candidate: {
+          entityId: codeCommitPullRequestEntityId,
+          accountLabel: "Production · AWS 123456789012",
+          title: "Protect payment retries"
+        }
+      })
+      assert.deepStrictEqual(result.chinaResult, result.boundResult)
+      assert.deepStrictEqual(result.govCloudResult, result.boundResult)
+      assert.strictEqual(yield* Ref.get(entityReads), 4)
+    }))
 
   it.effect("serves one exact workspace entity and maps a missing entity to NotFound", () =>
     Effect.gen(function*() {

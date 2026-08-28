@@ -1,3 +1,4 @@
+import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
@@ -157,6 +158,25 @@ export const WorkspaceEntityProjectionIndex = Schema.Struct({
 
 /** Decoded workspace-wide current entity index. */
 export type WorkspaceEntityProjectionIndex = typeof WorkspaceEntityProjectionIndex.Type
+
+/** Browser-safe exact CodeCommit match returned by the server-side batch resolver. */
+export const CodeCommitPullRequestCandidate = Schema.Struct({
+  entityId: EntityId,
+  accountLabel: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+})
+export type CodeCommitPullRequestCandidate = typeof CodeCommitPullRequestCandidate.Type
+
+/** Fail-closed result because shared console URLs contain no AWS account identity. */
+export const CodeCommitPullRequestResolution = Schema.TaggedUnion({
+  found: { candidate: CodeCommitPullRequestCandidate },
+  ambiguous: {
+    candidates: boundedArray(CodeCommitPullRequestCandidate, MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS)
+  },
+  "account-identity-unavailable": {},
+  "not-found": { indexTruncated: Schema.Boolean }
+})
+export type CodeCommitPullRequestResolution = typeof CodeCommitPullRequestResolution.Type
 
 /** Complete bounded graph closure surrounding one exact normalized entity. */
 export const WorkspaceEntityGraph = Schema.Struct({
@@ -353,6 +373,20 @@ const workspaceEntityProjections = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const resolveCodeCommitPullRequest = HttpApiEndpoint.get(
+  "resolveCodeCommitPullRequest",
+  "/api/v1/codecommit/pull-requests/resolve",
+  {
+    query: {
+      region: CodeCommitDomain.CodeCommitPullRequestLocator.fields.region,
+      repositoryName: CodeCommitDomain.CodeCommitPullRequestLocator.fields.repositoryName,
+      pullRequestId: CodeCommitDomain.CodeCommitPullRequestLocator.fields.pullRequestId
+    },
+    success: CodeCommitPullRequestResolution,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
+
 const workspaceEntity = HttpApiEndpoint.get("workspaceEntity", "/api/v1/items/:entityId", {
   params: { entityId: EntityId },
   success: WorkspaceEntityInspection,
@@ -531,6 +565,7 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
   .add(
     workspaceEntityProjections,
+    resolveCodeCommitPullRequest,
     workspaceEntity,
     submitClockifyAction,
     releaseSlice,

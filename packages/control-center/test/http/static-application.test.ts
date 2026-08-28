@@ -1,5 +1,9 @@
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
+import {
+  CONTROL_CENTER_MANAGED_REVIEW_IDENTITY,
+  CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH
+} from "@knpkv/codecommit-core/ManagedReviewProtocol.js"
 import { Context, Layer, Option } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 
@@ -36,6 +40,27 @@ const staticApplicationTestLayer = Layer.mergeAll(
 )
 
 describe("static application", () => {
+  it("exposes the exact managed-review service identity without caching", async () => {
+    const webHandler = HttpRouter.toWebHandler(staticApplicationTestLayer, { disableLogger: true })
+    try {
+      const response = await webHandler.handler(
+        new Request(`http://control.local${CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH}`),
+        requestContext
+      )
+
+      assert.strictEqual(response.status, 200)
+      assert.strictEqual(await response.text(), CONTROL_CENTER_MANAGED_REVIEW_IDENTITY)
+      assert.strictEqual(
+        response.headers.get("content-length"),
+        String(CONTROL_CENTER_MANAGED_REVIEW_IDENTITY.length)
+      )
+      assert.strictEqual(response.headers.get("cache-control"), "no-store")
+      assert.strictEqual(response.headers.get("x-content-type-options"), "nosniff")
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
   it("serves GET and implicit HEAD with identical metadata and no HEAD body", async () => {
     const webHandler = HttpRouter.toWebHandler(staticApplicationTestLayer, { disableLogger: true })
     try {

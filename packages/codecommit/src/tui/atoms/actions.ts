@@ -1,6 +1,21 @@
 import { AwsClient, CacheService, ChildEnv, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
-import { Effect, Predicate, Stream } from "effect"
+import { Effect, Predicate, Schema, Stream } from "effect"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import {
+  browserLauncherSucceeded,
+  clipboardCommandSucceeded,
+  controlCenterIdentityRequestInit,
+  controlCenterOriginConfiguration,
+  isControlCenterManagedReviewIdentity,
+  managedReviewIdentityContentLengthAllowed,
+  manualReviewHandoffMessage,
+  MAXIMUM_CONTROL_CENTER_IDENTITY_BYTES,
+  planControlCenterReviewHandoff,
+  resolveControlCenterOrigin
+} from "../../managed-review.js"
 import { assumeConsoleArgs } from "../browser-command.js"
 import { fetchPrComments } from "../comment-fetch.js"
 import { runtimeAtom, TuiApplicationScope } from "./runtime.js"
@@ -37,15 +52,45 @@ const notifyError = Effect.fn("notifyError")(function*(title: string, error: Err
 const exitCode = (command: ChildProcess.Command) =>
   Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
 
+class BrowserLaunchExitError extends Schema.TaggedError<BrowserLaunchExitError>()(
+  "BrowserLaunchExitError",
+  { command: Schema.String, exitCode: Schema.Int }
+) {}
+
+class ClipboardCopyExitError extends Schema.TaggedError<ClipboardCopyExitError>()(
+  "ClipboardCopyExitError",
+  { command: Schema.String, exitCode: Schema.Int }
+) {}
+
+const successfulBrowserExit = <Exit extends number, Error, Requirements>(
+  command: string,
+  effect: Effect.Effect<Exit, Error, Requirements>
+) =>
+  effect.pipe(
+    Effect.flatMap((code) =>
+      browserLauncherSucceeded(code)
+        ? Effect.void
+        : Effect.fail(new BrowserLaunchExitError({ command, exitCode: code }))
+    )
+  )
+
 export const copyToClipboard = Effect.fn("copyToClipboard")(
   function*(text: string) {
     const copyWith = (command: string, args: ReadonlyArray<string> = []) =>
       exitCode(ChildProcess.make(command, args, {
         stdin: Stream.make(text).pipe(Stream.encodeText)
-      }))
+      })).pipe(
+        Effect.flatMap((code) =>
+          clipboardCommandSucceeded(code)
+            ? Effect.succeed(true)
+            : Effect.fail(new ClipboardCopyExitError({ command, exitCode: code }))
+        )
+      )
 
-    yield* copyWith("pbcopy").pipe(
-      Effect.catchIf(() => true, () => copyWith("xclip", ["-selection", "clipboard"]))
+    return yield* copyWith("pbcopy").pipe(
+      Effect.catchIf(() => true, () => copyWith("wl-copy")),
+      Effect.catchIf(() => true, () => copyWith("xclip", ["-selection", "clipboard"])),
+      Effect.catchIf(() => true, () => copyWith("clip.exe"))
     )
   },
   Effect.catchIf(() => true, (error) =>
@@ -56,6 +101,7 @@ export const copyToClipboard = Effect.fn("copyToClipboard")(
         title: "Clipboard",
         message: Predicate.isError(error) ? error.message : String(error)
       })
+      return false
     }))
 )
 
@@ -72,7 +118,7 @@ export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
     const notificationRepo = yield* CacheService.NotificationRepo
     const ownerScope = yield* TuiApplicationScope
 
-    if (!profile || profile.trim() === "") {
+    if (profile.trim().length === 0) {
       yield* notificationRepo.addSystem({
         type: "error",
         title: "SSO Login",
@@ -169,10 +215,13 @@ export const openBrowserAtom = runtimeAtom.fn((link: string) =>
   Effect.gen(function*() {
     const ownerScope = yield* TuiApplicationScope
     const openWith = (command: string, args: ReadonlyArray<string>) =>
-      exitCode(ChildProcess.make(command, args, {
-        stdout: "pipe",
-        stderr: "pipe"
-      }))
+      successfulBrowserExit(
+        command,
+        exitCode(ChildProcess.make(command, args, {
+          stdout: "pipe",
+          stderr: "pipe"
+        }))
+      )
 
     yield* openWith("open", [link]).pipe(
       Effect.catchIf(() => true, () => openWith("xdg-open", [link])),
@@ -189,6 +238,81 @@ export const openBrowserAtom = runtimeAtom.fn((link: string) =>
       Effect.forkIn(ownerScope),
       Effect.asVoid,
       Effect.withSpan("openBrowser")
+    )
+  })
+)
+
+/** Opens the durable Control Center review for one selected PR, or labels the local fallback. */
+export const openManagedReviewAtom = runtimeAtom.fn((pullRequestUrl: string) =>
+  Effect.gen(function*() {
+    const ownerScope = yield* TuiApplicationScope
+    const client = yield* HttpClient.HttpClient
+    const notificationRepo = yield* CacheService.NotificationRepo
+    const origin = resolveControlCenterOrigin(yield* controlCenterOriginConfiguration)
+    const handoff = planControlCenterReviewHandoff(pullRequestUrl, origin)
+    if (handoff._tag === "unavailable") {
+      yield* notificationRepo.addSystem({
+        type: "warning",
+        title: "Managed Review Unavailable",
+        message: "Control Center origin is invalid. Local TUI review is Relay-only and not durable."
+      })
+      return
+    }
+    if (handoff._tag === "manual") {
+      const copied = yield* copyToClipboard(handoff.clipboardText)
+      yield* notificationRepo.addSystem({
+        type: "warning",
+        title: "Secure Managed Review Handoff Required",
+        message: manualReviewHandoffMessage(handoff.clipboardText, copied)
+      })
+      return
+    }
+    const available = yield* client.execute(HttpClientRequest.get(handoff.identityUrl)).pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, controlCenterIdentityRequestInit),
+      Effect.flatMap((response) =>
+        managedReviewIdentityContentLengthAllowed(
+            response.headers["content-length"],
+            response.headers["content-encoding"]
+          )
+          ? response.stream.pipe(
+            Stream.flatMap((bytes) => Stream.fromIterable(bytes)),
+            Stream.take(MAXIMUM_CONTROL_CENTER_IDENTITY_BYTES + 1),
+            Stream.map((byte) => Uint8Array.of(byte)),
+            Stream.decodeText(),
+            Stream.mkString,
+            Effect.map((body) => isControlCenterManagedReviewIdentity(response.status, body))
+          )
+          : Effect.succeed(false)
+      ),
+      Effect.timeout("2 seconds"),
+      Effect.catchIf(() => true, () => Effect.succeed(false))
+    )
+    if (!available) {
+      yield* notificationRepo.addSystem({
+        type: "warning",
+        title: "Managed Review Unavailable",
+        message: `Control Center identity was not found at ${origin}. Local TUI review is Relay-only and not durable.`
+      })
+      return
+    }
+    const url = handoff.reviewUrl
+    const openWith = (command: string, args: ReadonlyArray<string>) =>
+      successfulBrowserExit(
+        command,
+        exitCode(ChildProcess.make(command, args, { stdout: "pipe", stderr: "pipe" }))
+      )
+    yield* openWith("open", [url]).pipe(
+      Effect.catchIf(() => true, () => openWith("xdg-open", [url])),
+      Effect.catchIf(() => true, () => openWith("rundll32.exe", ["url.dll,FileProtocolHandler", url])),
+      Effect.catchIf(() => true, () =>
+        notificationRepo.addSystem({
+          type: "error",
+          title: "Managed Review",
+          message: "Control Center is available, but the browser could not be opened."
+        })),
+      Effect.forkIn(ownerScope),
+      Effect.asVoid,
+      Effect.withSpan("openManagedReview")
     )
   })
 )
@@ -224,7 +348,7 @@ export const createPrAtom = runtimeAtom.fn((input: CreatePRInput) =>
       Effect.withSpan("createPr", { attributes: { repo: input.repositoryName } })
     )
 
-    if (prId) {
+    if (prId.length > 0) {
       yield* notificationRepo.addSystem({
         type: "success",
         title: "PR Created",
