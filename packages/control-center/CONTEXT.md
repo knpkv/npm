@@ -37,12 +37,40 @@ The single person running and using the local Control Center instance. Connected
 _Avoid_: Workspace member, tenant user, collaborator
 
 **Exploratory Review Run**:
-A read-only, immutable child of a Review Thread that assesses one exact pull-request revision through a fresh Review Sandbox and returns Review Suggestions without changing an external service. It starts only from an explicit Full review, re-review, single-suggestion revalidation, or targeted thread request. A new pull-request head makes older suggestions stale but does not start a run automatically. It has no subjective overall verdict; Control Center derives the run's Review State from its structured result.
+A read-only, immutable child of a Review Thread that assesses one exact pull-request revision through a fresh Review Sandbox and returns Review Suggestions without changing an external service. It starts from an explicit Full review, re-review, single-suggestion revalidation, or targeted thread request; a separately enabled Review Watch may also prepare one read-only run for a matching latest head. Without a Review Watch, a new head only makes older suggestions stale. It has no subjective overall verdict; Control Center derives the run's Review State from its structured result.
 _Avoid_: Automated review, static-analysis run, autonomous reviewer
 
 **Review Thread**:
 The durable, Control Center-owned conversation between the Local Operator and review agents for one pull request. It preserves messages, Review Suggestions, Review Notes, resolutions, and immutable run history across changes to the pull-request head without relying on a provider's CLI session.
 _Avoid_: Codex thread, chat session, review run
+
+**Managed Review**:
+The durable Control Center review experience shared by every client through one Review Thread, immutable runs, decisions, and publication history.
+_Avoid_: Web review, TUI review, Relay session
+
+**Relay-only Review**:
+A clearly labeled, non-durable CodeCommit TUI review used only when Control Center is unavailable. It never becomes or silently merges into a Managed Review.
+_Avoid_: Review Thread, managed review, offline managed review
+
+**Change Cohort**:
+One independent intent within an exact pull-request revision, grouping the changed ranges that must be understood together.
+_Avoid_: File group, package, review category
+
+**Change Layer**:
+One typed reading step within a Change Cohort, anchored to concrete changed ranges. Kinds use the stable order contract, data-flow, implementation, callers, tests, docs-release; empty kinds are omitted.
+_Avoid_: File, severity, review pass
+
+**Review Watch**:
+An operator-selected account, repository, or author scope that prepares read-only Managed Reviews for matching new pull requests and heads. It grants no authority to publish, approve, finalize, or contact an author.
+_Avoid_: Subscription, automatic reviewer, auto-publish rule
+
+**Review Usage**:
+The provider-reported and locally measured resources consumed by one Exploratory Review Run, with unavailable measurements represented explicitly rather than estimated silently.
+_Avoid_: Review Budget, billing record, telemetry payload
+
+**Review Finalization**:
+A guided sequence of separately confirmed external writes for an exact current head: suggestion publication, an optional secure-review summary, CodeCommit approval, and an optional author notification. Each write has its own durable receipt and retry state.
+_Avoid_: Approve finding, publish all, atomic approval
 
 **Review Context Snapshot**:
 The bounded, structured history supplied to one Exploratory Review Run: current pull request and revision, summaries of active, stale, dismissed, and resolved suggestions, relevant recent operator messages, and prior limitations. Full history remains available through an explicit lookup tool; targeted revalidation includes the selected suggestion's complete revision and evidence history.

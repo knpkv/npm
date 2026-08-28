@@ -17,6 +17,8 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+For deterministic CodeCommit work, start `pnpm mock:codecommit`, then launch the server with the printed `CODECOMMIT_MOCK_ENDPOINT`. The executable redirects only its CodeCommit and STS outbound requests to that literal loopback origin, replaces profile resolution with fixed non-secret fixture credentials, and removes authorization/session-token headers before dispatch. Configured Atlassian, Clockify, CodePipeline, AI, and telemetry endpoints keep their real origins and credential boundaries. The mock's admin API can advance PR 17 to a new head, inject an author reply, inspect request receipts, and reset the scenario; see `packages/codecommit-mock/README.md`. Git checkout and sandbox model execution remain separate acceptance seams, covered by source-workspace tests and opt-in live AWS tests respectively.
+
 ### Release-cycle traceability
 
 End-to-end release verification should carry the Jira work-item key in the branch name, commit subject,
@@ -48,6 +50,18 @@ pnpm --filter @knpkv/control-center start
 ```
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+
+`GET /.well-known/knpkv-control-center` returns a versioned, credential-free
+identity used by the CodeCommit TUI before it sends a shared PR URL. The probe is
+uncached and carries no workspace or session state.
+
+A workspace owner or approver browser can open **Open PR** or visit
+`/open-pr?url=<encoded CodeCommit console URL>` to resolve a shared pull-request
+link through one narrow authenticated server-side batch resolver. The AWS Console
+URL contains region, repository, and pull-request ID but no account identity.
+Control Center therefore opens an exact unique match, reports an unsynchronized
+PR, or asks the operator to choose among browser-safe AWS account labels; it never
+guesses. A truncated candidate prefix or missing account identity fails closed.
 
 ### Real Atlassian OAuth acceptance journey
 
@@ -263,9 +277,17 @@ published.
 
 The diff workspace keeps the complete file inventory visible while severity and state filters narrow
 only the review advice. Line suggestions render inline; file and whole-change suggestions use the
-compact overview. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
+compact overview. When the provider returns Review Orientation, the workspace first explains the
+overall change as ordered Change Cohorts and Change Layers. Layers use the stable
+contract, data-flow, implementation, callers, tests, docs-release order. Each layer survives only when all displayed
+ranges resolve to concrete added lines in the immutable provider diff. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
 or Unable to Conclude from the validated report. The model does not author that outcome, and there is
 no suggestion-count cap beyond the existing durable event byte envelope.
+
+The Review Thread shows input and output token totals for the selected durable run. Provider/model and
+cost fields that were not reported remain visibly **Not reported**. When a synchronized head differs
+from the last reviewed head, the workspace names both revisions, blocks old findings from publication,
+and offers an explicit **Review current head** action.
 
 Every current, validated draft suggestion can be explicitly published. Preview, governed evidence,
 reservation, provider receipt, and the Review Thread event all bind to the exact suggestion revision;
