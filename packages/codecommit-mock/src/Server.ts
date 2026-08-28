@@ -148,6 +148,33 @@ const idempotencyMismatch = (clientRequestToken: string) =>
     status: 400
   })
 
+const pageItems = <A>(
+  items: ReadonlyArray<A>,
+  maxResults: number | undefined,
+  nextToken: string | undefined
+): Effect.Effect<{ readonly items: ReadonlyArray<A>; readonly nextToken?: string }, MockOperationError> =>
+  Effect.gen(function*() {
+    const limit = maxResults ?? Math.max(items.length, 1)
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      return yield* new MockOperationError({
+        awsTag: "InvalidRequestException",
+        message: "maxResults must be a positive integer",
+        status: 400
+      })
+    }
+    const offset = nextToken === undefined || nextToken === "" ? 0 : Number(nextToken)
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > items.length) {
+      return yield* new MockOperationError({
+        awsTag: "InvalidContinuationTokenException",
+        message: "nextToken is not a valid mock page cursor",
+        status: 400
+      })
+    }
+    const end = Math.min(offset + limit, items.length)
+    const page = { items: items.slice(offset, end) }
+    return end < items.length ? { ...page, nextToken: String(end) } : page
+  })
+
 const optionalLocation = (location: typeof LocationInput.Type | undefined) =>
   location === undefined
     ? null
@@ -262,14 +289,14 @@ const handleOperation = (
           (candidate) => candidate.repositoryName === input.repositoryName
         )
         if (repository === undefined) return yield* missingRepository(input.repositoryName)
-        return {
-          pullRequestIds: repository.pullRequests
-            .filter((pullRequest) =>
-              input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
-            )
-            .filter((pullRequest) => input.authorArn === undefined || pullRequest.authorArn === input.authorArn)
-            .map((pullRequest) => pullRequest.pullRequestId)
-        }
+        const pullRequestIds = repository.pullRequests
+          .filter((pullRequest) =>
+            input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
+          )
+          .filter((pullRequest) => input.authorArn === undefined || pullRequest.authorArn === input.authorArn)
+          .map((pullRequest) => pullRequest.pullRequestId)
+        const page = yield* pageItems(pullRequestIds, input.maxResults, input.nextToken)
+        return { pullRequestIds: page.items, ...(!(page.nextToken === undefined) && { nextToken: page.nextToken }) }
       }
       case "GetPullRequest": {
         const input = yield* decode(PullRequestInput, rawInput)
@@ -296,19 +323,19 @@ const handleOperation = (
           )
         }
         const path = input.afterPath ?? input.beforePath
-        return {
-          differences: revision.files
-            .filter((file) => path === undefined || file.path === path)
-            .map((file) => ({
-              ...(!(file.before === undefined) && {
-                beforeBlob: { blobId: file.before.blobId, path: file.path, mode: "100644" }
-              }),
-              ...(!(file.after === undefined) && {
-                afterBlob: { blobId: file.after.blobId, path: file.path, mode: "100644" }
-              }),
-              changeType: file.before === undefined ? "A" : file.after === undefined ? "D" : "M"
-            }))
-        }
+        const differences = revision.files
+          .filter((file) => path === undefined || file.path === path)
+          .map((file) => ({
+            ...(!(file.before === undefined) && {
+              beforeBlob: { blobId: file.before.blobId, path: file.path, mode: "100644" }
+            }),
+            ...(!(file.after === undefined) && {
+              afterBlob: { blobId: file.after.blobId, path: file.path, mode: "100644" }
+            }),
+            changeType: file.before === undefined ? "A" : file.after === undefined ? "D" : "M"
+          }))
+        const page = yield* pageItems(differences, input.MaxResults, input.NextToken)
+        return { differences: page.items, ...(!(page.nextToken === undefined) && { NextToken: page.nextToken }) }
       }
       case "GetBlob": {
         const input = yield* decode(GetBlobInput, rawInput)
@@ -340,10 +367,13 @@ const handleOperation = (
           (input.beforeCommitId === undefined || comment.beforeCommitId === input.beforeCommitId) &&
           (input.afterCommitId === undefined || comment.afterCommitId === input.afterCommitId)
         )
+        const groups = comments
+          .filter((comment) => comment.inReplyTo === null)
+          .map((comment) => makeCommentGroup(comment, comments))
+        const page = yield* pageItems(groups, input.maxResults, input.nextToken)
         return {
-          commentsForPullRequestData: comments
-            .filter((comment) => comment.inReplyTo === null)
-            .map((comment) => makeCommentGroup(comment, comments))
+          commentsForPullRequestData: page.items,
+          ...(!(page.nextToken === undefined) && { nextToken: page.nextToken })
         }
       }
       case "PostCommentForPullRequest": {

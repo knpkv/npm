@@ -58,7 +58,7 @@ export const routeAwsRequestToCodeCommitMock = (
   if (!URL.canParse(request.url)) return request
   const source = new URL(request.url)
   return awsMockHost.test(source.hostname)
-    ? setUrl(request, `${endpoint.origin}${source.pathname}`).pipe(
+    ? setUrl(request, `${endpoint.origin}${source.pathname}${source.search}`).pipe(
       removeHeader("authorization"),
       removeHeader("x-amz-security-token")
     )

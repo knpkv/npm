@@ -8,8 +8,7 @@ describe("CodeCommit mock transport", () => {
   it("routes only CodeCommit and STS requests to a loopback mock", () => {
     const endpoint = decodeCodeCommitMockEndpoint("http://127.0.0.1:4599")
     const codeCommit = routeAwsRequestToCodeCommitMock(
-      HttpClientRequest.post("https://codecommit.eu-west-1.amazonaws.com/").pipe(
-        HttpClientRequest.setUrlParam("trace", "one"),
+      HttpClientRequest.post("https://codecommit.eu-west-1.amazonaws.com/?trace=one").pipe(
         HttpClientRequest.setHeader("authorization", "real-signed-credential"),
         HttpClientRequest.setHeader("x-amz-security-token", "real-session-token")
       ),

@@ -81,6 +81,80 @@ describe("CodeCommit mock server", () => {
       })
     ))
 
+  it.effect("paginates pull requests, differences, and root comment groups", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const repository = defaultScenario.repositories[0]
+        const firstPullRequest = repository.pullRequests[0]
+        const mock = yield* startCodeCommitMock({
+          ...defaultScenario,
+          repositories: [{
+            ...repository,
+            pullRequests: [
+              firstPullRequest,
+              { ...firstPullRequest, pullRequestId: "18", title: "Second pull request" }
+            ]
+          }]
+        })
+        const runtime = yield* Layer.build(awsRuntime(mock.origin))
+
+        const firstPullRequestPage = yield* codecommit.listPullRequests({
+          repositoryName: "payments-api",
+          maxResults: 1
+        }).pipe(Effect.provide(runtime))
+        expect(firstPullRequestPage.pullRequestIds).toEqual(["17"])
+        expect(firstPullRequestPage.nextToken).toBe("1")
+        const secondPullRequestPage = yield* codecommit.listPullRequests({
+          repositoryName: "payments-api",
+          maxResults: 1,
+          nextToken: firstPullRequestPage.nextToken
+        }).pipe(Effect.provide(runtime))
+        expect(secondPullRequestPage.pullRequestIds).toEqual(["18"])
+        expect(secondPullRequestPage.nextToken).toBeUndefined()
+
+        const firstDifferencePage = yield* codecommit.getDifferences({
+          repositoryName: "payments-api",
+          beforeCommitSpecifier: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          afterCommitSpecifier: "2222222222222222222222222222222222222222",
+          MaxResults: 1
+        }).pipe(Effect.provide(runtime))
+        expect(firstDifferencePage.differences).toHaveLength(1)
+        expect(firstDifferencePage.NextToken).toBe("1")
+        const secondDifferencePage = yield* codecommit.getDifferences({
+          repositoryName: "payments-api",
+          beforeCommitSpecifier: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          afterCommitSpecifier: "2222222222222222222222222222222222222222",
+          MaxResults: 1,
+          NextToken: firstDifferencePage.NextToken
+        }).pipe(Effect.provide(runtime))
+        expect(secondDifferencePage.differences).toHaveLength(1)
+        expect(secondDifferencePage.NextToken).toBeUndefined()
+
+        for (const content of ["First root", "Second root"]) {
+          yield* codecommit.postCommentForPullRequest({
+            pullRequestId: "17",
+            repositoryName: "payments-api",
+            beforeCommitId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            afterCommitId: "1111111111111111111111111111111111111111",
+            content
+          }).pipe(Effect.provide(runtime))
+        }
+        const firstCommentPage = yield* codecommit.getCommentsForPullRequest({
+          pullRequestId: "17",
+          maxResults: 1
+        }).pipe(Effect.provide(runtime))
+        expect(firstCommentPage.commentsForPullRequestData?.[0]?.comments?.[0]?.content).toBe("First root")
+        expect(firstCommentPage.nextToken).toBe("1")
+        const secondCommentPage = yield* codecommit.getCommentsForPullRequest({
+          pullRequestId: "17",
+          maxResults: 1,
+          nextToken: firstCommentPage.nextToken
+        }).pipe(Effect.provide(runtime))
+        expect(secondCommentPage.commentsForPullRequestData?.[0]?.comments?.[0]?.content).toBe("Second root")
+        expect(secondCommentPage.nextToken).toBeUndefined()
+      })
+    ))
+
   it.effect("runs the stale-head and publication cycle through the real AWS protocol", () =>
     Effect.scoped(
       Effect.gen(function*() {
