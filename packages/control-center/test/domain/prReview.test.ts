@@ -5,6 +5,7 @@ import {
   derivePrReviewOutcome,
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewNote,
+  PrReviewOrientation,
   PrReviewPrevention,
   PrReviewRelatedLocation,
   PrReviewReport,
@@ -70,6 +71,87 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
 })
 
 describe("PR review domain", () => {
+  it("bounds logical change ranges while preserving cohort and layer order", () => {
+    const range = {
+      path: suggestion.evidence.path,
+      startLine: 42,
+      endLine: 45,
+      label: "Decode boundary"
+    }
+    const orientation = Schema.decodeUnknownSync(PrReviewOrientation)({
+      summary: "The patch moves decoding ahead of persistence.",
+      cohorts: [{
+        title: "Persistence boundary",
+        summary: "Validate first, then write.",
+        layers: [
+          { kind: "contract", title: "Decode", summary: "Decode provider output.", ranges: [range] },
+          {
+            kind: "implementation",
+            title: "Persist",
+            summary: "Commit the typed report.",
+            ranges: [{ ...range, startLine: 46, endLine: 46 }]
+          }
+        ]
+      }]
+    })
+
+    assert.deepStrictEqual(orientation.cohorts[0]?.layers.map(({ title }) => title), ["Decode", "Persist"])
+    const fullLayer = (kind: string) => ({
+      kind,
+      title: `Layer ${kind}`,
+      summary: "One logical reading step.",
+      ranges: Array.from({ length: 32 }, () => range)
+    })
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PrReviewOrientation)({
+        ...orientation,
+        cohorts: [{
+          ...orientation.cohorts[0],
+          layers: [
+            fullLayer("contract"),
+            fullLayer("data-flow"),
+            fullLayer("implementation"),
+            fullLayer("callers"),
+            fullLayer("tests")
+          ]
+        }]
+      })
+    ))
+    const firstCohort = orientation.cohorts[0]
+    const contractLayer = firstCohort?.layers[0]
+    const implementationLayer = firstCohort?.layers[1]
+    assert.isDefined(firstCohort)
+    assert.isDefined(contractLayer)
+    assert.isDefined(implementationLayer)
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PrReviewOrientation)({
+        ...orientation,
+        cohorts: [{
+          ...firstCohort,
+          layers: [implementationLayer, contractLayer]
+        }]
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PrReviewOrientation)({
+        ...orientation,
+        cohorts: [{
+          ...firstCohort,
+          layers: [{ ...contractLayer, kind: "model-invented" }]
+        }]
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PrReviewOrientation)({
+        ...orientation,
+        cohorts: [{
+          ...firstCohort,
+          layers: [{ ...contractLayer, ranges: [range, { ...range, label: "Same range" }] }]
+        }]
+      })
+    ))
+  })
+
   it("keeps suggestion identity stable when the head and line anchor move", () => {
     const movedSubject = Schema.decodeUnknownSync(PrReviewSubject)({
       ...subject,

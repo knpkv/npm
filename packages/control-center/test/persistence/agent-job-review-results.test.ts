@@ -318,6 +318,7 @@ const withRepositoryConfig = <Success, Failure>(
 ) => {
   const database = databaseLayer(config)
   const repository = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+  // @effect-diagnostics-next-line strictEffectProvide:off
   return use.pipe(Effect.provide(repository), Effect.scoped)
 }
 
@@ -325,7 +326,11 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-agent-review-result-")
     return yield* withRepositoryConfig(config, use)
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 describe("agent job review results", () => {
   it.effect("records an active review as interrupted with partial evidence on restart", () =>
@@ -683,6 +688,10 @@ describe("agent job review results", () => {
         assert.strictEqual(revalidated.validation.validatingJobId, JOB_ID)
         assert.strictEqual(revalidated.validation.sourceRevisionId, humanValidationAttempt.revisionId)
         assert.strictEqual(revalidated.validation.reviewedHead, technical.subject.headRevision)
+
+        const reloadedResult = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+        assert.strictEqual(reloadedResult.report.suggestions[0]?.title, titleEdit.title)
+        assert.strictEqual(reloadedResult.report.suggestions[0]?.problem, technicalEdit.problem)
 
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -1160,7 +1169,11 @@ describe("agent job review results", () => {
           assert.deepStrictEqual(page.revisions.map(({ sequence }) => sequence), [1])
         })
       )
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("allows one winner for concurrent edits of the same revision", () =>
     withRepository(
@@ -1693,7 +1706,10 @@ describe("agent job review results", () => {
               cancellationRequested: false
             }
           })
-        }).pipe(Effect.provide(prReviewThreadHistoryLayer))
+        }).pipe(
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(prReviewThreadHistoryLayer)
+        )
         assert.strictEqual(page.events.length, 66)
         assert.isFalse(page.hasMore)
         assert.strictEqual(page.nextCursor, page.events.at(-1)?.eventSequence)

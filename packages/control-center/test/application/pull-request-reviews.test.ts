@@ -138,6 +138,7 @@ const CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
 }
 const LANGUAGE_MODEL = Effect.runSync(
   LanguageModel.LanguageModel.pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(makeDeterministicLanguageModel([]).layer)
   )
 )
@@ -355,6 +356,9 @@ const failedFollowUpReview = Schema.decodeSync(LatestAgentReviewRecord)({
   report: null
 })
 
+// @effect-diagnostics-next-line effectSucceedWithVoid:off
+const persistenceUndefined = Effect.succeed(undefined)
+
 const completedReviewWithSuggestion = (
   overrides: Partial<typeof reviewReport.suggestions[number]>
 ) => {
@@ -504,14 +508,15 @@ const withService = <Success, Failure>(
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
   recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
-    Effect.succeed(undefined),
+    persistenceUndefined,
   reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
     Effect.succeed({ _tag: "acquired" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
-    Effect.succeed(undefined),
+    persistenceUndefined,
   publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"],
   latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"],
-  appendRevision?: Persistence["Service"]["agentJobs"]["appendReviewSuggestionRevision"]
+  appendRevision?: Persistence["Service"]["agentJobs"]["appendReviewSuggestionRevision"],
+  latestReviewForPullRequestOverride?: Persistence["Service"]["agentJobs"]["latestReviewForPullRequest"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -532,6 +537,8 @@ const withService = <Success, Failure>(
       const toolPolicy = yield* Ref.make<AgentToolPolicy>("review-sandbox")
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
+      const resolveLatestReviewForPullRequest = latestReviewForPullRequestOverride ??
+        persistence.agentJobs.latestReviewForPullRequest
       const testPersistence = Persistence.of({
         ...persistence,
         transact: <Success, Failure, Requirements>(
@@ -543,6 +550,7 @@ const withService = <Success, Failure>(
           ),
         agentJobs: {
           ...persistence.agentJobs,
+          latestReviewForPullRequest: resolveLatestReviewForPullRequest,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
           latestReview: resolveLatestReview,
           appendReviewSuggestionRevision: (input) =>
@@ -696,6 +704,7 @@ const withService = <Success, Failure>(
           })
       })
       const service = yield* PullRequestReviews.pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(pullRequestReviewsLayer),
         Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, graphInspection),
@@ -712,8 +721,15 @@ const withService = <Success, Failure>(
         allowedProviders,
         toolPolicy
       )
-    }).pipe(Effect.provide(persistenceLayer(config)))
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(persistenceLayer(config))
+    )
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 const withRealService = <Success, Failure>(
   use: (
@@ -757,6 +773,7 @@ const withRealService = <Success, Failure>(
         }
       })
       const service = yield* PullRequestReviews.pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(pullRequestReviewsLayer),
         Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, selectedInspection),
@@ -764,8 +781,15 @@ const withRealService = <Success, Failure>(
         Effect.provideService(ReviewSuggestionPublicationGateway, unusedPublicationGateway)
       )
       return yield* use(service, persistence, database)
-    }).pipe(Effect.provide(persistenceWithDatabase))
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(persistenceWithDatabase)
+    )
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 describe("pull request reviews", () => {
   it("advances only dispatchable or recoverable publication states", () => {
@@ -1018,6 +1042,82 @@ describe("pull request reviews", () => {
         }
       })
     ))
+
+  it.effect("returns the complete prior report when the current head has advanced", () => {
+    const previousHead = "0".repeat(40)
+    const previousReport = Schema.decodeUnknownSync(PrReviewReport)({
+      ...Schema.encodeSync(PrReviewReport)(reviewReport),
+      subject: { ...reviewReport.subject, headRevision: previousHead },
+      suggestions: reviewReport.suggestions.map((suggestion) =>
+        suggestion.replacement === undefined
+          ? suggestion
+          : { ...suggestion, replacement: { ...suggestion.replacement, reviewedHead: previousHead } }
+      )
+    })
+    const previousReview = Schema.decodeUnknownSync(LatestAgentReviewRecord)({
+      ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+      report: Schema.encodeSync(PrReviewReport)(previousReport)
+    })
+
+    return withService(
+      (service) =>
+        Effect.gen(function*() {
+          const current = yield* service.current({ workspaceId: WORKSPACE_ID, entityId: ENTITY_ID })
+          assert.strictEqual(current._tag, "stale")
+          if (current._tag !== "stale") return
+          assert.strictEqual(current.previousHead, previousHead)
+          assert.strictEqual(current.previousState, "succeeded")
+          assert.deepStrictEqual(current.previousReport, previousReport)
+        }),
+      registry,
+      Option.none(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Effect.succeed(Option.some(previousReview))
+    )
+  })
+
+  it.effect("preserves an incomplete prior run state after the current head advances", () => {
+    const previousHead = "0".repeat(40)
+    const previousReport = Schema.decodeUnknownSync(PrReviewReport)({
+      ...Schema.encodeSync(PrReviewReport)(reviewReport),
+      subject: { ...reviewReport.subject, headRevision: previousHead },
+      suggestions: reviewReport.suggestions.map((suggestion) =>
+        suggestion.replacement === undefined
+          ? suggestion
+          : { ...suggestion, replacement: { ...suggestion.replacement, reviewedHead: previousHead } }
+      )
+    })
+    const failedPreviousReview = Schema.decodeUnknownSync(LatestAgentReviewRecord)({
+      ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+      state: "failed",
+      report: Schema.encodeSync(PrReviewReport)(previousReport)
+    })
+
+    return withService(
+      (service) =>
+        Effect.gen(function*() {
+          const current = yield* service.current({ workspaceId: WORKSPACE_ID, entityId: ENTITY_ID })
+          assert.strictEqual(current._tag, "stale")
+          if (current._tag !== "stale") return
+          assert.strictEqual(current.previousState, "failed")
+          assert.deepStrictEqual(current.previousReport, previousReport)
+        }),
+      registry,
+      Option.none(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Effect.succeed(Option.some(failedPreviousReview))
+    )
+  })
 
   it.effect("retains malformed settings quarantine when review enqueue rolls back", () =>
     withRealService((service, persistence, { sql }) =>
@@ -1507,7 +1607,7 @@ describe("pull request reviews", () => {
           }),
         registry,
         Option.some(completedReview),
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         reserve
       )
     }))
@@ -1608,7 +1708,7 @@ describe("pull request reviews", () => {
           }),
         registry,
         Option.some(completedReviewWithSuggestion({ state: "published" })),
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         reserve
       )
     }))
@@ -1709,7 +1809,7 @@ describe("pull request reviews", () => {
           registry,
           Option.some(completedReview),
           () =>
-            Effect.succeed(undefined),
+            persistenceUndefined,
           reserve,
           release
         )
@@ -1754,7 +1854,7 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview),
-      () => Effect.succeed(undefined),
+      () => persistenceUndefined,
       () =>
         Effect.succeed(
           ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
@@ -1981,7 +2081,7 @@ describe("pull request reviews", () => {
         Option.some(completedReview),
         record,
         reserve,
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         idempotentPublish
       )
     }))

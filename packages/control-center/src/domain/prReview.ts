@@ -177,6 +177,94 @@ const PrReviewLocation = Schema.Struct({
   })
 )
 
+/** One concrete changed range supporting a logical review layer. */
+export const PrReviewChangeRange = Schema.Struct({
+  ...PrReviewLocation.fields,
+  label: boundedSingleLine(500, "PrReviewChangeRangeLabel")
+}).check(
+  Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
+    expected: "a change range end line at or after its start line"
+  })
+)
+export type PrReviewChangeRange = typeof PrReviewChangeRange.Type
+
+/** Stable reading order shared by model output, persisted reports, and clients. */
+export const PrReviewChangeLayerKind = Schema.Literals([
+  "contract",
+  "data-flow",
+  "implementation",
+  "callers",
+  "tests",
+  "docs-release"
+])
+export type PrReviewChangeLayerKind = typeof PrReviewChangeLayerKind.Type
+
+/** Ordered semantic slice inside one related change cohort. */
+export const PrReviewChangeLayer = Schema.Struct({
+  kind: PrReviewChangeLayerKind,
+  title: boundedSingleLine(300, "PrReviewChangeLayerTitle"),
+  summary: boundedMultiline(2_000, "PrReviewChangeLayerSummary"),
+  ranges: Schema.Array(PrReviewChangeRange).check(Schema.isMinLength(1), Schema.isMaxLength(32))
+}).check(
+  Schema.makeFilter(
+    ({ ranges }) =>
+      new Set(ranges.map(({ endLine, path, startLine }) => `${path}:${String(startLine)}:${String(endLine)}`)).size ===
+        ranges.length,
+    { expected: "unique concrete ranges within a change layer" }
+  )
+)
+export type PrReviewChangeLayer = typeof PrReviewChangeLayer.Type
+
+const changeLayerKindRank = (kind: PrReviewChangeLayerKind): number => {
+  switch (kind) {
+    case "contract":
+      return 0
+    case "data-flow":
+      return 1
+    case "implementation":
+      return 2
+    case "callers":
+      return 3
+    case "tests":
+      return 4
+    case "docs-release":
+      return 5
+  }
+}
+
+/** Related files and hunks presented as one reviewer-sized logical change. */
+export const PrReviewChangeCohort = Schema.Struct({
+  title: boundedSingleLine(300, "PrReviewChangeCohortTitle"),
+  summary: boundedMultiline(2_000, "PrReviewChangeCohortSummary"),
+  layers: Schema.Array(PrReviewChangeLayer).check(Schema.isMinLength(1), Schema.isMaxLength(16))
+}).check(
+  Schema.makeFilter(
+    ({ layers }) =>
+      layers.every((layer, index) => {
+        const previous = layers[index - 1]
+        return previous === undefined || changeLayerKindRank(previous.kind) < changeLayerKindRank(layer.kind)
+      }),
+    { expected: "unique change layers in contract-to-docs-release order" }
+  )
+)
+export type PrReviewChangeCohort = typeof PrReviewChangeCohort.Type
+
+/** Model orientation shown before findings; concrete ranges remain bound to the raw provider diff. */
+export const PrReviewOrientation = Schema.Struct({
+  summary: boundedMultiline(4_000, "PrReviewOrientationSummary"),
+  cohorts: Schema.Array(PrReviewChangeCohort).check(Schema.isMaxLength(8))
+}).check(
+  Schema.makeFilter(
+    ({ cohorts }) =>
+      cohorts.reduce(
+        (total, cohort) => total + cohort.layers.reduce((layerTotal, layer) => layerTotal + layer.ranges.length, 0),
+        0
+      ) <= 128,
+    { expected: "at most 128 concrete ranges across review orientation" }
+  )
+)
+export type PrReviewOrientation = typeof PrReviewOrientation.Type
+
 /** Exact source evidence which must be verified against an added diff line. */
 export const PrReviewSuggestionEvidence = Schema.Struct({
   ...PrReviewLocation.fields,
@@ -200,18 +288,14 @@ export type PrReviewSuggestionEvidence = typeof PrReviewSuggestionEvidence.Type
 
 /** Model-authored anchor before the host resolves file-level positions. */
 export const PrReviewSuggestionDraftAnchor = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal("line"),
+  Schema.TaggedStruct("line", {
     path: PrReviewPath,
     line: PrReviewLine
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("file"),
+  Schema.TaggedStruct("file", {
     path: PrReviewPath
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("changes")
-  })
+  Schema.TaggedStruct("changes", {})
 ]).annotate({ identifier: "PrReviewSuggestionDraftAnchor" })
 
 /** Decoded unresolved model-authored suggestion anchor. */
@@ -226,21 +310,17 @@ const PrReviewRelativeFileVersion = Schema.Literals(["BEFORE", "AFTER"]).pipe(
 )
 
 export const PrReviewSuggestionAnchor = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal("line"),
+  Schema.TaggedStruct("line", {
     path: PrReviewPath,
     line: PrReviewLine,
     relativeFileVersion: PrReviewAfterRelativeFileVersion
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("file"),
+  Schema.TaggedStruct("file", {
     path: PrReviewPath,
     line: PrReviewLine,
     relativeFileVersion: PrReviewRelativeFileVersion
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("changes")
-  })
+  Schema.TaggedStruct("changes", {})
 ]).annotate({ identifier: "PrReviewSuggestionAnchor" })
 
 /** Decoded host-resolved suggestion anchor. */
@@ -478,6 +558,8 @@ export const PrReviewReport = Schema.Struct({
   schemaVersion: Schema.Literal(3),
   subject: PrReviewSubject,
   completion: PrReviewCompletion,
+  /** Ordered model-authored explanation of the logical change structure. */
+  orientation: Schema.optionalKey(PrReviewOrientation),
   suggestions: Schema.Array(PrReviewSuggestion).check(
     Schema.makeFilter(
       (suggestions) => new Set(suggestions.map(({ suggestionId }) => suggestionId)).size === suggestions.length,

@@ -23,6 +23,7 @@ import {
 import { AgentThreadId, JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewOrientation,
   PrReviewPath,
   type PrReviewSubject,
   PrReviewSuggestionDraft
@@ -202,9 +203,10 @@ const response = (
 ]
 
 const completeScript = (
-  report: Schema.Json = {
+  report: Readonly<Record<string, Schema.Json>> = {
     schemaVersion: 3,
     completion: { status: "complete" },
+    orientation: null,
     suggestions: [suggestion],
     notes: []
   },
@@ -242,7 +244,7 @@ const completeScript = (
   {
     _tag: "response",
     parts: response({
-      text: JSON.stringify(report),
+      text: JSON.stringify({ orientation: null, ...report }),
       type: "text"
     })
   }
@@ -312,6 +314,7 @@ const runShellCommand = (
     })
   ).pipe(
     Effect.orDie,
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   )
 
@@ -345,6 +348,11 @@ const assertSharedNativeReviewContract = (
   assert.include(request.outputSchema ?? "", "\"prevention\":{\"anyOf\"")
   assert.include(request.outputSchema ?? "", "\"replacement\":{\"anyOf\"")
   assert.include(request.outputSchema ?? "", "\"prevention\",\"replacement\",\"anchor\"")
+  assert.include(request.outputSchema ?? "", "\"orientation\"")
+  assert.include(
+    request.outputSchema ?? "",
+    "\"required\":[\"schemaVersion\",\"completion\",\"orientation\",\"suggestions\",\"notes\"]"
+  )
 }
 
 const makeRealGitSessionLayer = (
@@ -406,7 +414,16 @@ const makeSessionLayer = (
     stream: "stdout"
   })
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
-    if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+    if (command.startsWith("git cat-file -t ")) {
+      return command.includes("missing.ts") || command.includes("deleted.ts") || command.includes("packages'")
+        ? output("tree\n")
+        : output("blob\n")
+    }
+    if (
+      command.startsWith("git -c core.quotePath=false diff --unified=0") ||
+      command.startsWith("git --literal-pathspecs -c core.quotePath=false diff --unified=0") ||
+      command.startsWith("previous_path=$(git -c core.quotePath=false diff --name-status --find-renames")
+    ) {
       if (
         retainedDiff !== undefined &&
         (retainPrimaryDiff || command.includes("paged.ts"))
@@ -569,6 +586,7 @@ const runExecutor = <Success, Failure>(
         })
     })
     return yield* use.pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
@@ -578,6 +596,7 @@ const runExecutor = <Success, Failure>(
       )
     )
   }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(fake.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Effect.scoped,
     Effect.map((result) => ({ fake, result }))
@@ -696,6 +715,7 @@ describe("PR review task executor", () => {
     const nativeReport = JSON.stringify({
       schemaVersion: 3,
       completion: { status: "complete" },
+      orientation: null,
       suggestions: [{ ...suggestion, prevention: null, replacement: null }],
       notes: []
     })
@@ -764,6 +784,7 @@ describe("PR review task executor", () => {
         ["started", "output"]
       )
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
@@ -809,6 +830,7 @@ describe("PR review task executor", () => {
       JSON.stringify({
         schemaVersion: 3,
         completion: { status: "complete" },
+        orientation: null,
         suggestions: [],
         notes: []
       })
@@ -853,6 +875,7 @@ describe("PR review task executor", () => {
       assert.notInclude(observation.operations, "runNativeCodexReview")
       assert.strictEqual(observation.requests.length, 1)
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
@@ -893,6 +916,7 @@ describe("PR review task executor", () => {
     const nativeReport = JSON.stringify({
       schemaVersion: 3,
       completion: { status: "complete" },
+      orientation: null,
       suggestions: [],
       notes: []
     })
@@ -946,6 +970,7 @@ describe("PR review task executor", () => {
       assert.strictEqual(nativeRequest.executable, "claude")
       assert.notProperty(nativeRequest, "model")
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
@@ -964,6 +989,197 @@ describe("PR review task executor", () => {
       Effect.scoped
     )
   })
+
+  it.effect("omits orientation when any model-authored range lacks literal changed-line evidence", () => {
+    const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        orientation: {
+          summary: "Moves retry identity into the persistence boundary.",
+          cohorts: [{
+            title: "Retry identity",
+            summary: "Implementation plus its tests.",
+            layers: [{
+              kind: "implementation",
+              title: "Persisted identity",
+              summary: "The retry path now persists the key.",
+              ranges: [{
+                path: EVIDENCE_PATH,
+                startLine: 42,
+                endLine: 42,
+                label: "Changed implementation"
+              }]
+            }, {
+              kind: "tests",
+              title: "Invalid directory anchor",
+              summary: "A directory is not a concrete changed blob.",
+              ranges: [{
+                path: "packages",
+                startLine: 42,
+                endLine: 42,
+                label: "Directory path"
+              }]
+            }]
+          }]
+        },
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      })
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.isUndefined(result.orientation)
+          assert.isTrue(
+            observation.commands.some((command) => command === `git cat-file -t '${HEAD_REVISION}:packages'`)
+          )
+          assert.isTrue(
+            observation.commands.some((command) =>
+              command.startsWith("previous_path=$(git -c core.quotePath=false diff --name-status --find-renames") &&
+              command.includes(`-v target='${EVIDENCE_PATH}'`) &&
+              command.includes(`-- '${EVIDENCE_PATH}' "$previous_path"`)
+            )
+          )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps an orientation whose complete structure has literal changed-line evidence", () => {
+    const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+    const orientation = Schema.decodeUnknownSync(PrReviewOrientation)({
+      summary: "Moves retry identity into the persistence boundary.",
+      cohorts: [{
+        title: "Retry identity",
+        summary: "Implementation boundary.",
+        layers: [{
+          kind: "implementation",
+          title: "Persisted identity",
+          summary: "The retry path now persists the key.",
+          ranges: [{
+            path: EVIDENCE_PATH,
+            startLine: 42,
+            endLine: 42,
+            label: "Changed implementation"
+          }]
+        }]
+      }]
+    })
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        orientation,
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      })
+    ).pipe(
+      Effect.tap(({ result }) => Effect.sync(() => assert.deepStrictEqual(result.orientation, orientation))),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps only edited lines when a changed file was renamed", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-rename-" })
+      const oldPath = "old.ts"
+      const newPath = "new.ts"
+      yield* fileSystem.writeFileString(path.join(root, "AGENTS.md"), "# Review instructions\n")
+      yield* fileSystem.writeFileString(
+        path.join(root, oldPath),
+        ["const one = 1", "const two = 2", "const three = 3", "const four = 4"].join("\n") + "\n"
+      )
+      const initialized = yield* runShellCommand(
+        root,
+        "git init --quiet && git add -- AGENTS.md old.ts && " +
+          "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m base"
+      )
+      assert.strictEqual(initialized.exitCode, 0, initialized.stderr.text)
+      const base = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(base.exitCode, 0, base.stderr.text)
+      const baseRevision = base.stdout.text.trim()
+
+      const renamed = yield* runShellCommand(root, "git mv -- old.ts new.ts")
+      assert.strictEqual(renamed.exitCode, 0, renamed.stderr.text)
+      yield* fileSystem.writeFileString(
+        path.join(root, newPath),
+        ["const one = 1", "const two = 20", "const three = 3", "const four = 4"].join("\n") + "\n"
+      )
+      const committed = yield* runShellCommand(
+        root,
+        "git add -- new.ts && git -c user.name=Review -c user.email=review@example.invalid " +
+          "commit --quiet -m head"
+      )
+      assert.strictEqual(committed.exitCode, 0, committed.stderr.text)
+      const head = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(head.exitCode, 0, head.stderr.text)
+      const headRevision = head.stdout.text.trim()
+      const reviewSubject = { ...subject, baseRevision, headRevision }
+      const actualClaim = {
+        ...claim,
+        context: {
+          ...claim.context,
+          subjectRevision: headRevision,
+          task: { ...claim.context.task, subject: reviewSubject }
+        }
+      } satisfies ClaimedAgentJob
+      const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+      const sessionLayer = makeRealGitSessionLayer(observation, root, baseRevision, headRevision)
+      const executed = yield* runExecutor(
+        completeScript({
+          schemaVersion: 3,
+          completion: { status: "complete" },
+          orientation: {
+            summary: "Renames one file and edits one line.",
+            cohorts: [{
+              title: "Rename",
+              summary: "Preserves unchanged lines.",
+              layers: [{
+                kind: "contract",
+                title: "Unchanged line",
+                summary: "This line only moved.",
+                ranges: [{ path: newPath, startLine: 1, endLine: 1, label: "Moved" }]
+              }, {
+                kind: "implementation",
+                title: "Edited line",
+                summary: "This line changed.",
+                ranges: [{ path: newPath, startLine: 2, endLine: 2, label: "Edited" }]
+              }]
+            }]
+          },
+          suggestions: [],
+          notes: []
+        }, reviewSubject),
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute(actualClaim)
+        }),
+        undefined,
+        undefined,
+        sessionLayer
+      )
+
+      assert.isUndefined(executed.result.orientation)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("exposes more than 64 fenced history events without exhausting tool steps", () => {
     const observedCursors = new Array<number>()
@@ -1536,6 +1752,7 @@ describe("PR review task executor", () => {
       })
       assert.deepStrictEqual(mixedDeletionAndAddition.result.suggestions, [])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

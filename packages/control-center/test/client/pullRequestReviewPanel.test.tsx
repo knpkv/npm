@@ -14,6 +14,7 @@ import {
   PublishedReviewComment,
   PullRequestReviewFailed,
   PullRequestReviewPending,
+  PullRequestReviewStale,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
@@ -157,6 +158,30 @@ const REVIEW_STATE = {
       schemaVersion: 3,
       subject: SUBJECT,
       completion: { status: "complete" },
+      orientation: {
+        summary: "This PR moves authorization ahead of the durable mutation.",
+        cohorts: [
+          {
+            title: "Authorization boundary",
+            summary: "The request path now establishes authority before state changes.",
+            layers: [
+              {
+                kind: "implementation",
+                title: "Guard then mutate",
+                summary: "The handler orders the authorization effect before the mutation effect.",
+                ranges: [
+                  {
+                    path: ANCHOR_PATH,
+                    startLine: ANCHOR_LINE,
+                    endLine: ANCHOR_LINE,
+                    label: "Handler ordering"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       suggestions: [
         {
           suggestionId: SUGGESTION_ID,
@@ -438,6 +463,14 @@ const REVIEW_THREAD_PAGE = Schema.decodeUnknownSync(PullRequestReviewThreadPage)
         implementation: "codex-cli",
         version: "1.2.3"
       }
+    },
+    {
+      _tag: "usage",
+      eventSequence: 3,
+      jobId: JOB_ID,
+      occurredAt: "2026-07-24T15:03:00.000Z",
+      inputTokens: 1200,
+      outputTokens: 345
     }
   ],
   hasMore: false,
@@ -472,6 +505,221 @@ afterEach(async () => {
 })
 
 describe("PullRequestReviewPanel", () => {
+  it("shows per-run usage and names fields the provider did not report", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{
+            ...REVIEW_STATE,
+            thread: { ...REVIEW_THREAD, hasEarlier: false, historyLoaded: true }
+          }}
+        />
+      )
+    )
+
+    expect(host.textContent).toContain("Input tokens1,200")
+    expect(host.textContent).toContain("Output tokens345")
+    expect(host.textContent).toContain("CostNot reported")
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+    expect(host.textContent).toContain("Input tokensLoad earlier history")
+    expect(host.textContent).toContain("Output tokensLoad earlier history")
+    expect(host.textContent).not.toContain("Input tokens1,200")
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{
+            ...REVIEW_STATE,
+            thread: {
+              ...REVIEW_THREAD,
+              events: [
+                {
+                  _tag: "run-queued",
+                  eventSequence: ReleaseAgentThreadCursor.make(4),
+                  jobId: JOB_ID,
+                  occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T14:59:59.000Z"),
+                  providerId: DurableAgentProviderId.make("openai-compatible"),
+                  model: AgentModelId.make("review-model"),
+                  reviewProfile: REVIEW_PROFILE,
+                  subject: SUBJECT
+                },
+                ...REVIEW_THREAD.events
+              ]
+            }
+          }}
+        />
+      )
+    )
+    expect(host.textContent).toContain("Input tokens1,200")
+    expect(host.textContent).toContain("Output tokens345")
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{
+            ...REVIEW_STATE,
+            thread: {
+              ...REVIEW_THREAD,
+              events: [
+                {
+                  _tag: "run-queued",
+                  eventSequence: ReleaseAgentThreadCursor.make(4),
+                  jobId: JOB_ID,
+                  occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T14:59:59.000Z"),
+                  providerId: DurableAgentProviderId.make("openai-compatible"),
+                  model: AgentModelId.make("review-model"),
+                  reviewProfile: REVIEW_PROFILE,
+                  subject: SUBJECT
+                },
+                ...REVIEW_THREAD.events.filter((event) => event._tag !== "usage")
+              ]
+            }
+          }}
+        />
+      )
+    )
+    expect(host.textContent).toContain("Input tokensNot reported")
+    expect(host.textContent).toContain("Output tokensNot reported")
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread: { ...REVIEW_THREAD, historyLoaded: true } }}
+        />
+      )
+    )
+    expect(host.textContent).toContain("Input tokensLoad earlier history")
+    expect(host.textContent).not.toContain("Input tokens1,200")
+  })
+
+  it("explains logical change layers before findings", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+
+    const text = host.textContent ?? ""
+    expect(text).toContain("What this PR changes")
+    expect(text).toContain("Authorization boundary")
+    expect(text.indexOf("Authorization boundary")).toBeLessThan(text.indexOf("Authorize before mutating"))
+  })
+
+  it("asks for an explicit review when the remote head supersedes the reviewed revision", async () => {
+    const onStart = vi.fn()
+    if (REVIEW_STATE.review._tag !== "completed") throw new Error("expected completed review fixture")
+    const previousReport = REVIEW_STATE.review.report
+    const loadRevision = vi.spyOn(REVISION_TRANSPORT, "load")
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const currentSubject = { ...SUBJECT, headRevision: "4".repeat(40) }
+
+    const render = (action: "failed" | "idle", previousState: "failed" | "succeeded" = "succeeded") =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={{
+            ...REVIEW_STATE,
+            action,
+            headRevision: currentSubject.headRevision,
+            review: new PullRequestReviewStale({
+              subject: currentSubject,
+              previousHead: SUBJECT.headRevision,
+              previousJobId: JOB_ID,
+              previousState,
+              previousReport
+            }),
+            thread: REVIEW_THREAD
+          }}
+        />
+      )
+    await act(async () => render("idle"))
+
+    expect(host.textContent).toContain("New head available")
+    expect(host.textContent).toContain("Review current head")
+    expect(host.textContent).toContain("cannot be published against the current head")
+    expect(host.textContent).toContain("Authorize before mutating")
+    expect(host.textContent).toContain("Previous-head findings are read-only")
+    expect(host.textContent).not.toContain("Review & approve")
+    expect(host.textContent).not.toContain("Retry revision")
+    expect(loadRevision).not.toHaveBeenCalled()
+    expect(host.querySelector('[role="alert"]')).toBeNull()
+
+    await act(async () => render("failed"))
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("The current-head review could not be started")
+
+    await act(async () => render("idle", "failed"))
+    expect(host.textContent).toContain("The previous review did not finish")
+    expect(host.textContent).toContain("retained findings are incomplete")
+    expect(host.textContent).not.toContain("The last completed review")
+  })
+
   it("reports the native Codex provider connection while a review is pending", async () => {
     const host = document.createElement("div")
     document.body.append(host)

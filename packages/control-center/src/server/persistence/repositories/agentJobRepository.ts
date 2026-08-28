@@ -35,6 +35,7 @@ import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewReport,
   PrReviewSubject,
+  type PrReviewSuggestion,
   PrReviewSuggestionId,
   reconcilePrReviewReports
 } from "../../../domain/prReview.js"
@@ -1198,7 +1199,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         )`.pipe(
       mapPersistenceOperation("agent-job.review-suggestion-lifecycle-revisions")
     )
-    const dismissedSuggestionIds = new Set<string>()
+    const latestSuggestionById = new Map<string, typeof PrReviewSuggestion.Type>()
     for (const unknownLifecycleRow of lifecycleRows) {
       const lifecycleRow = Schema.decodeUnknownResult(
         ReviewSuggestionLifecycleRevisionRow
@@ -1226,7 +1227,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
       if (
         Result.isFailure(revision) ||
         revision.success.sourceJobId !== request.jobId ||
-        revision.success.suggestion.suggestionId !== lifecycleRow.success.suggestionId
+        revision.success.suggestion.suggestionId !== lifecycleRow.success.suggestionId ||
+        !PrReviewSubjectEquivalence(revision.success.subject, decodedReport.success.subject)
       ) {
         return yield* persistedRecordError(
           request.workspaceId,
@@ -1235,11 +1237,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-review-lifecycle-revision-payload-invalid"
         )
       }
-      if (revision.success.suggestion.state === "dismissed") {
-        dismissedSuggestionIds.add(lifecycleRow.success.suggestionId)
-      }
+      latestSuggestionById.set(lifecycleRow.success.suggestionId, revision.success.suggestion)
     }
-    if (publishedSuggestionIds.size === 0 && dismissedSuggestionIds.size === 0) {
+    if (publishedSuggestionIds.size === 0 && latestSuggestionById.size === 0) {
       return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
         workspaceId: request.workspaceId,
         jobId: request.jobId,
@@ -1251,12 +1251,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const projectedReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
       ...decodedReport.success,
       suggestions: decodedReport.success.suggestions.map((suggestion) => {
+        const latest = latestSuggestionById.get(suggestion.suggestionId) ?? suggestion
         const state = publishedSuggestionIds.has(suggestion.suggestionId)
           ? "published"
-          : dismissedSuggestionIds.has(suggestion.suggestionId)
-          ? "dismissed"
-          : suggestion.state
-        return state === suggestion.state ? suggestion : { ...suggestion, state }
+          : latest.state
+        return state === latest.state ? latest : { ...latest, state }
       })
     }).pipe(
       Effect.mapError(() =>
@@ -2940,7 +2939,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             if (
               request.preservedAttempts?.some((preserved) =>
                 preserved.jobId === jobId && preserved.attemptSequence === attempt.success.attemptSequence
-              )
+              ) === true
             ) continue
             const existing = yield* readReviewResult({
               workspaceId: request.workspaceId,

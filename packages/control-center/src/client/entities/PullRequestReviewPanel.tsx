@@ -8,8 +8,8 @@ import {
   type DurableAgentPrompt,
   type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
-import type { PrReviewSuggestion } from "../../domain/prReview.js"
-import { ReviewNotes } from "./ReviewSuggestionPresentation.js"
+import type { PrReviewOrientation, PrReviewSuggestion } from "../../domain/prReview.js"
+import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import { VersionedReviewSuggestionCard } from "./VersionedReviewSuggestionCard.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import type {
@@ -85,6 +85,44 @@ const REVIEW_PROMPT_TEMPLATES: ReadonlyArray<{
 ]
 
 const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
+
+const ReviewOrientationSurface = ({
+  orientation
+}: {
+  readonly orientation: PrReviewOrientation | undefined
+}): ReactElement | null =>
+  orientation === undefined ? null : (
+    <section aria-label="Pull request orientation" className={styles.reviewOrientation}>
+      <header>
+        <strong>What this PR changes</strong>
+        <Text tone="secondary" variant="body">
+          {orientation.summary}
+        </Text>
+      </header>
+      {orientation.cohorts.map((cohort, cohortIndex) => (
+        <article key={`${String(cohortIndex)}:${cohort.title}`}>
+          <h3>{cohort.title}</h3>
+          <p>{cohort.summary}</p>
+          <ol>
+            {cohort.layers.map((layer, layerIndex) => (
+              <li key={`${String(layerIndex)}:${layer.title}`}>
+                <strong>{`${layer.kind} · ${layer.title}`}</strong>
+                <span>{layer.summary}</span>
+                <small>
+                  {layer.ranges
+                    .map(
+                      ({ endLine, label, path, startLine }) =>
+                        `${label} · ${path}:${String(startLine)}${endLine === startLine ? "" : `–${String(endLine)}`}`
+                    )
+                    .join(" · ")}
+                </small>
+              </li>
+            ))}
+          </ol>
+        </article>
+      ))}
+    </section>
+  )
 
 const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null => {
   switch (event._tag) {
@@ -248,6 +286,39 @@ export const PullRequestReviewPanel = ({
 
   const review = state.review
   const threadEvents = state.thread?.events ?? []
+  const usageJobId =
+    review._tag === "stale"
+      ? review.previousJobId
+      : review._tag === "pending" ||
+          review._tag === "completed" ||
+          review._tag === "failed" ||
+          review._tag === "interrupted"
+        ? review.jobId
+        : null
+  const usageEvents =
+    usageJobId === null
+      ? []
+      : threadEvents.filter(
+          (event): event is Extract<PullRequestReviewThreadEvent, { readonly _tag: "usage" }> =>
+            event._tag === "usage" && event.jobId === usageJobId
+        )
+  const usage = usageEvents.reduce(
+    (total, event) => ({
+      inputTokens: total.inputTokens + event.inputTokens,
+      outputTokens: total.outputTokens + event.outputTokens
+    }),
+    { inputTokens: 0, outputTokens: 0 }
+  )
+  const usageRun =
+    usageJobId === null
+      ? null
+      : threadEvents.find(
+          (event): event is Extract<PullRequestReviewThreadEvent, { readonly _tag: "run-queued" }> =>
+            event._tag === "run-queued" && event.jobId === usageJobId
+        )
+  const completeUsageVisible =
+    state.thread !== undefined && (!state.thread.hasEarlier || (usageRun !== null && usageRun !== undefined))
+  const missingUsageLabel = completeUsageVisible ? "Not reported" : "Load earlier history"
   const presentedThreadEvents = threadEvents
     .map((event) => ({ event, summary: threadEventSummary(event) }))
     .filter(
@@ -266,6 +337,38 @@ export const PullRequestReviewPanel = ({
         <strong>Review thread</strong>
         <span>{threadEvents.length === 0 ? "No runs yet" : "Durable across pull-request heads"}</span>
       </header>
+      {usageJobId === null ? null : (
+        <dl aria-label="Review run usage" className={styles.reviewUsage}>
+          <div>
+            <dt>Agent</dt>
+            <dd>
+              {usageRun === null || usageRun === undefined
+                ? missingUsageLabel
+                : `${usageRun.providerId} · ${usageRun.model ?? "model not reported"}`}
+            </dd>
+          </div>
+          <div>
+            <dt>Input tokens</dt>
+            <dd>
+              {!completeUsageVisible || usageEvents.length === 0
+                ? missingUsageLabel
+                : usage.inputTokens.toLocaleString("en-US")}
+            </dd>
+          </div>
+          <div>
+            <dt>Output tokens</dt>
+            <dd>
+              {!completeUsageVisible || usageEvents.length === 0
+                ? missingUsageLabel
+                : usage.outputTokens.toLocaleString("en-US")}
+            </dd>
+          </div>
+          <div>
+            <dt>Cost</dt>
+            <dd>Not reported</dd>
+          </div>
+        </dl>
+      )}
       {visibleThreadEvents.length === 0 ? null : (
         <ol className={styles.reviewThreadEvents}>
           {visibleThreadEvents.map(({ event, summary }) => (
@@ -275,7 +378,7 @@ export const PullRequestReviewPanel = ({
           ))}
         </ol>
       )}
-      {state.thread?.hasEarlier ? (
+      {state.thread !== undefined && state.thread.hasEarlier ? (
         <Button loading={state.historyAction === "loading"} onClick={onLoadEarlier}>
           {state.historyAction === "loading"
             ? "Loading earlier activity…"
@@ -495,6 +598,76 @@ export const PullRequestReviewPanel = ({
       </div>
     )
   }
+  if (review._tag === "stale") {
+    const previousReviewCompleted = review.previousState === "succeeded"
+    return (
+      <>
+        <div aria-live="polite" className={styles.reviewStatus} role="status">
+          <strong>New head available</strong>
+          {previousReviewCompleted ? (
+            <span>
+              The last completed review belongs to an older immutable revision. Its findings cannot be published against
+              the current head.
+            </span>
+          ) : (
+            <span>
+              The previous review did not finish and belongs to an older immutable revision. Its retained findings are
+              incomplete and cannot be published against the current head.
+            </span>
+          )}
+          <dl>
+            <div>
+              <dt>Last reviewed</dt>
+              <dd>
+                <code>{review.previousHead}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Current head</dt>
+              <dd>
+                <code>{review.subject.headRevision}</code>
+              </dd>
+            </div>
+          </dl>
+          <ReviewOrientationSurface orientation={review.previousReport.orientation} />
+          {review.previousReport.suggestions.length === 0 ? (
+            <span>The previous review retained no validated suggestions.</span>
+          ) : (
+            <ol aria-label="Previous review findings" className={styles.reviewFindings}>
+              {review.previousReport.suggestions.map((suggestion) => (
+                <li key={suggestion.suggestionId}>
+                  <ReviewSuggestionCard
+                    canPublish={false}
+                    isPreviewing={false}
+                    jobId={review.previousJobId}
+                    onPreviewPublication={() => undefined}
+                    suggestion={suggestion}
+                  />
+                </li>
+              ))}
+            </ol>
+          )}
+          <ReviewNotes notes={review.previousReport.notes} />
+          <span>Previous-head findings are read-only. Start a current-head review before publishing anything.</span>
+          {!canEnqueue ? (
+            <span>Only a workspace owner can start the new review.</span>
+          ) : state.provider === null ? (
+            <span>Configure an sbx Review Agent Profile to review the new head.</span>
+          ) : (
+            <>
+              {reviewLaunch(review.subject.headRevision, "Review current head")}
+              {state.action === "failed" ? (
+                <span role="alert">
+                  The current-head review could not be started. Check the provider and worker, then try again.
+                </span>
+              ) : null}
+            </>
+          )}
+        </div>
+        {threadSurface}
+      </>
+    )
+  }
   if (review._tag === "failed") {
     const report = review.report
     return withThread(
@@ -508,6 +681,7 @@ export const PullRequestReviewPanel = ({
               This review is incomplete. The retained findings were validated before the run stopped; unreviewed areas
               remain.
             </Text>
+            <ReviewOrientationSurface orientation={report.orientation} />
             {report.suggestions.length === 0 ? (
               <span>No validated suggestions were retained before the run stopped.</span>
             ) : (
@@ -558,6 +732,7 @@ export const PullRequestReviewPanel = ({
           Control Center restarted before this run finished. The retained findings were validated before the run
           stopped; unreviewed areas remain.
         </Text>
+        <ReviewOrientationSurface orientation={review.report.orientation} />
         {review.report.suggestions.length === 0 ? (
           <span>No validated suggestions were retained before the run stopped.</span>
         ) : (
@@ -604,6 +779,7 @@ export const PullRequestReviewPanel = ({
         {review.report.completion.status === "unable-to-conclude" ? (
           <Text>{review.report.completion.reason}</Text>
         ) : null}
+        <ReviewOrientationSurface orientation={review.report.orientation} />
         {(suggestions ?? review.report.suggestions).length === 0 ? (
           <span>No validated suggestions were retained for this exact head.</span>
         ) : (
@@ -629,7 +805,7 @@ export const PullRequestReviewPanel = ({
           </ol>
         )}
         <ReviewNotes notes={review.report.notes} />
-        <span>Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.</span>
+        <span>Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally.</span>
       </>
     )
   }

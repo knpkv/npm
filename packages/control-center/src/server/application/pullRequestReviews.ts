@@ -461,7 +461,9 @@ const makePullRequestReviews = Effect.gen(function*() {
       return new PullRequestReviewStale({
         subject: target.subject,
         previousHead: prior.value.report.subject.headRevision,
-        previousJobId: prior.value.jobId
+        previousJobId: prior.value.jobId,
+        previousState: prior.value.state,
+        previousReport: prior.value.report
       })
     }
     return yield* presentLatest(target, Option.none())

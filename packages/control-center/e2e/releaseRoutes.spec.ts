@@ -1225,7 +1225,9 @@ test("launches an exact-head review and presents its durable findings", async ({
           _tag: "stale",
           subject: reviewSubject,
           previousHead: reviewHeadRevision,
-          previousJobId: reviewJobId
+          previousJobId: reviewJobId,
+          previousState: "succeeded",
+          previousReport: reviewReport
         })
       )
       : !enqueued
