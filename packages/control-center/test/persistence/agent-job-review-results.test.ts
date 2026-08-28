@@ -333,6 +333,46 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   )
 
 describe("agent job review results", () => {
+  it.effect("finds the latest prior report behind a newer queued review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+
+        const newestJob = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: advancedSubject,
+          allowDifferentHead: true
+        })
+        assert.isTrue(Option.isSome(newestJob))
+        if (Option.isSome(newestJob)) {
+          assert.strictEqual(newestJob.value.jobId, SWAP_JOB_ID)
+          assert.isNull(newestJob.value.report)
+        }
+
+        const newestReport = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: advancedSubject,
+          allowDifferentHead: true,
+          requireReport: true
+        })
+        assert.isTrue(Option.isSome(newestReport))
+        if (Option.isSome(newestReport)) {
+          assert.strictEqual(newestReport.value.jobId, JOB_ID)
+          assert.deepStrictEqual(newestReport.value.report?.subject, report.subject)
+          assert.strictEqual(
+            newestReport.value.report?.suggestions[0]?.suggestionId,
+            report.suggestions[0]?.suggestionId
+          )
+        }
+      })
+    ))
+
   it.effect("records an active review as interrupted with partial evidence on restart", () =>
     withRepository(
       Effect.gen(function*() {

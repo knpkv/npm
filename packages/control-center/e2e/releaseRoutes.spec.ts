@@ -1425,7 +1425,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
   await expect(
-    page.getByText("Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.")
+    page.getByText("Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally.")
   ).toBeVisible()
   await page.locator(`[data-rly-diff-file-id="${helperDiffAnchor}"] button`).click()
   await expect(page.getByText("export const helper = true")).toBeVisible()
@@ -1476,8 +1476,8 @@ test("launches an exact-head review and presents its durable findings", async ({
   await page.getByRole("dialog", { name: "Dismiss finding?" }).getByRole("button", { name: "Dismiss finding" }).click()
   await expect(page.getByText("Dismissed · high confidence", { exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByText("Agent review not run")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Review exact head" })).toBeVisible()
+  await expect(page.getByText("New head available")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review current head" })).toBeVisible()
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

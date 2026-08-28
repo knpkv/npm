@@ -455,7 +455,7 @@ describe("ControlCenterApi contract", () => {
       ]),
       [
         ["workspaceEntityProjections", "GET", "/api/v1/items"],
-        ["resolveCodeCommitPullRequest", "GET", "/api/v1/codecommit/pull-requests/resolve"],
+        ["resolveCodeCommitPullRequest", "POST", "/api/v1/codecommit/pull-requests/resolve"],
         ["workspaceEntity", "GET", "/api/v1/items/:entityId"],
         ["submitClockifyAction", "POST", "/api/v1/items/:entityId/clockify-actions"],
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
@@ -648,7 +648,7 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
       workspaceEntityProjections: [SessionCookieAuth.key],
-      resolveCodeCommitPullRequest: [SessionCookieAuth.key],
+      resolveCodeCommitPullRequest: [SessionCookieAuth.key, SessionMutationAuth.key],
       workspaceEntity: [SessionCookieAuth.key],
       submitClockifyAction: [SessionCookieAuth.key, SessionMutationAuth.key],
       releaseSlice: [SessionCookieAuth.key],

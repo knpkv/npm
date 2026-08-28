@@ -54,7 +54,7 @@ const mountPage = async (transport: OpenPullRequestTransport, activeSession: Ses
   document.body.append(host)
   mountedRoot = createRoot(host)
   const router = createMemoryRouter([{ path: "/open-pr", element: <OpenPullRequestPage transport={transport} /> }], {
-    initialEntries: [`/open-pr?url=${encodeURIComponent(pullRequestUrl)}`]
+    initialEntries: ["/open-pr"]
   })
   await act(async () =>
     mountedRoot?.render(
@@ -66,6 +66,16 @@ const mountPage = async (transport: OpenPullRequestTransport, activeSession: Ses
   )
   if (sessionControls === undefined) throw new Error("browser session controls are unavailable")
   act(() => sessionControls?.establishSession(csrfToken, activeSession))
+  const input = host.querySelector<HTMLInputElement>("input[type=url]")
+  const form = host.querySelector("form")
+  if (input === null || form === null) throw new Error("open pull request form is unavailable")
+  await act(async () => {
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("native input value setter is unavailable")
+    valueSetter.call(input, pullRequestUrl)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+  await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
   return { host, router }
 }
 
@@ -74,10 +84,11 @@ describe("OpenPullRequestPage", () => {
     const resolution: OpenPullRequestResolution = { _tag: "not-found", indexTruncated: false }
     const resolve = vi.fn(() => Promise.resolve(resolution))
     const approver = SessionSummary.make({ ...session, permission: "workspace-approver" })
-    const { host } = await mountPage({ resolve }, approver)
+    const { host, router } = await mountPage({ resolve }, approver)
 
     await vi.waitFor(() => expect(host.textContent).toContain("PR not found"))
     expect(resolve).toHaveBeenCalledTimes(1)
+    expect(router.state.location.search).toBe("")
   })
 
   it("retries an unchanged URL after a transient lookup failure", async () => {
@@ -125,7 +136,7 @@ describe("OpenPullRequestPage", () => {
     expect(host.textContent).not.toContain("connection-a")
   })
 
-  it("clears stale candidates and follows URL history", async () => {
+  it("clears stale candidates without writing the provider locator to history", async () => {
     const candidates: ReadonlyArray<OpenPullRequestCandidate> = [
       {
         entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000071"),
@@ -153,8 +164,6 @@ describe("OpenPullRequestPage", () => {
     })
     await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
     await vi.waitFor(() => expect(host.textContent).not.toContain("Production · AWS 123456789012"))
-
-    await act(async () => router.navigate(-1))
-    await vi.waitFor(() => expect(input.value).toBe(pullRequestUrl))
+    expect(router.state.location.search).toBe("")
   })
 })

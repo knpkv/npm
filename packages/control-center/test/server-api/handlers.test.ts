@@ -1036,17 +1036,17 @@ describe("Control Center API handlers", () => {
           pullRequestId: "42"
         })
         const unboundResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
-          query: locator
+          payload: locator
         })
         yield* Ref.set(accountBound, true)
-        const boundResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({ query: locator })
+        const boundResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({ payload: locator })
         yield* Ref.set(selectedRegion, "cn-north-1")
         const chinaResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
-          query: { ...locator, region: CodeCommitDomain.AwsRegion.make("cn-north-1") }
+          payload: { ...locator, region: CodeCommitDomain.AwsRegion.make("cn-north-1") }
         })
         yield* Ref.set(selectedRegion, "us-gov-west-1")
         const govCloudResult = yield* client.deliveryGraph.resolveCodeCommitPullRequest({
-          query: { ...locator, region: CodeCommitDomain.AwsRegion.make("us-gov-west-1") }
+          payload: { ...locator, region: CodeCommitDomain.AwsRegion.make("us-gov-west-1") }
         })
         return { boundResult, chinaResult, govCloudResult, unboundResult }
       }).pipe(Effect.provide([

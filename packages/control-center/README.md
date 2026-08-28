@@ -33,10 +33,12 @@ delivery evidence as one connected release.
 
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
-| Client | generated API client chunk  |    251,169 / 74,462 bytes |         260,000 / 80,000 bytes |
+| Client | generated API client chunk  |    269,302 / 80,291 bytes |         270,000 / 82,000 bytes |
 | Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
+
+The client measurement was refreshed on 2026-08-28 after the managed-review API schemas grew the generated client chunk to 269,302 raw bytes and 80,291 level-9 gzip bytes. Its ceilings are now 270,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
 
 The remaining 1.58 MB raw shared server chunk is bounded technical debt: it is primarily Control Center's own shared application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries; raising the budget requires recording a new measurement and cause here.
 
@@ -52,12 +54,13 @@ pnpm --filter @knpkv/control-center start
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
 `GET /.well-known/knpkv-control-center` returns a versioned, credential-free
-identity used by the CodeCommit TUI before it sends a shared PR URL. The probe is
+identity used by the CodeCommit TUI before it opens the clean **Open PR** page. The probe is
 uncached and carries no workspace or session state.
 
-A workspace owner or approver browser can open **Open PR** or visit
-`/open-pr?url=<encoded CodeCommit console URL>` to resolve a shared pull-request
-link through one narrow authenticated server-side batch resolver. The AWS Console
+A workspace owner or approver browser can open **Open PR**, paste a shared
+pull-request link, and resolve it through one narrow authenticated POST-body
+server-side batch resolver. Provider coordinates never enter the browser request
+target, history, or referrer. The AWS Console
 URL contains region, repository, and pull-request ID but no account identity.
 Control Center therefore opens an exact unique match, reports an unsynchronized
 PR, or asks the operator to choose among browser-safe AWS account labels; it never

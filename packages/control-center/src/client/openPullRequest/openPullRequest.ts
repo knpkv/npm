@@ -21,7 +21,7 @@ export const browserOpenPullRequestTransport: OpenPullRequestTransport = {
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
-        return yield* client.deliveryGraph.resolveCodeCommitPullRequest({ query: locator })
+        return yield* client.deliveryGraph.resolveCodeCommitPullRequest({ payload: locator })
       }).pipe(
         // This promise bridge owns the browser HTTP client boundary.
         // @effect-diagnostics-next-line strictEffectProvide:off

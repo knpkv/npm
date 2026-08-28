@@ -1064,11 +1064,11 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
       const repairProposals = yield* RelationshipRepairProposals
       const clockifyActions = Option.getOrUndefined(yield* Effect.serviceOption(ClockifyActionSubmissions))
       return handlers
-        .handle("resolveCodeCommitPullRequest", ({ query }) =>
+        .handle("resolveCodeCommitPullRequest", ({ payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
-            const locator = query
+            const locator = payload
             if (inspection.codeCommitPullRequestCandidates === undefined) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }

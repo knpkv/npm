@@ -4,7 +4,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { type FormEvent, type ReactElement, useEffect, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router"
+import { useNavigate } from "react-router"
 
 import { useBrowserSession } from "../BrowserSession.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
@@ -32,11 +32,10 @@ export const OpenPullRequestPage = ({
 }: OpenPullRequestPageProps = {}): ReactElement => {
   const browserSession = useBrowserSession()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [input, setInput] = useState(searchParams.get("url") ?? "")
+  const [input, setInput] = useState("")
+  const [requestedUrl, setRequestedUrl] = useState("")
   const [lookup, setLookup] = useState<LookupState>({ _tag: "idle" })
   const [lookupAttempt, setLookupAttempt] = useState(0)
-  const requestedUrl = searchParams.get("url") ?? ""
   const readableSession =
     browserSession.state._tag === "authenticated" || browserSession.state._tag === "storage-unavailable"
       ? browserSession.state.session
@@ -46,8 +45,6 @@ export const OpenPullRequestPage = ({
     (readableSession.permission === "workspace-owner" || readableSession.permission === "workspace-approver")
       ? readableSession
       : null
-
-  useEffect(() => setInput(requestedUrl), [requestedUrl])
 
   useEffect(() => {
     if (requestedUrl.length === 0) {
@@ -86,8 +83,8 @@ export const OpenPullRequestPage = ({
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     const url = input.trim()
+    setRequestedUrl(url)
     setLookupAttempt((current) => current + 1)
-    setSearchParams(url.length === 0 ? {} : { url })
   }
 
   if (readableSession === null) {

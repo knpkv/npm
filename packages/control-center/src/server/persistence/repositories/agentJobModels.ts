@@ -512,7 +512,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   excludeJobId: Schema.optionalKey(JobId),
   excludeSubjectRevision: Schema.optionalKey(Schema.String),
   jobId: Schema.optionalKey(JobId),
-  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean),
+  requireReport: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 

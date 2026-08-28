@@ -373,19 +373,17 @@ const workspaceEntityProjections = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
-const resolveCodeCommitPullRequest = HttpApiEndpoint.get(
+const resolveCodeCommitPullRequest = HttpApiEndpoint.post(
   "resolveCodeCommitPullRequest",
   "/api/v1/codecommit/pull-requests/resolve",
   {
-    query: {
-      region: CodeCommitDomain.CodeCommitPullRequestLocator.fields.region,
-      repositoryName: CodeCommitDomain.CodeCommitPullRequestLocator.fields.repositoryName,
-      pullRequestId: CodeCommitDomain.CodeCommitPullRequestLocator.fields.pullRequestId
-    },
+    payload: CodeCommitDomain.CodeCommitPullRequestLocator,
     success: CodeCommitPullRequestResolution,
     error: readErrors
   }
-).middleware(SessionCookieAuth)
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
 
 const workspaceEntity = HttpApiEndpoint.get("workspaceEntity", "/api/v1/items/:entityId", {
   params: { entityId: EntityId },

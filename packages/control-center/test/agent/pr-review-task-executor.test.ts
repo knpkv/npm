@@ -990,7 +990,7 @@ describe("PR review task executor", () => {
     )
   })
 
-  it.effect("omits orientation when any model-authored range lacks literal changed-line evidence", () => {
+  it.effect("keeps valid orientation ranges when a sibling lacks literal changed-line evidence", () => {
     const observation: SessionObservation = { commands: [], operations: [], requests: [] }
     return runExecutor(
       completeScript({
@@ -1035,7 +1035,27 @@ describe("PR review task executor", () => {
     ).pipe(
       Effect.tap(({ result }) =>
         Effect.sync(() => {
-          assert.isUndefined(result.orientation)
+          assert.deepStrictEqual(
+            result.orientation,
+            Schema.decodeUnknownSync(PrReviewOrientation)({
+              summary: "Moves retry identity into the persistence boundary.",
+              cohorts: [{
+                title: "Retry identity",
+                summary: "Implementation plus its tests.",
+                layers: [{
+                  kind: "implementation",
+                  title: "Persisted identity",
+                  summary: "The retry path now persists the key.",
+                  ranges: [{
+                    path: EVIDENCE_PATH,
+                    startLine: 42,
+                    endLine: 42,
+                    label: "Changed implementation"
+                  }]
+                }]
+              }]
+            })
+          )
           assert.isTrue(
             observation.commands.some((command) => command === `git cat-file -t '${HEAD_REVISION}:packages'`)
           )
@@ -1174,7 +1194,22 @@ describe("PR review task executor", () => {
         sessionLayer
       )
 
-      assert.isUndefined(executed.result.orientation)
+      assert.deepStrictEqual(
+        executed.result.orientation,
+        Schema.decodeUnknownSync(PrReviewOrientation)({
+          summary: "Renames one file and edits one line.",
+          cohorts: [{
+            title: "Rename",
+            summary: "Preserves unchanged lines.",
+            layers: [{
+              kind: "implementation",
+              title: "Edited line",
+              summary: "This line changed.",
+              ranges: [{ path: newPath, startLine: 2, endLine: 2, label: "Edited" }]
+            }]
+          }]
+        })
+      )
     }).pipe(
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(NodeServices.layer),

@@ -3128,14 +3128,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const taskContextPrefix =
         `{"_tag":"pr-review","pluginConnectionId":"${request.pluginConnectionId}","subject":${subjectJson},"reviewProfile":`
       const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
-      const rendered = renderLatestAgentReviewQuery({
+      const queryInput = {
         workspaceId: request.workspaceId,
         ...(!(request.excludeJobId === undefined) && { excludeJobId: request.excludeJobId }),
         ...(!(request.allowDifferentHead === true) && { subjectRevision: request.subject.headRevision }),
         taskContextPrefix: request.allowDifferentHead === true ? identityPrefix : taskContextPrefix,
         excludeTargeted: true,
         ...(!(request.jobId === undefined) && { jobId: request.jobId })
-      })
+      }
+      const rendered = request.requireReport === true
+        ? renderLatestAgentReviewQuery({ ...queryInput, requireReport: true })
+        : renderLatestAgentReviewQuery(queryInput)
       const rows = yield* sql
         .unsafe<SqlRow>(rendered.sql, [...rendered.params])
         .pipe(mapPersistenceOperation("agent-job.latest-review"))

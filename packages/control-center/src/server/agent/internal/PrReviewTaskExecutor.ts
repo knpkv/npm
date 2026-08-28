@@ -645,19 +645,26 @@ const validatedOrientation = Effect.fn("PrReviewTaskExecutor.validatedOrientatio
   orientation: PrReviewOrientationType
 ) {
   const intervalsByPath = new Map<string, ReadonlyArray<DiffLineInterval> | null>()
+  const cohorts = new Array<PrReviewOrientationType["cohorts"][number]>()
   for (const cohort of orientation.cohorts) {
+    const layers = new Array<typeof cohort.layers[number]>()
     for (const layer of cohort.layers) {
+      const ranges = new Array<typeof layer.ranges[number]>()
       for (const range of layer.ranges) {
         let intervals = intervalsByPath.get(range.path)
         if (intervals === undefined) {
           intervals = yield* changedHeadLineIntervals(providerId, session, range.path)
           intervalsByPath.set(range.path, intervals)
         }
-        if (intervals === null || !rangeIsChanged(intervals, range.startLine, range.endLine)) return undefined
+        if (intervals !== null && rangeIsChanged(intervals, range.startLine, range.endLine)) {
+          ranges.push(range)
+        }
       }
+      if (ranges.length > 0) layers.push({ ...layer, ranges })
     }
+    if (layers.length > 0) cohorts.push({ ...cohort, layers })
   }
-  return orientation.cohorts.length === 0 ? undefined : orientation
+  return cohorts.length === 0 ? undefined : { ...orientation, cohorts }
 })
 
 const stableNoteId = Effect.fn("PrReviewTaskExecutor.stableNoteId")(function*(
