@@ -5,6 +5,11 @@ import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import {
+  codeCommitMockAwsClientConfig,
+  decodeCodeCommitMockEndpointEffect,
+  withCodeCommitMock
+} from "@knpkv/codecommit-core/MockTransport.js"
+import {
   makeOwnerSessionSecrets,
   makeServer,
   ownerSessionOrigin,
@@ -16,6 +21,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import pkg from "../package.json"
 import { FILTER_PRESETS, matchesRepoAuthor } from "./filterPresets.js"
@@ -115,9 +121,7 @@ const prCreate = Command.make("create", {
       `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
     yield* Console.log(`Created PR: ${prId}`)
     yield* Console.log(link)
-  }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-  )).pipe(Command.withDescription("Create a pull request"))
+  })).pipe(Command.withDescription("Create a pull request"))
 
 // Filter presets (FILTER_PRESETS, matchesPreset, matchesRepoAuthor) live in
 // ./filterPresets.ts — a side-effect-free module so they can be unit-tested
@@ -275,20 +279,7 @@ const prList = Command.make("list", {
         yield* Console.log("")
       }
     }
-  }).pipe(
-    Effect.provide(
-      // FilterService draws AwsClient/ConfigService from the base layers, which
-      // are also merged into the output so the single-account path keeps them.
-      FilterServiceLive.pipe(
-        Layer.provideMerge(
-          Layer.mergeAll(
-            AwsClient.AwsClientLive,
-            ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-          ).pipe(Layer.provideMerge(NodeHttpClient.layerFetch))
-        )
-      )
-    )
-  )).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))
+  })).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))
 
 // Helper to render comment threads as markdown
 const renderThread = (thread: Domain.CommentThread, indent: number = 0): string => {
@@ -299,11 +290,11 @@ const renderThread = (thread: Domain.CommentThread, indent: number = 0): string 
     : `${prefix}- **${c.author}** (${c.creationDate.toISOString()})`
   const content = c.deleted ? "" : `\n${prefix}  ${c.content.replace(/\n/g, `\n${prefix}  `)}`
   const replies = thread.replies.map((r) => renderThread(r, indent + 1)).join("\n")
-  return `${header}${content}${replies ? `\n${replies}` : ""}`
+  return `${header}${content}${replies.length > 0 ? `\n${replies}` : ""}`
 }
 
 const renderLocation = (loc: Domain.PRCommentLocation): string => {
-  const header = loc.filePath ? `### ${loc.filePath}\n` : "### General comments\n"
+  const header = loc.filePath !== undefined ? `### ${loc.filePath}\n` : "### General comments\n"
   const threads = loc.comments.map((t) => renderThread(t)).join("\n\n")
   return `${header}\n${threads}`
 }
@@ -365,7 +356,7 @@ const prExport = Command.make("export", {
       `**AWS Account:** ${profile}`,
       `**Link:** ${link}`,
       "",
-      ...(pr.description ? ["## Description", "", pr.description, ""] : []),
+      ...(pr.description !== undefined ? ["## Description", "", pr.description, ""] : []),
       "## Comments",
       "",
       ...(locations.length > 0 ? locations.map(renderLocation) : ["_No comments_"])
@@ -378,9 +369,7 @@ const prExport = Command.make("export", {
       yield* Console.log("")
       yield* Console.log(markdown)
     }
-  }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-  )).pipe(Command.withDescription("Export PR comments as markdown"))
+  })).pipe(Command.withDescription("Export PR comments as markdown"))
 
 // PR Update Command
 const prUpdate = Command.make("update", {
@@ -426,9 +415,7 @@ const prUpdate = Command.make("update", {
     }
 
     yield* Console.log(`Updated PR ${prId}`)
-  }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-  )).pipe(Command.withDescription("Update PR title or description"))
+  })).pipe(Command.withDescription("Update PR title or description"))
 
 // PR Command (parent)
 const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <command>")).pipe(
@@ -460,16 +447,43 @@ const cli = Command.runWith(command, {
 // The executable boundary is the only place permitted to read the host process.
 // Profile-scoped spawns need the environment they will actually inherit so ambient AWS
 // variables are tombstoned under whatever casing the host exported them with.
+const configuredMockEndpoint = process.env.CODECOMMIT_MOCK_ENDPOINT?.trim()
+const AwsHttpClientLayer = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+  ? NodeHttpClient.layerFetch
+  : Layer.effect(
+    HttpClient.HttpClient,
+    Effect.gen(function*() {
+      const client = yield* HttpClient.HttpClient
+      return withCodeCommitMock(client, yield* decodeCodeCommitMockEndpointEffect(configuredMockEndpoint))
+    })
+  ).pipe(Layer.provide(NodeHttpClient.layerFetch))
+const AwsConfigurationLayer = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+  ? AwsClientConfig.Default
+  : codeCommitMockAwsClientConfig
+const AwsClientLayer = AwsClient.AwsClientLive.pipe(
+  Layer.provide(AwsHttpClientLayer),
+  Layer.provide(AwsConfigurationLayer)
+)
+const ConfigServiceLayer = ConfigService.ConfigServiceLive.pipe(
+  Layer.provide(CacheService.EventsHub.Default)
+)
+const FilterServiceLayer = FilterServiceLive.pipe(
+  Layer.provide(Layer.merge(AwsClientLayer, ConfigServiceLayer))
+)
+
 const AppRuntimeLayer = Layer.mergeAll(
-  NodeHttpClient.layerFetch,
-  AwsClientConfig.Default,
+  AwsHttpClientLayer,
+  AwsConfigurationLayer,
+  AwsClientLayer,
+  FilterServiceLayer,
   ChildEnv.layerHostEnvironment(process.env)
 )
+const RuntimeLayer = AppRuntimeLayer.pipe(Layer.provideMerge(BunServices.layer))
 
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  return yield* cli(args).pipe(Effect.provide(AppRuntimeLayer))
+  return yield* cli(args)
 })
 
 // The TUI keeps long-lived resources open through its atom runtime (SQLite
@@ -480,4 +494,7 @@ const program = Effect.gen(function*() {
 // open handles after the UI has already torn down. Always terminate explicitly.
 const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
 
-BunRuntime.runMain(Effect.provide(program, BunServices.layer), { teardown: forceExitTeardown })
+// @effect-diagnostics-next-line strictEffectProvide:off
+BunRuntime.runMain(Effect.provide(program, RuntimeLayer), {
+  teardown: forceExitTeardown
+})

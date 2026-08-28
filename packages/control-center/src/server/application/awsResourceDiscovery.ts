@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
   AwsResourceDiscoveryRequest,
@@ -226,12 +227,33 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
   return AwsResourceDiscovery.of({ discover })
 })
 
-const codeCommitDiscoveryClient = CodeCommit.CodeCommitReadClient.live.pipe(
-  Layer.provide(AwsClientConfig.layer({ operationTimeout: "10 seconds", maxRetries: 0 }))
-)
-const discoveryClients = Layer.merge(codeCommitDiscoveryClient, CodePipelineReadClient.live)
+const discoveryClients = (
+  codeCommitHttpClient?: HttpClient.HttpClient,
+  codeCommitAwsConfiguration: Layer.Layer<AwsClientConfig.AwsClientConfig> = AwsClientConfig.layer({
+    operationTimeout: "10 seconds",
+    maxRetries: 0
+  })
+) =>
+  Layer.merge(
+    codeCommitHttpClient === undefined
+      ? CodeCommit.CodeCommitReadClient.live.pipe(Layer.provide(codeCommitAwsConfiguration))
+      : CodeCommit.CodeCommitReadClient.live.pipe(
+        Layer.provide(codeCommitAwsConfiguration),
+        Layer.provide(Layer.succeed(HttpClient.HttpClient, codeCommitHttpClient))
+      ),
+    CodePipelineReadClient.live
+  )
+
+/** Production AWS discovery with only CodeCommit identity and repository calls on a dedicated transport. */
+export const awsResourceDiscoveryLayerWithCodeCommitHttpClient = (
+  codeCommitHttpClient: HttpClient.HttpClient,
+  codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
+) =>
+  Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
+    Layer.provide(discoveryClients(codeCommitHttpClient, codeCommitAwsConfiguration))
+  )
 
 /** Production AWS discovery layer with bounded provider timeouts. */
 export const awsResourceDiscoveryLayer = Layer.effect(AwsResourceDiscovery, makeAwsResourceDiscovery()).pipe(
-  Layer.provide(discoveryClients)
+  Layer.provide(discoveryClients())
 )

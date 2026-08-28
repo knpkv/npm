@@ -1855,10 +1855,11 @@ export const pluginAdministrationLayer = Layer.effect(PluginAdministration, make
 
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
-  publicOrigin: string
+  publicOrigin: string,
+  resourceDiscovery = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin)).pipe(
-    Layer.provide(awsResourceDiscoveryLayer)
+    Layer.provide(resourceDiscovery)
   )
 
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
@@ -1873,10 +1874,11 @@ export const pluginAdministrationLayerWithConnections = (
 /** Live administration layer backed by provider runtimes and browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
-  publicOrigin: string
+  publicOrigin: string,
+  resourceDiscovery = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin)).pipe(
-    Layer.provide(awsResourceDiscoveryLayer)
+    Layer.provide(resourceDiscovery)
   )
 
 /** Internal factual projection reused by the portfolio adapter. */
