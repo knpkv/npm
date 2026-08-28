@@ -8,9 +8,160 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, SchemaParser } from "effect"
-import { Account, ApprovalRule, identityMatches, needsMyReview, PRComment, PullRequest } from "../src/Domain.js"
+import {
+  Account,
+  ApprovalRule,
+  codecommitConsoleUrl,
+  CodeCommitPullRequestLocator,
+  CodeCommitPullRequestUrl,
+  identityMatches,
+  needsMyReview,
+  PRComment,
+  PullRequest
+} from "../src/Domain.js"
 
 describe("Domain", () => {
+  describe("CodeCommitPullRequestUrl", () => {
+    it.effect("decodes a shared AWS Console PR link", () =>
+      Effect.gen(function*() {
+        const locator = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1"
+        )
+        expect(locator).toEqual({
+          pullRequestId: "42",
+          region: "eu-west-1",
+          repositoryName: "payments"
+        })
+      }))
+
+    it.effect("rejects a link whose query points at another region", () =>
+      Effect.gen(function*() {
+        const failure = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=us-east-1"
+        ).pipe(Effect.flip)
+        expect(failure).toBeDefined()
+      }))
+
+    it.effect("rejects duplicate region selectors", () =>
+      Effect.gen(function*() {
+        const distinct = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1&region=us-east-1"
+        ).pipe(Effect.flip)
+        const repeated = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1&region=eu-west-1"
+        ).pipe(Effect.flip)
+
+        expect(distinct).toBeDefined()
+        expect(repeated).toBeDefined()
+      }))
+
+    it.effect("rejects a lookalike host", () =>
+      Effect.gen(function*() {
+        const failure = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com.example.test/codesuite/codecommit/repositories/payments/pull-requests/42"
+        ).pipe(Effect.flip)
+        expect(failure).toBeDefined()
+      }))
+
+    it.effect("bounds the numeric provider pull-request ID to the lookup contract", () =>
+      Effect.gen(function*() {
+        const maximumId = "9".repeat(200)
+        const decoded = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          `https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/${maximumId}`
+        )
+        const oversized = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          `https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/${
+            "9".repeat(201)
+          }`
+        ).pipe(Effect.flip)
+        const nonNumeric = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/PR-42"
+        ).pipe(Effect.flip)
+
+        expect(decoded.pullRequestId).toBe(maximumId)
+        expect(oversized).toBeDefined()
+        expect(nonNumeric).toBeDefined()
+      }))
+
+    it.effect("decodes China and GovCloud console links only on their matching domains", () =>
+      Effect.gen(function*() {
+        const china = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://cn-north-1.console.amazonaws.cn/codesuite/codecommit/repositories/payments/pull-requests/42?region=cn-north-1"
+        )
+        const govCloud = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://us-gov-west-1.console.amazonaws-us-gov.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=us-gov-west-1"
+        )
+        const chinaOnCommercial = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://cn-north-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=cn-north-1"
+        ).pipe(Effect.flip)
+        const govCloudOnCommercial = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://us-gov-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=us-gov-west-1"
+        ).pipe(Effect.flip)
+        expect(china.region).toBe("cn-north-1")
+        expect(govCloud.region).toBe("us-gov-west-1")
+        expect(chinaOnCommercial).toBeDefined()
+        expect(govCloudOnCommercial).toBeDefined()
+      }))
+
+    it.effect("accepts an AWS activity comment link but rejects unknown PR subpaths", () =>
+      Effect.gen(function*() {
+        const activity = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42/activity#12345678-abcd"
+        )
+        const unknown = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42/unknown"
+        ).pipe(Effect.flip)
+
+        expect(activity.pullRequestId).toBe("42")
+        expect(unknown).toBeDefined()
+      }))
+
+    it.effect("accepts links copied from the Changes and Details tabs", () =>
+      Effect.gen(function*() {
+        const changes = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42/changes?region=eu-west-1"
+        )
+        const details = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestUrl)(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42/details?region=eu-west-1"
+        )
+
+        expect(changes.pullRequestId).toBe("42")
+        expect(details.pullRequestId).toBe("42")
+      }))
+
+    it.effect("rejects invalid coordinates at the locator schema boundary", () =>
+      Effect.gen(function*() {
+        const valid = yield* SchemaParser.decodeUnknownEffect(CodeCommitPullRequestLocator)({
+          region: "eu-west-1",
+          repositoryName: "payments-api",
+          pullRequestId: "42"
+        })
+        const invalid = yield* Effect.forEach([
+          { ...valid, region: "" },
+          { ...valid, repositoryName: "bad/slash" },
+          { ...valid, pullRequestId: "not-a-number" }
+        ], (candidate) => SchemaParser.decodeUnknownEffect(CodeCommitPullRequestLocator)(candidate).pipe(Effect.flip))
+
+        expect(valid.repositoryName).toBe("payments-api")
+        expect(invalid).toHaveLength(3)
+      }))
+
+    it("keeps durable normalized source URLs stable across AWS partitions", () => {
+      expect(codecommitConsoleUrl("cn-north-1", "payments", "42"))
+        .toBe(
+          "https://cn-north-1.console.amazonaws.cn/codesuite/codecommit/repositories/payments/pull-requests/42?region=cn-north-1"
+        )
+      expect(codecommitConsoleUrl("us-gov-west-1", "payments", "42"))
+        .toBe(
+          "https://us-gov-west-1.console.amazonaws-us-gov.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=us-gov-west-1"
+        )
+      expect(codecommitConsoleUrl("eu-west-1", "payments", "42"))
+        .toBe(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1"
+        )
+    })
+  })
+
   describe("Account", () => {
     // Schema.Class decode must enforce branded AwsProfileName on id field
     it.effect("decodes valid account", () =>

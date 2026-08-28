@@ -40,7 +40,7 @@
  * @category Domain
  * @module
  */
-import { Data, Effect, Schema } from "effect"
+import { Data, Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -251,15 +251,107 @@ export const needsMyReview = (
   pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
   currentUser: string | undefined
 ): boolean => {
-  if (!currentUser) return false
+  if (currentUser === undefined || currentUser.length === 0) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))
   )
 }
 
+const consoleDomainForRegion = (region: string): string =>
+  region.startsWith("cn-")
+    ? "console.amazonaws.cn"
+    : region.startsWith("us-gov-")
+    ? "console.amazonaws-us-gov.com"
+    : "console.aws.amazon.com"
+
 export const codecommitConsoleUrl = (region: string, repo: string, prId: string): string =>
-  `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
+  `https://${region}.${
+    consoleDomainForRegion(
+      region
+    )
+  }/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
+
+const CodeCommitLocatorRegion = AwsRegion.check(
+  Schema.isPattern(/^[a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+$/u)
+)
+const CodeCommitLocatorRepositoryName = RepositoryName.check(
+  Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u)
+)
+const CodeCommitLocatorPullRequestId = PullRequestId.check(
+  Schema.isPattern(/^[0-9]{1,200}$/u)
+)
+
+/** Provider coordinates recovered from an AWS CodeCommit console pull-request URL. */
+export const CodeCommitPullRequestLocator = Schema.Struct({
+  region: CodeCommitLocatorRegion,
+  repositoryName: CodeCommitLocatorRepositoryName,
+  pullRequestId: CodeCommitLocatorPullRequestId
+})
+export type CodeCommitPullRequestLocator = typeof CodeCommitPullRequestLocator.Type
+
+const codeCommitConsoleHost =
+  /^(?<region>[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+)\.(?<domain>console\.aws\.amazon\.com|console\.amazonaws\.cn|console\.amazonaws-us-gov\.com)$/u
+const codeCommitPullRequestPath =
+  /^\/codesuite\/codecommit\/repositories\/(?<repositoryName>[A-Za-z0-9._-]{1,100})\/pull-requests\/(?<pullRequestId>[0-9]{1,200})(?:\/(?<view>activity|changes|details))?$/u
+
+const parseCodeCommitPullRequestUrl = (input: string): CodeCommitPullRequestLocator | null => {
+  if (!URL.canParse(input)) return null
+  const url = new URL(input)
+  const host = codeCommitConsoleHost.exec(url.hostname)
+  const path = codeCommitPullRequestPath.exec(url.pathname)
+  const region = host?.groups?.region
+  const domain = host?.groups?.domain
+  const repositoryName = path?.groups?.repositoryName
+  const pullRequestId = path?.groups?.pullRequestId
+  const view = path?.groups?.view
+  const queryRegions = url.searchParams.getAll("region")
+  if (
+    url.protocol !== "https:" ||
+    url.port.length > 0 ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    (url.hash.length > 0 && view !== "activity") ||
+    region === undefined ||
+    domain === undefined ||
+    repositoryName === undefined ||
+    pullRequestId === undefined ||
+    domain !== consoleDomainForRegion(region) ||
+    queryRegions.length > 1 ||
+    (queryRegions.length === 1 && queryRegions[0] !== region)
+  ) return null
+  return {
+    region: AwsRegion.make(region),
+    repositoryName: RepositoryName.make(repositoryName),
+    pullRequestId: PullRequestId.make(pullRequestId)
+  }
+}
+
+/**
+ * Decodes a shared AWS Console PR link into provider coordinates.
+ *
+ * The URL does not identify an AWS account. Callers must resolve the locator
+ * within their authenticated workspace and reject ambiguous matches.
+ */
+export const CodeCommitPullRequestUrl = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048)
+).pipe(
+  Schema.decodeTo(CodeCommitPullRequestLocator, {
+    decode: SchemaGetter.transformOrFail((input, options) => {
+      const locator = parseCodeCommitPullRequestUrl(input)
+      return locator === null
+        ? Effect.fail(
+          new SchemaIssue.InvalidValue({ expected: "an AWS CodeCommit pull-request console URL" }, input, options)
+        )
+        : Effect.succeed(locator)
+    }),
+    encode: SchemaGetter.transform(({ pullRequestId, region, repositoryName }) =>
+      codecommitConsoleUrl(region, repositoryName, pullRequestId)
+    )
+  })
+)
 
 /**
  * Code sandbox instance for a pull request.
