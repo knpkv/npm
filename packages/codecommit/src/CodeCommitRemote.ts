@@ -64,14 +64,14 @@ const RemoteRegion = Domain.AwsRegion.check(
 const RemoteRepositoryName = Domain.RepositoryName.check(
   Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u)
 )
+const isTerminalSafeCharacter = (character: string): boolean => {
+  const code = character.codePointAt(0) ?? 0
+  return code >= 0x20 && (code < 0x7f || code > 0x9f)
+}
 const RemoteProfile = Schema.String.check(
   Schema.isPattern(/^[^@/]+$/u),
   Schema.makeFilter(
-    (profile) =>
-      [...profile].every((character) => {
-        const code = character.codePointAt(0) ?? 0
-        return code >= 0x20 && code !== 0x7f
-      }),
+    (profile) => [...profile].every(isTerminalSafeCharacter),
     { expected: "a profile name without control characters" }
   )
 )
@@ -133,9 +133,6 @@ export const parseCodeCommitRemote = (remoteUrl: string): CodeCommitRemote | nul
  * userinfo is a login name, not a secret.
  */
 export const redactRemoteUserInfo = (remoteUrl: string): string => {
-  const terminalSafe = [...remoteUrl].filter((character) => {
-    const code = character.codePointAt(0) ?? 0
-    return code >= 0x20 && (code < 0x7f || code > 0x9f)
-  }).join("")
+  const terminalSafe = [...remoteUrl].filter(isTerminalSafeCharacter).join("")
   return terminalSafe.replace(/^( *)([a-z][a-z0-9+.-]*:\/\/)[^/]*@/iu, "$1$2***@")
 }

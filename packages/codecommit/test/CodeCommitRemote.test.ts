@@ -44,6 +44,7 @@ describe("parseCodeCommitRemote", () => {
       ["codecommit://core-code@identity", { profile: "core-code", region: null, repositoryName: "identity" }],
       ["codecommit://team:dev@identity", { profile: "team:dev", region: null, repositoryName: "identity" }],
       ["codecommit://team~dev@identity", { profile: "team~dev", region: null, repositoryName: "identity" }],
+      ["codecommit://dév@identity", { profile: "dév", region: null, repositoryName: "identity" }],
       ["codecommit://identity", { profile: null, region: null, repositoryName: "identity" }]
     ]
 
@@ -70,6 +71,7 @@ describe("parseCodeCommitRemote", () => {
       "https://git-codecommit.eu-west-1.amazonaws.com/v1/repos/identity?x=1",
       "codecommit://identity/child",
       "codecommit://@identity",
+      "codecommit://dev\u009b31m@identity",
       ""
     ]
 
