@@ -11,11 +11,11 @@ import {
   javaScriptArtifactPaths
 } from "../../scripts/javascriptArtifactBudget.js"
 
-const matchingDocumentedBudgetRows = (
+const documentedBudgetRowsAreSynchronized = (
   source: string,
   target: "client" | "server",
   label: "Client" | "Server"
-): ReadonlyArray<string> => {
+): boolean => {
   const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS[target]
   const budgetPattern = new RegExp(
     `\\|\\s*${budget.rawBytes.toLocaleString("en-US")}\\s*/\\s*${
@@ -23,9 +23,16 @@ const matchingDocumentedBudgetRows = (
     } bytes\\s*\\|$`,
     "u"
   )
-  return source
+  const budgetSection = source
+    .split("### Distribution JavaScript budgets\n", 2)
+    .at(1)
+    ?.split("\n### ", 1)
+    .at(0)
+  const targetRows = (budgetSection ?? "")
     .split("\n")
-    .filter((line) => line.startsWith(`| ${label} |`) && budgetPattern.test(line))
+    .filter((line) => line.startsWith(`| ${label} |`))
+
+  return targetRows.length === 1 && budgetPattern.test(targetRows[0] ?? "")
 }
 
 const DOCUMENTED_BUILD_TARGETS: ReadonlyArray<
@@ -44,7 +51,7 @@ describe("JavaScript artifact budgets", () => {
       const readme = yield* fileSystem.readFileString(path.join(packageRoot, "README.md"))
 
       for (const [target, label] of DOCUMENTED_BUILD_TARGETS) {
-        expect(matchingDocumentedBudgetRows(readme, target, label)).toHaveLength(1)
+        expect(documentedBudgetRowsAreSynchronized(readme, target, label)).toBe(true)
       }
     }).pipe(
       // The test runner owns the file-service lifetime for this read-only assertion.
@@ -52,12 +59,14 @@ describe("JavaScript artifact budgets", () => {
       Effect.provide(NodeServices.layer)
     ))
 
-  it("rejects a stale target row and accepts the configured budget", () => {
+  it("rejects stale or duplicate target rows and accepts one configured budget", () => {
     const stale = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 290,000 bytes |"
     const current = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 292,000 bytes |"
+    const section = (rows: string) => `### Distribution JavaScript budgets\n\n${rows}\n\n### Next section`
 
-    expect(matchingDocumentedBudgetRows(stale, "server", "Server")).toEqual([])
-    expect(matchingDocumentedBudgetRows(current, "server", "Server")).toEqual([current])
+    expect(documentedBudgetRowsAreSynchronized(section(stale), "server", "Server")).toBe(false)
+    expect(documentedBudgetRowsAreSynchronized(section(`${stale}\n${current}`), "server", "Server")).toBe(false)
+    expect(documentedBudgetRowsAreSynchronized(section(current), "server", "Server")).toBe(true)
   })
 
   it("selects every JavaScript artifact and excludes maps and build metadata", () => {
