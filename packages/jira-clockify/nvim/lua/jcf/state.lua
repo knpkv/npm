@@ -162,6 +162,11 @@ local function stamp_path()
   return vim.fn.fnamemodify(cli_state_path(), ":h") .. "/poll.stamp"
 end
 
+local function wall_clock_ms()
+  local sec, usec = uv.gettimeofday()
+  return (sec * 1000) + math.floor(usec / 1000)
+end
+
 -- A watchdog escalation bypasses the CLI's Effect finalizers. Write the failed
 -- attempt synchronously while the child still owns `poll.lock`, so another
 -- editor cannot acquire the lock between SIGKILL and the shared rate bound.
@@ -170,7 +175,7 @@ local function stamp_failed_attempt()
   if not fd then
     return
   end
-  uv.fs_write(fd, tostring(os.time()), -1)
+  uv.fs_write(fd, tostring(wall_clock_ms()), -1)
   uv.fs_close(fd)
 end
 
@@ -185,7 +190,8 @@ local function polled_recently()
   if not stat then
     return false
   end
-  local age_ms = (os.time() - stat.mtime.sec) * 1000
+  local stamped_at_ms = (stat.mtime.sec * 1000) + math.floor((stat.mtime.nsec or 0) / 1000000)
+  local age_ms = wall_clock_ms() - stamped_at_ms
   -- A stamp dated in the future is a clock that moved backwards, not a poll that
   -- has not happened yet; treating it as recent would wedge polling until the
   -- clock caught up.
@@ -227,6 +233,7 @@ local function terminate(job)
   if signalled and pid > 0 then
     uv.kill(pid, "sigterm")
   else
+    stamp_failed_attempt()
     vim.fn.jobstop(job) -- no pid to signal; fall back to nvim's own teardown
   end
 
@@ -249,6 +256,7 @@ local function terminate(job)
     -- No pid to escalate against, so nothing further will make this job report.
     -- `jobstop` once more, then release on the next proof rather than wedging
     -- the poll for the rest of the session.
+    stamp_failed_attempt()
     vim.fn.jobstop(job)
     vim.defer_fn(function()
       if poll_job == job and vim.fn.jobwait({ job }, 0)[1] ~= -1 then
@@ -356,6 +364,7 @@ function M.stop_poll()
     -- reconfiguration deserve the same grace as a timeout. (On `VimLeave` nvim
     -- exits before any of it elapses — the CLI's own retry-not-delete rule is
     -- what covers that case.)
+    stamp_failed_attempt()
     terminate(poll_job)
   end
 end

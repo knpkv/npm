@@ -66,16 +66,19 @@ local function is_managed(path)
   return is_lease(path) or is_stamp(path)
 end
 
--- Wall clock shared by every world, because lease freshness is compared across
--- processes. Seconds, like `os.time`, which the module uses for the same reason:
--- the value has to mean the same thing in another editor.
-local CLOCK = { s = 1000 }
+-- Wall clock shared by every world, because stamp freshness is compared across
+-- processes. Milliseconds preserve the plugin's documented interval unit.
+local CLOCK = { ms = 1000000 }
 os.time = function()
-  return CLOCK.s
+  return math.floor(CLOCK.ms / 1000)
 end
 
 local function advance_clock(seconds)
-  CLOCK.s = CLOCK.s + seconds
+  CLOCK.ms = CLOCK.ms + (seconds * 1000)
+end
+
+local function advance_clock_ms(milliseconds)
+  CLOCK.ms = CLOCK.ms + milliseconds
 end
 
 -- A fake filesystem holding only the lease file. Passing one table to two
@@ -121,6 +124,9 @@ local function harness(opts)
       fs.next_key = fs.next_key + 1
       return fs.next_key
     end,
+    gettimeofday = function()
+      return math.floor(CLOCK.ms / 1000), (CLOCK.ms % 1000) * 1000
+    end,
     -- Path-aware: the lease lives in the fake filesystem, everything else is the
     -- single state file the older specs drive through `world.stat`.
     fs_stat = function(path)
@@ -136,7 +142,13 @@ local function harness(opts)
       -- write counter so that two writes in the same second are still distinct —
       -- which is exactly what the stale-reclaim check depends on.
       if is_stamp(path) then
-        return { mtime = { sec = entry.at, nsec = 0 }, size = #entry.content }
+        return {
+          mtime = {
+            sec = math.floor(entry.at / 1000),
+            nsec = (entry.at % 1000) * 1000000
+          },
+          size = #entry.content
+        }
       end
       return { mtime = { sec = entry.key, nsec = 0 }, size = #entry.content }
     end,
@@ -150,7 +162,7 @@ local function harness(opts)
         return nil
       end
       fs.next_key = fs.next_key + 1
-      fs.files[path] = { content = "", key = fs.next_key, at = os.time() }
+      fs.files[path] = { content = "", key = fs.next_key, at = CLOCK.ms }
       fs.next_fd = fs.next_fd + 1
       fs.fds[fs.next_fd] = path
       return fs.next_fd
@@ -214,7 +226,7 @@ local function harness(opts)
     if fs.lock_holder == world then
       fs.lock_holder = nil
     end
-    fs.files[world.poll_stamp] = { content = tostring(os.time()), key = fs.next_key, at = os.time() }
+    fs.files[world.poll_stamp] = { content = tostring(CLOCK.ms), key = fs.next_key, at = CLOCK.ms }
   end
 
   world.fn = setmetatable({
@@ -233,7 +245,7 @@ local function harness(opts)
         fs.lock_holder = world
         world.poll_lock = command[6]
         world.poll_stamp = command[11]
-        fs.files[command[6]] = fs.files[command[6]] or { content = "", key = fs.next_key, at = os.time() }
+        fs.files[command[6]] = fs.files[command[6]] or { content = "", key = fs.next_key, at = CLOCK.ms }
       end
       world.jobs_started = world.jobs_started + 1
       world.handlers = handlers
@@ -305,7 +317,7 @@ local function harness(opts)
   -- clock too, so a test that waits out a watchdog also ages the lease.
   function world.advance(ms)
     world.now = world.now + ms
-    advance_clock(math.floor(ms / 1000))
+    advance_clock_ms(ms)
     local due = {}
     local pending = {}
     for _, entry in ipairs(world.deferred) do
@@ -557,6 +569,44 @@ do
   advance_clock(30)
   tick(b)
   eq(b.jobs_started, 1, "watchdog stamp: another editor may retry after the interval")
+end
+
+-- Millisecond intervals must not be rounded down at the second boundary. A
+-- poll completed at .999 and a contender at the next second are only 2ms apart.
+do
+  CLOCK.ms = 1000999
+  local fs = new_fs()
+  local a = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 4001 })
+  local b = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 4002 })
+  a.activate()
+  a.state.start_poll(a.config, 500)
+  b.activate()
+  b.state.start_poll(b.config, 500)
+
+  tick(a)
+  a.complete_job()
+  advance_clock_ms(2)
+  tick(b)
+  eq(b.jobs_started, 0, "millisecond stamp: second-boundary contender stays suppressed")
+
+  advance_clock_ms(498)
+  tick(b)
+  eq(b.jobs_started, 1, "millisecond stamp: contender runs after the full interval")
+end
+
+-- VimLeave cannot wait for the CLI finalizer. `stop_poll` reserves the attempt
+-- before asking the process to stop, so an immediate editor exit remains bounded.
+do
+  local a, b, fs = two_editors()
+  tick(a)
+  a.activate()
+  a.state.stop_poll()
+  check(fs.files[STAMP_PATH] ~= nil, "teardown stamp: stop_poll records the attempt synchronously")
+
+  fs.lock_holders[LOCK_PATH] = nil -- nvim exits and hard-kills its owned child
+  fs.lock_holder = nil
+  tick(b)
+  eq(b.jobs_started, 0, "teardown stamp: another editor stays inside the shared interval")
 end
 
 do

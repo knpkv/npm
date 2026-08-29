@@ -54,13 +54,13 @@ const resolveNvimPollGate = Effect.fn("TimerStatus.resolveNvimPollGate")(functio
   }
 
   const fs = yield* FileSystem.FileSystem
-  const nowSeconds = Math.floor((yield* Clock.currentTimeMillis) / 1000)
+  const nowMs = yield* Clock.currentTimeMillis
   const lastPoll = yield* fs.readFileString(stampPath.value).pipe(
     Effect.map(pollTimestamp),
     Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.succeed(null))
   )
   if (lastPoll !== null) {
-    const ageMs = (nowSeconds - lastPoll) * 1000
+    const ageMs = nowMs - lastPoll
     if (ageMs >= 0 && ageMs < intervalMs.value) {
       return skipPoll
     }
@@ -68,7 +68,7 @@ const resolveNvimPollGate = Effect.fn("TimerStatus.resolveNvimPollGate")(functio
 
   return runPoll(
     Clock.currentTimeMillis.pipe(
-      Effect.flatMap((completedAt) => fs.writeFileString(stampPath.value, String(Math.floor(completedAt / 1000))))
+      Effect.flatMap((completedAt) => fs.writeFileString(stampPath.value, String(completedAt)))
     )
   )
 })

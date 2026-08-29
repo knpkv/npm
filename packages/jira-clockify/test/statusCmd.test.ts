@@ -240,6 +240,41 @@ describe("jcf timer status", () => {
       Effect.provide(NodeServices.layer)
     ))
 
+  it.effect("keeps sub-second polling intervals precise across a second boundary", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-poll-millisecond-stamp-" })
+      const stampPath = `${root}/poll.stamp`
+      yield* fs.writeFileString(stampPath, "1000999")
+      yield* TestClock.setTime(1_001_001)
+
+      const capture = makeCapture()
+      let calls = 0
+      const client = {
+        ...baseClient,
+        getRunningTimer: () =>
+          Effect.sync(() => {
+            calls += 1
+            return null
+          })
+      }
+      const args = ["--nvim-poll-stamp", stampPath, "--nvim-poll-interval-ms", "500"]
+
+      const suppressed = yield* run(client, capture, args)
+      expect(suppressed._tag).toBe("Success")
+      expect(calls).toBe(0)
+
+      yield* TestClock.setTime(1_001_499)
+      const afterInterval = yield* run(client, capture, args)
+      expect(afterInterval._tag).toBe("Success")
+      expect(calls).toBe(1)
+      expect(Number(yield* fs.readFileString(stampPath))).toBe(1_001_499)
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
   it.effect("runs a missing nvim poll stamp once and persists it", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
