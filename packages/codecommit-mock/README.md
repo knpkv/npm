@@ -6,14 +6,15 @@ Deterministic loopback data plane for the real CodeCommit clients. It accepts si
 pnpm mock:codecommit
 ```
 
-The command prints these values:
+The command prints these operator handoff values:
 
-- `CODECOMMIT_MOCK_ENDPOINT`, the loopback AWS protocol origin.
-- `CODECOMMIT_MOCK_GIT_REPOSITORY` and `CODECOMMIT_MOCK_GIT_REMOTE`, the repository name and scoped `file://` remote used by Control Center review checkout.
-- `CONTROL_CENTER_AGENT_OPENAI_API_URL` and `CONTROL_CENTER_AGENT_OPENAI_MODEL`, the deterministic review model.
-- A copyable AWS console PR URL.
+- `CODECOMMIT_MOCK_ENDPOINT`, a server-private loopback AWS protocol locator. It exists only in process configuration and operator stdout; it is not persisted or emitted through authenticated, browser, telemetry, or public diagnostic surfaces.
+- `CODECOMMIT_MOCK_GIT_REPOSITORY`, the normalized repository identity. It is persisted in ordinary CodeCommit plugin/PR records and may cross authenticated API and browser boundaries; it must not appear in unauthenticated or public diagnostics.
+- `CODECOMMIT_MOCK_GIT_REMOTE`, a server-private scoped `file://` checkout locator. It is not persisted and must not cross API, browser, telemetry, or public diagnostic boundaries.
+- `CONTROL_CENTER_AGENT_OPENAI_API_URL`, a server-private model endpoint locator kept only in process configuration and operator stdout, and `CONTROL_CENTER_AGENT_OPENAI_MODEL`, a non-secret model identifier persisted with review jobs and exposed through authenticated provider/review APIs.
+- A copyable client-visible AWS console PR URL. Control Center persists only its normalized account, region, repository, and PR identities, never the raw shared URL.
 
-The Git remote is a server-private fixture locator. Do not return it through an authenticated API, browser storage, logs, or public diagnostics. The mock deletes its temporary repository when the process exits.
+Operator stdout is the intended one-time handoff for private mock locators; application logs are not. The mock deletes its temporary repository when the process exits.
 
 Run the TUI with the AWS endpoint:
 

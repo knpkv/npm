@@ -98,6 +98,9 @@ export const makeGitFixtureScenario = (
             path: "src/retry.ts",
             before: { blobId: revisions.baseRetryBlob, content: BASE_RETRY_SOURCE },
             after: { blobId: revisions.firstRetryBlob, content: REVISION_ONE_RETRY_SOURCE }
+          }, {
+            path: "test/retry.test.ts",
+            after: { blobId: revisions.firstTestBlob, content: REVISION_TWO_TEST_SOURCE }
           }]
         }, {
           revisionId: "revision-2",

@@ -104,12 +104,13 @@ const AdminCommentInput = Schema.Struct({
 
 const decode = <S extends Schema.Constraint>(schema: S, input: Schema.Json) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError(() =>
-      new MockOperationError({
-        awsTag: "InvalidRequestException",
-        message: "request does not match the mock operation contract",
-        status: 400
-      })
+    Effect.mapError(
+      () =>
+        new MockOperationError({
+          awsTag: "InvalidRequestException",
+          message: "request does not match the mock operation contract",
+          status: 400
+        })
     )
   )
 
@@ -190,10 +191,7 @@ const optionalLocation = (location: typeof LocationInput.Type | undefined) =>
       })
     }
 
-const locationsEqual = (
-  left: MockComment["location"],
-  right: MockComment["location"]
-): boolean =>
+const locationsEqual = (left: MockComment["location"], right: MockComment["location"]): boolean =>
   left === null || right === null
     ? left === right
     : left.filePath === right.filePath &&
@@ -214,24 +212,23 @@ const pullRequestOutput = (state: CodeCommitMockState, pullRequestId: string) =>
       pullRequestStatus: found.pullRequest.status,
       authorArn: found.pullRequest.authorArn,
       revisionId: revision.revisionId,
-      pullRequestTargets: [{
-        repositoryName: found.repositoryName,
-        sourceReference: found.pullRequest.sourceReference,
-        destinationReference: found.pullRequest.destinationReference,
-        sourceCommit: revision.sourceCommit,
-        destinationCommit: revision.destinationCommit,
-        mergeBase: revision.mergeBase,
-        mergeMetadata: { isMerged: false }
-      }],
+      pullRequestTargets: [
+        {
+          repositoryName: found.repositoryName,
+          sourceReference: found.pullRequest.sourceReference,
+          destinationReference: found.pullRequest.destinationReference,
+          sourceCommit: revision.sourceCommit,
+          destinationCommit: revision.destinationCommit,
+          mergeBase: revision.mergeBase,
+          mergeMetadata: { isMerged: false }
+        }
+      ],
       approvalRules: []
     }
   })
 }
 
-const makeCommentGroup = (
-  root: MockComment,
-  comments: ReadonlyArray<MockComment>
-) => {
+const makeCommentGroup = (root: MockComment, comments: ReadonlyArray<MockComment>) => {
   const descendants = (parentId: string): ReadonlyArray<MockComment> =>
     comments
       .filter((comment) => comment.inReplyTo === parentId)
@@ -294,8 +291,8 @@ const handleOperation = (
         )
         if (repository === undefined) return yield* missingRepository(input.repositoryName)
         const pullRequestIds = repository.pullRequests
-          .filter((pullRequest) =>
-            input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
+          .filter(
+            (pullRequest) => input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
           )
           .filter((pullRequest) => input.authorArn === undefined || pullRequest.authorArn === input.authorArn)
           .map((pullRequest) => pullRequest.pullRequestId)
@@ -314,17 +311,15 @@ const handleOperation = (
         if (repository === undefined) return yield* missingRepository(input.repositoryName)
         const revision = repository.pullRequests
           .flatMap((pullRequest) => pullRequest.revisions)
-          .find((candidate) =>
-            candidate.sourceCommit === input.afterCommitSpecifier &&
-            (input.beforeCommitSpecifier === undefined ||
-              candidate.destinationCommit === input.beforeCommitSpecifier ||
-              candidate.mergeBase === input.beforeCommitSpecifier)
+          .find(
+            (candidate) =>
+              candidate.sourceCommit === input.afterCommitSpecifier &&
+              (input.beforeCommitSpecifier === undefined ||
+                candidate.destinationCommit === input.beforeCommitSpecifier ||
+                candidate.mergeBase === input.beforeCommitSpecifier)
           )
         if (revision === undefined) {
-          return yield* commitTupleMismatch(
-            input.beforeCommitSpecifier ?? "<unspecified>",
-            input.afterCommitSpecifier
-          )
+          return yield* commitTupleMismatch(input.beforeCommitSpecifier ?? "<unspecified>", input.afterCommitSpecifier)
         }
         const path = input.afterPath ?? input.beforePath
         const differences = revision.files
@@ -365,11 +360,12 @@ const handleOperation = (
         if (input.repositoryName !== undefined && found.repositoryName !== input.repositoryName) {
           return yield* missingRepository(input.repositoryName)
         }
-        const comments = state.comments.filter((comment) =>
-          comment.pullRequestId === input.pullRequestId &&
-          (input.repositoryName === undefined || comment.repositoryName === input.repositoryName) &&
-          (input.beforeCommitId === undefined || comment.beforeCommitId === input.beforeCommitId) &&
-          (input.afterCommitId === undefined || comment.afterCommitId === input.afterCommitId)
+        const comments = state.comments.filter(
+          (comment) =>
+            comment.pullRequestId === input.pullRequestId &&
+            (input.repositoryName === undefined || comment.repositoryName === input.repositoryName) &&
+            (input.beforeCommitId === undefined || comment.beforeCommitId === input.beforeCommitId) &&
+            (input.afterCommitId === undefined || comment.afterCommitId === input.afterCommitId)
         )
         const groups = comments
           .filter((comment) => comment.inReplyTo === null)
@@ -388,8 +384,9 @@ const handleOperation = (
         if (found.repositoryName !== input.repositoryName) {
           return yield* missingRepository(input.repositoryName)
         }
-        const revisionExists = found.pullRequest.revisions.some((revision) =>
-          revision.destinationCommit === input.beforeCommitId && revision.sourceCommit === input.afterCommitId
+        const revisionExists = found.pullRequest.revisions.some(
+          (revision) =>
+            revision.destinationCommit === input.beforeCommitId && revision.sourceCommit === input.afterCommitId
         )
         if (!revisionExists) return yield* commitTupleMismatch(input.beforeCommitId, input.afterCommitId)
         const outcome = yield* Ref.modify(
@@ -424,7 +421,9 @@ const handleOperation = (
                     pullRequest.revisions.map((revision) => revision.activityEpochSeconds)
                   )
                 )
-              ) + current.comments.length + 1,
+              ) +
+                current.comments.length +
+                1,
               clientRequestToken: input.clientRequestToken ?? null,
               inReplyTo: null,
               location
@@ -459,7 +458,7 @@ const handleOperation = (
         const updated = { ...existing, content: input.content }
         yield* Ref.update(stateRef, (current) => ({
           ...current,
-          comments: current.comments.map((comment) => comment.commentId === input.commentId ? updated : comment)
+          comments: current.comments.map((comment) => (comment.commentId === input.commentId ? updated : comment))
         }))
         return { comment: commentOutput(updated) }
       }
@@ -517,8 +516,8 @@ const handleOperation = (
         yield* Ref.update(stateRef, (current) => ({
           ...current,
           approvals: [
-            ...current.approvals.filter((approval) =>
-              approval.pullRequestId !== input.pullRequestId || approval.revisionId !== input.revisionId
+            ...current.approvals.filter(
+              (approval) => approval.pullRequestId !== input.pullRequestId || approval.revisionId !== input.revisionId
             ),
             { pullRequestId: input.pullRequestId, revisionId: input.revisionId, state: input.approvalState }
           ]
@@ -529,18 +528,19 @@ const handleOperation = (
         const input = yield* decode(RevisionInput, rawInput)
         return {
           approvals: state.approvals
-            .filter((approval) =>
-              approval.pullRequestId === input.pullRequestId && approval.revisionId === input.revisionId
+            .filter(
+              (approval) => approval.pullRequestId === input.pullRequestId && approval.revisionId === input.revisionId
             )
             .map((approval) => ({ userArn: state.scenario.callerArn, approvalState: approval.state }))
         }
       }
       case "EvaluatePullRequestApprovalRules": {
         const input = yield* decode(RevisionInput, rawInput)
-        const approved = state.approvals.some((approval) =>
-          approval.pullRequestId === input.pullRequestId &&
-          approval.revisionId === input.revisionId &&
-          approval.state === "APPROVE"
+        const approved = state.approvals.some(
+          (approval) =>
+            approval.pullRequestId === input.pullRequestId &&
+            approval.revisionId === input.revisionId &&
+            approval.state === "APPROVE"
         )
         return {
           evaluation: {
@@ -604,12 +604,13 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     }
     const operation = target.split(".").at(-1) ?? target
     const input = yield* HttpServerRequest.schemaBodyJson(Schema.Json).pipe(
-      Effect.mapError(() =>
-        new MockOperationError({
-          awsTag: "InvalidRequestException",
-          message: "request body must be JSON",
-          status: 400
-        })
+      Effect.mapError(
+        () =>
+          new MockOperationError({
+            awsTag: "InvalidRequestException",
+            message: "request body must be JSON",
+            status: 400
+          })
       )
     )
     return yield* handleOperation(stateRef, operation, input).pipe(
@@ -618,12 +619,7 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     )
   }).pipe(
     Effect.catchTag("MockOperationError", (error) => Effect.succeed(awsErrorResponse(error))),
-    Effect.catch(() =>
-      Effect.succeed(HttpServerResponse.jsonUnsafe(
-        { error: "mock-handler-failed" },
-        { status: 500 }
-      ))
-    )
+    Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "mock-handler-failed" }, { status: 500 })))
   )
 
 const adminPushHandler = (
@@ -633,39 +629,45 @@ const adminPushHandler = (
 ) =>
   Effect.gen(function*() {
     const input = yield* HttpServerRequest.schemaBodyJson(AdminPushInput)
-    return yield* transitionLock.withPermits(1)(Effect.gen(function*() {
-      const state = yield* Ref.get(stateRef)
-      const found = findPullRequest(state, input.pullRequestId)
-      if (found === null) {
-        return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
-      }
-      const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
-      const currentRevision = found.pullRequest.revisions[currentIndex]
-      const nextIndex = currentIndex + 1
-      const nextRevision = found.pullRequest.revisions[nextIndex]
-      if (currentRevision === undefined || nextRevision === undefined) {
-        return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
-      }
-      if (revisionControl !== undefined) {
-        yield* revisionControl.advance({
-          pullRequestId: input.pullRequestId,
-          repositoryName: found.repositoryName,
-          currentSourceCommit: currentRevision.sourceCommit,
-          nextSourceCommit: nextRevision.sourceCommit
-        }).pipe(Effect.mapError(() => new MockFixtureTransitionError()))
-      }
-      yield* Ref.update(stateRef, (current) => ({
-        ...current,
-        activeRevisionByPullRequest: {
-          ...current.activeRevisionByPullRequest,
-          [input.pullRequestId]: nextIndex
-        }
-      }))
-      return HttpServerResponse.jsonUnsafe({
-        pullRequestId: input.pullRequestId,
-        revisionId: nextRevision.revisionId
-      })
-    }))
+    return yield* transitionLock.withPermits(1)(
+      Effect.uninterruptible(
+        Effect.gen(function*() {
+          const state = yield* Ref.get(stateRef)
+          const found = findPullRequest(state, input.pullRequestId)
+          if (found === null) {
+            return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
+          }
+          const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
+          const currentRevision = found.pullRequest.revisions[currentIndex]
+          const nextIndex = currentIndex + 1
+          const nextRevision = found.pullRequest.revisions[nextIndex]
+          if (currentRevision === undefined || nextRevision === undefined) {
+            return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
+          }
+          if (revisionControl !== undefined) {
+            yield* revisionControl
+              .advance({
+                pullRequestId: input.pullRequestId,
+                repositoryName: found.repositoryName,
+                currentSourceCommit: currentRevision.sourceCommit,
+                nextSourceCommit: nextRevision.sourceCommit
+              })
+              .pipe(Effect.mapError(() => new MockFixtureTransitionError()))
+          }
+          yield* Ref.update(stateRef, (current) => ({
+            ...current,
+            activeRevisionByPullRequest: {
+              ...current.activeRevisionByPullRequest,
+              [input.pullRequestId]: nextIndex
+            }
+          }))
+          return HttpServerResponse.jsonUnsafe({
+            pullRequestId: input.pullRequestId,
+            revisionId: nextRevision.revisionId
+          })
+        })
+      )
+    )
   }).pipe(
     Effect.catchTag("MockFixtureTransitionError", () =>
       Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 }))),
@@ -700,11 +702,11 @@ const adminCommentHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
       return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
     }
     return HttpServerResponse.jsonUnsafe({ commentId: comment.commentId })
-  }).pipe(Effect.catch(() =>
-    Effect.succeed(
-      HttpServerResponse.jsonUnsafe({ error: "invalid-comment-request" }, { status: 400 })
+  }).pipe(
+    Effect.catch(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-comment-request" }, { status: 400 }))
     )
-  ))
+  )
 
 export interface CodeCommitMockServer {
   readonly origin: string
@@ -721,9 +723,7 @@ export interface CodeCommitMockRevisionTransition {
 
 /** Optional Git transition coupled to the mock's mutable provider state. */
 export interface CodeCommitMockRevisionControl {
-  readonly advance: (
-    transition: CodeCommitMockRevisionTransition
-  ) => Effect.Effect<void, unknown>
+  readonly advance: (transition: CodeCommitMockRevisionTransition) => Effect.Effect<void, unknown>
   readonly reset: Effect.Effect<void, unknown>
 }
 
@@ -762,26 +762,25 @@ export const startCodeCommitMock = (
     yield* router.add(
       "POST",
       "/__mock/reset",
-      transitionLock.withPermits(1)(
-        Effect.gen(function*() {
-          if (options.revisionControl !== undefined) {
-            yield* options.revisionControl.reset.pipe(
-              Effect.mapError(() => new MockFixtureTransitionError())
-            )
-          }
-          yield* Ref.set(stateRef, makeInitialState(scenario))
-          return HttpServerResponse.jsonUnsafe({ reset: true })
-        })
-      ).pipe(
-        Effect.catchTag("MockFixtureTransitionError", () =>
-          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 })))
-      )
+      transitionLock
+        .withPermits(1)(
+          Effect.uninterruptible(
+            Effect.gen(function*() {
+              if (options.revisionControl !== undefined) {
+                yield* options.revisionControl.reset.pipe(Effect.mapError(() => new MockFixtureTransitionError()))
+              }
+              yield* Ref.set(stateRef, makeInitialState(scenario))
+              return HttpServerResponse.jsonUnsafe({ reset: true })
+            })
+          )
+        )
+        .pipe(
+          Effect.catchTag("MockFixtureTransitionError", () =>
+            Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 })))
+        )
     )
     const app = router.asHttpEffect()
-    yield* HttpServer.serveEffect(app).pipe(
-      Effect.provideService(HttpServer.HttpServer, server),
-      Effect.forkScoped
-    )
+    yield* HttpServer.serveEffect(app).pipe(Effect.provideService(HttpServer.HttpServer, server), Effect.forkScoped)
     return {
       origin,
       consolePullRequestUrl: (repositoryName, pullRequestId) =>

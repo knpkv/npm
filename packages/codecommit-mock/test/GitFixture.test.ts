@@ -133,6 +133,17 @@ describe("CodeCommit Git and review fixtures", () => {
         expect(pushed.status).toBe(200)
         const afterPush = yield* clone("after-push")
         expect(yield* hasObject(afterPush, fixture.revisions.secondHead)).toBe(true)
+        const pullRequest = scenario.repositories[0].pullRequests[0]
+        for (const revision of pullRequest.revisions) {
+          const gitFiles = (yield* runGit([
+            "-C",
+            afterPush,
+            "diff",
+            "--name-only",
+            `${revision.destinationCommit}..${revision.sourceCommit}`
+          ])).split("\n")
+          expect(gitFiles).toEqual(revision.files.map(({ path: filePath }) => filePath))
+        }
         expect(yield* runGit(["-C", afterPush, "show", `${fixture.revisions.secondHead}:src/retry.ts`])).toContain(
           "outcomes.set(key, outcome)"
         )
