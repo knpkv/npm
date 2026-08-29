@@ -7,9 +7,11 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createServer } from "node:http"
 
+import { reviewModelHandler } from "./ReviewModelFixture.js"
 import type { CodeCommitMockScenario } from "./Scenario.js"
 import {
   activeRevision,
@@ -25,6 +27,8 @@ class MockOperationError extends Data.TaggedError("MockOperationError")<{
   readonly message: string
   readonly status: number
 }> {}
+
+class MockFixtureTransitionError extends Data.TaggedError("MockFixtureTransitionError")<{}> {}
 
 /** Failure to validate or bind a mock instance. */
 export class CodeCommitMockStartupError extends Data.TaggedError("CodeCommitMockStartupError")<{
@@ -622,34 +626,53 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     )
   )
 
-const adminPushHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
+const adminPushHandler = (
+  stateRef: Ref.Ref<CodeCommitMockState>,
+  transitionLock: Semaphore.Semaphore,
+  revisionControl: CodeCommitMockRevisionControl | undefined
+) =>
   Effect.gen(function*() {
     const input = yield* HttpServerRequest.schemaBodyJson(AdminPushInput)
-    const state = yield* Ref.get(stateRef)
-    const found = findPullRequest(state, input.pullRequestId)
-    if (found === null) return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
-    const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
-    const nextIndex = currentIndex + 1
-    if (found.pullRequest.revisions[nextIndex] === undefined) {
-      return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
-    }
-    yield* Ref.update(stateRef, (current) => ({
-      ...current,
-      activeRevisionByPullRequest: {
-        ...current.activeRevisionByPullRequest,
-        [input.pullRequestId]: nextIndex
+    return yield* transitionLock.withPermits(1)(Effect.gen(function*() {
+      const state = yield* Ref.get(stateRef)
+      const found = findPullRequest(state, input.pullRequestId)
+      if (found === null) {
+        return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
       }
+      const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
+      const currentRevision = found.pullRequest.revisions[currentIndex]
+      const nextIndex = currentIndex + 1
+      const nextRevision = found.pullRequest.revisions[nextIndex]
+      if (currentRevision === undefined || nextRevision === undefined) {
+        return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
+      }
+      if (revisionControl !== undefined) {
+        yield* revisionControl.advance({
+          pullRequestId: input.pullRequestId,
+          repositoryName: found.repositoryName,
+          currentSourceCommit: currentRevision.sourceCommit,
+          nextSourceCommit: nextRevision.sourceCommit
+        }).pipe(Effect.mapError(() => new MockFixtureTransitionError()))
+      }
+      yield* Ref.update(stateRef, (current) => ({
+        ...current,
+        activeRevisionByPullRequest: {
+          ...current.activeRevisionByPullRequest,
+          [input.pullRequestId]: nextIndex
+        }
+      }))
+      return HttpServerResponse.jsonUnsafe({
+        pullRequestId: input.pullRequestId,
+        revisionId: nextRevision.revisionId
+      })
     }))
-    const nextState = yield* Ref.get(stateRef)
-    return HttpServerResponse.jsonUnsafe({
-      pullRequestId: input.pullRequestId,
-      revisionId: activeRevision(nextState, found.pullRequest).revisionId
-    })
-  }).pipe(Effect.catch(() =>
-    Effect.succeed(
-      HttpServerResponse.jsonUnsafe({ error: "invalid-push-request" }, { status: 400 })
+  }).pipe(
+    Effect.catchTag("MockFixtureTransitionError", () =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 }))),
+    Effect.catch(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-push-request" }, { status: 400 }))
     )
-  ))
+  )
 
 const adminCommentHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
   Effect.gen(function*() {
@@ -689,16 +712,38 @@ export interface CodeCommitMockServer {
   readonly state: Effect.Effect<CodeCommitMockState>
 }
 
+export interface CodeCommitMockRevisionTransition {
+  readonly pullRequestId: string
+  readonly repositoryName: string
+  readonly currentSourceCommit: string
+  readonly nextSourceCommit: string
+}
+
+/** Optional Git transition coupled to the mock's mutable provider state. */
+export interface CodeCommitMockRevisionControl {
+  readonly advance: (
+    transition: CodeCommitMockRevisionTransition
+  ) => Effect.Effect<void, unknown>
+  readonly reset: Effect.Effect<void, unknown>
+}
+
+export interface CodeCommitMockServerOptions {
+  readonly cleanReviewHead?: string
+  readonly port?: number
+  readonly revisionControl?: CodeCommitMockRevisionControl
+}
+
 /** Start one deterministic, scoped mock on literal loopback. */
 export const startCodeCommitMock = (
   scenario: CodeCommitMockScenario,
-  port = 0
+  options: CodeCommitMockServerOptions = {}
 ): Effect.Effect<CodeCommitMockServer, CodeCommitMockStartupError, Scope.Scope> =>
   Effect.gen(function*() {
     const stateRef = yield* Ref.make(makeInitialState(scenario))
+    const transitionLock = yield* Semaphore.make(1)
     const scope = yield* Effect.scope
     const context = yield* Layer.build(
-      NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port })
+      NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: options.port ?? 0 })
     ).pipe(
       Scope.provide(scope),
       Effect.mapError((cause) => new CodeCommitMockStartupError({ cause }))
@@ -710,14 +755,26 @@ export const startCodeCommitMock = (
     const origin = `http://127.0.0.1:${server.address.port}`
     const router = yield* HttpRouter.make
     yield* router.add("POST", "/", awsHandler(stateRef))
+    yield* router.add("POST", "/v1/chat/completions", reviewModelHandler(options.cleanReviewHead))
     yield* router.add("GET", "/__mock/state", Ref.get(stateRef).pipe(Effect.map(HttpServerResponse.jsonUnsafe)))
-    yield* router.add("POST", "/__mock/push", adminPushHandler(stateRef))
+    yield* router.add("POST", "/__mock/push", adminPushHandler(stateRef, transitionLock, options.revisionControl))
     yield* router.add("POST", "/__mock/comment", adminCommentHandler(stateRef))
     yield* router.add(
       "POST",
       "/__mock/reset",
-      Ref.set(stateRef, makeInitialState(scenario)).pipe(
-        Effect.as(HttpServerResponse.jsonUnsafe({ reset: true }))
+      transitionLock.withPermits(1)(
+        Effect.gen(function*() {
+          if (options.revisionControl !== undefined) {
+            yield* options.revisionControl.reset.pipe(
+              Effect.mapError(() => new MockFixtureTransitionError())
+            )
+          }
+          yield* Ref.set(stateRef, makeInitialState(scenario))
+          return HttpServerResponse.jsonUnsafe({ reset: true })
+        })
+      ).pipe(
+        Effect.catchTag("MockFixtureTransitionError", () =>
+          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 })))
       )
     )
     const app = router.asHttpEffect()
