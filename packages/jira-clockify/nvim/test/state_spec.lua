@@ -48,6 +48,7 @@ local REAL_FN = vim.fn
 local REAL_OPEN = io.open
 local STATE_PATH = "/fake/state.json"
 local LOCK_PATH = "/fake/poll.lock"
+local STAMP_PATH = "/fake/poll.stamp"
 
 -- Any `poll.lock`, not just the configured one, so a spec can assert where an
 -- unconfigured lease is derived to rather than only that it exists.
@@ -185,6 +186,12 @@ local function harness(opts)
         return 0
       end
       table.insert(world.killed, { pid = pid, signal = signal })
+      if signal == "sigkill" and fs.lock_holders[world.poll_lock] == world then
+        fs.lock_holders[world.poll_lock] = nil
+        if fs.lock_holder == world then
+          fs.lock_holder = nil
+        end
+      end
       return 0
     end,
     new_timer = function()
@@ -338,6 +345,17 @@ do
   local first = w.timer_starts[1]
   eq(first and first.initial_ms, 0, "first poll: jitter stays inside the first interval")
   eq(first and first.repeat_ms, 0, "first poll: timer remains one-shot")
+end
+
+-- Invalid intervals disable polling at the configuration boundary. In
+-- particular, zero must not reach the PID modulo below and abort plugin setup.
+for label, interval in pairs({ zero = 0, negative = -1, fractional = 1.5, nonnumeric = "30000" }) do
+  local w = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, pid = 30000 })
+  local ok = pcall(w.state.start_poll, w.config, interval)
+
+  check(ok, "poll interval " .. label .. ": setup does not raise")
+  eq(#w.timer_starts, 0, "poll interval " .. label .. ": no timer is armed")
+  eq(w.jobs_started, 0, "poll interval " .. label .. ": no job is started")
 end
 
 -- ---------------------------------------------------------------------------
@@ -518,6 +536,27 @@ end
 local function tick(world)
   world.activate()
   world.tick()
+end
+
+-- Invalid fixture: SIGKILL releases the kernel lock without running the CLI's
+-- completion finalizer. The watchdog must stamp first, while it still owns the
+-- lock, so a second editor cannot immediately repeat the hung attempt.
+do
+  local a, b, fs = two_editors()
+  tick(a)
+
+  a.advance(120000)
+  a.wait_status = -1
+  a.advance(35000)
+  eq(a.killed[2] and a.killed[2].signal, "sigkill", "watchdog stamp: escalation kills the hung poll")
+  check(fs.files[STAMP_PATH] ~= nil, "watchdog stamp: failed attempt is recorded before lock release")
+
+  tick(b)
+  eq(b.jobs_started, 0, "watchdog stamp: another editor stays inside the shared interval")
+
+  advance_clock(30)
+  tick(b)
+  eq(b.jobs_started, 1, "watchdog stamp: another editor may retry after the interval")
 end
 
 do

@@ -162,6 +162,18 @@ local function stamp_path()
   return vim.fn.fnamemodify(cli_state_path(), ":h") .. "/poll.stamp"
 end
 
+-- A watchdog escalation bypasses the CLI's Effect finalizers. Write the failed
+-- attempt synchronously while the child still owns `poll.lock`, so another
+-- editor cannot acquire the lock between SIGKILL and the shared rate bound.
+local function stamp_failed_attempt()
+  local fd = uv.fs_open(stamp_path(), "w", 384) -- 0600
+  if not fd then
+    return
+  end
+  uv.fs_write(fd, tostring(os.time()), -1)
+  uv.fs_close(fd)
+end
+
 -- Whether some editor on this machine already reconciled within the interval.
 -- Read from the stamp's own mtime, so a torn or truncated write still carries a
 -- usable time and no parsing can fail here.
@@ -230,6 +242,7 @@ local function terminate(job)
     -- SIGTERM was not enough. Escalate, and let `on_exit` do the releasing.
     local ok, live_pid = pcall(vim.fn.jobpid, job)
     if ok and live_pid > 0 then
+      stamp_failed_attempt()
       uv.kill(live_pid, "sigkill")
       return
     end
@@ -305,6 +318,9 @@ function M.start_poll(config, interval_ms)
     return
   end
   interval_ms = interval_ms or 30000 -- 30s default
+  if type(interval_ms) ~= "number" or interval_ms <= 0 or interval_ms % 1 ~= 0 then
+    return -- non-positive and non-integral values disable polling
+  end
   poll_config = config
   poll_interval_ms = interval_ms
 

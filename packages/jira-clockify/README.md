@@ -93,7 +93,7 @@ Polling always coordinates through fixed `~/.jcf/poll.lock` and
       binary = "jcf",                -- path to jcf binary
       auto_detect_branch = true,     -- detect issue key from git branch
       float = { width = 0.8, height = 0.8 },
-      poll_interval = 30000,         -- ms, poll Clockify for external changes
+      poll_interval = 30000,         -- positive integer ms; invalid/non-positive disables polling
     })
   end,
 }
