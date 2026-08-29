@@ -1,6 +1,6 @@
 ---
 "@knpkv/ai-runtime": minor
-"@knpkv/codecommit-core": patch
+"@knpkv/codecommit-core": minor
 "@knpkv/control-center": minor
 "@knpkv/rly": patch
 ---

@@ -8,6 +8,27 @@ const credentials = (accessKeyId: string) => ({
 })
 
 describe("AWS profile credential resolution", () => {
+  it("uses empty provider options for the default profile", async () => {
+    const calls: Array<readonly [provider: "sso" | "fallback", options: { readonly profile?: string } | undefined]> = []
+    const provider = makeProfileCredentialProvider({
+      sso: (options) => {
+        calls.push(["sso", options])
+        return async () => credentials("sso")
+      },
+      fallback: (options) => {
+        calls.push(["fallback", options])
+        return async () => credentials("standard-chain")
+      }
+    })
+
+    await provider("default")
+
+    assert.deepStrictEqual(calls, [
+      ["sso", {}],
+      ["fallback", {}]
+    ])
+  })
+
   it("prefers SSO when a profile is configured in both AWS config files", async () => {
     let fallbackCalls = 0
     const provider = makeProfileCredentialProvider({
