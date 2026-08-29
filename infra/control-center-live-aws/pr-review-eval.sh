@@ -19,8 +19,7 @@ expected_account_id=""
 run_token=""
 state_root=""
 state_file=""
-branch_created=false
-pull_request_created=false
+branch_ownership="none"
 pull_request_ownership="none"
 
 fail() {
@@ -49,12 +48,17 @@ make_run_token() {
 }
 
 journal_state() {
+  local branch_created=false
+  local pull_request_created=false
   local temporary_state
   [[ -n "${state_root}" && -d "${state_root}" && -n "${state_file}" ]] || return 1
+  [[ "${branch_ownership}" == "owned" ]] && branch_created=true
+  [[ "${pull_request_ownership}" == "owned" ]] && pull_request_created=true
   temporary_state="$(mktemp "${state_root}/.fixture.XXXXXX")"
   if ! jq -n \
     --arg account "${expected_account_id}" \
     --arg branch "${branch_name}" \
+    --arg branchOwnership "${branch_ownership}" \
     --arg head "${head_commit}" \
     --arg pullRequestId "${pull_request_id}" \
     --arg pullRequestOwnership "${pull_request_ownership}" \
@@ -64,7 +68,7 @@ journal_state() {
     --arg url "$([[ -n "${pull_request_id}" ]] && printf 'https://%s.console.aws.amazon.com/codesuite/codecommit/repositories/%s/pull-requests/%s?region=%s' "${aws_region}" "${repository_name}" "${pull_request_id}" "${aws_region}")" \
     --argjson branchCreated "${branch_created}" \
     --argjson pullRequestCreated "${pull_request_created}" \
-    '{account: $account, region: $region, repository: $repository, runToken: $runToken, branch: $branch, branchCreated: $branchCreated, head: $head, pullRequestId: $pullRequestId, pullRequestCreated: $pullRequestCreated, pullRequestOwnership: $pullRequestOwnership, url: $url}' \
+    '{account: $account, region: $region, repository: $repository, runToken: $runToken, branch: $branch, branchCreated: $branchCreated, branchOwnership: $branchOwnership, head: $head, pullRequestId: $pullRequestId, pullRequestCreated: $pullRequestCreated, pullRequestOwnership: $pullRequestOwnership, url: $url}' \
     >"${temporary_state}"; then
     rm -f -- "${temporary_state}"
     return 1
@@ -165,11 +169,10 @@ cleanup() {
 
   if [[ "${pull_request_ownership}" == "uncertain" ]]; then
     cleanup_failed=true
-  elif [[ "${pull_request_created}" == true ]]; then
+  elif [[ "${pull_request_ownership}" == "owned" ]]; then
     if run_aws_quiet codecommit update-pull-request-status \
       --pull-request-id "${pull_request_id}" \
       --pull-request-status CLOSED; then
-      pull_request_created=false
       pull_request_ownership="none"
       if ! journal_state; then
         cleanup_failed=true
@@ -179,11 +182,13 @@ cleanup() {
     fi
   fi
 
-  if [[ "${cleanup_failed}" == false && "${branch_created}" == true ]]; then
+  if [[ "${cleanup_failed}" == false && "${branch_ownership}" == "uncertain" ]]; then
+    cleanup_failed=true
+  elif [[ "${cleanup_failed}" == false && "${branch_ownership}" == "owned" ]]; then
     if run_aws_quiet codecommit delete-branch \
       --repository-name "${repository_name}" \
       --branch-name "${branch_name}"; then
-      branch_created=false
+      branch_ownership="none"
       if ! journal_state; then
         cleanup_failed=true
       fi
@@ -220,6 +225,7 @@ handle_signal() {
 }
 
 create_fixture() {
+  local create_branch_error
   local create_pull_request_output
   local main_commit
 
@@ -247,13 +253,24 @@ create_fixture() {
     --output text)" || return 1
   [[ "${main_commit}" =~ ^[0-9a-f]{40}$ ]] || return 1
 
-  if ! run_aws_quiet codecommit create-branch \
-    --repository-name "${repository_name}" \
-    --branch-name "${branch_name}" \
-    --commit-id "${main_commit}"; then
+  branch_ownership="uncertain"
+  if ! journal_state; then
+    branch_ownership="none"
     return 1
   fi
-  branch_created=true
+  if create_branch_error="$("${aws_command[@]}" codecommit create-branch \
+    --repository-name "${repository_name}" \
+    --branch-name "${branch_name}" \
+    --commit-id "${main_commit}" \
+    --cli-error-format json 2>&1 >/dev/null)"; then
+    branch_ownership="owned"
+  elif jq -e '.Code == "BranchNameExistsException"' <<<"${create_branch_error}" >/dev/null 2>&1; then
+    branch_ownership="none"
+    journal_state || return 1
+    return 1
+  else
+    return 1
+  fi
   journal_state || return 1
 
   head_commit="$(capture_aws codecommit put-file \
@@ -289,7 +306,6 @@ create_fixture() {
   fi
   [[ "${pull_request_id}" =~ ^[0-9]+$ ]] || return 1
   pull_request_ownership="owned"
-  pull_request_created=true
   journal_state || return 1
 
   printf 'READY %s\n' "${state_file}"

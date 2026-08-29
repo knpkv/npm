@@ -18,6 +18,7 @@ source "${test_root}/pr-review-eval.sh"
 
 scenario="success"
 calls_file=""
+branch_owner_file=""
 
 uuidgen() {
   printf '%s\n' "${fixture_token}"
@@ -86,7 +87,13 @@ aws() {
     "codecommit get-repository"*) repository_document ;;
     "codecommit get-branch"*) printf '%s\n' "${expected_main_commit}" ;;
     "codecommit create-branch"*)
-      [[ "${scenario}" == "branch-collision" ]] && return 1
+      if [[ "${scenario}" == "branch-collision" ]]; then
+        jq -nc '{Message: "fixture branch already exists", Code: "BranchNameExistsException"}' >&2
+        return 1
+      fi
+      jq -e '.branchOwnership == "uncertain" and (.branchCreated | not)' "${state_file}" >/dev/null || return 1
+      printf 'fixture\n' >"${branch_owner_file}"
+      [[ "${scenario}" == "ambiguous-branch-create" ]] && return 1
       return 0
       ;;
     "codecommit put-file"*)
@@ -112,6 +119,8 @@ aws() {
       ;;
     "codecommit delete-branch"*)
       [[ "${scenario}" == "delete-fails" ]] && return 1
+      [[ "$(<"${branch_owner_file}")" == "fixture" ]] || return 1
+      printf 'none\n' >"${branch_owner_file}"
       return 0
       ;;
     *) return 1 ;;
@@ -122,6 +131,12 @@ reset_fixture() {
   scenario="$1"
   calls_file="${test_workspace}/calls-$1-$RANDOM"
   : >"${calls_file}"
+  branch_owner_file="${test_workspace}/branch-owner-$1-$RANDOM"
+  if [[ "${scenario}" == "branch-collision" ]]; then
+    printf 'foreign\n' >"${branch_owner_file}"
+  else
+    printf 'none\n' >"${branch_owner_file}"
+  fi
   aws_command=(aws)
   repository_name=""
   branch_name=""
@@ -131,8 +146,7 @@ reset_fixture() {
   run_token=""
   state_root=""
   state_file=""
-  branch_created=false
-  pull_request_created=false
+  branch_ownership="none"
   pull_request_ownership="none"
   trap - EXIT INT TERM
 }
@@ -160,10 +174,11 @@ test_successful_lifecycle() {
   jq -e \
     --arg head "${expected_fixture_commit}" \
     --arg token "${fixture_token}" \
-    '.runToken == $token and .head == $head and .branchCreated and .pullRequestCreated and .pullRequestOwnership == "owned" and .pullRequestId == "42"' \
+    '.runToken == $token and .head == $head and .branchCreated and .branchOwnership == "owned" and .pullRequestCreated and .pullRequestOwnership == "owned" and .pullRequestId == "42"' \
     "${state_file}" >/dev/null
   cleanup
   [[ ! -e "${state_root}" ]]
+  [[ "$(<"${branch_owner_file}")" == "none" ]]
   local close_line
   local delete_line
   close_line="$(grep -n 'codecommit update-pull-request-status' "${calls_file}" | cut -d: -f1)"
@@ -199,10 +214,28 @@ test_branch_collision_preserves_foreign_branch() {
   fi
   trap - EXIT INT TERM
   assert_private_state
-  [[ "${branch_created}" == false ]]
+  [[ "${branch_ownership}" == "none" ]]
+  jq -e '.branchOwnership == "none" and (.branchCreated | not)' "${state_file}" >/dev/null
   cleanup
+  [[ "$(<"${branch_owner_file}")" == "foreign" ]]
   ! grep -q 'codecommit delete-branch' "${calls_file}"
   assert_no_unrelated_calls
+}
+
+test_ambiguous_branch_create_retains_recovery_state() {
+  reset_fixture ambiguous-branch-create
+  if create_fixture >/dev/null; then
+    return 1
+  fi
+  trap - EXIT INT TERM
+  assert_private_state
+  jq -e '.branchOwnership == "uncertain" and (.branchCreated | not)' "${state_file}" >/dev/null
+  if cleanup 2>/dev/null; then
+    return 1
+  fi
+  [[ "$(<"${branch_owner_file}")" == "fixture" ]]
+  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  assert_private_state
 }
 
 test_branch_mutation_is_journaled() {
@@ -212,7 +245,8 @@ test_branch_mutation_is_journaled() {
   fi
   trap - EXIT INT TERM
   assert_private_state
-  jq -e '.branchCreated and .head == "" and (.pullRequestCreated | not)' "${state_file}" >/dev/null
+  jq -e '.branchCreated and .branchOwnership == "owned" and .head == "" and (.pullRequestCreated | not)' \
+    "${state_file}" >/dev/null
   cleanup
   grep -q 'codecommit delete-branch' "${calls_file}"
 }
@@ -256,7 +290,7 @@ test_ambiguous_pull_request_is_reconciled() {
   create_fixture >/dev/null
   trap - EXIT INT TERM
   assert_private_state
-  [[ "${pull_request_created}" == true && "${pull_request_id}" == "42" ]]
+  [[ "${pull_request_ownership}" == "owned" && "${pull_request_id}" == "42" ]]
   jq -e '.pullRequestCreated and .pullRequestOwnership == "owned" and .pullRequestId == "42"' \
     "${state_file}" >/dev/null
   grep -q 'codecommit list-pull-requests' "${calls_file}"
@@ -307,6 +341,7 @@ test_focused_fixture() {
 test_successful_lifecycle
 test_boundary_failures_write_nothing
 test_branch_collision_preserves_foreign_branch
+test_ambiguous_branch_create_retains_recovery_state
 test_branch_mutation_is_journaled
 test_uncertain_create_retains_recovery_state
 test_malformed_create_retains_recovery_state
