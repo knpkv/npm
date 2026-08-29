@@ -493,6 +493,7 @@ export const PullRequestReviewFailure = Schema.Struct({
     "review-setup",
     "sandbox-start",
     "agent-run",
+    "cleanup",
     "result-validation",
     "control-center"
   ]),

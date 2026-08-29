@@ -422,7 +422,8 @@ const makeSessionLayer = (
   artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type,
   nativeReviewOutput?: string,
   nativeReviewRunner: "claude" | "codex" = "codex",
-  nativeReviewResult?: PrReviewSandboxCommandResult
+  nativeReviewResult?: PrReviewSandboxCommandResult,
+  finalizationFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make(
     "01890f6f-6d6a-7cc0-98d2-000000000454"
@@ -552,7 +553,12 @@ const makeSessionLayer = (
       withSession: (request, use) =>
         Effect.sync(() => {
           observation.requests.push(request)
-        }).pipe(Effect.andThen(use(session))),
+        }).pipe(
+          Effect.andThen(use(session)),
+          Effect.flatMap((result) =>
+            finalizationFailure === undefined ? Effect.succeed(result) : Effect.fail(finalizationFailure)
+          )
+        ),
       reconcile: () => Effect.succeed({ removedSandboxes: [] })
     })
   )
@@ -2144,6 +2150,57 @@ describe("PR review task executor", () => {
             if (result.failure._tag === "AgentProviderError") {
               assert.strictEqual(result.failure.reviewCause, "output-rejected")
               assert.strictEqual(result.failure.reviewStage, "result-validation")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("classifies post-run sandbox cleanup failures as cleanup", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "cleanup-failed" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "cleanup-failed")
+              assert.strictEqual(result.failure.reviewStage, "cleanup")
             }
           }
         })

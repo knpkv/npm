@@ -150,6 +150,7 @@ export class AgentProviderError extends Schema.TaggedError<AgentProviderError>()
         "review-setup",
         "sandbox-start",
         "agent-run",
+        "cleanup",
         "result-validation",
         "control-center"
       ])

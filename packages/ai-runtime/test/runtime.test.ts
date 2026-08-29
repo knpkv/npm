@@ -167,6 +167,25 @@ describe("AgentRuntime", () => {
       expect(error).toBeInstanceOf(AgentProviderError)
     }))
 
+  it.effect("preserves post-run cleanup attribution", () =>
+    Effect.gen(function*() {
+      const cleanupFailure = new AgentProviderError({
+        providerId: AgentProviderId.make("fake"),
+        phase: "execution",
+        reviewStage: "cleanup",
+        reviewCause: "cleanup-failed",
+        message: "review finished but cleanup did not",
+        retryable: true
+      })
+      const runtime = makeAgentRuntime({ run: () => Stream.fail(cleanupFailure) })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({
+        reviewStage: "cleanup",
+        reviewCause: "cleanup-failed"
+      })
+    }))
+
   it.effect("converts synchronous adapter throws into provider failures", () =>
     Effect.gen(function*() {
       const runtime = makeAgentRuntime({

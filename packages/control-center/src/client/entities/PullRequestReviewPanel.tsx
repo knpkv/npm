@@ -94,6 +94,8 @@ const failureHeading = (stage: PullRequestReviewFailure["stage"]): string => {
       return "Review sandbox failed to start"
     case "agent-run":
       return "Agent review failed"
+    case "cleanup":
+      return "Review cleanup did not finish"
     case "result-validation":
       return "Review result was invalid"
     case "control-center":
@@ -139,7 +141,7 @@ const failureCause = (cause: PullRequestReviewFailure["cause"]): string | null =
 }
 
 const failureGuidance = ({ retryable, stage }: PullRequestReviewFailure): string => {
-  if (retryable) return "The failure may be temporary. Retry this exact-head review."
+  if (retryable && stage !== "cleanup") return "The failure may be temporary. Retry this exact-head review."
   switch (stage) {
     case "source-checkout":
       return "Check the CodeCommit connection, AWS credentials, region, and repository access."
@@ -149,6 +151,8 @@ const failureGuidance = ({ retryable, stage }: PullRequestReviewFailure): string
       return "Check the sbx installation and Review sandbox configuration."
     case "agent-run":
       return "Check the selected review runner and its authentication."
+    case "cleanup":
+      return "Check sbx status and reconcile the orphaned review sandbox before retrying."
     case "result-validation":
       return "The runner returned a result Control Center could not safely accept. Check its version and configuration."
     case "control-center":

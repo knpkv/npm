@@ -1304,6 +1304,36 @@ describe("PullRequestReviewPanel", () => {
     expect(host.querySelector("[role=dialog]")?.textContent).toContain("Start full-project review")
   })
 
+  it("identifies a post-run cleanup failure without calling it a sandbox start failure", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const cleanupFailedReview = new PullRequestReviewFailed({
+      ...FAILED_REVIEW,
+      failure: { stage: "cleanup", cause: "cleanup-failed", retryable: true }
+    })
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: cleanupFailedReview }}
+        />
+      )
+    )
+
+    expect(host.textContent).toContain("Review cleanup did not finish")
+    expect(host.textContent).toContain("Cause: The run ended, but sbx cleanup did not complete.")
+    expect(host.textContent).toContain("reconcile the orphaned review sandbox before retrying")
+    expect(host.textContent).not.toContain("Review sandbox failed to start")
+  })
+
   it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {
     const host = document.createElement("div")
     document.body.append(host)

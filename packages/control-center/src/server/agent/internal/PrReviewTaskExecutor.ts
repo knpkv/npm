@@ -315,6 +315,8 @@ const sandboxFailure = (
   reviewStage: NonNullable<AgentProviderError["reviewStage"]> = failure.reason === "source-unavailable" ||
       failure.reason === "source-rejected"
     ? "source-checkout"
+    : failure.reason === "cleanup-failed"
+    ? "cleanup"
     : failure.reason === "output-rejected"
     ? "result-validation"
     : "sandbox-start"
