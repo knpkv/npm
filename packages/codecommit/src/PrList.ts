@@ -10,8 +10,7 @@
  * @category Command
  * @module
  */
-import { NodeHttpClient } from "@effect/platform-node"
-import { AwsClient, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { AwsClient, type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, type Option, Stream } from "effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { makeAccount } from "./CliAccount.js"
@@ -115,20 +114,11 @@ export class PrListService extends Context.Service<PrListService, PrListServiceC
 /**
  * @category Layer
  *
- * FilterService draws AwsClient/ConfigService from the base layers, which are
- * also merged into the output so the single-account path keeps them.
+ * The executable supplies AwsClient and ConfigService so every command uses the
+ * selected transport and configuration boundary.
  */
 export const PrListLive = PrListService.live.pipe(
-  Layer.provide(
-    FilterServiceLive.pipe(
-      Layer.provideMerge(
-        Layer.mergeAll(
-          AwsClient.AwsClientLive,
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-        ).pipe(Layer.provideMerge(NodeHttpClient.layerFetch))
-      )
-    )
-  )
+  Layer.provide(FilterServiceLive)
 )
 
 /** @category Command */
@@ -251,9 +241,8 @@ export const prListCommand = Command.make("list", {
       }
     }
   }).pipe(
-    // Each subcommand is its own entry point: exactly one runs per process, and
-    // it owns the layers it needs. Hoisting them into `bin.ts` would build the
-    // AWS and config stacks for every invocation, including `codecommit tui`.
+    // The command owns its service layer. The executable supplies the selected
+    // AWS transport and configuration services.
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(PrListLive)
   )).pipe(

@@ -446,7 +446,6 @@ export class PullRequestReviewUnavailable extends Schema.TaggedClass<PullRequest
     "not-codecommit",
     "not-pull-request",
     "source-stale",
-    "release-unavailable",
     "base-revision-unavailable"
   ])
 }) {}
@@ -456,11 +455,21 @@ export class PullRequestReviewNotStarted
   extends Schema.TaggedClass<PullRequestReviewNotStarted>()("not-started", pullRequestReviewIdentity)
 {}
 
-/** A prior completed review exists, but its evidence is bound to an older head. */
+/** A prior review report exists, but its evidence is bound to an older head. */
 export class PullRequestReviewStale extends Schema.TaggedClass<PullRequestReviewStale>()("stale", {
   ...pullRequestReviewIdentity,
   previousHead: PrReviewSubject.fields.headRevision,
-  previousJobId: JobId
+  previousJobId: JobId,
+  previousState: Schema.Literals([
+    "queued",
+    "running",
+    "cancel-requested",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted"
+  ]),
+  previousReport: PrReviewReport
 }) {}
 
 /** One durable exact-head review is queued or running. */

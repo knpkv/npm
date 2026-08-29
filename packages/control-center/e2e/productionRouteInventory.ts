@@ -4,6 +4,7 @@ export type ProductionRouteFamily =
   | "atlassian-oauth-callback"
   | "item"
   | "items"
+  | "open-pr"
   | "not-found"
   | "overview"
   | "pair"
@@ -208,6 +209,31 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
     ],
     family: "items",
     routerLiterals: ["items"]
+  },
+  {
+    audits: [
+      {
+        action: {
+          kind: "none",
+          reason: "An unpaired browser cannot resolve private provider coordinates and exposes no route-owned mutation."
+        },
+        canonicalPath: "/open-pr",
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "open-pr",
+        surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: "/open-pr",
+        owner: "release-routes",
+        presentation: "authenticated",
+        routerLiteral: "open-pr",
+        surface: "primary"
+      }
+    ],
+    family: "open-pr",
+    routerLiterals: ["open-pr"]
   },
   {
     audits: [
@@ -473,6 +499,7 @@ export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_LEAVES: ReadonlyArray<Produc
   { family: "atlassian-oauth-callback", routerLiteral: "services/oauth/atlassian/callback" },
   { family: "item", routerLiteral: "items/:entityId" },
   { family: "items", routerLiteral: "items" },
+  { family: "open-pr", routerLiteral: "open-pr" },
   { family: "overview", routerLiteral: "overview" },
   { family: "release", routerLiteral: "releases/:releaseId" },
   { family: "release-preview", routerLiteral: "releases/:releaseId/preview" },
@@ -499,6 +526,7 @@ export const CONTROL_CENTER_READY_ROUTE_FAMILIES: ReadonlyArray<ProductionRouteF
   "authorized-share",
   "item",
   "items",
+  "open-pr",
   "overview",
   "pair",
   "release",
@@ -532,7 +560,7 @@ export const productionRouteCoverageFailures = (
   }
   for (const family of readyFamilies) {
     const descriptor = descriptors.find((candidate) => candidate.family === family)
-    if (!descriptor?.audits.some(({ surface }) => surface === "primary")) {
+    if (descriptor === undefined || !descriptor.audits.some(({ surface }) => surface === "primary")) {
       failures.push(`${family} is missing its primary ready surface`)
     }
   }

@@ -9,7 +9,6 @@
  * @category Command
  * @module
  */
-import { NodeHttpClient } from "@effect/platform-node"
 import { AwsClient, type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
 import * as FileSystem from "effect/FileSystem"
@@ -65,9 +64,7 @@ export class PrExportService extends Context.Service<PrExportService, PrExportSe
 }
 
 /** @category Layer */
-export const PrExportLive = PrExportService.live.pipe(
-  Layer.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-)
+export const PrExportLive = PrExportService.live
 
 /** @category Command */
 export const prExportCommand = Command.make("export", {
@@ -118,9 +115,8 @@ export const prExportCommand = Command.make("export", {
       yield* Console.log(markdown)
     }
   }).pipe(
-    // Each subcommand is its own entry point: exactly one runs per process, and
-    // it owns the layers it needs. Hoisting them into `bin.ts` would build the
-    // AWS and config stacks for every invocation, including `codecommit tui`.
+    // The command owns its service layer. The executable supplies the selected
+    // AWS transport so fixture and production calls share one boundary.
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(PrExportLive)
   )).pipe(Command.withDescription("Export PR comments as markdown"))

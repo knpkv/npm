@@ -9,7 +9,6 @@
  * @category Command
  * @module
  */
-import { NodeHttpClient } from "@effect/platform-node"
 import { AwsClient } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
@@ -58,9 +57,7 @@ export class PrUpdateService extends Context.Service<PrUpdateService, PrUpdateSe
 }
 
 /** @category Layer */
-export const PrUpdateLive = PrUpdateService.live.pipe(
-  Layer.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-)
+export const PrUpdateLive = PrUpdateService.live
 
 /** @category Command */
 export const prUpdateCommand = Command.make("update", {
@@ -107,9 +104,8 @@ export const prUpdateCommand = Command.make("update", {
 
     yield* Console.log(`Updated PR ${prId}`)
   }).pipe(
-    // Each subcommand is its own entry point: exactly one runs per process, and
-    // it owns the layers it needs. Hoisting them into `bin.ts` would build the
-    // AWS and config stacks for every invocation, including `codecommit tui`.
+    // The command owns its service layer. The executable supplies the selected
+    // AWS transport so fixture and production calls share one boundary.
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(PrUpdateLive)
   )).pipe(Command.withDescription("Update PR title or description"))

@@ -904,7 +904,13 @@ const consoleRepositoryUrl = (region: string, repositoryName: string): string =>
 const pullRequestSourceUrl = (
   configuration: typeof CodeCommitPluginConfiguration.Type,
   pullRequestId: string
-): string => Domain.codecommitConsoleUrl(configuration.region, configuration.repositoryName, pullRequestId)
+): string => {
+  // This URL is part of the immutable persisted event payload. Keep the legacy
+  // commercial host stable for replay compatibility; browser handoff derives a
+  // partition-correct URL from the typed provider coordinates instead.
+  const { region, repositoryName } = configuration
+  return `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repositoryName}/pull-requests/${pullRequestId}?region=${region}`
+}
 
 const toPullRequestEvent = (
   configuration: typeof CodeCommitPluginConfiguration.Type,

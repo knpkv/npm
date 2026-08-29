@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
+import {
+  codeCommitMockAwsClientConfig,
+  decodeCodeCommitMockEndpointEffect,
+  withCodeCommitMock
+} from "@knpkv/codecommit-core/MockTransport.js"
 import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -14,6 +19,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import { AgentModelId, AgentProvider } from "../api/agent.js"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
@@ -85,6 +91,7 @@ const serverConfiguration = Config.all({
   directTlsCertificateRef: Config.string("CONTROL_CENTER_TLS_CERTIFICATE_REF").pipe(Config.withDefault("")),
   directTlsPrivateKeyRef: Config.string("CONTROL_CENTER_TLS_PRIVATE_KEY_REF").pipe(Config.withDefault("")),
   host: Config.string("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
+  codeCommitMockEndpoint: Config.string("CODECOMMIT_MOCK_ENDPOINT").pipe(Config.withDefault("")),
   port: Config.int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173)),
   publicOrigin: Config.string("CONTROL_CENTER_PUBLIC_ORIGIN").pipe(Config.withDefault("")),
   trustedProxyAddresses: Config.string("CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES").pipe(Config.withDefault(""))
@@ -244,6 +251,13 @@ const program = Effect.scoped(
           }
         })
       })
+      const codeCommitMockEndpoint = optionalNonBlankConfigurationValue(configured.codeCommitMockEndpoint)
+      const codeCommitHttpClient = codeCommitMockEndpoint === undefined
+        ? undefined
+        : withCodeCommitMock(
+          Context.get(yield* Layer.build(NodeHttpClient.layerFetch), HttpClient.HttpClient),
+          yield* decodeCodeCommitMockEndpointEffect(codeCommitMockEndpoint)
+        )
       const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
       const services = yield* Layer.build(
         makeControlCenterServer({
@@ -258,6 +272,10 @@ const program = Effect.scoped(
             workspaceName: WorkspaceName.make("Control Center")
           },
           persistenceConfig: dataPaths.persistenceConfig,
+          ...(!(codeCommitHttpClient === undefined) && { codeCommitHttpClient }),
+          ...(!(codeCommitHttpClient === undefined) && {
+            codeCommitAwsConfiguration: codeCommitMockAwsClientConfig
+          }),
           prReviewWorker: configured.prReviewSbxEnabled
             ? {
               workspaceId: DEFAULT_WORKSPACE_ID,
@@ -379,6 +397,7 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
 NodeRuntime.runMain(
   program.pipe(
     Effect.tapCause(reportProgramFailure),
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }

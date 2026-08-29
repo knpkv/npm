@@ -1596,7 +1596,7 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("src/capture.ts:42")
     expect(host.textContent).toContain("Prevention proposal · separate review required")
     expect(host.textContent).toContain(
-      "Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally."
+      "Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally."
     )
     expect(host.textContent).toContain("Human review requested")
   })

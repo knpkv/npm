@@ -439,6 +439,15 @@ export class AuthorizedShares extends Context.Service<AuthorizedShares, {
 
 /** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
 export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {
+  readonly codeCommitPullRequestCandidates?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly region: string
+    readonly repositoryName: string
+    readonly pullRequestId: string
+  }) => Effect.Effect<
+    { readonly entityIds: ReadonlyArray<EntityId>; readonly truncated: boolean },
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly workspaceEntity: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId

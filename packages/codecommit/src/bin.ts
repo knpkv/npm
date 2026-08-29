@@ -2,17 +2,21 @@
 /**
  * The `codecommit` executable: command composition, runtime layers, teardown.
  *
- * Each subcommand owns its own flags, help text, service and layer stack in its
- * own module, so what is left here is the shape of the CLI rather than the work
- * any of it does. The one thing that genuinely belongs at this boundary is the
- * host process read for {@link ChildEnv}.
+ * Each subcommand owns its flags, help text, and service layer in its own
+ * module. This boundary supplies shared infrastructure, including the selected
+ * AWS transport and the host environment used by profile-scoped children.
  *
  * @module
  */
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
-import { AwsClientConfig, ChildEnv } from "@knpkv/codecommit-core"
+import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService } from "@knpkv/codecommit-core"
+import {
+  codeCommitMockAwsClientConfig,
+  decodeCodeCommitMockEndpointEffect,
+  withCodeCommitMock
+} from "@knpkv/codecommit-core/MockTransport.js"
 import {
   makeOwnerSessionSecrets,
   makeServer,
@@ -24,6 +28,7 @@ import { Console, Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { Command, Flag as Options } from "effect/unstable/cli"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import pkg from "../package.json"
 import { prCreateCommand } from "./PrCreate.js"
@@ -104,18 +109,44 @@ const cli = Command.runWith(command, {
 // The executable boundary is the only place permitted to read the host process.
 // Profile-scoped spawns need the environment they will actually inherit so ambient AWS
 // variables are tombstoned under whatever casing the host exported them with.
-const AppRuntimeLayer = Layer.mergeAll(
-  NodeHttpClient.layerFetch,
-  AwsClientConfig.Default,
-  ChildEnv.layerHostEnvironment(process.env)
+const HostEnvironmentLayer = ChildEnv.layerHostEnvironment(process.env)
+const AwsRuntimeLayer = Layer.unwrap(
+  Effect.map(ChildEnv.HostEnvironment, ({ variables }) => {
+    const configuredMockEndpoint = variables.CODECOMMIT_MOCK_ENDPOINT?.trim()
+    const httpClient = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+      ? NodeHttpClient.layerFetch
+      : Layer.effect(
+        HttpClient.HttpClient,
+        Effect.gen(function*() {
+          const client = yield* HttpClient.HttpClient
+          return withCodeCommitMock(client, yield* decodeCodeCommitMockEndpointEffect(configuredMockEndpoint))
+        })
+      ).pipe(Layer.provide(NodeHttpClient.layerFetch))
+    const configuration = configuredMockEndpoint === undefined || configuredMockEndpoint.length === 0
+      ? AwsClientConfig.Default
+      : codeCommitMockAwsClientConfig
+    const client = AwsClient.AwsClientLive.pipe(
+      Layer.provide(httpClient),
+      Layer.provide(configuration)
+    )
+    return Layer.mergeAll(httpClient, configuration, client)
+  })
+).pipe(Layer.provide(HostEnvironmentLayer))
+const ConfigServiceLayer = ConfigService.ConfigServiceLive.pipe(
+  Layer.provide(CacheService.EventsHub.Default)
 )
+
+const AppRuntimeLayer = Layer.mergeAll(
+  AwsRuntimeLayer,
+  ConfigServiceLayer,
+  HostEnvironmentLayer
+)
+const RuntimeLayer = AppRuntimeLayer.pipe(Layer.provideMerge(BunServices.layer))
 
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  // This is the application entry point — the case the diagnostic exempts.
-  // @effect-diagnostics-next-line strictEffectProvide:off
-  return yield* cli(args).pipe(Effect.provide(AppRuntimeLayer))
+  return yield* cli(args)
 })
 
 // The TUI keeps long-lived resources open through its atom runtime (SQLite
@@ -126,6 +157,7 @@ const program = Effect.gen(function*() {
 // open handles after the UI has already torn down. Always terminate explicitly.
 const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
 
-// The outermost provide, on the line that starts the runtime.
 // @effect-diagnostics-next-line strictEffectProvide:off
-BunRuntime.runMain(Effect.provide(program, BunServices.layer), { teardown: forceExitTeardown })
+BunRuntime.runMain(Effect.provide(program, RuntimeLayer), {
+  teardown: forceExitTeardown
+})

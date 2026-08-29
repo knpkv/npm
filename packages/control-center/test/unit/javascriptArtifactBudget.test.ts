@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 
 import {
   CONTROL_CENTER_DEFERRED_DIFF_ARTIFACT_BUDGET,
@@ -8,6 +12,25 @@ import {
 } from "../../scripts/javascriptArtifactBudget.js"
 
 describe("JavaScript artifact budgets", () => {
+  it.effect("keeps the documented client measurement and ceilings synchronized", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
+      const readme = yield* fileSystem.readFileString(path.join(packageRoot, "README.md"))
+      const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS.client
+
+      expect(readme).toContain(
+        `| Client | generated API client chunk  |    269,302 / 80,291 bytes |         ${
+          budget.rawBytes.toLocaleString("en-US")
+        } / ${budget.gzipBytes.toLocaleString("en-US")} bytes |`
+      )
+    }).pipe(
+      // The test runner owns the file-service lifetime for this read-only assertion.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
   it("selects every JavaScript artifact and excludes maps and build metadata", () => {
     expect(
       javaScriptArtifactPaths([

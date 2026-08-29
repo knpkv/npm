@@ -17,6 +17,8 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+For deterministic CodeCommit work, start `pnpm mock:codecommit`, then launch the server with the printed `CODECOMMIT_MOCK_ENDPOINT`. The executable redirects only its CodeCommit and STS outbound requests to that literal loopback origin, replaces profile resolution with fixed non-secret fixture credentials, and removes authorization/session-token headers before dispatch. Configured Atlassian, Clockify, CodePipeline, AI, and telemetry endpoints keep their real origins and credential boundaries. The mock's admin API can advance PR 17 to a new head, inject an author reply, inspect request receipts, and reset the scenario; see `packages/codecommit-mock/README.md`. Git checkout and sandbox model execution remain separate acceptance seams, covered by source-workspace tests and opt-in live AWS tests respectively.
+
 ### Release-cycle traceability
 
 End-to-end release verification should carry the Jira work-item key in the branch name, commit subject,
@@ -31,10 +33,12 @@ delivery evidence as one connected release.
 
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
-| Client | generated API client chunk  |    251,169 / 74,462 bytes |         260,000 / 80,000 bytes |
+| Client | generated API client chunk  |    269,302 / 80,291 bytes |         270,000 / 82,000 bytes |
 | Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
+
+The client measurement was refreshed on 2026-08-28 after the managed-review API schemas grew the generated client chunk to 269,302 raw bytes and 80,291 level-9 gzip bytes. Its ceilings are now 270,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
 
 The remaining 1.58 MB raw shared server chunk is bounded technical debt: it is primarily Control Center's own shared application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries; raising the budget requires recording a new measurement and cause here.
 
@@ -48,6 +52,19 @@ pnpm --filter @knpkv/control-center start
 ```
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+
+`GET /.well-known/knpkv-control-center` returns a versioned, credential-free
+identity used by the CodeCommit TUI before it opens the clean **Open PR** page. The probe is
+uncached and carries no workspace or session state.
+
+A workspace owner or approver browser can open **Open PR**, paste a shared
+pull-request link, and resolve it through one narrow authenticated POST-body
+server-side batch resolver. Provider coordinates never enter the browser request
+target, history, or referrer. The AWS Console
+URL contains region, repository, and pull-request ID but no account identity.
+Control Center therefore opens an exact unique match, reports an unsynchronized
+PR, or asks the operator to choose among browser-safe AWS account labels; it never
+guesses. A truncated candidate prefix or missing account identity fails closed.
 
 ### Real Atlassian OAuth acceptance journey
 
@@ -263,9 +280,17 @@ published.
 
 The diff workspace keeps the complete file inventory visible while severity and state filters narrow
 only the review advice. Line suggestions render inline; file and whole-change suggestions use the
-compact overview. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
+compact overview. When the provider returns Review Orientation, the workspace first explains the
+overall change as ordered Change Cohorts and Change Layers. Layers use the stable
+contract, data-flow, implementation, callers, tests, docs-release order. Each layer survives only when all displayed
+ranges resolve to concrete added lines in the immutable provider diff. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
 or Unable to Conclude from the validated report. The model does not author that outcome, and there is
 no suggestion-count cap beyond the existing durable event byte envelope.
+
+The Review Thread shows input and output token totals for the selected durable run. Provider/model and
+cost fields that were not reported remain visibly **Not reported**. When a synchronized head differs
+from the last reviewed head, the workspace names both revisions, blocks old findings from publication,
+and offers an explicit **Review current head** action.
 
 Every current, validated draft suggestion can be explicitly published. Preview, governed evidence,
 reservation, provider receipt, and the Review Thread event all bind to the exact suggestion revision;

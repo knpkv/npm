@@ -17,8 +17,7 @@
  * @category Command
  * @module
  */
-import { NodeHttpClient } from "@effect/platform-node"
-import { AwsClient, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { reportFailure } from "./CliFailure.js"
@@ -171,18 +170,13 @@ const CliTerminalSession = Layer.succeed(TuiTerminalSession)({
   suspend: Effect.void
 })
 
-const AwsAndConfig = Layer.mergeAll(
-  AwsClient.AwsClientLive,
-  ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-).pipe(Layer.provideMerge(NodeHttpClient.layerFetch))
-
 /** @category Layer */
 export const PrOpenLive = Layer.mergeAll(
   CliTerminalSession,
   PrOpenService.live.pipe(
     Layer.provide(Layer.mergeAll(
       GitContextService.live,
-      FilterServiceLive.pipe(Layer.provide(AwsAndConfig))
+      FilterServiceLive
     ))
   )
 )
@@ -299,9 +293,8 @@ export const prOpenCommand = Command.make("open", {
       NotACodeCommitRemote: (error) => reportFailure(error.message),
       UnsupportedConsoleRegion: (error) => reportFailure(error.message)
     }),
-    // Each subcommand is its own entry point: exactly one runs per process, and
-    // it owns the layers it needs. Hoisting them into `bin.ts` would build the
-    // AWS and config stacks for every invocation, including `codecommit tui`.
+    // The command owns its service layer. The executable supplies the selected
+    // AWS transport and configuration services.
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(PrOpenLive)
   )).pipe(Command.withDescription("Open the console page for the PR on the branch checked out here"))

@@ -8,7 +8,6 @@
  * @category Command
  * @module
  */
-import { NodeHttpClient } from "@effect/platform-node"
 import { AwsClient } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
@@ -62,9 +61,7 @@ export class PrCreateService extends Context.Service<PrCreateService, PrCreateSe
 }
 
 /** @category Layer */
-export const PrCreateLive = PrCreateService.live.pipe(
-  Layer.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
-)
+export const PrCreateLive = PrCreateService.live
 
 /** @category Command */
 export const prCreateCommand = Command.make("create", {
@@ -111,9 +108,8 @@ export const prCreateCommand = Command.make("create", {
     yield* Console.log(`Created PR: ${created.pullRequestId}`)
     yield* Console.log(created.link)
   }).pipe(
-    // Each subcommand is its own entry point: exactly one runs per process, and
-    // it owns the layers it needs. Hoisting them into `bin.ts` would build the
-    // AWS and config stacks for every invocation, including `codecommit tui`.
+    // The command owns its service layer. The executable supplies the selected
+    // AWS transport so fixture and production calls share one boundary.
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(PrCreateLive)
   )).pipe(Command.withDescription("Create a pull request"))

@@ -30,6 +30,9 @@ Opening a CodeCommit pull request uses one full-screen review workspace:
 - File-level and whole-change suggestions also appear in a compact overview above the diff.
 - A collapsible right rail contains the durable Review Thread and live agent activity.
 - Commands, files inspected, test progress, and limitations stream live. Speculative suggestions do not.
+- A shared AWS Console URL opens through `/open-pr` for owner or approver sessions, resolves through one narrow authenticated server-side batch inside the paired workspace, and fails closed on truncated candidates or absent account identity. Ambiguous matches use authenticated browser-safe AWS account labels.
+- Review Orientation precedes findings with an overall explanation and ordered Change Cohorts and Change Layers anchored to concrete diff ranges.
+- The Review Thread shows per-run token usage and says when provider/model or cost data was not reported.
 
 The Rly diff interface must be extended to render application-owned annotation cards without exposing Pierre types through Rly's public interface.
 
@@ -42,7 +45,10 @@ The Rly diff interface must be extended to render application-owned annotation c
 - Twenty-minute default Review Budget.
 - Network disabled status and any explicit unauthenticated endpoint allowlist.
 
-Advanced options remain collapsed. Reviews never start automatically after a push.
+Advanced options remain collapsed. Manual review remains the default. The current
+implementation never starts a run automatically after a push. A later Review Watch
+policy may prepare read-only runs for explicitly selected accounts, repositories,
+or authors; it grants no publication, approval, finalization, or notification authority.
 
 Explicit triggers are:
 
@@ -50,6 +56,8 @@ Explicit triggers are:
 - Re-review of a new head.
 - Revalidation of one suggestion.
 - Targeted request from the Review Thread.
+
+A synchronized pull request can be reviewed before it is connected to a release. When a canonical release exists, its identity remains part of the immutable run context; otherwise the review is scoped by workspace, provider connection, repository, pull-request ID, and exact base/head revisions.
 
 ### Suggestion actions
 
@@ -96,6 +104,13 @@ Every Review Suggestion contains:
 - Confidence and confidence reason.
 - Optional Suggested Replacement.
 - Optional Prevention Proposal.
+
+The report may also contain Review Orientation: one bounded overall summary and
+ordered Change Cohorts. Each cohort has ordered Change Layers, and every layer
+uses one stable kind in contract, data-flow, implementation, callers, tests,
+docs-release order and names concrete changed ranges. The host removes ranges that do not resolve to
+added lines in the immutable provider diff, then removes empty layers and cohorts.
+The raw provider diff remains publication truth.
 
 Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions, including added source text that begins with diff-marker characters.
 
@@ -439,3 +454,5 @@ environment values, and provider-native references remain server-only.
 - [0009 — Use a provider-neutral agent tool loop](./adr/0009-use-a-provider-neutral-agent-tool-loop.md)
 - [0010 — Test agent review through its public seams](./adr/0010-test-agent-review-through-its-public-seams.md)
 - [0011 — Replace the pre-stable review model without migration](./adr/0011-replace-the-pre-stable-review-model-without-migration.md)
+- [0012 — Own managed review in Control Center](./adr/0012-own-managed-review-in-control-center.md)
+- [0013 — Auto-prepare watched reviews without write authority](./adr/0013-auto-prepare-watched-reviews-without-write-authority.md)

@@ -1,3 +1,7 @@
+import {
+  CONTROL_CENTER_MANAGED_REVIEW_IDENTITY,
+  CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH
+} from "@knpkv/codecommit-core/ManagedReviewProtocol.js"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -12,6 +16,15 @@ const notFound = HttpServerResponse.text("Not Found", {
   headers: {
     "cache-control": "no-store",
     "content-type": "text/plain; charset=utf-8"
+  }
+})
+
+const managedReviewIdentity = HttpServerResponse.text(CONTROL_CENTER_MANAGED_REVIEW_IDENTITY, {
+  status: 200,
+  headers: {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8",
+    "x-content-type-options": "nosniff"
   }
 })
 
@@ -34,8 +47,13 @@ const serveStaticAsset = Effect.gen(function*() {
   })
 })
 
-/** Register immutable GET assets; Effect's router serves matching HEAD requests without a body. */
-export const staticApplicationLayer = HttpRouter.use((router) => router.add("GET", "/*", serveStaticAsset))
+/** Register the public identity probe and immutable assets; HEAD is implicit. */
+export const staticApplicationLayer = HttpRouter.use((router) =>
+  Effect.gen(function*() {
+    yield* router.add("GET", CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH, Effect.succeed(managedReviewIdentity))
+    yield* router.add("GET", "/*", serveStaticAsset)
+  })
+)
 
 /** Supply the immutable asset service to the static browser route. */
 export const staticApplicationWithAssetsLayer = <Error, Requirements>(
