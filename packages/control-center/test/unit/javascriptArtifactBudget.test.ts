@@ -11,25 +11,54 @@ import {
   javaScriptArtifactPaths
 } from "../../scripts/javascriptArtifactBudget.js"
 
+const matchingDocumentedBudgetRows = (
+  source: string,
+  target: "client" | "server",
+  label: "Client" | "Server"
+): ReadonlyArray<string> => {
+  const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS[target]
+  const budgetPattern = new RegExp(
+    `\\|\\s*${budget.rawBytes.toLocaleString("en-US")}\\s*/\\s*${
+      budget.gzipBytes.toLocaleString("en-US")
+    } bytes\\s*\\|$`,
+    "u"
+  )
+  return source
+    .split("\n")
+    .filter((line) => line.startsWith(`| ${label} |`) && budgetPattern.test(line))
+}
+
+const DOCUMENTED_BUILD_TARGETS: ReadonlyArray<
+  readonly [target: "client" | "server", label: "Client" | "Server"]
+> = [
+  ["client", "Client"],
+  ["server", "Server"]
+]
+
 describe("JavaScript artifact budgets", () => {
-  it.effect("keeps the documented client measurement and ceilings synchronized", () =>
+  it.effect("keeps every documented target ceiling synchronized by table row", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
       const readme = yield* fileSystem.readFileString(path.join(packageRoot, "README.md"))
-      const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS.client
 
-      expect(readme).toContain(
-        `| Client | generated API client chunk  |    269,302 / 80,291 bytes |         ${
-          budget.rawBytes.toLocaleString("en-US")
-        } / ${budget.gzipBytes.toLocaleString("en-US")} bytes |`
-      )
+      for (const [target, label] of DOCUMENTED_BUILD_TARGETS) {
+        expect(matchingDocumentedBudgetRows(readme, target, label)).toHaveLength(1)
+      }
     }).pipe(
       // The test runner owns the file-service lifetime for this read-only assertion.
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(NodeServices.layer)
     ))
+
+  it("rejects a stale target row and accepts the configured budget", () => {
+    const stale = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 290,000 bytes |"
+    const current = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 292,000 bytes |"
+
+    expect(matchingDocumentedBudgetRows(stale, "server", "Server")).toEqual([])
+    expect(matchingDocumentedBudgetRows(current, "server", "Server")).toEqual([current])
+  })
 
   it("selects every JavaScript artifact and excludes maps and build metadata", () => {
     expect(

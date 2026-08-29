@@ -35,14 +35,14 @@ delivery evidence as one connected release.
 
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
-| Client | generated API client chunk  |    269,302 / 80,291 bytes |         271,000 / 82,000 bytes |
-| Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
+| Client | generated API client chunk  |    270,002 / 80,249 bytes |         271,000 / 82,000 bytes |
+| Server | shared `BindConfig-*` chunk | 1,511,834 / 289,432 bytes |      1,650,000 / 292,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
 
-The client measurement was refreshed on 2026-08-28 after the managed-review API schemas grew the generated client chunk to 269,302 raw bytes and 80,291 level-9 gzip bytes. Its ceilings are now 271,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
+The client measurement was refreshed on 2026-08-29 after the managed-review API schemas and cleanup stage grew the generated client chunk to 270,002 raw bytes and 80,249 level-9 gzip bytes. Its ceilings are 271,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
 
-The remaining 1.58 MB raw shared server chunk is bounded technical debt: it is primarily Control Center's own shared application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries; raising the budget requires recording a new measurement and cause here.
+The server measurement was refreshed on 2026-08-29 after native review cleanup classification added its runtime path to the shared chunk. It now measures 1,511,834 raw bytes and 289,432 level-9 gzip bytes; the 292,000-byte gzip ceiling keeps less than one percent headroom so further growth requires a new measurement and cause here. This shared chunk remains bounded technical debt: it is primarily Control Center's own application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries.
 
 ## Run the application
 
