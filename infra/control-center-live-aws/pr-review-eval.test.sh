@@ -148,6 +148,7 @@ aws() {
 
 git() {
   printf 'git %s\n' "$*" >>"${calls_file}"
+  [[ "$*" == "init --bare --quiet "* ]] && return 0
   [[ "$*" == *" push "* ]] || return 1
 
   local argument
@@ -168,6 +169,8 @@ git() {
   [[ "${git_configs[4]}" == "credential.UseHttpPath=true" ]]
   [[ "${CONTROL_CENTER_CODECOMMIT_GIT_PROFILE}" == "${aws_profile}" ]]
   [[ "${CONTROL_CENTER_CODECOMMIT_GIT_REGION}" == "${aws_region}" ]]
+  [[ "${1}" == "-C" && "${2}" == "${state_root}/.git-delete."* ]]
+  [[ "$(stat -c '%u:%a' -- "${2}")" == "$(id -u):700" ]]
   [[ "${@: -2:1}" == "https://$(git_host_for_region "${aws_region}")/v1/repos/${repository_name}" ]]
   [[ "${@: -1}" == ":refs/heads/${branch_name}" ]]
 
@@ -295,7 +298,9 @@ test_git_credential_helper_clears_ambient_authority() {
     Aws_Web_Identity_Token_File="/forbidden/token" \
     AWS_REGION="forbidden-region" \
     Aws_Default_Region="forbidden-default-region" \
+    AWS_CONTAINER_CREDENTIALS_RELATIVE_URI="/v2/credentials/fixture" \
     AWS_CONTAINER_CREDENTIALS_FULL_URI="http://container-credentials.invalid" \
+    AWS_EC2_METADATA_SERVICE_ENDPOINT="http://instance-metadata.invalid" \
     CONTROL_CENTER_CODECOMMIT_GIT_PROFILE="selected-profile" \
     CONTROL_CENTER_CODECOMMIT_GIT_REGION="selected-region" \
     bash "${test_root}/pr-review-eval-git-credential-helper.sh" get
@@ -306,6 +311,51 @@ test_git_credential_helper_clears_ambient_authority() {
     "${credential_helper_capture}"
   grep -q '^AWS_CONTAINER_CREDENTIALS_FULL_URI=http://container-credentials.invalid$' \
     "${credential_helper_capture}"
+  grep -q '^AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=/v2/credentials/fixture$' \
+    "${credential_helper_capture}"
+  grep -q '^AWS_EC2_METADATA_SERVICE_ENDPOINT=http://instance-metadata.invalid$' \
+    "${credential_helper_capture}"
+}
+
+test_git_delete_ignores_ambient_url_rewrites() {
+  local attacker_repository="${test_workspace}/attacker.git"
+  local branch="fixture-branch"
+  local deletion_state_root="${recovery_root}/git-delete-test"
+  local git_workspace="${test_workspace}/git-workspace"
+  local victim_repository="${test_workspace}/victim.git"
+  mkdir -p -- "${deletion_state_root}" "${git_workspace}"
+  chmod 700 -- "${deletion_state_root}"
+  command git init --bare --quiet "${attacker_repository}"
+  command git init --bare --quiet "${victim_repository}"
+  command git -C "${git_workspace}" init --quiet
+  printf 'fixture\n' >"${git_workspace}/fixture.txt"
+  command git -C "${git_workspace}" add -- fixture.txt
+  command git -C "${git_workspace}" \
+    -c user.name=Fixture \
+    -c user.email=fixture@example.invalid \
+    commit --quiet -m fixture
+  local expected_head
+  expected_head="$(command git -C "${git_workspace}" rev-parse HEAD)"
+  command git -C "${git_workspace}" push --quiet "${victim_repository}" "HEAD:refs/heads/${branch}"
+  command git -C "${git_workspace}" push --quiet "${attacker_repository}" "HEAD:refs/heads/${branch}"
+
+  GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.file://${attacker_repository}/.pushInsteadOf" \
+    GIT_CONFIG_VALUE_0="file://${victim_repository}/" \
+    bash -c \
+    'source "$1"; delete_git_branch_exact_head "$2" "$3" "$4" "$5"' \
+    _ "${test_root}/pr-review-eval.sh" "file://${victim_repository}" "${branch}" "${expected_head}" \
+    "${deletion_state_root}"
+
+  if command git --git-dir="${victim_repository}" show-ref --verify --quiet "refs/heads/${branch}"; then
+    return 1
+  fi
+  command git --git-dir="${attacker_repository}" show-ref --verify --quiet "refs/heads/${branch}"
+  (
+    shopt -s nullglob
+    local scratch_repositories=("${deletion_state_root}"/.git-delete.*)
+    [[ "${#scratch_repositories[@]}" -eq 0 ]]
+  )
 }
 
 test_successful_lifecycle() {
@@ -637,6 +687,46 @@ test_unexpected_recovery_file_preserves_journal() {
   cleanup
 }
 
+test_recovery_removes_stale_isolated_git_repository() {
+  reset_fixture success
+  create_fixture >/dev/null
+  trap - EXIT INT TERM
+  local journal="${state_file}"
+  local journal_root="${state_root}"
+  local stale_repository="${state_root}/.git-delete.Abc123"
+  mkdir -p -- "${stale_repository}/objects"
+  chmod 700 -- "${stale_repository}"
+  : >"${stale_repository}/HEAD"
+  discard_runtime_state
+
+  recover_fixture "${journal}"
+
+  [[ ! -e "${journal_root}" ]]
+  [[ "$(<"${branch_owner_file}")" == "none" ]]
+}
+
+test_recovery_refuses_stale_git_repository_symlink() {
+  reset_fixture success
+  create_fixture >/dev/null
+  trap - EXIT INT TERM
+  local outside_repository="${test_workspace}/outside-git-delete"
+  local stale_repository="${state_root}/.git-delete.Abc123"
+  local stderr_file="${test_workspace}/stderr-stale-git-symlink"
+  mkdir -p -- "${outside_repository}"
+  ln -s -- "${outside_repository}" "${stale_repository}"
+
+  if cleanup 2>"${stderr_file}"; then
+    return 1
+  fi
+
+  [[ -f "${state_file}" ]]
+  [[ -L "${stale_repository}" ]]
+  [[ -d "${outside_repository}" ]]
+  grep -q 'recovery directory contains unexpected files' "${stderr_file}"
+  rm -- "${stale_repository}"
+  cleanup
+}
+
 test_recovery_accepts_already_removed_resources() {
   reset_fixture success
   create_fixture >/dev/null
@@ -748,6 +838,7 @@ test_focused_fixture() {
 test_successful_lifecycle
 test_china_partition_fixture_boundary
 test_git_credential_helper_clears_ambient_authority
+test_git_delete_ignores_ambient_url_rewrites
 test_boundary_failures_write_nothing
 test_branch_collision_preserves_foreign_branch
 test_ambiguous_branch_create_retains_recovery_state
@@ -761,6 +852,8 @@ test_uncertain_branch_recovery_refuses_mutation
 test_tampered_recovery_journal_refuses_mutation
 test_recovery_path_boundary
 test_unexpected_recovery_file_preserves_journal
+test_recovery_removes_stale_isolated_git_repository
+test_recovery_refuses_stale_git_repository_symlink
 test_recovery_accepts_already_removed_resources
 test_uncertain_create_retains_recovery_state
 test_malformed_create_retains_recovery_state

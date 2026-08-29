@@ -91,24 +91,64 @@ git_host_for_region() {
 }
 
 delete_branch_exact_head() {
-  local credential_helper_command
   local repository_url
-  printf -v credential_helper_command '!bash %q' "${git_credential_helper}"
   printf -v repository_url 'https://%s/v1/repos/%s' \
     "$(git_host_for_region "${aws_region}")" "${repository_name}"
+  delete_git_branch_exact_head "${repository_url}" "${branch_name}" "${head_commit}" "${state_root}"
+}
+
+delete_git_branch_exact_head() (
+  local branch="$2"
+  local credential_helper_command
+  local environment_name
+  local expected_head="$3"
+  local isolated_repository
+  local repository_url="$1"
+  local temporary_root="$4"
+
+  while IFS='=' read -r -d '' environment_name _; do
+    case "${environment_name^^}" in
+      GIT_*) unset "${environment_name}" ;;
+    esac
+  done < <(env -0)
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_NOSYSTEM=1
+  export GIT_TERMINAL_PROMPT=0
+
+  isolated_repository="$(mktemp -d "${temporary_root}/.git-delete.XXXXXX")" || return 1
+  chmod 700 -- "${isolated_repository}" || return 1
+  trap 'rm -rf -- "${isolated_repository}"' EXIT
+  git init --bare --quiet "${isolated_repository}" >/dev/null 2>&1 || return 1
+  printf -v credential_helper_command '!bash %q' "${git_credential_helper}"
   CONTROL_CENTER_CODECOMMIT_GIT_PROFILE="${aws_profile}" \
     CONTROL_CENTER_CODECOMMIT_GIT_REGION="${aws_region}" \
-    git -C "${script_root}" \
-    -c credential.helper= \
-    -c "credential.helper=${credential_helper_command}" \
-    -c credential.interactive=false \
-    -c core.hooksPath=/dev/null \
-    -c credential.UseHttpPath=true \
-    push --porcelain \
-    --force-with-lease="refs/heads/${branch_name}:${head_commit}" \
-    "${repository_url}" \
-    ":refs/heads/${branch_name}" >/dev/null 2>&1
-}
+    git -C "${isolated_repository}" \
+      -c credential.helper= \
+      -c "credential.helper=${credential_helper_command}" \
+      -c credential.interactive=false \
+      -c core.hooksPath=/dev/null \
+      -c credential.UseHttpPath=true \
+      push --porcelain \
+      --force-with-lease="refs/heads/${branch}:${expected_head}" \
+      "${repository_url}" \
+      ":refs/heads/${branch}" >/dev/null 2>&1
+)
+
+cleanup_stale_git_repositories() (
+  local candidate
+  local candidate_name
+  local owner_and_mode
+
+  shopt -s nullglob
+  for candidate in "${state_root}"/.git-delete.*; do
+    candidate_name="${candidate##*/}"
+    [[ "${candidate_name}" =~ ^\.git-delete\.[[:alnum:]]{6}$ ]] || continue
+    [[ -d "${candidate}" && ! -L "${candidate}" ]] || continue
+    owner_and_mode="$(stat -c '%u:%a' -- "${candidate}")" || return 1
+    [[ "${owner_and_mode}" == "$(id -u):700" ]] || continue
+    rm -rf -- "${candidate}" || return 1
+  done
+)
 
 prepare_recovery_root() {
   if [[ "${recovery_root}" != /* ]]; then
@@ -457,6 +497,10 @@ cleanup() {
     return 1
   fi
   if [[ -n "${state_root}" && -d "${state_root}" && "${state_file}" == "${state_root}/fixture.json" ]]; then
+    if ! cleanup_stale_git_repositories; then
+      printf 'Cleanup incomplete; isolated Git repository removal failed at %s\n' "${state_root}" >&2
+      return 1
+    fi
     if ! (
       shopt -s dotglob nullglob
       entries=("${state_root}"/*)

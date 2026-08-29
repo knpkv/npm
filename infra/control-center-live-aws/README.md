@@ -98,11 +98,16 @@ ARN agree. `RECOVERY <journal>` is printed before the first resource mutation; `
 printed after the pull request is usable. The script stays alive while the fixture is in use; type
 `stop` or terminate it to close the pull request and then delete the branch. Branch deletion uses
 Git's exact-head force-with-lease transaction; a concurrent push fails cleanup and leaves the branch
-and journal intact. Successful cleanup removes the journal. Incomplete cleanup reports the failed
-stage without exposing provider stderr and keeps the journal. Cleanup is registered before the
-first AWS resource is created and records ownership after each successful mutation. This fixture
-does not inspect or modify CodePipeline and remains usable when that pipeline has drifted. It
-requires Git, the AWS CLI, `jq`, and `uuidgen`. The selected profile needs CloudFormation
+and journal intact. The push runs from a private temporary bare repository beneath the recovery
+state directory with inherited Git environment, repository, global, and system configuration
+disabled, preventing URL rewrites or credential-helper substitution. Its credential helper clears
+ambient static, session, web-identity, and region authority before selecting the requested profile;
+container and instance-metadata sources remain available to profiles configured to use them.
+Successful cleanup removes the temporary repository and journal. Incomplete cleanup reports the
+failed stage without exposing provider stderr and keeps the journal. Cleanup is registered before
+the first AWS resource is created and records ownership after each successful mutation. This
+fixture does not inspect or modify CodePipeline and remains usable when that pipeline has drifted.
+It requires Git, the AWS CLI, `jq`, and `uuidgen`. The selected profile needs CloudFormation
 `DescribeStacks`/`DescribeStackResource`, STS `GetCallerIdentity`, and CodeCommit `GetRepository`,
 `GetBranch`, `CreateBranch`, `PutFile`, `ListPullRequests`, `GetPullRequest`, `CreatePullRequest`,
 `UpdatePullRequestStatus`, and `GitPush`; the last action authorizes conditional branch deletion.
