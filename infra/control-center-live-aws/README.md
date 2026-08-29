@@ -96,11 +96,16 @@ mode-`0700` state directory. The absolute dedicated recovery root defaults to
 CloudFormation stack output, stack-owned repository ID, CodeCommit repository name, and repository
 ARN agree. `RECOVERY <journal>` is printed before the first resource mutation; `READY <journal>` is
 printed after the pull request is usable. The script stays alive while the fixture is in use; type
-`stop` or terminate it to close the pull request and then delete the branch. Successful cleanup
-removes the journal. Incomplete cleanup reports the failed stage without exposing provider stderr
-and keeps the journal. Cleanup is registered before the first AWS resource is created and records
-ownership after each successful mutation. This fixture does not inspect or modify CodePipeline and
-remains usable when that pipeline has drifted.
+`stop` or terminate it to close the pull request and then delete the branch. Branch deletion uses
+Git's exact-head force-with-lease transaction; a concurrent push fails cleanup and leaves the branch
+and journal intact. Successful cleanup removes the journal. Incomplete cleanup reports the failed
+stage without exposing provider stderr and keeps the journal. Cleanup is registered before the
+first AWS resource is created and records ownership after each successful mutation. This fixture
+does not inspect or modify CodePipeline and remains usable when that pipeline has drifted. It
+requires Git, the AWS CLI, `jq`, and `uuidgen`. The selected profile needs CloudFormation
+`DescribeStacks`/`DescribeStackResource`, STS `GetCallerIdentity`, and CodeCommit `GetRepository`,
+`GetBranch`, `CreateBranch`, `PutFile`, `ListPullRequests`, `GetPullRequest`, `CreatePullRequest`,
+`UpdatePullRequestStatus`, and `GitPush`; the last action authorizes conditional branch deletion.
 
 ```sh
 AWS_PROFILE=dev-administratoraccess \
@@ -117,10 +122,11 @@ CONTROL_CENTER_LIVE_AWS_REGION=eu-central-1 \
 ```
 
 Recovery accepts only a private journal directly beneath the configured recovery root, re-verifies
-the stack/account/repository boundary, and matches the exact tokenized pull request and branch head
-before mutation. It reconciles an uncertain pull-request create only when exactly one matching open
-pull request exists. It never deletes an uncertain branch; inspect that retained journal and the
-provider state manually.
+the stack/account/repository boundary, and matches the exact tokenized pull request. The branch is
+deleted only by a Git force-with-lease operation conditioned on the journaled head, so a change
+between the preceding read and deletion cannot remove an unverified commit. Recovery reconciles an
+uncertain pull-request create only when exactly one matching open pull request exists. It never
+deletes an uncertain branch; inspect that retained journal and the provider state manually.
 
 If the terminal output was lost, inspect the configured recovery root for a private
 `*/fixture.json` journal. Do not move or copy a journal outside that root before recovery.

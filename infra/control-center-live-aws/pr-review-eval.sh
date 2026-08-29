@@ -10,6 +10,7 @@ readonly recovery_root="${CONTROL_CENTER_PR_REVIEW_RECOVERY_ROOT:-${XDG_STATE_HO
 script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly script_root
 readonly fixture_file="${script_root}/pr-review-eval-fixture.ts"
+readonly git_credential_helper="${script_root}/pr-review-eval-git-credential-helper.sh"
 aws_command=(aws --profile "${aws_profile}" --region "${aws_region}")
 
 repository_name=""
@@ -81,6 +82,34 @@ console_host_for_region() {
   esac
 }
 
+git_host_for_region() {
+  local region="$1"
+  case "$(aws_partition_for_region "${region}")" in
+    aws-cn) printf 'git-codecommit.%s.amazonaws.com.cn\n' "${region}" ;;
+    aws | aws-us-gov) printf 'git-codecommit.%s.amazonaws.com\n' "${region}" ;;
+  esac
+}
+
+delete_branch_exact_head() {
+  local credential_helper_command
+  local repository_url
+  printf -v credential_helper_command '!bash %q' "${git_credential_helper}"
+  printf -v repository_url 'https://%s/v1/repos/%s' \
+    "$(git_host_for_region "${aws_region}")" "${repository_name}"
+  CONTROL_CENTER_CODECOMMIT_GIT_PROFILE="${aws_profile}" \
+    CONTROL_CENTER_CODECOMMIT_GIT_REGION="${aws_region}" \
+    git -C "${script_root}" \
+    -c credential.helper= \
+    -c "credential.helper=${credential_helper_command}" \
+    -c credential.interactive=false \
+    -c core.hooksPath=/dev/null \
+    -c credential.UseHttpPath=true \
+    push --porcelain \
+    --force-with-lease="refs/heads/${branch_name}:${head_commit}" \
+    "${repository_url}" \
+    ":refs/heads/${branch_name}" >/dev/null 2>&1
+}
+
 prepare_recovery_root() {
   if [[ "${recovery_root}" != /* ]]; then
     fail "Recovery root must be an absolute dedicated directory"
@@ -100,6 +129,14 @@ prepare_recovery_root() {
   }
   [[ "$(stat -c '%u:%a' "${recovery_root}")" == "$(id -u):700" ]] ||
     fail "Recovery root must be owned by the current user with mode 0700"
+}
+
+verify_cleanup_prerequisites() {
+  command -v aws >/dev/null 2>&1 || fail "AWS CLI is required"
+  command -v git >/dev/null 2>&1 || fail "git is required"
+  command -v jq >/dev/null 2>&1 || fail "jq is required"
+  [[ -f "${git_credential_helper}" && ! -L "${git_credential_helper}" ]] ||
+    fail "The CodeCommit Git credential helper is required"
 }
 
 load_recovery_state() {
@@ -337,6 +374,7 @@ recover_fixture() {
   local journal_repository
   local requested_state_file="$1"
 
+  verify_cleanup_prerequisites || return 1
   load_recovery_state "${requested_state_file}" || return 1
   journal_account="${expected_account_id}"
   journal_repository="${repository_name}"
@@ -402,16 +440,14 @@ cleanup() {
     if ! verify_recovery_branch; then
       printf 'Branch cleanup refused because its exact head could not be verified\n' >&2
       cleanup_failed=true
-    elif [[ "${branch_ownership}" == "owned" ]] && run_aws_quiet codecommit delete-branch \
-      --repository-name "${repository_name}" \
-      --branch-name "${branch_name}"; then
+    elif [[ "${branch_ownership}" == "owned" ]] && delete_branch_exact_head; then
       branch_ownership="none"
       if ! journal_state; then
         printf 'Branch deleted, but its recovery journal could not be updated at %s\n' "${state_file}" >&2
         cleanup_failed=true
       fi
     elif [[ "${branch_ownership}" == "owned" ]]; then
-      printf 'Branch cleanup failed while deleting the verified fixture\n' >&2
+      printf 'Branch cleanup failed while deleting the exact fixture head\n' >&2
       cleanup_failed=true
     fi
   fi
@@ -462,7 +498,7 @@ create_fixture() {
   local fixture_commit
   local main_commit
 
-  command -v jq >/dev/null 2>&1 || fail "jq is required"
+  verify_cleanup_prerequisites || return 1
   command -v uuidgen >/dev/null 2>&1 || fail "uuidgen is required"
   run_token="$(make_run_token)"
   prepare_recovery_root || return 1

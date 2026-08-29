@@ -142,15 +142,50 @@ aws() {
       [[ "${scenario}" == "close-fails" ]] && return 1
       return 0
       ;;
-    "codecommit delete-branch"*)
-      [[ "${scenario}" == "delete-fails" ]] && return 1
-      [[ "$(<"${branch_owner_file}")" == "fixture" ]] || return 1
-      printf 'none\n' >"${branch_owner_file}"
-      : >"${branch_head_file}"
-      return 0
-      ;;
     *) return 1 ;;
   esac
+}
+
+git() {
+  printf 'git %s\n' "$*" >>"${calls_file}"
+  [[ "$*" == *" push "* ]] || return 1
+
+  local argument
+  local expected_credential_helper
+  local previous=""
+  local git_configs=()
+  printf -v expected_credential_helper 'credential.helper=!bash %q' "${git_credential_helper}"
+  for argument in "$@"; do
+    if [[ "${previous}" == "-c" ]]; then
+      git_configs+=("${argument}")
+    fi
+    previous="${argument}"
+  done
+  [[ "${git_configs[0]}" == "credential.helper=" ]]
+  [[ "${git_configs[1]}" == "${expected_credential_helper}" ]]
+  [[ "${git_configs[2]}" == "credential.interactive=false" ]]
+  [[ "${git_configs[3]}" == "core.hooksPath=/dev/null" ]]
+  [[ "${git_configs[4]}" == "credential.UseHttpPath=true" ]]
+  [[ "${CONTROL_CENTER_CODECOMMIT_GIT_PROFILE}" == "${aws_profile}" ]]
+  [[ "${CONTROL_CENTER_CODECOMMIT_GIT_REGION}" == "${aws_region}" ]]
+  [[ "${@: -2:1}" == "https://$(git_host_for_region "${aws_region}")/v1/repos/${repository_name}" ]]
+  [[ "${@: -1}" == ":refs/heads/${branch_name}" ]]
+
+  local expected_head=""
+  for argument in "$@"; do
+    if [[ "${argument}" == --force-with-lease="refs/heads/${branch_name}:"* ]]; then
+      expected_head="${argument##*:}"
+    fi
+  done
+  [[ "${expected_head}" == "${head_commit}" ]] || return 1
+  [[ "${scenario}" == "delete-fails" ]] && return 1
+  if [[ "${scenario}" == "delete-race" ]]; then
+    printf '3333333333333333333333333333333333333333\n' >"${branch_head_file}"
+  fi
+  [[ "$(<"${branch_head_file}")" == "${expected_head}" ]] || return 1
+  [[ "$(<"${branch_owner_file}")" == "fixture" ]] || return 1
+  printf 'none\n' >"${branch_owner_file}"
+  : >"${branch_head_file}"
 }
 
 reset_fixture() {
@@ -211,6 +246,7 @@ test_china_partition_fixture_boundary() {
 
   [[ "${identity}" == $'aws-cn\t123456789012' ]]
   [[ "$(console_host_for_region "cn-north-1")" == "cn-north-1.console.amazonaws.cn" ]]
+  [[ "$(git_host_for_region "cn-north-1")" == "git-codecommit.cn-north-1.amazonaws.com.cn" ]]
   if fixture_role_identity \
     "arn:aws:iam::${fixture_account}:role/control-center-live" \
     "cn-north-1" >/dev/null; then
@@ -238,6 +274,38 @@ test_china_partition_fixture_boundary() {
   jq -e \
     '.region == "cn-north-1" and .url == "https://cn-north-1.console.amazonaws.cn/codesuite/codecommit/repositories/fixture-repository/pull-requests/42?region=cn-north-1"' \
     "${china_state_root}/fixture.json" >/dev/null
+}
+
+test_git_credential_helper_clears_ambient_authority() {
+  local credential_helper_capture="${test_workspace}/credential-helper-capture"
+  local helper_bin="${test_workspace}/credential-helper-bin"
+  mkdir -p -- "${helper_bin}"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf '\''args=%s\n'\'' "$*" >"${credential_helper_capture}"' \
+    'env >>"${credential_helper_capture}"' \
+    >"${helper_bin}/aws"
+  chmod 700 "${helper_bin}/aws"
+  export credential_helper_capture
+
+  PATH="${helper_bin}:${PATH}" \
+    AWS_ACCESS_KEY_ID="forbidden-access-key" \
+    Aws_Secret_Access_Key="forbidden-secret" \
+    AWS_SESSION_TOKEN="forbidden-session" \
+    Aws_Web_Identity_Token_File="/forbidden/token" \
+    AWS_REGION="forbidden-region" \
+    Aws_Default_Region="forbidden-default-region" \
+    AWS_CONTAINER_CREDENTIALS_FULL_URI="http://container-credentials.invalid" \
+    CONTROL_CENTER_CODECOMMIT_GIT_PROFILE="selected-profile" \
+    CONTROL_CENTER_CODECOMMIT_GIT_REGION="selected-region" \
+    bash "${test_root}/pr-review-eval-git-credential-helper.sh" get
+
+  grep -q '^args=--profile selected-profile --region selected-region codecommit credential-helper get$' \
+    "${credential_helper_capture}"
+  ! grep -Eqi '^aws_(access_key_id|secret_access_key|session_token|web_identity_token_file|region|default_region)=' \
+    "${credential_helper_capture}"
+  grep -q '^AWS_CONTAINER_CREDENTIALS_FULL_URI=http://container-credentials.invalid$' \
+    "${credential_helper_capture}"
 }
 
 test_successful_lifecycle() {
@@ -268,11 +336,11 @@ test_successful_lifecycle() {
   local close_line
   local delete_line
   close_line="$(grep -n 'codecommit update-pull-request-status' "${calls_file}" | cut -d: -f1)"
-  delete_line="$(grep -n 'codecommit delete-branch' "${calls_file}" | cut -d: -f1)"
+  delete_line="$(grep -n 'git .* push ' "${calls_file}" | cut -d: -f1)"
   [[ "${close_line}" -lt "${delete_line}" ]]
   cleanup
   [[ "$(grep -c 'codecommit update-pull-request-status' "${calls_file}")" -eq 1 ]]
-  [[ "$(grep -c 'codecommit delete-branch' "${calls_file}")" -eq 1 ]]
+  [[ "$(grep -c 'git .* push ' "${calls_file}")" -eq 1 ]]
   assert_no_unrelated_calls
 }
 
@@ -304,7 +372,7 @@ test_branch_collision_preserves_foreign_branch() {
   jq -e '.branchOwnership == "none" and (.branchCreated | not)' "${state_file}" >/dev/null
   cleanup
   [[ "$(<"${branch_owner_file}")" == "foreign" ]]
-  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
   assert_no_unrelated_calls
 }
 
@@ -320,7 +388,7 @@ test_ambiguous_branch_create_retains_recovery_state() {
     return 1
   fi
   [[ "$(<"${branch_owner_file}")" == "fixture" ]]
-  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
   assert_private_state
 }
 
@@ -340,7 +408,7 @@ test_branch_mutation_is_journaled() {
   grep -q 'Unable to write the evaluation change to the fixture branch' "${stderr_file}"
   ! grep -Eq "${fixture_account}|${fixture_repository}" "${stderr_file}"
   cleanup
-  grep -q 'codecommit delete-branch' "${calls_file}"
+  grep -q 'git .* push ' "${calls_file}"
 }
 
 test_changed_branch_refuses_cleanup() {
@@ -358,7 +426,29 @@ test_changed_branch_refuses_cleanup() {
   [[ "$(<"${branch_owner_file}")" == "fixture" ]]
   grep -q 'Branch cleanup refused because its exact head could not be verified' "${stderr_file}"
   ! grep -Eq "${fixture_account}|${fixture_repository}" "${stderr_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
+  printf '%s\n' "${expected_fixture_commit}" >"${branch_head_file}"
+  cleanup
+}
+
+test_branch_advance_during_delete_refuses_cleanup() {
+  reset_fixture success
+  create_fixture >/dev/null
+  trap - EXIT INT TERM
+  scenario="delete-race"
+  local stderr_file="${test_workspace}/stderr-delete-race"
+
+  if cleanup 2>"${stderr_file}"; then
+    return 1
+  fi
+
+  [[ -f "${state_file}" ]]
+  [[ "$(<"${branch_owner_file}")" == "fixture" ]]
+  jq -e '(.pullRequestCreated | not) and .branchCreated' "${state_file}" >/dev/null
+  grep -q 'Branch cleanup failed while deleting the exact fixture head' "${stderr_file}"
+  grep -q -- "--force-with-lease=refs/heads/${branch_name}:${expected_fixture_commit}" "${calls_file}"
   ! grep -q 'codecommit delete-branch' "${calls_file}"
+  scenario="success"
   printf '%s\n' "${expected_fixture_commit}" >"${branch_head_file}"
   cleanup
 }
@@ -392,7 +482,7 @@ test_fresh_process_recovery() {
     export scenario calls_file branch_owner_file branch_head_file
     export fixture_account fixture_repository fixture_repository_id
     export expected_main_commit expected_fixture_commit
-    export -f aws stack_document repository_document pull_request_document
+    export -f aws git stack_document repository_document pull_request_document
     AWS_PROFILE="dev-administratoraccess" \
       CONTROL_CENTER_LIVE_AWS_REGION="eu-central-1" \
       CONTROL_CENTER_PR_REVIEW_RECOVERY_ROOT="${recovery_root}" \
@@ -405,7 +495,7 @@ test_fresh_process_recovery() {
   local close_line
   local delete_line
   close_line="$(grep -n 'codecommit update-pull-request-status' "${calls_file}" | tail -1 | cut -d: -f1)"
-  delete_line="$(grep -n 'codecommit delete-branch' "${calls_file}" | tail -1 | cut -d: -f1)"
+  delete_line="$(grep -n 'git .* push ' "${calls_file}" | tail -1 | cut -d: -f1)"
   [[ "${close_line}" -lt "${delete_line}" ]]
 }
 
@@ -445,7 +535,7 @@ test_uncertain_branch_recovery_refuses_mutation() {
   [[ -f "${journal}" ]]
   [[ "$(<"${branch_owner_file}")" == "fixture" ]]
   grep -q 'Branch ownership is uncertain; recovery state retained for operator resolution' "${stderr_file}"
-  ! tail -n "+$((calls_before + 1))" "${calls_file}" | grep -Eq 'update-pull-request-status|delete-branch'
+  ! tail -n "+$((calls_before + 1))" "${calls_file}" | grep -Eq 'update-pull-request-status|delete-branch|git .* push '
 }
 
 test_tampered_recovery_journal_refuses_mutation() {
@@ -468,7 +558,7 @@ test_tampered_recovery_journal_refuses_mutation() {
 
   [[ -f "${journal}" ]]
   grep -q 'Recovery journal does not belong to the verified fixture repository' "${stderr_file}"
-  ! tail -n "+$((calls_before + 1))" "${calls_file}" | grep -Eq 'update-pull-request-status|delete-branch'
+  ! tail -n "+$((calls_before + 1))" "${calls_file}" | grep -Eq 'update-pull-request-status|delete-branch|git .* push '
 }
 
 test_recovery_path_boundary() {
@@ -578,7 +668,7 @@ test_uncertain_create_retains_recovery_state() {
     return 1
   fi
   ! grep -q 'codecommit update-pull-request-status' "${calls_file}"
-  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
   assert_private_state
 }
 
@@ -594,7 +684,7 @@ test_malformed_create_retains_recovery_state() {
     return 1
   fi
   ! grep -q 'codecommit update-pull-request-status' "${calls_file}"
-  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
   assert_private_state
 }
 
@@ -622,7 +712,7 @@ test_close_failure_keeps_complete_recovery_state() {
   fi
   assert_private_state
   jq -e '.pullRequestCreated and .branchCreated' "${state_file}" >/dev/null
-  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  ! grep -Eq 'codecommit delete-branch|git .* push ' "${calls_file}"
   grep -q 'Pull request cleanup failed while closing the owned fixture' "${stderr_file}"
   grep -q 'Cleanup incomplete; recovery state retained at' "${stderr_file}"
   ! grep -Eq "${fixture_account}|${fixture_repository}" "${stderr_file}"
@@ -641,7 +731,7 @@ test_delete_failure_keeps_remaining_recovery_state() {
   fi
   assert_private_state
   jq -e '(.pullRequestCreated | not) and .branchCreated' "${state_file}" >/dev/null
-  grep -q 'Branch cleanup failed while deleting the verified fixture' "${stderr_file}"
+  grep -q 'Branch cleanup failed while deleting the exact fixture head' "${stderr_file}"
   ! grep -Eq "${fixture_account}|${fixture_repository}" "${stderr_file}"
   [[ "$(grep -c 'codecommit update-pull-request-status' "${calls_file}")" -eq 1 ]]
   scenario="success"
@@ -657,11 +747,13 @@ test_focused_fixture() {
 
 test_successful_lifecycle
 test_china_partition_fixture_boundary
+test_git_credential_helper_clears_ambient_authority
 test_boundary_failures_write_nothing
 test_branch_collision_preserves_foreign_branch
 test_ambiguous_branch_create_retains_recovery_state
 test_branch_mutation_is_journaled
 test_changed_branch_refuses_cleanup
+test_branch_advance_during_delete_refuses_cleanup
 test_branch_verification_keeps_provider_errors_in_memory
 test_fresh_process_recovery
 test_uncertain_pull_request_recovery
