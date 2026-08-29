@@ -80,7 +80,11 @@ if (policy.schedule === undefined) throw new Error("Distilled AWS retry policy w
 
     yield* runCheckedCommand(spawner, "node", ["verify.mjs"], consumer)
     yield* Console.log("codecommit-core packed consumer verified public clients and the Distilled AWS runtime")
-  }).pipe(Effect.provide(NodeServices.layer))
+  }).pipe(
+    // The packed-consumer script is the executable boundary for Node services.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer)
+  )
 )
 
 NodeRuntime.runMain(program)
