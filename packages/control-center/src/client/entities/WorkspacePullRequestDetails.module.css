@@ -248,9 +248,24 @@
 .reviewPresetList {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--rly-space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-.reviewPresetList button {
+.reviewPresetList label {
+  cursor: pointer;
+  position: relative;
+}
+
+.reviewPresetList input {
+  block-size: 1px;
+  inline-size: 1px;
+  opacity: 0;
+  position: absolute;
+}
+
+.reviewPresetList label > span {
   display: grid;
   gap: var(--rly-space-4);
   padding: var(--rly-space-12);
@@ -258,17 +273,21 @@
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
-  cursor: pointer;
   text-align: start;
 }
 
-.reviewPresetList button[aria-checked="true"] {
+.reviewPresetList input:checked + span {
   border-color: var(--rly-color-agent);
   background: var(--rly-color-surface-2);
   box-shadow: inset 0 0 0 1px var(--rly-color-agent);
 }
 
-.reviewPresetList span {
+.reviewPresetList input:focus-visible + span {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
+.reviewPresetList small {
   color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
@@ -759,6 +778,30 @@
   padding: var(--rly-space-0);
 }
 
+.reviewThreadTranscript {
+  display: grid;
+  gap: var(--rly-space-12);
+  max-block-size: min(28rem, 55vh);
+  min-block-size: 8rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  background: var(--rly-color-surface-2);
+  scrollbar-gutter: stable;
+}
+
+.reviewThreadTranscript:focus-visible {
+  border-color: var(--rly-color-focus);
+  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
+  outline-offset: var(--rly-space-2);
+}
+
+.reviewThreadTranscript > button {
+  justify-self: start;
+}
+
 .reviewThreadEvents li {
   border-inline-start: 2px solid var(--rly-color-border-1);
   padding-inline-start: var(--rly-space-12);
@@ -872,7 +915,11 @@
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-field);
   color: var(--rly-color-text-1);
+  field-sizing: content;
   font: inherit;
+  max-block-size: 12rem;
+  min-block-size: 5.5rem;
+  overflow-y: auto;
   padding: var(--rly-space-12);
   resize: vertical;
 }

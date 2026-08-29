@@ -1,6 +1,18 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
-import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import {
+  type KeyboardEvent,
+  type ReactElement,
+  type UIEvent,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
@@ -178,6 +190,148 @@ const REVIEW_PROMPT_TEMPLATES: ReadonlyArray<{
   }
 ]
 
+const ReviewPresetChoices = ({
+  accessibleName,
+  groupName,
+  onSelect,
+  presets,
+  selectedProviderId
+}: {
+  readonly accessibleName: string
+  readonly groupName: string
+  readonly onSelect: (providerId: DurableAgentProviderId) => void
+  readonly presets: ReadonlyArray<Parameters<typeof providerName>[0]>
+  readonly selectedProviderId: DurableAgentProviderId
+}): ReactElement => (
+  <fieldset aria-label={accessibleName} className={styles.reviewPresetList}>
+    {presets.map((preset) => (
+      <label key={preset.providerId}>
+        <input
+          checked={preset.providerId === selectedProviderId}
+          name={groupName}
+          onChange={() => onSelect(preset.providerId)}
+          type="radio"
+          value={preset.providerId}
+        />
+        <span>
+          <strong>{providerReviewLabel(preset)}</strong>
+          <small>{modelName(preset.providerId, preset.model)}</small>
+        </span>
+      </label>
+    ))}
+  </fieldset>
+)
+
+type PresentedThreadEvent = {
+  readonly event: PullRequestReviewThreadEvent
+  readonly summary: string
+}
+
+const THREAD_END_THRESHOLD = 24
+
+const ReviewThreadTranscript = ({
+  events,
+  hasEarlier,
+  historyAction,
+  historyLoaded,
+  onLoadEarlier
+}: {
+  readonly events: ReadonlyArray<PresentedThreadEvent>
+  readonly hasEarlier: boolean
+  readonly historyAction: "idle" | "loading" | "failed"
+  readonly historyLoaded: boolean
+  readonly onLoadEarlier: () => void
+}): ReactElement => {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const followsLatestRef = useRef(true)
+  const previousRef = useRef<{
+    readonly first: number | null
+    readonly firstOffsetTop: number
+    readonly last: number | null
+  }>({ first: null, firstOffsetTop: 0, last: null })
+  const [hasNewActivity, setHasNewActivity] = useState(false)
+  const first = events[0]?.event.eventSequence ?? null
+  const last = events.at(-1)?.event.eventSequence ?? null
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current
+    if (scroller === null) return
+    const previous = previousRef.current
+    const prepended = previous.first !== null && first !== null && first < previous.first
+    const appended = previous.last !== null && last !== null && last > previous.last
+    const previousFirstElement = [...scroller.querySelectorAll<HTMLElement>("[data-review-event-sequence]")].find(
+      (element) => element.dataset.reviewEventSequence === String(previous.first)
+    )
+    if (prepended && previousFirstElement !== undefined) {
+      scroller.scrollTop += previousFirstElement.offsetTop - previous.firstOffsetTop
+      const followsLatest = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= THREAD_END_THRESHOLD
+      followsLatestRef.current = followsLatest
+      setHasNewActivity(appended && !followsLatest)
+    } else if (followsLatestRef.current) {
+      scroller.scrollTop = scroller.scrollHeight
+      setHasNewActivity(false)
+    } else if (appended) {
+      setHasNewActivity(true)
+    }
+    const firstElement = scroller.querySelector<HTMLElement>("[data-review-event-sequence]")
+    previousRef.current = { first, firstOffsetTop: firstElement?.offsetTop ?? 0, last }
+  }, [first, last])
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
+    const scroller = event.currentTarget
+    const followsLatest = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= THREAD_END_THRESHOLD
+    followsLatestRef.current = followsLatest
+    if (followsLatest) setHasNewActivity(false)
+  }
+  const jumpToLatest = (): void => {
+    const scroller = scrollerRef.current
+    if (scroller === null) return
+    followsLatestRef.current = true
+    scroller.scrollTop = scroller.scrollHeight
+    setHasNewActivity(false)
+    scroller.focus({ preventScroll: true })
+  }
+
+  return (
+    <>
+      <div
+        aria-label="Review activity"
+        aria-live="polite"
+        aria-relevant="additions text"
+        className={styles.reviewThreadTranscript}
+        onScroll={handleScroll}
+        ref={scrollerRef}
+        role="log"
+        tabIndex={0}
+      >
+        {hasEarlier ? (
+          <Button loading={historyAction === "loading"} onClick={onLoadEarlier}>
+            {historyAction === "loading"
+              ? "Loading earlier activity…"
+              : historyAction === "failed"
+                ? "Retry earlier activity"
+                : "Load earlier activity"}
+          </Button>
+        ) : historyLoaded ? (
+          <Text tone="secondary" variant="meta">
+            Beginning of review thread
+          </Text>
+        ) : null}
+        {events.length === 0 ? null : (
+          <ol className={styles.reviewThreadEvents}>
+            {events.map(({ event, summary }) => (
+              <li data-review-event-sequence={event.eventSequence} key={event.eventSequence}>
+                <span>{summary}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      {hasNewActivity ? <Button onClick={jumpToLatest}>New activity · Jump to latest</Button> : null}
+    </>
+  )
+}
+
 const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
 
 const ReviewOrientationSurface = ({
@@ -289,8 +443,11 @@ export const PullRequestReviewPanel = ({
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
+  const [requestedSelection, setRequestedSelection] = useState<number | null>(null)
   const [submittedRequest, setSubmittedRequest] = useState<string | null>(null)
   const [selectedProviderId, setSelectedProviderId] = useState<DurableAgentProviderId | null>(null)
+  const requestRef = useRef<HTMLTextAreaElement>(null)
+  const targetedSubmissionInFlightRef = useRef(false)
   const providerPresets = useMemo(
     () => (state._tag === "ready" ? (state.providerPresets ?? (state.provider === null ? [] : [state.provider])) : []),
     [state]
@@ -308,8 +465,10 @@ export const PullRequestReviewPanel = ({
   useEffect(() => {
     setLaunchOpen(false)
     setRequest("")
+    setRequestedSelection(null)
     setSubmittedRequest(null)
     setSelectedProviderId(null)
+    targetedSubmissionInFlightRef.current = false
   }, [requestScope])
   useEffect(() => {
     if (providerPresets.length === 0) {
@@ -320,10 +479,22 @@ export const PullRequestReviewPanel = ({
       setSelectedProviderId(providerPresets[0]?.providerId ?? null)
     }
   }, [providerPresets, selectedProviderId])
+  useLayoutEffect(() => {
+    if (requestedSelection === null) return
+    const textarea = requestRef.current
+    if (textarea === null) return
+    textarea.focus({ preventScroll: true })
+    textarea.setSelectionRange(requestedSelection, requestedSelection)
+    setRequestedSelection(null)
+  }, [request, requestedSelection])
   useEffect(() => {
     if (submittedRequest === null || state._tag !== "ready") return
-    if (state.action === "failed") return
+    if (state.action === "failed") {
+      targetedSubmissionInFlightRef.current = false
+      return
+    }
     if (state.action === "idle" && state.review._tag === "pending") {
+      targetedSubmissionInFlightRef.current = false
       setRequest((current) => (current.trim() === submittedRequest ? "" : current))
       setSubmittedRequest(null)
     }
@@ -338,15 +509,38 @@ export const PullRequestReviewPanel = ({
   }, [onStart, selectedProvider])
   const submitTargetedReview = useCallback((): void => {
     const prompt = request.trim()
-    if (prompt.length === 0 || state._tag !== "ready" || state.action === "starting") return
+    if (
+      prompt.length === 0 ||
+      selectedProvider === null ||
+      targetedSubmissionInFlightRef.current ||
+      state._tag !== "ready" ||
+      state.action === "starting" ||
+      state.review._tag === "pending"
+    )
+      return
+    targetedSubmissionInFlightRef.current = true
     setSubmittedRequest(prompt)
-    if (selectedProvider === null) return
     onStart(prompt, selectedProvider.providerId)
   }, [onStart, request, selectedProvider, state])
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return
     if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
     submitTargetedReview()
+  }
+  const insertPromptTemplate = (prompt: string): void => {
+    const textarea = requestRef.current
+    const selectionStart = textarea?.selectionStart ?? request.length
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart
+    const before = request.slice(0, selectionStart)
+    const after = request.slice(selectionEnd)
+    const leadingBreak = before.length > 0 && !/\s$/u.test(before) ? "\n" : ""
+    const trailingBreak = after.length > 0 && !/^\s/u.test(after) ? "\n" : ""
+    const availableInsertionLength = Math.max(0, MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH - before.length - after.length)
+    const insertion = `${leadingBreak}${prompt}${trailingBreak}`.slice(0, availableInsertionLength)
+    const nextRequest = `${before}${insertion}${after}`
+    setRequest(nextRequest)
+    setRequestedSelection(before.length + insertion.length)
   }
   const publicationSurface =
     publication._tag === "idle" || publication._tag === "previewing" ? null : (
@@ -431,6 +625,8 @@ export const PullRequestReviewPanel = ({
     )
   const completeThreadVisible = state.thread !== undefined && (state.thread.historyLoaded || !state.thread.hasEarlier)
   const visibleThreadEvents = completeThreadVisible ? presentedThreadEvents : presentedThreadEvents.slice(-12)
+  const reviewRunning = review._tag === "pending"
+  const composerDisabled = state.action === "starting" || reviewRunning
   const threadSurface = (
     <section aria-label="Review thread" className={styles.reviewThread}>
       <header>
@@ -471,46 +667,29 @@ export const PullRequestReviewPanel = ({
           </div>
         </dl>
       )}
-      {visibleThreadEvents.length === 0 ? null : (
-        <ol className={styles.reviewThreadEvents}>
-          {visibleThreadEvents.map(({ event, summary }) => (
-            <li key={event.eventSequence}>
-              <span>{summary}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-      {state.thread !== undefined && state.thread.hasEarlier ? (
-        <Button loading={state.historyAction === "loading"} onClick={onLoadEarlier}>
-          {state.historyAction === "loading"
-            ? "Loading earlier activity…"
-            : state.historyAction === "failed"
-              ? "Retry earlier activity"
-              : "Load earlier activity"}
-        </Button>
-      ) : state.thread !== undefined ? (
-        <Text tone="secondary" variant="meta">
-          Beginning of review thread
-        </Text>
-      ) : null}
-      {canEnqueue && state.provider !== null && review._tag !== "pending" && review._tag !== "unavailable" ? (
+      <ReviewThreadTranscript
+        events={visibleThreadEvents}
+        hasEarlier={state.thread?.hasEarlier ?? false}
+        historyAction={state.historyAction}
+        historyLoaded={state.thread !== undefined}
+        key={requestScope}
+        onLoadEarlier={onLoadEarlier}
+      />
+      {canEnqueue && state.provider !== null && review._tag !== "unavailable" ? (
         <div className={styles.reviewThreadComposer}>
-          <label htmlFor="review-thread-request">Ask Relay about this pull request</label>
+          <label htmlFor="review-thread-request">
+            {reviewRunning ? "Draft the next review request" : "Ask Relay about this pull request"}
+          </label>
           {providerPresets.length > 1 ? (
-            <div aria-label="Targeted review agent presets" className={styles.reviewPresetList} role="radiogroup">
-              {providerPresets.map((preset) => (
-                <button
-                  aria-checked={preset.providerId === selectedProvider?.providerId}
-                  key={preset.providerId}
-                  onClick={() => setSelectedProviderId(preset.providerId)}
-                  role="radio"
-                  type="button"
-                >
-                  <strong>{providerReviewLabel(preset)}</strong>
-                  <span>{modelName(preset.providerId, preset.model)}</span>
-                </button>
-              ))}
-            </div>
+            selectedProvider === null ? null : (
+              <ReviewPresetChoices
+                accessibleName="Targeted review agent presets"
+                groupName="targeted-review-agent"
+                onSelect={setSelectedProviderId}
+                presets={providerPresets}
+                selectedProviderId={selectedProvider.providerId}
+              />
+            )
           ) : selectedProvider === null ? null : (
             <span className={styles.reviewSelectedPreset}>
               Review with {providerName(selectedProvider)} ·{" "}
@@ -519,7 +698,7 @@ export const PullRequestReviewPanel = ({
           )}
           <div aria-label="Review prompt templates" className={styles.reviewTemplateList}>
             {REVIEW_PROMPT_TEMPLATES.map((template) => (
-              <Button key={template.label} onClick={() => setRequest(template.prompt)}>
+              <Button key={template.label} onClick={() => insertPromptTemplate(template.prompt)}>
                 {template.label}
               </Button>
             ))}
@@ -531,6 +710,7 @@ export const PullRequestReviewPanel = ({
             onChange={(event) => setRequest(event.currentTarget.value)}
             onKeyDown={handleComposerKeyDown}
             placeholder="Re-check the error handling in the connection flow…"
+            ref={requestRef}
             rows={3}
             value={request}
           />
@@ -545,8 +725,12 @@ export const PullRequestReviewPanel = ({
               Targeted review did not start. Your request is still here—check the provider and worker, then try again.
             </span>
           ) : null}
-          <Button disabled={state.action === "starting" || request.trim().length === 0} onClick={submitTargetedReview}>
-            {state.action === "starting" ? "Starting targeted review…" : "Start targeted review"}
+          <Button disabled={composerDisabled || request.trim().length === 0} onClick={submitTargetedReview}>
+            {state.action === "starting"
+              ? "Starting targeted review…"
+              : reviewRunning
+                ? "Review in progress"
+                : "Start targeted review"}
           </Button>
         </div>
       ) : null}
@@ -573,20 +757,13 @@ export const PullRequestReviewPanel = ({
           <div className={styles.reviewLaunchBody}>
             <small className={styles.reviewLaunchEyebrow}>No CodeCommit writes</small>
             {providerPresets.length > 1 ? (
-              <div aria-label="Review agent presets" className={styles.reviewPresetList} role="radiogroup">
-                {providerPresets.map((preset) => (
-                  <button
-                    aria-checked={preset.providerId === selectedProvider.providerId}
-                    key={preset.providerId}
-                    onClick={() => setSelectedProviderId(preset.providerId)}
-                    role="radio"
-                    type="button"
-                  >
-                    <strong>{providerReviewLabel(preset)}</strong>
-                    <span>{modelName(preset.providerId, preset.model)}</span>
-                  </button>
-                ))}
-              </div>
+              <ReviewPresetChoices
+                accessibleName="Review agent presets"
+                groupName="full-review-agent"
+                onSelect={setSelectedProviderId}
+                presets={providerPresets}
+                selectedProviderId={selectedProvider.providerId}
+              />
             ) : null}
             <dl className={styles.reviewLaunchFacts}>
               <div>

@@ -1426,6 +1426,23 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
+  const reviewActivity = page.getByRole("log", { name: "Review activity" })
+  await expect(reviewActivity).toBeVisible()
+  expect(
+    await reviewActivity.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).overflowY)
+  ).toBe("auto")
+  const reviewRequest = page.getByLabel("Ask Relay about this pull request")
+  await reviewRequest.fill("Keep this draft.")
+  await reviewRequest.press("End")
+  await page.getByRole("button", { name: "Security" }).click()
+  await expect(reviewRequest).toBeFocused()
+  await expect(reviewRequest).toHaveValue(
+    "Keep this draft.\nReview authorization, credential handling, unsafe input, and privilege boundaries."
+  )
+  await reviewRequest.press("Enter")
+  await expect(reviewRequest).toHaveValue(
+    "Keep this draft.\nReview authorization, credential handling, unsafe input, and privilege boundaries.\n"
+  )
   await expect(
     page.getByText("Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally.")
   ).toBeVisible()

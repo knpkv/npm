@@ -16,6 +16,7 @@ import {
   PullRequestReviewPending,
   PullRequestReviewStale,
   PullRequestReviewState,
+  type PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
   ReleaseAgentThreadCursor,
@@ -487,6 +488,42 @@ const REVIEW_THREAD = {
   historyLoaded: false,
   nextCursor: REVIEW_THREAD_PAGE.nextCursor
 }
+const threadWithOperatorMessage = (eventSequence: number, prompt: string) => {
+  const event = {
+    _tag: "operator-message",
+    eventSequence: ReleaseAgentThreadCursor.make(eventSequence),
+    jobId: JOB_ID,
+    occurredAt: REVIEW_THREAD_PAGE.events[0]!.occurredAt,
+    prompt: DurableAgentPrompt.make(prompt)
+  } satisfies PullRequestReviewThreadEvent
+  return {
+    events: [...REVIEW_THREAD_PAGE.events, event],
+    hasEarlier: false,
+    historyLoaded: true,
+    nextCursor: ReleaseAgentThreadCursor.make(eventSequence)
+  }
+}
+const threadWithConcurrentHistoryAndActivity = () => {
+  const current = threadWithOperatorMessage(4, "Current activity.")
+  return {
+    events: [
+      {
+        ...REVIEW_THREAD_PAGE.events[0]!,
+        eventSequence: ReleaseAgentThreadCursor.make(0),
+        prompt: DurableAgentPrompt.make("Earlier context.")
+      },
+      ...current.events,
+      {
+        ...REVIEW_THREAD_PAGE.events[0]!,
+        eventSequence: ReleaseAgentThreadCursor.make(5),
+        prompt: DurableAgentPrompt.make("Concurrent activity.")
+      }
+    ],
+    hasEarlier: false,
+    historyLoaded: true,
+    nextCursor: ReleaseAgentThreadCursor.make(5)
+  }
+}
 const REFRESHED_NOT_STARTED_STATE = {
   ...REVIEW_STATE,
   baseRevision: "3".repeat(40),
@@ -782,12 +819,12 @@ describe("PullRequestReviewPanel", () => {
     )
 
     expect(host.textContent).toContain("Relay Gateway review")
-    const targetedClaudePreset = [...host.querySelectorAll<HTMLButtonElement>("[role=radio]")].find(
-      ({ textContent }) => textContent?.includes("Claude review") === true
+    const targetedClaudePreset = [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+      (input) => input.closest("label")?.textContent?.includes("Claude review") === true
     )
     if (targetedClaudePreset === undefined) throw new Error("Expected targeted Claude review preset")
     await act(async () => targetedClaudePreset.click())
-    expect(targetedClaudePreset.getAttribute("aria-checked")).toBe("true")
+    expect(targetedClaudePreset.checked).toBe(true)
     const securityTemplate = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "Security"
     )
@@ -923,6 +960,267 @@ describe("PullRequestReviewPanel", () => {
       )
     )
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
+  })
+
+  it("keeps terminal input multiline, composition-safe, and draftable while a review runs", async () => {
+    const onStart = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: PENDING_REVIEW, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected a draftable request while review runs")
+    expect(host.textContent).toContain("Draft the next review request")
+    expect(host.textContent).toContain("Review in progress")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+    await act(async () => {
+      valueSetter.call(textarea, "Follow up after this run.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const plainEnter = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })
+    const composingSubmit = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      isComposing: true,
+      key: "Enter"
+    })
+    await act(async () => {
+      textarea.dispatchEvent(plainEnter)
+      textarea.dispatchEvent(composingSubmit)
+    })
+
+    expect(plainEnter.defaultPrevented).toBe(false)
+    expect(composingSubmit.defaultPrevented).toBe(false)
+    expect(onStart).not.toHaveBeenCalled()
+    expect(textarea.value).toBe("Follow up after this run.")
+  })
+
+  it("inserts prompt templates without replacing the draft and restores typing focus", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+    await act(async () => {
+      valueSetter.call(textarea, "Keep this draft.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    const securityTemplate = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Security"
+    )
+    if (securityTemplate === undefined) throw new Error("Expected security prompt template")
+    await act(async () => securityTemplate.click())
+
+    expect(textarea.value).toBe(
+      "Keep this draft.\nReview authorization, credential handling, unsafe input, and privilege boundaries."
+    )
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe(textarea.value.length)
+  })
+
+  it("preserves the operator draft when a prompt template cannot fit", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+    const fullDraft = "a".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+    await act(async () => {
+      valueSetter.call(textarea, fullDraft)
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    textarea.setSelectionRange(100, 100)
+    const securityTemplate = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Security"
+    )
+    if (securityTemplate === undefined) throw new Error("Expected security prompt template")
+    await act(async () => securityTemplate.click())
+
+    expect(textarea.value).toBe(fullDraft)
+    expect(textarea.selectionStart).toBe(100)
+  })
+
+  it("starts one targeted review per submission and unlocks after a failed start", async () => {
+    const onStart = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (state: PullRequestReviewControllerState) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+
+    await act(async () => render({ ...REVIEW_STATE, thread: REVIEW_THREAD }))
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+    await act(async () => {
+      valueSetter.call(textarea, "Review the boundary.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
+    })
+    expect(onStart).toHaveBeenCalledOnce()
+
+    await act(async () => render({ ...REVIEW_STATE, action: "failed", thread: REVIEW_THREAD }))
+    await act(async () =>
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
+    )
+    expect(onStart).toHaveBeenCalledTimes(2)
+  })
+
+  it("follows new terminal activity only while the reader remains at the tail", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (thread: NonNullable<Extract<PullRequestReviewControllerState, { _tag: "ready" }>["thread"]>) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread }}
+        />
+      )
+
+    await act(async () => render(REVIEW_THREAD))
+    const log = host.querySelector<HTMLElement>("[role=log]")
+    if (log === null) throw new Error("Expected review activity log")
+    let scrollHeight = 300
+    Object.defineProperties(log, {
+      clientHeight: { configurable: true, get: () => 100 },
+      scrollHeight: { configurable: true, get: () => scrollHeight }
+    })
+    log.scrollTop = 200
+    await act(async () => log.dispatchEvent(new Event("scroll", { bubbles: true })))
+    scrollHeight = 400
+    await act(async () => render(threadWithOperatorMessage(4, "Tail event.")))
+    expect(log.scrollTop).toBe(400)
+
+    log.scrollTop = 40
+    await act(async () => log.dispatchEvent(new Event("scroll", { bubbles: true })))
+    scrollHeight = 500
+    await act(async () => render(threadWithOperatorMessage(5, "Detached event.")))
+    expect(log.scrollTop).toBe(40)
+    const jump = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Jump to latest")
+    )
+    if (jump === undefined) throw new Error("Expected new activity action")
+    await act(async () => jump.click())
+    expect(log.scrollTop).toBe(500)
+    expect(document.activeElement).toBe(log)
+    expect(host.textContent).not.toContain("Jump to latest")
+  })
+
+  it("anchors the visible event when history and new activity arrive together", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (thread: NonNullable<Extract<PullRequestReviewControllerState, { _tag: "ready" }>["thread"]>) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread }}
+        />
+      )
+
+    await act(async () => render(REVIEW_THREAD))
+    const log = host.querySelector<HTMLElement>("[role=log]")
+    const firstVisibleEvent = host.querySelector<HTMLElement>('[data-review-event-sequence="1"]')
+    if (log === null || firstVisibleEvent === null) throw new Error("Expected review activity geometry")
+    let scrollHeight = 80
+    let anchorOffsetTop = 20
+    Object.defineProperties(log, {
+      clientHeight: { configurable: true, get: () => 100 },
+      scrollHeight: { configurable: true, get: () => scrollHeight }
+    })
+    Object.defineProperty(firstVisibleEvent, "offsetTop", {
+      configurable: true,
+      get: () => anchorOffsetTop
+    })
+    await act(async () => render(threadWithOperatorMessage(4, "Current activity.")))
+    log.scrollTop = 0
+
+    scrollHeight = 300
+    anchorOffsetTop = 140
+    await act(async () => render(threadWithConcurrentHistoryAndActivity()))
+
+    expect(log.scrollTop).toBe(120)
+    expect(host.textContent).toContain("New activity · Jump to latest")
   })
 
   it("loads earlier durable activity explicitly and marks the beginning", async () => {
