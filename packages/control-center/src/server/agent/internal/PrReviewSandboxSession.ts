@@ -1,4 +1,4 @@
-/** Writable, credential-free sbx session for one exact pull-request revision. @module */
+/** Writable sbx session without raw credentials for one exact pull-request revision. @module */
 import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"

@@ -13,7 +13,7 @@ The agent never changes the branch or CodeCommit. The Local Operator may edit, r
 - Full project access exists only inside an ephemeral sandbox.
 - External mutations always require an explicit human preview and confirmation.
 - Review history is durable; execution environments are disposable.
-- Codex and Claude use the same provider-neutral agent runtime.
+- Native Codex, native Claude, and Effect AI typed-tool review share one provider-neutral request, result, evidence, and lifecycle contract.
 - This is a breaking replacement. Pre-stable review data and interfaces need no migration.
 
 ## User experience
@@ -43,7 +43,7 @@ The Rly diff interface must be extended to render application-owned annotation c
 - Exact head revision.
 - Selected Review Agent Profile.
 - Twenty-minute default Review Budget.
-- Network disabled status and any explicit unauthenticated endpoint allowlist.
+- Network policy: **Network blocked** for typed-tool review, or **Codex access enabled** / **Claude access enabled** through the selected sbx provider connection for native review.
 
 Advanced options remain collapsed. Manual review remains the default. The current
 implementation never starts a run automatically after a push. A later Review Watch
@@ -200,12 +200,15 @@ Pre-existing defects and unverified concerns appear separately as non-publishabl
 ```mermaid
 flowchart LR
   UI[Control Center review workspace] --> Review[Review application module]
-  Review --> Agent["@knpkv/ai-runtime"]
-  Agent --> Model[Effect AI LanguageModel]
-  Model --> Codex["@knpkv/ai-codex"]
-  Model --> Claude["@knpkv/ai-claude"]
+  Review --> Agent["@knpkv/ai-runtime typed-tool branch"]
+  Agent --> Model[Host Effect AI LanguageModel]
   Agent --> Tools[Typed sandbox tools]
   Tools --> Sandbox[Review Sandbox module]
+  Review --> Native[Native review runner]
+  Native --> Codex[Codex CLI inside sbx]
+  Native --> Claude[Claude CLI inside sbx]
+  Codex --> Sandbox
+  Claude --> Sandbox
   Sandbox --> Checkout["@knpkv/codecommit-core checkout"]
   Review --> Store[Local review store]
   Review --> Comments["@knpkv/codecommit-core comments"]
@@ -232,7 +235,7 @@ It does not own:
 - CodeCommit.
 - Provider selection.
 
-Codex and Claude are real adapters at the LanguageModel seam. The package does not depend on their native tool behavior.
+The Effect AI branch may use Codex and Claude adapters at the host LanguageModel seam and does not depend on native tool behavior. Native pull-request review is a separate branch: the selected provider CLI executes inside sbx while preserving the same trusted-host request, result, and evidence validation contract.
 
 Each command stream returned to the model is limited to a 32 KiB UTF-8 prefix
 plus an artifact handle when more output exists, for at most 64 KiB of immediate
@@ -294,7 +297,7 @@ A Review Checkout Broker:
 
 1. Uses the connected CodeCommit profile on the host.
 2. Fetches and verifies the exact base and head commit IDs.
-3. Lets `sbx create shell --clone` copy the checkout into an isolated writable sandbox filesystem.
+3. Copies the checkout into an isolated writable sandbox filesystem: typed-tool review uses `sbx create shell --clone`; native review uses `sbx run codex --clone --detached` or `sbx run claude --clone --detached`.
 4. Removes authenticated remotes and credential configuration inside the sandbox before exposing any tools.
 5. Deletes host staging data when the scoped run ends.
 
@@ -319,12 +322,15 @@ command removes Git remotes and credential helpers and verifies the exact head
 again before any Review Sandbox tool can run.
 
 The loopback CodeCommit acceptance fixture changes only the source locator. Its
-repository name is a provider fixture coordinate. Its canonical `file:` URL is
-server-private, is not persisted, and must not enter an API response, browser
-storage, log, or trace. Control Center accepts the pair only with
+repository name is the normalized provider identity persisted in CodeCommit plugin
+configuration and synchronized pull-request records. It may cross authenticated
+API and browser surfaces, but is prohibited from unauthenticated and public diagnostics.
+Its canonical `file:` URL and `CODECOMMIT_MOCK_ENDPOINT` are non-persisted,
+server-private locators prohibited from API responses, browser storage, logs, telemetry,
+and traces. Control Center accepts the pair only with
 `CODECOMMIT_MOCK_ENDPOINT`, requires an exact enabled-connection repository
 match, and never falls back to an AWS Git URL when the fixture does not match.
-The name belongs to a server-private workspace namespace beginning with
+The sandbox name belongs to a server-private workspace namespace beginning with
 `cc-pr-review-<compact-workspace-id>-`, where the compact ID is the canonical
 workspace UUID without hyphens. The complete name stays within sbx's
 63-character limit; callers do not construct or interpret it.
@@ -333,7 +339,7 @@ Every contained command uses `sbx exec` with an explicit work directory and a
 fixed minimal environment. Host environment inheritance and shell
 interpretation of sbx control arguments are disabled.
 
-Credentials are never injected. Native Codex retains only the sbx-owned user configuration required to
+Raw provider credentials are never injected. Native Codex retains only the sbx-owned user configuration required to
 select its credential proxy; reviewed source cannot change that configuration. Tests requiring secrets
 or unavailable system capabilities are skipped and reported as limitations.
 

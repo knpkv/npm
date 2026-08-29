@@ -224,8 +224,8 @@ the review sandbox; authentication is owned by the selected `sbx run codex` or `
 connection. For each durable claim the worker resolves exactly one enabled CodeCommit
 connection, clones the exact head into a private data-root workspace, and hands that checkout to one
 named sbx sandbox. It strips Git remotes and credential helpers and verifies the full head object ID
-before review. With the loopback mock configured, the same resolver accepts only the exact repository named
-by the server-private `CODECOMMIT_MOCK_GIT_REPOSITORY` and clones its canonical `file:` URL. Other repositories
+before review. With the loopback mock configured, the same resolver accepts only the normalized repository
+identity configured by `CODECOMMIT_MOCK_GIT_REPOSITORY` and clones its server-private canonical `file:` URL. Other repositories
 fail closed. The typed-tool path denies all sandbox network access. Native CLI review instead enables
 only the selected provider connection, disables session persistence and unrelated MCP configuration,
 and uses only the disposable clone. Codex retains the sbx-owned user configuration required for its

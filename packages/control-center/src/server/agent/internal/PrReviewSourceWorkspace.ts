@@ -84,7 +84,7 @@ export interface PrReviewSourceLocation {
   readonly region: string
 }
 
-/** Server-private local repository used only with the loopback CodeCommit mock. */
+/** Authenticated repository identity paired with a server-private local mock locator. */
 export interface CodeCommitMockSourceFixture {
   readonly repositoryName: string
   readonly repositoryUrl: string
