@@ -57,6 +57,8 @@ Explicit triggers are:
 - Revalidation of one suggestion.
 - Targeted request from the Review Thread.
 
+A synchronized pull request can be reviewed before it is connected to a release. When a canonical release exists, its identity remains part of the immutable run context; otherwise the review is scoped by workspace, provider connection, repository, pull-request ID, and exact base/head revisions.
+
 ### Suggestion actions
 
 A draft Review Suggestion supports:

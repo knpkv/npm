@@ -189,14 +189,14 @@ const ThreadRow = Schema.Struct({
   threadId: AgentThreadId,
   threadKind: AgentJobTaskTag,
   subjectKey: Schema.String,
-  releaseId: ReleaseId
+  releaseId: Schema.NullOr(ReleaseId)
 })
 
 const JobRow = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   threadId: AgentThreadId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   providerId: EnqueueAgentJobInput.fields.providerId,
   model: EnqueueAgentJobInput.fields.model,
   access: EnqueueAgentJobInput.fields.access,
@@ -1696,30 +1696,45 @@ const makeAgentJobRepository = Effect.gen(function*() {
         Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.thread-id" }))
       )
       const threadKind = request.task._tag
-      const subjectKey = request.task._tag === "release-chat"
-        ? request.releaseId
-        : yield* reviewThreadSubjectKey(
+      let subjectKey: string
+      if (request.task._tag === "release-chat") {
+        if (request.releaseId === null) {
+          return yield* new AgentJobInputError({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            reason: "task-mismatch"
+          })
+        }
+        subjectKey = request.releaseId
+      } else {
+        subjectKey = yield* reviewThreadSubjectKey(
           request.task.pluginConnectionId,
           request.task.subject
         )
+      }
       return yield* database
         .transaction(
           Effect.gen(function*() {
-            const releaseRows = yield* sql`SELECT release_id FROM releases
-          WHERE workspace_id = ${request.workspaceId} AND release_id = ${request.releaseId}`
-            if (releaseRows.length === 0) {
-              return yield* new RecordNotFoundError({
-                workspaceId: request.workspaceId,
-                recordKind: "release",
-                recordKey: request.releaseId
-              })
+            if (request.releaseId !== null) {
+              const releaseRows = yield* sql`SELECT release_id FROM releases
+            WHERE workspace_id = ${request.workspaceId} AND release_id = ${request.releaseId}`
+              if (releaseRows.length === 0) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: request.workspaceId,
+                  recordKind: "release",
+                  recordKey: request.releaseId
+                })
+              }
             }
+            const threadReleaseId = request.task._tag === "release-chat"
+              ? request.releaseId
+              : null
             yield* sql`INSERT INTO agent_threads (
           workspace_id, thread_id, thread_kind, subject_key, release_id,
           next_event_sequence, created_at
         ) VALUES (
           ${request.workspaceId}, ${candidateThreadId}, ${threadKind}, ${subjectKey},
-          ${request.releaseId}, 1,
+          ${threadReleaseId}, 1,
           ${encodeTimestamp(request.createdAt)}
         ) ON CONFLICT (workspace_id, thread_kind, subject_key) DO NOTHING`
             const thread = yield* findThread(request.workspaceId, threadKind, subjectKey)

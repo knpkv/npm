@@ -33,8 +33,6 @@ const unavailableMessage = (
       return "Agent review is available only for synchronized CodeCommit pull requests."
     case "source-stale":
       return "Synchronize this pull request before reviewing its immutable head."
-    case "release-unavailable":
-      return "Connect this pull request to a release before asking Relay to review it."
     case "base-revision-unavailable":
       return "The base revision has not been synchronized, so an exact review cannot start."
   }

@@ -99,7 +99,7 @@ const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
-  releaseId: Schema.String,
+  releaseId: Schema.NullOr(Schema.String),
   pluginConnectionId: Schema.String,
   subject: PrReviewSubject
 })
@@ -128,7 +128,7 @@ const ReviewThreadCancellationPayload = Schema.Struct({ requestedAt: UtcTimestam
 class AvailableReviewTarget extends Data.TaggedClass("available")<{
   readonly entityId: EntityId
   readonly pluginConnectionId: PluginConnectionId
-  readonly releaseId: ReleaseId
+  readonly releaseId: ReleaseId | null
   readonly sourceRevision: string
   readonly subject: PrReviewSubjectType
 }> {}
@@ -292,10 +292,6 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   if (!inspection.isSourceCurrent) {
     return new PullRequestReviewUnavailable({ reason: "source-stale" })
   }
-  const releaseId = inspection.entity.canonicalReleaseId
-  if (releaseId === null) {
-    return new PullRequestReviewUnavailable({ reason: "release-unavailable" })
-  }
   if (details.baseRevision === undefined || details.baseRevision === null) {
     return new PullRequestReviewUnavailable({ reason: "base-revision-unavailable" })
   }
@@ -309,7 +305,7 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   return new AvailableReviewTarget({
     entityId: inspection.entity.projection.entityId,
     pluginConnectionId: inspection.source.pluginConnectionId,
-    releaseId,
+    releaseId: inspection.entity.canonicalReleaseId,
     sourceRevision: inspection.source.revision,
     subject
   })

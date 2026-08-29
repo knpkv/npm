@@ -446,7 +446,6 @@ export class PullRequestReviewUnavailable extends Schema.TaggedClass<PullRequest
     "not-codecommit",
     "not-pull-request",
     "source-stale",
-    "release-unavailable",
     "base-revision-unavailable"
   ])
 }) {}

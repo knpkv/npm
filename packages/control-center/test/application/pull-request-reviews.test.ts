@@ -109,6 +109,7 @@ const OTHER_PLUGIN_CONNECTION_ID = PluginConnectionId.make(
 )
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000405")
 const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000406")
+const RELEASELESS_CHAT_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000040d")
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000407")
 const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000408")
 const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
@@ -269,6 +270,14 @@ const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const encodedInspection = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+const unreleasedInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    canonicalReleaseId: null,
+    releaseIds: []
+  }
+})
 const otherConnectionInspection = Schema.decodeSync(WorkspaceEntityInspection)({
   ...encodedInspection,
   entity: {
@@ -388,6 +397,14 @@ const graphInspection = DeliveryGraphInspection.of({
   relationship: () => Effect.die("not used"),
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
+})
+
+const unreleasedGraphInspection = DeliveryGraphInspection.of({
+  ...graphInspection,
+  workspaceEntity: ({ entityId, workspaceId }) =>
+    entityId === ENTITY_ID && workspaceId === WORKSPACE_ID
+      ? Effect.succeed(unreleasedInspection)
+      : Effect.die("review crossed its workspace or entity boundary")
 })
 
 const multipleConnectionGraphInspection = DeliveryGraphInspection.of({
@@ -1041,6 +1058,70 @@ describe("pull request reviews", () => {
           return yield* Effect.die("review enqueue input was not captured")
         }
       })
+    ))
+
+  it.effect("enqueues and claims an immutable review without a release", () =>
+    withRealService(
+      (service, persistence, { sql }) =>
+        Effect.gen(function*() {
+          const rejectedChat = yield* persistence.agentJobs.enqueue({
+            workspaceId: WORKSPACE_ID,
+            releaseId: null,
+            jobId: RELEASELESS_CHAT_JOB_ID,
+            providerId: AgentProviderId.make(PROVIDER_ID),
+            model: MODEL,
+            access: "read-only",
+            userPrompt: "Describe this release.",
+            prompt: "Describe this release.",
+            contextFingerprint: AgentContextFingerprint.make(`sha256:${"b".repeat(64)}`),
+            subjectRevision: "release-revision-1",
+            task: { _tag: "release-chat" },
+            createdAt: STARTED_TIMESTAMP
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(rejectedChat))
+          if (Result.isFailure(rejectedChat)) {
+            assert.isTrue(Schema.is(AgentJobInputError)(rejectedChat.failure))
+          }
+
+          const before = yield* service.current({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID
+          })
+          assert.strictEqual(before._tag, "not-started")
+
+          const accepted = yield* service.enqueue({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              providerId: PROVIDER_ID,
+              model: MODEL,
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
+            }
+          })
+          assert.strictEqual(accepted._tag, "pending")
+
+          const claimedAt = yield* DateTime.now
+          const claim = yield* persistence.agentJobs.claimNext({
+            workspaceId: WORKSPACE_ID,
+            taskTags: ["pr-review"],
+            leaseOwner: LEASE_OWNER,
+            leaseToken: LEASE_TOKEN,
+            claimedAt,
+            leaseExpiresAt: DateTime.addDuration(claimedAt, Duration.minutes(1))
+          })
+          assert.isTrue(Option.isSome(claim))
+          if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+          assert.isNull(claim.value.releaseId)
+          assert.isNull(claim.value.context.releaseId)
+
+          const rows = yield* sql`SELECT release_id AS releaseId
+            FROM agent_threads
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND thread_kind = 'pr-review'`
+          assert.deepStrictEqual(rows, [{ releaseId: null }])
+        }),
+      unreleasedGraphInspection
     ))
 
   it.effect("returns the complete prior report when the current head has advanced", () => {
@@ -2656,17 +2737,6 @@ describe("pull request reviews", () => {
                 value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
                   ...encodedInspection,
                   isSourceCurrent: false
-                })
-              },
-              {
-                reason: "release-unavailable",
-                value: Schema.decodeSync(WorkspaceEntityInspection)({
-                  ...encodedInspection,
-                  entity: {
-                    ...encodedInspection.entity,
-                    canonicalReleaseId: null,
-                    releaseIds: []
-                  }
                 })
               },
               {
