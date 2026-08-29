@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as Schema from "effect/Schema"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -10,6 +11,7 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { OpenPullRequestPage } from "../../src/client/openPullRequest/OpenPullRequestPage.js"
 import {
+  browserOpenPullRequestTransport,
   type OpenPullRequestCandidate,
   type OpenPullRequestResolution,
   type OpenPullRequestTransport
@@ -46,6 +48,7 @@ afterEach(async () => {
   mountedRoot = undefined
   sessionControls = undefined
   sessionStorage.clear()
+  vi.unstubAllGlobals()
   document.body.replaceChildren()
 })
 
@@ -80,6 +83,40 @@ const mountPage = async (transport: OpenPullRequestTransport, activeSession: Ses
 }
 
 describe("OpenPullRequestPage", () => {
+  it("attaches the tab mutation proof through the browser transport", async () => {
+    const requests: Array<{ readonly csrf: string | null; readonly method: string; readonly url: string }> = []
+    sessionStorage.setItem("cc_csrf", csrfToken)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init)
+        requests.push({
+          csrf: request.headers.get("x-csrf-token"),
+          method: request.method,
+          url: request.url
+        })
+        return new Response(JSON.stringify({ _tag: "not-found", indexTruncated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      })
+    )
+
+    const resolution = await browserOpenPullRequestTransport.resolve(
+      Schema.decodeSync(Domain.CodeCommitPullRequestUrl)(pullRequestUrl),
+      new AbortController().signal
+    )
+
+    expect(resolution).toEqual({ _tag: "not-found", indexTruncated: false })
+    expect(requests).toEqual([
+      {
+        csrf: csrfToken,
+        method: "POST",
+        url: "http://localhost:3000/api/v1/codecommit/pull-requests/resolve"
+      }
+    ])
+  })
+
   it("lets an approver call the narrow workspace resolver", async () => {
     const resolution: OpenPullRequestResolution = { _tag: "not-found", indexTruncated: false }
     const resolve = vi.fn(() => Promise.resolve(resolution))

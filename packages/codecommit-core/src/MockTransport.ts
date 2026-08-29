@@ -14,6 +14,14 @@ export class InvalidCodeCommitMockEndpoint extends Data.TaggedError(
 
 const awsMockHost = /^(?:codecommit(?:-fips)?|sts)(?:\.[a-z0-9-]+)?\.amazonaws\.com(?:\.cn)?$/u
 
+const mockRequestUrl = (source: URL, endpoint: URL): URL => {
+  const target = new URL(source.pathname, endpoint.origin)
+  for (const [name, value] of source.searchParams) {
+    if (!name.toLowerCase().startsWith("x-amz-")) target.searchParams.append(name, value)
+  }
+  return target
+}
+
 /** Fixed non-secret signer identity that prevents mock mode from consulting real profiles. */
 export const codeCommitMockAwsClientConfig = AwsClientConfig.layer({
   credentialProvider: () =>
@@ -58,7 +66,7 @@ export const routeAwsRequestToCodeCommitMock = (
   if (!URL.canParse(request.url)) return request
   const source = new URL(request.url)
   return awsMockHost.test(source.hostname)
-    ? setUrl(request, `${endpoint.origin}${source.pathname}${source.search}`).pipe(
+    ? setUrl(request, mockRequestUrl(source, endpoint).href).pipe(
       removeHeader("authorization"),
       removeHeader("x-amz-security-token")
     )

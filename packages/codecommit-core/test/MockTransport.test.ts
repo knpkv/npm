@@ -36,6 +36,22 @@ describe("CodeCommit mock transport", () => {
     expect(codePipeline.url).toBe("https://codepipeline.eu-west-1.amazonaws.com/")
   })
 
+  it("keeps operation parameters but strips presigned SigV4 credentials", () => {
+    const endpoint = decodeCodeCommitMockEndpoint("http://127.0.0.1:4599")
+    const routed = routeAwsRequestToCodeCommitMock(
+      HttpClientRequest.get(
+        "https://sts.eu-west-1.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15" +
+          "&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=real-access-key" +
+          "&X-Amz-Date=20260829T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host" +
+          "&X-Amz-Signature=real-signature&X-Amz-Security-Token=real-session-token"
+      ),
+      endpoint
+    )
+
+    expect(Option.getOrThrow(HttpClientRequest.toUrl(routed)).href)
+      .toBe("http://127.0.0.1:4599/?Action=GetCallerIdentity&Version=2011-06-15")
+  })
+
   it("rejects non-loopback and path-bearing endpoints", () => {
     expect(() => decodeCodeCommitMockEndpoint("https://mock.example.test")).toThrow()
     expect(() => decodeCodeCommitMockEndpoint("http://127.0.0.1:4599/base")).toThrow()
