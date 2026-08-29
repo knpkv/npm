@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
@@ -124,20 +125,23 @@ export const makeCodeCommitGitFixture = Effect.fn("CodeCommitGitFixture.make")(f
   const testPath = path.join(sourceRoot, "test", "retry.test.ts")
 
   const runGit = Effect.fn("CodeCommitGitFixture.runGit")(function*(operation: string, args: ReadonlyArray<string>) {
-    return yield* spawner
-      .string(
-        ChildProcess.make("git", args, {
-          env: gitEnvironment(host.variables),
-          extendEnv: true,
-          stderr: "pipe",
-          stdin: "ignore",
-          stdout: "pipe"
-        })
-      )
-      .pipe(
-        Effect.map((output) => output.trim()),
-        Effect.mapError(() => gitError(operation))
-      )
+    return yield* Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make("git", args, {
+            env: gitEnvironment(host.variables),
+            extendEnv: true,
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "pipe"
+          })
+        )
+        const output = yield* handle.all.pipe(Stream.decodeText(), Stream.mkString)
+        const exitCode = yield* handle.exitCode
+        if (exitCode !== ChildProcessSpawner.ExitCode(0)) return yield* gitError(operation)
+        return output.trim()
+      })
+    ).pipe(Effect.mapError(() => gitError(operation)))
   })
 
   const revision = Effect.fn("CodeCommitGitFixture.revision")(function*(specifier: string) {

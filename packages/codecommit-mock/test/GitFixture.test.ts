@@ -14,7 +14,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-import { makeCodeCommitGitFixture } from "../src/GitFixture.js"
+import { CodeCommitGitFixtureError, makeCodeCommitGitFixture } from "../src/GitFixture.js"
 import { CODECOMMIT_MOCK_REVIEW_MODEL } from "../src/ReviewModelFixture.js"
 import { makeGitFixtureScenario } from "../src/Scenario.js"
 import { startCodeCommitMock } from "../src/Server.js"
@@ -209,6 +209,25 @@ describe("CodeCommit Git and review fixtures", () => {
           })
         )
         expect(advertised.trim().split(/\s+/u)[0]).toBe(fixture.revisions.secondHead)
+      })
+    ).pipe(
+      // The test runner supplies the complete merged runtime layer.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(testRuntimeLayer)
+    ))
+
+  it.effect("fails a ref transition when the bare remote is unavailable", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const fixture = yield* makeCodeCommitGitFixture()
+        const remoteRoot = yield* path.fromFileUrl(new URL(fixture.cloneUrl))
+        yield* fileSystem.remove(remoteRoot, { recursive: true })
+
+        const error = yield* fixture.advance.pipe(Effect.flip)
+
+        expect(error).toEqual(new CodeCommitGitFixtureError({ operation: "advance-source-ref" }))
       })
     ).pipe(
       // The test runner supplies the complete merged runtime layer.
