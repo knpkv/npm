@@ -99,6 +99,21 @@ describe("GitContextService", () => {
       expect(reason).toBe("not-a-git-repository")
     }))
 
+  it.effect("recognizes git's mount-point not-repository diagnostic", () =>
+    Effect.gen(function*() {
+      const reason = yield* reasonOf(
+        { cwd: "/tmp", remote: "origin" },
+        () =>
+          Effect.succeed(handleWith(
+            "",
+            128,
+            "fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n"
+          ))
+      )
+
+      expect(reason).toBe("not-a-git-repository")
+    }))
+
   it.effect("reports a nonzero git exit as a git failure", () =>
     Effect.gen(function*() {
       const reason = yield* reasonOf(

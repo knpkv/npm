@@ -50,8 +50,7 @@ export interface GitContextServiceContract {
 const gitContextFailure = (reason: GitContextReason, message: string, cause?: unknown) =>
   new GitContextError({ reason, message, ...(!(cause === undefined) && { cause }) })
 
-const notRepositoryDiagnostic = (stderr: string): boolean =>
-  stderr.startsWith("fatal: not a git repository (or any of the parent directories):")
+const notRepositoryDiagnostic = (stderr: string): boolean => stderr.startsWith("fatal: not a git repository")
 
 const missingRemoteDiagnostic = (stderr: string, remote: string): boolean =>
   stderr === `error: No such remote '${remote}'`
