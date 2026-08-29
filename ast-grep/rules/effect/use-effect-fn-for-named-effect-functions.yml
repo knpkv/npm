@@ -109,6 +109,12 @@ rule:
     - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
     - pattern: "function $NAME($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
     - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME: $CONTRACT = ($$$ARGS) => $SOURCE.pipe(Effect.map($$$MAPPER))"
+    - pattern: "const $NAME: $CONTRACT = $ARG => $SOURCE.pipe(Effect.map($$$MAPPER))"
+    - pattern: "const $NAME = ($$$ARGS) => $SOURCE.pipe(Effect.map($$$MAPPER))"
+    - pattern: "const $NAME: $CONTRACT = ($$$ARGS) => Effect.gen($$$BODY)"
+    - pattern: "const $NAME: $CONTRACT = ($$$ARGS) => Effect.gen($$$BODY).pipe($$$OPERATORS)"
+    - pattern: "const $NAME = ($$$ARGS) => $SOURCE.pipe($$$BEFORE, Stream.runCollect, $$$AFTER)"
 
 files:
   - "packages/control-center/src/**/*.ts"
@@ -116,6 +122,9 @@ files:
   - "packages/codecommit-core/src/ConfigService/load.ts"
   - "packages/codecommit-core/src/ConfigService/reset.ts"
   - "packages/codecommit-core/src/ConfigService/save.ts"
+  - "packages/codecommit/src/FilterService.ts"
+  - "packages/codecommit/src/GitContextService.ts"
+  - "packages/codecommit/src/Pr*.ts"
   - "packages/codecommit/src/tui/atoms/actions.ts"
 
 ignores:

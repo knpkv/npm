@@ -1,3 +1,20 @@
+import { Schema } from "effect"
+
+/**
+ * A region whose partition has no console hostname this build knows.
+ *
+ * Lives beside {@link codecommitPullRequestConsoleUrl} because it is the name
+ * for that function's `null`: a caller that turns the null into a failure needs
+ * both, and keeping them apart lets one drift from the other.
+ */
+export class UnsupportedConsoleRegion extends Schema.TaggedError<UnsupportedConsoleRegion>()(
+  "UnsupportedConsoleRegion",
+  {
+    region: Schema.String,
+    message: Schema.String
+  }
+) {}
+
 /**
  * Builds the Granted arguments for opening an exact console destination.
  * `--cd` is a long-option alias; `-cd` is parsed as `-c` plus `-d`.
@@ -43,6 +60,26 @@ export const codecommitConsoleHost = (region: string): string | null =>
   UNSUPPORTED_CONSOLE_REGIONS.some((pattern) => pattern.test(region))
     ? null
     : AWS_CONSOLE_HOSTS.find(([pattern]) => pattern.test(region))?.[1] ?? null
+
+/**
+ * Builds the CodeCommit console destination for one pull request.
+ *
+ * Partition-aware, unlike `Domain.codecommitConsoleUrl`, which hardcodes the
+ * commercial hostname. Returns null for a region whose partition has no known
+ * console host, so an unusable link is never handed to `assume`.
+ */
+export const codecommitPullRequestConsoleUrl = (input: {
+  readonly prId: string
+  readonly region: string
+  readonly repositoryName: string
+}): string | null => {
+  const host = codecommitConsoleHost(input.region)
+  if (host === null) return null
+  const repository = encodeURIComponent(input.repositoryName)
+  const pullRequest = encodeURIComponent(input.prId)
+  const region = encodeURIComponent(input.region)
+  return `https://${region}.${host}/codesuite/codecommit/repositories/${repository}/pull-requests/${pullRequest}?region=${region}`
+}
 
 /**
  * Builds the CodeCommit console destination for one reviewed file.

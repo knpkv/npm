@@ -22,7 +22,47 @@ valid:
     })
   - |
     Effect.uninterruptibleMask(() => Effect.succeed("anonymous callback"))
+  - |
+    const collectOpen: FilterServiceContract["collectOpen"] = Effect.fn("FilterService.collectOpen")(
+      (targets, opts) =>
+        fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
+    )
+  - |
+    const scan: PrOpenServiceContract["scan"] = Effect.fn("PrOpenService.scan")((input) =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+    )
+  - |
+    const gitOutput = Effect.fn("GitContextService.gitOutput")((path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+    )
+  - |
+    const collect: FilterServiceContract["collect"] = Effect.fn("FilterService.collect")((targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+    )
+  - |
+    const collectMatching = Effect.fn("PrListService.collectMatching")((stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+    )
 invalid:
+  - |
+    const collect: FilterServiceContract["collect"] = (targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+  - |
+    const collectMatching = (stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+  - |
+    const gitOutput = (path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+  - |
+    const scan: PrOpenServiceContract["scan"] = input =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+  - |
+    const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
+      fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
   - |
     const load = function loadItem<Value>(value: Value) {
       return Effect.gen(function*() {

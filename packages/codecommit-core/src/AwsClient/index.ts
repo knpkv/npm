@@ -64,7 +64,7 @@ export declare namespace AwsClient {
   export interface Service {
     readonly getPullRequests: (
       account: AccountParams,
-      options?: { status?: "OPEN" | "CLOSED" }
+      options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
     ) => Stream.Stream<PullRequest, AwsClientError>
     readonly getCallerIdentity: (account: AccountParams) => Effect.Effect<CallerIdentity, AwsClientError>
     readonly createPullRequest: (params: CreatePullRequestParams) => Effect.Effect<string, AwsClientError>

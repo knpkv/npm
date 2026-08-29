@@ -494,6 +494,38 @@ codecommit pr export 123 my-repo
 codecommit pr export 123 my-repo -o pr-comments.md
 ```
 
+#### Open the PR for the current branch
+
+Opens the console page for the open PR whose source branch is checked out in a
+working directory. There is no `--profile` flag: a profile embedded in a
+git-remote-codecommit URL narrows the scan; otherwise every enabled account in
+the remote's region is checked. Matching PRs in different accounts are reported
+as ambiguous instead of choosing one by timestamp. A renamed local branch uses
+its upstream source branch when that upstream belongs to the selected remote.
+A regionless helper URL is
+accepted only when its eligible accounts resolve to one configured region. Requires
+`git` and, for the browser handover, Granted's `assume`.
+
+```bash
+codecommit pr open [options]
+```
+
+| Option     | Alias | Description                                         | Default  |
+| ---------- | ----- | --------------------------------------------------- | -------- |
+| `--cwd`    |       | Directory inside the repository                     | `.`      |
+| `--remote` |       | Git remote naming the CodeCommit repository         | `origin` |
+| `--json`   |       | Print the resolved PR as JSON instead of opening it | `false`  |
+| `--url`    |       | Print the console URL instead of opening it         | `false`  |
+
+`--json` and `--url` select different stdout shapes, so passing both is an
+error rather than a silent precedence.
+
+```bash
+codecommit pr open
+codecommit pr open --cwd ~/work/my-repo --url
+codecommit pr open --remote upstream --json
+```
+
 #### Update PR
 
 ```bash

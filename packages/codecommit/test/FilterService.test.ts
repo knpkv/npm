@@ -71,17 +71,32 @@ interface StubConfig {
   readonly prsByTarget?: Record<string, ReadonlyArray<PullRequest>>
   /** Target keys whose `getPullRequests` should fail with an AwsApiError. */
   readonly failTargets?: ReadonlyArray<string>
+  /** Exact repositories absent from these target keys. */
+  readonly missingRepositoryTargets?: ReadonlyArray<string>
   /** Resolved caller username per profile; `null` → identity lookup fails. */
   readonly callerByProfile?: Record<string, string | null>
+  /** Repository filters received by getPullRequests, in call order. */
+  readonly requestedRepositories?: Array<string | null>
 }
 
 const awsStub = (cfg: StubConfig): Layer.Layer<AwsClient.AwsClient> =>
   Layer.succeed(
     AwsClient.AwsClient,
     AwsClient.AwsClient.of({
-      getPullRequests: (account, _options) => {
+      getPullRequests: (account, options) => {
+        cfg.requestedRepositories?.push(options?.repositoryName ?? null)
         const k = key(account)
-        if (cfg.failTargets?.includes(k)) {
+        if (cfg.missingRepositoryTargets?.includes(k) === true) {
+          return Stream.fail(
+            new Errors.AwsApiError({
+              operation: "getPullRequests",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "RepositoryDoesNotExistException" }
+            })
+          )
+        }
+        if (cfg.failTargets?.includes(k) === true) {
           return Stream.fail(
             new Errors.AwsApiError({
               operation: "getPullRequests",
@@ -170,6 +185,7 @@ describe("FilterService / resolveTargets", () => {
         "stage/us-east-1"
       ])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({}),
         configStub([
@@ -198,6 +214,7 @@ describe("FilterService / collect — preset matching", () => {
       expect(failures).toEqual([])
       expect(unresolvedProfiles).toEqual([])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({
           prsByTarget: {
@@ -216,6 +233,7 @@ describe("FilterService / collect — preset matching", () => {
       expect(prs.map((p) => p.id)).toEqual(["mine"])
       expect(unresolvedProfiles).toEqual([])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({
           prsByTarget: {
@@ -246,6 +264,7 @@ describe("FilterService / collect — failure collection", () => {
       expect(failures).toHaveLength(1)
       expect(failures[0]).toMatch(/^prod\/us-east-1: /)
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({
           prsByTarget: { "dev/us-east-1": [mkPR({ id: "ok", profile: "dev", isMergeable: false })] },
@@ -278,6 +297,7 @@ describe("FilterService / collect — unresolved identity", () => {
       // The fetch itself did not fail — only identity resolution did.
       expect(failures).toEqual([])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({
           prsByTarget: {
@@ -309,6 +329,7 @@ describe("FilterService / collect — sort order", () => {
       )
       expect(prs.map((p) => p.id)).toEqual(["newest", "middle", "oldest"])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(provide(
         awsStub({
           prsByTarget: {
@@ -324,6 +345,61 @@ describe("FilterService / collect — sort order", () => {
         configStub([
           { profile: "dev", regions: ["us-east-1"], enabled: true },
           { profile: "prod", regions: ["us-east-1"], enabled: true }
+        ])
+      ))
+    ))
+})
+
+describe("FilterService / collectOpen — repository scope", () => {
+  it.effect("requests only the exact repository instead of scanning unrelated repositories", () => {
+    const requestedRepositories: Array<string | null> = []
+    return Effect.gen(function*() {
+      const fs = yield* FilterService
+      const { prs } = yield* fs.collectOpen(
+        [target("dev")],
+        { repo: Option.some("my-repo"), author: Option.none() }
+      )
+
+      expect(prs.map((pr) => pr.id)).toEqual(["target"])
+      expect(requestedRepositories).toEqual(["my-repo"])
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: {
+            "dev/us-east-1": [
+              mkPR({ id: "target", repositoryName: "my-repo" }),
+              mkPR({ id: "unrelated", repositoryName: "other-repo" })
+            ]
+          },
+          requestedRepositories
+        }),
+        configStub([{ profile: "dev", regions: ["us-east-1"], enabled: true }])
+      ))
+    )
+  })
+
+  it.effect("treats an absent exact repository as an empty successful account scan", () =>
+    Effect.gen(function*() {
+      const fs = yield* FilterService
+      const { failures, prs } = yield* fs.collectOpen(
+        [target("missing"), target("failed")],
+        { repo: Option.some("my-repo"), author: Option.none() }
+      )
+
+      expect(prs).toEqual([])
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatch(/^failed\/us-east-1: /)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(provide(
+        awsStub({
+          missingRepositoryTargets: ["missing/us-east-1"],
+          failTargets: ["failed/us-east-1"]
+        }),
+        configStub([
+          { profile: "missing", regions: ["us-east-1"], enabled: true },
+          { profile: "failed", regions: ["us-east-1"], enabled: true }
         ])
       ))
     ))

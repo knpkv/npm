@@ -40,6 +40,16 @@ snapshots:
         start: 14
         end: 182
   ? |
+    const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
+      fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
+  : labels:
+      - source: |-
+          const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
+            fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
+        style: primary
+        start: 0
+        end: 141
+  ? |
     const load = (id: Id) => Effect.gen(function*() {
       return yield* repository.load(id)
     })
@@ -394,3 +404,47 @@ snapshots:
         style: primary
         start: 0
         end: 82
+  ? |
+    const scan: PrOpenServiceContract["scan"] = input =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+  : labels:
+      - source: |-
+          const scan: PrOpenServiceContract["scan"] = input =>
+            source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+        style: primary
+        start: 0
+        end: 109
+  ? |
+    const gitOutput = (path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+  : labels:
+      - source: |-
+          const gitOutput = (path, args) =>
+            spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+        style: primary
+        start: 0
+        end: 115
+  ? |
+    const collect: FilterServiceContract["collect"] = (targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+  : labels:
+      - source: |-
+          const collect: FilterServiceContract["collect"] = (targets) =>
+            Effect.gen(function*() {
+              return yield* fanOut(targets)
+            })
+        style: primary
+        start: 0
+        end: 128
+  ? |
+    const collectMatching = (stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+  : labels:
+      - source: |-
+          const collectMatching = (stream) =>
+            stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+        style: primary
+        start: 0
+        end: 113

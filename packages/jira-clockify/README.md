@@ -77,6 +77,11 @@ jcf auth status            # Show auth status for both services
 ## Neovim Plugin
 
 Ships with a Lua plugin in `nvim/lua/jcf/`. Auto-detects Jira issue keys from branch names.
+Periodic status polling requires util-linux `flock`; the lock stays attached to
+the `jcf` process so closing or killing Neovim cannot start an overlapping poll.
+Polling always coordinates through fixed `~/.jcf/poll.lock` and
+`~/.jcf/poll.stamp` files beside the CLI-owned `state.json`; a configured
+`state_path` changes display reads only.
 
 ### lazy.nvim
 
@@ -88,7 +93,7 @@ Ships with a Lua plugin in `nvim/lua/jcf/`. Auto-detects Jira issue keys from br
       binary = "jcf",                -- path to jcf binary
       auto_detect_branch = true,     -- detect issue key from git branch
       float = { width = 0.8, height = 0.8 },
-      poll_interval = 30000,         -- ms, poll Clockify for external changes
+      poll_interval = 30000,         -- positive integer ms; invalid/non-positive disables polling
     })
   end,
 }
@@ -114,7 +119,9 @@ Stored in `~/.jcf/`:
 ~/.jcf/
 ├── config.json      # JQL, project, billable defaults
 ├── clockify.json    # Clockify API key, workspace, user
-└── state.json       # Current timer state
+├── poll.lock       # Kernel lock held by the active managed poll
+├── poll.stamp      # Last managed poll attempt, including failures
+└── state.json       # Current timer state and polling authority
 ```
 
 Jira OAuth credentials stored via `@knpkv/atlassian-common` in `~/.config/atlassian/`.

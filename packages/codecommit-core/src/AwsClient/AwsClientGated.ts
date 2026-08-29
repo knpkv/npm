@@ -18,7 +18,7 @@
  * @module
  */
 import { Clock, Context, Effect, Layer, Random, Schema, Stream } from "effect"
-import { AwsProfileName, AwsRegion } from "../Domain.js"
+import { AwsProfileName, AwsRegion, type PullRequest } from "../Domain.js"
 import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
 import { PermissionService } from "../PermissionService/index.js"
@@ -40,6 +40,10 @@ interface GateParams {
 }
 
 type PromptAllowedState = "always_allowed" | "allowed"
+type GetPullRequestsInput = {
+  readonly account: Parameters<AwsClient.Service["getPullRequests"]>[0]
+  readonly options: Parameters<AwsClient.Service["getPullRequests"]>[1]
+}
 
 const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
@@ -114,7 +118,7 @@ export const AwsClientGatedLive: Layer.Layer<
         if (response === "deny") {
           yield* permService.set(params.operation, "deny")
           yield* logAudit(params, "denied", null)
-          return yield* Effect.fail(toDeniedError(params, "denied"))
+          return yield* toDeniedError(params, "denied")
         }
         return allowedState
       })
@@ -129,7 +133,7 @@ export const AwsClientGatedLive: Layer.Layer<
         }
         if (state === "deny") {
           yield* logAudit(params, "denied", null)
-          return yield* Effect.fail(toDeniedError(params, "denied"))
+          return yield* toDeniedError(params, "denied")
         }
         return yield* promptUser(params)
       })
@@ -190,12 +194,13 @@ export const AwsClientGatedLive: Layer.Layer<
     const nested = (p: { account: { profile: string; region: string } }) => p.account
 
     return {
-      getPullRequests: gatedStream(
-        "getPullRequests",
-        (a) => `List PRs for ${a.profile}`,
-        self,
-        (a) => inner.getPullRequests(a)
-      ),
+      getPullRequests: (account, options) =>
+        gatedStream<GetPullRequestsInput, PullRequest>(
+          "getPullRequests",
+          ({ account }) => `List PRs for ${account.profile}`,
+          nested,
+          ({ account, options }) => inner.getPullRequests(account, options)
+        )({ account, options }),
       getCallerIdentity: gated(
         "getCallerIdentity",
         (a) => `Get identity for ${a.profile}`,
