@@ -34,6 +34,7 @@ local function fire_exit(world, label)
     check(false, label .. " (no job was started, so on_exit could not be delivered)")
     return
   end
+  world.complete_job()
   world.handlers.on_exit()
 end
 
@@ -46,7 +47,7 @@ local MODULE = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h") .. 
 local REAL_FN = vim.fn
 local REAL_OPEN = io.open
 local STATE_PATH = "/fake/state.json"
-local LEASE_PATH = "/fake/poll.lock"
+local LOCK_PATH = "/fake/poll.lock"
 
 -- Any `poll.lock`, not just the configured one, so a spec can assert where an
 -- unconfigured lease is derived to rather than only that it exists.
@@ -81,7 +82,7 @@ end
 -- pids that `kill(pid, 0)` should report as gone, standing in for an editor that
 -- was SIGKILLed while holding the lease.
 local function new_fs()
-  return { files = {}, dead = {}, next_key = 0, next_fd = 10, fds = {} }
+  return { files = {}, dead = {}, next_key = 0, next_fd = 10, fds = {}, lock_holders = {}, realpaths = {} }
 end
 
 -- Builds a fresh world: a fake libuv, fake job control, a deferred-callback
@@ -96,6 +97,7 @@ local function harness(opts)
     next_job_id = 100,
     -- what `jobwait` reports: -1 means "still running"
     wait_status = -1,
+    timer_starts = {},
     stat = opts.stat,
     content = opts.content,
     handlers = nil,
@@ -104,9 +106,10 @@ local function harness(opts)
   }
   local fs = world.fs
 
-  -- The lease is always derived from `state_path`; there is no override to point
-  -- it somewhere convenient, so the harness configures the state file that puts
-  -- it at LEASE_PATH.
+  -- `STATE_PATH` stubs the fixed CLI authority expanded from
+  -- `~/.jcf/state.json`; `config.state_path` controls display reads only. The
+  -- managed lock and stamp therefore stay beside `STATE_PATH` even when a test
+  -- configures another display path.
   world.config = { binary = "jcf", state_path = STATE_PATH }
 
   local fake_uv = {
@@ -135,6 +138,9 @@ local function harness(opts)
         return { mtime = { sec = entry.at, nsec = 0 }, size = #entry.content }
       end
       return { mtime = { sec = entry.key, nsec = 0 }, size = #entry.content }
+    end,
+    fs_realpath = function(path)
+      return fs.realpaths[path] or path
     end,
     -- Only the exclusive form is used by the module, and it is the whole point:
     -- an existing file must make this fail rather than truncate.
@@ -183,7 +189,8 @@ local function harness(opts)
     end,
     new_timer = function()
       return {
-        start = function(_, _, _, cb)
+        start = function(_, initial_ms, repeat_ms, cb)
+          table.insert(world.timer_starts, { initial_ms = initial_ms, repeat_ms = repeat_ms })
           world.tick = cb
         end,
         stop = function() end,
@@ -192,14 +199,35 @@ local function harness(opts)
     end
   }
 
+  function world.complete_job()
+    if fs.lock_holders[world.poll_lock] ~= world then
+      return
+    end
+    fs.lock_holders[world.poll_lock] = nil
+    if fs.lock_holder == world then
+      fs.lock_holder = nil
+    end
+    fs.files[world.poll_stamp] = { content = tostring(os.time()), key = fs.next_key, at = os.time() }
+  end
+
   world.fn = setmetatable({
     expand = function(p)
-      return p
+      return p == "~/.jcf/state.json" and STATE_PATH or p
     end,
     getpid = function()
       return world.pid
     end,
-    jobstart = function(_, handlers)
+    jobstart = function(command, handlers)
+      if command[1] == "flock" then
+        if fs.lock_holders[command[6]] then
+          return -1
+        end
+        fs.lock_holders[command[6]] = world
+        fs.lock_holder = world
+        world.poll_lock = command[6]
+        world.poll_stamp = command[11]
+        fs.files[command[6]] = fs.files[command[6]] or { content = "", key = fs.next_key, at = os.time() }
+      end
       world.jobs_started = world.jobs_started + 1
       world.handlers = handlers
       world.next_job_id = world.next_job_id + 1
@@ -210,6 +238,12 @@ local function harness(opts)
       return 1
     end,
     jobwait = function()
+      if world.wait_status ~= -1 and fs.lock_holders[world.poll_lock] == world then
+        fs.lock_holders[world.poll_lock] = nil
+        if fs.lock_holder == world then
+          fs.lock_holder = nil
+        end
+      end
       return { world.wait_status }
     end,
     jobpid = function(id)
@@ -294,6 +328,18 @@ local function statOf(sec, nsec, size)
   return { mtime = { sec = sec, nsec = nsec }, size = size }
 end
 
+-- The first reconciliation is spread across one interval, not postponed by a
+-- full interval before the jitter. A pid equal to one interval is the boundary:
+-- its offset wraps to zero.
+do
+  local w = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, pid = 30000 })
+  w.state.start_poll(w.config, 30000)
+
+  local first = w.timer_starts[1]
+  eq(first and first.initial_ms, 0, "first poll: jitter stays inside the first interval")
+  eq(first and first.repeat_ms, 0, "first poll: timer remains one-shot")
+end
+
 -- ---------------------------------------------------------------------------
 -- Single-flight: the poll must never stack
 -- ---------------------------------------------------------------------------
@@ -323,7 +369,9 @@ do
   eq(w.jobs_started, 1, "single-flight: no second poll while the first is alive")
 end
 
--- Valid fixture: the job reports exit, so the next tick may poll again.
+-- Valid fixture: the job reports exit, so a one-shot timer is rearmed from
+-- completion. A five-second poll must not make the fixed start-based tick skip
+-- and delay the next attempt until two intervals after start.
 do
   local w = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE })
   w.state.start_poll(w.config, 30000)
@@ -331,12 +379,14 @@ do
   w.tick()
   eq(w.jobs_started, 1, "exit path: first tick starts a poll")
 
+  advance_clock(5)
   fire_exit(w, "exit path")
-  -- The guard is free, but the finished poll stamped the machine. Let the
-  -- interval pass so this case still measures the guard rather than the rate.
+  local rearmed = w.timer_starts[#w.timer_starts]
+  eq(rearmed.initial_ms, 30000, "exit path: next attempt is one interval after completion")
+  eq(rearmed.repeat_ms, 0, "exit path: polling uses a one-shot timer")
   advance_clock(30)
   w.tick()
-  eq(w.jobs_started, 2, "exit path: a reported exit releases the guard")
+  eq(w.jobs_started, 2, "exit path: a five-second poll retries by 65 seconds")
 end
 
 -- Valid fixture: the process died without on_exit reaching us. Once `jobwait`
@@ -447,7 +497,7 @@ do
 end
 
 -- ---------------------------------------------------------------------------
--- The cross-editor lease: one poll per machine, not per editor
+-- The cross-editor lock: one poll per machine, not per editor
 -- ---------------------------------------------------------------------------
 
 -- Two editors, one shared lease file. Both have an active timer to reconcile and
@@ -476,24 +526,24 @@ do
   tick(a)
   tick(b)
 
-  eq(a.jobs_started, 1, "lease: the editor that claims it polls")
-  eq(b.jobs_started, 0, "lease: the other editor skips rather than polling too")
+  eq(a.jobs_started, 1, "lock: the editor that acquires it polls")
+  eq(b.jobs_started, 0, "lock: the other editor does not start jcf")
 end
 
--- Losing the lease must not mean losing the statusline: the loser's reading comes
+-- Losing the lock must not mean losing the statusline: the loser's reading comes
 -- from the state file the winner refreshes, so skipping the spawn costs nothing.
 do
   local a, b = two_editors()
   tick(a)
   tick(b)
-  eq(b.state.read("/fake/state.json").active, true, "lease: a loser still reads the shared state")
+  eq(b.state.read("/fake/state.json").active, true, "lock: a loser still reads the shared state")
 end
 
--- A finished poll hands the lease back, but handing it back is not permission to
+-- A finished poll hands the lock back, but handing it back is not permission to
 -- poll again: the work was just done for the whole machine. This is the pair of
--- checks that separates the two bounds — the lease stops overlap, the stamp
+-- checks that separates the two bounds — the lock stops overlap, the stamp
 -- stops repetition — and without the second one 19 de-phased editors would each
--- spawn per interval, which is the cost the lease was introduced to remove.
+-- spawn per interval, which is the cost the lock was introduced to remove.
 do
   local a, b = two_editors()
   tick(a)
@@ -503,7 +553,7 @@ do
   a.activate()
   fire_exit(a, "handover")
   tick(b)
-  eq(b.jobs_started, 0, "handover: a released lease is still inside the polled interval")
+  eq(b.jobs_started, 0, "handover: a released lock is still inside the polled interval")
 
   advance_clock(30)
   tick(b)
@@ -542,9 +592,9 @@ do
   eq(total, 1, "fleet: a finished poll does not release the rest to poll in the same interval")
 end
 
--- The common failure: an editor holding the lease is SIGKILLed, so `VimLeave`
--- never runs and the file outlives its owner. Nothing would ever poll again if
--- expiry were the only way out, so a dead pid is reclaimed immediately.
+-- A SIGKILLed editor does not release the lock while its orphaned `jcf` child is
+-- still running. Once that child exits it writes the stamp and releases the
+-- kernel lock; another editor may run only after the interval passes.
 do
   local a, b, fs = two_editors()
   tick(a)
@@ -552,21 +602,29 @@ do
 
   fs.dead[4001] = true
   tick(b)
-  eq(b.jobs_started, 1, "dead holder: a lease whose owner is gone is reclaimed at once")
+  eq(b.jobs_started, 0, "dead holder: a live orphaned child keeps the lock")
+
+  a.complete_job()
+  tick(b)
+  eq(b.jobs_started, 0, "dead holder: the child's completion stamp keeps the rate bound")
+
+  advance_clock(30)
+  tick(b)
+  eq(b.jobs_started, 1, "dead holder: the next editor runs after child exit and one interval")
 end
 
--- A live holder that has blown through every deadline it was given is also
--- reclaimable — otherwise one wedged editor stops the machine reconciling at all.
+-- Elapsed wall time never licenses stealing a kernel lock from a process that
+-- still owns it.
 do
   local a, b = two_editors()
   tick(a)
 
-  advance_clock(206) -- past POLL_TIMEOUT_MS + 2 * POLL_STOP_GRACE_MS + slack
+  advance_clock(206)
   tick(b)
-  eq(b.jobs_started, 1, "expiry: a lease held past every deadline is stolen")
+  eq(b.jobs_started, 0, "elapsed time: a live lock holder is not stolen from")
 end
 
--- The inverse, and the one that keeps the fix honest: a fresh lease held by a
+-- The ordinary case: a fresh lock held by a
 -- live editor is never stolen, however often the others tick.
 do
   local a, b = two_editors()
@@ -575,56 +633,39 @@ do
   for _ = 1, 5 do
     tick(b)
   end
-  eq(b.jobs_started, 0, "no theft: a fresh lease held by a live editor stands")
+  eq(b.jobs_started, 0, "no theft: a fresh lock held by a live editor stands")
 end
 
--- An editor that died between creating the lease and writing its payload leaves
--- an empty file. It names no pid, so liveness cannot save it and it must read as
--- stale, or the lease wedges permanently on first use.
+-- `flock` locks the inode, not the existence of the path. A lock file left from
+-- an earlier process is therefore harmless.
 do
   local fs = new_fs()
   local b = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 4002 })
   b.state.start_poll(b.config, 30000)
-  fs.files[LEASE_PATH] = { content = "", key = 99 }
+  fs.files[LOCK_PATH] = { content = "", key = 99 }
 
   tick(b)
-  eq(b.jobs_started, 1, "torn lease: an unparseable lease is treated as stale")
+  eq(b.jobs_started, 1, "persistent lock file: an unlocked inode is acquired")
 end
 
--- Being stolen from must not turn the victim's own cleanup into a second theft:
--- releasing on a nonce that is no longer ours would drop the thief's lease and
--- let a third editor in beside it.
-do
-  local a, b, fs = two_editors()
-  tick(a)
-  fs.dead[4001] = true -- b is entitled to steal
-  tick(b)
-  eq(b.jobs_started, 1, "stolen lease: the thief holds it")
-
-  fs.dead[4001] = nil
-  a.activate()
-  fire_exit(a, "stolen lease") -- the victim finally reaps its own job
-  check(fs.files[LEASE_PATH] ~= nil, "stolen lease: the victim's release leaves the thief's lease alone")
-end
-
--- Teardown with nothing in flight should hand the lease straight back instead of
--- making every other editor wait out the expiry.
+-- Teardown with nothing in flight leaves no kernel lock behind. The path itself
+-- remains, as `flock` expects.
 do
   local a, b, fs = two_editors()
   tick(a)
   a.activate()
-  fire_exit(a, "teardown") -- poll done, lease already released
+  fire_exit(a, "teardown") -- poll done, lock already released
   advance_clock(30) -- past the stamp a's poll left, so b is free to claim
-  tick(b) -- b claims it
-  eq(b.jobs_started, 1, "teardown: b holds the lease")
+  tick(b) -- b acquires it
+  eq(b.jobs_started, 1, "teardown: b holds the lock")
 
   b.activate()
   fire_exit(b, "teardown")
   b.state.stop_poll()
-  check(fs.files[LEASE_PATH] == nil, "teardown: stop_poll with no job in flight releases the lease")
+  check(fs.lock_holder == nil, "teardown: stop_poll with no job in flight leaves the lock free")
 end
 
--- A spawn that fails (missing binary) must not leave the lease held, or one
+-- A spawn that fails (`flock` missing) must not leave the lock held, or one
 -- broken install would silence polling for every editor on the machine.
 do
   local fs = new_fs()
@@ -635,22 +676,63 @@ do
   a.state.start_poll(a.config, 30000)
 
   tick(a)
-  check(fs.files[LEASE_PATH] == nil, "failed spawn: the lease is released rather than stranded")
+  check(fs.lock_holder == nil, "failed spawn: the lock is not stranded")
 end
 
--- `state_path` is a supported setup option and `lease_path` is not, so the lease
--- has to be derived from the state file rather than hardcoded. Pointing it at a
--- directory nothing creates makes every claim fail with ENOENT, and since a
--- failed claim reads as "somebody else is polling", nothing would ever poll
--- again.
+-- `state_path` controls what the plugin displays, but `jcf timer status` owns a
+-- fixed global state file. Coordination must follow the CLI authority.
 do
   local fs = new_fs()
   local a = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 4003 })
   a.state.start_poll({ binary = "jcf", state_path = "/elsewhere/state.json" }, 30000)
 
   tick(a)
-  eq(a.jobs_started, 1, "derived lease: a configured state_path still polls")
-  check(fs.files["/elsewhere/poll.lock"] ~= nil, "derived lease: the lease sits beside the state file")
+  eq(a.jobs_started, 1, "global lock: a configured display state still polls")
+  check(fs.files[LOCK_PATH] ~= nil, "global lock: coordination follows the CLI state authority")
+end
+
+-- A display-only state override must not suppress reconciliation of the CLI's
+-- fixed active state.
+do
+  local a = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, pid = 4004 })
+  a.state.read = function(path)
+    return { active = path == STATE_PATH }
+  end
+  a.state.start_poll({ binary = "jcf", state_path = "/display/inactive.json" }, 30000)
+
+  tick(a)
+  eq(a.jobs_started, 1, "global gate: display state cannot suppress CLI reconciliation")
+end
+
+-- Different configured display files still invoke the same CLI state authority,
+-- so they must share one machine-wide lock.
+do
+  local fs = new_fs()
+  local a = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 7001 })
+  local b = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 7002 })
+  a.state.start_poll({ binary = "jcf", state_path = "/state-a/state.json" }, 30000)
+  b.state.start_poll({ binary = "jcf", state_path = "/state-b/state.json" }, 30000)
+
+  tick(a)
+  tick(b)
+  eq(a.jobs_started + b.jobs_started, 1, "global lock: display paths cannot split CLI coordination")
+end
+
+-- StateWriter atomically replaces `state.json`; if that file began as a
+-- symlink, its realpath changes during the in-flight poll. Lock identity must
+-- stay in the fixed CLI directory across that replacement.
+do
+  local fs = new_fs()
+  fs.realpaths[STATE_PATH] = "/symlink-target/state.json"
+  local a = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 7201 })
+  local b = harness({ stat = statOf(10, 0, #ACTIVE), content = ACTIVE, fs = fs, pid = 7202 })
+  a.state.start_poll(a.config, 30000)
+  b.state.start_poll(b.config, 30000)
+
+  tick(a)
+  fs.realpaths[STATE_PATH] = STATE_PATH -- atomic rename replaced the symlink
+  tick(b)
+  eq(a.jobs_started + b.jobs_started, 1, "atomic refresh: replacing state.json cannot move the lock")
 end
 
 -- ---------------------------------------------------------------------------

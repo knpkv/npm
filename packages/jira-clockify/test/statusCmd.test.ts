@@ -26,13 +26,15 @@ import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as PlatformError from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
 import { TestClock } from "effect/testing"
 import { Command } from "effect/unstable/cli"
 import { statusCmd } from "../src/cli/timer/status.js"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
-import type { TimerStateFile } from "../src/services/StateWriter.js"
+import type { StateWriterContract, TimerStateFile } from "../src/services/StateWriter.js"
 import { StateWriter } from "../src/services/StateWriter.js"
 
 const WORKSPACE_ID = "ws-1"
@@ -93,7 +95,22 @@ interface Capture {
 
 const makeCapture = (): Capture => ({ cleared: false, written: [] })
 
-const layersFor = (client: ClockifyApiClientContract, capture: Capture) =>
+const stateWriterFor = (capture: Capture): StateWriterContract => ({
+  read: Effect.succeed(activeState),
+  write: (state: TimerStateFile) =>
+    Effect.sync(() => {
+      capture.written.push(state)
+    }),
+  clear: Effect.sync(() => {
+    capture.cleared = true
+  })
+})
+
+const layersFor = (
+  client: ClockifyApiClientContract,
+  capture: Capture,
+  stateWriter: StateWriterContract = stateWriterFor(capture)
+) =>
   Layer.mergeAll(
     Layer.succeed(ClockifyApiClient, client),
     Layer.succeed(ClockifyAuth, {
@@ -106,23 +123,41 @@ const layersFor = (client: ClockifyApiClientContract, capture: Capture) =>
       save: () => Effect.void,
       isConfigured: Effect.succeed(true)
     }),
-    Layer.succeed(StateWriter, {
-      read: Effect.succeed(activeState),
-      write: (state: TimerStateFile) =>
-        Effect.sync(() => {
-          capture.written.push(state)
-        }),
-      clear: Effect.sync(() => {
-        capture.cleared = true
-      })
-    }),
+    Layer.succeed(StateWriter, stateWriter),
     NodeServices.layer
   )
 
-const run = (client: ClockifyApiClientContract, capture: Capture) =>
-  Command.runWith(statusCmd, { version: "0.0.0-test" })([]).pipe(
-    Effect.provide(layersFor(client, capture)),
+interface RunOverrides {
+  readonly fileSystem?: FileSystem.FileSystem
+  readonly stateWriter?: StateWriterContract
+}
+
+const run = (
+  client: ClockifyApiClientContract,
+  capture: Capture,
+  args: ReadonlyArray<string> = [],
+  overrides: RunOverrides = {}
+) => {
+  const command = Command.runWith(statusCmd, { version: "0.0.0-test" })(args)
+  const withFileSystem = overrides.fileSystem === undefined
+    ? command
+    : command.pipe(Effect.provideService(FileSystem.FileSystem, overrides.fileSystem))
+  return withFileSystem.pipe(
+    // Test runner boundary: every command service is composed above and supplied once.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(layersFor(client, capture, overrides.stateWriter)),
     Effect.exit
+  )
+}
+
+const fileSystemFailure = (method: string, tag: PlatformError.SystemErrorTag) =>
+  new PlatformError.PlatformError(
+    new PlatformError.SystemError({
+      _tag: tag,
+      module: "FileSystem",
+      method,
+      description: `${method} test failure`
+    })
   )
 
 describe("jcf timer status", () => {
@@ -170,5 +205,205 @@ describe("jcf timer status", () => {
       expect(capture.cleared).toBe(false)
       expect(capture.written).toHaveLength(1)
       expect(capture.written[0]).toMatchObject({ active: true, ticketKey: "PROJ-123" })
+    }))
+
+  it.effect("skips a second nvim poll while the completion stamp is fresh", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-poll-stamp-" })
+      const stampPath = `${root}/poll.stamp`
+      yield* fs.writeFileString(stampPath, "0")
+
+      const capture = makeCapture()
+      let calls = 0
+      const client = {
+        ...baseClient,
+        getRunningTimer: () =>
+          Effect.sync(() => {
+            calls += 1
+            return null
+          })
+      }
+      const exit = yield* run(client, capture, [
+        "--nvim-poll-stamp",
+        stampPath,
+        "--nvim-poll-interval-ms",
+        "30000"
+      ])
+
+      expect(exit._tag).toBe("Success")
+      expect(calls).toBe(0)
+      expect(capture.cleared).toBe(false)
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
+  it.effect("runs a missing nvim poll stamp once and persists it", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-poll-complete-" })
+      const stampPath = `${root}/poll.stamp`
+
+      const capture = makeCapture()
+      let calls = 0
+      const client = {
+        ...baseClient,
+        getRunningTimer: () =>
+          Effect.sync(() => {
+            calls += 1
+            return null
+          })
+      }
+      const exit = yield* run(
+        client,
+        capture,
+        [
+          "--nvim-poll-stamp",
+          stampPath,
+          "--nvim-poll-interval-ms",
+          "30000"
+        ]
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(calls).toBe(1)
+      expect(capture.cleared).toBe(true)
+      expect(Number(yield* fs.readFileString(stampPath))).toBe(0)
+
+      const secondExit = yield* run(client, capture, [
+        "--nvim-poll-stamp",
+        stampPath,
+        "--nvim-poll-interval-ms",
+        "30000"
+      ])
+      expect(secondExit._tag).toBe("Success")
+      expect(calls).toBe(1)
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
+  it.effect("fails before reconciliation when the nvim poll stamp cannot be read", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      let calls = 0
+      const capture = makeCapture()
+      const exit = yield* run(
+        {
+          ...baseClient,
+          getRunningTimer: () =>
+            Effect.sync(() => {
+              calls += 1
+              return null
+            })
+        },
+        capture,
+        [
+          "--nvim-poll-stamp",
+          "/poll.stamp",
+          "--nvim-poll-interval-ms",
+          "30000"
+        ],
+        {
+          fileSystem: {
+            ...fs,
+            readFileString: () => Effect.fail(fileSystemFailure("readFileString", "PermissionDenied"))
+          }
+        }
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(calls).toBe(0)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
+  it.effect("reports a completion-stamp write failure after reconciliation", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      let calls = 0
+      const capture = makeCapture()
+      const exit = yield* run(
+        {
+          ...baseClient,
+          getRunningTimer: () =>
+            Effect.sync(() => {
+              calls += 1
+              return null
+            })
+        },
+        capture,
+        [
+          "--nvim-poll-stamp",
+          "/poll.stamp",
+          "--nvim-poll-interval-ms",
+          "30000"
+        ],
+        {
+          fileSystem: {
+            ...fs,
+            readFileString: () => Effect.fail(fileSystemFailure("readFileString", "NotFound")),
+            writeFileString: () => Effect.fail(fileSystemFailure("writeFileString", "PermissionDenied"))
+          }
+        }
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(calls).toBe(1)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
+  it.effect("rate-bounds a failed managed attempt without changing unmanaged failures", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-poll-failed-" })
+      const stampPath = `${root}/poll.stamp`
+      const args = ["--nvim-poll-stamp", stampPath, "--nvim-poll-interval-ms", "30000"]
+      const capture = makeCapture()
+
+      const failed = yield* run(baseClient, capture, args, {
+        stateWriter: {
+          ...stateWriterFor(capture),
+          read: Effect.die("state read failed")
+        }
+      })
+      expect(failed._tag).toBe("Failure")
+      expect(yield* fs.exists(stampPath)).toBe(true)
+
+      const suppressedRetry = yield* run(baseClient, capture, args, {
+        stateWriter: {
+          ...stateWriterFor(capture),
+          read: Effect.die("must be skipped while the attempt stamp is fresh")
+        }
+      })
+      expect(suppressedRetry._tag).toBe("Success")
+
+      const unmanagedFailure = yield* run(baseClient, capture, [], {
+        stateWriter: {
+          ...stateWriterFor(capture),
+          read: Effect.die("unmanaged state read failed")
+        }
+      })
+      expect(unmanagedFailure._tag).toBe("Failure")
+    }).pipe(
+      Effect.scoped,
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
+
+  it.effect("reports invalid managed-poll flags in the typed failure channel", () =>
+    Effect.gen(function*() {
+      const exit = yield* run(baseClient, makeCapture(), ["--nvim-poll-stamp", "/poll.stamp"])
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail"])
+      }
     }))
 })

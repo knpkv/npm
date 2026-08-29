@@ -318,6 +318,10 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep Jira Clockify Neovim polling path claims synchronized across
+  `.changeset/*.md`, `packages/jira-clockify/**`, and the owning Lua fixtures.
+  Poll coordination follows jcf's fixed `~/.jcf/state.json` authority, not the
+  plugin's configurable display-only `state_path`.
 - Keep sandbox capability boundaries synchronized across
   `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
   owning policy, service, projection, and security tests. The invariant is:
