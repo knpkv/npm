@@ -50,8 +50,10 @@ owner configuration and discovery. Forbidden surfaces for all four coordinates a
 artifacts, and public responses; the role ARN is additionally forbidden from Control Center
 authenticated API responses and every client-facing or normalized payload.
 
-Supported role partitions are `aws` and `aws-us-gov`. aws-cn is intentionally rejected until the
-workflow, provider client ID, and trust policy support the China STS audience.
+The protected OIDC probe supports role partitions `aws` and `aws-us-gov`. aws-cn is intentionally
+rejected until the workflow, provider client ID, and trust policy support the China STS audience.
+The local disposable PR-review evaluation below also supports `aws-cn` when its profile, region,
+stack role, and CodeCommit repository all belong to that partition.
 
 ## Verify
 
@@ -86,20 +88,42 @@ cleanup; remove it only through a deliberate operator procedure.
 ## Disposable PR-review evaluation
 
 `pr-review-eval.sh` creates a unique pull request against `main` with one intentional
-retry/idempotency defect. It writes the repository, branch, head, pull-request ID, and browser URL
-only to a mode-`0600` recovery journal. Before writing, it verifies that the current AWS account,
+retry/idempotency defect. It writes the repository, branch, head, pull-request ID, and
+partition-correct browser URL only to a mode-`0600` recovery journal beneath the current user's
+mode-`0700` state directory. The absolute dedicated recovery root defaults to
+`${XDG_STATE_HOME:-$HOME/.local/state}/control-center/pr-review-eval`; override it with
+`CONTROL_CENTER_PR_REVIEW_RECOVERY_ROOT`. Before writing, it verifies that the current AWS account,
 CloudFormation stack output, stack-owned repository ID, CodeCommit repository name, and repository
-ARN agree. The script stays alive while the fixture is in use; type `stop` or terminate it to close
-the pull request and then delete the branch. Successful cleanup removes the journal. Incomplete
-cleanup fails loudly and keeps the journal for recovery. Cleanup is registered before the first AWS
-resource is created and records ownership after each successful mutation. This fixture does not
-inspect or modify CodePipeline and remains usable when that pipeline has drifted.
+ARN agree. `RECOVERY <journal>` is printed before the first resource mutation; `READY <journal>` is
+printed after the pull request is usable. The script stays alive while the fixture is in use; type
+`stop` or terminate it to close the pull request and then delete the branch. Successful cleanup
+removes the journal. Incomplete cleanup reports the failed stage without exposing provider stderr
+and keeps the journal. Cleanup is registered before the first AWS resource is created and records
+ownership after each successful mutation. This fixture does not inspect or modify CodePipeline and
+remains usable when that pipeline has drifted.
 
 ```sh
 AWS_PROFILE=dev-administratoraccess \
 CONTROL_CENTER_LIVE_AWS_REGION=eu-central-1 \
 ./infra/control-center-live-aws/pr-review-eval.sh
 ```
+
+After a process or host loss, rerun cleanup with the same profile and region:
+
+```sh
+AWS_PROFILE=dev-administratoraccess \
+CONTROL_CENTER_LIVE_AWS_REGION=eu-central-1 \
+./infra/control-center-live-aws/pr-review-eval.sh recover /path/from/the/RECOVERY/line/fixture.json
+```
+
+Recovery accepts only a private journal directly beneath the configured recovery root, re-verifies
+the stack/account/repository boundary, and matches the exact tokenized pull request and branch head
+before mutation. It reconciles an uncertain pull-request create only when exactly one matching open
+pull request exists. It never deletes an uncertain branch; inspect that retained journal and the
+provider state manually.
+
+If the terminal output was lost, inspect the configured recovery root for a private
+`*/fixture.json` journal. Do not move or copy a journal outside that root before recovery.
 
 Expected evaluation result: a correctness finding that the idempotency key is regenerated inside
 the retry loop, which can charge the same request more than once after an ambiguous provider
