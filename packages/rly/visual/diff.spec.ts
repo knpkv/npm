@@ -18,6 +18,22 @@ const expectInsideViewport = async (locator: Locator, page: Page): Promise<void>
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0)
 }
 
+const constructedThemeCss = (container: Locator): Promise<string> =>
+  container.evaluate((element) => {
+    const root = element.shadowRoot
+    if (root === null) throw new Error("Diff shadow root was unavailable")
+    return root.adoptedStyleSheets
+      .flatMap((sheet) => Array.from(sheet.cssRules, (rule) => rule.cssText))
+      .join("\n")
+  })
+
+const fallbackThemeCss = (container: Locator): Promise<string> =>
+  container.evaluate((element) => {
+    const themes = element.shadowRoot?.querySelectorAll("style[data-theme-css]")
+    if (themes === undefined || themes.length === 0) throw new Error("Diff fallback theme style was unavailable")
+    return Array.from(themes, (theme) => theme.textContent ?? "").join("\n")
+  })
+
 test("renders the actual split diff and preserves the completed review interaction", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_440 })
   await page.goto(story("diff-diffcodeview--workbench"))
@@ -30,6 +46,37 @@ test("renders the actual split diff and preserves the completed review interacti
   await expect(page.getByText("Audit evidence appended without resetting the viewer")).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-split.png") })
+})
+
+test("updates an adopted diff theme without remounting", async ({ page }) => {
+  await page.goto(story("diff-diffcodeview--theme-transition"))
+  const container = page.locator("diffs-container").first()
+
+  await expect.poll(() => constructedThemeCss(container)).toContain("color-scheme: light")
+  await container.evaluate((element) => {
+    element.dataset.themeTransitionIdentity = "retained"
+  })
+  await page.getByRole("button", { name: "Use dark diff theme" }).click()
+  await expect(page.locator("[data-diff-theme-type='dark']")).toBeAttached()
+  await expect.poll(() => constructedThemeCss(container)).toContain("color-scheme: dark")
+  await expect(container).toHaveAttribute("data-theme-transition-identity", "retained")
+})
+
+test("updates the style-element diff theme fallback without remounting", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(CSSStyleSheet.prototype, "replaceSync", { configurable: true, value: undefined })
+  })
+  await page.goto(story("diff-diffcodeview--theme-transition"))
+  const container = page.locator("diffs-container").first()
+
+  await expect.poll(() => fallbackThemeCss(container)).toContain("color-scheme: light")
+  await container.evaluate((element) => {
+    element.dataset.themeTransitionIdentity = "retained"
+  })
+  await page.getByRole("button", { name: "Use dark diff theme" }).click()
+  await expect(page.locator("[data-diff-theme-type='dark']")).toBeAttached()
+  await expect.poll(() => fallbackThemeCss(container)).toContain("color-scheme: dark")
+  await expect(container).toHaveAttribute("data-theme-transition-identity", "retained")
 })
 
 test("keeps the real stacked and wrapped renderer inside 320 pixels", async ({ page }, testInfo) => {

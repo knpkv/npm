@@ -33,6 +33,7 @@ index 1cbc5759923c9004f461c66b03e225a1b07de975..383c11da9f18e482456de85fa39d511c
 +	if (supportsConstructedThemeSheets(shadowRoot)) {
 +		currentNode?.remove();
 +		upsertConstructedThemeSheet(shadowRoot, themeCSS);
- 		return;
+-		return;
++		return currentNode ?? createHostThemeStyleNode();
  	}
  	currentNode ??= createHostThemeStyleNode();
