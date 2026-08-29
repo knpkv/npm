@@ -161,7 +161,7 @@ export const statusCmd = Command.make(
               projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
             }
             yield* Console.log(`  Project:  ${projectName}`)
-            yield* Console.log(`  Billable: ${entry.billable ? "yes" : "no"}`)
+            yield* Console.log(`  Billable: ${entry.billable === true ? "yes" : "no"}`)
 
             // Show tags
             if (entry.tagIds !== null && entry.tagIds !== undefined && entry.tagIds.length > 0) {
