@@ -4107,6 +4107,65 @@ describe("application adapters", () => {
       if (events._tag === "page") assert.lengthOf(events.events, 0)
     })))
 
+  it.effect("does not bind discovery observed before a concurrent configuration revision", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        displayName: PluginConnectionDisplayName.make("Racing CodePipeline"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        "codepipeline",
+        descriptor,
+        0,
+        T0
+      )
+      yield* persistence.pluginConfigurations.update(WORKSPACE_ID, CODEPIPELINE_PLUGIN_ID, [], 0, T0)
+      const discoveryEntered = yield* Deferred.make<void>()
+      const releaseDiscovery = yield* Deferred.make<void>()
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Deferred.succeed(discoveryEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseDiscovery)),
+          Effect.as({
+            account: { providerImmutableId: "123456789012", displayName: "123456789012" },
+            workspace: null,
+            resource: { providerImmutableId: "eu-central-1:payments", displayName: "Payments pipeline" },
+            endpoints: [],
+            discoveredAt: T0
+          })
+        ),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      })
+      const testFiber = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(discoveryEntered)
+      yield* persistence.pluginConfigurations.update(WORKSPACE_ID, CODEPIPELINE_PLUGIN_ID, [], 1, SNAPSHOT_AT)
+      yield* Deferred.succeed(releaseDiscovery, undefined)
+
+      const outcome = yield* Fiber.join(testFiber).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.instanceOf(outcome.failure, ApplicationServiceUnavailable)
+      const stored = yield* persistence.pluginConnections.get(WORKSPACE_ID, CODEPIPELINE_PLUGIN_ID)
+      assert.isNull(stored.providerAccountId)
+      assert.isNull(stored.followedResourceId)
+    })))
+
   it.effect("persists manual connection health and wakes live portfolio readers", () =>
     withApplication(
       Effect.gen(function*() {

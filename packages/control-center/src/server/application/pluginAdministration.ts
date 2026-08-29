@@ -1728,18 +1728,22 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     }),
     testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
       const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const unboundConfigurationRevision =
+        connection.providerAccountId === null && connection.followedResourceId === null
+          ? yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+            Effect.map(Option.match({ onNone: () => 0, onSome: ({ revision }) => revision })),
+            Effect.mapError(mapPersistenceReadError)
+          )
+          : null
       const tested = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
       if (tested.test._tag === "healthy") {
         if (connection.providerAccountId === null && connection.followedResourceId === null) {
-          const configuration = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
-            Effect.mapError(mapPersistenceReadError)
-          )
           yield* materializeConnectionOwnership(
             persistence,
             cryptoService,
             connection,
             tested.discovery,
-            Option.isSome(configuration) ? configuration.value.revision : 0
+            unboundConfigurationRevision ?? 0
           ).pipe(Effect.mapError(() => unavailable()))
         } else {
           yield* assertConnectionOwnership(persistence, connection, tested.discovery).pipe(
