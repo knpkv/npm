@@ -11,7 +11,10 @@ import { PackedPackageError, runCheckedCommand } from "./checked-command.js"
 const PackageJson = Schema.fromJsonString(Schema.Struct({
   name: Schema.String,
   version: Schema.String,
-  dependencies: Schema.Struct({ "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4") })
+  dependencies: Schema.Struct({
+    "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4"),
+    "@smithy/core": Schema.String
+  })
 }))
 
 const runtimeDependencies: ReadonlyArray<string> = [
@@ -19,6 +22,7 @@ const runtimeDependencies: ReadonlyArray<string> = [
   "@distilled.cloud/aws",
   "@effect/sql-libsql",
   "@libsql/client",
+  "@smithy/core",
   "effect"
 ]
 
