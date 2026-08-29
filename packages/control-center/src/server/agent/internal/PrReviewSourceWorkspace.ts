@@ -168,7 +168,8 @@ const makeCodeCommitResolver = Effect.fn("PrReviewSourceResolver.makeCodeCommitR
         if (Option.isNone(stored)) continue
         const repositoryName = configuredText(stored.value.values, "repositoryName")
         const region = configuredText(stored.value.values, "region")
-        if (repositoryName !== request.repository || !Schema.is(SourceRegion)(region)) continue
+        if (repositoryName !== request.repository) continue
+        if (!Schema.is(SourceRegion)(region)) return yield* sourceError("connection-unavailable")
         const profile = yield* Effect.scoped(
           configuredCredentialText(secrets, stored.value.values, "profile")
         )
