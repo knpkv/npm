@@ -361,6 +361,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
+      '@smithy/core':
+        specifier: ^3.32.0
+        version: 3.32.0
       effect:
         specifier: 4.0.0-rc.109
         version: 4.0.0-rc.109
