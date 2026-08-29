@@ -36,6 +36,7 @@ import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
+  type PrReviewSandboxSessionRequest,
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
@@ -423,7 +424,8 @@ const makeSessionLayer = (
   nativeReviewOutput?: string,
   nativeReviewRunner: "claude" | "codex" = "codex",
   nativeReviewResult?: PrReviewSandboxCommandResult,
-  finalizationFailure?: typeof PrReviewSandboxSessionError.Type
+  finalizationFailure?: typeof PrReviewSandboxSessionError.Type,
+  acquisitionFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make(
     "01890f6f-6d6a-7cc0-98d2-000000000454"
@@ -550,15 +552,23 @@ const makeSessionLayer = (
   return Layer.succeed(
     PrReviewSandboxSessions,
     PrReviewSandboxSessions.of({
-      withSession: (request, use) =>
-        Effect.sync(() => {
+      withSession: <Success, Failure, Requirements>(
+        request: PrReviewSandboxSessionRequest,
+        use: (session: PrReviewSandboxSession) => Effect.Effect<Success, Failure, Requirements>
+      ): Effect.Effect<Success, Failure | PrReviewSandboxSessionError, Requirements> => {
+        const recordRequest = Effect.sync(() => {
           observation.requests.push(request)
-        }).pipe(
+        })
+        if (acquisitionFailure !== undefined) {
+          return recordRequest.pipe(Effect.andThen(Effect.fail(acquisitionFailure)))
+        }
+        return recordRequest.pipe(
           Effect.andThen(use(session)),
           Effect.flatMap((result) =>
             finalizationFailure === undefined ? Effect.succeed(result) : Effect.fail(finalizationFailure)
           )
-        ),
+        )
+      },
       reconcile: () => Effect.succeed({ removedSandboxes: [] })
     })
   )
@@ -2091,7 +2101,56 @@ describe("PR review task executor", () => {
             assert.strictEqual(result.failure._tag, "AgentProviderError")
             if (result.failure._tag === "AgentProviderError") {
               assert.strictEqual(result.failure.phase, "timeout")
+              assert.strictEqual(result.failure.reviewCause, "command-timeout")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
               assert.isTrue(result.failure.retryable)
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps sandbox acquisition failures at sandbox start", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "sandbox-unavailable" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "sandbox-unavailable")
+              assert.strictEqual(result.failure.reviewStage, "sandbox-start")
             }
           }
         })
