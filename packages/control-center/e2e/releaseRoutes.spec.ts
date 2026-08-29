@@ -1361,11 +1361,13 @@ test("launches an exact-head review and presents its durable findings", async ({
 
   const launchDialog = page.getByRole("dialog", { name: "Review this exact head" })
   await expect(launchDialog).toBeVisible()
-  await expect(launchDialog.getByRole("button", { name: "Keep reading" })).toBeFocused()
+  await expect(launchDialog.getByRole("button", { name: "Cancel" })).toBeFocused()
   await expect(launchDialog).toContainText(reviewHeadRevision)
-  await expect(launchDialog).toContainText(reviewProfile.label)
+  await expect(launchDialog.locator("dl")).toContainText("Agentopenai-compatible")
+  await expect(launchDialog.locator("dl")).toContainText("Modelreview-model")
   await expect(launchDialog).toContainText("20 minutes")
-  await expect(launchDialog).toContainText("Network blocked · sbx")
+  await expect(launchDialog.locator("dl")).toContainText("NetworkNetwork blocked")
+  await expect(launchDialog.locator("dl")).toContainText("IsolationDisposable sbx sandbox")
   await expect(page.locator("[inert]")).not.toHaveCount(0)
   await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
 
@@ -1376,7 +1378,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked", "1")
 
   await reviewTrigger.click()
-  await launchDialog.getByRole("button", { name: "Start full review" }).click()
+  await launchDialog.getByRole("button", { name: "Start full-project review" }).click()
   await expect
     .poll(() => enqueuePayload)
     .toEqual({
