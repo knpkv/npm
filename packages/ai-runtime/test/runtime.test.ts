@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Stream } from "effect"
 
@@ -149,6 +150,8 @@ describe("AgentRuntime", () => {
       const providerFailure = new AgentProviderError({
         providerId: AgentProviderId.make("fake"),
         phase: "execution",
+        reviewStage: "agent-run",
+        reviewCause: "provider-authentication",
         message: "provider stopped",
         retryable: true
       })
@@ -157,6 +160,10 @@ describe("AgentRuntime", () => {
 
       expect(error).not.toBe(providerFailure)
       expect(error).toEqual(providerFailure)
+      expect(error).toMatchObject({
+        reviewStage: "agent-run",
+        reviewCause: "provider-authentication"
+      })
       expect(error).toBeInstanceOf(AgentProviderError)
     }))
 
