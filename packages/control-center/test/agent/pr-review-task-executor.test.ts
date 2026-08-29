@@ -2094,6 +2094,64 @@ describe("PR review task executor", () => {
     )
   })
 
+  it.effect("classifies rejected sandbox output as result validation", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const replacementSuggestion = {
+      ...suggestion,
+      replacement: {
+        reviewedHead: HEAD_REVISION,
+        unifiedDiff: [
+          `--- a/${EVIDENCE_PATH}`,
+          `+++ b/${EVIDENCE_PATH}`,
+          "@@ -42,1 +42,1 @@",
+          `-${EVIDENCE_EXCERPT}`,
+          "+const unsafe = false"
+        ].join("\n"),
+        explanation: "Use the safe value."
+      }
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [replacementSuggestion],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "output-rejected" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "output-rejected")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
   it.effect("deduplicates validated suggestions by their host-derived identity", () => {
     const observation: SessionObservation = {
       commands: [],

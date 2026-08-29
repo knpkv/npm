@@ -315,6 +315,8 @@ const sandboxFailure = (
   reviewStage: NonNullable<AgentProviderError["reviewStage"]> = failure.reason === "source-unavailable" ||
       failure.reason === "source-rejected"
     ? "source-checkout"
+    : failure.reason === "output-rejected"
+    ? "result-validation"
     : "sandbox-start"
 ): AgentProviderError =>
   providerFailure(
@@ -1353,7 +1355,11 @@ const makeExecutor = Effect.gen(function*() {
         }).pipe(
           Effect.mapError((failure) =>
             Schema.is(PrReviewSandboxSessionError)(failure)
-              ? sandboxFailure(claim.providerId, failure, "agent-run")
+              ? sandboxFailure(
+                claim.providerId,
+                failure,
+                failure.reason === "output-rejected" ? "result-validation" : "agent-run"
+              )
               : failure
           )
         )
