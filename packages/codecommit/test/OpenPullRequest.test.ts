@@ -163,6 +163,57 @@ describe("matchOpenPullRequest", () => {
     if (match._tag === "Matched") expect(match.pullRequest.id).toBe("new")
   })
 
+  it("does not infer distinct accounts from profile aliases when repository identity is missing", () => {
+    const match = matchOpenPullRequest(
+      [
+        pullRequest({
+          id: "dev",
+          lastModifiedDate: "2026-08-01T09:00:00Z",
+          repositoryName: "identity",
+          sourceBranch: target.branch,
+          profile: "dev"
+        }),
+        pullRequest({
+          id: "dev-admin",
+          lastModifiedDate: "2026-08-20T09:00:00Z",
+          repositoryName: "identity",
+          sourceBranch: target.branch,
+          profile: "dev-admin"
+        })
+      ],
+      target
+    )
+
+    expect(match).toEqual({ _tag: "Unresolved", targets: ["dev-admin/eu-central-1", "dev/eu-central-1"] })
+  })
+
+  it.effect("fails closed when profile aliases lack stable repository identity", () =>
+    Effect.gen(function*() {
+      const error = yield* resolveOpenPullRequest({
+        failures: [],
+        pullRequests: [
+          pullRequest({
+            id: "dev",
+            lastModifiedDate: "2026-08-01T09:00:00Z",
+            repositoryName: "identity",
+            sourceBranch: target.branch,
+            profile: "dev"
+          }),
+          pullRequest({
+            id: "dev-admin",
+            lastModifiedDate: "2026-08-20T09:00:00Z",
+            repositoryName: "identity",
+            sourceBranch: target.branch,
+            profile: "dev-admin"
+          })
+        ],
+        target,
+        targetCount: 2
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe("UnresolvedOpenPullRequestIdentity")
+    }))
+
   it.effect("refuses a match when another planned account could not be searched", () =>
     Effect.gen(function*() {
       const error = yield* resolveOpenPullRequest({

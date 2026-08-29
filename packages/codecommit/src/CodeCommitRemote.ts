@@ -66,7 +66,7 @@ const RemoteRepositoryName = Domain.RepositoryName.check(
 )
 const isTerminalSafeCharacter = (character: string): boolean => {
   const code = character.codePointAt(0) ?? 0
-  return code >= 0x20 && (code < 0x7f || code > 0x9f)
+  return code >= 0x20 && (code < 0x7f || code > 0x9f) && !/\p{Bidi_Control}/u.test(character)
 }
 const RemoteProfile = Schema.String.check(
   Schema.isPattern(/^[^@/]+$/u),

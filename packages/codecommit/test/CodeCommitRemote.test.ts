@@ -45,6 +45,7 @@ describe("parseCodeCommitRemote", () => {
       ["codecommit://team:dev@identity", { profile: "team:dev", region: null, repositoryName: "identity" }],
       ["codecommit://team~dev@identity", { profile: "team~dev", region: null, repositoryName: "identity" }],
       ["codecommit://dév@identity", { profile: "dév", region: null, repositoryName: "identity" }],
+      ["codecommit://שלום@identity", { profile: "שלום", region: null, repositoryName: "identity" }],
       ["codecommit://identity", { profile: null, region: null, repositoryName: "identity" }]
     ]
 
@@ -71,6 +72,7 @@ describe("parseCodeCommitRemote", () => {
       "https://git-codecommit.eu-west-1.amazonaws.com/v1/repos/identity?x=1",
       "codecommit://identity/child",
       "codecommit://@identity",
+      "codecommit://dev\u202Etxt@identity",
       "codecommit://dev\u009b31m@identity",
       ""
     ]
@@ -93,6 +95,8 @@ describe("redactRemoteUserInfo", () => {
       .toBe("  https://***@github.com/org/repo.git")
     expect(redactRemoteUserInfo("https://alice:p@ss@example.com/org/repo.git"))
       .toBe("https://***@example.com/org/repo.git")
+    expect(redactRemoteUserInfo("\u2067https://alice:ghp_secret@github.com/org/repo.git\u2069"))
+      .toBe("https://***@github.com/org/repo.git")
     expect(redactRemoteUserInfo("\n\u001bhttps://alice:ghp_secret@github.com/org/repo.git"))
       .toBe("https://***@github.com/org/repo.git")
   })

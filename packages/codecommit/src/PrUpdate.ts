@@ -13,6 +13,7 @@ import { AwsClient } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { makeAccount } from "./CliAccount.js"
+import { reportFailure } from "./CliFailure.js"
 
 interface UpdateTarget {
   readonly profile: string
@@ -91,8 +92,7 @@ export const prUpdateCommand = Command.make("update", {
     const target = { profile, pullRequestId: prId, region }
 
     if (Option.isNone(title) && Option.isNone(description)) {
-      yield* Console.log("Error: At least one of --title or --description must be provided")
-      return
+      return yield* reportFailure("At least one of --title or --description must be provided")
     }
 
     if (Option.isSome(title)) {

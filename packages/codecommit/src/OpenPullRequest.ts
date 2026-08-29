@@ -37,16 +37,25 @@ export class IncompleteOpenPullRequestScan extends Schema.TaggedError<Incomplete
   }
 ) {}
 
+export class UnresolvedOpenPullRequestIdentity extends Schema.TaggedError<UnresolvedOpenPullRequestIdentity>()(
+  "UnresolvedOpenPullRequestIdentity",
+  {
+    branch: Schema.String,
+    repositoryName: Schema.String,
+    targets: Schema.Array(Schema.String),
+    message: Schema.String
+  }
+) {}
+
 export type OpenPullRequestMatch = Data.TaggedEnum<{
   readonly None: {}
+  readonly Unresolved: { readonly targets: ReadonlyArray<string> }
   readonly Ambiguous: { readonly targets: ReadonlyArray<string> }
   readonly Matched: { readonly pullRequest: Domain.PullRequest }
 }>
 export const OpenPullRequestMatch = Data.taggedEnum<OpenPullRequestMatch>()
 
 const noMatch = OpenPullRequestMatch.None()
-const accountIdentity = (pr: Domain.PullRequest): string =>
-  `${pr.account.repoAccountId ?? pr.account.awsAccountId ?? `profile:${pr.account.profile}`}/${pr.account.region}`
 const accountTarget = (pr: Domain.PullRequest): string => `${pr.account.profile}/${pr.account.region}`
 
 /**
@@ -66,11 +75,16 @@ export const matchOpenPullRequest = (
   )
   if (candidates.length === 0) return noMatch
 
-  const identities = new Set(candidates.map(accountIdentity))
+  const targets = [...new Set(candidates.map(accountTarget))].sort()
+  if (targets.length > 1 && candidates.some((pr) => pr.account.repoAccountId === undefined)) {
+    return OpenPullRequestMatch.Unresolved({ targets })
+  }
+
+  const identities = new Set(
+    candidates.flatMap((pr) => pr.account.repoAccountId === undefined ? [] : [pr.account.repoAccountId])
+  )
   if (identities.size > 1) {
-    return OpenPullRequestMatch.Ambiguous({
-      targets: [...new Set(candidates.map(accountTarget))].sort()
-    })
+    return OpenPullRequestMatch.Ambiguous({ targets })
   }
 
   const pullRequest = candidates.reduce((newest, pr) => pr.lastModifiedDate > newest.lastModifiedDate ? pr : newest)
@@ -112,6 +126,16 @@ export const resolveOpenPullRequest = Effect.fn("OpenPullRequest.resolve")(funct
         message:
           `More than one account has an open PR for ${input.target.repositoryName} branch '${input.target.branch}': ` +
           `${targets.join(", ")}. Use a codecommit:// remote that names the intended profile.`
+      }),
+    Unresolved: ({ targets }) =>
+      new UnresolvedOpenPullRequestIdentity({
+        branch: input.target.branch,
+        repositoryName: input.target.repositoryName,
+        targets: [...targets],
+        message:
+          `Could not determine whether matching PRs for ${input.target.repositoryName} branch '${input.target.branch}' ` +
+          `belong to one account: repository account identity is unavailable for ${targets.join(", ")}. ` +
+          "Use a codecommit:// remote that names the intended profile."
       }),
     Matched: ({ pullRequest }) => Effect.succeed(pullRequest)
   })

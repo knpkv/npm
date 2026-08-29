@@ -351,6 +351,7 @@ export const prOpenCommand = Command.make("open", {
       NoEnabledAccounts: (error) => reportFailure(error.message),
       NoOpenPullRequest: (error) => reportFailure(error.message),
       NotACodeCommitRemote: (error) => reportFailure(error.message),
+      UnresolvedOpenPullRequestIdentity: (error) => reportFailure(error.message),
       UnsupportedConsoleRegion: (error) => reportFailure(error.message)
     }),
     // The command owns its service layer. The executable supplies the selected

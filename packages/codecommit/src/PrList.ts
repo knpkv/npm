@@ -11,7 +11,7 @@
  * @module
  */
 import { AwsClient, type Domain } from "@knpkv/codecommit-core"
-import { Console, Context, Effect, Layer, type Option, Predicate, Schema, Stream } from "effect"
+import { Console, Context, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { makeAccount } from "./CliAccount.js"
 import { reportFailure } from "./CliFailure.js"
@@ -81,17 +81,22 @@ const make = Effect.gen(function*() {
   const listAccount: PrListServiceContract["listAccount"] = Effect.fn("PrListService.listAccount")(
     function*(input) {
       const account = makeAccount(input.profile, input.region)
+      const requestOptions = (status: "OPEN" | "CLOSED") =>
+        Option.match(input.repo, {
+          onNone: () => ({ status }),
+          onSome: (repositoryName) => ({ status, repositoryName })
+        })
       if (!input.all) {
         return yield* collectMatching(
-          aws.getPullRequests(account, { status: input.status }),
+          aws.getPullRequests(account, requestOptions(input.status)),
           input.repo,
           input.author
         )
       }
 
       const [openPrs, closedPrs] = yield* Effect.all([
-        collectMatching(aws.getPullRequests(account, { status: "OPEN" }), input.repo, input.author),
-        collectMatching(aws.getPullRequests(account, { status: "CLOSED" }), input.repo, input.author)
+        collectMatching(aws.getPullRequests(account, requestOptions("OPEN")), input.repo, input.author),
+        collectMatching(aws.getPullRequests(account, requestOptions("CLOSED")), input.repo, input.author)
       ])
       return [...openPrs, ...closedPrs].sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
     }
@@ -188,7 +193,8 @@ export const prListCommand = Command.make("list", {
       const targets = yield* service.resolveTargets
 
       if (targets.length === 0) {
-        yield* Console.log("No enabled accounts in ~/.codecommit/config.json. Enable some with `codecommit tui`.")
+        if (json) yield* Console.log("[]")
+        else yield* Console.log("No enabled accounts in ~/.codecommit/config.json. Enable some with `codecommit tui`.")
         return
       }
 
@@ -235,12 +241,13 @@ export const prListCommand = Command.make("list", {
 
     // ── Single-account path (original behaviour) ─────────────────────────────
     const statusLabel = all ? "all" : status.toLowerCase()
-    yield* Console.log(`Fetching ${statusLabel} PRs...`)
+    if (!json) yield* Console.log(`Fetching ${statusLabel} PRs...`)
 
     const prs = yield* service.listAccount({ all, author, profile, region, repo, status })
 
     if (prs.length === 0) {
-      yield* Console.log(`No ${statusLabel} PRs found.`)
+      if (json) yield* Console.log("[]")
+      else yield* Console.log(`No ${statusLabel} PRs found.`)
       return
     }
 
