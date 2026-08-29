@@ -21,6 +21,7 @@ state_root=""
 state_file=""
 branch_created=false
 pull_request_created=false
+pull_request_ownership="none"
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -56,13 +57,14 @@ journal_state() {
     --arg branch "${branch_name}" \
     --arg head "${head_commit}" \
     --arg pullRequestId "${pull_request_id}" \
+    --arg pullRequestOwnership "${pull_request_ownership}" \
     --arg region "${aws_region}" \
     --arg repository "${repository_name}" \
     --arg runToken "${run_token}" \
     --arg url "$([[ -n "${pull_request_id}" ]] && printf 'https://%s.console.aws.amazon.com/codesuite/codecommit/repositories/%s/pull-requests/%s?region=%s' "${aws_region}" "${repository_name}" "${pull_request_id}" "${aws_region}")" \
     --argjson branchCreated "${branch_created}" \
     --argjson pullRequestCreated "${pull_request_created}" \
-    '{account: $account, region: $region, repository: $repository, runToken: $runToken, branch: $branch, branchCreated: $branchCreated, head: $head, pullRequestId: $pullRequestId, pullRequestCreated: $pullRequestCreated, url: $url}' \
+    '{account: $account, region: $region, repository: $repository, runToken: $runToken, branch: $branch, branchCreated: $branchCreated, head: $head, pullRequestId: $pullRequestId, pullRequestCreated: $pullRequestCreated, pullRequestOwnership: $pullRequestOwnership, url: $url}' \
     >"${temporary_state}"; then
     rm -f -- "${temporary_state}"
     return 1
@@ -161,11 +163,14 @@ find_created_pull_request() {
 cleanup() {
   local cleanup_failed=false
 
-  if [[ "${pull_request_created}" == true ]]; then
+  if [[ "${pull_request_ownership}" == "uncertain" ]]; then
+    cleanup_failed=true
+  elif [[ "${pull_request_created}" == true ]]; then
     if run_aws_quiet codecommit update-pull-request-status \
       --pull-request-id "${pull_request_id}" \
       --pull-request-status CLOSED; then
       pull_request_created=false
+      pull_request_ownership="none"
       if ! journal_state; then
         cleanup_failed=true
       fi
@@ -263,17 +268,27 @@ create_fixture() {
   [[ "${head_commit}" =~ ^[0-9a-f]{40}$ ]] || return 1
   journal_state || return 1
 
+  pull_request_ownership="uncertain"
+  if ! journal_state; then
+    pull_request_ownership="none"
+    return 1
+  fi
   if create_pull_request_output="$(capture_aws codecommit create-pull-request \
     --title "Preserve idempotency keys across retries [${run_token}]" \
     --description "Disposable Control Center PR-review evaluation fixture ${run_token}." \
     --targets "repositoryName=${repository_name},sourceReference=${branch_name},destinationReference=main" \
     --query pullRequest.pullRequestId \
     --output text)"; then
-    pull_request_id="${create_pull_request_output}"
+    if [[ "${create_pull_request_output}" =~ ^[0-9]+$ ]]; then
+      pull_request_id="${create_pull_request_output}"
+    else
+      pull_request_id="$(find_created_pull_request)" || return 1
+    fi
   else
     pull_request_id="$(find_created_pull_request)" || return 1
   fi
   [[ "${pull_request_id}" =~ ^[0-9]+$ ]] || return 1
+  pull_request_ownership="owned"
   pull_request_created=true
   journal_state || return 1
 

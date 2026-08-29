@@ -97,9 +97,10 @@ aws() {
       if [[ "${scenario}" == "ambiguous-create" || "${scenario}" == "create-pr-unresolved" ]]; then
         return 1
       fi
-      printf '42\n'
+      [[ "${scenario}" == "malformed-create" ]] && printf 'not-a-pull-request-id\n' || printf '42\n'
       ;;
     "codecommit list-pull-requests"*)
+      [[ "${scenario}" == "malformed-create" ]] && return 1
       [[ "${scenario}" == "ambiguous-create" ]] && printf '41\t42\n' || printf '41\n'
       ;;
     "codecommit get-pull-request"*)
@@ -132,6 +133,7 @@ reset_fixture() {
   state_file=""
   branch_created=false
   pull_request_created=false
+  pull_request_ownership="none"
   trap - EXIT INT TERM
 }
 
@@ -158,7 +160,7 @@ test_successful_lifecycle() {
   jq -e \
     --arg head "${expected_fixture_commit}" \
     --arg token "${fixture_token}" \
-    '.runToken == $token and .head == $head and .branchCreated and .pullRequestCreated and .pullRequestId == "42"' \
+    '.runToken == $token and .head == $head and .branchCreated and .pullRequestCreated and .pullRequestOwnership == "owned" and .pullRequestId == "42"' \
     "${state_file}" >/dev/null
   cleanup
   [[ ! -e "${state_root}" ]]
@@ -215,7 +217,7 @@ test_branch_mutation_is_journaled() {
   grep -q 'codecommit delete-branch' "${calls_file}"
 }
 
-test_head_mutation_is_journaled() {
+test_uncertain_create_retains_recovery_state() {
   reset_fixture create-pr-unresolved
   if create_fixture >/dev/null; then
     return 1
@@ -223,9 +225,30 @@ test_head_mutation_is_journaled() {
   trap - EXIT INT TERM
   assert_private_state
   jq -e --arg head "${expected_fixture_commit}" \
-    '.branchCreated and .head == $head and (.pullRequestCreated | not)' "${state_file}" >/dev/null
-  cleanup
+    '.branchCreated and .head == $head and .pullRequestOwnership == "uncertain" and (.pullRequestCreated | not)' \
+    "${state_file}" >/dev/null
+  if cleanup 2>/dev/null; then
+    return 1
+  fi
   ! grep -q 'codecommit update-pull-request-status' "${calls_file}"
+  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  assert_private_state
+}
+
+test_malformed_create_retains_recovery_state() {
+  reset_fixture malformed-create
+  if create_fixture >/dev/null; then
+    return 1
+  fi
+  trap - EXIT INT TERM
+  assert_private_state
+  jq -e '.pullRequestOwnership == "uncertain" and (.pullRequestCreated | not)' "${state_file}" >/dev/null
+  if cleanup 2>/dev/null; then
+    return 1
+  fi
+  ! grep -q 'codecommit update-pull-request-status' "${calls_file}"
+  ! grep -q 'codecommit delete-branch' "${calls_file}"
+  assert_private_state
 }
 
 test_ambiguous_pull_request_is_reconciled() {
@@ -234,7 +257,8 @@ test_ambiguous_pull_request_is_reconciled() {
   trap - EXIT INT TERM
   assert_private_state
   [[ "${pull_request_created}" == true && "${pull_request_id}" == "42" ]]
-  jq -e '.pullRequestCreated and .pullRequestId == "42"' "${state_file}" >/dev/null
+  jq -e '.pullRequestCreated and .pullRequestOwnership == "owned" and .pullRequestId == "42"' \
+    "${state_file}" >/dev/null
   grep -q 'codecommit list-pull-requests' "${calls_file}"
   grep -q 'codecommit get-pull-request --pull-request-id 42' "${calls_file}"
   cleanup
@@ -284,7 +308,8 @@ test_successful_lifecycle
 test_boundary_failures_write_nothing
 test_branch_collision_preserves_foreign_branch
 test_branch_mutation_is_journaled
-test_head_mutation_is_journaled
+test_uncertain_create_retains_recovery_state
+test_malformed_create_retains_recovery_state
 test_ambiguous_pull_request_is_reconciled
 test_close_failure_keeps_complete_recovery_state
 test_delete_failure_keeps_remaining_recovery_state
