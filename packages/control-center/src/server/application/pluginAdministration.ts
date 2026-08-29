@@ -1728,16 +1728,20 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     }),
     testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
       const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
-      const unboundConfigurationRevision =
-        connection.providerAccountId === null && connection.followedResourceId === null
-          ? yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
-            Effect.map(Option.match({ onNone: () => 0, onSome: ({ revision }) => revision })),
-            Effect.mapError(mapPersistenceReadError)
-          )
-          : null
+      const requiresInitialOwnershipBinding = connection.providerAccountId === null &&
+        connection.followedResourceId === null
+      const unboundConfigurationRevision = requiresInitialOwnershipBinding
+        ? yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+          Effect.map(Option.match({ onNone: () => 0, onSome: ({ revision }) => revision })),
+          Effect.mapError(mapPersistenceReadError)
+        )
+        : null
+      if (connection.isEnabled && requiresInitialOwnershipBinding && pluginConnections !== null) {
+        yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      }
       const tested = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
       if (tested.test._tag === "healthy") {
-        if (connection.providerAccountId === null && connection.followedResourceId === null) {
+        if (requiresInitialOwnershipBinding) {
           yield* materializeConnectionOwnership(
             persistence,
             cryptoService,

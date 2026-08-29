@@ -4107,6 +4107,88 @@ describe("application adapters", () => {
       if (events._tag === "page") assert.lengthOf(events.events, 0)
     })))
 
+  it.effect("refreshes a stale cached runtime before binding initial ownership", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        displayName: PluginConnectionDisplayName.make("Cached CodePipeline"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        "codepipeline",
+        descriptor,
+        0,
+        T0
+      )
+      const runtime = (
+        accountId: string,
+        resourceId: string
+      ): PluginConnectionV1 => ({
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: accountId, displayName: accountId },
+          workspace: null,
+          resource: { providerImmutableId: resourceId, displayName: "Payments pipeline" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      })
+      const staleRuntime = runtime("111111111111", "eu-central-1:stale")
+      const currentRuntime = runtime("123456789012", "eu-central-1:payments")
+      const cachedRuntime = yield* Ref.make(staleRuntime)
+      const invalidations = yield* Ref.make(0)
+
+      // The configuration commit has completed, but its cache invalidation has not.
+      const committedConfiguration = yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        [],
+        0,
+        SNAPSHOT_AT
+      )
+      assert.strictEqual(committedConfiguration.revision, 1)
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () =>
+          Ref.get(cachedRuntime).pipe(
+            Effect.map((connection) => Context.make(PluginConnection, connection))
+          ),
+        invalidate: ({ pluginConnectionId, workspaceId }) =>
+          workspaceId === WORKSPACE_ID && pluginConnectionId === CODEPIPELINE_PLUGIN_ID
+            ? Ref.set(cachedRuntime, currentRuntime).pipe(
+              Effect.andThen(Ref.update(invalidations, (count) => count + 1))
+            )
+            : Effect.die("connection test invalidated the wrong runtime")
+      })
+
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "healthy")
+      if (result._tag === "healthy") {
+        assert.strictEqual(result.identity.providerImmutableId, "123456789012")
+      }
+      assert.strictEqual(yield* Ref.get(invalidations), 1)
+      const accounts = yield* persistence.providerAccounts.list(WORKSPACE_ID)
+      assert.deepStrictEqual(accounts.map(({ vendorAccountId }) => vendorAccountId), ["123456789012"])
+      const account = accounts[0]
+      if (account === undefined) return assert.fail("current runtime account was not materialized")
+      const resources = yield* persistence.providerAccounts.listResources(WORKSPACE_ID, account.providerAccountId)
+      assert.deepStrictEqual(resources.map(({ vendorResourceId }) => vendorResourceId), ["eu-central-1:payments"])
+    })))
+
   it.effect("does not bind discovery observed before a concurrent configuration revision", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
