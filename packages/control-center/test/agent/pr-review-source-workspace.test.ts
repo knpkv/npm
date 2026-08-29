@@ -27,6 +27,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000051")
+const UNRELATED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000060")
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000061")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-24T10:00:00.000Z")
 const STALE_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000052")
@@ -116,6 +117,8 @@ describe("PR review source workspace", () => {
       const secretStore = yield* makeSecretStore({ secretRoot: SecretRoot.make(secretRoot) })
       const secrets = Layer.succeed(SecretStore, secretStore)
       const profileRef = yield* secretStore.create(new TextEncoder().encode("review-profile"))
+      const missingUnrelatedProfileRef = yield* secretStore.create(new TextEncoder().encode("missing-profile"))
+      yield* secretStore.remove(missingUnrelatedProfileRef)
       const resolver = codeCommitPrReviewSourceResolverLayer.pipe(
         Layer.provide(persistence),
         Layer.provide(secrets)
@@ -126,6 +129,36 @@ describe("PR review source workspace", () => {
           displayName: WorkspaceName.make("Review workspace"),
           createdAt: CREATED_AT
         })
+        yield* durable.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: UNRELATED_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Unavailable unrelated repository"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* durable.pluginConfigurations.update(
+          WORKSPACE_ID,
+          UNRELATED_CONNECTION_ID,
+          [
+            {
+              _tag: "secret-reference",
+              key: StoredPluginConfigurationKey.make("profile"),
+              ref: missingUnrelatedProfileRef
+            },
+            {
+              _tag: "text",
+              key: StoredPluginConfigurationKey.make("region"),
+              value: "eu-west-1"
+            },
+            {
+              _tag: "text",
+              key: StoredPluginConfigurationKey.make("repositoryName"),
+              value: "unrelated-repository"
+            }
+          ],
+          0,
+          CREATED_AT
+        )
         yield* durable.pluginConnections.create(WORKSPACE_ID, {
           pluginConnectionId: CONNECTION_ID,
           providerId: "codecommit",

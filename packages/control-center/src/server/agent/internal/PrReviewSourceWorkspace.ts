@@ -166,13 +166,16 @@ const makeCodeCommitResolver = Effect.fn("PrReviewSourceResolver.makeCodeCommitR
           connection.pluginConnectionId
         ).pipe(Effect.mapError(() => sourceError("connection-unavailable")))
         if (Option.isNone(stored)) continue
+        const repositoryName = configuredText(stored.value.values, "repositoryName")
+        const region = configuredText(stored.value.values, "region")
+        if (repositoryName !== request.repository || !Schema.is(SourceRegion)(region)) continue
         const profile = yield* Effect.scoped(
           configuredCredentialText(secrets, stored.value.values, "profile")
         )
         const candidate = Schema.decodeUnknownResult(CodeCommitPluginConfiguration)({
           profile,
-          region: configuredText(stored.value.values, "region"),
-          repositoryName: configuredText(stored.value.values, "repositoryName")
+          region,
+          repositoryName
         })
         if (
           Result.isSuccess(candidate) &&
