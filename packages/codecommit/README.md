@@ -69,6 +69,24 @@ codecommit
 codecommit tui
 ```
 
+Press `o` on a selected pull request to hand its AWS Console URL to the durable
+Control Center Managed Review. The TUI resolves `CODECOMMIT_CONTROL_CENTER_ORIGIN`,
+then Control Center's `CONTROL_CENTER_PUBLIC_ORIGIN`, then its host and port settings,
+with `http://127.0.0.1:4173` as the default. Assisted browser handoff requires an
+HTTPS origin so TLS authenticates the server before the browser sends its host-only
+owner cookie. The TUI copies the provider URL locally and opens a clean `/open-pr`
+target; paste the URL there so the authenticated resolver sends it only in a POST
+body. The ordinary local HTTP origin must be opened manually. For HTTPS origins, the
+TUI also requires Control Center's exact bounded versioned identity response before
+opening the page. When it is unavailable,
+the TUI labels its local review as **Relay-only** and **non-durable**; local
+findings never silently merge into a later Managed Review.
+
+For a shared PR link, open Control Center's **Open PR** page and paste the URL.
+The link does not identify an AWS account. Control Center resolves it only inside
+the paired workspace and asks the operator to choose when several connected
+accounts contain the same repository and pull-request ID.
+
 Open a pull request to enter the exact-revision review workspace. Opening is
 API-first: the TUI reads the advertised base/head and changed-file metadata,
 then renders selected files with bounded CodeCommit `GetBlob` reads without
@@ -496,6 +514,12 @@ codecommit pr update 123 -t "New title" -d "New description"
 ```
 
 ## AWS Configuration
+
+### Local CodeCommit mock
+
+Set `CODECOMMIT_MOCK_ENDPOINT` to the exact HTTP origin printed by `pnpm mock:codecommit`. Only literal loopback origins are accepted, and only CodeCommit and STS requests are redirected; Jira, Confluence, Clockify, and Control Center traffic is unchanged. The mock runner prints a direct PR link and exposes head-advance, author-comment, state, and reset controls documented in `packages/codecommit-mock/README.md`.
+
+Mock mode does not resolve the selected AWS profile or read ambient AWS credentials. It signs with a fixed non-secret fixture identity and removes authorization/session-token headers before loopback dispatch. Select region `eu-west-1` for the bundled scenario; the configured profile name may be nonexistent.
 
 Uses AWS SSO. Configure profiles in `~/.aws/config`:
 

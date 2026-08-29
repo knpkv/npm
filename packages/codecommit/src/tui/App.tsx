@@ -1,13 +1,14 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect } from "react"
-import { createPrAtom, openPrAtom } from "./atoms/actions.js"
+import { createPrAtom, openManagedReviewAtom } from "./atoms/actions.js"
 import { appStateAtom, refreshAtom } from "./atoms/app.js"
 import { ambiguousMergeGuardsAtom, creatingPrAtom, viewAtom } from "./atoms/ui.js"
 import { DetailsView, Footer, Header, MainList, QuickFilters } from "./components/index.js"
 import { DialogProvider } from "./context/dialog.js"
 import { ThemeProvider, useTheme } from "./context/theme.js"
 import { useKeyboardNav } from "./hooks/useKeyboardNav.js"
+import { managedReviewPullRequestUrl } from "../managed-review.js"
 import { DialogRenderer } from "./ui/Dialog.js"
 import { ambiguousMergeGuardsAfterAppStatus } from "./details-model.js"
 
@@ -17,7 +18,7 @@ interface AppProps {
 
 function AppContent({ onQuit }: AppProps) {
   const { theme } = useTheme()
-  const openPr = useAtomSet(openPrAtom)
+  const openManagedReview = useAtomSet(openManagedReviewAtom)
   const refresh = useAtomSet(refreshAtom)
   const appStateResult = useAtomValue(appStateAtom)
   const ambiguousMergeGuards = useAtomValue(ambiguousMergeGuardsAtom)
@@ -56,7 +57,7 @@ function AppContent({ onQuit }: AppProps) {
   useKeyboardNav({
     onQuit,
     onOpenInBrowser: (pr) => {
-      openPr(pr)
+      openManagedReview(managedReviewPullRequestUrl(pr))
     }
   })
 

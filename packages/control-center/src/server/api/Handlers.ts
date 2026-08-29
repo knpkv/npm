@@ -1,3 +1,4 @@
+import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -12,6 +13,11 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
+import type {
+  CodeCommitPullRequestCandidate,
+  CodeCommitPullRequestResolution,
+  WorkspaceEntityInspection
+} from "../../api/deliveryGraph.js"
 import type {
   ConflictApiError,
   ForbiddenApiError,
@@ -240,11 +246,9 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
             }
           }))
         .handle("list", ({ request }) =>
-          Effect.gen(function*() {
-            return yield* mapAuthenticationFailures(
-              auth.listSessions(currentSessionToken(request))
-            )
-          }))
+          mapAuthenticationFailures(
+            auth.listSessions(currentSessionToken(request))
+          ))
         .handle("issueBrowserPairingCode", ({ payload, request }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {
@@ -270,11 +274,9 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
             )
           ))
         .handle("revoke", ({ params, request }) =>
-          Effect.gen(function*() {
-            yield* mapAuthenticationFailures(
-              auth.revokeSession(currentSessionToken(request), params.sessionId)
-            )
-          }))
+          mapAuthenticationFailures(
+            auth.revokeSession(currentSessionToken(request), params.sessionId)
+          ))
         .handle("logout", ({ request }) =>
           Effect.gen(function*() {
             yield* mapAuthenticationFailures(auth.logout(currentSessionToken(request)))
@@ -987,6 +989,68 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
     })
 )
 
+const legacyPersistedCodeCommitSourceUrl = (
+  locator: CodeCommitDomain.CodeCommitPullRequestLocator
+): string =>
+  `https://${locator.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${locator.repositoryName}/pull-requests/${locator.pullRequestId}?region=${locator.region}`
+
+const codeCommitInspectionMatches = (
+  locator: CodeCommitDomain.CodeCommitPullRequestLocator,
+  inspection: WorkspaceEntityInspection
+): boolean => {
+  if (
+    inspection.source.providerId !== "codecommit" ||
+    inspection.source.sourceUrl === null ||
+    String(inspection.source.vendorImmutableId) !== String(locator.pullRequestId) ||
+    inspection.entity.projection.entityType !== "pull-request" ||
+    inspection.entity.projection.details._tag !== "pull-request" ||
+    inspection.entity.projection.details.repository !== locator.repositoryName
+  ) return false
+  const persistedLocator = Option.getOrNull(
+    Schema.decodeUnknownOption(CodeCommitDomain.CodeCommitPullRequestUrl)(inspection.source.sourceUrl.href)
+  )
+  return persistedLocator === null
+    ? inspection.source.sourceUrl.href === legacyPersistedCodeCommitSourceUrl(locator)
+    : persistedLocator.region === locator.region &&
+      persistedLocator.repositoryName === locator.repositoryName &&
+      persistedLocator.pullRequestId === locator.pullRequestId
+}
+
+const codeCommitAccountLabel = (
+  pluginConnectionId: string,
+  connections: ReadonlyArray<{
+    readonly pluginConnectionId: string
+    readonly providerId: string
+    readonly providerAccountId: string | null
+  }>,
+  accounts: ReadonlyArray<{
+    readonly providerAccountId: string
+    readonly providerFamily: string
+    readonly displayName: string
+    readonly providerImmutableId: string
+  }>
+): string | null => {
+  const connection = connections.find((candidate) =>
+    candidate.pluginConnectionId === pluginConnectionId && candidate.providerId === "codecommit"
+  )
+  if (connection?.providerAccountId === null || connection?.providerAccountId === undefined) return null
+  const account = accounts.find((candidate) => candidate.providerAccountId === connection.providerAccountId)
+  return account?.providerFamily === "aws"
+    ? `${account.displayName} · AWS ${account.providerImmutableId}`
+    : null
+}
+
+const codeCommitResolution = (
+  candidates: ReadonlyArray<CodeCommitPullRequestCandidate>
+): CodeCommitPullRequestResolution => {
+  const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined
+  return onlyCandidate !== undefined
+    ? { _tag: "found", candidate: onlyCandidate }
+    : candidates.length > 1
+    ? { _tag: "ambiguous", candidates }
+    : { _tag: "not-found", indexTruncated: false }
+}
+
 /** Authenticated workspace-scoped delivery relationship and evidence handlers. */
 export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
@@ -994,9 +1058,71 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const inspection = yield* DeliveryGraphInspection
+      const pluginAdministration = Option.getOrUndefined(
+        yield* Effect.serviceOption(PluginAdministration)
+      )
       const repairProposals = yield* RelationshipRepairProposals
       const clockifyActions = Option.getOrUndefined(yield* Effect.serviceOption(ClockifyActionSubmissions))
       return handlers
+        .handle("resolveCodeCommitPullRequest", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const locator = payload
+            if (inspection.codeCommitPullRequestCandidates === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const candidateSet = yield* inspection.codeCommitPullRequestCandidates({
+              workspaceId: session.workspaceId,
+              region: locator.region,
+              repositoryName: locator.repositoryName,
+              pullRequestId: locator.pullRequestId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+            if (candidateSet.truncated) {
+              return { _tag: "not-found", indexTruncated: true } satisfies CodeCommitPullRequestResolution
+            }
+            const inspections = yield* Effect.forEach(
+              candidateSet.entityIds,
+              (entityId) => inspection.workspaceEntity({ workspaceId: session.workspaceId, entityId }),
+              { concurrency: 16 }
+            ).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+            const matches = inspections.filter((candidate) => codeCommitInspectionMatches(locator, candidate))
+            if (matches.length === 0) return codeCommitResolution([])
+            if (pluginAdministration === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const connections = yield* pluginAdministration.list(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+            const accounts = pluginAdministration.accounts === undefined
+              ? []
+              : yield* pluginAdministration.accounts(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+            const candidates = matches.flatMap((candidate) => {
+              const accountLabel = codeCommitAccountLabel(
+                candidate.source.pluginConnectionId,
+                connections,
+                accounts
+              )
+              return accountLabel === null
+                ? []
+                : [{
+                  entityId: candidate.entity.projection.entityId,
+                  accountLabel,
+                  title: candidate.entity.projection.title
+                }]
+            })
+            return candidates.length === matches.length
+              ? codeCommitResolution(candidates)
+              : { _tag: "account-identity-unavailable" } satisfies CodeCommitPullRequestResolution
+          }))
         .handle("workspaceEntity", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

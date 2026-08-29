@@ -1,0 +1,27 @@
+{
+  "name": "@knpkv/codecommit-mock",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codecommit-mock": "dist/cli.js"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build": "tsc -b",
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint \"{src,test}/**/*.ts\""
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@knpkv/codecommit-core": "workspace:^",
+    "effect": "4.0.0-rc.109"
+  },
+  "devDependencies": {
+    "@distilled.cloud/aws": "1.0.0-rc.4",
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "vitest": "catalog:"
+  }
+}

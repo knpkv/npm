@@ -14,7 +14,7 @@ import {
 } from "../../src/api/workspaceSettings.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
-import { AppShell, canInspectWorkspaceSettings } from "../../src/client/AppShell.js"
+import { AppShell, canInspectWorkspaceSettings, canOpenCodeCommitPullRequest } from "../../src/client/AppShell.js"
 import { pairedBrowserDestination } from "../../src/client/PairPage.js"
 import { publishWorkspacePresentation } from "../../src/client/settings/workspaceSettingsSignals.js"
 import { useWorkspaceDefaultLandingPath } from "../../src/client/settings/useWorkspaceDefaultLanding.js"
@@ -143,6 +143,10 @@ describe("useWorkspaceDefaultLandingPath", () => {
     expect(canInspectWorkspaceSettings({ _tag: "authenticated", session: approver }, session.workspaceId)).toBe(true)
     expect(canInspectWorkspaceSettings({ _tag: "authenticated", session: reviewer }, session.workspaceId)).toBe(false)
     expect(canInspectWorkspaceSettings({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
+    expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session }, session.workspaceId)).toBe(true)
+    expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session: approver }, session.workspaceId)).toBe(true)
+    expect(canOpenCodeCommitPullRequest({ _tag: "storage-unavailable", session }, session.workspaceId)).toBe(false)
+    expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
   })
 
   it("loads shared active-work presentation for a reviewer", async () => {

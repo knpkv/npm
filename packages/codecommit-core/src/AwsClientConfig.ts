@@ -20,8 +20,23 @@
  * @category Config
  * @module
  */
+import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import type { Duration } from "effect"
 import { Context, Layer } from "effect"
+
+/** Credential material consumed only by the AWS signing layer. */
+export interface AwsCredentialIdentity {
+  readonly accessKeyId: string
+  readonly secretAccessKey: string
+  readonly sessionToken?: string
+  readonly expiration?: Date
+}
+
+/** Replaceable credential boundary used by deterministic provider runtimes. */
+export type AwsCredentialProvider = (input: {
+  readonly profile: string
+  readonly region: string
+}) => Promise<AwsCredentialIdentity>
 
 /**
  * Shape of the AWS client configuration.
@@ -29,6 +44,7 @@ import { Context, Layer } from "effect"
  * @category Config
  */
 export interface AwsClientConfigContract {
+  readonly credentialProvider: AwsCredentialProvider
   readonly credentialTimeout: Duration.Input
   readonly operationTimeout: Duration.Input
   readonly streamTimeout: Duration.Input
@@ -51,6 +67,15 @@ export class AwsClientConfig extends Context.Service<
 >()("@knpkv/codecommit-core/AwsClientConfig") {}
 
 const defaults: AwsClientConfigContract = {
+  credentialProvider: async ({ profile }) => {
+    const identity = await fromNodeProviderChain(profile === "default" ? {} : { profile })()
+    return {
+      accessKeyId: identity.accessKeyId,
+      secretAccessKey: identity.secretAccessKey,
+      ...(!(identity.sessionToken === undefined) && { sessionToken: identity.sessionToken }),
+      ...(!(identity.expiration === undefined) && { expiration: identity.expiration })
+    }
+  },
   credentialTimeout: "5 seconds",
   operationTimeout: "30 seconds",
   streamTimeout: "60 seconds",

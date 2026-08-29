@@ -26,7 +26,7 @@ export type AgentRunId = typeof AgentRunId.Type
 export const AgentSessionRef = boundedIdentifier("AgentSessionRef")
 export type AgentSessionRef = typeof AgentSessionRef.Type
 
-/** Digest binding continuation state to its exact release context. */
+/** Digest binding continuation state to its exact immutable context. */
 export const AgentContextFingerprint = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
 ).pipe(Schema.brand("AgentContextFingerprint"))
@@ -38,10 +38,10 @@ const SafeContextIdentifier = Schema.String.check(
   Schema.isMaxLength(500)
 )
 
-/** Immutable context identity captured when a run is requested. */
+/** Immutable context identity; pull-request reviews may have no release. */
 export const AgentContextSnapshot = Schema.Struct({
   workspaceId: SafeContextIdentifier,
-  releaseId: SafeContextIdentifier,
+  releaseId: Schema.NullOr(SafeContextIdentifier),
   subjectRevision: SafeContextIdentifier,
   fingerprint: AgentContextFingerprint
 })
@@ -144,7 +144,7 @@ export class AgentRuntimeProtocolError extends Schema.TaggedError<AgentRuntimePr
   }
 ) {}
 
-/** A continuation was captured for a different immutable release context. */
+/** A continuation was captured for a different immutable run context. */
 export class AgentContextMismatchError extends Schema.TaggedError<AgentContextMismatchError>()(
   "AgentContextMismatchError",
   {}

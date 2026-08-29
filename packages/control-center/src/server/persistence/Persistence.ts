@@ -355,7 +355,7 @@ const makePersistence = Effect.gen(function*() {
       ) =>
         publicOperation(
           "agent-job.latest-review-for-pull-request",
-          agentJobs.latestReview({ ...args[0], allowDifferentHead: true })
+          agentJobs.latestReview({ ...args[0], allowDifferentHead: true, requireReport: true })
         ),
       listRunningPrReviewAttempts: (
         ...args: Parameters<AgentJobRepositoryService["listRunningPrReviewAttempts"]>

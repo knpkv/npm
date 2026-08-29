@@ -194,7 +194,7 @@ export type AgentJobState = typeof AgentJobState.Type
 /** Immutable request persisted before a worker may claim it. */
 export const EnqueueAgentJobInput = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   jobId: JobId,
   providerId: AgentProviderId,
   model: AgentModel,
@@ -211,7 +211,7 @@ export type EnqueueAgentJobInput = typeof EnqueueAgentJobInput.Type
 /** Context frozen for one provider attempt. */
 export const AgentContextSnapshotRecord = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   subjectRevision: SubjectRevision,
   fingerprint: AgentContextFingerprint,
   task: AgentJobTask
@@ -221,7 +221,7 @@ export type AgentContextSnapshotRecord = typeof AgentContextSnapshotRecord.Type
 /** Claimed work returned only after the lease and attempt are durable. */
 export const ClaimedAgentJob = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   threadId: AgentThreadId,
   jobId: JobId,
   attemptSequence: AgentAttemptSequence,
@@ -512,7 +512,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   excludeJobId: Schema.optionalKey(JobId),
   excludeSubjectRevision: Schema.optionalKey(Schema.String),
   jobId: Schema.optionalKey(JobId),
-  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean),
+  requireReport: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 

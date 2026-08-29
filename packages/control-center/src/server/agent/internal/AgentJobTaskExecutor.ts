@@ -86,11 +86,17 @@ const executeReleaseChat = Effect.fn("AgentJobTaskExecutor.executeReleaseChat")(
   runtimes: AgentRuntimeRegistry["Service"],
   claim: ClaimedAgentJob
 ): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError> {
-  if (claim.context.task._tag === "pr-review") {
+  if (
+    claim.context.task._tag === "pr-review" ||
+    claim.releaseId === null ||
+    claim.context.releaseId === null
+  ) {
     return yield* new AgentProviderError({
       providerId: claim.providerId,
       phase: "configuration",
-      message: "No immutable PR review executor is configured.",
+      message: claim.context.task._tag === "pr-review"
+        ? "No immutable PR review executor is configured."
+        : "Release-chat context is missing its release identity.",
       retryable: false
     })
   }

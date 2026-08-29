@@ -318,6 +318,7 @@ const withRepositoryConfig = <Success, Failure>(
 ) => {
   const database = databaseLayer(config)
   const repository = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+  // @effect-diagnostics-next-line strictEffectProvide:off
   return use.pipe(Effect.provide(repository), Effect.scoped)
 }
 
@@ -325,9 +326,53 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-agent-review-result-")
     return yield* withRepositoryConfig(config, use)
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 describe("agent job review results", () => {
+  it.effect("finds the latest prior report behind a newer queued review", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+
+        const newestJob = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: advancedSubject,
+          allowDifferentHead: true
+        })
+        assert.isTrue(Option.isSome(newestJob))
+        if (Option.isSome(newestJob)) {
+          assert.strictEqual(newestJob.value.jobId, SWAP_JOB_ID)
+          assert.isNull(newestJob.value.report)
+        }
+
+        const newestReport = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: advancedSubject,
+          allowDifferentHead: true,
+          requireReport: true
+        })
+        assert.isTrue(Option.isSome(newestReport))
+        if (Option.isSome(newestReport)) {
+          assert.strictEqual(newestReport.value.jobId, JOB_ID)
+          assert.deepStrictEqual(newestReport.value.report?.subject, report.subject)
+          assert.strictEqual(
+            newestReport.value.report?.suggestions[0]?.suggestionId,
+            report.suggestions[0]?.suggestionId
+          )
+        }
+      })
+    ))
+
   it.effect("records an active review as interrupted with partial evidence on restart", () =>
     withRepository(
       Effect.gen(function*() {
@@ -683,6 +728,10 @@ describe("agent job review results", () => {
         assert.strictEqual(revalidated.validation.validatingJobId, JOB_ID)
         assert.strictEqual(revalidated.validation.sourceRevisionId, humanValidationAttempt.revisionId)
         assert.strictEqual(revalidated.validation.reviewedHead, technical.subject.headRevision)
+
+        const reloadedResult = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+        assert.strictEqual(reloadedResult.report.suggestions[0]?.title, titleEdit.title)
+        assert.strictEqual(reloadedResult.report.suggestions[0]?.problem, technicalEdit.problem)
 
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -1160,7 +1209,11 @@ describe("agent job review results", () => {
           assert.deepStrictEqual(page.revisions.map(({ sequence }) => sequence), [1])
         })
       )
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("allows one winner for concurrent edits of the same revision", () =>
     withRepository(
@@ -1693,7 +1746,10 @@ describe("agent job review results", () => {
               cancellationRequested: false
             }
           })
-        }).pipe(Effect.provide(prReviewThreadHistoryLayer))
+        }).pipe(
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(prReviewThreadHistoryLayer)
+        )
         assert.strictEqual(page.events.length, 66)
         assert.isFalse(page.hasMore)
         assert.strictEqual(page.nextCursor, page.events.at(-1)?.eventSequence)

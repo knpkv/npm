@@ -653,6 +653,11 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
+      audit: productionRouteAuditCase("scaffold", "open-pr", "unauthenticated", "open-pr"),
+      landmark: () => page.getByText("Browser session required", { exact: true }),
+      primaryAction: () => null
+    },
+    {
       audit: productionRouteAuditCase("scaffold", "item", "unauthenticated", "items/:entityId"),
       expectOutcome: async () => expect(page.getByText("Release facts stay private", { exact: true })).toBeVisible(),
       landmark: () => page.getByText("Entity unavailable", { exact: true }),

@@ -109,6 +109,7 @@ const OTHER_PLUGIN_CONNECTION_ID = PluginConnectionId.make(
 )
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000405")
 const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000406")
+const RELEASELESS_CHAT_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000040d")
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000407")
 const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000408")
 const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
@@ -138,6 +139,7 @@ const CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
 }
 const LANGUAGE_MODEL = Effect.runSync(
   LanguageModel.LanguageModel.pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(makeDeterministicLanguageModel([]).layer)
   )
 )
@@ -268,6 +270,14 @@ const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const encodedInspection = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+const unreleasedInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    canonicalReleaseId: null,
+    releaseIds: []
+  }
+})
 const otherConnectionInspection = Schema.decodeSync(WorkspaceEntityInspection)({
   ...encodedInspection,
   entity: {
@@ -355,6 +365,9 @@ const failedFollowUpReview = Schema.decodeSync(LatestAgentReviewRecord)({
   report: null
 })
 
+// @effect-diagnostics-next-line effectSucceedWithVoid:off
+const persistenceUndefined = Effect.succeed(undefined)
+
 const completedReviewWithSuggestion = (
   overrides: Partial<typeof reviewReport.suggestions[number]>
 ) => {
@@ -384,6 +397,14 @@ const graphInspection = DeliveryGraphInspection.of({
   relationship: () => Effect.die("not used"),
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
+})
+
+const unreleasedGraphInspection = DeliveryGraphInspection.of({
+  ...graphInspection,
+  workspaceEntity: ({ entityId, workspaceId }) =>
+    entityId === ENTITY_ID && workspaceId === WORKSPACE_ID
+      ? Effect.succeed(unreleasedInspection)
+      : Effect.die("review crossed its workspace or entity boundary")
 })
 
 const multipleConnectionGraphInspection = DeliveryGraphInspection.of({
@@ -504,14 +525,15 @@ const withService = <Success, Failure>(
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
   recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
-    Effect.succeed(undefined),
+    persistenceUndefined,
   reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
     Effect.succeed({ _tag: "acquired" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
-    Effect.succeed(undefined),
+    persistenceUndefined,
   publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"],
   latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"],
-  appendRevision?: Persistence["Service"]["agentJobs"]["appendReviewSuggestionRevision"]
+  appendRevision?: Persistence["Service"]["agentJobs"]["appendReviewSuggestionRevision"],
+  latestReviewForPullRequestOverride?: Persistence["Service"]["agentJobs"]["latestReviewForPullRequest"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -532,6 +554,8 @@ const withService = <Success, Failure>(
       const toolPolicy = yield* Ref.make<AgentToolPolicy>("review-sandbox")
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
+      const resolveLatestReviewForPullRequest = latestReviewForPullRequestOverride ??
+        persistence.agentJobs.latestReviewForPullRequest
       const testPersistence = Persistence.of({
         ...persistence,
         transact: <Success, Failure, Requirements>(
@@ -543,6 +567,7 @@ const withService = <Success, Failure>(
           ),
         agentJobs: {
           ...persistence.agentJobs,
+          latestReviewForPullRequest: resolveLatestReviewForPullRequest,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
           latestReview: resolveLatestReview,
           appendReviewSuggestionRevision: (input) =>
@@ -696,6 +721,7 @@ const withService = <Success, Failure>(
           })
       })
       const service = yield* PullRequestReviews.pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(pullRequestReviewsLayer),
         Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, graphInspection),
@@ -712,8 +738,15 @@ const withService = <Success, Failure>(
         allowedProviders,
         toolPolicy
       )
-    }).pipe(Effect.provide(persistenceLayer(config)))
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(persistenceLayer(config))
+    )
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 const withRealService = <Success, Failure>(
   use: (
@@ -757,6 +790,7 @@ const withRealService = <Success, Failure>(
         }
       })
       const service = yield* PullRequestReviews.pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(pullRequestReviewsLayer),
         Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, selectedInspection),
@@ -764,8 +798,15 @@ const withRealService = <Success, Failure>(
         Effect.provideService(ReviewSuggestionPublicationGateway, unusedPublicationGateway)
       )
       return yield* use(service, persistence, database)
-    }).pipe(Effect.provide(persistenceWithDatabase))
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(persistenceWithDatabase)
+    )
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer),
+    Effect.scoped
+  )
 
 describe("pull request reviews", () => {
   it("advances only dispatchable or recoverable publication states", () => {
@@ -1018,6 +1059,146 @@ describe("pull request reviews", () => {
         }
       })
     ))
+
+  it.effect("enqueues and claims an immutable review without a release", () =>
+    withRealService(
+      (service, persistence, { sql }) =>
+        Effect.gen(function*() {
+          const rejectedChat = yield* persistence.agentJobs.enqueue({
+            workspaceId: WORKSPACE_ID,
+            releaseId: null,
+            jobId: RELEASELESS_CHAT_JOB_ID,
+            providerId: AgentProviderId.make(PROVIDER_ID),
+            model: MODEL,
+            access: "read-only",
+            userPrompt: "Describe this release.",
+            prompt: "Describe this release.",
+            contextFingerprint: AgentContextFingerprint.make(`sha256:${"b".repeat(64)}`),
+            subjectRevision: "release-revision-1",
+            task: { _tag: "release-chat" },
+            createdAt: STARTED_TIMESTAMP
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(rejectedChat))
+          if (Result.isFailure(rejectedChat)) {
+            assert.isTrue(Schema.is(AgentJobInputError)(rejectedChat.failure))
+          }
+
+          const before = yield* service.current({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID
+          })
+          assert.strictEqual(before._tag, "not-started")
+
+          const accepted = yield* service.enqueue({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              providerId: PROVIDER_ID,
+              model: MODEL,
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
+            }
+          })
+          assert.strictEqual(accepted._tag, "pending")
+
+          const claimedAt = yield* DateTime.now
+          const claim = yield* persistence.agentJobs.claimNext({
+            workspaceId: WORKSPACE_ID,
+            taskTags: ["pr-review"],
+            leaseOwner: LEASE_OWNER,
+            leaseToken: LEASE_TOKEN,
+            claimedAt,
+            leaseExpiresAt: DateTime.addDuration(claimedAt, Duration.minutes(1))
+          })
+          assert.isTrue(Option.isSome(claim))
+          if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+          assert.isNull(claim.value.releaseId)
+          assert.isNull(claim.value.context.releaseId)
+
+          const rows = yield* sql`SELECT release_id AS releaseId
+            FROM agent_threads
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND thread_kind = 'pr-review'`
+          assert.deepStrictEqual(rows, [{ releaseId: null }])
+        }),
+      unreleasedGraphInspection
+    ))
+
+  it.effect("returns the complete prior report when the current head has advanced", () => {
+    const previousHead = "0".repeat(40)
+    const previousReport = Schema.decodeUnknownSync(PrReviewReport)({
+      ...Schema.encodeSync(PrReviewReport)(reviewReport),
+      subject: { ...reviewReport.subject, headRevision: previousHead },
+      suggestions: reviewReport.suggestions.map((suggestion) =>
+        suggestion.replacement === undefined
+          ? suggestion
+          : { ...suggestion, replacement: { ...suggestion.replacement, reviewedHead: previousHead } }
+      )
+    })
+    const previousReview = Schema.decodeUnknownSync(LatestAgentReviewRecord)({
+      ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+      report: Schema.encodeSync(PrReviewReport)(previousReport)
+    })
+
+    return withService(
+      (service) =>
+        Effect.gen(function*() {
+          const current = yield* service.current({ workspaceId: WORKSPACE_ID, entityId: ENTITY_ID })
+          assert.strictEqual(current._tag, "stale")
+          if (current._tag !== "stale") return
+          assert.strictEqual(current.previousHead, previousHead)
+          assert.strictEqual(current.previousState, "succeeded")
+          assert.deepStrictEqual(current.previousReport, previousReport)
+        }),
+      registry,
+      Option.none(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Effect.succeed(Option.some(previousReview))
+    )
+  })
+
+  it.effect("preserves an incomplete prior run state after the current head advances", () => {
+    const previousHead = "0".repeat(40)
+    const previousReport = Schema.decodeUnknownSync(PrReviewReport)({
+      ...Schema.encodeSync(PrReviewReport)(reviewReport),
+      subject: { ...reviewReport.subject, headRevision: previousHead },
+      suggestions: reviewReport.suggestions.map((suggestion) =>
+        suggestion.replacement === undefined
+          ? suggestion
+          : { ...suggestion, replacement: { ...suggestion.replacement, reviewedHead: previousHead } }
+      )
+    })
+    const failedPreviousReview = Schema.decodeUnknownSync(LatestAgentReviewRecord)({
+      ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+      state: "failed",
+      report: Schema.encodeSync(PrReviewReport)(previousReport)
+    })
+
+    return withService(
+      (service) =>
+        Effect.gen(function*() {
+          const current = yield* service.current({ workspaceId: WORKSPACE_ID, entityId: ENTITY_ID })
+          assert.strictEqual(current._tag, "stale")
+          if (current._tag !== "stale") return
+          assert.strictEqual(current.previousState, "failed")
+          assert.deepStrictEqual(current.previousReport, previousReport)
+        }),
+      registry,
+      Option.none(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Effect.succeed(Option.some(failedPreviousReview))
+    )
+  })
 
   it.effect("retains malformed settings quarantine when review enqueue rolls back", () =>
     withRealService((service, persistence, { sql }) =>
@@ -1507,7 +1688,7 @@ describe("pull request reviews", () => {
           }),
         registry,
         Option.some(completedReview),
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         reserve
       )
     }))
@@ -1608,7 +1789,7 @@ describe("pull request reviews", () => {
           }),
         registry,
         Option.some(completedReviewWithSuggestion({ state: "published" })),
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         reserve
       )
     }))
@@ -1709,7 +1890,7 @@ describe("pull request reviews", () => {
           registry,
           Option.some(completedReview),
           () =>
-            Effect.succeed(undefined),
+            persistenceUndefined,
           reserve,
           release
         )
@@ -1754,7 +1935,7 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview),
-      () => Effect.succeed(undefined),
+      () => persistenceUndefined,
       () =>
         Effect.succeed(
           ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
@@ -1981,7 +2162,7 @@ describe("pull request reviews", () => {
         Option.some(completedReview),
         record,
         reserve,
-        () => Effect.succeed(undefined),
+        () => persistenceUndefined,
         idempotentPublish
       )
     }))
@@ -2556,17 +2737,6 @@ describe("pull request reviews", () => {
                 value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
                   ...encodedInspection,
                   isSourceCurrent: false
-                })
-              },
-              {
-                reason: "release-unavailable",
-                value: Schema.decodeSync(WorkspaceEntityInspection)({
-                  ...encodedInspection,
-                  entity: {
-                    ...encodedInspection.entity,
-                    canonicalReleaseId: null,
-                    releaseIds: []
-                  }
                 })
               },
               {

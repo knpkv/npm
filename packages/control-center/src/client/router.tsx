@@ -86,6 +86,11 @@ const authorizedShareRoute = async () => {
   return { Component: module.AuthorizedSharePage }
 }
 
+const openPullRequestRoute = async () => {
+  const module = await import("./openPullRequest/OpenPullRequestPage.js")
+  return { Component: module.OpenPullRequestPage }
+}
+
 /** Browser routes remain application-owned while rly receives only a link bridge. */
 export const router = createBrowserRouter([
   {
@@ -97,6 +102,7 @@ export const router = createBrowserRouter([
       { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
       { path: "agent", lazy: agentRoute },
       { path: "pair", lazy: pairRoute },
+      { path: "open-pr", lazy: openPullRequestRoute },
       { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },
       {
         path: "w/:workspaceId",
