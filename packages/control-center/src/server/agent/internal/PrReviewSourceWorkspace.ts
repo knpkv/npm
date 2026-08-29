@@ -178,13 +178,14 @@ const makeCodeCommitResolver = Effect.fn("PrReviewSourceResolver.makeCodeCommitR
           repositoryName
         })
         if (
-          Result.isSuccess(candidate) &&
-          Schema.is(SourceProfile)(candidate.success.profile) &&
-          Schema.is(SourceRegion)(candidate.success.region) &&
-          candidate.success.repositoryName === request.repository
+          Result.isFailure(candidate) ||
+          !Schema.is(SourceProfile)(candidate.success.profile) ||
+          !Schema.is(SourceRegion)(candidate.success.region) ||
+          candidate.success.repositoryName !== request.repository
         ) {
-          matches.push(candidate.success)
+          return yield* sourceError("connection-unavailable")
         }
+        matches.push(candidate.success)
       }
       if (matches.length !== 1) return yield* sourceError("connection-unavailable")
       const [configuration] = matches

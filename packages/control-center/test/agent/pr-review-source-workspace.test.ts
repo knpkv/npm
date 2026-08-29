@@ -29,6 +29,7 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000051")
 const UNRELATED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000060")
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000061")
+const INVALID_MATCHING_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000062")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-24T10:00:00.000Z")
 const STALE_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000052")
 
@@ -117,6 +118,7 @@ describe("PR review source workspace", () => {
       const secretStore = yield* makeSecretStore({ secretRoot: SecretRoot.make(secretRoot) })
       const secrets = Layer.succeed(SecretStore, secretStore)
       const profileRef = yield* secretStore.create(new TextEncoder().encode("review-profile"))
+      const invalidMatchingProfileRef = yield* secretStore.create(new TextEncoder().encode(" "))
       const missingUnrelatedProfileRef = yield* secretStore.create(new TextEncoder().encode("missing-profile"))
       yield* secretStore.remove(missingUnrelatedProfileRef)
       const resolver = codeCommitPrReviewSourceResolverLayer.pipe(
@@ -247,6 +249,65 @@ describe("PR review source workspace", () => {
           if (mismatch.failure._tag === "PrReviewSourceError") {
             assert.strictEqual(mismatch.failure.reason, "connection-unavailable")
           }
+        }
+        yield* durable.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: INVALID_MATCHING_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Invalid matching profile"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* durable.pluginConfigurations.update(
+          WORKSPACE_ID,
+          INVALID_MATCHING_CONNECTION_ID,
+          [
+            {
+              _tag: "secret-reference",
+              key: StoredPluginConfigurationKey.make("profile"),
+              ref: invalidMatchingProfileRef
+            },
+            {
+              _tag: "text",
+              key: StoredPluginConfigurationKey.make("region"),
+              value: "eu-central-1"
+            },
+            {
+              _tag: "text",
+              key: StoredPluginConfigurationKey.make("repositoryName"),
+              value: "control-center"
+            }
+          ],
+          0,
+          CREATED_AT
+        )
+        const invalidMatchingProfile = yield* sourceResolver.resolve({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          repository: "control-center",
+          baseRevision: "1".repeat(40),
+          headRevision: "2".repeat(40)
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(invalidMatchingProfile))
+        if (Result.isFailure(invalidMatchingProfile)) {
+          assert.strictEqual(invalidMatchingProfile.failure.reason, "connection-unavailable")
+        }
+        const healthyConnection = yield* durable.pluginConnections.get(WORKSPACE_ID, CONNECTION_ID)
+        yield* durable.pluginConnections.updateMetadata(WORKSPACE_ID, CONNECTION_ID, {
+          displayName: healthyConnection.displayName,
+          isEnabled: false,
+          expectedRevision: healthyConnection.revision,
+          updatedAt: CREATED_AT
+        })
+        const soleInvalidMatchingProfile = yield* sourceResolver.resolve({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          repository: "control-center",
+          baseRevision: "1".repeat(40),
+          headRevision: "2".repeat(40)
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(soleInvalidMatchingProfile))
+        if (Result.isFailure(soleInvalidMatchingProfile)) {
+          assert.strictEqual(soleInvalidMatchingProfile.failure.reason, "connection-unavailable")
         }
       }).pipe(Effect.provide(Layer.mergeAll(persistence, resolver, secrets)))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
