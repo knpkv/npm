@@ -40,7 +40,7 @@ export const canInspectWorkspaceSettings = (state: BrowserSessionState, workspac
 
 /** The narrow PR resolver is available to workspace-wide readers. @internal */
 export const canOpenCodeCommitPullRequest = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
-  const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
+  const session = state._tag === "authenticated" ? state.session : null
   return (
     workspaceId !== null &&
     session?.workspaceId === workspaceId &&

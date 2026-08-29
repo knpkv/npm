@@ -41,9 +41,10 @@ export const OpenPullRequestPage = ({
       ? browserSession.state.session
       : null
   const session =
-    readableSession !== null &&
-    (readableSession.permission === "workspace-owner" || readableSession.permission === "workspace-approver")
-      ? readableSession
+    browserSession.state._tag === "authenticated" &&
+    (browserSession.state.session.permission === "workspace-owner" ||
+      browserSession.state.session.permission === "workspace-approver")
+      ? browserSession.state.session
       : null
 
   useEffect(() => {
@@ -92,6 +93,16 @@ export const OpenPullRequestPage = ({
       <StatePanel
         description="Pair this browser with Control Center before resolving a private CodeCommit pull request."
         title="Browser session required"
+        tone="caution"
+      />
+    )
+  }
+
+  if (browserSession.state._tag === "storage-unavailable") {
+    return (
+      <StatePanel
+        description="Enable session storage, then pair this browser again before resolving a private CodeCommit pull request."
+        title="Browser storage required"
         tone="caution"
       />
     )

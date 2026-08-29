@@ -145,6 +145,7 @@ describe("useWorkspaceDefaultLandingPath", () => {
     expect(canInspectWorkspaceSettings({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
     expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session }, session.workspaceId)).toBe(true)
     expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session: approver }, session.workspaceId)).toBe(true)
+    expect(canOpenCodeCommitPullRequest({ _tag: "storage-unavailable", session }, session.workspaceId)).toBe(false)
     expect(canOpenCodeCommitPullRequest({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
   })
 

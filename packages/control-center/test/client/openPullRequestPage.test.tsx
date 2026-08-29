@@ -52,7 +52,11 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const mountPage = async (transport: OpenPullRequestTransport, activeSession: SessionSummary = session) => {
+const mountPage = async (
+  transport: OpenPullRequestTransport,
+  activeSession: SessionSummary = session,
+  submit = true
+) => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
@@ -69,6 +73,7 @@ const mountPage = async (transport: OpenPullRequestTransport, activeSession: Ses
   )
   if (sessionControls === undefined) throw new Error("browser session controls are unavailable")
   act(() => sessionControls?.establishSession(csrfToken, activeSession))
+  if (!submit) return { host, router }
   const input = host.querySelector<HTMLInputElement>("input[type=url]")
   const form = host.querySelector("form")
   if (input === null || form === null) throw new Error("open pull request form is unavailable")
@@ -126,6 +131,23 @@ describe("OpenPullRequestPage", () => {
     await vi.waitFor(() => expect(host.textContent).toContain("PR not found"))
     expect(resolve).toHaveBeenCalledTimes(1)
     expect(router.state.location.search).toBe("")
+  })
+
+  it("does not offer the resolver when mutation-proof storage is unavailable", async () => {
+    const resolve = vi.fn(() =>
+      Promise.resolve<OpenPullRequestResolution>({ _tag: "not-found", indexTruncated: false })
+    )
+    const storageWrite = vi.spyOn(sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable")
+    })
+
+    const { host } = await mountPage({ resolve }, session, false)
+
+    expect(sessionControls?.state).toMatchObject({ _tag: "storage-unavailable", session })
+    expect(host.textContent).toContain("Browser storage required")
+    expect(host.querySelector("form")).toBeNull()
+    expect(resolve).not.toHaveBeenCalled()
+    storageWrite.mockRestore()
   })
 
   it("retries an unchanged URL after a transient lookup failure", async () => {
