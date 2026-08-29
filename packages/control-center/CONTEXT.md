@@ -97,7 +97,7 @@ The trusted host-side component that reuses the connected CodeCommit profile to 
 _Avoid_: Git clone in the sandbox, repository mount, AWS credentials
 
 **Review Sandbox**:
-An ephemeral sbx microVM containing a writable clone of the exact reviewed revision. Within that boundary the agent may autonomously inspect files, run commands and tests, build, and create temporary changes without per-command approval. Host credentials and authority-bearing Git configuration are absent, and sandbox changes are never propagated automatically. Outbound network access is denied for the run. Activity is observable and the run remains cancellable.
+An ephemeral sbx microVM containing a writable clone of the exact reviewed revision. Within that boundary the agent may autonomously inspect files, run commands and tests, build, and create temporary changes without per-command approval. Host credentials and authority-bearing Git configuration are absent, and sandbox changes are never propagated automatically. Typed-tool review denies sandbox network access and keeps its Effect AI provider on the host. Native Codex or Claude review executes inside sbx and can reach only its selected provider connection through sbx-owned configuration and its credential proxy; raw provider credentials never enter Control Center or the reviewed checkout. Activity is observable and the run remains cancellable.
 _Avoid_: Workspace, host checkout, development container
 
 **Review Budget**:
@@ -105,7 +105,7 @@ The visible per-run execution allowance for an Exploratory Review Run. A Full re
 _Avoid_: Hidden timeout, token limit, deadline
 
 **Sandbox Network Grant**:
-An explicit, auditable allowlist of unauthenticated outbound endpoints made available to one Exploratory Review Run for integration testing. The AI orchestrator does not require this grant because it operates outside the Review Sandbox.
+An explicit, auditable allowlist of unauthenticated outbound endpoints made available to one Exploratory Review Run for integration testing. The typed-tool Effect AI orchestrator does not require this grant because it operates outside the Review Sandbox. Native Codex or Claude instead runs inside sbx with its selected provider connection; that provider-only authority is not a general integration-test grant.
 _Avoid_: Internet access, host network, network mode
 
 **Review State**:

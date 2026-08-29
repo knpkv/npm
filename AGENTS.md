@@ -272,7 +272,8 @@ When writing Effect code:
 - When PR-review execution placement, provider-network authority, or retained
   provider user configuration changes in
   `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
-  update `packages/control-center/README.md` and
+  update `packages/control-center/CONTEXT.md`,
+  `packages/control-center/README.md`, and
   `packages/control-center/docs/agentic-pr-review.md`, and append an amendment
   to `packages/control-center/docs/adr/0009-use-a-provider-neutral-agent-tool-loop.md`.
   Typed-tool review keeps its provider on the host and denies sandbox network
