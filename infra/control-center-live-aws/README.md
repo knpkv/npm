@@ -82,3 +82,25 @@ The artifact bucket is private, encrypted, versioned, TLS-only, and expires each
 after one day plus its noncurrent version after six more days, bounding total retention to seven
 days. CloudFormation retains the bucket during stack deletion to avoid an implicit destructive
 cleanup; remove it only through a deliberate operator procedure.
+
+## Disposable PR-review evaluation
+
+`pr-review-eval.sh` creates a unique pull request against `main` with one intentional
+retry/idempotency defect. It writes the repository, branch, head, pull-request ID, and browser URL
+only to a mode-`0600` recovery journal. Before writing, it verifies that the current AWS account,
+CloudFormation stack output, stack-owned repository ID, CodeCommit repository name, and repository
+ARN agree. The script stays alive while the fixture is in use; type `stop` or terminate it to close
+the pull request and then delete the branch. Successful cleanup removes the journal. Incomplete
+cleanup fails loudly and keeps the journal for recovery. Cleanup is registered before the first AWS
+resource is created and records ownership after each successful mutation. This fixture does not
+inspect or modify CodePipeline and remains usable when that pipeline has drifted.
+
+```sh
+AWS_PROFILE=dev-administratoraccess \
+CONTROL_CENTER_LIVE_AWS_REGION=eu-central-1 \
+./infra/control-center-live-aws/pr-review-eval.sh
+```
+
+Expected evaluation result: a correctness finding that the idempotency key is regenerated inside
+the retry loop, which can charge the same request more than once after an ambiguous provider
+failure. The durable prevention is a focused test asserting every attempt receives the same key.
