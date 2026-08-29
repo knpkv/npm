@@ -2090,6 +2090,87 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("resolves a published suggestion when a newer review no longer finds it", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const firstClaim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: firstClaim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestion = report.suggestions[0]!
+        const revision = yield* currentSuggestionRevision(suggestion.suggestionId)
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T3
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        yield* TestClock.setTime(DateTime.toEpochMillis(T4))
+        const secondClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T4,
+          leaseExpiresAt: DateTime.addDuration(T4, "5 minutes")
+        })
+        if (Option.isNone(secondClaim)) return yield* Effect.die("follow-up review claim missing")
+        const cleanReport = PrReviewReport.make({
+          ...report,
+          subject: advancedSubject,
+          suggestions: []
+        })
+        const completed = yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: SWAP_JOB_ID,
+          attemptSequence: secondClaim.value.attemptSequence,
+          leaseToken: SECOND_LEASE_TOKEN,
+          report: cleanReport,
+          completedAt: T5
+        })
+
+        assert.deepStrictEqual(completed.report.transitions, [{
+          suggestionId: suggestion.suggestionId,
+          transition: "resolved",
+          previousState: "published",
+          currentState: null,
+          previousHead: subject.headRevision,
+          currentHead: advancedSubject.headRevision
+        }])
+        const history = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(history.current.suggestion.state, "stale")
+      })
+    ))
+
   it.effect("reserves aggregate bytes for the longest lifecycle projection", () =>
     withRepository(
       Effect.gen(function*() {
