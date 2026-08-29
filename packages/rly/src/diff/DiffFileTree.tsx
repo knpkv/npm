@@ -252,9 +252,6 @@ export const DiffFileTree = ({
         <li className={style("directory")} data-rly-diff-directory={node.path} key={`directory:${node.path}`}>
           <button
             aria-expanded={expanded}
-            aria-label={`${visibleGitPath(node.name)}, directory, ${node.fileCount} changed ${
-              node.fileCount === 1 ? "file" : "files"
-            }`}
             className={style("directoryButton")}
             onClick={() =>
               setCollapsedDirectories((current) => {
