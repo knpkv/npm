@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import type { RlyTheme } from "@knpkv/rly/foundations"
+import { PortalProvider, type RlyTheme } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
 import { type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -98,13 +98,15 @@ const SettingsPageHarness = ({ transport }: { readonly transport: WorkspaceSetti
 const renderSettingsPage = async (transport: WorkspaceSettingsTransport): Promise<HTMLElement> =>
   mount(
     <AppThemeProvider>
-      <MemoryRouter initialEntries={[`/workspaces/${workspaceId}/settings`]}>
-        <BrowserSessionProvider>
-          <Routes>
-            <Route element={<SettingsPageHarness transport={transport} />} path="/workspaces/:workspaceId/settings" />
-          </Routes>
-        </BrowserSessionProvider>
-      </MemoryRouter>
+      <PortalProvider>
+        <MemoryRouter initialEntries={[`/workspaces/${workspaceId}/settings`]}>
+          <BrowserSessionProvider>
+            <Routes>
+              <Route element={<SettingsPageHarness transport={transport} />} path="/workspaces/:workspaceId/settings" />
+            </Routes>
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      </PortalProvider>
     </AppThemeProvider>
   )
 
@@ -155,8 +157,8 @@ const changeInput = async (input: HTMLInputElement, value: string): Promise<void
   })
 }
 
-const renderConfirmedRetentionChange = async (): Promise<{
-  readonly confirmation: HTMLInputElement
+const renderGovernedRetentionChange = async (): Promise<{
+  readonly confirm: HTMLButtonElement
   readonly host: HTMLElement
   readonly save: HTMLButtonElement
 }> => {
@@ -174,17 +176,17 @@ const renderConfirmedRetentionChange = async (): Promise<{
     throw new Error("expected content retention input")
   }
   await changeInput(contentRetention, "91")
-  const confirmation = Array.from(host.querySelectorAll("label"))
-    .find((candidate) => candidate.textContent?.includes("governed retention policy change"))
-    ?.querySelector<HTMLInputElement>("input")
   const save = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
     (candidate) => candidate.textContent === "Save settings"
   )
-  if (confirmation === undefined || confirmation === null || save === undefined) {
-    throw new Error("expected governed confirmation and save controls")
-  }
-  await act(async () => confirmation.click())
-  return { confirmation, host, save }
+  if (save === undefined) throw new Error("expected save control")
+  await act(async () => save.click())
+  await vi.waitFor(() => expect(host.textContent).toContain("Review governed changes"))
+  const confirm = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+    (candidate) => candidate.textContent === "Save governed changes"
+  )
+  if (confirm === undefined) throw new Error("expected governed save confirmation")
+  return { confirm, host, save }
 }
 
 describe("workspace settings browser acceptance", () => {
@@ -343,27 +345,43 @@ describe("workspace settings browser acceptance", () => {
     )
   })
 
-  it("keeps save enabled while the confirmed governed draft is unchanged", async () => {
-    const { confirmation, save } = await renderConfirmedRetentionChange()
+  it("puts governed confirmation beside the save action", async () => {
+    const { confirm, host, save } = await renderGovernedRetentionChange()
 
-    expect(confirmation.checked).toBe(true)
     expect(save.disabled).toBe(false)
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Review governed changes")
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Retention")
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Content (days): 90 → 91")
+    expect(confirm.textContent).toBe("Save governed changes")
   })
 
-  it("clears confirmation when the exact governed draft changes", async () => {
-    const { confirmation, host, save } = await renderConfirmedRetentionChange()
-    const allowedProviders = Array.from(host.querySelectorAll("label"))
-      .find((candidate) => candidate.textContent?.includes("Allowed providers"))
+  it("saves only after the governed dialog action", async () => {
+    const update = vi.fn(() => Promise.resolve(settingsReadModel))
+    const host = await renderSettingsPage({
+      load: () => Promise.resolve(settingsReadModel),
+      makeMutationId: () => Promise.resolve(mutationId),
+      update
+    })
+    await act(async () => sessionControls?.establishSession(Schema.decodeSync(CsrfToken)("a".repeat(64)), session))
+    await vi.waitFor(() => expect(host.textContent).toContain("Workspace settings"))
+    const retention = Array.from(host.querySelectorAll("label"))
+      .find((candidate) => candidate.textContent?.includes("Content (days)"))
       ?.querySelector<HTMLInputElement>("input")
-    if (allowedProviders === undefined || allowedProviders === null) {
-      throw new Error("expected allowed providers input")
-    }
-
-    await changeInput(allowedProviders, "codex")
-
-    expect(confirmation.checked).toBe(false)
-    expect(save.disabled).toBe(true)
-    expect(confirmation.parentElement?.textContent).toContain("governed agent, retention policy changes")
+    if (retention === undefined || retention === null) throw new Error("expected retention input")
+    await changeInput(retention, "91")
+    const save = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Save settings"
+    )
+    if (save === undefined) throw new Error("expected save control")
+    await act(async () => save.click())
+    expect(update).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(host.textContent).toContain("Review governed changes"))
+    const confirm = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Save governed changes"
+    )
+    if (confirm === undefined) throw new Error("expected governed confirmation")
+    await act(async () => confirm.click())
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1))
   })
 
   it("leaves a schema-invalid field-level reapply explicitly unresolved", async () => {
@@ -407,17 +425,17 @@ describe("workspace settings browser acceptance", () => {
       throw new Error("expected allowed providers input")
     }
     await changeInput(allowedProviders, "codex")
-    const confirmation = Array.from(host.querySelectorAll("label"))
-      .find((candidate) => candidate.textContent?.includes("governed agent policy change"))
-      ?.querySelector<HTMLInputElement>("input")
     const save = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
       (candidate) => candidate.textContent === "Save settings"
     )
-    if (confirmation === undefined || confirmation === null || save === undefined) {
-      throw new Error("expected governed confirmation and save controls")
-    }
-    await act(async () => confirmation.click())
+    if (save === undefined) throw new Error("expected save control")
     await act(async () => save.click())
+    await vi.waitFor(() => expect(host.textContent).toContain("Review governed changes"))
+    const confirm = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Save governed changes"
+    )
+    if (confirm === undefined) throw new Error("expected governed confirmation")
+    await act(async () => confirm.click())
     await vi.waitFor(() => expect(host.textContent).toContain("Settings changed in another session"))
 
     const reapply = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(

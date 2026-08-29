@@ -6,6 +6,7 @@ import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   type DurableAgentProviderId,
   type DurableAgentPrompt,
+  type PullRequestReviewFailure,
   type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
 import type { PrReviewOrientation, PrReviewSuggestion } from "../../domain/prReview.js"
@@ -58,11 +59,102 @@ const formatBudget = (budgetMillis: number): string => {
   return `${String(minutes)} minute${minutes === 1 ? "" : "s"}`
 }
 
+const providerIdName = (providerId: DurableAgentProviderId): string => {
+  switch (providerId) {
+    case "codex":
+      return "Codex"
+    case "claude":
+      return "Claude"
+    case "relay-gateway":
+      return "Relay Gateway"
+    default:
+      return providerId
+  }
+}
+
 const providerName = (
   provider: NonNullable<Extract<PullRequestReviewControllerState, { readonly _tag: "ready" }>["provider"]>
-): string => provider.displayName ?? provider.providerId
+): string => provider.displayName ?? providerIdName(provider.providerId)
 
 const providerReviewLabel = (provider: Parameters<typeof providerName>[0]): string => `${providerName(provider)} review`
+
+const modelName = (providerId: DurableAgentProviderId, model: string): string =>
+  model === "configured-default" || (providerId === "claude" && model === "default") ? "CLI default" : model
+
+const networkAccessLabel = (networkAccess: "blocked" | "provider-enabled", provider: string): string =>
+  networkAccess === "blocked" ? "Network blocked" : `${provider} access enabled`
+
+const failureHeading = (stage: PullRequestReviewFailure["stage"]): string => {
+  switch (stage) {
+    case "source-checkout":
+      return "Source checkout failed"
+    case "review-setup":
+      return "Review setup is incomplete"
+    case "sandbox-start":
+      return "Review sandbox failed to start"
+    case "agent-run":
+      return "Agent review failed"
+    case "result-validation":
+      return "Review result was invalid"
+    case "control-center":
+      return "Control Center could not save the review"
+  }
+}
+
+const failureCause = (cause: PullRequestReviewFailure["cause"]): string | null => {
+  switch (cause) {
+    case undefined:
+      return null
+    case "invalid-configuration":
+      return "The Review Sandbox configuration is invalid."
+    case "invalid-request":
+      return "Control Center rejected the generated review command."
+    case "source-rejected":
+      return "The source exceeded review safety limits or failed validation."
+    case "source-unavailable":
+      return "CodeCommit source could not be materialized."
+    case "sandbox-unavailable":
+      return "sbx could not create or reach the review sandbox."
+    case "sandbox-timeout":
+      return "The review sandbox did not become ready in time."
+    case "command-timeout":
+      return "The review command exceeded its time budget."
+    case "provider-authentication":
+      return "The agent provider rejected its credentials or required API access is missing."
+    case "provider-rate-limited":
+      return "The agent provider rate-limited this review."
+    case "provider-unavailable":
+      return "The agent provider could not be reached."
+    case "agent-command-failed":
+      return "The agent command exited before producing a review."
+    case "output-rejected":
+      return "The review command returned output outside the safe limits."
+    case "artifact-unavailable":
+      return "The retained review output could not be read."
+    case "session-closed":
+      return "The review sandbox closed before the command finished."
+    case "cleanup-failed":
+      return "The run ended, but sbx cleanup did not complete."
+  }
+}
+
+const failureGuidance = ({ retryable, stage }: PullRequestReviewFailure): string => {
+  if (retryable) return "The failure may be temporary. Retry this exact-head review."
+  switch (stage) {
+    case "source-checkout":
+      return "Check the CodeCommit connection, AWS credentials, region, and repository access."
+    case "review-setup":
+      return "Check the workspace review policy and selected runner."
+    case "sandbox-start":
+      return "Check the sbx installation and Review sandbox configuration."
+    case "agent-run":
+      return "Check the selected review runner and its authentication."
+    case "result-validation":
+      return "The runner returned a result Control Center could not safely accept. Check its version and configuration."
+    case "control-center":
+      return "Check Control Center storage and worker health before starting a new review."
+  }
+}
 
 const REVIEW_PROMPT_TEMPLATES: ReadonlyArray<{
   readonly label: string
@@ -145,7 +237,9 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
     case "run-completed":
       return `Run completed · ${event.outcome}`
     case "run-failed":
-      return event.retryable ? "Run failed · retryable" : "Run failed"
+      return `${failureHeading(event.stage)}${event.cause === undefined ? "" : ` · ${failureCause(event.cause)}`}${
+        event.retryable ? " · retryable" : ""
+      }`
     case "run-interrupted":
       return "Run interrupted · Control Center restarted"
     case "cancellation-requested":
@@ -199,6 +293,10 @@ export const PullRequestReviewPanel = ({
   )
   const selectedProvider =
     providerPresets.find(({ providerId }) => providerId === selectedProviderId) ?? providerPresets[0] ?? null
+  const durableProviderName = (providerId: DurableAgentProviderId): string => {
+    const preset = providerPresets.find((candidate) => candidate.providerId === providerId)
+    return preset === undefined ? providerIdName(providerId) : providerName(preset)
+  }
   const requestScope =
     state._tag === "idle"
       ? null
@@ -342,7 +440,9 @@ export const PullRequestReviewPanel = ({
             <dd>
               {usageRun === null || usageRun === undefined
                 ? missingUsageLabel
-                : `${usageRun.providerId} · ${usageRun.model ?? "model not reported"}`}
+                : `${durableProviderName(usageRun.providerId)} · ${
+                    usageRun.model === null ? "model not reported" : modelName(usageRun.providerId, usageRun.model)
+                  }`}
             </dd>
           </div>
           <div>
@@ -403,13 +503,14 @@ export const PullRequestReviewPanel = ({
                   type="button"
                 >
                   <strong>{providerReviewLabel(preset)}</strong>
-                  <span>{preset.model}</span>
+                  <span>{modelName(preset.providerId, preset.model)}</span>
                 </button>
               ))}
             </div>
           ) : selectedProvider === null ? null : (
             <span className={styles.reviewSelectedPreset}>
-              Review with {providerName(selectedProvider)} · {selectedProvider.model}
+              Review with {providerName(selectedProvider)} ·{" "}
+              {modelName(selectedProvider.providerId, selectedProvider.model)}
             </span>
           )}
           <div aria-label="Review prompt templates" className={styles.reviewTemplateList}>
@@ -454,7 +555,7 @@ export const PullRequestReviewPanel = ({
         {threadSurface}
       </>
     )
-  const reviewLaunch = (headRevision: string, triggerLabel: string): ReactElement | null =>
+  const reviewLaunch = (headRevision: string, triggerLabel: string, repeat = false): ReactElement | null =>
     selectedProvider === null ? null : (
       <Dialog.Root onOpenChange={changeLaunchOpen} open={launchOpen}>
         <Dialog.Trigger disabled={state.action === "starting"}>
@@ -462,11 +563,11 @@ export const PullRequestReviewPanel = ({
         </Dialog.Trigger>
         <Dialog.Content
           className={styles.reviewLaunchDialog}
-          description="Relay will inspect the immutable revision in an isolated sandbox. It cannot approve or change the pull request."
-          title="Review this exact head"
+          description={`${providerName(selectedProvider)} can inspect and temporarily edit the disposable checkout. It cannot approve, comment on, or change this CodeCommit pull request.`}
+          title={repeat ? "Review this exact head again" : "Review this exact head"}
         >
           <div className={styles.reviewLaunchBody}>
-            <small className={styles.reviewLaunchEyebrow}>Read-only agent run</small>
+            <small className={styles.reviewLaunchEyebrow}>No CodeCommit writes</small>
             {providerPresets.length > 1 ? (
               <div aria-label="Review agent presets" className={styles.reviewPresetList} role="radiogroup">
                 {providerPresets.map((preset) => (
@@ -478,7 +579,7 @@ export const PullRequestReviewPanel = ({
                     type="button"
                   >
                     <strong>{providerReviewLabel(preset)}</strong>
-                    <span>{preset.model}</span>
+                    <span>{modelName(preset.providerId, preset.model)}</span>
                   </button>
                 ))}
               </div>
@@ -491,25 +592,35 @@ export const PullRequestReviewPanel = ({
                 </dd>
               </div>
               <div>
-                <dt>Review profile</dt>
-                <dd>{selectedProvider.reviewProfile.label}</dd>
+                <dt>Agent</dt>
+                <dd>{providerName(selectedProvider)}</dd>
               </div>
               <div>
-                <dt>Time budget</dt>
+                <dt>Model</dt>
+                <dd>{modelName(selectedProvider.providerId, selectedProvider.model)}</dd>
+              </div>
+              <div>
+                <dt>Scope</dt>
+                <dd>Full project</dd>
+              </div>
+              <div>
+                <dt>Budget</dt>
                 <dd>{formatBudget(selectedProvider.reviewProfile.budgetMillis)}</dd>
               </div>
               <div>
-                <dt>Runtime</dt>
+                <dt>Network</dt>
                 <dd>
-                  {selectedProvider.reviewProfile.networkAccess === "blocked"
-                    ? "Network blocked · sbx"
-                    : "Provider connection enabled · sbx"}
+                  {networkAccessLabel(selectedProvider.reviewProfile.networkAccess, providerName(selectedProvider))}
                 </dd>
+              </div>
+              <div>
+                <dt>Isolation</dt>
+                <dd>Disposable sbx sandbox</dd>
               </div>
             </dl>
             <div className={styles.reviewLaunchActions}>
-              <Dialog.Close>Keep reading</Dialog.Close>
-              <Dialog.Close onClick={submitFullReview}>Start full review</Dialog.Close>
+              <Dialog.Close>Cancel</Dialog.Close>
+              <Dialog.Close onClick={submitFullReview}>Start full-project review</Dialog.Close>
             </div>
           </div>
         </Dialog.Content>
@@ -536,13 +647,12 @@ export const PullRequestReviewPanel = ({
       <div aria-live="polite" className={styles.reviewStatus} role="status">
         <strong>{label}</strong>
         <span>
-          Relay is using {review.providerId} · {review.model}. This page updates automatically.
+          {durableProviderName(review.providerId)} · {modelName(review.providerId, review.model)}. This page updates
+          automatically.
         </span>
         <span>
-          {review.reviewProfile.label} · {formatBudget(review.reviewProfile.budgetMillis)} ·{" "}
-          {review.reviewProfile.networkAccess === "blocked"
-            ? "network blocked · sbx"
-            : "provider connection enabled · sbx"}
+          {networkAccessLabel(review.reviewProfile.networkAccess, durableProviderName(review.providerId))} · Disposable
+          sbx sandbox
         </span>
         <dl>
           <div>
@@ -569,8 +679,8 @@ export const PullRequestReviewPanel = ({
             </dd>
           </div>
           <div>
-            <dt>Current command</dt>
-            <dd>{review.activity.events.at(-1) ?? "Preparing review sandbox…"}</dd>
+            <dt>Current step</dt>
+            <dd>{review.activity.events.at(-1) ?? "Fetching exact source and starting the sandbox…"}</dd>
           </div>
         </dl>
         {review.activity.events.length === 0 ? null : (
@@ -584,7 +694,7 @@ export const PullRequestReviewPanel = ({
         {canEnqueue ? (
           <div>
             {review.budgetExtensionCount === 0 ? (
-              <Button onClick={onExtendReviewBudget}>Extend review once</Button>
+              <Button onClick={onExtendReviewBudget}>{`Add ${formatBudget(review.reviewProfile.budgetMillis)}`}</Button>
             ) : (
               <span>One budget extension used.</span>
             )}
@@ -668,9 +778,20 @@ export const PullRequestReviewPanel = ({
   }
   if (review._tag === "failed") {
     const report = review.report
+    const failure = review.failure ?? null
     return withThread(
       <>
-        <strong>{review.state === "cancelled" ? "Review cancelled" : "Review did not finish"}</strong>
+        <strong>
+          {review.state === "cancelled"
+            ? "Review cancelled"
+            : failure === null
+              ? "Review did not finish"
+              : failureHeading(failure.stage)}
+        </strong>
+        {review.state === "failed" && failure !== null ? <span>{failureGuidance(failure)}</span> : null}
+        {review.state === "failed" && failure !== null && failureCause(failure.cause) !== null ? (
+          <span>Cause: {failureCause(failure.cause)}</span>
+        ) : null}
         {report == null ? (
           <span>The failed run did not change approval or publish a recommendation.</span>
         ) : (
@@ -716,7 +837,11 @@ export const PullRequestReviewPanel = ({
                 A new full review could not be started. Check the provider and worker, then try again.
               </span>
             ) : null}
-            {reviewLaunch(review.subject.headRevision, "Try again")}
+            {reviewLaunch(
+              review.subject.headRevision,
+              failure?.retryable === false ? "Review again" : "Retry review",
+              true
+            )}
           </>
         ) : null}
       </>
@@ -815,7 +940,10 @@ export const PullRequestReviewPanel = ({
       {!canEnqueue ? (
         <span>Only a workspace owner can start a review.</span>
       ) : state.provider === null ? (
-        <span>Configure an sbx Review Agent Profile with an Effect AI provider to enable review.</span>
+        <span>
+          PR review is not configured. Enable Codex, Claude, or an Effect AI review runner on the Control Center server.
+          The workspace must allow that provider with Review sandbox and Isolated profile.
+        </span>
       ) : (
         <>{reviewLaunch(review.subject.headRevision, "Review exact head")}</>
       )}

@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
@@ -14,6 +15,7 @@ import * as Schema from "effect/Schema"
 import { classifyControlCenterCliArguments } from "../../src/server/cliArguments.js"
 import {
   claimFreshControlCenterDataRoot,
+  decodeCodeCommitMockSourceFixture,
   decodeControlCenterDataPaths,
   optionalNonBlankConfigurationValue,
   prepareControlCenterDataRoot,
@@ -24,6 +26,46 @@ import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
 import { preserveNodeFileDescriptor } from "../../src/server/persistence/NodeFileDescriptor.js"
 
 const DATA_ROOT_MARKER_V1_CONTENT = "@knpkv/control-center:data-root:v1\n"
+
+describe("CodeCommit mock source configuration", () => {
+  it.effect("accepts only a complete file URL paired with the loopback provider mock", () =>
+    Effect.gen(function*() {
+      const mockEndpoint = new URL("http://127.0.0.1:42339")
+      assert.deepStrictEqual(
+        yield* decodeCodeCommitMockSourceFixture({
+          gitRemote: "file:///tmp/codecommit-mock/payments-api.git",
+          repositoryName: "payments-api",
+          mockEndpoint
+        }),
+        {
+          repositoryName: "payments-api",
+          repositoryUrl: "file:///tmp/codecommit-mock/payments-api.git"
+        }
+      )
+      assert.isTrue(Result.isFailure(
+        yield* decodeCodeCommitMockSourceFixture({
+          gitRemote: "file:///tmp/codecommit-mock/payments-api.git",
+          repositoryName: undefined,
+          mockEndpoint
+        }).pipe(Effect.result)
+      ))
+      assert.isTrue(Result.isFailure(
+        yield* decodeCodeCommitMockSourceFixture({
+          gitRemote: "file:///tmp/codecommit-mock/payments-api.git",
+          repositoryName: "payments-api",
+          mockEndpoint: undefined
+        }).pipe(Effect.result)
+      ))
+      assert.isTrue(Result.isFailure(
+        yield* decodeCodeCommitMockSourceFixture({
+          gitRemote: "https://example.test/payments-api.git",
+          repositoryName: "payments-api",
+          mockEndpoint
+        }).pipe(Effect.result)
+      ))
+    }))
+})
+
 const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
   `@knpkv/control-center:data-root:v2\nclaim-basename:${Encoding.encodeBase64Url(claimBasename)}\n` +
   `target-basename:${Encoding.encodeBase64Url(targetBasename)}\n`
@@ -127,6 +169,14 @@ describe("Control Center CLI", () => {
         Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
           budgetMillis: 60_000,
           maximumSandboxDurationMillis: 60_000
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
+          budgetMillis: 1_800_000,
+          maximumSandboxDurationMillis: 3_600_000
         })
       )
     )

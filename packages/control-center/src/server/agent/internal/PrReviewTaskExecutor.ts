@@ -58,6 +58,7 @@ import {
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { nativeReviewMaximumDurationMillis } from "../PrReviewTiming.js"
 import {
+  type PrReviewSandboxCommandResult,
   type PrReviewSandboxOutput,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
@@ -227,8 +228,27 @@ const providerFailure = (
   providerId: ClaimedAgentJob["providerId"],
   phase: AgentProviderError["phase"],
   message: string,
-  retryable: boolean
-): AgentProviderError => new AgentProviderError({ providerId, phase, message, retryable })
+  retryable: boolean,
+  reviewStage: NonNullable<AgentProviderError["reviewStage"]> = phase === "protocol"
+    ? "result-validation"
+    : phase === "configuration"
+    ? "review-setup"
+    : phase === "launch"
+    ? "sandbox-start"
+    : "agent-run",
+  reviewCause?: AgentProviderError["reviewCause"]
+): AgentProviderError => {
+  const failure = {
+    providerId,
+    phase,
+    reviewStage,
+    message,
+    retryable
+  }
+  return reviewCause === undefined
+    ? new AgentProviderError(failure)
+    : new AgentProviderError({ ...failure, reviewCause })
+}
 
 const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNativeReviewOutput")(function*(
   providerId: ClaimedAgentJob["providerId"],
@@ -247,11 +267,13 @@ const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNat
     schemaVersion: nativeReport.schemaVersion,
     completion: nativeReport.completion,
     orientation: nativeReport.orientation,
-    suggestions: nativeReport.suggestions.map(({ prevention, replacement, ...suggestion }) => ({
-      ...suggestion,
-      ...(!(prevention === null) && { prevention }),
-      ...(!(replacement === null) && { replacement })
-    })),
+    suggestions: nativeReport.suggestions.map(({ prevention, replacement, ...suggestion }) =>
+      prevention === null
+        ? replacement === null ? suggestion : { ...suggestion, replacement }
+        : replacement === null
+        ? { ...suggestion, prevention }
+        : { ...suggestion, prevention, replacement }
+    ),
     notes: nativeReport.notes
   })
 })
@@ -261,12 +283,22 @@ const runtimeFailure = (
   failure: AgentRuntimeError
 ): AgentProviderError =>
   failure._tag === "AgentProviderError"
-    ? new AgentProviderError({
+    ? providerFailure(
       providerId,
-      phase: failure.phase,
-      message: failure.message,
-      retryable: failure.retryable
-    })
+      failure.phase,
+      failure.message,
+      failure.retryable,
+      failure.reviewStage ?? (
+        failure.phase === "configuration"
+          ? "review-setup"
+          : failure.phase === "launch"
+          ? "sandbox-start"
+          : failure.phase === "protocol"
+          ? "result-validation"
+          : "agent-run"
+      ),
+      failure.reviewCause
+    )
     : providerFailure(providerId, "protocol", "PR review provider violated the runtime protocol.", false)
 
 const executionFailure = (
@@ -279,7 +311,11 @@ const executionFailure = (
 
 const sandboxFailure = (
   providerId: ClaimedAgentJob["providerId"],
-  failure: typeof PrReviewSandboxSessionError.Type
+  failure: typeof PrReviewSandboxSessionError.Type,
+  reviewStage: NonNullable<AgentProviderError["reviewStage"]> = failure.reason === "source-unavailable" ||
+      failure.reason === "source-rejected"
+    ? "source-checkout"
+    : "sandbox-start"
 ): AgentProviderError =>
   providerFailure(
     providerId,
@@ -292,8 +328,46 @@ const sandboxFailure = (
     failure.reason === "sandbox-unavailable" ||
       failure.reason === "sandbox-timeout" ||
       failure.reason === "command-timeout" ||
-      failure.reason === "cleanup-failed"
+      failure.reason === "cleanup-failed",
+    reviewStage,
+    failure.reason
   )
+
+const nativeReviewFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  providerLabel: "Claude" | "Codex",
+  result: PrReviewSandboxCommandResult
+): AgentProviderError => {
+  const diagnostic = result.stderr.text.toLowerCase()
+  const cause: NonNullable<AgentProviderError["reviewCause"]> = diagnostic.includes("401 unauthorized") ||
+      diagnostic.includes("missing scopes") ||
+      diagnostic.includes("authentication") ||
+      diagnostic.includes("not logged in")
+    ? "provider-authentication"
+    : diagnostic.includes("429") ||
+        diagnostic.includes("rate limit") ||
+        diagnostic.includes("quota")
+    ? "provider-rate-limited"
+    : diagnostic.includes("invalid schema for response_format")
+    ? "output-rejected"
+    : diagnostic.includes("connection") ||
+        diagnostic.includes("timed out") ||
+        diagnostic.includes("502") ||
+        diagnostic.includes("503") ||
+        diagnostic.includes("504")
+    ? "provider-unavailable"
+    : "agent-command-failed"
+  return providerFailure(
+    providerId,
+    cause === "output-rejected" ? "protocol" : "execution",
+    `Native ${providerLabel} review did not complete successfully.`,
+    cause === "provider-rate-limited" ||
+      cause === "provider-unavailable" ||
+      cause === "agent-command-failed",
+    cause === "output-rejected" ? "result-validation" : "agent-run",
+    cause
+  )
+}
 
 const utf8Bytes = (
   providerId: ClaimedAgentJob["providerId"],
@@ -1180,12 +1254,7 @@ const makeExecutor = Effect.gen(function*() {
                 { model: String(selected.model) })
             })
             if (reviewed.exitCode !== 0) {
-              return yield* providerFailure(
-                claim.providerId,
-                "execution",
-                `Native ${nativeProviderLabel} review did not complete successfully.`,
-                true
-              )
+              return yield* nativeReviewFailure(claim.providerId, nativeProviderLabel, reviewed)
             }
             const output = yield* completeOutputText(session, reviewed.stdout)
             if (output === null || output.length === 0) {
@@ -1281,7 +1350,13 @@ const makeExecutor = Effect.gen(function*() {
           return reportExecution(
             yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
           )
-        })
+        }).pipe(
+          Effect.mapError((failure) =>
+            Schema.is(PrReviewSandboxSessionError)(failure)
+              ? sandboxFailure(claim.providerId, failure, "agent-run")
+              : failure
+          )
+        )
     ).pipe(
       Effect.mapError((failure) =>
         Schema.is(PrReviewSandboxSessionError)(failure)

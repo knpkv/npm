@@ -269,6 +269,25 @@ const output = (
   }
 })
 
+const failedOutput = (
+  stderr: string,
+  exitCode = 1
+): PrReviewSandboxCommandResult => ({
+  exitCode,
+  stderr: {
+    artifact: null,
+    byteLength: new TextEncoder().encode(stderr).byteLength,
+    text: stderr,
+    truncated: false
+  },
+  stdout: {
+    artifact: null,
+    byteLength: 0,
+    text: "",
+    truncated: false
+  }
+})
+
 const runShellCommand = (
   cwd: string,
   command: string
@@ -402,7 +421,8 @@ const makeSessionLayer = (
   retainPrimaryDiff = false,
   artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type,
   nativeReviewOutput?: string,
-  nativeReviewRunner: "claude" | "codex" = "codex"
+  nativeReviewRunner: "claude" | "codex" = "codex",
+  nativeReviewResult?: PrReviewSandboxCommandResult
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make(
     "01890f6f-6d6a-7cc0-98d2-000000000454"
@@ -507,22 +527,23 @@ const makeSessionLayer = (
         })
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "codex") && {
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "codex") && {
       runNativeCodexReview: <UnparsedInput>(request: UnparsedInput) =>
         Effect.sync(() => {
           observation.operations.push("runNativeCodexReview")
           observation.requests.push(request)
-          return output(nativeReviewOutput)
+          return nativeReviewResult ?? output(nativeReviewOutput ?? "")
         })
     }),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "claude") && {
-      runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
-        Effect.sync(() => {
-          observation.operations.push("runNativeClaudeReview")
-          observation.requests.push(request)
-          return output(nativeReviewOutput)
-        })
-    }),
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "claude") &&
+      {
+        runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
+          Effect.sync(() => {
+            observation.operations.push("runNativeClaudeReview")
+            observation.requests.push(request)
+            return nativeReviewResult ?? output(nativeReviewOutput ?? "")
+          })
+      }),
     close: Effect.void
   }
   return Layer.succeed(
@@ -790,6 +811,97 @@ describe("PR review task executor", () => {
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
           Layer.provide(nativeSessionLayer),
           Layer.provide(historyLayer),
+          Layer.provideMerge(NodeServices.layer)
+        )
+      ),
+      Effect.scoped
+    )
+  })
+
+  it.effect("classifies rejected native provider credentials without retaining stderr", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const nativeClaim = {
+      ...claim,
+      providerId: NATIVE_PROVIDER_ID,
+      model: NATIVE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: NATIVE_REVIEW_PROFILE
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      "codex",
+      failedOutput("HTTP error: 401 Unauthorized. Missing scopes: api.responses.write.")
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: NATIVE_REVIEW_PROFILE
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-codex",
+          reviewExecutable: "codex"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const result = yield* executor.execute(nativeClaim).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "AgentProviderError")
+        if (result.failure._tag === "AgentProviderError") {
+          assert.strictEqual(result.failure.reviewStage, "agent-run")
+          assert.strictEqual(result.failure.reviewCause, "provider-authentication")
+          assert.isFalse(result.failure.retryable)
+          assert.notInclude(result.failure.message, "api.responses.write")
+        }
+      }
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(
+            Layer.succeed(
+              PrReviewThreadHistory,
+              PrReviewThreadHistory.of({
+                page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+              })
+            )
+          ),
           Layer.provideMerge(NodeServices.layer)
         )
       ),

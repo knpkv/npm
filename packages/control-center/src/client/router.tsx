@@ -95,6 +95,11 @@ const openPullRequestRoute = async () => {
 export const router = createBrowserRouter([
   {
     element: <AppShell />,
+    hydrateFallbackElement: (
+      <p aria-live="polite" role="status">
+        Loading Control Center…
+      </p>
+    ),
     children: [
       { index: true, lazy: overviewRoute },
       { path: "releases", lazy: overviewRoute },

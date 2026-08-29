@@ -125,7 +125,8 @@ export const OpenPullRequestPage = ({
           Open CodeCommit PR
         </Text>
         <Text tone="secondary" variant="body-large">
-          Paste the AWS Console link. Control Center resolves it inside this workspace; no PR search required.
+          Paste a CodeCommit PR URL from any AWS region. Control Center resolves it inside this workspace; no PR search
+          required.
         </Text>
       </header>
       <Surface as="section" className={styles.card} form="grouped" padding="spacious" tone="secondary">
@@ -135,7 +136,7 @@ export const OpenPullRequestPage = ({
             <input
               autoComplete="url"
               onChange={(event) => setInput(event.currentTarget.value)}
-              placeholder="https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/…"
+              placeholder="https://REGION.console.aws.amazon.com/codesuite/codecommit/repositories/…"
               spellCheck={false}
               type="url"
               value={input}

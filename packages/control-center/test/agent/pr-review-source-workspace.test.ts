@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
@@ -9,6 +10,7 @@ import { JobId, PluginConnectionId, WorkspaceId } from "../../src/domain/identif
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   codeCommitPrReviewSourceResolverLayer,
+  codeCommitPrReviewSourceResolverLayerWithFixture,
   drainPrReviewProcessDiagnostics,
   PrReviewSourceResolver,
   PrReviewSourceWorkspace,
@@ -20,6 +22,7 @@ import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfigurationKey } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import { makeSecretStore, SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
@@ -108,7 +111,15 @@ describe("PR review source workspace", () => {
       const config = yield* makePersistenceTestConfig("pr-review-source-resolver-")
       const database = databaseLayer(config)
       const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provideMerge(database))
-      const resolver = codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))
+      const fileSystem = yield* FileSystem.FileSystem
+      const secretRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-secrets-" })
+      const secretStore = yield* makeSecretStore({ secretRoot: SecretRoot.make(secretRoot) })
+      const secrets = Layer.succeed(SecretStore, secretStore)
+      const profileRef = yield* secretStore.create(new TextEncoder().encode("review-profile"))
+      const resolver = codeCommitPrReviewSourceResolverLayer.pipe(
+        Layer.provide(persistence),
+        Layer.provide(secrets)
+      )
       return yield* Effect.gen(function*() {
         const durable = yield* Persistence
         yield* durable.workspaces.create(WORKSPACE_ID, {
@@ -127,9 +138,9 @@ describe("PR review source workspace", () => {
           CONNECTION_ID,
           [
             {
-              _tag: "text",
+              _tag: "secret-reference",
               key: StoredPluginConfigurationKey.make("profile"),
-              value: "review-profile"
+              ref: profileRef
             },
             {
               _tag: "text",
@@ -158,7 +169,53 @@ describe("PR review source workspace", () => {
           profile: "review-profile",
           region: "eu-central-1"
         })
-      }).pipe(Effect.provide(Layer.merge(persistence, resolver)))
+        const fixtureResolver = codeCommitPrReviewSourceResolverLayerWithFixture({
+          repositoryName: "control-center",
+          repositoryUrl: "file:///tmp/codecommit-mock/control-center.git"
+        }).pipe(
+          Layer.provide(persistence),
+          Layer.provide(secrets)
+        )
+        const fixtureLocation = yield* Effect.gen(function*() {
+          const sourceResolver = yield* PrReviewSourceResolver
+          return yield* sourceResolver.resolve({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            repository: "control-center",
+            baseRevision: "1".repeat(40),
+            headRevision: "2".repeat(40)
+          })
+        }).pipe(Effect.provide(fixtureResolver))
+        assert.deepStrictEqual(fixtureLocation, {
+          repositoryUrl: "file:///tmp/codecommit-mock/control-center.git",
+          profile: "review-profile",
+          region: "eu-central-1"
+        })
+        const mismatchedFixture = codeCommitPrReviewSourceResolverLayerWithFixture({
+          repositoryName: "other-repository",
+          repositoryUrl: "file:///tmp/codecommit-mock/other-repository.git"
+        }).pipe(
+          Layer.provide(persistence),
+          Layer.provide(secrets)
+        )
+        const mismatch = yield* Effect.gen(function*() {
+          const sourceResolver = yield* PrReviewSourceResolver
+          return yield* sourceResolver.resolve({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            repository: "control-center",
+            baseRevision: "1".repeat(40),
+            headRevision: "2".repeat(40)
+          })
+        }).pipe(Effect.provide(mismatchedFixture), Effect.result)
+        assert.isTrue(Result.isFailure(mismatch))
+        if (Result.isFailure(mismatch)) {
+          assert.strictEqual(mismatch.failure._tag, "PrReviewSourceError")
+          if (mismatch.failure._tag === "PrReviewSourceError") {
+            assert.strictEqual(mismatch.failure.reason, "connection-unavailable")
+          }
+        }
+      }).pipe(Effect.provide(Layer.mergeAll(persistence, resolver, secrets)))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("materializes an exact local Git head for the callback and removes it afterwards", () =>
@@ -355,8 +412,10 @@ describe("PR review source workspace", () => {
               workspaceRoot,
               maximumSourceBytes: 1_024,
               maximumSourceEntries: 100
-            }).pipe(Layer.provide(resolver))
-              .pipe(Layer.provide(inactiveLeaseGuard))
+            }).pipe(
+              Layer.provide(resolver),
+              Layer.provide(inactiveLeaseGuard)
+            )
           ),
           Effect.result
         )
@@ -387,9 +446,7 @@ describe("PR review source workspace", () => {
           })
         )
 
-        yield* Effect.gen(function*() {
-          yield* PrReviewSourceWorkspace
-        }).pipe(
+        yield* PrReviewSourceWorkspace.pipe(
           Effect.provide(
             prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
               Layer.provide(resolver),
@@ -479,9 +536,7 @@ describe("PR review source workspace", () => {
         yield* fileSystem.makeDirectory(staleGit)
         yield* fileSystem.makeDirectory(staleJob)
         yield* fileSystem.makeDirectory(unrelated)
-        yield* Effect.gen(function*() {
-          yield* PrReviewSourceWorkspace
-        }).pipe(Effect.provide(workspaceLayer))
+        yield* PrReviewSourceWorkspace.pipe(Effect.provide(workspaceLayer))
 
         assert.isTrue(yield* fileSystem.exists(path.join(workspaceRoot, JOB_ID)))
         assert.isTrue(yield* fileSystem.exists(activeStaging))

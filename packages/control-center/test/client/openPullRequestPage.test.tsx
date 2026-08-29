@@ -88,6 +88,12 @@ const mountPage = async (
 }
 
 describe("OpenPullRequestPage", () => {
+  it("makes the cross-region CodeCommit boundary explicit", async () => {
+    const { host } = await mountPage({ resolve: vi.fn() }, session, false)
+    expect(host.textContent).toContain("Paste a CodeCommit PR URL from any AWS region")
+    expect(host.querySelector<HTMLInputElement>("input[type=url]")?.placeholder).not.toContain("eu-west-1")
+  })
+
   it("attaches the tab mutation proof through the browser transport", async () => {
     const requests: Array<{ readonly csrf: string | null; readonly method: string; readonly url: string }> = []
     sessionStorage.setItem("cc_csrf", csrfToken)

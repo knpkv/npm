@@ -307,16 +307,23 @@ The Review Sandbox is:
 - Ephemeral and isolated in an sbx microVM.
 - Writable inside its cloned sandbox filesystem.
 - Free of host credentials and authority-bearing Git configuration.
-- Network-disabled for the complete run.
+- Network-disabled for typed-tool review; native review can reach only its selected provider through sbx.
 - Autonomous inside its fixed policy: no command confirmations.
 - Destroyed when the run ends.
 
 The source broker checks out the immutable queued head and verifies it after
-fetch. Control Center creates a named shell sandbox from that source with
-`sbx create shell --clone`, immediately applies `sbx policy deny network`, then
-executes a credential-free initialization command inside the sandbox. That
+fetch. Control Center creates a named sandbox from that source. Typed-tool review applies
+`sbx policy deny network`; native review enables only its selected provider connection. Both paths
+execute a credential-free initialization command inside the sandbox. That
 command removes Git remotes and credential helpers and verifies the exact head
 again before any Review Sandbox tool can run.
+
+The loopback CodeCommit acceptance fixture changes only the source locator. Its
+repository name is a provider fixture coordinate. Its canonical `file:` URL is
+server-private, is not persisted, and must not enter an API response, browser
+storage, log, or trace. Control Center accepts the pair only with
+`CODECOMMIT_MOCK_ENDPOINT`, requires an exact enabled-connection repository
+match, and never falls back to an AWS Git URL when the fixture does not match.
 The name belongs to a server-private workspace namespace beginning with
 `cc-pr-review-<compact-workspace-id>-`, where the compact ID is the canonical
 workspace UUID without hyphens. The complete name stays within sbx's
@@ -326,9 +333,11 @@ Every contained command uses `sbx exec` with an explicit work directory and a
 fixed minimal environment. Host environment inheritance and shell
 interpretation of sbx control arguments are disabled.
 
-Credentials are never injected. Tests requiring secrets or unavailable system capabilities are skipped and reported as limitations.
+Credentials are never injected. Native Codex retains only the sbx-owned user configuration required to
+select its credential proxy; reviewed source cannot change that configuration. Tests requiring secrets
+or unavailable system capabilities are skipped and reported as limitations.
 
-The AI provider process remains outside sbx. The provider-neutral tool loop
+For typed-tool review, the AI provider process remains outside sbx. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
@@ -339,7 +348,7 @@ handles for the owning review job after recovery; page and search operations
 must then present the handle's original attempt, command, and stream identity.
 Both retained streams for one command commit atomically. An attempt retains at
 most 64 artifacts and 64 MiB, while any one pathological stream above 16 MiB is rejected.
-Provider CLIs never receive direct host or sbx control access. File reads and
+Native provider CLIs execute inside sbx and never receive direct host or sbx control access. File reads and
 listings preserve missing-path failures, and temporary diffs include tracked,
 staged, unstaged, and non-ignored untracked changes.
 

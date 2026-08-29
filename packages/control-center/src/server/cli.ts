@@ -26,6 +26,7 @@ import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
 import {
+  decodeCodeCommitMockSourceFixture,
   decodeControlCenterDataPaths,
   optionalNonBlankConfigurationValue,
   prepareControlCenterDataRoot,
@@ -83,7 +84,7 @@ const serverConfiguration = Config.all({
     Config.withDefault(1_200_000)
   ),
   prReviewMaximumDurationMillis: Config.int("CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS").pipe(
-    Config.withDefault(1_200_000)
+    Config.withDefault(3_600_000)
   ),
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
   allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
@@ -92,6 +93,8 @@ const serverConfiguration = Config.all({
   directTlsPrivateKeyRef: Config.string("CONTROL_CENTER_TLS_PRIVATE_KEY_REF").pipe(Config.withDefault("")),
   host: Config.string("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
   codeCommitMockEndpoint: Config.string("CODECOMMIT_MOCK_ENDPOINT").pipe(Config.withDefault("")),
+  codeCommitMockGitRemote: Config.string("CODECOMMIT_MOCK_GIT_REMOTE").pipe(Config.withDefault("")),
+  codeCommitMockGitRepository: Config.string("CODECOMMIT_MOCK_GIT_REPOSITORY").pipe(Config.withDefault("")),
   port: Config.int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173)),
   publicOrigin: Config.string("CONTROL_CENTER_PUBLIC_ORIGIN").pipe(Config.withDefault("")),
   trustedProxyAddresses: Config.string("CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES").pipe(Config.withDefault(""))
@@ -252,12 +255,20 @@ const program = Effect.scoped(
         })
       })
       const codeCommitMockEndpoint = optionalNonBlankConfigurationValue(configured.codeCommitMockEndpoint)
-      const codeCommitHttpClient = codeCommitMockEndpoint === undefined
+      const decodedCodeCommitMockEndpoint = codeCommitMockEndpoint === undefined
+        ? undefined
+        : yield* decodeCodeCommitMockEndpointEffect(codeCommitMockEndpoint)
+      const codeCommitHttpClient = decodedCodeCommitMockEndpoint === undefined
         ? undefined
         : withCodeCommitMock(
           Context.get(yield* Layer.build(NodeHttpClient.layerFetch), HttpClient.HttpClient),
-          yield* decodeCodeCommitMockEndpointEffect(codeCommitMockEndpoint)
+          decodedCodeCommitMockEndpoint
         )
+      const codeCommitMockSourceFixture = yield* decodeCodeCommitMockSourceFixture({
+        gitRemote: optionalNonBlankConfigurationValue(configured.codeCommitMockGitRemote),
+        repositoryName: optionalNonBlankConfigurationValue(configured.codeCommitMockGitRepository),
+        mockEndpoint: decodedCodeCommitMockEndpoint
+      })
       const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
       const services = yield* Layer.build(
         makeControlCenterServer({
@@ -284,6 +295,7 @@ const program = Effect.scoped(
               ...(!(sbxTemplate === undefined) && { sbxTemplate }),
               ...(!(prReviewCodexExecutable === undefined) && { codexExecutable: prReviewCodexExecutable }),
               ...(!(prReviewClaudeExecutable === undefined) && { claudeExecutable: prReviewClaudeExecutable }),
+              ...(!(codeCommitMockSourceFixture === undefined) && { codeCommitMockSourceFixture }),
               reviewBudgetMillis: prReviewTiming.budgetMillis,
               leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
               maximumSandboxDurationMillis: prReviewTiming.maximumSandboxDurationMillis
@@ -302,7 +314,7 @@ const program = Effect.scoped(
               ...(!(openAiCompatible === undefined) && { openAiCompatible })
             },
           secretRoot: dataPaths.secretRoot,
-          staticAssets: { root: staticRoot }
+          staticAssets: { publicAssets: ["favicon.svg"], root: staticRoot }
         })
       )
       const bootstrap = Context.get(services, ControlCenterBootstrap)

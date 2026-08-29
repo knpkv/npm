@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
@@ -3975,6 +3976,7 @@ describe("application adapters", () => {
         0,
         T0
       )
+      yield* persistence.pluginConfigurations.update(WORKSPACE_ID, CODEPIPELINE_PLUGIN_ID, [], 0, T0)
       const connection: PluginConnectionV1 = {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
@@ -3990,13 +3992,26 @@ describe("application adapters", () => {
         diff: Option.none(),
         proposeAction: () => Effect.die("not used")
       }
+      const codePipelineConnection: PluginConnectionV1 = {
+        ...connection,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "123456789012", displayName: "123456789012" },
+          workspace: null,
+          resource: { providerImmutableId: "eu-central-1:payments", displayName: "Payments pipeline" },
+          endpoints: [],
+          discoveredAt: T0
+        })
+      }
       const pluginConnections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId, workspaceId }) =>
           workspaceId === WORKSPACE_ID &&
             (pluginConnectionId === PLUGIN_ID ||
               pluginConnectionId === CONFLUENCE_PLUGIN_ID ||
               pluginConnectionId === CODEPIPELINE_PLUGIN_ID)
-            ? Effect.succeed(Context.make(PluginConnection, connection))
+            ? Effect.succeed(Context.make(
+              PluginConnection,
+              pluginConnectionId === CODEPIPELINE_PLUGIN_ID ? codePipelineConnection : connection
+            ))
             : Effect.die("connection test crossed its requested scope"),
         invalidate: () => Effect.void
       }
@@ -4055,10 +4070,15 @@ describe("application adapters", () => {
         assert.deepStrictEqual(codePipelineResult.identity, {
           kind: "account",
           label: "AWS account",
-          displayName: "Avery Bell",
-          providerImmutableId: "atlassian-account-123"
+          displayName: "123456789012",
+          providerImmutableId: "123456789012"
         })
       }
+      const boundCodePipeline = (yield* administration.list(WORKSPACE_ID)).find(
+        ({ pluginConnectionId }) => pluginConnectionId === CODEPIPELINE_PLUGIN_ID
+      )
+      assert.isNotNull(boundCodePipeline?.providerAccountId)
+      assert.isNotNull(boundCodePipeline?.followedResourceId)
     })))
 
   it.effect("keeps disabled connection tests provider-inert", () =>

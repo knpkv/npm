@@ -1,5 +1,11 @@
 /** Durable release-thread and local-agent job contracts. @module */
-import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  AgentRuntimeEvent,
+  AgentSessionRef
+} from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
 
@@ -570,6 +576,7 @@ export const LatestAgentReviewRecord = Schema.Struct({
   state: Schema.Union([AgentJobState, Schema.Literal("interrupted")]),
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
+  failure: Schema.optionalKey(Schema.NullOr(AgentProviderError)),
   startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
   reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
   reviewBudgetExtensionCount: Schema.optionalKey(

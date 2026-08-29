@@ -828,6 +828,7 @@ export const ServicesPage = ({
           if (request.signal.aborted) return
           testRequests.current.delete(pluginConnectionId)
           setTestStates((current) => new Map(current).set(pluginConnectionId, { _tag: "result", result }))
+          refreshAdministration(pluginConnectionId)
         },
         (failure) => {
           if (request.signal.aborted) return
@@ -837,7 +838,7 @@ export const ServicesPage = ({
         }
       )
     },
-    [invalidateSession, sessionKey, transport]
+    [invalidateSession, refreshAdministration, sessionKey, transport]
   )
 
   const createConnections = useCallback(

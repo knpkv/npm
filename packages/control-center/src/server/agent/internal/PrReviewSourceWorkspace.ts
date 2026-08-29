@@ -18,6 +18,7 @@ import { Persistence } from "../../persistence/Persistence.js"
 import { AgentJobRepository } from "../../persistence/repositories/agentJobRepository.js"
 import type { StoredPluginConfiguration } from "../../persistence/repositories/pluginConfigurationModels.js"
 import { CodeCommitPluginConfiguration } from "../../plugins/codecommit/CodeCommitPluginDefinition.js"
+import { SecretStore } from "../../secrets/SecretStore.js"
 import { isPrReviewAuthorityConfigKey, PR_REVIEW_SANDBOX_PREFIXES } from "./PrReviewWorkspaceProtocol.js"
 
 const GIT_EXECUTABLE = "git"
@@ -83,6 +84,12 @@ export interface PrReviewSourceLocation {
   readonly region: string
 }
 
+/** Server-private local repository used only with the loopback CodeCommit mock. */
+export interface CodeCommitMockSourceFixture {
+  readonly repositoryName: string
+  readonly repositoryUrl: string
+}
+
 /** Stable source failures that retain neither paths nor provider diagnostics. */
 export class PrReviewSourceError extends Schema.TaggedError<PrReviewSourceError>()(
   "PrReviewSourceError",
@@ -119,8 +126,30 @@ const configuredText = (
   return value?._tag === "text" ? value.value : undefined
 }
 
-const makeCodeCommitResolver = Effect.gen(function*() {
+const configuredCredentialText = Effect.fn("PrReviewSourceResolver.configuredCredentialText")(function*(
+  secrets: SecretStore["Service"],
+  values: StoredPluginConfiguration,
+  key: string
+) {
+  const value = values.find((candidate) => candidate.key === key)
+  if (value?._tag === "text") return value.value
+  if (value?._tag !== "secret-reference") return undefined
+  const lease = yield* secrets.resolve(value.ref).pipe(
+    Effect.mapError(() => sourceError("connection-unavailable"))
+  )
+  return yield* lease.withBytes((bytes) =>
+    Effect.try({
+      try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      catch: () => sourceError("connection-unavailable")
+    })
+  )
+})
+
+const makeCodeCommitResolver = Effect.fn("PrReviewSourceResolver.makeCodeCommitResolver")(function*(
+  fixture?: CodeCommitMockSourceFixture
+) {
   const persistence = yield* Persistence
+  const secrets = yield* SecretStore
   return PrReviewSourceResolver.of({
     resolve: Effect.fn("PrReviewSourceResolver.resolve")(function*(unknownRequest) {
       const request = yield* Schema.decodeUnknownEffect(SourceRequest)(unknownRequest).pipe(
@@ -137,8 +166,11 @@ const makeCodeCommitResolver = Effect.gen(function*() {
           connection.pluginConnectionId
         ).pipe(Effect.mapError(() => sourceError("connection-unavailable")))
         if (Option.isNone(stored)) continue
+        const profile = yield* Effect.scoped(
+          configuredCredentialText(secrets, stored.value.values, "profile")
+        )
         const candidate = Schema.decodeUnknownResult(CodeCommitPluginConfiguration)({
-          profile: configuredText(stored.value.values, "profile"),
+          profile,
           region: configuredText(stored.value.values, "region"),
           repositoryName: configuredText(stored.value.values, "repositoryName")
         })
@@ -154,8 +186,11 @@ const makeCodeCommitResolver = Effect.gen(function*() {
       if (matches.length !== 1) return yield* sourceError("connection-unavailable")
       const [configuration] = matches
       if (configuration === undefined) return yield* sourceError("connection-unavailable")
+      if (fixture !== undefined && fixture.repositoryName !== request.repository) {
+        return yield* sourceError("connection-unavailable")
+      }
       return {
-        repositoryUrl:
+        repositoryUrl: fixture?.repositoryUrl ??
           `https://git-codecommit.${configuration.region}.amazonaws.com/v1/repos/${configuration.repositoryName}`,
         profile: configuration.profile,
         region: configuration.region
@@ -168,8 +203,14 @@ const makeCodeCommitResolver = Effect.gen(function*() {
 export const codeCommitPrReviewSourceResolverLayer: Layer.Layer<
   PrReviewSourceResolver,
   never,
-  Persistence
-> = Layer.effect(PrReviewSourceResolver, makeCodeCommitResolver)
+  Persistence | SecretStore
+> = Layer.effect(PrReviewSourceResolver, makeCodeCommitResolver())
+
+/** Mock-only resolver that retains connection checks but replaces the matched repository URL. */
+export const codeCommitPrReviewSourceResolverLayerWithFixture = (
+  fixture: CodeCommitMockSourceFixture
+): Layer.Layer<PrReviewSourceResolver, never, Persistence | SecretStore> =>
+  Layer.effect(PrReviewSourceResolver, makeCodeCommitResolver(fixture))
 
 interface ProcessResult {
   readonly exitCode: ChildProcessSpawner.ExitCode

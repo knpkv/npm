@@ -417,7 +417,9 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             currentTarget,
             session: currentSession,
             evaluatedAt: now
-          }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+          }).pipe(
+            Effect.provideService(Crypto.Crypto, cryptoService)
+          )
 
           const transitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)
           const auditEventId = DomainEventId.make(yield* cryptoService.randomUUIDv7)

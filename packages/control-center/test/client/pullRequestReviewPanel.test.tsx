@@ -441,7 +441,12 @@ const FAILED_REVIEW = new PullRequestReviewFailed({
   activity: { events: [], truncated: false },
   requestedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
   completedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:01:00.000Z"),
-  state: "failed"
+  state: "failed",
+  failure: { stage: "source-checkout", cause: "source-unavailable", retryable: false }
+})
+const RETRYABLE_FAILED_REVIEW = new PullRequestReviewFailed({
+  ...FAILED_REVIEW,
+  failure: { stage: "source-checkout", retryable: true }
 })
 
 const REVIEW_THREAD_PAGE = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
@@ -570,8 +575,8 @@ describe("PullRequestReviewPanel", () => {
                   eventSequence: ReleaseAgentThreadCursor.make(4),
                   jobId: JOB_ID,
                   occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T14:59:59.000Z"),
-                  providerId: DurableAgentProviderId.make("openai-compatible"),
-                  model: AgentModelId.make("review-model"),
+                  providerId: DurableAgentProviderId.make("codex"),
+                  model: AgentModelId.make("configured-default"),
                   reviewProfile: REVIEW_PROFILE,
                   subject: SUBJECT
                 },
@@ -584,6 +589,8 @@ describe("PullRequestReviewPanel", () => {
     )
     expect(host.textContent).toContain("Input tokens1,200")
     expect(host.textContent).toContain("Output tokens345")
+    expect(host.textContent).toContain("AgentCodex · CLI default")
+    expect(host.textContent).not.toContain("configured-default")
 
     await act(async () =>
       root?.render(
@@ -740,8 +747,12 @@ describe("PullRequestReviewPanel", () => {
       )
     )
 
-    expect(host.textContent).toContain("provider connection enabled · sbx")
-    expect(host.textContent).not.toContain("network blocked · sbx")
+    expect(host.textContent).toContain("Codex · CLI default")
+    expect(host.textContent).toContain("Current stepFetching exact source and starting the sandbox…")
+    expect(host.textContent).toContain("Codex access enabled")
+    expect(host.textContent).toContain("Disposable sbx sandbox")
+    expect(host.textContent).toContain("Add 20 minutes")
+    expect(host.textContent).not.toContain("configured-default")
   })
 
   it("offers catalog-defined review presets with reusable prompt templates", async () => {
@@ -800,9 +811,10 @@ describe("PullRequestReviewPanel", () => {
     )
     if (launch === undefined) throw new Error("Expected review launch action")
     await act(async () => launch.click())
-    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Full-project review · claude · default")
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("AgentClaude")
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("ModelCLI default")
     const startFull = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Start full review"
+      ({ textContent }) => textContent === "Start full-project review"
     )
     if (startFull === undefined) throw new Error("Expected full-review confirmation")
     await act(async () => startFull.click())
@@ -1048,7 +1060,9 @@ describe("PullRequestReviewPanel", () => {
     )
     if (start === undefined) throw new Error("Expected targeted review action")
     await act(async () => start.click())
-    await act(async () => render({ ...REVIEW_STATE, action: "failed", review: FAILED_REVIEW, thread: REVIEW_THREAD }))
+    await act(async () =>
+      render({ ...REVIEW_STATE, action: "failed", review: RETRYABLE_FAILED_REVIEW, thread: REVIEW_THREAD })
+    )
 
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
       "Keep this request after failure."
@@ -1059,12 +1073,12 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).not.toContain("A new full review could not be started")
 
     const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Try again"
+      ({ textContent }) => textContent === "Retry review"
     )
     if (retry === undefined) throw new Error("Expected full-review retry action")
     await act(async () => retry.click())
     const keepReading = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Keep reading"
+      ({ textContent }) => textContent === "Cancel"
     )
     if (keepReading === undefined) throw new Error("Expected full-review dismissal")
     await act(async () => keepReading.click())
@@ -1076,7 +1090,7 @@ describe("PullRequestReviewPanel", () => {
 
     await act(async () => retry.click())
     const startFullReview = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Start full review"
+      ({ textContent }) => textContent === "Start full-project review"
     )
     if (startFullReview === undefined) throw new Error("Expected full-review confirmation")
     await act(async () => startFullReview.click())
@@ -1203,8 +1217,10 @@ describe("PullRequestReviewPanel", () => {
     const dialog = host.querySelector<HTMLDivElement>("[role=dialog]")
     if (dialog === null) throw new Error("Expected review launch dialog")
     expect(dialog.getAttribute("aria-describedby")).not.toBeNull()
-    expect(document.activeElement?.textContent).toBe("Keep reading")
-    expect(dialog.textContent).toContain("It cannot approve or change the pull request.")
+    expect(document.activeElement?.textContent).toBe("Cancel")
+    expect(dialog.textContent).toContain("No CodeCommit writes")
+    expect(dialog.textContent).toContain("temporarily edit the disposable checkout")
+    expect(dialog.textContent).toContain("cannot approve, comment on, or change this CodeCommit pull request")
     expect(document.body.getAttribute("data-scroll-locked")).toBe("1")
 
     await act(async () => dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
@@ -1230,18 +1246,21 @@ describe("PullRequestReviewPanel", () => {
           onRetry={() => undefined}
           onStart={onStart}
           publication={{ _tag: "idle" }}
-          state={{ ...REVIEW_STATE, action, review: FAILED_REVIEW }}
+          state={{ ...REVIEW_STATE, action, review: RETRYABLE_FAILED_REVIEW }}
         />
       )
 
     await act(async () => render("idle"))
+    expect(host.textContent).toContain("Source checkout failed")
+    expect(host.textContent).toContain("The failure may be temporary. Retry this exact-head review")
+    expect(host.textContent).toContain("The failed run did not change approval or publish a recommendation")
     const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Try again"
+      ({ textContent }) => textContent === "Retry review"
     )
     if (retry === undefined) throw new Error("Expected full-review retry action")
     await act(async () => retry.click())
     const start = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Start full review"
+      ({ textContent }) => textContent === "Start full-project review"
     )
     if (start === undefined) throw new Error("Expected full-review confirmation")
     await act(async () => start.click())
@@ -1251,6 +1270,38 @@ describe("PullRequestReviewPanel", () => {
 
     expect(host.querySelector("[role=alert]")?.textContent).toContain("A new full review could not be started")
     expect(host.textContent).not.toContain("Targeted review did not start")
+  })
+
+  it("offers a deliberate new review after a non-retryable failure is fixed", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: FAILED_REVIEW }}
+        />
+      )
+    )
+
+    expect(host.textContent).toContain("Source checkout failed")
+    expect(host.textContent).toContain("Check the CodeCommit connection")
+    expect(host.textContent).toContain("Cause: CodeCommit source could not be materialized.")
+    const reviewAgain = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Review again"
+    )
+    if (reviewAgain === undefined) throw new Error("Expected a new review action")
+    await act(async () => reviewAgain.click())
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Review this exact head again")
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Start full-project review")
   })
 
   it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {

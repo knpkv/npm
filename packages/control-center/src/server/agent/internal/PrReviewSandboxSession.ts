@@ -38,7 +38,7 @@ const SOURCE_HANDOFF_TIMEOUT = Duration.minutes(5)
 const DEFAULT_COMMAND_TIMEOUT_MILLIS = 120_000
 const MAXIMUM_COMMAND_TIMEOUT_MILLIS = 1_200_000
 const DEFAULT_SESSION_TIMEOUT_MILLIS = 1_200_000
-const MAXIMUM_SESSION_TIMEOUT_MILLIS = 1_800_000
+const MAXIMUM_SESSION_TIMEOUT_MILLIS = 3_600_000
 const MAXIMUM_CONTROL_OUTPUT_BYTES = 64 * 1_024
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_VISIBLE_OUTPUT_BYTES = 32 * 1_024
@@ -235,6 +235,7 @@ export class PrReviewSandboxSessionError extends Schema.TaggedError<PrReviewSand
     reason: Schema.Literals([
       "invalid-configuration",
       "invalid-request",
+      "source-rejected",
       "source-unavailable",
       "sandbox-unavailable",
       "sandbox-timeout",
@@ -250,6 +251,17 @@ export class PrReviewSandboxSessionError extends Schema.TaggedError<PrReviewSand
 const sessionError = (
   reason: PrReviewSandboxSessionError["reason"]
 ): PrReviewSandboxSessionError => new PrReviewSandboxSessionError({ reason })
+
+const sourceSessionError = (failure: PrReviewSourceError): PrReviewSandboxSessionError => {
+  switch (failure.reason) {
+    case "connection-unavailable":
+      return sessionError("source-unavailable")
+    case "revision-mismatch":
+      return sessionError("source-rejected")
+    default:
+      return sessionError(failure.reason)
+  }
+}
 
 const isSessionError = Schema.is(PrReviewSandboxSessionError)
 
@@ -839,7 +851,6 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       "exec",
                       "--ephemeral",
                       "--ignore-rules",
-                      "--ignore-user-config",
                       "--dangerously-bypass-approvals-and-sandbox",
                       "-c",
                       "project_doc_max_bytes=0",
@@ -1122,7 +1133,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
         isSessionError(failure)
           ? failure
           : Schema.is(PrReviewSourceError)(failure)
-          ? sessionError("source-unavailable")
+          ? sourceSessionError(failure)
           : failure
       )
     )

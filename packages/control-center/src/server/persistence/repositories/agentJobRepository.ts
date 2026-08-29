@@ -3174,6 +3174,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.taskContextDigest
       )
       let interrupted = false
+      let failure: AgentProviderError | null = null
       if (row.success.state === "failed") {
         const interruptionRows = yield* sql<SqlRow>`SELECT COUNT(*) AS interrupted
           FROM agent_thread_events
@@ -3184,6 +3185,40 @@ const makeAgentJobRepository = Effect.gen(function*() {
           mapPersistenceOperation("agent-job.latest-review-interruption")
         )
         interrupted = Number(interruptionRows[0]?.interrupted ?? 0) > 0
+        const failureRows = yield* sql<SqlRow>`SELECT
+          workspace_id AS workspaceId, thread_id AS threadId,
+          event_sequence AS eventSequence, job_id AS jobId,
+          attempt_sequence AS attemptSequence, event_kind AS eventKind,
+          payload_json AS payloadJson, payload_digest AS payloadDigest,
+          payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+          FROM agent_thread_events
+          WHERE workspace_id = ${request.workspaceId}
+            AND job_id = ${row.success.jobId}
+            AND event_kind = 'job-failed'
+          ORDER BY event_sequence DESC
+          LIMIT 1`.pipe(mapPersistenceOperation("agent-job.latest-review-failure"))
+        if (failureRows.length === 1) {
+          const failureRow = Schema.decodeUnknownResult(ThreadEventRow)(failureRows[0])
+          if (Result.isFailure(failureRow)) {
+            return yield* persistedRecordError(
+              request.workspaceId,
+              "agent-review",
+              request.subject.pullRequestId,
+              "agent-review-failure-schema-invalid"
+            )
+          }
+          const failurePayload = yield* decodeEventPayload(request.workspaceId, failureRow.success)
+          const decodedFailure = Schema.decodeUnknownResult(ProviderFailurePayload)(failurePayload)
+          if (Result.isFailure(decodedFailure)) {
+            return yield* persistedRecordError(
+              request.workspaceId,
+              "agent-review",
+              request.subject.pullRequestId,
+              "agent-review-failure-payload-invalid"
+            )
+          }
+          failure = decodedFailure.success.error
+        }
       }
       if (
         task._tag !== "pr-review" ||
@@ -3281,6 +3316,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
         state: interrupted ? "interrupted" : row.success.state,
+        failure: interrupted ? null : failure,
         startedAt: startedAt.success.startedAt,
         ...(!(reviewBudget.reviewBudgetMillis === undefined) &&
           { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),
