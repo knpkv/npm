@@ -1,5 +1,13 @@
 import * as Schema from "effect/Schema"
 
+import {
+  BASE_RETRY_SOURCE,
+  type CodeCommitGitFixtureRevisions,
+  REVISION_ONE_RETRY_SOURCE,
+  REVISION_TWO_RETRY_SOURCE,
+  REVISION_TWO_TEST_SOURCE
+} from "./GitFixture.js"
+
 export const MockBlob = Schema.Struct({
   blobId: Schema.String.check(Schema.isNonEmpty()),
   content: Schema.String
@@ -57,6 +65,61 @@ export const CodeCommitMockScenario = Schema.Struct({
   repositories: Schema.NonEmptyArray(MockRepository)
 })
 export type CodeCommitMockScenario = typeof CodeCommitMockScenario.Type
+
+/** Build the CLI scenario from Git objects that the local fixture can serve. */
+export const makeGitFixtureScenario = (
+  revisions: CodeCommitGitFixtureRevisions
+): CodeCommitMockScenario =>
+  Schema.decodeUnknownSync(CodeCommitMockScenario)({
+    accountId: "123456789012",
+    region: "eu-west-1",
+    callerArn: "arn:aws:sts::123456789012:assumed-role/Reviewer/andrey",
+    repositories: [{
+      repositoryName: "payments-api",
+      repositoryId: "11111111-1111-4111-8111-111111111111",
+      description: "Example payments service",
+      defaultBranch: "main",
+      pullRequests: [{
+        pullRequestId: "17",
+        title: "Preserve idempotency keys across retries",
+        description: "Moves request identity into the retry boundary and adds focused coverage.",
+        authorArn: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+        sourceReference: "refs/heads/feature/idempotency",
+        destinationReference: "refs/heads/main",
+        status: "OPEN",
+        creationEpochSeconds: 1_787_728_400,
+        revisions: [{
+          revisionId: "revision-1",
+          sourceCommit: revisions.firstHead,
+          destinationCommit: revisions.base,
+          mergeBase: revisions.base,
+          activityEpochSeconds: 1_787_732_000,
+          files: [{
+            path: "src/retry.ts",
+            before: { blobId: revisions.baseRetryBlob, content: BASE_RETRY_SOURCE },
+            after: { blobId: revisions.firstRetryBlob, content: REVISION_ONE_RETRY_SOURCE }
+          }, {
+            path: "test/retry.test.ts",
+            after: { blobId: revisions.firstTestBlob, content: REVISION_TWO_TEST_SOURCE }
+          }]
+        }, {
+          revisionId: "revision-2",
+          sourceCommit: revisions.secondHead,
+          destinationCommit: revisions.base,
+          mergeBase: revisions.base,
+          activityEpochSeconds: 1_787_735_600,
+          files: [{
+            path: "src/retry.ts",
+            before: { blobId: revisions.baseRetryBlob, content: BASE_RETRY_SOURCE },
+            after: { blobId: revisions.secondRetryBlob, content: REVISION_TWO_RETRY_SOURCE }
+          }, {
+            path: "test/retry.test.ts",
+            after: { blobId: revisions.secondTestBlob, content: REVISION_TWO_TEST_SOURCE }
+          }]
+        }]
+      }]
+    }]
+  })
 
 /** Small but multi-revision scenario used by the dev runner and integration tests. */
 export const defaultScenario = Schema.decodeUnknownSync(CodeCommitMockScenario)({

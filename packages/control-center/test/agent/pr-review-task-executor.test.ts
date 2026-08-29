@@ -36,6 +36,7 @@ import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
+  type PrReviewSandboxSessionRequest,
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
@@ -269,6 +270,25 @@ const output = (
   }
 })
 
+const failedOutput = (
+  stderr: string,
+  exitCode = 1
+): PrReviewSandboxCommandResult => ({
+  exitCode,
+  stderr: {
+    artifact: null,
+    byteLength: new TextEncoder().encode(stderr).byteLength,
+    text: stderr,
+    truncated: false
+  },
+  stdout: {
+    artifact: null,
+    byteLength: 0,
+    text: "",
+    truncated: false
+  }
+})
+
 const runShellCommand = (
   cwd: string,
   command: string
@@ -402,7 +422,10 @@ const makeSessionLayer = (
   retainPrimaryDiff = false,
   artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type,
   nativeReviewOutput?: string,
-  nativeReviewRunner: "claude" | "codex" = "codex"
+  nativeReviewRunner: "claude" | "codex" = "codex",
+  nativeReviewResult?: PrReviewSandboxCommandResult,
+  finalizationFailure?: typeof PrReviewSandboxSessionError.Type,
+  acquisitionFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make(
     "01890f6f-6d6a-7cc0-98d2-000000000454"
@@ -507,31 +530,45 @@ const makeSessionLayer = (
         })
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "codex") && {
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "codex") && {
       runNativeCodexReview: <UnparsedInput>(request: UnparsedInput) =>
         Effect.sync(() => {
           observation.operations.push("runNativeCodexReview")
           observation.requests.push(request)
-          return output(nativeReviewOutput)
+          return nativeReviewResult ?? output(nativeReviewOutput ?? "")
         })
     }),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "claude") && {
-      runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
-        Effect.sync(() => {
-          observation.operations.push("runNativeClaudeReview")
-          observation.requests.push(request)
-          return output(nativeReviewOutput)
-        })
-    }),
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "claude") &&
+      {
+        runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
+          Effect.sync(() => {
+            observation.operations.push("runNativeClaudeReview")
+            observation.requests.push(request)
+            return nativeReviewResult ?? output(nativeReviewOutput ?? "")
+          })
+      }),
     close: Effect.void
   }
   return Layer.succeed(
     PrReviewSandboxSessions,
     PrReviewSandboxSessions.of({
-      withSession: (request, use) =>
-        Effect.sync(() => {
+      withSession: <Success, Failure, Requirements>(
+        request: PrReviewSandboxSessionRequest,
+        use: (session: PrReviewSandboxSession) => Effect.Effect<Success, Failure, Requirements>
+      ): Effect.Effect<Success, Failure | PrReviewSandboxSessionError, Requirements> => {
+        const recordRequest = Effect.sync(() => {
           observation.requests.push(request)
-        }).pipe(Effect.andThen(use(session))),
+        })
+        if (acquisitionFailure !== undefined) {
+          return recordRequest.pipe(Effect.andThen(Effect.fail(acquisitionFailure)))
+        }
+        return recordRequest.pipe(
+          Effect.andThen(use(session)),
+          Effect.flatMap((result) =>
+            finalizationFailure === undefined ? Effect.succeed(result) : Effect.fail(finalizationFailure)
+          )
+        )
+      },
       reconcile: () => Effect.succeed({ removedSandboxes: [] })
     })
   )
@@ -790,6 +827,97 @@ describe("PR review task executor", () => {
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
           Layer.provide(nativeSessionLayer),
           Layer.provide(historyLayer),
+          Layer.provideMerge(NodeServices.layer)
+        )
+      ),
+      Effect.scoped
+    )
+  })
+
+  it.effect("classifies rejected native provider credentials without retaining stderr", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const nativeClaim = {
+      ...claim,
+      providerId: NATIVE_PROVIDER_ID,
+      model: NATIVE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: NATIVE_REVIEW_PROFILE
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      "codex",
+      failedOutput("HTTP error: 401 Unauthorized. Missing scopes: api.responses.write.")
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: NATIVE_REVIEW_PROFILE
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-codex",
+          reviewExecutable: "codex"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const result = yield* executor.execute(nativeClaim).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "AgentProviderError")
+        if (result.failure._tag === "AgentProviderError") {
+          assert.strictEqual(result.failure.reviewStage, "agent-run")
+          assert.strictEqual(result.failure.reviewCause, "provider-authentication")
+          assert.isFalse(result.failure.retryable)
+          assert.notInclude(result.failure.message, "api.responses.write")
+        }
+      }
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(
+            Layer.succeed(
+              PrReviewThreadHistory,
+              PrReviewThreadHistory.of({
+                page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+              })
+            )
+          ),
           Layer.provideMerge(NodeServices.layer)
         )
       ),
@@ -1973,7 +2101,165 @@ describe("PR review task executor", () => {
             assert.strictEqual(result.failure._tag, "AgentProviderError")
             if (result.failure._tag === "AgentProviderError") {
               assert.strictEqual(result.failure.phase, "timeout")
+              assert.strictEqual(result.failure.reviewCause, "command-timeout")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
               assert.isTrue(result.failure.retryable)
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps sandbox acquisition failures at sandbox start", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "sandbox-unavailable" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "sandbox-unavailable")
+              assert.strictEqual(result.failure.reviewStage, "sandbox-start")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("classifies rejected sandbox output as result validation", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const replacementSuggestion = {
+      ...suggestion,
+      replacement: {
+        reviewedHead: HEAD_REVISION,
+        unifiedDiff: [
+          `--- a/${EVIDENCE_PATH}`,
+          `+++ b/${EVIDENCE_PATH}`,
+          "@@ -42,1 +42,1 @@",
+          `-${EVIDENCE_EXCERPT}`,
+          "+const unsafe = false"
+        ].join("\n"),
+        explanation: "Use the safe value."
+      }
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [replacementSuggestion],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "output-rejected" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "output-rejected")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("classifies post-run sandbox cleanup failures as cleanup", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "cleanup-failed" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "cleanup-failed")
+              assert.strictEqual(result.failure.reviewStage, "cleanup")
             }
           }
         })

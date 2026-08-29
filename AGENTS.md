@@ -269,6 +269,20 @@ When writing Effect code:
   compact name and foreign-workspace fixture pass. Generated and vendor docs are
   excluded. Clearly historical implementation plans may remain unchanged, but
   ADR history requires an amendment rather than a silent rewrite.
+- When PR-review execution placement, provider-network authority, or retained
+  provider user configuration changes in
+  `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
+  update `packages/control-center/CONTEXT.md`,
+  `packages/control-center/README.md`, and
+  `packages/control-center/docs/agentic-pr-review.md`, and append an amendment
+  to `packages/control-center/docs/adr/0009-use-a-provider-neutral-agent-tool-loop.md`.
+  Typed-tool review keeps its provider on the host and denies sandbox network
+  access. Native Codex and Claude execute inside sbx with only the selected
+  provider connection; authentication remains behind sbx-owned configuration
+  and its credential proxy, and raw provider credentials never enter Control
+  Center or the reviewed checkout. Output-label and error-copy changes alone do
+  not alter this boundary. Generated and vendor docs are excluded; whether a
+  configuration flag changes authority still requires review judgment.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

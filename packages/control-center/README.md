@@ -17,7 +17,9 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
-For deterministic CodeCommit work, start `pnpm mock:codecommit`, then launch the server with the printed `CODECOMMIT_MOCK_ENDPOINT`. The executable redirects only its CodeCommit and STS outbound requests to that literal loopback origin, replaces profile resolution with fixed non-secret fixture credentials, and removes authorization/session-token headers before dispatch. Configured Atlassian, Clockify, CodePipeline, AI, and telemetry endpoints keep their real origins and credential boundaries. The mock's admin API can advance PR 17 to a new head, inject an author reply, inspect request receipts, and reset the scenario; see `packages/codecommit-mock/README.md`. Git checkout and sandbox model execution remain separate acceptance seams, covered by source-workspace tests and opt-in live AWS tests respectively.
+For a deterministic CodeCommit review cycle, start `pnpm mock:codecommit`, then launch the server with the environment values it prints. The executable sends only CodeCommit and STS requests to the literal loopback endpoint. It uses fixed non-secret AWS fixture credentials and removes authorization and session-token headers before dispatch. The mock also supplies a temporary Git remote and an OpenAI-compatible review response, while Control Center still performs its normal clone, exact-head checks, sbx execution, output validation, and durable review transitions. Configured Atlassian, Clockify, CodePipeline, telemetry, and unselected AI providers keep their normal origins and credential boundaries. The admin API can advance PR 17, add an author reply, inspect request receipts, and reset the scenario. See `packages/codecommit-mock/README.md`.
+
+`CODECOMMIT_MOCK_GIT_REPOSITORY` and `CODECOMMIT_MOCK_GIT_REMOTE` form one mock-only server configuration. Both require `CODECOMMIT_MOCK_ENDPOINT`; a partial pair or a non-`file:` remote fails startup. The repository name is the normalized provider identity already persisted in CodeCommit plugin and PR records and exposed only through authenticated API/browser surfaces; it is prohibited from unauthenticated and public diagnostics. The canonical `file:` URL is a server-private, non-persisted locator printed only to the operator terminal and prohibited from API responses, browser storage, application logs, and telemetry. `CODECOMMIT_MOCK_ENDPOINT` and `CONTROL_CENTER_AGENT_OPENAI_API_URL` are likewise non-persisted server-private locators, while `CONTROL_CENTER_AGENT_OPENAI_MODEL` is a non-secret identifier persisted with review jobs and exposed through authenticated review/provider APIs. The fixture must match the one enabled CodeCommit connection used by the review. A mismatch fails closed instead of falling back to AWS Git.
 
 ### Release-cycle traceability
 
@@ -33,14 +35,14 @@ delivery evidence as one connected release.
 
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
-| Client | generated API client chunk  |    269,302 / 80,291 bytes |         270,000 / 82,000 bytes |
-| Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
+| Client | generated API client chunk  |    270,002 / 80,249 bytes |         271,000 / 82,000 bytes |
+| Server | shared `BindConfig-*` chunk | 1,511,834 / 289,432 bytes |      1,650,000 / 292,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
 
-The client measurement was refreshed on 2026-08-28 after the managed-review API schemas grew the generated client chunk to 269,302 raw bytes and 80,291 level-9 gzip bytes. Its ceilings are now 270,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
+The client measurement was refreshed on 2026-08-29 after the managed-review API schemas and cleanup stage grew the generated client chunk to 270,002 raw bytes and 80,249 level-9 gzip bytes. Its ceilings are 271,000 raw and 82,000 gzip bytes; further growth still requires a new measurement and cause here.
 
-The remaining 1.58 MB raw shared server chunk is bounded technical debt: it is primarily Control Center's own shared application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries; raising the budget requires recording a new measurement and cause here.
+The server measurement was refreshed on 2026-08-29 after native review cleanup classification added its runtime path to the shared chunk. It now measures 1,511,834 raw bytes and 289,432 level-9 gzip bytes; the 292,000-byte gzip ceiling keeps less than one percent headroom so further growth requires a new measurement and cause here. This shared chunk remains bounded technical debt: it is primarily Control Center's own application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries.
 
 ## Run the application
 
@@ -222,10 +224,13 @@ the review sandbox; authentication is owned by the selected `sbx run codex` or `
 connection. For each durable claim the worker resolves exactly one enabled CodeCommit
 connection, clones the exact head into a private data-root workspace, and hands that checkout to one
 named sbx sandbox. It strips Git remotes and credential helpers and verifies the full head object ID
-before review. The typed-tool path denies all sandbox network access. Native CLI review instead enables
+before review. With the loopback mock configured, the same resolver accepts only the normalized repository
+identity configured by `CODECOMMIT_MOCK_GIT_REPOSITORY` and clones its server-private canonical `file:` URL. Other repositories
+fail closed. The typed-tool path denies all sandbox network access. Native CLI review instead enables
 only the selected provider connection, disables session persistence and unrelated MCP configuration,
-and uses only the disposable clone. Codex disables project-document and exec-policy loading from the
-reviewed head; Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
+and uses only the disposable clone. Codex retains the sbx-owned user configuration required for its
+credential proxy while disabling project-document and exec-policy loading from the reviewed head;
+Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
 review content rather than executable instructions, and safe mode disables automatic project-memory
 discovery. Every path validates structured output and exact
 diff evidence on the trusted host. Sandbox names use a server-private compact workspace-scoped prefix and remain within sbx's 63-character
@@ -238,8 +243,8 @@ While a review is running, the worker renews its durable lease and
 observes cancellation; cancellation
 interrupts the scoped checkout, sandbox, and model work before durably completing the job as cancelled.
 `CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS` and
-`CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` both default to 1,200,000 milliseconds. The maximum
-session duration should be at least the selected Review Agent Profile budget.
+`CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` default to 1,200,000 and 3,600,000 milliseconds,
+respectively. The maximum session duration should be at least the selected Review Agent Profile budget.
 The worker enforces the selected budget independently of provider process limits. An operator may extend
 one running review once by one profile budget; the extension is durable and visible to the worker after
 restart. Cancellation and budget expiry retain the last validated partial report, mark the run unable to
@@ -256,6 +261,10 @@ explicit separate opt-in in `@knpkv/ai-codex`.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, network policy, and sbx
 runtime before enqueue. The selected model explores the complete project inside the Review Sandbox.
+Failures retain a redacted stage and cause, such as source checkout, sandbox startup, provider
+authentication, rate limiting, command timeout, or result validation. The browser uses those stable
+values for specific recovery guidance without receiving stderr, credentials, provider payloads, or
+workspace paths.
 Release-chat CLI selection first reads a bounded, credential-free `--version` response and fails closed
 when the configured host executable cannot identify itself. Native review selection is independent of
 that host executable because its CLI lives inside the matching sbx agent image. Safe runtime metadata,

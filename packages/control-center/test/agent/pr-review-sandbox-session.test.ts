@@ -1,5 +1,6 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Logger, Ref, Result, Schema, Sink, Stream, Tracer } from "effect"
+import { DateTime, Effect, Layer, Logger, Result, Schema, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -7,11 +8,15 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import * as Predicate from "effect/Predicate"
 import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
+import type { PrReviewSandboxSessionError } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
   PrReviewSandboxSessions,
   prReviewSandboxSessionsLayer
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
-import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import {
+  PrReviewSourceError,
+  PrReviewSourceWorkspace
+} from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { reviewCommandArtifactTestLayer } from "./reviewCommandArtifactTestLayer.js"
 
@@ -111,7 +116,8 @@ const sourceLayer = Layer.succeed(
 const testLayer = (
   calls: Array<ChildProcess.StandardCommand>,
   responseRules: ReadonlyArray<FakeResponseRule> = [],
-  listedSandboxes = SANDBOX_NAME
+  listedSandboxes = SANDBOX_NAME,
+  reviewSourceLayer = sourceLayer
 ) =>
   prReviewSandboxSessionsLayer({
     executable: "sbx",
@@ -119,7 +125,7 @@ const testLayer = (
   }).pipe(
     Layer.provide(fakeSbxLayer(calls, responseRules, listedSandboxes)),
     Layer.provide(reviewCommandArtifactTestLayer()),
-    Layer.provide(sourceLayer)
+    Layer.provide(reviewSourceLayer)
   )
 
 const request = {
@@ -229,7 +235,7 @@ describe("PrReviewSandboxSessions", () => {
               executable: "codex-wrapper",
               prompt: "Review the exact base and head.",
               outputSchema: "{\"type\":\"object\"}",
-              maximumDurationMillis: 1_800_000
+              maximumDurationMillis: 3_570_000
             })
       )
 
@@ -254,7 +260,8 @@ describe("PrReviewSandboxSessions", () => {
       assert.include(native?.args ?? [], "--interactive")
       assert.include(native?.args ?? [], "--dangerously-bypass-approvals-and-sandbox")
       const ignoreRules = native?.args.indexOf("--ignore-rules") ?? -1
-      assert.strictEqual(native?.args[ignoreRules + 1], "--ignore-user-config")
+      assert.isAtLeast(ignoreRules, 0)
+      assert.notInclude(native?.args ?? [], "--ignore-user-config")
       assert.include(native?.args ?? [], "project_doc_max_bytes=0")
       assert.include(native?.args ?? [], "mcp_servers={}")
       assert.include(native?.args ?? [], "--output-schema")
@@ -549,9 +556,9 @@ describe("PrReviewSandboxSessions", () => {
     })
     const sensitiveOutput = `${SOURCE_OUTPUT_CANARY}\n${"x".repeat(40_000)}\n${CREDENTIAL_OUTPUT_CANARY}`
     return Effect.gen(function*() {
-      const logsRef = yield* Ref.make<Array<unknown>>([])
+      const logs = new Array<unknown>()
       const logger = Logger.make<unknown, void>((entry) => {
-        Effect.runSync(Ref.update(logsRef, (items) => [...items, entry.message]))
+        logs.push(entry.message)
       })
       const sessions = yield* PrReviewSandboxSessions
       const observed = yield* sessions.withSession(request, (session) =>
@@ -588,7 +595,7 @@ describe("PrReviewSandboxSessions", () => {
       ) {
         assert.notInclude(telemetry, canary)
       }
-      const logText = JSON.stringify(yield* Ref.get(logsRef))
+      const logText = JSON.stringify(logs)
       assert.include(logText, "pr-review.telemetry")
       assert.include(logText, "\"provider\":\"codex\"")
       assert.include(logText, "\"model\":\"gpt-review\"")
@@ -805,4 +812,55 @@ describe("PrReviewSandboxSessions", () => {
       }]))
     )
   })
+
+  it.effect("preserves a rejected source as a non-transient review cause", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const rejectedSourceLayer = Layer.succeed(
+      PrReviewSourceWorkspace,
+      PrReviewSourceWorkspace.of({
+        withSource: () => Effect.fail(new PrReviewSourceError({ reason: "source-rejected" }))
+      })
+    )
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const result = yield* sessions.withSession(request, () => Effect.void).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "source-rejected")
+      assert.deepStrictEqual(calls, [])
+    }).pipe(Effect.provide(testLayer(calls, [], SANDBOX_NAME, rejectedSourceLayer)))
+  })
+
+  it.effect("maps source connection and revision failures to browser-safe causes", () =>
+    Effect.gen(function*() {
+      const cases: ReadonlyArray<
+        readonly [
+          PrReviewSourceError["reason"],
+          PrReviewSandboxSessionError["reason"]
+        ]
+      > = [
+        ["connection-unavailable", "source-unavailable"],
+        ["revision-mismatch", "source-rejected"]
+      ]
+      for (
+        const [sourceReason, sessionReason] of cases
+      ) {
+        const calls: Array<ChildProcess.StandardCommand> = []
+        const sourceLayer = Layer.succeed(
+          PrReviewSourceWorkspace,
+          PrReviewSourceWorkspace.of({
+            withSource: () => Effect.fail(new PrReviewSourceError({ reason: sourceReason }))
+          })
+        )
+        const result = yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, () => Effect.void)
+        }).pipe(
+          Effect.provide(testLayer(calls, [], SANDBOX_NAME, sourceLayer)),
+          Effect.result
+        )
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, sessionReason)
+        assert.deepStrictEqual(calls, [])
+      }
+    }))
 })

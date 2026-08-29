@@ -116,12 +116,24 @@ const normalizeRuntimeFailure = (
   failure: AgentRuntimeError
 ): AgentProviderError => {
   if (failure._tag === "AgentProviderError") {
-    return new AgentProviderError({
+    const required = {
       providerId,
       phase: failure.phase,
       message: failure.message,
       retryable: failure.retryable
-    })
+    }
+    if (failure.reviewStage === undefined) {
+      return failure.reviewCause === undefined
+        ? new AgentProviderError(required)
+        : new AgentProviderError({ ...required, reviewCause: failure.reviewCause })
+    }
+    return failure.reviewCause === undefined
+      ? new AgentProviderError({ ...required, reviewStage: failure.reviewStage })
+      : new AgentProviderError({
+        ...required,
+        reviewCause: failure.reviewCause,
+        reviewStage: failure.reviewStage
+      })
   }
   if (failure._tag === "AgentContextMismatchError") {
     return new AgentProviderError({
@@ -279,6 +291,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
             : new AgentProviderError({
               providerId: claim.providerId,
               phase: "execution",
+              reviewStage: "control-center",
               message: "Review activity persistence failed.",
               retryable: false
             })
@@ -303,6 +316,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
             : new AgentProviderError({
               providerId: claim.providerId,
               phase: "execution",
+              reviewStage: "control-center",
               message: "Partial review persistence failed.",
               retryable: false
             })
@@ -317,7 +331,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
       if (isAgentRuntimeFailure(selected.failure)) {
         return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
       }
-      return yield* Effect.fail(selected.failure)
+      return yield* selected.failure
     }
     if (selected.success._tag !== claim.context.task._tag) {
       return yield* failClaim(
@@ -363,7 +377,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
               })
             )
           }
-          return yield* Effect.fail(source.failure)
+          return yield* source.failure
         }
         const completedAt = yield* DateTime.now
         const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined

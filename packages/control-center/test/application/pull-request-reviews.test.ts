@@ -2663,6 +2663,8 @@ describe("pull request reviews", () => {
           error: new AgentProviderError({
             providerId: claim.value.providerId,
             phase: "execution",
+            reviewStage: "source-checkout",
+            reviewCause: "source-unavailable",
             message: "Expected review test failure.",
             retryable: true
           }),
@@ -2688,6 +2690,15 @@ describe("pull request reviews", () => {
             implementation: "codex-cli",
             version: "1.2.3"
           }
+        })
+        assert.deepStrictEqual(failedPresented.events[1], {
+          _tag: "run-failed",
+          eventSequence: ReleaseAgentThreadCursor.make(secondPresented.nextCursor + 2),
+          jobId: active[0].jobId,
+          occurredAt: failedAt,
+          stage: "source-checkout",
+          cause: "source-unavailable",
+          retryable: true
         })
 
         const retry = yield* enqueue("Re-check the durable transaction boundary.")

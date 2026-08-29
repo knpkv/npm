@@ -7,9 +7,11 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createServer } from "node:http"
 
+import { reviewModelHandler } from "./ReviewModelFixture.js"
 import type { CodeCommitMockScenario } from "./Scenario.js"
 import {
   activeRevision,
@@ -25,6 +27,8 @@ class MockOperationError extends Data.TaggedError("MockOperationError")<{
   readonly message: string
   readonly status: number
 }> {}
+
+class MockFixtureTransitionError extends Data.TaggedError("MockFixtureTransitionError")<{}> {}
 
 /** Failure to validate or bind a mock instance. */
 export class CodeCommitMockStartupError extends Data.TaggedError("CodeCommitMockStartupError")<{
@@ -100,12 +104,13 @@ const AdminCommentInput = Schema.Struct({
 
 const decode = <S extends Schema.Constraint>(schema: S, input: Schema.Json) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError(() =>
-      new MockOperationError({
-        awsTag: "InvalidRequestException",
-        message: "request does not match the mock operation contract",
-        status: 400
-      })
+    Effect.mapError(
+      () =>
+        new MockOperationError({
+          awsTag: "InvalidRequestException",
+          message: "request does not match the mock operation contract",
+          status: 400
+        })
     )
   )
 
@@ -186,10 +191,7 @@ const optionalLocation = (location: typeof LocationInput.Type | undefined) =>
       })
     }
 
-const locationsEqual = (
-  left: MockComment["location"],
-  right: MockComment["location"]
-): boolean =>
+const locationsEqual = (left: MockComment["location"], right: MockComment["location"]): boolean =>
   left === null || right === null
     ? left === right
     : left.filePath === right.filePath &&
@@ -210,24 +212,23 @@ const pullRequestOutput = (state: CodeCommitMockState, pullRequestId: string) =>
       pullRequestStatus: found.pullRequest.status,
       authorArn: found.pullRequest.authorArn,
       revisionId: revision.revisionId,
-      pullRequestTargets: [{
-        repositoryName: found.repositoryName,
-        sourceReference: found.pullRequest.sourceReference,
-        destinationReference: found.pullRequest.destinationReference,
-        sourceCommit: revision.sourceCommit,
-        destinationCommit: revision.destinationCommit,
-        mergeBase: revision.mergeBase,
-        mergeMetadata: { isMerged: false }
-      }],
+      pullRequestTargets: [
+        {
+          repositoryName: found.repositoryName,
+          sourceReference: found.pullRequest.sourceReference,
+          destinationReference: found.pullRequest.destinationReference,
+          sourceCommit: revision.sourceCommit,
+          destinationCommit: revision.destinationCommit,
+          mergeBase: revision.mergeBase,
+          mergeMetadata: { isMerged: false }
+        }
+      ],
       approvalRules: []
     }
   })
 }
 
-const makeCommentGroup = (
-  root: MockComment,
-  comments: ReadonlyArray<MockComment>
-) => {
+const makeCommentGroup = (root: MockComment, comments: ReadonlyArray<MockComment>) => {
   const descendants = (parentId: string): ReadonlyArray<MockComment> =>
     comments
       .filter((comment) => comment.inReplyTo === parentId)
@@ -290,8 +291,8 @@ const handleOperation = (
         )
         if (repository === undefined) return yield* missingRepository(input.repositoryName)
         const pullRequestIds = repository.pullRequests
-          .filter((pullRequest) =>
-            input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
+          .filter(
+            (pullRequest) => input.pullRequestStatus === undefined || pullRequest.status === input.pullRequestStatus
           )
           .filter((pullRequest) => input.authorArn === undefined || pullRequest.authorArn === input.authorArn)
           .map((pullRequest) => pullRequest.pullRequestId)
@@ -310,17 +311,15 @@ const handleOperation = (
         if (repository === undefined) return yield* missingRepository(input.repositoryName)
         const revision = repository.pullRequests
           .flatMap((pullRequest) => pullRequest.revisions)
-          .find((candidate) =>
-            candidate.sourceCommit === input.afterCommitSpecifier &&
-            (input.beforeCommitSpecifier === undefined ||
-              candidate.destinationCommit === input.beforeCommitSpecifier ||
-              candidate.mergeBase === input.beforeCommitSpecifier)
+          .find(
+            (candidate) =>
+              candidate.sourceCommit === input.afterCommitSpecifier &&
+              (input.beforeCommitSpecifier === undefined ||
+                candidate.destinationCommit === input.beforeCommitSpecifier ||
+                candidate.mergeBase === input.beforeCommitSpecifier)
           )
         if (revision === undefined) {
-          return yield* commitTupleMismatch(
-            input.beforeCommitSpecifier ?? "<unspecified>",
-            input.afterCommitSpecifier
-          )
+          return yield* commitTupleMismatch(input.beforeCommitSpecifier ?? "<unspecified>", input.afterCommitSpecifier)
         }
         const path = input.afterPath ?? input.beforePath
         const differences = revision.files
@@ -361,11 +360,12 @@ const handleOperation = (
         if (input.repositoryName !== undefined && found.repositoryName !== input.repositoryName) {
           return yield* missingRepository(input.repositoryName)
         }
-        const comments = state.comments.filter((comment) =>
-          comment.pullRequestId === input.pullRequestId &&
-          (input.repositoryName === undefined || comment.repositoryName === input.repositoryName) &&
-          (input.beforeCommitId === undefined || comment.beforeCommitId === input.beforeCommitId) &&
-          (input.afterCommitId === undefined || comment.afterCommitId === input.afterCommitId)
+        const comments = state.comments.filter(
+          (comment) =>
+            comment.pullRequestId === input.pullRequestId &&
+            (input.repositoryName === undefined || comment.repositoryName === input.repositoryName) &&
+            (input.beforeCommitId === undefined || comment.beforeCommitId === input.beforeCommitId) &&
+            (input.afterCommitId === undefined || comment.afterCommitId === input.afterCommitId)
         )
         const groups = comments
           .filter((comment) => comment.inReplyTo === null)
@@ -384,8 +384,9 @@ const handleOperation = (
         if (found.repositoryName !== input.repositoryName) {
           return yield* missingRepository(input.repositoryName)
         }
-        const revisionExists = found.pullRequest.revisions.some((revision) =>
-          revision.destinationCommit === input.beforeCommitId && revision.sourceCommit === input.afterCommitId
+        const revisionExists = found.pullRequest.revisions.some(
+          (revision) =>
+            revision.destinationCommit === input.beforeCommitId && revision.sourceCommit === input.afterCommitId
         )
         if (!revisionExists) return yield* commitTupleMismatch(input.beforeCommitId, input.afterCommitId)
         const outcome = yield* Ref.modify(
@@ -420,7 +421,9 @@ const handleOperation = (
                     pullRequest.revisions.map((revision) => revision.activityEpochSeconds)
                   )
                 )
-              ) + current.comments.length + 1,
+              ) +
+                current.comments.length +
+                1,
               clientRequestToken: input.clientRequestToken ?? null,
               inReplyTo: null,
               location
@@ -455,7 +458,7 @@ const handleOperation = (
         const updated = { ...existing, content: input.content }
         yield* Ref.update(stateRef, (current) => ({
           ...current,
-          comments: current.comments.map((comment) => comment.commentId === input.commentId ? updated : comment)
+          comments: current.comments.map((comment) => (comment.commentId === input.commentId ? updated : comment))
         }))
         return { comment: commentOutput(updated) }
       }
@@ -513,8 +516,8 @@ const handleOperation = (
         yield* Ref.update(stateRef, (current) => ({
           ...current,
           approvals: [
-            ...current.approvals.filter((approval) =>
-              approval.pullRequestId !== input.pullRequestId || approval.revisionId !== input.revisionId
+            ...current.approvals.filter(
+              (approval) => approval.pullRequestId !== input.pullRequestId || approval.revisionId !== input.revisionId
             ),
             { pullRequestId: input.pullRequestId, revisionId: input.revisionId, state: input.approvalState }
           ]
@@ -525,18 +528,19 @@ const handleOperation = (
         const input = yield* decode(RevisionInput, rawInput)
         return {
           approvals: state.approvals
-            .filter((approval) =>
-              approval.pullRequestId === input.pullRequestId && approval.revisionId === input.revisionId
+            .filter(
+              (approval) => approval.pullRequestId === input.pullRequestId && approval.revisionId === input.revisionId
             )
             .map((approval) => ({ userArn: state.scenario.callerArn, approvalState: approval.state }))
         }
       }
       case "EvaluatePullRequestApprovalRules": {
         const input = yield* decode(RevisionInput, rawInput)
-        const approved = state.approvals.some((approval) =>
-          approval.pullRequestId === input.pullRequestId &&
-          approval.revisionId === input.revisionId &&
-          approval.state === "APPROVE"
+        const approved = state.approvals.some(
+          (approval) =>
+            approval.pullRequestId === input.pullRequestId &&
+            approval.revisionId === input.revisionId &&
+            approval.state === "APPROVE"
         )
         return {
           evaluation: {
@@ -600,12 +604,13 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     }
     const operation = target.split(".").at(-1) ?? target
     const input = yield* HttpServerRequest.schemaBodyJson(Schema.Json).pipe(
-      Effect.mapError(() =>
-        new MockOperationError({
-          awsTag: "InvalidRequestException",
-          message: "request body must be JSON",
-          status: 400
-        })
+      Effect.mapError(
+        () =>
+          new MockOperationError({
+            awsTag: "InvalidRequestException",
+            message: "request body must be JSON",
+            status: 400
+          })
       )
     )
     return yield* handleOperation(stateRef, operation, input).pipe(
@@ -614,42 +619,62 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     )
   }).pipe(
     Effect.catchTag("MockOperationError", (error) => Effect.succeed(awsErrorResponse(error))),
-    Effect.catch(() =>
-      Effect.succeed(HttpServerResponse.jsonUnsafe(
-        { error: "mock-handler-failed" },
-        { status: 500 }
-      ))
-    )
+    Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "mock-handler-failed" }, { status: 500 })))
   )
 
-const adminPushHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
+const adminPushHandler = (
+  stateRef: Ref.Ref<CodeCommitMockState>,
+  transitionLock: Semaphore.Semaphore,
+  revisionControl: CodeCommitMockRevisionControl | undefined
+) =>
   Effect.gen(function*() {
     const input = yield* HttpServerRequest.schemaBodyJson(AdminPushInput)
-    const state = yield* Ref.get(stateRef)
-    const found = findPullRequest(state, input.pullRequestId)
-    if (found === null) return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
-    const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
-    const nextIndex = currentIndex + 1
-    if (found.pullRequest.revisions[nextIndex] === undefined) {
-      return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
-    }
-    yield* Ref.update(stateRef, (current) => ({
-      ...current,
-      activeRevisionByPullRequest: {
-        ...current.activeRevisionByPullRequest,
-        [input.pullRequestId]: nextIndex
-      }
-    }))
-    const nextState = yield* Ref.get(stateRef)
-    return HttpServerResponse.jsonUnsafe({
-      pullRequestId: input.pullRequestId,
-      revisionId: activeRevision(nextState, found.pullRequest).revisionId
-    })
-  }).pipe(Effect.catch(() =>
-    Effect.succeed(
-      HttpServerResponse.jsonUnsafe({ error: "invalid-push-request" }, { status: 400 })
+    return yield* transitionLock.withPermits(1)(
+      Effect.uninterruptible(
+        Effect.gen(function*() {
+          const state = yield* Ref.get(stateRef)
+          const found = findPullRequest(state, input.pullRequestId)
+          if (found === null) {
+            return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
+          }
+          const currentIndex = state.activeRevisionByPullRequest[input.pullRequestId] ?? 0
+          const currentRevision = found.pullRequest.revisions[currentIndex]
+          const nextIndex = currentIndex + 1
+          const nextRevision = found.pullRequest.revisions[nextIndex]
+          if (currentRevision === undefined || nextRevision === undefined) {
+            return HttpServerResponse.jsonUnsafe({ error: "no-newer-revision" }, { status: 409 })
+          }
+          if (revisionControl !== undefined) {
+            yield* revisionControl
+              .advance({
+                pullRequestId: input.pullRequestId,
+                repositoryName: found.repositoryName,
+                currentSourceCommit: currentRevision.sourceCommit,
+                nextSourceCommit: nextRevision.sourceCommit
+              })
+              .pipe(Effect.mapError(() => new MockFixtureTransitionError()))
+          }
+          yield* Ref.update(stateRef, (current) => ({
+            ...current,
+            activeRevisionByPullRequest: {
+              ...current.activeRevisionByPullRequest,
+              [input.pullRequestId]: nextIndex
+            }
+          }))
+          return HttpServerResponse.jsonUnsafe({
+            pullRequestId: input.pullRequestId,
+            revisionId: nextRevision.revisionId
+          })
+        })
+      )
     )
-  ))
+  }).pipe(
+    Effect.catchTag("MockFixtureTransitionError", () =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 }))),
+    Effect.catch(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-push-request" }, { status: 400 }))
+    )
+  )
 
 const adminCommentHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
   Effect.gen(function*() {
@@ -677,11 +702,11 @@ const adminCommentHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
       return HttpServerResponse.jsonUnsafe({ error: "pull-request-not-found" }, { status: 404 })
     }
     return HttpServerResponse.jsonUnsafe({ commentId: comment.commentId })
-  }).pipe(Effect.catch(() =>
-    Effect.succeed(
-      HttpServerResponse.jsonUnsafe({ error: "invalid-comment-request" }, { status: 400 })
+  }).pipe(
+    Effect.catch(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-comment-request" }, { status: 400 }))
     )
-  ))
+  )
 
 export interface CodeCommitMockServer {
   readonly origin: string
@@ -689,16 +714,36 @@ export interface CodeCommitMockServer {
   readonly state: Effect.Effect<CodeCommitMockState>
 }
 
+export interface CodeCommitMockRevisionTransition {
+  readonly pullRequestId: string
+  readonly repositoryName: string
+  readonly currentSourceCommit: string
+  readonly nextSourceCommit: string
+}
+
+/** Optional Git transition coupled to the mock's mutable provider state. */
+export interface CodeCommitMockRevisionControl {
+  readonly advance: (transition: CodeCommitMockRevisionTransition) => Effect.Effect<void, unknown>
+  readonly reset: Effect.Effect<void, unknown>
+}
+
+export interface CodeCommitMockServerOptions {
+  readonly cleanReviewHead?: string
+  readonly port?: number
+  readonly revisionControl?: CodeCommitMockRevisionControl
+}
+
 /** Start one deterministic, scoped mock on literal loopback. */
 export const startCodeCommitMock = (
   scenario: CodeCommitMockScenario,
-  port = 0
+  options: CodeCommitMockServerOptions = {}
 ): Effect.Effect<CodeCommitMockServer, CodeCommitMockStartupError, Scope.Scope> =>
   Effect.gen(function*() {
     const stateRef = yield* Ref.make(makeInitialState(scenario))
+    const transitionLock = yield* Semaphore.make(1)
     const scope = yield* Effect.scope
     const context = yield* Layer.build(
-      NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port })
+      NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: options.port ?? 0 })
     ).pipe(
       Scope.provide(scope),
       Effect.mapError((cause) => new CodeCommitMockStartupError({ cause }))
@@ -710,21 +755,32 @@ export const startCodeCommitMock = (
     const origin = `http://127.0.0.1:${server.address.port}`
     const router = yield* HttpRouter.make
     yield* router.add("POST", "/", awsHandler(stateRef))
+    yield* router.add("POST", "/v1/chat/completions", reviewModelHandler(options.cleanReviewHead))
     yield* router.add("GET", "/__mock/state", Ref.get(stateRef).pipe(Effect.map(HttpServerResponse.jsonUnsafe)))
-    yield* router.add("POST", "/__mock/push", adminPushHandler(stateRef))
+    yield* router.add("POST", "/__mock/push", adminPushHandler(stateRef, transitionLock, options.revisionControl))
     yield* router.add("POST", "/__mock/comment", adminCommentHandler(stateRef))
     yield* router.add(
       "POST",
       "/__mock/reset",
-      Ref.set(stateRef, makeInitialState(scenario)).pipe(
-        Effect.as(HttpServerResponse.jsonUnsafe({ reset: true }))
-      )
+      transitionLock
+        .withPermits(1)(
+          Effect.uninterruptible(
+            Effect.gen(function*() {
+              if (options.revisionControl !== undefined) {
+                yield* options.revisionControl.reset.pipe(Effect.mapError(() => new MockFixtureTransitionError()))
+              }
+              yield* Ref.set(stateRef, makeInitialState(scenario))
+              return HttpServerResponse.jsonUnsafe({ reset: true })
+            })
+          )
+        )
+        .pipe(
+          Effect.catchTag("MockFixtureTransitionError", () =>
+            Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 })))
+        )
     )
     const app = router.asHttpEffect()
-    yield* HttpServer.serveEffect(app).pipe(
-      Effect.provideService(HttpServer.HttpServer, server),
-      Effect.forkScoped
-    )
+    yield* HttpServer.serveEffect(app).pipe(Effect.provideService(HttpServer.HttpServer, server), Effect.forkScoped)
     return {
       origin,
       consolePullRequestUrl: (repositoryName, pullRequestId) =>

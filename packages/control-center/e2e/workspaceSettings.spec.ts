@@ -131,11 +131,9 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   expect(savedSettings.presentation.density).toBe("compact")
   await expect(page.locator("[data-workspace-density]")).toHaveAttribute("data-workspace-density", "compact")
 
-  await page.getByLabel("Profile policy").selectOption("local-profile")
-  const localProfileNotices = page.getByText(/Local profile is unavailable/)
-  await expect(localProfileNotices).toHaveCount(1)
-  await expect(localProfileNotices).toContainText("hooks, plugins, MCP servers")
-  await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled()
+  const profilePolicy = page.getByLabel("Profile policy")
+  await expect(profilePolicy).toHaveValue("isolated")
+  await expect(profilePolicy.locator("option[value=\"local-profile\"]")).toHaveCount(0)
 
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")

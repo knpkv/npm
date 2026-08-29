@@ -20,9 +20,11 @@
  * @category Config
  * @module
  */
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
+import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"
 import type { Duration } from "effect"
 import { Context, Layer } from "effect"
+
+import { makeProfileCredentialProvider } from "./AwsClientConfig/internal/ProfileCredentialProvider.js"
 
 /** Credential material consumed only by the AWS signing layer. */
 export interface AwsCredentialIdentity {
@@ -66,9 +68,14 @@ export class AwsClientConfig extends Context.Service<
   AwsClientConfigContract
 >()("@knpkv/codecommit-core/AwsClientConfig") {}
 
+const profileCredentialProvider = makeProfileCredentialProvider({
+  sso: fromSSO,
+  fallback: fromNodeProviderChain
+})
+
 const defaults: AwsClientConfigContract = {
   credentialProvider: async ({ profile }) => {
-    const identity = await fromNodeProviderChain(profile === "default" ? {} : { profile })()
+    const identity = await profileCredentialProvider(profile)
     return {
       accessKeyId: identity.accessKeyId,
       secretAccessKey: identity.secretAccessKey,

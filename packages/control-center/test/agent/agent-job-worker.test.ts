@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import {
@@ -1041,6 +1042,8 @@ describe("agent job worker", () => {
     const providerFailure = new AgentProviderError({
       providerId: PROVIDER_ID,
       phase: "execution",
+      reviewCause: "provider-authentication",
+      reviewStage: "agent-run",
       message: "Deterministic provider failure",
       retryable: true
     })
@@ -1074,6 +1077,8 @@ describe("agent job worker", () => {
         assert.strictEqual(rows[0]?.outcome, "failed")
         assert.strictEqual(rows[0]?.leaseCount, 0)
         assert.include(rows[0]?.errorJson ?? "", "Deterministic provider failure")
+        assert.include(rows[0]?.errorJson ?? "", "\"reviewCause\":\"provider-authentication\"")
+        assert.include(rows[0]?.errorJson ?? "", "\"reviewStage\":\"agent-run\"")
         assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-failed")
       })
     )

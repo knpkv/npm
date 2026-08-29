@@ -1,0 +1,39 @@
+diff --git a/dist/utils/hostTheme.js b/dist/utils/hostTheme.js
+index 1cbc5759923c9004f461c66b03e225a1b07de975..383c11da9f18e482456de85fa39d511c1cb86598 100644
+--- a/dist/utils/hostTheme.js
++++ b/dist/utils/hostTheme.js
+@@ -1,8 +1,33 @@
+ import { THEME_CSS_ATTRIBUTE } from "../constants.js";
+ //#region src/utils/hostTheme.ts
++const constructedThemeSheets = /* @__PURE__ */ new WeakMap();
++function supportsConstructedThemeSheets(shadowRoot) {
++	return "adoptedStyleSheets" in shadowRoot && typeof CSSStyleSheet !== "undefined" && typeof CSSStyleSheet.prototype.replaceSync === "function";
++}
++function removeConstructedThemeSheet(shadowRoot) {
++	const sheet = constructedThemeSheets.get(shadowRoot);
++	if (sheet === void 0) return;
++	shadowRoot.adoptedStyleSheets = shadowRoot.adoptedStyleSheets.filter((candidate) => candidate !== sheet);
++	constructedThemeSheets.delete(shadowRoot);
++}
++function upsertConstructedThemeSheet(shadowRoot, themeCSS) {
++	let sheet = constructedThemeSheets.get(shadowRoot);
++	if (sheet === void 0) {
++		sheet = new CSSStyleSheet();
++		constructedThemeSheets.set(shadowRoot, sheet);
++		shadowRoot.adoptedStyleSheets = [...shadowRoot.adoptedStyleSheets, sheet];
++	}
++	sheet.replaceSync(themeCSS);
++}
+ function upsertHostThemeStyle({ shadowRoot, currentNode, themeCSS }) {
+ 	if (themeCSS.trim() === "") {
+ 		currentNode?.remove();
++		removeConstructedThemeSheet(shadowRoot);
++		return;
++	}
++	if (supportsConstructedThemeSheets(shadowRoot)) {
++		currentNode?.remove();
++		upsertConstructedThemeSheet(shadowRoot, themeCSS);
+-		return;
++		return currentNode ?? createHostThemeStyleNode();
+ 	}
+ 	currentNode ??= createHostThemeStyleNode();

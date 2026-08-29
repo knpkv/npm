@@ -118,12 +118,44 @@ export const attachAgentRuntimeMetadata = (
     ? { ...event, runtimeMetadata }
     : event
 
+/** Stable redacted cause for one pull-request review failure. */
+export const AgentReviewFailureCause = Schema.Literals([
+  "invalid-configuration",
+  "invalid-request",
+  "source-rejected",
+  "source-unavailable",
+  "sandbox-unavailable",
+  "sandbox-timeout",
+  "command-timeout",
+  "provider-authentication",
+  "provider-rate-limited",
+  "provider-unavailable",
+  "agent-command-failed",
+  "output-rejected",
+  "artifact-unavailable",
+  "session-closed",
+  "cleanup-failed"
+])
+export type AgentReviewFailureCause = typeof AgentReviewFailureCause.Type
+
 /** A provider failed without exposing credentials or provider-native state. */
 export class AgentProviderError extends Schema.TaggedError<AgentProviderError>()(
   "AgentProviderError",
   {
     providerId: AgentProviderId,
     phase: Schema.Literals(["configuration", "launch", "protocol", "execution", "timeout"]),
+    reviewStage: Schema.optionalKey(
+      Schema.Literals([
+        "source-checkout",
+        "review-setup",
+        "sandbox-start",
+        "agent-run",
+        "cleanup",
+        "result-validation",
+        "control-center"
+      ])
+    ),
+    reviewCause: Schema.optionalKey(AgentReviewFailureCause),
     message: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
     retryable: Schema.Boolean
   }

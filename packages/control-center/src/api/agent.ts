@@ -1,4 +1,4 @@
-import { AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
+import { AgentReviewFailureCause, AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
@@ -487,10 +487,29 @@ export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestRe
 }) {}
 
 /** Durable exact-head review stopped without publishing a recommendation. */
+export const PullRequestReviewFailure = Schema.Struct({
+  stage: Schema.Literals([
+    "source-checkout",
+    "review-setup",
+    "sandbox-start",
+    "agent-run",
+    "cleanup",
+    "result-validation",
+    "control-center"
+  ]),
+  cause: Schema.optionalKey(AgentReviewFailureCause),
+  retryable: Schema.Boolean
+})
+export type PullRequestReviewFailure = typeof PullRequestReviewFailure.Type
+
 export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestReviewFailed>()("failed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
   state: Schema.Literals(["failed", "cancelled"]),
+  failure: Schema.optionalKey(Schema.NullOr(PullRequestReviewFailure)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  ),
   report: Schema.optionalKey(Schema.NullOr(PrReviewReport)).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(null))
@@ -595,6 +614,8 @@ const PullRequestReviewRunCompletedEvent = Schema.TaggedStruct("run-completed", 
 
 const PullRequestReviewRunFailedEvent = Schema.TaggedStruct("run-failed", {
   ...pullRequestReviewThreadEventFields,
+  stage: PullRequestReviewFailure.fields.stage,
+  cause: Schema.optionalKey(PullRequestReviewFailure.fields.cause),
   retryable: Schema.Boolean
 })
 

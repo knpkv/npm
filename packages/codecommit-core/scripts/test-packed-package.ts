@@ -11,7 +11,10 @@ import { PackedPackageError, runCheckedCommand } from "./checked-command.js"
 const PackageJson = Schema.fromJsonString(Schema.Struct({
   name: Schema.String,
   version: Schema.String,
-  dependencies: Schema.Struct({ "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4") })
+  dependencies: Schema.Struct({
+    "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4"),
+    "@smithy/core": Schema.String
+  })
 }))
 
 const runtimeDependencies: ReadonlyArray<string> = [
@@ -19,6 +22,7 @@ const runtimeDependencies: ReadonlyArray<string> = [
   "@distilled.cloud/aws",
   "@effect/sql-libsql",
   "@libsql/client",
+  "@smithy/core",
   "effect"
 ]
 
@@ -76,7 +80,11 @@ if (policy.schedule === undefined) throw new Error("Distilled AWS retry policy w
 
     yield* runCheckedCommand(spawner, "node", ["verify.mjs"], consumer)
     yield* Console.log("codecommit-core packed consumer verified public clients and the Distilled AWS runtime")
-  }).pipe(Effect.provide(NodeServices.layer))
+  }).pipe(
+    // The packed-consumer script is the executable boundary for Node services.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer)
+  )
 )
 
 NodeRuntime.runMain(program)

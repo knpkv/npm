@@ -20,6 +20,7 @@ export {
   AgentContinuation,
   AgentProviderError,
   AgentProviderId,
+  AgentReviewFailureCause,
   AgentRunId,
   AgentRunRequest,
   type AgentRuntimeError,

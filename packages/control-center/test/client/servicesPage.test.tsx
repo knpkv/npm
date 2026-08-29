@@ -3570,6 +3570,92 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("84 ms")
   })
 
+  it("regroups a connection after a healthy manual test materializes provider ownership", async () => {
+    const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000401")
+    const providerAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000402")
+    const followedResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000403")
+    const ungroupedConnection = Schema.decodeSync(PluginConnectionSummary)({
+      pluginConnectionId,
+      providerAccountId: null,
+      followedResourceId: null,
+      providerId: "codecommit",
+      displayName: "Payments repository",
+      isEnabled: true,
+      health: null,
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    })
+    const groupedConnection = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(ungroupedConnection),
+      providerAccountId,
+      followedResourceId,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" }
+    })
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      ...Schema.encodeSync(PluginOverviewResponse)(overview),
+      connections: [Schema.encodeSync(PluginConnectionSummary)(ungroupedConnection)],
+      accounts: []
+    })
+    const groupedOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      ...Schema.encodeSync(PluginOverviewResponse)(overview),
+      connections: [Schema.encodeSync(PluginConnectionSummary)(groupedConnection)],
+      accounts: [
+        {
+          providerAccountId,
+          providerFamily: "aws",
+          displayName: "Production",
+          providerImmutableId: "123456789012",
+          revision: 1,
+          resources: [
+            {
+              followedResourceId,
+              providerId: "codecommit",
+              displayName: "payments-api",
+              providerImmutableId: "eu-west-1:payments-api",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const healthy = Schema.decodeSync(PluginConnectionTestResult)({
+      _tag: "healthy",
+      pluginConnectionId,
+      providerId: "codecommit",
+      checkedAt: "2026-07-14T10:03:00.000Z",
+      latencyMilliseconds: 24,
+      identity: {
+        kind: "account",
+        label: "AWS account",
+        displayName: "Production",
+        providerImmutableId: "123456789012"
+      }
+    })
+    const loadOverview = vi.fn().mockResolvedValueOnce(initialOverview).mockResolvedValue(groupedOverview)
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn().mockResolvedValue(healthy)
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).not.toContain("Connected accounts")
+    const testConnection = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Test connection"
+    )
+    await act(async () => testConnection?.click())
+
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toContain("Connected accounts")
+    const accountCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("AWS account Production")
+    )
+    expect(accountCard?.textContent).toContain("payments-api")
+    expect(accountCard?.textContent).toContain("Connection healthy")
+  })
+
   it("enables and tests a disabled connection, then lets the owner disable it again", async () => {
     const disabled = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),

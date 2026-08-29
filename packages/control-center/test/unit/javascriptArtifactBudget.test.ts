@@ -11,25 +11,63 @@ import {
   javaScriptArtifactPaths
 } from "../../scripts/javascriptArtifactBudget.js"
 
+const documentedBudgetRowsAreSynchronized = (
+  source: string,
+  target: "client" | "server",
+  label: "Client" | "Server"
+): boolean => {
+  const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS[target]
+  const budgetPattern = new RegExp(
+    `\\|\\s*${budget.rawBytes.toLocaleString("en-US")}\\s*/\\s*${
+      budget.gzipBytes.toLocaleString("en-US")
+    } bytes\\s*\\|$`,
+    "u"
+  )
+  const budgetSection = source
+    .split("### Distribution JavaScript budgets\n", 2)
+    .at(1)
+    ?.split("\n### ", 1)
+    .at(0)
+  const targetRows = (budgetSection ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith(`| ${label} |`))
+
+  return targetRows.length === 1 && budgetPattern.test(targetRows[0] ?? "")
+}
+
+const DOCUMENTED_BUILD_TARGETS: ReadonlyArray<
+  readonly [target: "client" | "server", label: "Client" | "Server"]
+> = [
+  ["client", "Client"],
+  ["server", "Server"]
+]
+
 describe("JavaScript artifact budgets", () => {
-  it.effect("keeps the documented client measurement and ceilings synchronized", () =>
+  it.effect("keeps every documented target ceiling synchronized by table row", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
       const readme = yield* fileSystem.readFileString(path.join(packageRoot, "README.md"))
-      const budget = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS.client
 
-      expect(readme).toContain(
-        `| Client | generated API client chunk  |    269,302 / 80,291 bytes |         ${
-          budget.rawBytes.toLocaleString("en-US")
-        } / ${budget.gzipBytes.toLocaleString("en-US")} bytes |`
-      )
+      for (const [target, label] of DOCUMENTED_BUILD_TARGETS) {
+        expect(documentedBudgetRowsAreSynchronized(readme, target, label)).toBe(true)
+      }
     }).pipe(
       // The test runner owns the file-service lifetime for this read-only assertion.
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(NodeServices.layer)
     ))
+
+  it("rejects stale or duplicate target rows and accepts one configured budget", () => {
+    const stale = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 290,000 bytes |"
+    const current = "| Server | shared chunk | 1 / 1 bytes | 1,650,000 / 292,000 bytes |"
+    const section = (rows: string) => `### Distribution JavaScript budgets\n\n${rows}\n\n### Next section`
+
+    expect(documentedBudgetRowsAreSynchronized(section(stale), "server", "Server")).toBe(false)
+    expect(documentedBudgetRowsAreSynchronized(section(`${stale}\n${current}`), "server", "Server")).toBe(false)
+    expect(documentedBudgetRowsAreSynchronized(section(current), "server", "Server")).toBe(true)
+  })
 
   it("selects every JavaScript artifact and excludes maps and build metadata", () => {
     expect(

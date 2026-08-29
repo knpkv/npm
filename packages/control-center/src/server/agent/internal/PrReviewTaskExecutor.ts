@@ -58,6 +58,7 @@ import {
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { nativeReviewMaximumDurationMillis } from "../PrReviewTiming.js"
 import {
+  type PrReviewSandboxCommandResult,
   type PrReviewSandboxOutput,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
@@ -227,8 +228,27 @@ const providerFailure = (
   providerId: ClaimedAgentJob["providerId"],
   phase: AgentProviderError["phase"],
   message: string,
-  retryable: boolean
-): AgentProviderError => new AgentProviderError({ providerId, phase, message, retryable })
+  retryable: boolean,
+  reviewStage: NonNullable<AgentProviderError["reviewStage"]> = phase === "protocol"
+    ? "result-validation"
+    : phase === "configuration"
+    ? "review-setup"
+    : phase === "launch"
+    ? "sandbox-start"
+    : "agent-run",
+  reviewCause?: AgentProviderError["reviewCause"]
+): AgentProviderError => {
+  const failure = {
+    providerId,
+    phase,
+    reviewStage,
+    message,
+    retryable
+  }
+  return reviewCause === undefined
+    ? new AgentProviderError(failure)
+    : new AgentProviderError({ ...failure, reviewCause })
+}
 
 const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNativeReviewOutput")(function*(
   providerId: ClaimedAgentJob["providerId"],
@@ -247,11 +267,13 @@ const normalizeNativeReviewOutput = Effect.fn("PrReviewTaskExecutor.normalizeNat
     schemaVersion: nativeReport.schemaVersion,
     completion: nativeReport.completion,
     orientation: nativeReport.orientation,
-    suggestions: nativeReport.suggestions.map(({ prevention, replacement, ...suggestion }) => ({
-      ...suggestion,
-      ...(!(prevention === null) && { prevention }),
-      ...(!(replacement === null) && { replacement })
-    })),
+    suggestions: nativeReport.suggestions.map(({ prevention, replacement, ...suggestion }) =>
+      prevention === null
+        ? replacement === null ? suggestion : { ...suggestion, replacement }
+        : replacement === null
+        ? { ...suggestion, prevention }
+        : { ...suggestion, prevention, replacement }
+    ),
     notes: nativeReport.notes
   })
 })
@@ -261,12 +283,22 @@ const runtimeFailure = (
   failure: AgentRuntimeError
 ): AgentProviderError =>
   failure._tag === "AgentProviderError"
-    ? new AgentProviderError({
+    ? providerFailure(
       providerId,
-      phase: failure.phase,
-      message: failure.message,
-      retryable: failure.retryable
-    })
+      failure.phase,
+      failure.message,
+      failure.retryable,
+      failure.reviewStage ?? (
+        failure.phase === "configuration"
+          ? "review-setup"
+          : failure.phase === "launch"
+          ? "sandbox-start"
+          : failure.phase === "protocol"
+          ? "result-validation"
+          : "agent-run"
+      ),
+      failure.reviewCause
+    )
     : providerFailure(providerId, "protocol", "PR review provider violated the runtime protocol.", false)
 
 const executionFailure = (
@@ -279,7 +311,15 @@ const executionFailure = (
 
 const sandboxFailure = (
   providerId: ClaimedAgentJob["providerId"],
-  failure: typeof PrReviewSandboxSessionError.Type
+  failure: typeof PrReviewSandboxSessionError.Type,
+  reviewStage: NonNullable<AgentProviderError["reviewStage"]> = failure.reason === "source-unavailable" ||
+      failure.reason === "source-rejected"
+    ? "source-checkout"
+    : failure.reason === "cleanup-failed"
+    ? "cleanup"
+    : failure.reason === "output-rejected"
+    ? "result-validation"
+    : "sandbox-start"
 ): AgentProviderError =>
   providerFailure(
     providerId,
@@ -292,8 +332,51 @@ const sandboxFailure = (
     failure.reason === "sandbox-unavailable" ||
       failure.reason === "sandbox-timeout" ||
       failure.reason === "command-timeout" ||
-      failure.reason === "cleanup-failed"
+      failure.reason === "cleanup-failed",
+    reviewStage,
+    failure.reason
   )
+
+const resultValidationSandboxFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  failure: typeof PrReviewSandboxSessionError.Type
+): AgentProviderError => sandboxFailure(providerId, failure, "result-validation")
+
+const nativeReviewFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  providerLabel: "Claude" | "Codex",
+  result: PrReviewSandboxCommandResult
+): AgentProviderError => {
+  const diagnostic = result.stderr.text.toLowerCase()
+  const cause: NonNullable<AgentProviderError["reviewCause"]> = diagnostic.includes("401 unauthorized") ||
+      diagnostic.includes("missing scopes") ||
+      diagnostic.includes("authentication") ||
+      diagnostic.includes("not logged in")
+    ? "provider-authentication"
+    : diagnostic.includes("429") ||
+        diagnostic.includes("rate limit") ||
+        diagnostic.includes("quota")
+    ? "provider-rate-limited"
+    : diagnostic.includes("invalid schema for response_format")
+    ? "output-rejected"
+    : diagnostic.includes("connection") ||
+        diagnostic.includes("timed out") ||
+        diagnostic.includes("502") ||
+        diagnostic.includes("503") ||
+        diagnostic.includes("504")
+    ? "provider-unavailable"
+    : "agent-command-failed"
+  return providerFailure(
+    providerId,
+    cause === "output-rejected" ? "protocol" : "execution",
+    `Native ${providerLabel} review did not complete successfully.`,
+    cause === "provider-rate-limited" ||
+      cause === "provider-unavailable" ||
+      cause === "agent-command-failed",
+    cause === "output-rejected" ? "result-validation" : "agent-run",
+    cause
+  )
+}
 
 const utf8Bytes = (
   providerId: ClaimedAgentJob["providerId"],
@@ -361,7 +444,7 @@ const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(func
 ) {
   const check = yield* session.runCommand(
     `git cat-file -e ${shellQuote(`${session.headRevision}:${path}`)}`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   return check.exitCode === 0
 })
 
@@ -375,7 +458,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
       `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(path)}`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   if (diff.exitCode !== 0) {
     return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
   }
@@ -410,7 +493,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   const source = yield* session.runCommand(
     `git show ${shellQuote(`${evidenceRevision}:${path}`)} | ` +
       `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifact !== null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion source evidence was unavailable.", false)
   }
@@ -443,7 +526,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
         `GIT_INDEX_FILE="$replacement_index" git read-tree ${shellQuote(session.headRevision)} && ` +
         `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | ` +
         `GIT_INDEX_FILE="$replacement_index" git apply --check --cached -`
-    ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+    ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
     if (replacementCheck.exitCode !== 0) {
       return yield* providerFailure(
         providerId,
@@ -475,7 +558,7 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
     `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
       `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(suggestion.anchor.path)}`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   if (diff.exitCode !== 0) {
     return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
   }
@@ -530,7 +613,7 @@ const locationExistsInHead = Effect.fn("PrReviewTaskExecutor.locationExistsInHea
       `git show ${source} | ` +
       `sed -n '${String(location.startLine)},${String(location.endLine)}p' | ` +
       `awk 'END { exit NR == ${String(expectedLines)} ? 0 : 1 }'`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   return check.exitCode === 0
 })
 
@@ -542,7 +625,7 @@ const changedHeadLineIntervals = Effect.fn("PrReviewTaskExecutor.changedHeadLine
   const source = shellQuote(`${session.headRevision}:${path}`)
   const objectType = yield* session.runCommand(
     `git cat-file -t ${source}`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   if (objectType.exitCode !== 0) return null
   const completeObjectType = yield* completeOutputText(session, objectType.stdout)
   if (completeObjectType?.trim() !== "blob") return null
@@ -558,7 +641,7 @@ const changedHeadLineIntervals = Effect.fn("PrReviewTaskExecutor.changedHeadLine
       `${targetPath} "$previous_path"; else ` +
       `git --literal-pathspecs -c core.quotePath=false diff --find-renames --unified=0 --no-ext-diff ` +
       `--no-textconv --no-color --inter-hunk-context=0 ${baseRevision} ${headRevision} -- ${targetPath}; fi`
-  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  ).pipe(Effect.mapError((failure) => resultValidationSandboxFailure(providerId, failure)))
   if (diff.exitCode !== 0) return null
   const completeDiff = yield* completeOutputText(session, diff.stdout)
   return completeDiff === null ? null : diffLineIntervals(completeDiff, "head")
@@ -1180,12 +1263,7 @@ const makeExecutor = Effect.gen(function*() {
                 { model: String(selected.model) })
             })
             if (reviewed.exitCode !== 0) {
-              return yield* providerFailure(
-                claim.providerId,
-                "execution",
-                `Native ${nativeProviderLabel} review did not complete successfully.`,
-                true
-              )
+              return yield* nativeReviewFailure(claim.providerId, nativeProviderLabel, reviewed)
             }
             const output = yield* completeOutputText(session, reviewed.stdout)
             if (output === null || output.length === 0) {
@@ -1281,7 +1359,17 @@ const makeExecutor = Effect.gen(function*() {
           return reportExecution(
             yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
           )
-        })
+        }).pipe(
+          Effect.mapError((failure) =>
+            Schema.is(PrReviewSandboxSessionError)(failure)
+              ? sandboxFailure(
+                claim.providerId,
+                failure,
+                failure.reason === "output-rejected" ? "result-validation" : "agent-run"
+              )
+              : failure
+          )
+        )
     ).pipe(
       Effect.mapError((failure) =>
         Schema.is(PrReviewSandboxSessionError)(failure)

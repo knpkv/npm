@@ -586,13 +586,14 @@ export const makeReviewSuggestionRevisionOperations = <
         request.state === undefined &&
         request.validation === undefined
       ) return current
-      const activePublication = yield* sql`SELECT 1
+      const blockingPublication = yield* sql`SELECT 1
           FROM agent_review_suggestion_publications
           WHERE workspace_id = ${request.workspaceId}
             AND job_id = ${request.jobId}
             AND suggestion_id = ${request.suggestionId}
+            AND (${request.state === "stale" ? 1 : 0} = 0 OR state <> 'published')
           LIMIT 1`
-      if (activePublication.length > 0) {
+      if (blockingPublication.length > 0) {
         return yield* new AgentJobInputError({
           workspaceId: request.workspaceId,
           jobId: request.jobId,

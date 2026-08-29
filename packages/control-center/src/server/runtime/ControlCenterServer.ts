@@ -23,7 +23,9 @@ import {
   prReviewSandboxSessionsLayer
 } from "../agent/internal/PrReviewSandboxSession.js"
 import {
+  type CodeCommitMockSourceFixture,
   codeCommitPrReviewSourceResolverLayer,
+  codeCommitPrReviewSourceResolverLayerWithFixture,
   type PrReviewSourceError,
   PrReviewSourceWorkspace,
   prReviewSourceWorkspaceLayer,
@@ -169,6 +171,8 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly failurePollInterval?: Duration.Input
   readonly maximumSandboxDurationMillis?: number
   readonly maximumSourceDuration?: Duration.Input
+  /** Server-private checkout locator accepted only from the loopback mock CLI configuration. @internal */
+  readonly codeCommitMockSourceFixture?: CodeCommitMockSourceFixture
   /** Deterministic composition seam; production omits it. @internal */
   readonly sourceWorkspace?: PrReviewSourceWorkspace["Service"]
   /** Deterministic composition seam; production omits it. @internal */
@@ -552,13 +556,16 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     )
     : (() => {
       const configured = options.prReviewWorker
+      const sourceResolver = configured.codeCommitMockSourceFixture === undefined
+        ? codeCommitPrReviewSourceResolverLayer
+        : codeCommitPrReviewSourceResolverLayerWithFixture(configured.codeCommitMockSourceFixture)
       const sourceWorkspace = configured.sourceWorkspace === undefined
         ? prReviewSourceWorkspaceLayer({
           workspaceRoot: configured.workspaceRoot,
           ...(!(configured.maximumSourceDuration === undefined) &&
             { maximumDuration: configured.maximumSourceDuration })
         }).pipe(
-          Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
+          Layer.provide(sourceResolver.pipe(Layer.provide(persistence))),
           Layer.provide(
             prReviewWorkspaceLeaseGuardLayer(configured.workspaceId).pipe(
               Layer.provide(agentJobRepository)

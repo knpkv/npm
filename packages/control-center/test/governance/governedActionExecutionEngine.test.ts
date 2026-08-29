@@ -165,6 +165,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   readonly recoveryCandidates?: ReadonlyArray<GovernedActionExecutionReference>
 }) {
   const events = yield* Ref.make<ReadonlyArray<string>>([])
+  const invalidations = yield* Ref.make(0)
   const unknowns = yield* Ref.make<ReadonlyArray<GovernedActionUnknownOutcome>>([])
   const dispatchResults = yield* Ref.make<ReadonlyArray<typeof PluginActionDispatchResultV1.Type>>([])
   const beginInputs = yield* Ref.make<ReadonlyArray<Parameters<GovernedActionExecutionStoreV1["begin"]>[0]>>([])
@@ -247,7 +248,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
       expected === lease.runtimeAuthorityToken
         ? Effect.succeed(lease)
         : Effect.fail(new PluginRuntimeAuthorityUnavailable()),
-    invalidate: () => Effect.void
+    invalidate: () => Ref.update(invalidations, (count) => count + 1)
   }
   const dependencies = Layer.merge(
     Layer.succeed(GovernedActionExecutionStore, store),
@@ -255,6 +256,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   )
   return {
     events,
+    invalidations,
     unknowns,
     dispatchResults,
     beginInputs,
@@ -269,13 +271,21 @@ const run = (layer: Layer.Layer<GovernedActionExecutionEngine>) =>
   Effect.flatMap(
     GovernedActionExecutionEngine,
     (engine) => engine.run({ workspaceId: WORKSPACE_ID, actionId: ACTION_ID })
-  ).pipe(Effect.provide(layer))
+  ).pipe(
+    // Test execution boundary supplies the complete runtime layer.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(layer)
+  )
 
 const recoverEligible = (layer: Layer.Layer<GovernedActionExecutionEngine>) =>
   Effect.flatMap(
     GovernedActionExecutionEngine,
     (engine) => engine.recoverEligible()
-  ).pipe(Effect.provide(layer))
+  ).pipe(
+    // Test execution boundary supplies the complete runtime layer.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(layer)
+  )
 
 describe("governed action execution engine", () => {
   it.effect("preflights, atomically obtains a new permit, then records the provider receipt", () =>
@@ -283,6 +293,7 @@ describe("governed action execution engine", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
       const harness = yield* makeHarness()
       assert.deepStrictEqual(yield* run(harness.layer), { _tag: "advanced", state: "succeeded" })
+      assert.strictEqual(yield* Ref.get(harness.invalidations), 1)
       assert.deepStrictEqual(yield* Ref.get(harness.events), [
         "inspect",
         "preflight",
