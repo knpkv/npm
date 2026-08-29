@@ -135,7 +135,7 @@ export const buildApprovalRules = (
           ruleName: rule.approvalRuleName ?? "",
           satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
           ...parsed,
-          ...((rule.originApprovalRuleTemplate?.approvalRuleTemplateName) &&
+          ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName !== undefined &&
             { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName })
         }))
       )
@@ -148,7 +148,7 @@ const fetchPRDetails = (id: string, repoName: string) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: id })
     const pr = resp.pullRequest
-    if (!pr) return yield* new MissingPullRequestResponse({ pullRequestId: id })
+    if (pr === undefined) return yield* new MissingPullRequestResponse({ pullRequestId: id })
 
     const revisionId = pr.revisionId ?? ""
     const [evaluation, isMergeable, approvers] = yield* Effect.all([
@@ -181,7 +181,9 @@ export const fetchApprovers = (
   ).pipe(
     Effect.map((r) => {
       const approved = (r.approvals ?? [])
-        .filter((a): a is typeof a & { userArn: string } => a.approvalState === "APPROVE" && !!a.userArn)
+        .filter((a): a is typeof a & { userArn: string } =>
+          a.approvalState === "APPROVE" && a.userArn !== undefined && a.userArn !== ""
+        )
       return {
         names: approved.map((a) => normalizeAuthor(a.userArn)),
         arns: approved.map((a) => a.userArn)
@@ -197,7 +199,7 @@ const fetchMergeStatus = (
   repoName: string,
   target?: { destinationCommit?: string; sourceCommit?: string }
 ) => {
-  if (!target) return Effect.succeed(true)
+  if (target === undefined) return Effect.succeed(true)
   return throttleRetry(
     codecommit.getMergeConflicts({
       repositoryName: repoName,
@@ -249,7 +251,7 @@ const RawToPullRequest = RawPullRequest.pipe(
         id: raw.pullRequestId ?? "",
         title: raw.title ?? "",
         description: raw.description,
-        author: raw.authorArn ? normalizeAuthor(raw.authorArn) : "unknown",
+        author: raw.authorArn === undefined || raw.authorArn === "" ? "unknown" : normalizeAuthor(raw.authorArn),
         repositoryName: raw.repoName,
         creationDate: raw.creationDate ?? EpochFallback,
         lastModifiedDate: raw.lastActivityDate ?? EpochFallback,
@@ -314,7 +316,7 @@ export const fetchRepoAccountId = (
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => normalizeAccountId(r.repositoryMetadata?.accountId)),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
-    Effect.catch(() => Effect.succeed(undefined))
+    Effect.catch(() => Effect.void.pipe(Effect.as(undefined)))
   )
 
 const listPullRequestIds = (
@@ -332,7 +334,7 @@ const listPullRequestIds = (
 
 export const getPullRequests = (
   account: AccountParams,
-  options?: { status?: "OPEN" | "CLOSED" }
+  options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
 ): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
   const pullRequestsEffect: Effect.Effect<
     Stream.Stream<PullRequest, AwsClientError, AwsClientConfig>,
@@ -354,7 +356,11 @@ export const getPullRequests = (
       )
     }
 
-    const stream = listAllRepositories().pipe(
+    const repositories = options?.repositoryName === undefined
+      ? listAllRepositories()
+      : Stream.make(options.repositoryName)
+
+    const stream = repositories.pipe(
       Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
       Stream.mapEffect(
         ({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)),

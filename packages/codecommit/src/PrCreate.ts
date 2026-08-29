@@ -34,7 +34,7 @@ export interface PrCreateServiceContract {
 const make = Effect.gen(function*() {
   const aws = yield* AwsClient.AwsClient
 
-  const create: PrCreateServiceContract["create"] = (input) =>
+  const create: PrCreateServiceContract["create"] = Effect.fn("PrCreateService.create")((input) =>
     aws.createPullRequest({
       account: makeAccount(input.profile, input.region),
       repositoryName: input.repositoryName,
@@ -49,6 +49,7 @@ const make = Effect.gen(function*() {
           `https://${input.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${input.repositoryName}/pull-requests/${pullRequestId}?region=${input.region}`
       }))
     )
+  )
 
   return { create } satisfies PrCreateServiceContract
 })

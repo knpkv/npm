@@ -25,7 +25,7 @@
  */
 import { AwsClient, ConfigService, type Domain, type Errors } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Clock, Context, Effect, Layer, type Option, Stream } from "effect"
+import { Clock, Context, Effect, Layer, Option, Predicate, Stream } from "effect"
 import { type FilterPreset, matchesPreset, matchesRepoAuthor } from "./filterPresets.js"
 
 /** A single `{ profile, region }` account/region pair to scan. */
@@ -84,6 +84,9 @@ const failedAccount = (acct: FilterTarget, message: string): AccountCollection =
   failed: `${acct.profile}/${acct.region}: ${message}`
 })
 
+const repositoryDoesNotExist = (error: FilterCollectError): boolean =>
+  error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "RepositoryDoesNotExistException")
+
 /**
  * Cross-account filter orchestration service.
  *
@@ -133,36 +136,48 @@ const make: Effect.Effect<
    * about filtering: concurrency, per-account failure capture, and the
    * newest-first ordering the callers render.
    */
-  const fanOut = (
+  const fanOut = Effect.fn("FilterService.fanOut")(function*(
     targets: ReadonlyArray<FilterTarget>,
-    keep: (pr: Domain.PullRequest) => boolean
-  ) =>
-    Effect.gen(function*() {
-      const collected = yield* Effect.forEach(
-        targets,
-        (acct) =>
-          aws.getPullRequests(acct, { status: "OPEN" }).pipe(
-            Stream.filter(keep),
-            Stream.runCollect,
-            Effect.map(collectedPullRequests),
-            // Don't silently coalesce auth/permission failures to "no matches" —
-            // collect the failure so it can be surfaced after the results.
-            Effect.catchIf(() => true, (e: FilterCollectError) => Effect.succeed(failedAccount(acct, e.message)))
-          ),
-        { concurrency: 4 }
-      )
-      const prs = collected.flatMap((r) => r.ok).sort((a, b) =>
-        b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime()
-      )
-      return { prs, failures: collected.flatMap((r) => (r.failed === null ? [] : [r.failed])) }
-    })
-
-  const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
-    fanOut(targets, (pr) => matchesRepoAuthor(pr, opts.repo, opts.author)).pipe(
-      Effect.map(({ failures, prs }) => ({ prs, failures, unresolvedProfiles: [] }))
+    keep: (pr: Domain.PullRequest) => boolean,
+    repositoryName: Option.Option<string>
+  ) {
+    const collected = yield* Effect.forEach(
+      targets,
+      (acct) =>
+        aws.getPullRequests(
+          acct,
+          Option.match(repositoryName, {
+            onNone: () => ({ status: "OPEN" }),
+            onSome: (name) => ({ status: "OPEN", repositoryName: name })
+          })
+        ).pipe(
+          Stream.filter(keep),
+          Stream.runCollect,
+          Effect.map(collectedPullRequests),
+          // Don't silently coalesce auth/permission failures to "no matches" —
+          // collect the failure so it can be surfaced after the results.
+          Effect.catch((error: FilterCollectError) =>
+            Option.isSome(repositoryName) && repositoryDoesNotExist(error)
+              ? Effect.succeed(collectedPullRequests([]))
+              : Effect.succeed(failedAccount(acct, error.message))
+          )
+        ),
+      { concurrency: 4 }
     )
+    const prs = collected.flatMap((r) => r.ok).sort((a, b) =>
+      b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime()
+    )
+    return { prs, failures: collected.flatMap((r) => (r.failed === null ? [] : [r.failed])) }
+  })
 
-  const collect: FilterServiceContract["collect"] = (preset, targets, opts, now) =>
+  const collectOpen: FilterServiceContract["collectOpen"] = Effect.fn("FilterService.collectOpen")(
+    (targets, opts) =>
+      fanOut(targets, (pr) => matchesRepoAuthor(pr, opts.repo, opts.author), opts.repo).pipe(
+        Effect.map(({ failures, prs }) => ({ prs, failures, unresolvedProfiles: [] }))
+      )
+  )
+
+  const collect: FilterServiceContract["collect"] = Effect.fn("FilterService.collect")((preset, targets, opts, now) =>
     Effect.gen(function*() {
       const effectiveNow = now ?? new Date(yield* Clock.currentTimeMillis)
       // Resolve caller identity once per profile (deduped per profile within this
@@ -199,11 +214,13 @@ const make: Effect.Effect<
         targets,
         (pr) =>
           matchesPreset(preset, pr, callerByProfile, effectiveNow) &&
-          matchesRepoAuthor(pr, opts.repo, opts.author)
+          matchesRepoAuthor(pr, opts.repo, opts.author),
+        Option.none()
       )
 
       return { prs, failures, unresolvedProfiles: unresolvedCallerProfiles }
     })
+  )
 
   const service: FilterServiceContract = { resolveTargets, collect, collectOpen }
   return service

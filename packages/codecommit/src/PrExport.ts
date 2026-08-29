@@ -37,18 +37,21 @@ export interface PrExportServiceContract {
 const make = Effect.gen(function*() {
   const aws = yield* AwsClient.AwsClient
 
-  const loadPullRequest: PrExportServiceContract["loadPullRequest"] = (input) =>
-    aws.getPullRequest({
-      account: makeAccount(input.profile, input.region),
-      pullRequestId: input.pullRequestId
-    })
+  const loadPullRequest: PrExportServiceContract["loadPullRequest"] = Effect.fn("PrExportService.loadPullRequest")(
+    (input) =>
+      aws.getPullRequest({
+        account: makeAccount(input.profile, input.region),
+        pullRequestId: input.pullRequestId
+      })
+  )
 
-  const loadComments: PrExportServiceContract["loadComments"] = (input) =>
+  const loadComments: PrExportServiceContract["loadComments"] = Effect.fn("PrExportService.loadComments")((input) =>
     aws.getCommentsForPullRequest({
       account: makeAccount(input.profile, input.region),
       pullRequestId: input.pullRequestId,
       repositoryName: input.repositoryName
     })
+  )
 
   const consoleLink: PrExportServiceContract["consoleLink"] = (input) =>
     `https://${input.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${input.repositoryName}/pull-requests/${input.pullRequestId}?region=${input.region}`

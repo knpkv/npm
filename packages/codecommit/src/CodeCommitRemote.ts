@@ -9,7 +9,8 @@
  * @category Domain
  * @module
  */
-import { Schema } from "effect"
+import { Domain } from "@knpkv/codecommit-core"
+import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 
 export class NotACodeCommitRemote extends Schema.TaggedError<NotACodeCommitRemote>()(
   "NotACodeCommitRemote",
@@ -22,12 +23,12 @@ export class NotACodeCommitRemote extends Schema.TaggedError<NotACodeCommitRemot
 /**
  * What a CodeCommit remote URL discloses.
  *
- * `region` is absent only for the region-less `codecommit://` Git-remote-codecommit
- * form. Any embedded profile is deliberately dropped: it is a local alias for
- * whoever cloned the repository, and the scan resolves the account that holds the
- * PR anyway, so honouring it would add a second code path that can disagree.
+ * `region` is absent only for the region-less `codecommit://`
+ * Git-remote-codecommit form. `profile` is present only when that helper URL
+ * names one; it is an exact local account discriminator and narrows the scan.
  */
 export interface CodeCommitRemote {
+  readonly profile: string | null
   readonly region: string | null
   readonly repositoryName: string
 }
@@ -44,18 +45,67 @@ const REMOTE_PATTERNS: ReadonlyArray<
   readonly [RegExp, (match: RegExpMatchArray) => CodeCommitRemote]
 > = [
   [
-    /^(?:https?|ssh):\/\/(?:[^@/]+@)?git-codecommit(?:-fips)?\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?\/v1\/repos\/(.+)$/u,
-    (match) => ({ region: match[1] ?? null, repositoryName: match[2] ?? "" })
+    /^(?:https?|ssh):\/\/(?:[^@/]+@)?git-codecommit(?:-fips)?\.([a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+)\.amazonaws\.com(?:\.cn)?\/v1\/repos\/([A-Za-z0-9._-]{1,100})\/*$/u,
+    (match) => ({ profile: null, region: match[1] ?? null, repositoryName: match[2] ?? "" })
   ],
   [
-    /^codecommit::([a-z0-9-]+):\/\/(?:[^@/]+@)?(.+)$/u,
-    (match) => ({ region: match[1] ?? null, repositoryName: match[2] ?? "" })
+    /^codecommit::([a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+):\/\/(?:([^@/]+)@)?([A-Za-z0-9._-]{1,100})$/u,
+    (match) => ({ profile: match[2] ?? null, region: match[1] ?? null, repositoryName: match[3] ?? "" })
   ],
   [
-    /^codecommit:\/\/(?:[^@/]+@)?(.+)$/u,
-    (match) => ({ region: null, repositoryName: match[1] ?? "" })
+    /^codecommit:\/\/(?:([^@/]+)@)?([A-Za-z0-9._-]{1,100})$/u,
+    (match) => ({ profile: match[1] ?? null, region: null, repositoryName: match[2] ?? "" })
   ]
 ]
+
+const RemoteRegion = Domain.AwsRegion.check(
+  Schema.isPattern(/^[a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+$/u)
+)
+const RemoteRepositoryName = Domain.RepositoryName.check(
+  Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u)
+)
+const RemoteProfile = Schema.String.check(
+  Schema.isPattern(/^[^@/]+$/u),
+  Schema.makeFilter(
+    (profile) =>
+      [...profile].every((character) => {
+        const code = character.codePointAt(0) ?? 0
+        return code >= 0x20 && code !== 0x7f
+      }),
+    { expected: "a profile name without control characters" }
+  )
+)
+const CodeCommitRemoteValue = Schema.Struct({
+  profile: Schema.NullOr(RemoteProfile),
+  region: Schema.NullOr(RemoteRegion),
+  repositoryName: RemoteRepositoryName
+})
+
+const parseRemoteString = (remoteUrl: string): CodeCommitRemote | null => {
+  const trimmed = remoteUrl.trim()
+  for (const [pattern, extract] of REMOTE_PATTERNS) {
+    const match = trimmed.match(pattern)
+    if (match !== null) return extract(match)
+  }
+  return null
+}
+
+const CodeCommitRemoteFromString = Schema.String.pipe(
+  Schema.decodeTo(CodeCommitRemoteValue, {
+    decode: SchemaGetter.transformOrFail((input, options) => {
+      const parsed = parseRemoteString(input)
+      return parsed === null
+        ? Effect.fail(new SchemaIssue.InvalidValue({ expected: "a CodeCommit Git remote URL" }, input, options))
+        : Effect.succeed(parsed)
+    }),
+    encode: SchemaGetter.transform(({ profile, region, repositoryName }) => {
+      const authority = profile === null ? repositoryName : `${profile}@${repositoryName}`
+      return region === null ? `codecommit://${authority}` : `codecommit::${region}://${authority}`
+    })
+  })
+)
+
+const decodeCodeCommitRemote = Schema.decodeUnknownOption(CodeCommitRemoteFromString)
 
 /**
  * Recognises a CodeCommit remote and extracts what it names.
@@ -65,16 +115,8 @@ const REMOTE_PATTERNS: ReadonlyArray<
  * scan from running for a repository no CodeCommit account can hold.
  */
 export const parseCodeCommitRemote = (remoteUrl: string): CodeCommitRemote | null => {
-  const trimmed = remoteUrl.trim()
-  for (const [pattern, extract] of REMOTE_PATTERNS) {
-    const match = trimmed.match(pattern)
-    if (match === null) continue
-    const parsed = extract(match)
-    const repositoryName = parsed.repositoryName.replace(/\/+$/u, "").replace(/\.git$/u, "")
-    if (repositoryName === "") return null
-    return { region: parsed.region, repositoryName }
-  }
-  return null
+  const decoded = decodeCodeCommitRemote(remoteUrl)
+  return Option.isSome(decoded) ? decoded.value : null
 }
 
 /**
@@ -90,5 +132,10 @@ export const parseCodeCommitRemote = (remoteUrl: string): CodeCommitRemote | nul
  * The scp-like `git@host:org/repo` form has no `//`, so it is left alone: that
  * userinfo is a login name, not a secret.
  */
-export const redactRemoteUserInfo = (remoteUrl: string): string =>
-  remoteUrl.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]+@/iu, "$1***@")
+export const redactRemoteUserInfo = (remoteUrl: string): string => {
+  const terminalSafe = [...remoteUrl].filter((character) => {
+    const code = character.codePointAt(0) ?? 0
+    return code >= 0x20 && (code < 0x7f || code > 0x9f)
+  }).join("")
+  return terminalSafe.replace(/^( *)([a-z][a-z0-9+.-]*:\/\/)[^/]*@/iu, "$1$2***@")
+}

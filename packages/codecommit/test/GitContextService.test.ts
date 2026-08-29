@@ -7,19 +7,20 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, PlatformError, Sink, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { type GitContextError, GitContextService } from "../src/GitContextService.js"
 
-const handleWith = (stdoutText: string) =>
+const handleWith = (stdoutText: string, exitCode = 0, stderrText = "") =>
   ChildProcessSpawner.makeHandle({
     all: Stream.empty,
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
     isRunning: Effect.succeed(false),
     kill: () => Effect.void,
     pid: ChildProcessSpawner.ProcessId(42),
-    stderr: Stream.empty,
+    stderr: Stream.make(stderrText).pipe(Stream.encodeText),
     stdin: Sink.drain,
     stdout: Stream.make(stdoutText).pipe(Stream.encodeText),
     unref: Effect.succeed(Effect.void)
@@ -87,11 +88,43 @@ describe("GitContextService", () => {
       // its own diagnosis now that spawn failures no longer borrow it.
       const reason = yield* reasonOf(
         { cwd: "/tmp", remote: "origin" },
-        () => Effect.succeed(handleWith(""))
+        () =>
+          Effect.succeed(handleWith(
+            "",
+            128,
+            "fatal: not a git repository (or any of the parent directories): .git\n"
+          ))
       )
 
       expect(reason).toBe("not-a-git-repository")
     }))
+
+  it.effect("reports a nonzero git exit as a git failure", () =>
+    Effect.gen(function*() {
+      const reason = yield* reasonOf(
+        { cwd: "/work/identity", remote: "origin" },
+        () => Effect.succeed(handleWith("", 128, "fatal: detected dubious ownership in repository\n"))
+      )
+
+      expect(reason).toBe("git-failed")
+    }))
+
+  it.effect("reports git's missing-remote refusal as no remote", () => {
+    let call = 0
+    return Effect.gen(function*() {
+      const reason = yield* reasonOf(
+        { cwd: "/work/identity", remote: "upstream" },
+        () =>
+          Effect.succeed(
+            call++ === 0
+              ? handleWith("/work/identity\n")
+              : handleWith("", 2, "error: No such remote 'upstream'\n")
+          )
+      )
+
+      expect(reason).toBe("no-remote")
+    })
+  })
 
   it.effect("reports a detached checkout rather than treating HEAD as a branch", () =>
     Effect.gen(function*() {
@@ -123,4 +156,72 @@ describe("GitContextService", () => {
         withSpawner(answering(["/work/identity\n", `${CODECOMMIT_REMOTE}\n`, "feat/RPS-2335-thing\n"]))
       )
     ))
+
+  it.effect("separates a dash-prefixed remote name from git options", () => {
+    const commands: Array<ChildProcess.Command> = []
+    const answers = ["/work/identity\n", `${CODECOMMIT_REMOTE}\n`, "feat/dash-remote\n"]
+    let call = 0
+    const spawn: Parameters<typeof ChildProcessSpawner.make>[0] = (command) => {
+      commands.push(command)
+      return Effect.succeed(handleWith(answers[call++] ?? ""))
+    }
+
+    return Effect.gen(function*() {
+      const service = yield* GitContextService
+      const context = yield* service.resolve({ cwd: "/work/identity", remote: "-x" })
+
+      expect(context.remoteUrl).toBe(CODECOMMIT_REMOTE)
+      const remoteCommand = commands[1]
+      expect(remoteCommand !== undefined && ChildProcess.isStandardCommand(remoteCommand)).toBe(true)
+      if (remoteCommand !== undefined && ChildProcess.isStandardCommand(remoteCommand)) {
+        expect(remoteCommand.args).toEqual(["remote", "get-url", "--", "-x"])
+      }
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(withSpawner(spawn))
+    )
+  })
+
+  it.effect("uses the selected remote's upstream source when the local branch was renamed", () =>
+    Effect.gen(function*() {
+      const service = yield* GitContextService
+      const context = yield* service.resolve({ cwd: "/work/identity", remote: "origin" })
+
+      expect(context.branch).toBe("feature/x")
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        withSpawner(answering([
+          "/work/identity\n",
+          `${CODECOMMIT_REMOTE}\n`,
+          "review\n",
+          "origin\0refs/heads/feature/x\n"
+        ]))
+      )
+    ))
+
+  it.effect("preserves a trailing space in the repository root while removing git's newline", () => {
+    const commands: Array<ChildProcess.Command> = []
+    const answers = ["/work/identity \n", `${CODECOMMIT_REMOTE}\n`, "feat/space\n"]
+    let call = 0
+    const spawn: Parameters<typeof ChildProcessSpawner.make>[0] = (command) => {
+      commands.push(command)
+      return Effect.succeed(handleWith(answers[call++] ?? ""))
+    }
+
+    return Effect.gen(function*() {
+      const service = yield* GitContextService
+      const context = yield* service.resolve({ cwd: "/work/identity ", remote: "origin" })
+
+      expect(context.repositoryRoot).toBe("/work/identity ")
+      const remoteCommand = commands[1]
+      expect(remoteCommand !== undefined && ChildProcess.isStandardCommand(remoteCommand)).toBe(true)
+      if (remoteCommand !== undefined && ChildProcess.isStandardCommand(remoteCommand)) {
+        expect(remoteCommand.options.cwd).toBe("/work/identity ")
+      }
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(withSpawner(spawn))
+    )
+  })
 })

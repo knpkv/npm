@@ -32,19 +32,22 @@ export interface PrUpdateServiceContract {
 const make = Effect.gen(function*() {
   const aws = yield* AwsClient.AwsClient
 
-  const setTitle: PrUpdateServiceContract["setTitle"] = (input) =>
+  const setTitle: PrUpdateServiceContract["setTitle"] = Effect.fn("PrUpdateService.setTitle")((input) =>
     aws.updatePullRequestTitle({
       account: makeAccount(input.profile, input.region),
       pullRequestId: input.pullRequestId,
       title: input.title
     })
+  )
 
-  const setDescription: PrUpdateServiceContract["setDescription"] = (input) =>
-    aws.updatePullRequestDescription({
-      account: makeAccount(input.profile, input.region),
-      pullRequestId: input.pullRequestId,
-      description: input.description
-    })
+  const setDescription: PrUpdateServiceContract["setDescription"] = Effect.fn("PrUpdateService.setDescription")(
+    (input) =>
+      aws.updatePullRequestDescription({
+        account: makeAccount(input.profile, input.region),
+        pullRequestId: input.pullRequestId,
+        description: input.description
+      })
+  )
 
   return { setDescription, setTitle } satisfies PrUpdateServiceContract
 })

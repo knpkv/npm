@@ -7,9 +7,10 @@
  * with tagged errors and the command turns each into a line rather than letting
  * a Cause reach the popup.
  *
- * The remote names the repository (and usually the region), never the AWS
- * profile. The profile is therefore not guessed: the enabled accounts are
- * scanned and the account that actually holds the matching PR is the answer.
+ * The remote names the repository and usually the region. Git-remote-codecommit
+ * may name a profile too; when it does, that exact profile narrows the scan.
+ * Otherwise every eligible account is scanned and ambiguous cross-account
+ * matches are rejected.
  * Region for the console link comes from that same PR, not from the remote,
  * which keeps the link correct when a repository name exists in more than one
  * region.
@@ -18,7 +19,7 @@
  * @module
  */
 import { type Domain } from "@knpkv/codecommit-core"
-import { Console, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
+import { Console, Context, Effect, Layer, Logger, Option, Predicate, Schema } from "effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { reportFailure } from "./CliFailure.js"
 import {
@@ -29,7 +30,7 @@ import {
 } from "./CodeCommitRemote.js"
 import { type FilterCollectError, FilterService, FilterServiceLive, type FilterTarget } from "./FilterService.js"
 import { type GitContextError, GitContextService } from "./GitContextService.js"
-import { matchOpenPullRequest, NoOpenPullRequest } from "./OpenPullRequest.js"
+import { resolveOpenPullRequest } from "./OpenPullRequest.js"
 import { TuiTerminalSession } from "./tui/atoms/applicationScope.js"
 import { codecommitPullRequestConsoleUrl, UnsupportedConsoleRegion } from "./tui/browser-command.js"
 import { openAssumeConsole } from "./tui/console-launch.js"
@@ -52,6 +53,18 @@ export class NoAccountForRegion extends Schema.TaggedError<NoAccountForRegion>()
   { region: Schema.String, message: Schema.String }
 ) {}
 
+/** A git-remote-codecommit URL names a profile that is not enabled. */
+export class NoAccountForProfile extends Schema.TaggedError<NoAccountForProfile>()(
+  "NoAccountForProfile",
+  { profile: Schema.String, message: Schema.String }
+) {}
+
+/** A regionless helper remote maps to more than one configured region. */
+export class AmbiguousRemoteRegion extends Schema.TaggedError<AmbiguousRemoteRegion>()(
+  "AmbiguousRemoteRegion",
+  { profile: Schema.String, regions: Schema.Array(Schema.String), message: Schema.String }
+) {}
+
 /** The working directory, resolved as far as "which accounts are worth scanning". */
 export interface OpenScanPlan {
   readonly branch: string
@@ -72,7 +85,13 @@ export interface PrOpenServiceContract {
     readonly remote: string
   }) => Effect.Effect<
     OpenScanPlan,
-    ConfigUnreadable | NoAccountForRegion | NoEnabledAccounts | NotACodeCommitRemote | GitContextError
+    | AmbiguousRemoteRegion
+    | ConfigUnreadable
+    | NoAccountForProfile
+    | NoAccountForRegion
+    | NoEnabledAccounts
+    | NotACodeCommitRemote
+    | GitContextError
   >
 
   /** Scans the planned accounts for open PRs in that repository. */
@@ -121,16 +140,41 @@ const make = Effect.gen(function*() {
       })
     }
 
-    // The remote's region, when it names one, is part of the repository's identity:
-    // a same-named repository in another region is a different repository, and
-    // skipping those accounts also spends fewer API calls per keypress.
-    const targets = remote.region === null
+    const profileTargets = remote.profile === null
       ? allTargets
-      : allTargets.filter((target) => target.region === remote.region)
+      : allTargets.filter((target) => target.profile === remote.profile)
 
+    if (remote.profile !== null && profileTargets.length === 0) {
+      return yield* new NoAccountForProfile({
+        profile: remote.profile,
+        message: `No enabled account is configured for profile ${remote.profile}, which '${input.remote}' names.`
+      })
+    }
+
+    // A helper URL without a region still has one effective region. The app can
+    // use its configured profile only when that profile names exactly one;
+    // otherwise opening a same-named repository in another region is possible.
+    if (remote.region === null) {
+      const regions = [...new Set(profileTargets.map((target) => target.region))].sort()
+      if (regions.length !== 1) {
+        const scope = remote.profile === null
+          ? "Enabled accounts"
+          : `Profile ${remote.profile}`
+        return yield* new AmbiguousRemoteRegion({
+          profile: remote.profile ?? "(no embedded profile)",
+          regions,
+          message: `${scope} span ${regions.length} configured regions (${regions.join(", ")}); ` +
+            "use a region-qualified codecommit::REGION:// remote."
+        })
+      }
+      return { branch: context.branch, remote, targets: profileTargets }
+    }
+
+    // A same-named repository in another region is a different repository.
+    const targets = profileTargets.filter((target) => target.region === remote.region)
     if (targets.length === 0) {
       return yield* new NoAccountForRegion({
-        region: remote.region ?? "",
+        region: remote.region,
         message: `No enabled account is configured for region ${remote.region}, which '${input.remote}' names.`
       })
     }
@@ -138,11 +182,12 @@ const make = Effect.gen(function*() {
     return { branch: context.branch, remote, targets }
   })
 
-  const scan: PrOpenServiceContract["scan"] = (input) =>
+  const scan: PrOpenServiceContract["scan"] = Effect.fn("PrOpenService.scan")((input) =>
     filterService.collectOpen(input.targets, {
       repo: Option.some(input.remote.repositoryName),
       author: Option.none()
     }).pipe(Effect.map(({ failures, prs }) => ({ failures, prs })))
+  )
 
   return { plan, scan } satisfies PrOpenServiceContract
 })
@@ -181,6 +226,77 @@ export const PrOpenLive = Layer.mergeAll(
   )
 )
 
+export type PrOpenMode = "interactive" | "json" | "url"
+
+/**
+ * Resolves one open pull request and renders the selected stdout shape.
+ *
+ * Machine-readable modes route Effect logs to stderr for the full scan. AWS
+ * enrichment is best-effort and may log before recovering, so guarding only the
+ * command's own progress lines would still corrupt JSON and URL output.
+ */
+export const resolvePrOpenPresentation = Effect.fn("PrOpen.resolvePresentation")((input: {
+  readonly cwd: string
+  readonly mode: PrOpenMode
+  readonly remote: string
+}) =>
+  Effect.gen(function*() {
+    const service = yield* PrOpenService
+    const plan = yield* service.plan({ cwd: input.cwd, remote: input.remote })
+
+    if (input.mode === "interactive") {
+      yield* Console.error(
+        `Looking for an open PR on '${plan.branch}' in ${plan.remote.repositoryName} ` +
+          `across ${plan.targets.length} account(s)...`
+      )
+    }
+
+    const { failures, prs } = yield* service.scan(plan)
+    for (const failure of failures) yield* Console.error(`⚠ ${failure}`)
+    const pullRequest = yield* resolveOpenPullRequest({
+      failures,
+      pullRequests: prs,
+      target: { branch: plan.branch, repositoryName: plan.remote.repositoryName },
+      targetCount: plan.targets.length
+    })
+
+    const link = codecommitPullRequestConsoleUrl({
+      prId: pullRequest.id,
+      region: pullRequest.account.region,
+      repositoryName: pullRequest.repositoryName
+    })
+    if (link === null) {
+      return yield* new UnsupportedConsoleRegion({
+        region: pullRequest.account.region,
+        message: `No known AWS console host for region ${pullRequest.account.region}`
+      })
+    }
+
+    if (input.mode === "json") {
+      yield* Console.log(JSON.stringify(
+        {
+          pr_id: pullRequest.id,
+          repo: pullRequest.repositoryName,
+          branch: plan.branch,
+          title: pullRequest.title,
+          author: pullRequest.author,
+          profile: pullRequest.account.profile,
+          region: pullRequest.account.region,
+          url: link
+        },
+        null,
+        2
+      ))
+    } else if (input.mode === "url") {
+      yield* Console.log(link)
+    }
+
+    return { link, pullRequest }
+  }).pipe(
+    Effect.provideService(Logger.LogToStderr, input.mode !== "interactive")
+  )
+)
+
 /** @category Command */
 export const prOpenCommand = Command.make("open", {
   cwd: Options.string("cwd").pipe(
@@ -208,86 +324,30 @@ export const prOpenCommand = Command.make("open", {
       return yield* reportFailure("--json and --url select different output; pass one.")
     }
 
-    const service = yield* PrOpenService
-    const plan = yield* service.plan({ cwd, remote })
+    const mode: PrOpenMode = json ? "json" : url ? "url" : "interactive"
+    const { link, pullRequest } = yield* resolvePrOpenPresentation({ cwd, mode, remote })
+    if (mode !== "interactive") return
 
-    // The scan is several seconds of silence otherwise, and the usual caller is a
-    // popup where silence reads as a hang. On stderr, and suppressed for the
-    // machine-readable modes, exactly like `pr list`'s progress line.
-    if (!json && !url) {
-      yield* Console.error(
-        `Looking for an open PR on '${plan.branch}' in ${plan.remote.repositoryName} ` +
-          `across ${plan.targets.length} account(s)...`
-      )
-    }
-
-    const { failures, prs } = yield* service.scan(plan)
-    // Warnings go to stderr so `--json`/`--url` stdout stays machine-readable.
-    for (const failure of failures) yield* Console.error(`⚠ ${failure}`)
-
-    const match = matchOpenPullRequest(prs, {
-      branch: plan.branch,
-      repositoryName: plan.remote.repositoryName
+    yield* Console.error(
+      `Opening PR ${pullRequest.id} (${pullRequest.repositoryName}) via ${pullRequest.account.profile}...`
+    )
+    yield* openAssumeConsole({
+      link,
+      profile: pullRequest.account.profile,
+      requestId: `pr-open-${pullRequest.id}`
     })
-    if (match === null) {
-      // Same reasoning as the empty-target check in `plan`, applied to the scan's
-      // own outcome: an account that failed was not searched. With several
-      // profiles a stale SSO session is the ordinary state, not an edge case,
-      // and reporting that as an absent pull request sends the caller to
-      // CodeCommit when the answer is `aws sso login`.
-      if (failures.length > 0) {
-        return yield* reportFailure(
-          `Could not determine whether ${plan.remote.repositoryName} branch '${plan.branch}' has an open PR: ` +
-            `${failures.length} of ${plan.targets.length} account(s) could not be searched.`
-        )
-      }
-      return yield* new NoOpenPullRequest({
-        branch: plan.branch,
-        repositoryName: plan.remote.repositoryName,
-        message: `No open PR for ${plan.remote.repositoryName} branch '${plan.branch}'`
-      })
-    }
-
-    const link = codecommitPullRequestConsoleUrl({
-      prId: match.id,
-      region: match.account.region,
-      repositoryName: match.repositoryName
-    })
-    if (link === null) {
-      return yield* new UnsupportedConsoleRegion({
-        region: match.account.region,
-        message: `No known AWS console host for region ${match.account.region}`
-      })
-    }
-
-    if (json) {
-      return yield* Console.log(JSON.stringify(
-        {
-          pr_id: match.id,
-          repo: match.repositoryName,
-          branch: plan.branch,
-          title: match.title,
-          author: match.author,
-          profile: match.account.profile,
-          region: match.account.region,
-          url: link
-        },
-        null,
-        2
-      ))
-    }
-    if (url) return yield* Console.log(link)
-
-    yield* Console.error(`Opening PR ${match.id} (${match.repositoryName}) via ${match.account.profile}...`)
-    yield* openAssumeConsole({ link, profile: match.account.profile, requestId: `pr-open-${match.id}` })
   }).pipe(
     // Every failure here is something to tell the user in one sentence, not a
     // Cause to render: the usual caller is a keybinding showing this in a popup.
     Effect.catchTags({
+      AmbiguousOpenPullRequest: (error) => reportFailure(error.message),
+      AmbiguousRemoteRegion: (error) => reportFailure(error.message),
       ConfigUnreadable: (error) => reportFailure(error.message),
       ConsoleLaunchError: (error) => reportFailure(error.message),
       GitContextError: (error) => reportFailure(error.message),
+      IncompleteOpenPullRequestScan: (error) => reportFailure(error.message),
       NoAccountForRegion: (error) => reportFailure(error.message),
+      NoAccountForProfile: (error) => reportFailure(error.message),
       NoEnabledAccounts: (error) => reportFailure(error.message),
       NoOpenPullRequest: (error) => reportFailure(error.message),
       NotACodeCommitRemote: (error) => reportFailure(error.message),

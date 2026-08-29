@@ -11,9 +11,10 @@
  * @module
  */
 import { AwsClient, type Domain } from "@knpkv/codecommit-core"
-import { Console, Context, Effect, Layer, type Option, Stream } from "effect"
+import { Console, Context, Effect, Layer, type Option, Predicate, Schema, Stream } from "effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { makeAccount } from "./CliAccount.js"
+import { reportFailure } from "./CliFailure.js"
 import { FILTER_PRESETS, type FilterPreset, matchesRepoAuthor } from "./filterPresets.js"
 import { type FilterCollectError, FilterService, FilterServiceLive, type FilterTarget } from "./FilterService.js"
 import { accountSuffix, renderPullRequestEntry, statusPrefix } from "./PrListOutput.js"
@@ -26,6 +27,11 @@ export interface PresetListing {
   readonly prs: ReadonlyArray<Domain.PullRequest>
   readonly unresolvedProfiles: ReadonlyArray<string>
 }
+
+export class PrListConfigUnreadable extends Schema.TaggedError<PrListConfigUnreadable>()(
+  "PrListConfigUnreadable",
+  { message: Schema.String }
+) {}
 
 export interface PrListServiceContract {
   /** Lists one account, newest first when both statuses are requested. */
@@ -45,7 +51,7 @@ export interface PrListServiceContract {
    * announces how many accounts it is about to scan, and that line has to
    * precede the scan it describes rather than report it afterwards.
    */
-  readonly resolveTargets: Effect.Effect<ReadonlyArray<FilterTarget>>
+  readonly resolveTargets: Effect.Effect<ReadonlyArray<FilterTarget>, PrListConfigUnreadable>
 
   /** Fans a named preset out across the given accounts. */
   readonly listPreset: (input: {
@@ -60,7 +66,7 @@ const make = Effect.gen(function*() {
   const aws = yield* AwsClient.AwsClient
   const filterService = yield* FilterService
 
-  const collectMatching = (
+  const collectMatching = Effect.fn("PrListService.collectMatching")((
     prStream: Stream.Stream<Domain.PullRequest, AwsClient.AwsClientError>,
     repo: Option.Option<string>,
     author: Option.Option<string>
@@ -70,6 +76,7 @@ const make = Effect.gen(function*() {
       Stream.runCollect,
       Effect.map((chunk) => Array.from(chunk))
     )
+  )
 
   const listAccount: PrListServiceContract["listAccount"] = Effect.fn("PrListService.listAccount")(
     function*(input) {
@@ -90,13 +97,20 @@ const make = Effect.gen(function*() {
     }
   )
 
-  const resolveTargets: PrListServiceContract["resolveTargets"] = filterService.resolveTargets.pipe(Effect.orDie)
+  const resolveTargets: PrListServiceContract["resolveTargets"] = filterService.resolveTargets.pipe(
+    Effect.mapError((error) =>
+      new PrListConfigUnreadable({
+        message: `Unable to read ~/.codecommit/config.json: ${Predicate.isError(error) ? error.message : String(error)}`
+      })
+    )
+  )
 
-  const listPreset: PrListServiceContract["listPreset"] = (input) =>
+  const listPreset: PrListServiceContract["listPreset"] = Effect.fn("PrListService.listPreset")((input) =>
     filterService.collect(input.preset, input.targets, {
       repo: input.repo,
       author: input.author
     })
+  )
 
   return { listAccount, listPreset, resolveTargets } satisfies PrListServiceContract
 })
@@ -241,6 +255,7 @@ export const prListCommand = Command.make("list", {
       }
     }
   }).pipe(
+    Effect.catchTag("PrListConfigUnreadable", (error) => reportFailure(error.message)),
     // The command owns its service layer. The executable supplies the selected
     // AWS transport and configuration services.
     // @effect-diagnostics-next-line strictEffectProvide:off
