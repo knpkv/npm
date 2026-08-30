@@ -24,6 +24,19 @@ const record = (status: JobRecord["status"]): JobRecord => ({
 })
 
 describe("fleet follow polling", () => {
+  it.effect("stops after observing an interrupted job", () =>
+    Effect.gen(function*() {
+      let requests = 0
+      const result = yield* followJob(
+        Effect.sync(() => {
+          requests += 1
+          return record("interrupted")
+        })
+      )
+      expect(result.status).toBe("interrupted")
+      expect(requests).toBe(1)
+    }))
+
   it.effect("returns the observed terminal record without another request", () =>
     Effect.gen(function*() {
       const firstObserved = yield* Deferred.make<void>()

@@ -104,6 +104,22 @@ describe("fleet local authority", () => {
         applyMachines: ["MAC"]
       })
     )).toBe(true)
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        applyMachines: [],
+        crossHost: false,
+        machines: [{ host: "PI", nodeId: "node-pi" }]
+      })
+    )).toBe(true)
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        applyMachines: [],
+        crossHost: false,
+        machines: [{ host: "ser8", nodeId: "node-ser8" }]
+      })
+    )).toBe(true)
     for (
       const invalid of [
         { ...valid, applyCommand: [] },

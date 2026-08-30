@@ -4,6 +4,7 @@ import { Effect, Schedule } from "effect"
 const terminalStatuses = new Set([
   "expired",
   "failed",
+  "interrupted",
   "rejected",
   "succeeded"
 ])

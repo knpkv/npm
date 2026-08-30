@@ -316,8 +316,8 @@ export const HostConfiguration = Schema.Struct({
       )
       return new Set(applyHosts).size === applyHosts.length &&
         applyHosts.every((host) => configuredHosts.has(host)) &&
-        (!configuration.crossHost ||
-          (localConfigured && approvalHubConfigured))
+        localConfigured &&
+        (!configuration.crossHost || approvalHubConfigured)
     },
     {
       expected: "apply machines unique case-insensitively and present in fleet machines"
