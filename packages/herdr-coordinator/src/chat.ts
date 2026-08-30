@@ -79,6 +79,8 @@ export const makeCoordinatorChat = Effect.fn("CoordinatorChat.make")(function*(
     request: ChatRequest,
     actor: string
   ) {
+    const createdAt = yield* now
+    const id = yield* nextId
     const record = yield* options.fleet.submit(
       {
         payload: {
@@ -92,8 +94,8 @@ export const makeCoordinatorChat = Effect.fn("CoordinatorChat.make")(function*(
       actor
     )
     const persisted = yield* Effect.result(options.store.put({
-      createdAt: yield* now,
-      id: yield* nextId,
+      createdAt,
+      id,
       jobId: record.id,
       message: request.message,
       mode: request.mode

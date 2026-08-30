@@ -8,7 +8,7 @@ import {
   JobStore,
   makeFleetService
 } from "@knpkv/herdr-fleet"
-import { Effect, Result, Schema } from "effect"
+import { Crypto, Effect, PlatformError, Result, Schema } from "effect"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -283,6 +283,41 @@ describe("coordinator contracts", () => {
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
         Effect.gen(function*() {
+          const cryptoService = yield* Crypto.Crypto
+          const failingCrypto = Crypto.Crypto.of({
+            ...cryptoService,
+            randomUUIDv4: Effect.fail(
+              new PlatformError.PlatformError(
+                new PlatformError.SystemError({
+                  _tag: "Unknown",
+                  module: "Crypto",
+                  method: "randomUUIDv4",
+                  description: "entropy unavailable"
+                })
+              )
+            )
+          })
+          const idFailureFleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("id-failure-job"),
+            now: Effect.succeed(1_000),
+            operations: baseOperations,
+            store
+          })
+          const idFailureChat = yield* makeCoordinatorChat({
+            config: config(root),
+            fleet: idFailureFleet,
+            now: Effect.succeed(1_000),
+            store: failingStore
+          }).pipe(Effect.provideService(Crypto.Crypto, failingCrypto))
+          expect(Result.isFailure(
+            yield* Effect.result(
+              idFailureChat.submit({ message: "check fleet", mode: "ask" }, "owner")
+            )
+          )).toBe(true)
+          expect(yield* store.list(1)).toEqual([])
+
           const fleet = yield* makeFleetService({
             approvalEnabled: true,
             host: "SER8",
