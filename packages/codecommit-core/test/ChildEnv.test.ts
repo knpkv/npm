@@ -22,7 +22,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { fileURLToPath } from "node:url"
@@ -362,6 +364,9 @@ describe("ChildEnv.gitChildEnv", () => {
         ChildEnv.gitChildEnv(
           {
             ...host.variables,
+            GIT_CONFIG_GLOBAL: "/outer/global-config",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_SYSTEM: "/outer/system-config",
             GIT_DIR: "/outer/repository/.git",
             GIT_INDEX_FILE: "/outer/repository/index",
             Git_Config_Key_0: "core.hooksPath",
@@ -373,9 +378,75 @@ describe("ChildEnv.gitChildEnv", () => {
 
       assert.isFalse("GIT_DIR" in env)
       assert.isFalse("GIT_INDEX_FILE" in env)
+      assert.isFalse("GIT_CONFIG_NOSYSTEM" in env)
+      assert.isFalse("GIT_CONFIG_SYSTEM" in env)
       assert.isFalse("Git_Config_Key_0" in env)
       assert.isFalse("git_config_value_0" in env)
       assert.strictEqual(env.GIT_CONFIG_GLOBAL, "/dev/null")
       assert.isTrue(hasSearchPath(env))
     }).pipe(Effect.provide(testRuntimeLayer)))
+
+  it.effect("ignores an inherited global config that redirects an explicit push target", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const host = yield* ChildEnv.HostEnvironment
+        const path = yield* Path.Path
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-git-child-env-" })
+        const attacker = path.join(root, "attacker.git")
+        const config = path.join(root, "redirect.gitconfig")
+        const source = path.join(root, "source")
+        const victim = path.join(root, "victim.git")
+        const runGit = Effect.fn("ChildEnvTest.runGit")(function*(
+          args: ReadonlyArray<string>,
+          inherited = host.variables
+        ) {
+          return yield* spawner.string(
+            ChildProcess.make("git", args, {
+              env: ChildEnv.gitChildEnv(inherited),
+              extendEnv: true,
+              stderr: "pipe",
+              stdout: "pipe"
+            })
+          )
+        })
+
+        yield* runGit(["init", "--bare", "--quiet", "--", attacker])
+        yield* runGit(["init", "--bare", "--quiet", "--", victim])
+        yield* runGit(["init", "--quiet", "--", source])
+        yield* runGit(["-C", source, "config", "user.email", "relay@example.test"])
+        yield* runGit(["-C", source, "config", "user.name", "Relay test"])
+        yield* runGit(["-C", source, "commit", "--allow-empty", "--quiet", "-m", "initial"])
+        yield* runGit(["-C", source, "remote", "add", "victim", victim])
+        yield* runGit(["config", "--file", config, `url.${attacker}.pushInsteadOf`, victim])
+        yield* runGit(
+          ["-C", source, "push", "--quiet", "victim", "HEAD:refs/heads/main"],
+          { ...host.variables, GIT_CONFIG_GLOBAL: config }
+        )
+
+        assert.strictEqual(
+          yield* spawner.exitCode(
+            ChildProcess.make("git", ["--git-dir", victim, "show-ref", "--verify", "refs/heads/main"], {
+              env: ChildEnv.gitChildEnv(host.variables),
+              extendEnv: true,
+              stderr: "pipe",
+              stdout: "pipe"
+            })
+          ),
+          0
+        )
+        assert.notStrictEqual(
+          yield* spawner.exitCode(
+            ChildProcess.make("git", ["--git-dir", attacker, "show-ref", "--verify", "refs/heads/main"], {
+              env: ChildEnv.gitChildEnv(host.variables),
+              extendEnv: true,
+              stderr: "pipe",
+              stdout: "pipe"
+            })
+          ),
+          0
+        )
+      })
+    ).pipe(Effect.provide(testRuntimeLayer)))
 })
