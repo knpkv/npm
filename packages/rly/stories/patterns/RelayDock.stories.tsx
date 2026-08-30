@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { type ReactElement, useState } from "react"
+import { type ReactElement, type ReactNode, useState } from "react"
 import { expect, userEvent, waitFor } from "storybook/test"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import {
@@ -62,6 +62,11 @@ const nestedDialogState: RlyRelayDockState = {
   status: "ready"
 }
 
+const richTextState: RlyRelayDockState = {
+  content: <div aria-label="Rich Relay reply" contentEditable role="textbox" />,
+  status: "ready"
+}
+
 const unavailableState: RlyRelayDockState = {
   action: <Button size="compact">Check connection</Button>,
   description: "The product adapter cannot reach Relay. The review remains unchanged.",
@@ -112,11 +117,13 @@ const Composer = (): ReactElement => (
 
 const RelayDockFixture = ({
   initiallyOpen = false,
+  footer = <Composer />,
   presentation = "overlay",
   state = readyState,
   tall = false
 }: {
   readonly initiallyOpen?: boolean
+  readonly footer?: ReactNode
   readonly presentation?: RlyRelayDockDesktopPresentation
   readonly state?: RlyRelayDockState
   readonly tall?: boolean
@@ -141,7 +148,7 @@ const RelayDockFixture = ({
               { id: "head", label: "Head", value: "8fa21c7" }
             ]}
             desktopPresentation={presentation}
-            footer={<Composer />}
+            footer={footer}
             onOpenChange={setOpen}
             open={open}
             selection={{
@@ -200,6 +207,10 @@ export const RailScrolling: Story = {
 
 export const NestedModal: Story = {
   render: () => <RelayDockFixture initiallyOpen state={nestedDialogState} />
+}
+
+export const RichTextComposer: Story = {
+  render: () => <RelayDockFixture footer={null} initiallyOpen state={richTextState} />
 }
 
 export const Empty: Story = {
