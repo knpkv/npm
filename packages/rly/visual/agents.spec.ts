@@ -140,6 +140,49 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
   }
 })
 
+test("modal Relay presentations isolate and scroll-lock the page without swallowing nested modal keys", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--modal-isolation"))
+  const background = page.locator("main")
+  const overlay = page.locator("[data-rly-relay-dock-overlay]")
+
+  await expect.poll(() => background.evaluate((element) => element.hasAttribute("inert"))).toBe(true)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+  await overlay.hover()
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+  await page.setViewportSize({ height: 600, width: 390 })
+  const sheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(sheet).toBeVisible()
+  await sheet.locator(":scope > header").hover()
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.getByRole("button", { name: "Close Relay" }).click()
+  await expect.poll(() => background.evaluate((element) => element.hasAttribute("inert"))).toBe(false)
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  await page.goto(story("patterns-relaydock--rail-scrolling"))
+  await expect(page.getByRole("complementary", { name: "Relay" })).toBeVisible()
+  await expect.poll(() => page.locator("main").evaluate((element) => element.hasAttribute("inert"))).toBe(false)
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  await page.goto(story("patterns-relaydock--nested-modal"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.getByRole("button", { name: "Open nested action" }).click()
+  const nested = page.getByRole("dialog", { name: "Nested Relay action" })
+  await expect(nested).toBeVisible()
+  await page.keyboard.press("Tab")
+  expect(await nested.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
+  await page.keyboard.press("Escape")
+  await expect(nested).toHaveCount(0)
+  await expect(dock).toBeVisible()
+})
+
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_200 })
   await page.goto(story("patterns-agentdrawer--interaction"))

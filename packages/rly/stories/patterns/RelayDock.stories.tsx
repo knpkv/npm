@@ -9,6 +9,7 @@ import {
   type RlyRelayDockState
 } from "../../src/patterns/RelayDock.js"
 import { Button } from "../../src/primitives/Button.js"
+import { Dialog } from "../../src/primitives/Dialog.js"
 import { Field } from "../../src/primitives/Field.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
@@ -42,6 +43,22 @@ const readyState: RlyRelayDockState = {
       <ThreadMarker />
     </div>
   ),
+  status: "ready"
+}
+
+const NestedDialogProbe = (): ReactElement => (
+  <Dialog.Root>
+    <Dialog.Trigger>Open nested action</Dialog.Trigger>
+    <Dialog.Content title="Nested Relay action">
+      <Text>This action stays inside its own modal layer.</Text>
+      <Dialog.Close>Close nested action</Dialog.Close>
+      <Button>Inspect nested action</Button>
+    </Dialog.Content>
+  </Dialog.Root>
+)
+
+const nestedDialogState: RlyRelayDockState = {
+  content: <NestedDialogProbe />,
   status: "ready"
 }
 
@@ -96,18 +113,20 @@ const Composer = (): ReactElement => (
 const RelayDockFixture = ({
   initiallyOpen = false,
   presentation = "overlay",
-  state = readyState
+  state = readyState,
+  tall = false
 }: {
   readonly initiallyOpen?: boolean
   readonly presentation?: RlyRelayDockDesktopPresentation
   readonly state?: RlyRelayDockState
+  readonly tall?: boolean
 }): ReactElement => {
   const [open, setOpen] = useState(initiallyOpen)
   const [profile, setProfile] = useState("review")
   const [model, setModel] = useState("codex")
   return (
     <PortalProvider>
-      <main style={pageStyle}>
+      <main style={tall ? { ...pageStyle, minHeight: "200vh" } : pageStyle}>
         <div style={stackStyle}>
           <Text as="h1" variant="section-title">
             PR #184 · Relay review
@@ -169,6 +188,18 @@ export const DesktopRail: Story = {
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />
+}
+
+export const ModalIsolation: Story = {
+  render: () => <RelayDockFixture initiallyOpen tall />
+}
+
+export const RailScrolling: Story = {
+  render: () => <RelayDockFixture initiallyOpen presentation="rail" tall />
+}
+
+export const NestedModal: Story = {
+  render: () => <RelayDockFixture initiallyOpen state={nestedDialogState} />
 }
 
 export const Empty: Story = {
