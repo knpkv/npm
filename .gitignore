@@ -26,6 +26,10 @@ storybook-static/
 .DS_Store
 tmp
 
+# Generated package archives and local packed-package receipts
+packages/herdr-*/*.tgz
+artifacts/
+
 # scratchpad files
 scratchpad/**/*.ts 
 .claude

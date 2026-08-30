@@ -1,0 +1,1942 @@
+import { NodeHttpClient, NodeServices } from "@effect/platform-node"
+import type {
+  ConnectPeerError,
+  TerminalAgentNotFoundError,
+  TerminalBusyError,
+  TerminalConnector,
+  TerminalProtocolError,
+  TerminalTransportError
+} from "@knpkv/herdr-connect"
+import {
+  AgentActivityStore,
+  AgentRelationshipStore,
+  fleetConnectAgents,
+  localConnectAgents,
+  makeHerdrTerminalConnector,
+  TerminalClientCommand,
+  terminalCommandMaxPayloadBytes,
+  TerminalSelection,
+  TerminalServerSignal
+} from "@knpkv/herdr-connect"
+import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
+import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
+import type {
+  FleetApprovalError,
+  FleetJobConflictError,
+  FleetJobNotFoundError,
+  FleetService,
+  FleetStoreError,
+  FleetTransitionConflictError,
+  HostConfiguration,
+  JobRecord
+} from "@knpkv/herdr-fleet"
+import {
+  decodeBoundedResponseJson,
+  FleetAuthorizationError,
+  FleetOperationError,
+  FleetValidationError,
+  JobHash,
+  JobRequest,
+  PeerPendingDecodeError,
+  PeerPendingHostMismatchError,
+  PeerPendingStatusError,
+  PeerPendingTimeoutError,
+  PeerPendingTransportError,
+  PeerPendingUnavailableError
+} from "@knpkv/herdr-fleet"
+import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
+import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
+import type { WorkCheckpointConflictError, WorkProjectionError, WorkService, WorkStoreError } from "@knpkv/herdr-work"
+import { makeWorkService, WorkStore } from "@knpkv/herdr-work"
+import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
+import {
+  Cause,
+  Clock,
+  Crypto,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  ManagedRuntime,
+  Queue,
+  Result,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream
+} from "effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import { createServer as createSecureServer } from "node:https"
+import type { Duplex } from "node:stream"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import WebSocketClient, { WebSocketServer } from "ws"
+import { authorize } from "./auth.js"
+import {
+  type ApprovalDirectory,
+  type DashboardSnapshot,
+  type PendingApproval,
+  type PendingApprovalFailure,
+  PendingApprovalSummary
+} from "./dashboard-model.js"
+import { DashboardView } from "./dashboard-view.js"
+import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
+import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { type ApprovalNotificationCandidate, PushSubscriptionRecord, PushSubscriptionRemoval } from "./model.js"
+import { generateVapidKeys, makePushSender } from "./push-sender.js"
+import { validatePushEndpoint } from "./push-subscription.js"
+import { makePushWorker } from "./push-worker.js"
+import { ApprovalAppStore } from "./store.js"
+import { workCheckpointPath } from "./work-checkpoint.js"
+
+const Approval = Schema.Struct({ hash: JobHash, nonce: Schema.String })
+type Approval = typeof Approval.Type
+const TcpAddress = Schema.Struct({ address: Schema.String, port: Schema.Number })
+
+const peerPendingTimeoutMs = 1_500
+const terminalFrameMaxPayload = 4 * 1024 * 1024
+
+export type UiAssets = {
+  readonly script: string
+  readonly connectScript: string
+  readonly worker: string
+  readonly stylesheet: string
+  readonly fonts: ReadonlyMap<string, Uint8Array>
+}
+
+type ApiError =
+  | ApprovalAppStoreError
+  | ChatHistoryError
+  | ConnectPeerError
+  | FleetApprovalError
+  | FleetAuthorizationError
+  | FleetJobConflictError
+  | FleetJobNotFoundError
+  | FleetOperationError
+  | FleetStoreError
+  | FleetTransitionConflictError
+  | FleetValidationError
+  | PushEndpointNotAllowedError
+  | TerminalTransportError
+  | WorkCheckpointConflictError
+  | WorkProjectionError
+  | WorkStoreError
+
+type Runner = {
+  readonly close: () => Promise<void>
+  readonly enqueue: (jobId: string) => Promise<boolean>
+}
+
+type ListenerMode = "local" | "tailnet" | "approval" | "serve"
+
+type TlsCredentials = {
+  readonly certificate: string
+  readonly privateKey: string
+}
+
+type PushSender = ReturnType<typeof makePushSender>
+
+export type HttpServerOptions = {
+  readonly now?: () => number
+  readonly pushSender?: PushSender
+  readonly terminalConnector?: TerminalConnector
+}
+
+type PeerTarget = {
+  readonly host: string
+  readonly online: boolean
+  readonly approvalUrl: string | null
+  readonly pendingUrl: string | null
+  readonly connectAgentsUrl: string | null
+  readonly terminalUrl: string | null
+}
+
+type PeerPendingError =
+  | PeerPendingDecodeError
+  | PeerPendingHostMismatchError
+  | PeerPendingStatusError
+  | PeerPendingTimeoutError
+  | PeerPendingTransportError
+  | PeerPendingUnavailableError
+
+const json = <Value>(
+  response: ServerResponse,
+  status: number,
+  value: Value
+): void => {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8"
+  })
+  response.end(`${JSON.stringify(value)}\n`)
+}
+
+interface ApiErrorResponse {
+  readonly status: number
+  readonly body: Readonly<Record<string, string | number>>
+}
+
+const apiError = (error: ApiError): ApiErrorResponse => {
+  switch (error._tag) {
+    case "FleetAuthorizationError":
+      return { status: 403, body: { error: error._tag, actor: error.actor } }
+    case "FleetJobNotFoundError":
+      return { status: 404, body: { error: error._tag, jobId: error.jobId } }
+    case "FleetJobConflictError":
+      return { status: 409, body: { error: error._tag, jobId: error.jobId } }
+    case "FleetApprovalError":
+      return { status: 409, body: { error: error._tag, detail: error.detail } }
+    case "FleetTransitionConflictError":
+      return { status: 409, body: { error: error._tag, jobId: error.jobId } }
+    case "FleetValidationError":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "PushEndpointNotAllowedError":
+      return { status: 400, body: { error: error._tag, origin: error.origin } }
+    case "ConnectPeerError":
+      return {
+        status: 503,
+        body: { error: error._tag, host: error.host, reason: error.reason }
+      }
+    case "FleetOperationError":
+    case "TerminalTransportError":
+      return { status: 503, body: { error: error._tag, detail: error.detail } }
+    case "FleetStoreError":
+      return { status: 500, body: { error: error._tag, detail: error.detail } }
+    case "ApprovalAppStoreError":
+    case "ChatHistoryError":
+    case "WorkProjectionError":
+      return { status: 500, body: { error: error._tag, detail: error.detail } }
+    case "WorkStoreError":
+      return { status: 500, body: { error: error._tag, detail: error.operation } }
+    case "WorkCheckpointConflictError":
+      return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+  }
+}
+
+const header = (request: IncomingMessage, name: string): string | undefined => {
+  const value = request.headers[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+const actor = (
+  request: IncomingMessage,
+  config: HostConfiguration,
+  allowLocal: boolean
+) =>
+  authorize(
+    {
+      remoteAddress: request.socket.remoteAddress,
+      login: header(request, "tailscale-user-login")
+    },
+    config.allowedUsers,
+    allowLocal
+  )
+
+const sameOrigin = (request: IncomingMessage, expected: string) => {
+  const received = header(request, "origin")
+  return received === expected
+    ? Effect.void
+    : Effect.fail(
+      new FleetAuthorizationError({ actor: received ?? "missing-origin" })
+    )
+}
+
+const approvalIcon =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
+
+const approvalManifest = JSON.stringify({
+  id: "/",
+  name: "Fleet approvals",
+  short_name: "Approvals",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  background_color: "#111418",
+  theme_color: "#111418",
+  icons: [
+    {
+      src: "/assets/approval-icon.svg",
+      sizes: "any",
+      type: "image/svg+xml",
+      purpose: "any maskable"
+    }
+  ]
+})
+
+const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
+  request: IncomingMessage,
+  config: HostConfiguration,
+  requiredNodeIds: ReadonlyArray<string> | null
+) {
+  const address = request.socket.remoteAddress
+  if (address === undefined) {
+    return yield* new FleetAuthorizationError({ actor: "unknown" })
+  }
+  const tailscale = yield* Tailscale
+  const identity = yield* tailscale.whois(address).pipe(
+    Effect.mapError(
+      (cause) =>
+        new FleetOperationError({
+          cause,
+          detail: String(cause),
+          operation: "tailscale.whois"
+        })
+    )
+  )
+  return yield* authorizeWhois(
+    identity,
+    config.allowedUsers,
+    requiredNodeIds
+  ).pipe(
+    Effect.mapError(
+      (error: TailscaleAuthorizationError) => new FleetAuthorizationError({ actor: error.actor })
+    )
+  )
+})
+
+const readBody = (request: IncomingMessage) =>
+  Effect.tryPromise({
+    try: async () => {
+      const chunks: Array<Buffer> = []
+      let size = 0
+      for await (const chunk of request) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        size += buffer.length
+        if (size > 1024 * 1024) throw new Error("request body exceeds 1 MiB")
+        chunks.push(buffer)
+      }
+      return Buffer.concat(chunks).toString("utf8")
+    },
+    catch: (cause) => new FleetValidationError({ detail: String(cause) })
+  })
+
+const readJson = Effect.fn("ApprovalHttp.readJson")(function*<A>(
+  request: IncomingMessage,
+  schema: Schema.Codec<A, unknown, never, never>
+) {
+  const mediaType = (header(request, "content-type") ?? "")
+    .split(";", 1)[0]
+    ?.trim()
+    .toLowerCase()
+  if (mediaType !== "application/json") {
+    return yield* new FleetValidationError({
+      detail: "content-type must be application/json"
+    })
+  }
+  const text = yield* readBody(request)
+  const unknown = yield* Effect.try({
+    try: () => JSON.parse(text),
+    catch: (cause) => new FleetValidationError({ detail: `invalid JSON: ${String(cause)}` })
+  })
+  return yield* Schema.decodeUnknownEffect(schema, {
+    onExcessProperty: "error"
+  })(unknown).pipe(
+    Effect.mapError(
+      (error) =>
+        new FleetValidationError({
+          detail: `invalid request: ${String(error)}`
+        })
+    )
+  )
+})
+
+const authorizeOriginlessMutation = (request: IncomingMessage) => {
+  const origin = header(request, "origin")
+  const fetchSite = header(request, "sec-fetch-site")
+  return origin === undefined && fetchSite !== "cross-site"
+    ? Effect.void
+    : Effect.fail(
+      new FleetAuthorizationError({ actor: origin ?? fetchSite ?? "browser" })
+    )
+}
+
+export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkCheckpointRequest")(
+  function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
+    authorization: Effect.Effect<string, AuthorizationError, AuthorizationRequirements>,
+    decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
+    work: WorkService
+  ) {
+    yield* authorization
+    const checkpoint = yield* decode
+    return yield* work.record(checkpoint)
+  }
+)
+
+const pathOf = (request: IncomingMessage): URL => {
+  const url = new URL(request.url ?? "/", "http://hostd.local")
+  if (url.pathname === "/fleet") url.pathname = "/"
+  if (url.pathname.startsWith("/fleet/")) {
+    url.pathname = url.pathname.slice("/fleet".length)
+  }
+  return url
+}
+
+const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
+  config: HostConfiguration
+) {
+  const peers = yield* discoverFleetPeers(config.host, config.machines).pipe(
+    Effect.mapError(
+      (cause) =>
+        new FleetOperationError({
+          operation: "tailscale.status",
+          detail: String(cause),
+          cause
+        })
+    )
+  )
+  return peers.map((peer) => {
+    const address = peer.ipv4 ?? undefined
+    return {
+      host: peer.host,
+      online: peer.online,
+      approvalUrl: address === undefined
+        ? null
+        : `http://${address}:${config.approvalPort}/`,
+      pendingUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/pending-approvals`,
+      connectAgentsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/agents/local`,
+      terminalUrl: address === undefined
+        ? null
+        : `ws://${address}:${config.port}/v1/connect/terminal`
+    } satisfies PeerTarget
+  })
+})
+
+const pendingApproval = (record: JobRecord): PendingApproval => ({
+  id: record.id,
+  createdAt: record.createdAt,
+  actor: record.actor,
+  approvalExpiresAt: record.approvalExpiresAt ?? null,
+  status: "pending_approval",
+  payload: record.payload
+})
+
+const localPendingSummary = Effect.fn("HostHttp.localPendingSummary")(
+  function*(host: string, service: FleetService) {
+    const records = yield* service.pendingApprovals()
+    return {
+      host,
+      approvals: records.map(pendingApproval)
+    } satisfies PendingApprovalSummary
+  }
+)
+
+const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
+  function*(peer: PeerTarget) {
+    const pendingUrl = peer.pendingUrl
+    if (pendingUrl === null || peer.approvalUrl === null) {
+      return yield* new PeerPendingUnavailableError({
+        host: peer.host,
+        reason: "unavailable"
+      })
+    }
+    if (!peer.online) {
+      return yield* new PeerPendingUnavailableError({
+        host: peer.host,
+        reason: "offline"
+      })
+    }
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client.get(pendingUrl).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PeerPendingTransportError({
+            host: peer.host,
+            detail: String(cause),
+            cause
+          })
+      )
+    )
+    if (response.status < 200 || response.status >= 300) {
+      return yield* new PeerPendingStatusError({
+        host: peer.host,
+        status: response.status
+      })
+    }
+    const summary = yield* decodeBoundedResponseJson(
+      response,
+      PendingApprovalSummary
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PeerPendingDecodeError({
+            host: peer.host,
+            detail: String(cause),
+            cause
+          })
+      )
+    )
+    if (summary.host.toLowerCase() !== peer.host.toLowerCase()) {
+      return yield* new PeerPendingHostMismatchError({
+        expectedHost: peer.host,
+        receivedHost: summary.host
+      })
+    }
+    return summary
+  },
+  (effect, peer) =>
+    effect.pipe(
+      Effect.timeoutOrElse({
+        duration: peerPendingTimeoutMs,
+        orElse: () =>
+          Effect.fail(
+            new PeerPendingTimeoutError({
+              host: peer.host,
+              timeoutMs: peerPendingTimeoutMs
+            })
+          )
+      })
+    )
+)
+
+const pendingFailureReason = (
+  error: PeerPendingError
+): PendingApprovalFailure["reason"] => {
+  switch (error._tag) {
+    case "PeerPendingUnavailableError":
+      return error.reason
+    case "PeerPendingTimeoutError":
+      return "timeout"
+    case "PeerPendingDecodeError":
+    case "PeerPendingHostMismatchError":
+      return "invalid_response"
+    case "PeerPendingStatusError":
+    case "PeerPendingTransportError":
+      return "request_failed"
+  }
+}
+
+const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
+  function*(peers: ReadonlyArray<PeerTarget>) {
+    const results = yield* Effect.all(
+      peers.map((peer) =>
+        Effect.result(fetchPeerPending(peer)).pipe(
+          Effect.map((result) => ({ peer, result }))
+        )
+      ),
+      { concurrency: 4 }
+    )
+    const remote: Array<{
+      readonly host: string
+      readonly approvalUrl: string
+      readonly approval: PendingApproval
+    }> = []
+    const failures: Array<PendingApprovalFailure> = []
+    for (const { peer, result } of results) {
+      if (Result.isFailure(result)) {
+        failures.push({
+          host: peer.host,
+          reason: pendingFailureReason(result.failure)
+        })
+        continue
+      }
+      if (peer.approvalUrl === null) {
+        failures.push({ host: peer.host, reason: "unavailable" })
+        continue
+      }
+      for (const approval of result.success.approvals) {
+        remote.push({
+          host: peer.host,
+          approvalUrl: peer.approvalUrl,
+          approval
+        })
+      }
+    }
+    return { remote, failures }
+  }
+)
+
+export const notificationCandidates = Effect.fn(
+  "HostHttp.notificationCandidates"
+)(function*(config: HostConfiguration, service: FleetService) {
+  const local = yield* service.pendingApprovals()
+  const localCandidates = local.map(
+    (record): ApprovalNotificationCandidate => ({
+      host: config.host,
+      jobId: record.id
+    })
+  )
+  const peers = yield* Effect.result(fleetPeers(config))
+  if (Result.isFailure(peers)) {
+    yield* Effect.logWarning(
+      "PushWorker.peer_directory_unavailable",
+      peers.failure
+    )
+    return localCandidates
+  }
+  const aggregated = yield* aggregatePeerPending(peers.success)
+  if (aggregated.failures.length > 0) {
+    yield* Effect.logWarning(
+      "PushWorker.peer_pending_partial_failure",
+      aggregated.failures
+    )
+  }
+  return [
+    ...localCandidates,
+    ...aggregated.remote.map(
+      (remote): ApprovalNotificationCandidate => ({
+        host: remote.host,
+        jobId: remote.approval.id
+      })
+    )
+  ]
+})
+
+const dashboardPage = (snapshot: DashboardSnapshot): string => {
+  const markup = snapshot.approvalApp.canonical ? "" : renderToStaticMarkup(
+    createElement(
+      "div",
+      { className: "dashboard-gesture" },
+      createElement(DashboardView, {
+        busyJobId: null,
+        chatBusy: false,
+        notificationState: "loading",
+        onChatSubmit: undefined,
+        onDecision: () => undefined,
+        onDisableNotifications: undefined,
+        onEnableNotifications: undefined,
+        onRefresh: () => undefined,
+        pull: { distance: 0, ready: false, refreshing: false },
+        snapshot
+      })
+    )
+  )
+  const data = JSON.stringify(snapshot).replaceAll("<", "\\u003c")
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#111418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Approvals">
+<title>Host activity · ${snapshot.host}</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/index.css">
+</head>
+<body data-rly-root data-rly-theme="dark">
+<div id="fleet-dashboard-root">${markup}</div>
+<script id="fleet-dashboard-data" type="application/json">${data}</script>
+<script src="/assets/approval.js" defer></script>
+</body>
+</html>`
+}
+
+const connectPage = (): string =>
+  `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Fleet connect</title>
+<link rel="stylesheet" href="/assets/index.css">
+</head>
+<body data-rly-root data-rly-theme="dark" class="connect-body">
+<div id="fleet-connect-root"></div>
+<script src="/assets/connect.js" defer></script>
+</body>
+</html>`
+
+const rejectUpgrade = (
+  socket: Duplex,
+  status: number
+): void => {
+  socket.end(
+    `HTTP/1.1 ${status} ${
+      status === 403 ? "Forbidden" : "Bad Request"
+    }\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`
+  )
+}
+
+const terminalSelectionFromUrl = (url: URL) =>
+  Schema.decodeUnknownEffect(TerminalSelection)({
+    host: url.searchParams.get("host"),
+    agentId: url.searchParams.get("agent"),
+    cols: Number(url.searchParams.get("cols")),
+    rows: Number(url.searchParams.get("rows"))
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new FleetValidationError({
+          detail: `invalid terminal selection: ${String(cause)}`
+        })
+    )
+  )
+
+const terminalCloseCode = (
+  error:
+    | TerminalAgentNotFoundError
+    | TerminalBusyError
+    | TerminalProtocolError
+    | TerminalTransportError
+): number => {
+  switch (error._tag) {
+    case "TerminalAgentNotFoundError":
+      return 4404
+    case "TerminalBusyError":
+      return 4423
+    case "TerminalProtocolError":
+      return 4400
+    case "TerminalTransportError":
+      return 4503
+  }
+}
+
+const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
+  request: IncomingMessage
+) {
+  const contentType = header(request, "content-type") ?? ""
+  if (contentType.startsWith("application/json")) {
+    return yield* readJson(request, Approval)
+  }
+  const body = yield* readBody(request)
+  const form = new URLSearchParams(body)
+  return yield* Schema.decodeUnknownEffect(Approval)({
+    hash: form.get("hash"),
+    nonce: form.get("nonce")
+  }).pipe(
+    Effect.mapError(
+      (error) =>
+        new FleetValidationError({
+          detail: `invalid approval: ${String(error)}`
+        })
+    )
+  )
+})
+
+export const makeRunner = Effect.fn("HostRunner.make")(function*(
+  runJob: (jobId: string) => Effect.Effect<unknown, unknown>
+): Effect.fn.Return<Runner> {
+  const scope = yield* Scope.make()
+  const serial = yield* Semaphore.make(1)
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+  let accepting = true
+
+  const enqueue = (jobId: string): Promise<boolean> => {
+    if (!accepting) return Promise.resolve(false)
+    const run = serial.withPermits(1)(
+      runJob(jobId).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("HostRunner.job_failed", error).pipe(
+            Effect.annotateLogs({ jobId })
+          )
+        ),
+        Effect.ignore
+      )
+    )
+    return runPromise(Effect.forkIn(run, scope)).then(() => true)
+  }
+
+  const close = async (): Promise<void> => {
+    if (!accepting) return
+    accepting = false
+    await runPromise(Scope.close(scope, Exit.void))
+  }
+
+  return { close, enqueue }
+})
+
+export const startHttpServer = async (
+  config: HostConfiguration,
+  service: FleetService,
+  uiAssets: UiAssets,
+  options: HttpServerOptions = {}
+): Promise<{
+  readonly close: () => Promise<void>
+  readonly url: string
+  readonly tailnetUrl: string | null
+  readonly approvalUrl: string | null
+  readonly serveUrl: string | null
+}> => {
+  const isHub = config.crossHost &&
+    config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
+  const approvalTls = config.approvalTls
+  if (isHub && approvalTls === null) {
+    throw new FleetValidationError({
+      detail: "approval hub requires direct TLS certificate and private key paths"
+    })
+  }
+  const configuredTailscale = tailscaleLayer(config.tailscaleCommand).pipe(
+    Layer.provide(NodeServices.layer)
+  )
+  const httpRuntime = ManagedRuntime.make(
+    Layer.mergeAll(
+      NodeServices.layer,
+      NodeHttpClient.layerNodeHttp,
+      configuredTailscale
+    )
+  )
+  const activeServers = new Set<
+    ReturnType<typeof createServer> | ReturnType<typeof createSecureServer>
+  >()
+  const activeHttpSockets = new Set<Duplex>()
+  const activeRequestControllers = new Set<AbortController>()
+  const terminalControllers = new Set<string>()
+  const terminalTasks = new Set<Promise<void>>()
+  const webSockets = new Set<WebSocketClient>()
+  const finalizers: Array<() => Promise<void>> = [
+    () => httpRuntime.dispose()
+  ]
+  let acceptingRequests = false
+  let closed = false
+  const runRequest = <A, E>(
+    effect: Effect.Effect<A, E, HttpClient.HttpClient | Tailscale>
+  ): Promise<A> => {
+    const controller = new AbortController()
+    activeRequestControllers.add(controller)
+    return httpRuntime.runPromise(effect, { signal: controller.signal }).finally(
+      () => activeRequestControllers.delete(controller)
+    )
+  }
+  const shutdown = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    acceptingRequests = false
+    for (const controller of activeRequestControllers) controller.abort()
+    for (const socket of webSockets) socket.terminate()
+    for (const socket of activeHttpSockets) socket.destroy()
+    const failures: Array<unknown> = []
+    const serverResults = await Promise.allSettled(
+      [...activeServers].map(
+        (server) =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => error === undefined ? resolve() : reject(error))
+          })
+      )
+    )
+    for (const result of serverResults) {
+      if (result.status === "rejected") failures.push(result.reason)
+    }
+    for (const socket of webSockets) socket.terminate()
+    const terminalResults = await Promise.allSettled(terminalTasks)
+    for (const result of terminalResults) {
+      if (result.status === "rejected") failures.push(result.reason)
+    }
+    for (const finalize of finalizers) {
+      try {
+        await finalize()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "hostd cleanup failed")
+    }
+  }
+
+  try {
+    const tlsCredentials = isHub && approvalTls !== null
+      ? await httpRuntime.runPromise(
+        Effect.gen(function*() {
+          const fileSystem = yield* FileSystem.FileSystem
+          const read = (path: string, operation: string) =>
+            fileSystem.readFileString(path).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FleetOperationError({
+                    cause,
+                    detail: `cannot read approval TLS material at ${path}`,
+                    operation
+                  })
+              )
+            )
+          return {
+            certificate: yield* read(
+              approvalTls.certificatePath,
+              "hostd.approval_tls.read_certificate"
+            ),
+            privateKey: yield* read(
+              approvalTls.privateKeyPath,
+              "hostd.approval_tls.read_private_key"
+            )
+          }
+        })
+      )
+      : null
+    const respond = async <A>(
+      response: ServerResponse,
+      effect: Effect.Effect<
+        A,
+        ApiError,
+        HttpClient.HttpClient | Tailscale
+      >,
+      status = 200
+    ): Promise<void> => {
+      const result = await runRequest(Effect.result(effect))
+      if (Result.isSuccess(result)) {
+        json(response, status, result.success)
+        return
+      }
+      const mapped = apiError(result.failure)
+      json(response, mapped.status, mapped.body)
+    }
+    const statePath = `${config.stateDirectory}/approval-app.sqlite`
+    const approvalStore = await httpRuntime.runPromise(
+      ApprovalAppStore.open(statePath)
+    )
+    finalizers.unshift(() => Promise.resolve().then(() => approvalStore.close()))
+    const cryptoService = await httpRuntime.runPromise(Crypto.Crypto)
+    const chatStore = await httpRuntime.runPromise(ChatStore.open(statePath))
+    finalizers.unshift(() => Promise.resolve().then(() => chatStore.close()))
+    const activityStore = await httpRuntime.runPromise(
+      AgentActivityStore.open(statePath)
+    )
+    finalizers.unshift(() => Promise.resolve().then(() => activityStore.close()))
+    const relationshipStore = await httpRuntime.runPromise(
+      AgentRelationshipStore.open(statePath)
+    )
+    finalizers.unshift(() => Promise.resolve().then(() => relationshipStore.close()))
+    const workStore = await httpRuntime.runPromise(WorkStore.open(statePath))
+    finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
+    const work = await httpRuntime.runPromise(makeWorkService(workStore))
+    const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
+    const chat = await httpRuntime.runPromise(makeCoordinatorChat({
+      config,
+      fleet: service,
+      store: chatStore
+    }))
+    const runJob = Effect.fn("HostRunner.runJob")(function*(jobId: string) {
+      const record = yield* service.get(jobId)
+      return yield* record.payload.kind === "agent.delegate" &&
+          record.payload.channel === "coordinator_chat"
+        ? chat.run(jobId)
+        : service.run(jobId)
+    })
+    const runner = await Effect.runPromise(makeRunner(runJob))
+    finalizers.unshift(() => runner.close())
+    const enqueueJob = (jobId: string) =>
+      Effect.promise(() => runner.enqueue(jobId)).pipe(
+        Effect.flatMap((accepted) =>
+          accepted
+            ? Effect.void
+            : Effect.fail(
+              new FleetOperationError({
+                cause: jobId,
+                detail: "job runner is closed",
+                operation: "hostd.runner.enqueue"
+              })
+            )
+        )
+      )
+    const vapidKeys = isHub
+      ? await Effect.runPromise(
+        approvalStore.getOrCreateVapidKeys(generateVapidKeys)
+      )
+      : null
+    const pushSender = vapidKeys === null
+      ? null
+      : (options.pushSender ??
+        makePushSender(
+          vapidKeys,
+          config.pushSubject,
+          approvalStore,
+          config.pushAllowedOrigins
+        ))
+    const workerScope = await Effect.runPromise(Scope.make())
+    finalizers.unshift(() => Effect.runPromise(Scope.close(workerScope, Exit.void)))
+    const terminalConnector = options.terminalConnector ??
+      (await httpRuntime.runPromise(makeHerdrTerminalConnector(config, service)))
+    const webSocketServer = new WebSocketServer({
+      noServer: true,
+      maxPayload: terminalCommandMaxPayloadBytes,
+      perMessageDeflate: false
+    })
+
+    const watchSocket = (socket: WebSocketClient): void => {
+      let alive = true
+      socket.on("error", () => socket.terminate())
+      const heartbeat = setInterval(() => {
+        if (!alive) {
+          socket.terminate()
+          return
+        }
+        alive = false
+        socket.ping()
+      }, 25_000)
+      heartbeat.unref()
+      socket.on("pong", () => {
+        alive = true
+      })
+      socket.once("close", () => clearInterval(heartbeat))
+    }
+
+    const closeSocket = (
+      socket: WebSocketClient,
+      code: number,
+      reason: string
+    ): void => {
+      if (socket.readyState === WebSocketClient.OPEN) socket.close(code, reason)
+    }
+
+    const attachTerminal = async (
+      socket: WebSocketClient,
+      selection: typeof TerminalSelection.Type
+    ): Promise<void> => {
+      if (terminalControllers.size >= 4) {
+        closeSocket(socket, 4429, "terminal connection limit reached")
+        return
+      }
+      const key = `${selection.host.toLowerCase()}:${selection.agentId}`
+      if (terminalControllers.has(key)) {
+        closeSocket(socket, 4423, "agent already controlled")
+        return
+      }
+      terminalControllers.add(key)
+      const scope = await Effect.runPromise(Scope.make())
+      let finalized = false
+      let finalizePromise: Promise<void> | undefined
+      let idleTimer: NodeJS.Timeout | undefined
+      const finalize = async (): Promise<void> => {
+        if (finalizePromise !== undefined) return finalizePromise
+        finalized = true
+        if (idleTimer !== undefined) clearTimeout(idleTimer)
+        finalizePromise = Effect.runPromise(
+          Scope.close(scope, Exit.void)
+        ).finally(() => terminalControllers.delete(key))
+        return finalizePromise
+      }
+      const finalizeFromSocket = (): void => {
+        void finalize().catch((error) =>
+          Effect.runPromise(
+            Effect.logError("HostHttp.terminal_finalize_failed", error)
+          )
+        )
+      }
+      socket.once("close", finalizeFromSocket)
+      socket.once("error", finalizeFromSocket)
+      const openFiber = await Effect.runPromise(
+        Effect.forkIn(
+          Effect.result(Scope.provide(scope)(terminalConnector.open(selection))),
+          scope
+        )
+      )
+      const openExit = await Effect.runPromise(Fiber.await(openFiber))
+      if (Exit.isFailure(openExit)) {
+        await finalize()
+        if (Cause.hasInterruptsOnly(openExit.cause)) return
+        await Effect.runPromise(Effect.failCause(openExit.cause))
+        return
+      }
+      const opened = openExit.value
+      if (Result.isFailure(opened)) {
+        await finalize()
+        closeSocket(
+          socket,
+          terminalCloseCode(opened.failure),
+          opened.failure._tag
+        )
+        return
+      }
+      if (finalized || socket.readyState !== WebSocketClient.OPEN) {
+        await finalize()
+        return
+      }
+      const session = opened.success
+      const inputQueue = await Effect.runPromise(
+        Queue.dropping<typeof TerminalClientCommand.Type>(64)
+      )
+      const inputLoop = Stream.fromQueue(inputQueue).pipe(
+        Stream.runForEach(session.send),
+        Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
+      )
+      await Effect.runPromise(Effect.forkIn(inputLoop, scope))
+      const resetIdle = (): void => {
+        if (idleTimer !== undefined) clearTimeout(idleTimer)
+        idleTimer = setTimeout(
+          () => closeSocket(socket, 4408, "terminal idle timeout"),
+          30 * 60 * 1_000
+        )
+        idleTimer.unref()
+      }
+      resetIdle()
+      const readySignal = JSON.stringify(
+        Schema.decodeUnknownSync(TerminalServerSignal)({
+          type: "terminal.ready"
+        })
+      )
+      setImmediate(() => {
+        if (socket.readyState === WebSocketClient.OPEN) socket.send(readySignal)
+      })
+      socket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          closeSocket(socket, 4400, "binary client frames are forbidden")
+          return
+        }
+        resetIdle()
+        try {
+          const command = Schema.decodeUnknownSync(TerminalClientCommand)(
+            JSON.parse(data.toString())
+          )
+          if (!Queue.offerUnsafe(inputQueue, command)) {
+            closeSocket(socket, 4429, "terminal input queue limit reached")
+          }
+        } catch {
+          closeSocket(socket, 4400, "invalid terminal command")
+        }
+      })
+      const eventLoop = Stream.runForEach(session.events, (event) =>
+        Effect.sync(() => {
+          if (socket.readyState !== WebSocketClient.OPEN) return
+          if (event.type === "terminal.frame") {
+            const payload = Buffer.from(event.bytes, "base64")
+            if (!terminalBufferCanAccept(socket.bufferedAmount, payload.byteLength)) {
+              closeSocket(socket, 4429, "terminal output backpressure limit hit")
+              return
+            }
+            socket.send(payload, { binary: true })
+          } else {
+            const payload = JSON.stringify(
+              Schema.decodeUnknownSync(TerminalServerSignal)({
+                type: "terminal.closed",
+                reason: "terminal ended"
+              })
+            )
+            if (!terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) {
+              closeSocket(socket, 4429, "terminal output backpressure limit hit")
+              return
+            }
+            socket.send(payload)
+            closeSocket(socket, 1000, "terminal closed")
+          }
+        })).pipe(
+          Effect.tap(() => Effect.sync(() => closeSocket(socket, 1000, "terminal ended"))),
+          Effect.catch((error) => Effect.sync(() => closeSocket(socket, terminalCloseCode(error), error._tag)))
+        )
+      const eventFiber = await Effect.runPromise(
+        Effect.forkIn(eventLoop, scope)
+      )
+      await Effect.runPromise(Fiber.await(eventFiber))
+      await finalize()
+    }
+
+    const proxyTerminal = async (
+      socket: WebSocketClient,
+      selection: typeof TerminalSelection.Type
+    ): Promise<void> => {
+      const peers = await httpRuntime.runPromise(fleetPeers(config))
+      const peer = peers.find(
+        (candidate) => candidate.host.toLowerCase() === selection.host.toLowerCase()
+      )
+      if (peer?.terminalUrl === null || peer?.terminalUrl === undefined) {
+        closeSocket(socket, 4404, "host unavailable")
+        return
+      }
+      const remoteUrl = new URL(peer.terminalUrl)
+      remoteUrl.searchParams.set("host", selection.host)
+      remoteUrl.searchParams.set("agent", selection.agentId)
+      remoteUrl.searchParams.set("cols", String(selection.cols))
+      remoteUrl.searchParams.set("rows", String(selection.rows))
+      const remote = new WebSocketClient(remoteUrl, {
+        headers: { host: remoteUrl.host },
+        maxPayload: terminalFrameMaxPayload,
+        perMessageDeflate: false
+      })
+      const closed = new Promise<void>((resolve) => remote.once("close", () => resolve()))
+      webSockets.add(remote)
+      const connectTimeout = setTimeout(() => {
+        remote.terminate()
+        closeSocket(socket, 4408, "remote terminal connection timeout")
+      }, 5_000)
+      connectTimeout.unref()
+      remote.once("open", () => {
+        clearTimeout(connectTimeout)
+        watchSocket(remote)
+        socket.on("message", (data, isBinary) => {
+          if (isBinary || remote.readyState !== WebSocketClient.OPEN) {
+            closeSocket(socket, 4400, "invalid terminal command")
+            return
+          }
+          try {
+            const decoded = Schema.decodeUnknownSync(TerminalClientCommand)(
+              JSON.parse(data.toString())
+            )
+            const encoded = JSON.stringify(decoded)
+            if (
+              !terminalBufferCanAccept(
+                remote.bufferedAmount,
+                Buffer.byteLength(encoded)
+              )
+            ) {
+              closeSocket(socket, 4429, "remote input backpressure limit hit")
+              remote.close(4429, "remote input backpressure limit hit")
+              return
+            }
+            remote.send(encoded)
+          } catch {
+            closeSocket(socket, 4400, "invalid terminal command")
+          }
+        })
+      })
+      remote.on("message", (data, isBinary) => {
+        if (socket.readyState === WebSocketClient.OPEN) {
+          const payloadBytes = Array.isArray(data)
+            ? data.reduce((bytes, part) => bytes + part.byteLength, 0)
+            : data.byteLength
+          if (!terminalBufferCanAccept(socket.bufferedAmount, payloadBytes)) {
+            closeSocket(socket, 4429, "terminal output backpressure limit hit")
+            if (remote.readyState === WebSocketClient.OPEN) {
+              remote.close(4429, "browser backpressure limit hit")
+            }
+            return
+          }
+          socket.send(data, { binary: isBinary })
+        }
+      })
+      remote.once("unexpected-response", (_request, response) => {
+        clearTimeout(connectTimeout)
+        response.resume()
+        closeSocket(socket, 4403, "remote host rejected connection")
+        remote.terminate()
+      })
+      remote.once("error", () => {
+        clearTimeout(connectTimeout)
+        closeSocket(socket, 4503, "remote host unavailable")
+      })
+      remote.once("close", (code, reason) => {
+        clearTimeout(connectTimeout)
+        webSockets.delete(remote)
+        const relayedCode = relayTerminalCloseCode(code)
+        closeSocket(
+          socket,
+          relayedCode,
+          relayedCode === code
+            ? reason.toString()
+            : "remote terminal closed abnormally"
+        )
+      })
+      socket.once("close", () => {
+        webSockets.delete(remote)
+        if (remote.readyState === WebSocketClient.CONNECTING) {
+          remote.terminate()
+        } else if (remote.readyState === WebSocketClient.OPEN) {
+          remote.close(1000, "browser disconnected")
+        }
+      })
+      await closed
+    }
+
+    const listen = async (
+      address: string,
+      port: number,
+      mode: ListenerMode,
+      tls: TlsCredentials | null = null
+    ) => {
+      let expectedHost = mode === "serve"
+        ? new URL(config.approvalHub.url).host.toLowerCase()
+        : ""
+      const expectedOrigin = (): string =>
+        mode === "serve"
+          ? new URL(config.approvalHub.url).origin
+          : `http://${expectedHost}`
+      const requestHandler = async (
+        request: IncomingMessage,
+        response: ServerResponse
+      ) => {
+        try {
+          const url = pathOf(request)
+          if (header(request, "host")?.toLowerCase() !== expectedHost) {
+            json(response, 403, {
+              error: "FleetAuthorizationError",
+              actor: "host"
+            })
+            return
+          }
+          if (!acceptingRequests) {
+            json(response, 503, { error: "starting" })
+            return
+          }
+          if (request.method === "GET" && url.pathname === "/assets/index.css") {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "text/css; charset=utf-8"
+            })
+            response.end(uiAssets.stylesheet)
+            return
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/assets/approval.js"
+          ) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "text/javascript; charset=utf-8"
+            })
+            response.end(uiAssets.script)
+            return
+          }
+          if (request.method === "GET" && url.pathname === "/assets/connect.js") {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "text/javascript; charset=utf-8"
+            })
+            response.end(uiAssets.connectScript)
+            return
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/assets/approval-sw.js"
+          ) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "text/javascript; charset=utf-8",
+              "service-worker-allowed": "/"
+            })
+            response.end(uiAssets.worker)
+            return
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/manifest.webmanifest"
+          ) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "application/manifest+json; charset=utf-8"
+            })
+            response.end(approvalManifest)
+            return
+          }
+          if (
+            request.method === "GET" &&
+            url.pathname === "/assets/approval-icon.svg"
+          ) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "image/svg+xml; charset=utf-8"
+            })
+            response.end(approvalIcon)
+            return
+          }
+          const fontMatch = /^\/assets\/([^/]+\.woff2)$/.exec(url.pathname)
+          const font = fontMatch?.[1] === undefined
+            ? undefined
+            : uiAssets.fonts.get(fontMatch[1])
+          if (request.method === "GET" && font !== undefined) {
+            response.writeHead(200, {
+              "cache-control": "public, max-age=31536000, immutable",
+              "content-type": "font/woff2"
+            })
+            response.end(font)
+            return
+          }
+          const authorized = mode === "approval"
+            ? tailnetActor(request, config, config.approvalNodes)
+            : mode === "tailnet" || mode === "serve"
+            ? tailnetActor(request, config, null)
+            : actor(request, config, true)
+
+          const approvalSurface = mode === "approval" || mode === "serve"
+          const dashboard = Effect.gen(function*() {
+            const observedAt = now()
+            const resolvedLocalApprovals = approvalSurface
+              ? yield* service.pendingApprovals()
+              : []
+            const state = yield* Effect.all({
+              records: service.history(50),
+              status: service.status()
+            })
+            const chatHistory = mode === "serve" ? yield* chat.history() : null
+            const workSnapshots = mode === "serve" ? yield* work.snapshots(observedAt) : null
+            let directory: ApprovalDirectory | null = null
+            let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
+              local: approvalSurface
+                ? resolvedLocalApprovals
+                : state.records.filter(
+                  (record) => record.status === "pending_approval"
+                ),
+              remote: [],
+              failures: []
+            }
+            if (approvalSurface) {
+              const currentUrl = mode === "serve"
+                ? config.approvalHub.url
+                : `http://${expectedHost}/`
+              const peersResult = yield* Effect.result(fleetPeers(config))
+              directory = Result.isSuccess(peersResult)
+                ? {
+                  currentUrl,
+                  links: peersResult.success.map((peer) => ({
+                    host: peer.host,
+                    online: peer.online,
+                    url: peer.approvalUrl
+                  })),
+                  error: null
+                }
+                : {
+                  currentUrl,
+                  links: [],
+                  error: peersResult.failure.detail
+                }
+              if (Result.isSuccess(peersResult)) {
+                const aggregated = yield* aggregatePeerPending(
+                  peersResult.success
+                )
+                pendingApprovals = {
+                  local: resolvedLocalApprovals,
+                  ...aggregated
+                }
+              } else {
+                pendingApprovals = {
+                  local: resolvedLocalApprovals,
+                  remote: [],
+                  failures: config.machines
+                    .filter(
+                      ({ host }) => host.toLowerCase() !== config.host.toLowerCase()
+                    )
+                    .map(
+                      ({ host }): PendingApprovalFailure => ({
+                        host,
+                        reason: "unavailable"
+                      })
+                    )
+                }
+              }
+            }
+            return {
+              host: config.host,
+              observedAt,
+              approvalsEnabled: approvalSurface,
+              approvalApp: {
+                canonical: mode === "serve",
+                canonicalUrl: config.approvalHub.url,
+                chatEnabled: mode === "serve",
+                pushEnabled: mode === "serve"
+              },
+              chat: chatHistory,
+              work: workSnapshots,
+              status: state.status,
+              records: state.records,
+              directory,
+              pendingApprovals
+            } satisfies DashboardSnapshot
+          })
+
+          if (request.method === "GET" && url.pathname === "/v1/dashboard") {
+            await respond(response, Effect.andThen(authorized, dashboard))
+            return
+          }
+
+          if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/work") {
+            await respond(response, Effect.andThen(authorized, work.snapshots(now())))
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "POST" &&
+            url.pathname === workCheckpointPath
+          ) {
+            const effect = recordWorkCheckpointRequest(
+              authorized,
+              authorizeOriginlessMutation(request).pipe(
+                Effect.andThen(readJson(request, WorkGoalCheckpoint))
+              ),
+              work
+            )
+            await respond(response, effect, 201)
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/push/config"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                Effect.succeed({
+                  canonicalUrl: config.approvalHub.url,
+                  enabled: vapidKeys !== null,
+                  publicKey: vapidKeys?.publicKey ?? null
+                })
+              )
+            )
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/push/subscriptions"
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              const removal = yield* Schema.decodeUnknownEffect(
+                PushSubscriptionRemoval
+              )({ endpoint: url.searchParams.get("endpoint") }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new FleetValidationError({
+                      detail: `invalid subscription endpoint: ${String(cause)}`
+                    })
+                )
+              )
+              return {
+                subscribed: yield* approvalStore.hasSubscription(
+                  removal.endpoint,
+                  who
+                )
+              }
+            })
+            await respond(response, effect)
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "POST" &&
+            url.pathname === "/v1/push/subscriptions"
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              yield* sameOrigin(request, expectedOrigin())
+              const subscription = yield* readJson(
+                request,
+                PushSubscriptionRecord
+              )
+              yield* validatePushEndpoint(
+                subscription.endpoint,
+                config.pushAllowedOrigins
+              )
+              yield* approvalStore.putSubscription(subscription, who)
+              return { subscribed: true }
+            })
+            await respond(response, effect, 201)
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "DELETE" &&
+            url.pathname === "/v1/push/subscriptions"
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              yield* sameOrigin(request, expectedOrigin())
+              const removal = yield* readJson(request, PushSubscriptionRemoval)
+              yield* approvalStore.deleteOwnedSubscription(
+                removal.endpoint,
+                who
+              )
+              return { subscribed: false }
+            })
+            await respond(response, effect)
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/chat"
+          ) {
+            await respond(response, Effect.andThen(authorized, chat.history()))
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "POST" &&
+            url.pathname === "/v1/chat"
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              yield* sameOrigin(request, expectedOrigin())
+              const input = yield* readJson(request, ChatRequest)
+              const submitted = yield* chat.submit(input, who)
+              if (submitted.queued) yield* enqueueJob(submitted.jobId)
+              return submitted.entry
+            })
+            await respond(response, effect, 202)
+            return
+          }
+
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/pending-approvals"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                localPendingSummary(config.host, service)
+              )
+            )
+            return
+          }
+
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/agents/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                tailnetActor(request, config, [config.approvalHub.nodeId]),
+                localConnectAgents(
+                  config,
+                  service,
+                  activityStore,
+                  relationshipStore,
+                  now()
+                ).pipe(
+                  Effect.provideService(Crypto.Crypto, cryptoService)
+                )
+              )
+            )
+            return
+          }
+
+          if (
+            mode === "serve" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/agents"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                Effect.gen(function*() {
+                  const peers = yield* fleetPeers(config)
+                  return yield* fleetConnectAgents(
+                    localConnectAgents(
+                      config,
+                      service,
+                      activityStore,
+                      relationshipStore,
+                      now()
+                    ).pipe(
+                      Effect.provideService(Crypto.Crypto, cryptoService)
+                    ),
+                    peers.map((peer) => ({
+                      agentsUrl: peer.connectAgentsUrl,
+                      host: peer.host,
+                      online: peer.online,
+                      terminalUrl: peer.terminalUrl
+                    }))
+                  )
+                })
+              )
+            )
+            return
+          }
+
+          if (
+            !approvalSurface &&
+            request.method === "GET" &&
+            url.pathname === "/v1/status"
+          ) {
+            await respond(response, Effect.andThen(authorized, service.status()))
+            return
+          }
+          if (
+            !approvalSurface &&
+            request.method === "GET" &&
+            url.pathname === "/v1/history"
+          ) {
+            const rawLimit = Number(url.searchParams.get("limit") ?? "50")
+            const limit = Number.isInteger(rawLimit)
+              ? Math.min(Math.max(rawLimit, 1), 500)
+              : 50
+            await respond(
+              response,
+              Effect.andThen(authorized, service.history(limit))
+            )
+            return
+          }
+          const jobMatch = /^\/v1\/jobs\/([^/]+)$/.exec(url.pathname)
+          if (
+            !approvalSurface &&
+            request.method === "GET" &&
+            jobMatch?.[1] !== undefined
+          ) {
+            await respond(
+              response,
+              Effect.andThen(authorized, service.get(jobMatch[1]))
+            )
+            return
+          }
+          if (
+            !approvalSurface &&
+            request.method === "POST" &&
+            url.pathname === "/v1/jobs"
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              yield* authorizeOriginlessMutation(request)
+              const input = yield* readJson(request, JobRequest)
+              const record = yield* service.submit(input, who)
+              if (record.status === "queued") yield* enqueueJob(record.id)
+              return record
+            })
+            await respond(response, effect, 202)
+            return
+          }
+          const approvalMatch = /^\/v1\/jobs\/([^/]+)\/(approve|reject)$/.exec(
+            url.pathname
+          )
+          const approvalJobId = approvalMatch?.[1]
+          const decision = approvalMatch?.[2]
+          if (
+            approvalSurface &&
+            request.method === "POST" &&
+            approvalJobId !== undefined &&
+            (decision === "approve" || decision === "reject")
+          ) {
+            const effect = Effect.gen(function*() {
+              const who = yield* authorized
+              yield* sameOrigin(request, expectedOrigin())
+              const approval = yield* readApproval(request)
+              const record = decision === "approve"
+                ? yield* service.approve(approvalJobId, approval, who)
+                : yield* service.reject(approvalJobId, approval, who)
+              if (record.status === "queued") yield* enqueueJob(record.id)
+              return record
+            })
+            if (
+              header(request, "content-type")?.startsWith(
+                "application/x-www-form-urlencoded"
+              ) === true
+            ) {
+              const result = await runRequest(Effect.result(effect))
+              if (Result.isFailure(result)) {
+                const mapped = apiError(result.failure)
+                json(response, mapped.status, mapped.body)
+              } else {
+                response.writeHead(303, { location: "/" })
+                response.end()
+              }
+              return
+            }
+            await respond(response, effect)
+            return
+          }
+          if (request.method === "GET" && url.pathname === "/") {
+            const result = await runRequest(
+              Effect.result(Effect.andThen(authorized, dashboard))
+            )
+            if (Result.isFailure(result)) {
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+              return
+            }
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-security-policy": "frame-ancestors 'none'",
+              "content-type": "text/html; charset=utf-8",
+              "x-frame-options": "DENY"
+            })
+            response.end(dashboardPage(result.success))
+            return
+          }
+          if (
+            mode === "serve" &&
+            request.method === "GET" &&
+            url.pathname === "/connect/"
+          ) {
+            const result = await runRequest(Effect.result(authorized))
+            if (Result.isFailure(result)) {
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+              return
+            }
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-security-policy": "frame-ancestors 'none'",
+              "content-type": "text/html; charset=utf-8",
+              "x-frame-options": "DENY"
+            })
+            response.end(connectPage())
+            return
+          }
+          json(response, 404, { error: "not_found" })
+        } catch (error) {
+          if (closed || response.destroyed) return
+          json(response, 500, { error: "internal", detail: String(error) })
+        }
+      }
+      const server = tls === null
+        ? createServer(requestHandler)
+        : await httpRuntime.runPromise(
+          Effect.try({
+            try: () =>
+              createSecureServer(
+                { cert: tls.certificate, key: tls.privateKey },
+                requestHandler
+              ),
+            catch: (cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "approval TLS certificate or private key is invalid",
+                operation: "hostd.approval_tls.create_server"
+              })
+          })
+        )
+
+      server.on("connection", (connection) => {
+        activeHttpSockets.add(connection)
+        connection.once("close", () => activeHttpSockets.delete(connection))
+      })
+
+      server.on("upgrade", async (request, socket, head) => {
+        const url = pathOf(request)
+        const isServeTerminal = mode === "serve" && url.pathname === "/v1/connect/session"
+        const isTailnetTerminal = mode === "tailnet" && url.pathname === "/v1/connect/terminal"
+        if (!isServeTerminal && !isTailnetTerminal) {
+          rejectUpgrade(socket, 404)
+          return
+        }
+        if (header(request, "host")?.toLowerCase() !== expectedHost) {
+          rejectUpgrade(socket, 403)
+          return
+        }
+        if (!acceptingRequests) {
+          rejectUpgrade(socket, 503)
+          return
+        }
+        const access = Effect.gen(function*() {
+          if (isServeTerminal) {
+            yield* tailnetActor(request, config, null)
+            yield* sameOrigin(request, expectedOrigin())
+          } else {
+            yield* tailnetActor(request, config, [config.approvalHub.nodeId])
+          }
+          return yield* terminalSelectionFromUrl(url)
+        })
+        const result = await httpRuntime.runPromise(Effect.result(access)).catch(
+          () => null
+        )
+        if (result === null) {
+          socket.destroy()
+          return
+        }
+        if (Result.isFailure(result)) {
+          rejectUpgrade(socket, 403)
+          return
+        }
+        if (closed || !acceptingRequests) {
+          rejectUpgrade(socket, 503)
+          return
+        }
+        webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+          watchSocket(webSocket)
+          webSockets.add(webSocket)
+          webSocket.once("close", () => webSockets.delete(webSocket))
+          const task = isTailnetTerminal ||
+              result.success.host.toLowerCase() === config.host.toLowerCase()
+            ? attachTerminal(webSocket, result.success)
+            : proxyTerminal(webSocket, result.success)
+          terminalTasks.add(task)
+          void task.then(
+            () => terminalTasks.delete(task),
+            () => {
+              terminalTasks.delete(task)
+              closeSocket(webSocket, 4503, "terminal unavailable")
+            }
+          )
+        })
+      })
+
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject)
+        server.listen(port, address, resolve)
+      })
+      const decodedAddress = Schema.decodeUnknownResult(TcpAddress)(server.address())
+      if (Result.isFailure(decodedAddress)) {
+        throw new FleetOperationError({
+          cause: decodedAddress.failure,
+          detail: "hostd did not receive a TCP address",
+          operation: "hostd.listen.address"
+        })
+      }
+      const bound = decodedAddress.success
+      if (mode !== "serve") {
+        expectedHost = `${bound.address}:${bound.port}`.toLowerCase()
+      }
+      activeServers.add(server)
+      return {
+        server,
+        url: `${tls === null ? "http" : "https"}://${bound.address}:${bound.port}`
+      }
+    }
+
+    const tailscaleIp = config.crossHost
+      ? await httpRuntime.runPromise(
+        Effect.flatMap(Tailscale, (tailscale) => tailscale.ipv4)
+      )
+      : null
+    if (tailscaleIp === "") {
+      throw new FleetOperationError({
+        cause: tailscaleIp,
+        detail: "tailscale ip -4 returned no address",
+        operation: "hostd.tailscale.ipv4"
+      })
+    }
+
+    const recoveredJobIds = await Effect.runPromise(service.recover())
+    const local = await listen("127.0.0.1", config.localPort, "local")
+    if (tailscaleIp === null) {
+      for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+      acceptingRequests = true
+      return {
+        url: local.url,
+        tailnetUrl: null,
+        approvalUrl: null,
+        serveUrl: null,
+        close: shutdown
+      }
+    }
+
+    const remote = await listen(tailscaleIp, config.port, "tailnet")
+    const approval = isHub
+      ? null
+      : await listen(tailscaleIp, config.approvalPort, "approval")
+    const serve = isHub
+      ? await listen(tailscaleIp, config.approvalPort, "serve", tlsCredentials)
+      : null
+    for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+    if (pushSender !== null) {
+      await httpRuntime.runPromise(
+        Effect.forkIn(
+          makePushWorker({
+            allowedPushOrigins: config.pushAllowedOrigins,
+            allowedUsers: config.allowedUsers,
+            loadCandidates: () => notificationCandidates(config, service),
+            send: pushSender,
+            store: approvalStore
+          }),
+          workerScope
+        )
+      )
+    }
+    acceptingRequests = true
+    return {
+      url: local.url,
+      tailnetUrl: remote.url,
+      approvalUrl: approval?.url ?? serve?.url ?? null,
+      serveUrl: serve?.url ?? null,
+      close: shutdown
+    }
+  } catch (error) {
+    try {
+      await shutdown()
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "hostd startup and cleanup both failed",
+        { cause: cleanupError }
+      )
+    }
+    throw error
+  }
+}

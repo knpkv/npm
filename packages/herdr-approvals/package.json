@@ -1,0 +1,86 @@
+{
+  "name": "@knpkv/herdr-approvals",
+  "version": "0.1.0",
+  "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/herdr-approvals"
+  },
+  "type": "module",
+  "sideEffects": [
+    "*.css",
+    "**/*.css",
+    "./dist/bin.js",
+    "./dist/fleetctl.js"
+  ],
+  "bin": {
+    "hostd": "./dist/bin.js",
+    "fleetctl": "./dist/fleetctl.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fleetctl": {
+      "types": "./dist/fleetctl.d.ts",
+      "import": "./dist/fleetctl.js"
+    },
+    "./hostd": {
+      "types": "./dist/bin.d.ts",
+      "import": "./dist/bin.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -b --force && node scripts/build-assets.mjs",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.worker.json --noEmit",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
+    "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
+    "test": "vitest run",
+    "test:pack": "tsx scripts/test-packed-packages.ts"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.0-rc.109",
+    "@effect/platform-browser": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@knpkv/herdr-connect": "workspace:^",
+    "@knpkv/herdr-coordinator": "workspace:^",
+    "@knpkv/herdr-fleet": "workspace:^",
+    "@knpkv/herdr-tailscale": "workspace:^",
+    "@knpkv/herdr-work": "workspace:^",
+    "@knpkv/rly": "workspace:^",
+    "effect": "4.0.0-rc.109",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "web-push": "3.6.7",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/web-push": "3.6.4",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
+    "rimraf": "^6.1.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
+  }
+}

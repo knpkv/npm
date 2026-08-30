@@ -1,0 +1,68 @@
+{
+  "name": "@knpkv/herdr-work",
+  "version": "0.1.0",
+  "description": "Durable fleet work checkpoints and departure-board projections",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/herdr-work"
+  },
+  "type": "module",
+  "sideEffects": [
+    "*.css",
+    "**/*.css"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "import": "./dist/model.js"
+    },
+    "./react": {
+      "types": "./dist/view.d.ts",
+      "import": "./dist/view.js"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "files": [
+    "dist",
+    "src/styles.css",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -b --force",
+    "check": "tsc -b tsconfig.json",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
+    "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@knpkv/herdr-fleet": "workspace:^",
+    "@knpkv/rly": "workspace:^",
+    "effect": "4.0.0-rc.109",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "rimraf": "^6.1.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
+  }
+}
