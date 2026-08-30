@@ -19,7 +19,7 @@ export class AgentActivityStore {
       this.#database.exec(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS agent_activity (
-          host TEXT NOT NULL,
+          host TEXT COLLATE NOCASE NOT NULL,
           agent_id TEXT NOT NULL,
           revision INTEGER NOT NULL,
           last_activity_at INTEGER NOT NULL,
@@ -60,6 +60,7 @@ export class AgentActivityStore {
     revision: number,
     observedAt: number
   ) {
+    const normalizedHost = host.toLowerCase()
     const row = yield* Effect.try({
       try: () =>
         this.#database
@@ -82,7 +83,7 @@ export class AgentActivityStore {
                observed_at = MAX(agent_activity.observed_at, excluded.observed_at)
              RETURNING last_activity_at`
           )
-          .get(host, agentId, revision, observedAt, observedAt),
+          .get(normalizedHost, agentId, revision, observedAt, observedAt),
       catch: storeError("activity.observe")
     })
     return yield* Schema.decodeUnknownEffect(ActivityRow)(row).pipe(

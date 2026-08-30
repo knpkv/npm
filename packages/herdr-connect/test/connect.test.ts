@@ -495,6 +495,13 @@ describe("Connect public seams", () => {
     }
   })
 
+  it.effect("case-folds only the host in synthetic agent identities", () =>
+    Effect.gen(function*() {
+      const upper = yield* connectAgentId("SER8", "w1:p1")
+      expect(yield* connectAgentId("ser8", "w1:p1")).toBe(upper)
+      expect(yield* connectAgentId("SER8", "w1:P1")).not.toBe(upper)
+    }).pipe(provideNodeServices))
+
   it("keeps blocked and unknown agents out of the finished filter", () => {
     const agents = ["blocked", "unknown", "done"].map((state, index) => ({
       host: "SER8",
@@ -563,6 +570,24 @@ describe("Connect public seams", () => {
           expect(yield* store.observe("SER8", "agent-1", 3, 300)).toBe(300)
           expect(yield* store.observe("SER8", "agent-1", 2, 200)).toBe(300)
           expect(yield* store.observe("SER8", "agent-1", 4, 400)).toBe(400)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("keeps activity identity stable across host casing", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-activity-host-test-"))
+    return Effect.acquireUseRelease(
+      AgentActivityStore.open(join(root, "activity.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          expect(yield* store.observe("SER8", "agent-1", 1, 100)).toBe(100)
+          expect(yield* store.observe("ser8", "agent-1", 1, 200)).toBe(100)
+          expect(yield* store.observe("ser8", "agent-2", 1, 200)).toBe(200)
         }),
       (store) =>
         Effect.sync(() => {
