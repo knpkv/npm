@@ -6,6 +6,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
   AgentWorkerIdentity,
   BrowserMcpRecover,
@@ -17,7 +18,7 @@ import {
   JobHash,
   jobHash,
   JobPayload,
-  type JobRecord,
+  JobRecord,
   JobStore,
   jobTextMaxLength,
   makeFleetService
@@ -51,6 +52,26 @@ const operations: HostOperations = {
   run: (payload) => Effect.succeed(`${payload.kind}: ok`),
   runLocal: (payload) => Effect.succeed(`${payload.kind}: ok`),
   runCoordinatorChat: () => Effect.succeed("coordinator: ok")
+}
+
+const seedJobRecords = (path: string, records: ReadonlyArray<JobRecord>): void => {
+  const database = new DatabaseSync(path)
+  try {
+    database.exec("BEGIN IMMEDIATE")
+    const insert = database.prepare(
+      "INSERT INTO jobs (id, created_at, record) VALUES (?, ?, ?)"
+    )
+    for (const record of records) {
+      insert.run(
+        record.id,
+        record.createdAt,
+        JSON.stringify(Schema.encodeSync(JobRecord)(record))
+      )
+    }
+    database.exec("COMMIT")
+  } finally {
+    database.close()
+  }
 }
 
 describe("fleet local authority", () => {
@@ -759,10 +780,11 @@ describe("fleet local authority", () => {
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
         Effect.gen(function*() {
-          yield* Effect.forEach(
-            Array.from({ length: 1_023 }, (_, index) => record(index, index)),
-            (entry) => store.put(entry),
-            { discard: true }
+          yield* Effect.sync(() =>
+            seedJobRecords(
+              store.path,
+              Array.from({ length: 1_023 }, (_, index) => record(index, index))
+            )
           )
           const newest = record(9_999, 10_000)
           yield* store.put(newest)
@@ -965,10 +987,16 @@ describe("fleet local authority", () => {
           yield* store.put(record("old-queued", 1, "queued"))
           yield* store.put(record("old-running", 2, "running"))
           yield* store.put(record("old-pending", 3, "pending_approval"))
-          yield* Effect.forEach(
-            Array.from({ length: 10_001 }, (_, index) => index),
-            (index) => store.put(record(`terminal-${index}`, 10 + index, "succeeded")),
-            { discard: true }
+          yield* Effect.sync(() =>
+            seedJobRecords(
+              store.path,
+              Array.from({ length: 10_001 }, (_, index) =>
+                record(
+                  `terminal-${index}`,
+                  10 + index,
+                  "succeeded"
+                ))
+            )
           )
           const service = yield* makeFleetService({
             approvalEnabled: true,
