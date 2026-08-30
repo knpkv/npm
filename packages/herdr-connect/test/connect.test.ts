@@ -937,19 +937,28 @@ describe("Connect public seams", () => {
   })
 
   it.effect("decodes a maximum terminal line across transport chunks", () => {
-    const encoded = new TextEncoder().encode(
-      `${"A".repeat(terminalEventMaxLineBytes)}\n`
+    const content = Uint8Array.from(
+      { length: terminalEventMaxLineBytes },
+      (_, index) => 65 + (index % 26)
     )
+    const encoded = new Uint8Array(content.byteLength + 1)
+    encoded.set(content)
+    encoded[content.byteLength] = 10
     const chunkBytes = 32 * 1_024
     const chunks = Array.from(
       { length: Math.ceil(encoded.byteLength / chunkBytes) },
       (_, index) => encoded.subarray(index * chunkBytes, (index + 1) * chunkBytes)
     )
     return Effect.gen(function*() {
+      let copiedBytes = 0
       const line = yield* Stream.runHead(
-        boundedTerminalLines(Stream.fromIterable(chunks))
+        boundedTerminalLines(Stream.fromIterable(chunks), (bytes) => {
+          copiedBytes += bytes
+        })
       )
-      expect(Option.getOrThrow(line)).toHaveLength(terminalEventMaxLineBytes)
+      expect(Option.getOrThrow(line)).toBe(new TextDecoder().decode(content))
+      expect(copiedBytes).toBeGreaterThan(0)
+      expect(copiedBytes).toBeLessThanOrEqual(terminalEventMaxLineBytes * 2)
     })
   })
 
@@ -997,6 +1006,8 @@ done
 `,
       { mode: 0o700 }
     )
+    let agentsAvailable = true
+    let agentPresent = true
     const operations: HostOperations = {
       inspect: () =>
         Effect.succeed({
@@ -1008,19 +1019,21 @@ done
         }),
       listAgents: () =>
         Effect.succeed({
-          agents: [{
-            agentId: null,
-            activityRevision: 1,
-            kind: "codex",
-            name: "Worker",
-            paneId: "w1:p1",
-            parentAgentId: null,
-            relation: null,
-            status: "working",
-            work: "npm"
-          }],
-          available: true,
-          error: null
+          agents: agentPresent ?
+            [{
+              agentId: null,
+              activityRevision: 1,
+              kind: "codex",
+              name: "Worker",
+              paneId: "w1:p1",
+              parentAgentId: null,
+              relation: null,
+              status: "working",
+              work: "npm"
+            }] :
+            [],
+          available: agentsAvailable,
+          error: agentsAvailable ? null : "herdr agent list unavailable"
         }),
       run: () => Effect.succeed("ok"),
       runLocal: () => Effect.succeed("ok"),
@@ -1065,6 +1078,24 @@ done
           })
           const connector = yield* makeHerdrTerminalConnector(config, service)
           const agentId = yield* connectAgentId(config.host, "w1:p1")
+          agentsAvailable = false
+          expect(
+            yield* Effect.result(
+              Effect.scoped(
+                connector.open({ agentId, cols: 100, host: config.host, rows: 30 })
+              )
+            )
+          ).toMatchObject({ failure: { _tag: "TerminalTransportError" } })
+          agentsAvailable = true
+          agentPresent = false
+          expect(
+            yield* Effect.result(
+              Effect.scoped(
+                connector.open({ agentId, cols: 100, host: config.host, rows: 30 })
+              )
+            )
+          ).toMatchObject({ failure: { _tag: "TerminalAgentNotFoundError" } })
+          agentPresent = true
           const event = yield* Effect.scoped(
             Effect.gen(function*() {
               const session = yield* connector.open({

@@ -44,7 +44,8 @@ const decodeTerminalLine = (bytes: Uint8Array): string => {
 
 const growTerminalLineBuffer = (
   buffer: Uint8Array,
-  requiredBytes: number
+  requiredBytes: number,
+  onBufferCopy: ((bytes: number) => void) | undefined
 ): Uint8Array => {
   if (requiredBytes <= buffer.byteLength) return buffer
   let capacity = buffer.byteLength
@@ -52,11 +53,16 @@ const growTerminalLineBuffer = (
     capacity = Math.min(capacity * 2, terminalEventMaxLineBytes)
   }
   const grown = new Uint8Array(capacity)
+  onBufferCopy?.(buffer.byteLength)
   grown.set(buffer)
   return grown
 }
 
-export const boundedTerminalLines = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
+/** @internal Exposes copied-byte accounting only for the deterministic complexity regression. */
+export const boundedTerminalLines = <E, R>(
+  stream: Stream.Stream<Uint8Array, E, R>,
+  onBufferCopy?: (bytes: number) => void
+) =>
   stream.pipe(
     Stream.mapAccumEffect(
       emptyTerminalLine,
@@ -77,7 +83,7 @@ export const boundedTerminalLines = <E, R>(stream: Stream.Stream<Uint8Array, E, 
               })
             )
           }
-          buffer = growTerminalLineBuffer(buffer, nextLength)
+          buffer = growTerminalLineBuffer(buffer, nextLength, onBufferCopy)
           buffer.set(chunk.subarray(offset, end), length)
           length = nextLength
           if (newline === -1) break
@@ -127,6 +133,13 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
         })
       )
     )
+    if (!inventory.available) {
+      return yield* new TerminalTransportError({
+        cause: inventory.error,
+        detail: inventory.error ?? "Herdr agent inventory unavailable",
+        operation: "herdr.agent_list"
+      })
+    }
     const candidates = yield* Effect.forEach(
       inventory.agents,
       (agent) =>
