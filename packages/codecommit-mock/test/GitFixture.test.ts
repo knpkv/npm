@@ -66,6 +66,7 @@ describe("CodeCommit Git and review fixtures", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const host = yield* ChildEnv.HostEnvironment
         const fixture = yield* makeCodeCommitGitFixture()
         const repeatedFixture = yield* makeCodeCommitGitFixture()
         const scenario = makeGitFixtureScenario(fixture.revisions)
@@ -77,11 +78,28 @@ describe("CodeCommit Git and review fixtures", () => {
         })
         const client = Context.get(yield* Layer.build(NodeHttpClient.layerFetch), HttpClient.HttpClient)
         const clonesRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-mock-clones-" })
+        const hookCanary = path.join(clonesRoot, "hook-canary")
+        yield* spawner.string(
+          ChildProcess.make("git", ["init", "--quiet", "--", hookCanary], {
+            env: ChildEnv.gitChildEnv(host.variables),
+            extendEnv: true,
+            stderr: "pipe",
+            stdout: "pipe"
+          })
+        )
+        const hookIndex = path.join(hookCanary, "hook-index")
+        const hookLikeEnvironment = {
+          ...host.variables,
+          GIT_DIR: path.join(hookCanary, ".git"),
+          GIT_INDEX_FILE: hookIndex
+        }
 
         const runGit = Effect.fn("CodeCommitGitFixtureTest.runGit")(function*(args: ReadonlyArray<string>) {
           return yield* spawner
             .string(
               ChildProcess.make("git", args, {
+                env: ChildEnv.gitChildEnv(hookLikeEnvironment),
+                extendEnv: true,
                 stderr: "pipe",
                 stdout: "pipe"
               })
@@ -99,6 +117,8 @@ describe("CodeCommit Git and review fixtures", () => {
         ) {
           const exitCode = yield* spawner.exitCode(
             ChildProcess.make("git", ["-C", repository, "cat-file", "-e", `${objectId}^{commit}`], {
+              env: ChildEnv.gitChildEnv(hookLikeEnvironment),
+              extendEnv: true,
               stderr: "pipe",
               stdout: "pipe"
             })
@@ -163,6 +183,16 @@ describe("CodeCommit Git and review fixtures", () => {
         expect(yield* hasObject(afterReset, fixture.revisions.secondHead)).toBe(false)
         const state = yield* mock.state
         expect(state.activeRevisionByPullRequest["17"]).toBe(0)
+        expect(yield* fileSystem.exists(hookIndex)).toBe(false)
+        const canaryHead = yield* spawner.exitCode(
+          ChildProcess.make("git", [`--git-dir=${path.join(hookCanary, ".git")}`, "rev-parse", "--verify", "HEAD"], {
+            env: ChildEnv.gitChildEnv(host.variables),
+            extendEnv: true,
+            stderr: "pipe",
+            stdout: "pipe"
+          })
+        )
+        expect(canaryHead).not.toBe(ChildProcessSpawner.ExitCode(0))
       })
     ).pipe(
       // The test runner supplies the complete merged runtime layer.
@@ -202,8 +232,11 @@ describe("CodeCommit Git and review fixtures", () => {
         const state = yield* mock.state
         expect(state.activeRevisionByPullRequest["17"]).toBe(1)
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const host = yield* ChildEnv.HostEnvironment
         const advertised = yield* spawner.string(
           ChildProcess.make("git", ["ls-remote", fixture.cloneUrl, "refs/heads/feature/idempotency"], {
+            env: ChildEnv.gitChildEnv(host.variables),
+            extendEnv: true,
             stderr: "pipe",
             stdout: "pipe"
           })
@@ -244,6 +277,8 @@ describe("CodeCommit Git and review fixtures", () => {
         const canary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-mock-git-canary-" })
         yield* spawner.string(
           ChildProcess.make("git", ["init", "--quiet", "--", canary], {
+            env: ChildEnv.gitChildEnv(process.env),
+            extendEnv: true,
             stderr: "pipe",
             stdout: "pipe"
           })
@@ -265,6 +300,8 @@ describe("CodeCommit Git and review fixtures", () => {
         expect(yield* fileSystem.exists(path.join(canary, "outside-index"))).toBe(false)
         const canaryRefs = yield* spawner.string(
           ChildProcess.make("git", [`--git-dir=${canaryGitDirectory}`, "show-ref"], {
+            env: ChildEnv.gitChildEnv(process.env),
+            extendEnv: true,
             stderr: "pipe",
             stdout: "pipe"
           })

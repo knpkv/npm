@@ -75,6 +75,29 @@ const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_DEFAULT_REGION"
 ]
 
+const REPOSITORY_CONTROL_GIT_VARIABLES: ReadonlyArray<string> = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_COMMON_DIR",
+  "GIT_CONFIG",
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_DIR",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_EXEC_PATH",
+  "GIT_GRAFT_FILE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_NAMESPACE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_SHALLOW_FILE",
+  "GIT_TEMPLATE_DIR",
+  "GIT_WORK_TREE"
+]
+
 /** Whether an inherited name denotes an overriding AWS variable under any casing. */
 const isOverridingAwsVariable = (name: string): boolean => {
   // `toUpperCase`, not `toLocaleUpperCase`: these names are ASCII and a Turkish
@@ -114,6 +137,37 @@ export const profileScopedEnv = (
   }
   for (const name of Object.keys(inherited)) {
     if (isOverridingAwsVariable(name)) cleared[name] = undefined
+  }
+  return { ...cleared, ...overrides }
+}
+
+/**
+ * Builds tombstones for repository-control variables exported by Git hooks.
+ *
+ * A child `git -C <fixture>` must discover the fixture from `-C`. Inheriting a
+ * hook's `GIT_DIR` or `GIT_INDEX_FILE` silently binds it to the outer worktree
+ * instead. Pass the environment the child will extend so mixed-case spellings
+ * are cleared on case-insensitive hosts. Explicit overrides are applied last.
+ *
+ * Must be paired with `extendEnv: true`; on its own it does not carry `PATH`.
+ */
+export const gitChildEnv = (
+  inherited: Record<string, string | undefined>,
+  overrides: Record<string, string | undefined> = {}
+) => {
+  const cleared: Record<string, string | undefined> = {}
+  for (const name of REPOSITORY_CONTROL_GIT_VARIABLES) {
+    cleared[name] = undefined
+  }
+  for (const name of Object.keys(inherited)) {
+    const canonical = name.toUpperCase()
+    if (
+      REPOSITORY_CONTROL_GIT_VARIABLES.some((candidate) => candidate === canonical) ||
+      canonical.startsWith("GIT_CONFIG_KEY_") ||
+      canonical.startsWith("GIT_CONFIG_VALUE_")
+    ) {
+      cleared[name] = undefined
+    }
   }
   return { ...cleared, ...overrides }
 }

@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 /**
  * Behavioral tests for profile-scoped child environments.
  *
@@ -325,4 +326,29 @@ describe("ChildEnv.profileScopedEnv", () => {
     assert.isFalse(hasHomeLocator({ HOMEDRIVE: "C:" }))
     assert.isFalse(hasHomeLocator({ PATH: "/usr/bin" }))
   })
+})
+
+describe("ChildEnv.gitChildEnv", () => {
+  it.effect("drops hook-owned repository controls while preserving the explicit Git command", () =>
+    Effect.gen(function*() {
+      const env = yield* childEnvironment(
+        ChildEnv.gitChildEnv(
+          {
+            ...process.env,
+            GIT_DIR: "/outer/repository/.git",
+            GIT_INDEX_FILE: "/outer/repository/index",
+            Git_Config_Key_0: "core.hooksPath",
+            git_config_value_0: "/outer/hooks"
+          },
+          { GIT_CONFIG_GLOBAL: "/dev/null" }
+        )
+      )
+
+      assert.isFalse("GIT_DIR" in env)
+      assert.isFalse("GIT_INDEX_FILE" in env)
+      assert.isFalse("Git_Config_Key_0" in env)
+      assert.isFalse("git_config_value_0" in env)
+      assert.strictEqual(env.GIT_CONFIG_GLOBAL, "/dev/null")
+      assert.isTrue(hasSearchPath(env))
+    }).pipe(Effect.provide(NodeServices.layer)))
 })

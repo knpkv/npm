@@ -58,55 +58,22 @@ export interface CodeCommitGitFixture {
   readonly reset: Effect.Effect<void, CodeCommitGitFixtureError>
 }
 
-const OVERRIDING_GIT_VARIABLES = [
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_CEILING_DIRECTORIES",
-  "GIT_COMMON_DIR",
-  "GIT_CONFIG",
-  "GIT_CONFIG_PARAMETERS",
-  "GIT_DIR",
-  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-  "GIT_EXEC_PATH",
-  "GIT_GRAFT_FILE",
-  "GIT_INDEX_FILE",
-  "GIT_NAMESPACE",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_REPLACE_REF_BASE",
-  "GIT_SHALLOW_FILE",
-  "GIT_TEMPLATE_DIR",
-  "GIT_WORK_TREE"
-]
-
-const isOverridingGitVariable = (name: string): boolean => {
-  const canonical = name.toUpperCase()
-  return (
-    OVERRIDING_GIT_VARIABLES.some((candidate) => candidate === canonical) ||
-    canonical.startsWith("GIT_CONFIG_KEY_") ||
-    canonical.startsWith("GIT_CONFIG_VALUE_")
-  )
-}
-
-const gitEnvironment = (inherited: Record<string, string | undefined>) => ({
-  ...Object.fromEntries(OVERRIDING_GIT_VARIABLES.map((name) => [name, undefined])),
-  ...Object.fromEntries(
-    Object.keys(inherited)
-      .filter(isOverridingGitVariable)
-      .map((name) => [name, undefined])
-  ),
-  GIT_AUTHOR_DATE: "2026-08-28T10:00:00Z",
-  GIT_AUTHOR_EMAIL: "codecommit-mock@example.invalid",
-  GIT_AUTHOR_NAME: "CodeCommit Mock",
-  GIT_COMMITTER_DATE: "2026-08-28T10:00:00Z",
-  GIT_COMMITTER_EMAIL: "codecommit-mock@example.invalid",
-  GIT_COMMITTER_NAME: "CodeCommit Mock",
-  GIT_CONFIG_COUNT: "0",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  GIT_DEFAULT_HASH: "sha1",
-  LANG: "C",
-  LC_ALL: "C"
-})
+const gitEnvironment = (inherited: Record<string, string | undefined>) =>
+  ChildEnv.gitChildEnv(inherited, {
+    GIT_AUTHOR_DATE: "2026-08-28T10:00:00Z",
+    GIT_AUTHOR_EMAIL: "codecommit-mock@example.invalid",
+    GIT_AUTHOR_NAME: "CodeCommit Mock",
+    GIT_COMMITTER_DATE: "2026-08-28T10:00:00Z",
+    GIT_COMMITTER_EMAIL: "codecommit-mock@example.invalid",
+    GIT_COMMITTER_NAME: "CodeCommit Mock",
+    GIT_CONFIG_COUNT: "0",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_DEFAULT_HASH: "sha1",
+    LANG: "C",
+    LC_ALL: "C"
+  })
 
 const gitError = (operation: string) => new CodeCommitGitFixtureError({ operation })
 
