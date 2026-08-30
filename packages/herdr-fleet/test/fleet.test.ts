@@ -1077,7 +1077,7 @@ describe("fleet local authority", () => {
     ).pipe(provideNodeServices)
   })
 
-  it.effect("does not change a caller-owned state directory mode", () => {
+  it.effect("secures a pre-existing state directory before opening SQLite", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-fleet-parent-mode-test-"))
     const stateDirectory = join(root, "shared")
     mkdirSync(stateDirectory, { mode: 0o755 })
@@ -1086,7 +1086,7 @@ describe("fleet local authority", () => {
       () =>
         Effect.sync(() => {
           if (platform() !== "win32") {
-            expect(statSync(stateDirectory).mode & 0o777).toBe(0o755)
+            expect(statSync(stateDirectory).mode & 0o777).toBe(0o700)
           }
         }),
       (store) =>

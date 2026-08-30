@@ -66,8 +66,12 @@ export class WorkStore implements WorkStoreService {
   static readonly open = Effect.fn("WorkStore.open")(function*(path: string) {
     const fileSystem = yield* FileSystem.FileSystem
     const paths = yield* Path.Path
-    yield* fileSystem.makeDirectory(paths.dirname(path), { recursive: true, mode: 0o700 }).pipe(
+    const directory = paths.dirname(path)
+    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
       Effect.mapError(storeError("open.directory"))
+    )
+    yield* fileSystem.chmod(directory, 0o700).pipe(
+      Effect.mapError(storeError("open.secureDirectory"))
     )
     const store = yield* Effect.try({
       try: () => new WorkStore(path, fileSystem),

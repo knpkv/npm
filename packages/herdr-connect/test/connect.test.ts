@@ -6,8 +6,8 @@ import { Effect, Fiber, Option, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { AgentActivityStore } from "../src/activity-store.js"
 import { type AgentSource, fetchPeerConnectAgents, fleetConnectAgents, localConnectAgents } from "../src/directory.js"
@@ -43,6 +43,33 @@ const provideNodeHttpClient = Effect.provide(NodeHttpClient.layerNodeHttp)
 const provideTestClock = Effect.provide(TestClock.layer())
 
 describe("Connect public seams", () => {
+  it.effect("secures pre-existing state directories before opening SQLite", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-connect-mode-test-"))
+    const activityDirectory = join(root, "activity")
+    const relationshipDirectory = join(root, "relationships")
+    mkdirSync(activityDirectory, { mode: 0o755 })
+    mkdirSync(relationshipDirectory, { mode: 0o755 })
+    return Effect.scoped(Effect.gen(function*() {
+      const activity = yield* Effect.acquireRelease(
+        AgentActivityStore.open(join(activityDirectory, "activity.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      const relationships = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(join(relationshipDirectory, "relationships.sqlite")),
+        (store) => Effect.sync(() => store.close())
+      )
+      expect(activity.path).toContain("activity.sqlite")
+      expect(relationships.path).toContain("relationships.sqlite")
+      if (platform() !== "win32") {
+        expect(statSync(activityDirectory).mode & 0o777).toBe(0o700)
+        expect(statSync(relationshipDirectory).mode & 0o777).toBe(0o700)
+      }
+    })).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   const hostConfiguration = (root: string): HostConfiguration => ({
     allowedUsers: ["andrey@example.com"],
     applyCommand: null,

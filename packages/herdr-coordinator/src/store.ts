@@ -62,6 +62,9 @@ export class ChatStore {
     yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
       Effect.mapError(storeError("chat.openDirectory"))
     )
+    yield* fileSystem.chmod(directory, 0o700).pipe(
+      Effect.mapError(storeError("chat.secureDirectory"))
+    )
     const store = yield* Effect.try({
       try: () => new ChatStore(path, fileSystem),
       catch: storeError("chat.openDatabase")

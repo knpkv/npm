@@ -44,8 +44,12 @@ export class AgentActivityStore {
   static readonly open = Effect.fn("AgentActivityStore.open")(function*(path: string) {
     const fileSystem = yield* FileSystem.FileSystem
     const paths = yield* Path.Path
-    yield* fileSystem.makeDirectory(paths.dirname(path), { recursive: true }).pipe(
+    const directory = paths.dirname(path)
+    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
       Effect.mapError(storeError("activity.openDirectory"))
+    )
+    yield* fileSystem.chmod(directory, 0o700).pipe(
+      Effect.mapError(storeError("activity.secureDirectory"))
     )
     return yield* Effect.try({
       try: () => new AgentActivityStore(path),

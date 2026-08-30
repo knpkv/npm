@@ -317,7 +317,7 @@ describe("push delivery retries", () => {
         Effect.gen(function*() {
           yield* store.putSubscription(subscription, "alice@example.com")
           if (platform() === "win32") return
-          expect(statSync(stateDirectory).mode & 0o777).toBe(0o755)
+          expect(statSync(stateDirectory).mode & 0o777).toBe(0o700)
           for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
             if (existsSync(path)) expect(statSync(path).mode & 0o777).toBe(0o600)
           }

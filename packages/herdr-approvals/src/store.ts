@@ -96,6 +96,9 @@ export class ApprovalAppStore {
     yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
       Effect.mapError(storeError("open.makeDirectory"))
     )
+    yield* fileSystem.chmod(directory, 0o700).pipe(
+      Effect.mapError(storeError("open.secureDirectory"))
+    )
     const store = yield* Effect.try({
       try: () => new ApprovalAppStore(path, fileSystem),
       catch: storeError("open.database")

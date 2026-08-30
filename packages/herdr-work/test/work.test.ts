@@ -1,8 +1,8 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
+import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import {
@@ -108,6 +108,26 @@ const history = [
 ]
 
 describe("durable Work projection", () => {
+  it.effect("secures a pre-existing state directory before opening SQLite", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-work-mode-test-"))
+    const stateDirectory = join(root, "state")
+    mkdirSync(stateDirectory, { mode: 0o755 })
+    return Effect.acquireUseRelease(
+      WorkStore.open(join(stateDirectory, "work.sqlite")),
+      () =>
+        Effect.sync(() => {
+          if (platform() !== "win32") {
+            expect(statSync(stateDirectory).mode & 0o777).toBe(0o700)
+          }
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("derives now, day, week, and month from recorded timestamps", () =>
     Effect.gen(function*() {
       const snapshots = yield* projectWorkSnapshots(history, 31 * day)

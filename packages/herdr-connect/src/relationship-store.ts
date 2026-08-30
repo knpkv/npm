@@ -1,4 +1,4 @@
-import { Effect, Exit, Schema, Semaphore } from "effect"
+import { Effect, Exit, FileSystem, Path, Schema, Semaphore } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { ConnectRelationshipError, ConnectRelationshipStoreError } from "./errors.js"
 import { validateConnectRelationships } from "./forest.js"
@@ -140,6 +140,15 @@ export class AgentRelationshipStore {
 
   static readonly open = Effect.fn("AgentRelationshipStore.open")(
     function*(path: string) {
+      const fileSystem = yield* FileSystem.FileSystem
+      const paths = yield* Path.Path
+      const directory = paths.dirname(path)
+      yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
+        Effect.mapError(storeError("open.directory"))
+      )
+      yield* fileSystem.chmod(directory, 0o700).pipe(
+        Effect.mapError(storeError("open.secureDirectory"))
+      )
       const transactions = yield* Semaphore.make(1)
       return yield* Effect.try({
         try: () => new AgentRelationshipStore(path, transactions),
