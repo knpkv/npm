@@ -44,6 +44,18 @@ describe("browser push subscription ownership", () => {
           ]
         )
       ).toBe("https://fcm.googleapis.com/fcm/send/subscription")
+      expect(
+        yield* validatePushEndpoint(
+          "https://push.example.test/subscription",
+          ["https://Push.Example.Test:443"]
+        )
+      ).toBe("https://push.example.test/subscription")
+      expect(
+        yield* validatePushEndpoint(
+          "https://push.example.test:8443/subscription",
+          ["https://Push.Example.Test:8443"]
+        )
+      ).toBe("https://push.example.test:8443/subscription")
       const rejected = yield* Effect.result(
         validatePushEndpoint(
           "https://push.example.test/subscription",
@@ -54,6 +66,19 @@ describe("browser push subscription ownership", () => {
         failure: {
           _tag: "PushEndpointNotAllowedError",
           origin: "https://push.example.test"
+        }
+      })
+      expect(
+        yield* Effect.result(
+          validatePushEndpoint(
+            "https://push.example.test/subscription",
+            ["https://push.example.test:99999"]
+          )
+        )
+      ).toMatchObject({
+        failure: {
+          _tag: "PushEndpointNotAllowedError",
+          origin: "https://push.example.test:99999"
         }
       })
     }))

@@ -10,9 +10,20 @@ export const validatePushEndpoint = (
     catch: () => new PushEndpointNotAllowedError({ origin: "invalid" })
   }).pipe(
     Effect.flatMap((origin) =>
-      allowedOrigins.includes(origin)
-        ? Effect.succeed(endpoint)
-        : Effect.fail(new PushEndpointNotAllowedError({ origin }))
+      Effect.forEach(
+        allowedOrigins,
+        (allowedOrigin) =>
+          Effect.try({
+            try: () => new URL(allowedOrigin).origin,
+            catch: () => new PushEndpointNotAllowedError({ origin: allowedOrigin })
+          })
+      ).pipe(
+        Effect.flatMap((canonicalOrigins) =>
+          canonicalOrigins.includes(origin)
+            ? Effect.succeed(endpoint)
+            : Effect.fail(new PushEndpointNotAllowedError({ origin }))
+        )
+      )
     )
   )
 
