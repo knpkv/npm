@@ -168,6 +168,7 @@ describe("RelayDock", () => {
 
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
     expect(dialog).not.toBeNull()
+    expect(dialog?.tagName).toBe("SECTION")
     expect(dialog?.contains(document.activeElement)).toBe(true)
     await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
