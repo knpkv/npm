@@ -241,6 +241,12 @@ export const PendingApprovalCursor = Schema.Struct({
 })
 export type PendingApprovalCursor = typeof PendingApprovalCursor.Type
 
+export const JobHistoryPage = Schema.Struct({
+  records: Schema.Array(JobRecord),
+  nextCursor: Schema.NullOr(PendingApprovalCursor)
+})
+export type JobHistoryPage = typeof JobHistoryPage.Type
+
 export const FleetMachine = Schema.Struct({
   host: JobIdentifier,
   nodeId: JobIdentifier

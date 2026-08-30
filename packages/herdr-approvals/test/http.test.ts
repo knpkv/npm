@@ -13,6 +13,7 @@ import {
   FleetValidationError,
   type HostConfiguration,
   type HostOperations,
+  JobHistoryPage,
   type JobRecord,
   JobStore,
   jobTextMaxLength,
@@ -36,9 +37,10 @@ import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
-import { PendingApprovalSummary } from "../src/dashboard-model.js"
+import { DashboardSnapshot, PendingApprovalSummary } from "../src/dashboard-model.js"
 import { makeRunner, recordWorkCheckpointRequest, startHttpServer } from "../src/http.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
+import { commandOutputMaxBytes } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -346,6 +348,89 @@ esac
       (store) => Effect.sync(() => store.close())
     ).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("pages worst-case history without exceeding the response limit", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-history-page-test-"))
+    const hostConfig = config(root)
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* Effect.forEach(
+            Array.from({ length: 8 }, (_, index): JobRecord => ({
+              actor: "andrey@example.com",
+              approvalNonce: null,
+              approvedBy: null,
+              createdAt: index + 1,
+              error: null,
+              hash: index.toString(16).padStart(64, "0"),
+              id: `job-history-${String(index).padStart(2, "0")}`,
+              payload: {
+                kind: "agent.message",
+                message: "\u0001".repeat(jobTextMaxLength),
+                session: "agent-1"
+              },
+              result: "\u0001".repeat(commandOutputMaxBytes),
+              status: "succeeded",
+              updatedAt: index + 1
+            })),
+            (record) => store.put(record),
+            { discard: true }
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: false,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const ids: Array<string> = []
+          let cursor: typeof JobHistoryPage.Type["nextCursor"] = null
+          do {
+            const pageUrl = new URL("/v1/history?limit=8", server.url)
+            if (cursor !== null) {
+              pageUrl.searchParams.set("cursorCreatedAt", String(cursor.createdAt))
+              pageUrl.searchParams.set("cursorId", cursor.id)
+            }
+            const response = yield* Effect.promise(() => fetch(pageUrl))
+            const body = yield* Effect.promise(() => response.text())
+            expect(response.status).toBe(200)
+            expect(Buffer.byteLength(body)).toBeLessThanOrEqual(
+              fleetResponseBodyMaxBytes
+            )
+            const page = Schema.decodeUnknownSync(JobHistoryPage)(JSON.parse(body))
+            for (const record of page.records) ids.push(record.id)
+            cursor = page.nextCursor
+          } while (cursor !== null)
+
+          expect(ids).toEqual(
+            Array.from({ length: 8 }, (_, index) => `job-history-${String(7 - index).padStart(2, "0")}`)
+          )
+          const dashboardResponse = yield* Effect.promise(() => fetch(`${server.url}/v1/dashboard`))
+          const dashboardBody = yield* Effect.promise(() => dashboardResponse.text())
+          expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
+          const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(dashboardBody)
+          )
+          expect(dashboard.historyNextCursor).not.toBeNull()
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(
+        Effect.sync(() => rmSync(root, { force: true, recursive: true }))
+      ),
       provideNodeServices
     )
   })

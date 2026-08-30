@@ -34,6 +34,7 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
     work: null,
     directory: null,
     host: "ALPHA",
+    historyNextCursor: null,
     observedAt: 1_000,
     pendingApprovals: { failures: [], local: [pending], remote: [] },
     records: [pending],

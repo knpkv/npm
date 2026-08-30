@@ -78,6 +78,7 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import { authorize } from "./auth.js"
 import {
   type ApprovalDirectory,
+  type DashboardHistoryPage,
   type DashboardSnapshot,
   type PendingApproval,
   type PendingApprovalFailure,
@@ -415,6 +416,31 @@ const pendingApproval = (record: JobRecord): PendingApproval => ({
   approvalExpiresAt: record.approvalExpiresAt ?? null,
   status: "pending_approval",
   payload: record.payload
+})
+
+const dashboardHistoryMaxBytes = 512 * 1024
+
+const dashboardHistory = Effect.fn("HostHttp.dashboardHistory")(function*(
+  service: FleetService,
+  cursor: typeof PendingApprovalCursor.Type | null
+) {
+  const candidates = yield* service.historyAfter(cursor, 51)
+  const records: Array<JobRecord> = []
+  for (const candidate of candidates.slice(0, 50)) {
+    const projected: JobRecord = { ...candidate, error: null, result: null }
+    const bytes = new TextEncoder().encode(
+      JSON.stringify([...records, projected])
+    ).byteLength
+    if (bytes > dashboardHistoryMaxBytes) break
+    records.push(projected)
+  }
+  const last = records.at(-1)
+  return {
+    records,
+    nextCursor: records.length < candidates.length && last !== undefined
+      ? { createdAt: last.createdAt, id: last.id }
+      : null
+  } satisfies DashboardHistoryPage
 })
 
 const localPendingSummary = Effect.fn("HostHttp.localPendingSummary")(
@@ -1407,7 +1433,7 @@ export const startHttpServer = async (
               ? (yield* service.pendingApprovalPage(null)).records
               : []
             const state = yield* Effect.all({
-              records: service.history(50),
+              history: dashboardHistory(service, null),
               status: service.status()
             })
             const chatHistory = mode === "serve" ? yield* chat.history() : null
@@ -1416,7 +1442,7 @@ export const startHttpServer = async (
             let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
               local: approvalSurface
                 ? resolvedLocalApprovals
-                : state.records.filter(
+                : state.history.records.filter(
                   (record) => record.status === "pending_approval"
                 ),
               remote: [],
@@ -1480,7 +1506,8 @@ export const startHttpServer = async (
               chat: chatHistory,
               work: workSnapshots,
               status: state.status,
-              records: state.records,
+              records: state.history.records,
+              historyNextCursor: state.history.nextCursor,
               directory,
               pendingApprovals
             } satisfies DashboardSnapshot
@@ -1488,6 +1515,20 @@ export const startHttpServer = async (
 
           if (request.method === "GET" && url.pathname === "/v1/dashboard") {
             await respond(response, Effect.andThen(authorized, dashboard))
+            return
+          }
+
+          if (
+            approvalSurface &&
+            request.method === "GET" &&
+            url.pathname === "/v1/dashboard-history"
+          ) {
+            const effect = Effect.gen(function*() {
+              yield* authorized
+              const cursor = yield* decodePendingApprovalCursor(url)
+              return yield* dashboardHistory(service, cursor)
+            })
+            await respond(response, effect)
             return
           }
 
@@ -1718,10 +1759,12 @@ export const startHttpServer = async (
             const limit = Number.isInteger(rawLimit)
               ? Math.min(Math.max(rawLimit, 1), 500)
               : 50
-            await respond(
-              response,
-              Effect.andThen(authorized, service.history(limit))
-            )
+            const effect = Effect.gen(function*() {
+              yield* authorized
+              const cursor = yield* decodePendingApprovalCursor(url)
+              return yield* service.historyPage(cursor, limit)
+            })
+            await respond(response, effect)
             return
           }
           const jobMatch = /^\/v1\/jobs\/([^/]+)$/.exec(url.pathname)

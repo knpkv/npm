@@ -15,7 +15,7 @@ const decodeRecord = (text: string) =>
 const encodeRecord = (record: JobRecord) => JSON.stringify(Schema.encodeSync(JobRecord)(record))
 
 const decodeRows = (
-  operation: "list" | "listPending" | "listRecoverable" | "listWorkers",
+  operation: "list" | "listHistory" | "listPending" | "listRecoverable" | "listWorkers",
   rows: ReadonlyArray<Record<string, SQLOutputValue>>
 ) =>
   Effect.forEach(rows, (row) =>
@@ -193,6 +193,37 @@ export class JobStore {
       catch: storeError("listPending")
     })
     return yield* decodeRows("listPending", rows)
+  })
+
+  readonly listHistory = Effect.fn("JobStore.listHistory")(function*(
+    this: JobStore,
+    cursor: PendingApprovalCursor | null,
+    limit: number
+  ) {
+    const database = this.#database
+    const rows = yield* Effect.try({
+      try: () =>
+        cursor === null
+          ? database.prepare(
+            `
+              SELECT record
+              FROM jobs
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?
+            `
+          ).all(limit)
+          : database.prepare(
+            `
+              SELECT record
+              FROM jobs
+              WHERE created_at < ? OR (created_at = ? AND id < ?)
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?
+            `
+          ).all(cursor.createdAt, cursor.createdAt, cursor.id, limit),
+      catch: storeError("listHistory")
+    })
+    return yield* decodeRows("listHistory", rows)
   })
 
   readonly listRecoverable = Effect.fn("JobStore.listRecoverable")(function*(

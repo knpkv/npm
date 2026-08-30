@@ -53,6 +53,11 @@ export const FleetPendingApprovals = Schema.Struct({
   failures: Schema.Array(PendingApprovalFailure)
 })
 
+export const DashboardHistoryPage = Schema.Struct({
+  records: Schema.Array(JobRecord),
+  nextCursor: Schema.NullOr(PendingApprovalCursor)
+})
+
 export const DashboardSnapshot = Schema.Struct({
   host: Schema.String,
   observedAt: Schema.Number,
@@ -67,12 +72,14 @@ export const DashboardSnapshot = Schema.Struct({
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,
   records: Schema.Array(JobRecord),
+  historyNextCursor: Schema.NullOr(PendingApprovalCursor),
   directory: Schema.NullOr(ApprovalDirectory),
   pendingApprovals: FleetPendingApprovals
 })
 
 export type ApprovalDirectory = typeof ApprovalDirectory.Type
 export type DashboardSnapshot = typeof DashboardSnapshot.Type
+export type DashboardHistoryPage = typeof DashboardHistoryPage.Type
 export type PendingApproval = typeof PendingApproval.Type
 export type PendingApprovalFailure = typeof PendingApprovalFailure.Type
 export type PendingApprovalSummary = typeof PendingApprovalSummary.Type

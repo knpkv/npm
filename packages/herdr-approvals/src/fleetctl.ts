@@ -6,6 +6,7 @@ import {
   FleetValidationError,
   type HostConfiguration,
   HostStatus,
+  JobHistoryPage,
   JobPayload,
   type JobPayload as JobPayloadType,
   JobRecord,
@@ -105,6 +106,41 @@ const request = Effect.fn("Fleetctl.request")(function*<A>(
 
 const getJob = (config: HostConfiguration, tailscale: TailscaleClient, host: string, id: string) =>
   request(config, tailscale, host, `/v1/jobs/${encodeURIComponent(id)}`, JobRecord)
+
+const history = Effect.fn("Fleetctl.history")(function*(
+  config: HostConfiguration,
+  tailscale: TailscaleClient,
+  host: string,
+  rawLimit: string
+) {
+  const limit = Number(rawLimit)
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+    return yield* new FleetValidationError({
+      detail: "history limit must be an integer between 1 and 500"
+    })
+  }
+  const records: Array<typeof JobRecord.Type> = []
+  let cursor: typeof JobHistoryPage.Type["nextCursor"] = null
+  do {
+    const parameters = new URLSearchParams({
+      limit: String(limit - records.length)
+    })
+    if (cursor !== null) {
+      parameters.set("cursorCreatedAt", String(cursor.createdAt))
+      parameters.set("cursorId", cursor.id)
+    }
+    const page = yield* request(
+      config,
+      tailscale,
+      host,
+      `/v1/history?${parameters.toString()}`,
+      JobHistoryPage
+    )
+    for (const record of page.records) records.push(record)
+    cursor = page.nextCursor
+  } while (cursor !== null && records.length < limit)
+  return records
+})
 
 const submit = (
   config: HostConfiguration,
@@ -240,13 +276,7 @@ const main = Effect.gen(function*() {
       const value = command === "status"
         ? yield* request(config, tailscale, host, "/v1/status", HostStatus)
         : command === "history"
-        ? yield* request(
-          config,
-          tailscale,
-          host,
-          `/v1/history?limit=${encodeURIComponent(rest[1] ?? "50")}`,
-          Schema.Array(JobRecord)
-        )
+        ? yield* history(config, tailscale, host, rest[1] ?? "50")
         : yield* request(
           config,
           tailscale,

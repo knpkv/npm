@@ -8,6 +8,7 @@ import {
   FleetValidationError
 } from "./errors.js"
 import { jobHash } from "./hash.js"
+import { fleetResponseBodyMaxBytes } from "./limits.js"
 import {
   agentConnectTarget,
   type AgentDelegate,
@@ -380,6 +381,54 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
 
   const history = Effect.fn("FleetService.history")((limit: number) => options.store.list(limit))
 
+  const historyAfter = Effect.fn("FleetService.historyAfter")((
+    cursor: PendingApprovalCursor | null,
+    limit: number
+  ) => options.store.listHistory(cursor, limit))
+
+  const historyPage = Effect.fn("FleetService.historyPage")(function*(
+    cursor: PendingApprovalCursor | null,
+    limit: number
+  ) {
+    const records: Array<JobRecord> = []
+    let scannedCursor = cursor
+    let hasMore = false
+    scan: while (records.length < limit) {
+      const requested = Math.min(9, limit - records.length + 1)
+      const candidates = yield* options.store.listHistory(scannedCursor, requested)
+      if (candidates.length === 0) break
+      for (const candidate of candidates) {
+        if (records.length >= limit) {
+          hasMore = true
+          break scan
+        }
+        const candidateCursor = { createdAt: candidate.createdAt, id: candidate.id }
+        const bytes = new TextEncoder().encode(JSON.stringify({
+          records: [...records, candidate],
+          nextCursor: candidateCursor
+        })).byteLength + 1
+        if (bytes > fleetResponseBodyMaxBytes) {
+          if (records.length === 0) {
+            return yield* new FleetStoreError({
+              cause: bytes,
+              detail: "one job record cannot fit in a history response",
+              operation: "historyPage"
+            })
+          }
+          hasMore = true
+          break scan
+        }
+        records.push(candidate)
+        scannedCursor = candidateCursor
+      }
+      if (candidates.length < requested) break
+    }
+    return {
+      records,
+      nextCursor: hasMore && records.length > 0 ? scannedCursor : null
+    }
+  })
+
   const pendingApprovalPage = Effect.fn("FleetService.pendingApprovalPage")(
     function*(cursor: PendingApprovalCursor | null) {
       const scanned = yield* options.store.listPending(
@@ -529,6 +578,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     runCoordinatorChat,
     get,
     history,
+    historyAfter,
+    historyPage,
     pendingApprovalPage,
     pendingApprovals,
     agents,
