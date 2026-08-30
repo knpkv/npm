@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: require-host-environment-for-git-child-env
+language: tsx
+severity: error
+message: "Read inherited Git child variables from ChildEnv.HostEnvironment"
+
+rule:
+  any:
+    - pattern: ChildEnv.gitChildEnv(process.env)
+    - pattern: ChildEnv.gitChildEnv(process.env, $$$ARGS)
+    - pattern: |
+        ChildEnv.gitChildEnv({ $$$BEFORE, ...process.env, $$$AFTER })
+    - pattern: |
+        ChildEnv.gitChildEnv({ $$$BEFORE, ...process.env, $$$AFTER }, $$$ARGS)
+    - pattern: |
+        Effect.provideService(ChildEnv.HostEnvironment, { variables: process.env })
+    - pattern: |
+        Effect.provideService(ChildEnv.HostEnvironment, { variables: { $$$BEFORE, ...process.env, $$$AFTER } })
+
+files:
+  - "packages/codecommit-core/**/*.ts"
+  - "packages/codecommit-mock/**/*.ts"
+
+note: |
+  Git child processes acquire inherited variables through HostEnvironment so
+  tests and executables share the same audited boundary. Reading process.env
+  while building gitChildEnv input or a nested HostEnvironment override bypasses
+  that boundary. A top-level layerHostEnvironment(process.env) remains the valid
+  test and executable boundary.
+
+  This syntactic rule covers the namespace-import convention used by these
+  packages. Aliased helpers or intermediate variables still require review.
