@@ -158,6 +158,44 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("retries an accepted delivery after its push TTL", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-ttl-test-"))
+    let sends = 0
+    const pass = (store: ApprovalAppStore) =>
+      runPushPass({
+        allowedPushOrigins: ["https://push.example.test"],
+        allowedUsers: ["alice@example.com"],
+        loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-ttl" }]),
+        now: Effect.succeed(61_001),
+        send: () =>
+          Effect.sync(() => {
+            sends += 1
+          }),
+        store
+      })
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* store.recordDelivery(
+            "SER8",
+            "job-ttl",
+            subscription.endpoint,
+            1_000
+          )
+          yield* pass(store)
+          yield* pass(store)
+          expect(sends).toBe(1)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("does not send a persisted endpoint outside the configured origins", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-origin-test-"))
     let sends = 0

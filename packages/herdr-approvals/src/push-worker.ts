@@ -1,6 +1,7 @@
 import type { Duration } from "effect"
 import { Clock, Effect, Schedule } from "effect"
 import type { ApprovalNotificationCandidate, ApprovalPushPayload, PushSubscriptionRecord } from "./model.js"
+import { pushDeliveryTtlMillis } from "./push-policy.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import type { ApprovalAppStore } from "./store.js"
 
@@ -30,6 +31,7 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
 ) {
   const candidates = yield* options.loadCandidates()
   const subscriptions = yield* options.store.listSubscriptions()
+  const timestamp = yield* (options.now ?? Clock.currentTimeMillis)
   const pendingCount = candidates.length
   yield* Effect.forEach(
     candidates,
@@ -67,7 +69,8 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
               const delivered = yield* options.store.hasDelivered(
                 candidate.host,
                 candidate.jobId,
-                target.endpoint
+                target.endpoint,
+                timestamp - pushDeliveryTtlMillis
               )
               if (delivered) return
               yield* options.send(target, payload)
@@ -81,7 +84,7 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
                 candidate.host,
                 candidate.jobId,
                 target.endpoint,
-                yield* (options.now ?? Clock.currentTimeMillis)
+                timestamp
               )
             }).pipe(
               Effect.tapError((error) => Effect.logError("PushWorker.delivery_failed", error)),

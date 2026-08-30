@@ -2,6 +2,7 @@ import { Effect, Result, Schema } from "effect"
 import webPush from "web-push"
 import { type ApprovalAppStoreError, PushDeliveryError } from "./errors.js"
 import type { ApprovalPushPayload, PushSubscriptionRecord, VapidKeyPair } from "./model.js"
+import { pushDeliveryTtlSeconds } from "./push-policy.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import type { ApprovalAppStore } from "./store.js"
 
@@ -23,7 +24,7 @@ export const makePushSender = (
     yield* Effect.tryPromise({
       try: () =>
         webPush.sendNotification(subscription, JSON.stringify(payload), {
-          TTL: 60,
+          TTL: pushDeliveryTtlSeconds,
           timeout: 10_000,
           urgency: "high",
           vapidDetails: {

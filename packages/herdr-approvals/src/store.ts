@@ -258,16 +258,17 @@ export class ApprovalAppStore {
     this: ApprovalAppStore,
     host: string,
     jobId: string,
-    endpoint: string
+    endpoint: string,
+    deliveredAfter = Number.MIN_SAFE_INTEGER
   ) {
     const database = this.#database
     return yield* Effect.try({
       try: () =>
         database
           .prepare(
-            "SELECT 1 FROM push_deliveries WHERE host = ? AND job_id = ? AND endpoint = ?"
+            "SELECT 1 FROM push_deliveries WHERE host = ? AND job_id = ? AND endpoint = ? AND delivered_at >= ?"
           )
-          .get(host, jobId, endpoint) !== undefined,
+          .get(host, jobId, endpoint, deliveredAfter) !== undefined,
       catch: storeError("delivery.has")
     })
   })
@@ -284,7 +285,10 @@ export class ApprovalAppStore {
       try: () => {
         database
           .prepare(
-            "INSERT OR IGNORE INTO push_deliveries (host, job_id, endpoint, delivered_at) VALUES (?, ?, ?, ?)"
+            `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
+               delivered_at = excluded.delivered_at`
           )
           .run(host, jobId, endpoint, deliveredAt)
       },
