@@ -53,10 +53,17 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
                 )
                 return
               }
-              yield* validatePushEndpoint(
+              const allowed = yield* validatePushEndpoint(
                 target.endpoint,
                 options.allowedPushOrigins
+              ).pipe(
+                Effect.as(true),
+                Effect.catchTag("PushEndpointNotAllowedError", () =>
+                  options.store.deleteSubscriptionPrivileged(
+                    target.endpoint
+                  ).pipe(Effect.as(false)))
               )
+              if (!allowed) return
               const delivered = yield* options.store.hasDelivered(
                 candidate.host,
                 candidate.jobId,

@@ -183,6 +183,13 @@ describe("push delivery retries", () => {
             store
           })
           expect(sends).toBe(0)
+          expect(yield* store.listSubscriptions()).toEqual([])
+          expect(
+            yield* store.hasSubscription(
+              "https://untrusted.example.test/subscription",
+              "alice@example.com"
+            )
+          ).toBe(false)
         }),
       (store) =>
         Effect.sync(() => {
