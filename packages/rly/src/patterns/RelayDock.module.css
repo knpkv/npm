@@ -1,0 +1,249 @@
+@layer rly.components {
+  .root {
+    position: relative;
+  }
+
+  .trigger,
+  .close {
+    align-items: center;
+    appearance: none;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    display: inline-flex;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    justify-content: center;
+  }
+
+  .trigger {
+    border-radius: var(--rly-radius-round);
+    gap: var(--rly-space-8);
+    min-block-size: var(--rly-space-40);
+    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-6);
+  }
+
+  .root[data-rly-relay-dock-open="true"] > .trigger {
+    visibility: hidden;
+  }
+
+  .trigger:hover,
+  .close:hover {
+    background: var(--rly-color-surface-2);
+  }
+
+  .trigger:active,
+  .close:active {
+    background: var(--rly-color-surface-3);
+  }
+
+  .mark {
+    align-items: center;
+    align-self: stretch;
+    background: var(--rly-color-agent);
+    border-radius: var(--rly-radius-round);
+    color: var(--rly-color-surface-1);
+    display: inline-flex;
+    inline-size: var(--rly-space-32);
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .markLine {
+    background: currentcolor;
+    block-size: 100%;
+    inline-size: var(--rly-space-2);
+    inset-inline-start: var(--rly-space-6);
+    opacity: 0.42;
+    position: absolute;
+  }
+
+  .markGlyph {
+    block-size: var(--rly-space-16);
+    inline-size: var(--rly-space-16);
+    position: relative;
+  }
+
+  .sheet,
+  .rail {
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    display: flex;
+    flex-direction: column;
+    padding-block-end: env(safe-area-inset-bottom, 0px);
+    padding-block-start: env(safe-area-inset-top, 0px);
+  }
+
+  .sheet {
+    inline-size: min(92vw, 34rem);
+    max-inline-size: 34rem;
+  }
+
+  .rail {
+    block-size: 100vh;
+    block-size: 100dvh;
+    border-inline-start: 1px solid var(--rly-color-border-1);
+    box-shadow: -12px 0 32px color-mix(in srgb, var(--rly-color-text-1) 8%, transparent);
+    inline-size: min(38vw, 30rem);
+    inset-block: var(--rly-space-0);
+    inset-inline-end: var(--rly-space-0);
+    min-inline-size: 24rem;
+    position: fixed;
+    z-index: 90;
+  }
+
+  .railHeader {
+    align-items: flex-start;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    flex: none;
+    gap: var(--rly-space-16);
+    justify-content: space-between;
+    padding: var(--rly-space-20) var(--rly-space-24);
+  }
+
+  .railHeading {
+    display: grid;
+    gap: var(--rly-space-6);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .title {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+  }
+
+  .description {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: var(--rly-space-0);
+  }
+
+  .close {
+    border-radius: var(--rly-radius-field);
+    flex: none;
+    min-block-size: var(--rly-space-40);
+    min-inline-size: var(--rly-space-40);
+    padding: var(--rly-space-8);
+  }
+
+  .fixedContext {
+    background: var(--rly-color-surface-1);
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: grid;
+    flex: none;
+    gap: var(--rly-space-16);
+    padding: var(--rly-space-16) var(--rly-space-24) var(--rly-space-20);
+  }
+
+  .context,
+  .selection {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .sectionLabel {
+    color: var(--rly-color-text-3);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: var(--rly-type-meta-tracking);
+    margin: var(--rly-space-0);
+    text-transform: uppercase;
+  }
+
+  .chipList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-6);
+    list-style: none;
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-0);
+  }
+
+  .chip {
+    align-items: baseline;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-tag);
+    display: inline-flex;
+    gap: var(--rly-space-6);
+    max-inline-size: 100%;
+    padding: var(--rly-space-4) var(--rly-space-8);
+  }
+
+  .chipLabel,
+  .chipValue {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  .chipLabel {
+    color: var(--rly-color-text-2);
+  }
+
+  .chipValue {
+    color: var(--rly-color-text-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .selectionGrid {
+    display: grid;
+    gap: var(--rly-space-12);
+    grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+  }
+
+  .body {
+    flex: 1 1 auto;
+    min-block-size: var(--rly-space-0);
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-24);
+  }
+
+  .ready,
+  .state {
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .footer {
+    background: var(--rly-color-surface-1);
+    border-block-start: 1px solid var(--rly-color-border-1);
+    flex: none;
+    padding: var(--rly-space-16) var(--rly-space-24);
+  }
+
+  @media (max-width: 40rem), (max-height: 40rem) and (pointer: coarse) {
+    .sheet {
+      block-size: 100vh;
+      block-size: 100dvh;
+      border: var(--rly-space-0);
+      border-radius: var(--rly-space-0);
+      inline-size: 100vw;
+      max-inline-size: none;
+    }
+
+    .sheet > :first-child,
+    .fixedContext,
+    .footer {
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+
+    .body {
+      padding-inline: max(var(--rly-space-16), env(safe-area-inset-left, 0px))
+        max(var(--rly-space-16), env(safe-area-inset-right, 0px));
+    }
+
+    .selectionGrid {
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+  }
+}

@@ -311,6 +311,34 @@ target, expected revision, impact, and evidence beside a named human reviewer.
 Its owned authorization button stays disabled until the controlled exact-action
 confirmation is checked, and terminal outcomes remain visible after review.
 
+`RelayDock` is the shared product frame for one adapter-owned Relay thread. It
+starts collapsed, keeps context plus profile and model selection visible above
+the scrolling thread, and accepts explicit ready, loading, empty, error, and
+unavailable states. Products choose a non-modal desktop rail or modal desktop
+overlay. Compact viewports always use a full-height modal sheet with safe-area
+padding. Rly owns focus and responsive presentation only. The adapter still
+owns thread identity, loading, persistence, authorization, routing, and the
+difference between advisory Ask and approval-bound Work.
+
+```tsx
+import { RelayDock } from "@knpkv/rly/patterns"
+
+export const PullRequestRelay = () => (
+  <RelayDock
+    context={[
+      { id: "repository", label: "Repository", value: "control-center" },
+      { id: "pull-request", label: "PR", value: "#184" }
+    ]}
+    desktopPresentation="rail"
+    selection={{
+      model: { onValueChange: setModel, options: models, value: model },
+      profile: { onValueChange: setProfile, options: profiles, value: profile }
+    }}
+    state={{ content: <ReviewThread />, status: "ready" }}
+  />
+)
+```
+
 ```tsx
 import { AgentContextButton, GovernedActionReview } from "@knpkv/rly/patterns"
 
@@ -324,8 +352,9 @@ export const ReleaseAgentEntry = () => (
 ```
 
 Callbacks request application-owned state changes only. Rly never contacts an
-agent provider, invokes a vendor capability, derives permission, or treats an
-agent proposal as a human decision.
+agent provider, invokes a vendor capability, derives permission, discovers a
+thread, or treats an agent proposal as a human decision. RelayDock does not
+combine Relay-only and Managed Review history.
 
 ## Complete pull-request diffs
 
