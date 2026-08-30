@@ -7,7 +7,10 @@ import type { WorkStoreService } from "./store.js"
 export interface WorkService {
   readonly record: (
     event: WorkGoalCheckpoint
-  ) => Effect.Effect<WorkGoalCheckpoint, WorkCheckpointConflictError | WorkStoreError>
+  ) => Effect.Effect<
+    WorkGoalCheckpoint,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly snapshots: (observedAt?: number) => Effect.Effect<WorkSnapshots, WorkStoreError | WorkProjectionError>
 }
 

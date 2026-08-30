@@ -3,6 +3,7 @@ import { WorkProjectionError } from "./errors.js"
 import {
   type WorkGoal,
   WorkGoalCheckpoint,
+  workHistoryMaxEvents,
   type WorkSnapshot,
   WorkSnapshots,
   type WorkSnapshotWindow
@@ -25,7 +26,7 @@ const validateHistory = Effect.fn("HerdrWork.validateHistory")(function*(
   input: ReadonlyArray<WorkGoalCheckpoint>
 ) {
   const events = yield* Schema.decodeUnknownEffect(
-    Schema.Array(WorkGoalCheckpoint).check(Schema.isMaxLength(16_384))
+    Schema.Array(WorkGoalCheckpoint).check(Schema.isMaxLength(workHistoryMaxEvents))
   )(input).pipe(
     Effect.mapError((cause) => projectionError("malformed", "work checkpoint history is malformed", cause))
   )

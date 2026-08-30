@@ -8,6 +8,9 @@ const Timestamp = Schema.Number.check(
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
 )
 
+export const workHistoryMaxEvents = 16_384
+export const workSnapshotMaxGoals = 1_024
+
 export const WorkGoalId = Identifier
 export type WorkGoalId = typeof WorkGoalId.Type
 
@@ -80,7 +83,7 @@ export const WorkSnapshot = Schema.Struct({
   window: WorkSnapshotWindow,
   observedAt: Timestamp,
   asOf: Timestamp,
-  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(1_024))
+  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals))
 })
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
 

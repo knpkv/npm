@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { ChatHistoryError } from "./errors.js"
-import { StoredChatTurn, type StoredChatTurn as StoredChatTurnType } from "./model.js"
+import { chatHistoryMaxEntries, StoredChatTurn, type StoredChatTurn as StoredChatTurnType } from "./model.js"
 
 const storeError = (operation: string) => (cause: unknown) =>
   new ChatHistoryError({ cause, detail: String(cause), operation })
@@ -100,7 +100,16 @@ export class ChatStore {
 
   readonly list = Effect.fn("ChatStore.list")(function*(this: ChatStore) {
     const rows = yield* Effect.try({
-      try: () => this.#database.prepare("SELECT record FROM chat_turns ORDER BY created_at ASC").all(),
+      try: () =>
+        this.#database.prepare(
+          `SELECT record FROM (
+           SELECT id, created_at, record
+           FROM chat_turns
+           ORDER BY created_at DESC, id DESC
+           LIMIT ?
+         )
+         ORDER BY created_at ASC, id ASC`
+        ).all(chatHistoryMaxEntries),
       catch: storeError("chat.list")
     })
     return yield* Effect.forEach(rows, (row) => decodeRow("chat.list", row))

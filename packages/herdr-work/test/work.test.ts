@@ -4,11 +4,15 @@ import { Effect, Schema } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
+  makeWorkService,
   projectWorkSnapshots,
   type WorkGoal,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  workHistoryMaxEvents,
+  workSnapshotMaxGoals,
   WorkStore
 } from "../src/index.js"
 
@@ -53,6 +57,48 @@ const checkpoint = (
   occurredAt: updatedAt,
   version: "herdr.work.event.v1"
 })
+
+const checkpointForGoal = (
+  goalId: string,
+  eventId: string,
+  occurredAt: number,
+  createdAt: number
+): WorkGoalCheckpointType => ({
+  eventId,
+  goal: {
+    ...goal(occurredAt, "working", "local"),
+    createdAt,
+    id: goalId,
+    title: goalId
+  },
+  occurredAt,
+  version: "herdr.work.event.v1"
+})
+
+const seedWorkDatabase = (
+  path: string,
+  events: ReadonlyArray<WorkGoalCheckpointType>
+): void => {
+  const database = new DatabaseSync(path)
+  database.exec(`
+    CREATE TABLE work_goal_events (
+      event_id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      record TEXT NOT NULL,
+      UNIQUE (goal_id, occurred_at)
+    );
+    BEGIN IMMEDIATE;
+  `)
+  const insert = database.prepare(
+    "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+  )
+  for (const event of events) {
+    insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event))
+  }
+  database.exec("COMMIT")
+  database.close()
+}
 
 const history = [
   checkpoint("event-created", 0, "planned", "local"),
@@ -128,4 +174,94 @@ describe("durable Work projection", () => {
       })
       expect(yield* store.list()).toEqual([history[0]])
     }).pipe(provideNodeServices))
+
+  it.effect("rejects cross-history inconsistencies before durable mutation", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-invariant-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+
+      const missingCreation = checkpointForGoal("goal-late", "event-late", 2, 1)
+      expect(yield* Effect.result(service.record(missingCreation))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+      expect(yield* store.list()).toEqual([])
+
+      yield* service.record(history[0])
+      const changedCreation = {
+        ...history[1],
+        goal: { ...history[1].goal, createdAt: 1 }
+      }
+      expect(yield* Effect.result(service.record(changedCreation))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+      expect(yield* store.list()).toEqual([history[0]])
+
+      yield* service.record(history[1])
+      expect((yield* service.snapshots(history[1].occurredAt)).now.goals[0]?.updatedAt).toBe(
+        history[1].occurredAt
+      )
+    }).pipe(provideNodeServices))
+
+  it.effect(
+    "keeps the largest projectable event history writable and rejects the next event",
+    () =>
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-event-capacity-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const events = Array.from(
+          { length: workHistoryMaxEvents },
+          (_, index) => checkpointForGoal("goal-capacity", `event-${index}`, index, 0)
+        )
+        yield* Effect.sync(() => seedWorkDatabase(path, events))
+        const store = yield* WorkStore.open(path)
+        yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+        const service = yield* makeWorkService(store)
+
+        expect((yield* service.snapshots(workHistoryMaxEvents)).now.goals).toHaveLength(1)
+        const overflow = checkpointForGoal(
+          "goal-capacity",
+          `event-${workHistoryMaxEvents}`,
+          workHistoryMaxEvents,
+          0
+        )
+        expect(yield* Effect.result(service.record(overflow))).toMatchObject({
+          failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+        })
+        expect(yield* store.list()).toHaveLength(workHistoryMaxEvents)
+      }).pipe(provideNodeServices),
+    30_000
+  )
+
+  it.effect("keeps the largest snapshot projectable and rejects a new goal", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-goal-capacity-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const events = Array.from({ length: workSnapshotMaxGoals }, (_, index) =>
+        checkpointForGoal(`goal-${index}`, `event-${index}`, index, index))
+      yield* Effect.sync(() =>
+        seedWorkDatabase(path, events)
+      )
+      const store = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+
+      expect((yield* service.snapshots(workSnapshotMaxGoals)).now.goals).toHaveLength(
+        workSnapshotMaxGoals
+      )
+      const overflow = checkpointForGoal(
+        `goal-${workSnapshotMaxGoals}`,
+        `event-${workSnapshotMaxGoals}`,
+        workSnapshotMaxGoals,
+        workSnapshotMaxGoals
+      )
+      expect(yield* Effect.result(service.record(overflow))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(yield* store.list()).toHaveLength(workSnapshotMaxGoals)
+    }).pipe(provideNodeServices), 30_000)
 })

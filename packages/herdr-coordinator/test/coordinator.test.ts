@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import {
   AgentWorkerIdentity,
+  fleetResponseBodyMaxBytes,
   type HostConfiguration,
   type HostOperations,
   JobStore,
@@ -12,7 +13,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  ChatHistory,
   ChatHistoryError,
+  chatHistoryMaxEntries,
   ChatRequest,
   ChatStore,
   type ChatStoreService,
@@ -194,6 +197,54 @@ describe("coordinator contracts", () => {
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
+  })
+
+  it.effect("returns only the newest durable turns in chronological order", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-chat-history-bound-test-"))
+    const path = join(root, "chat.sqlite")
+    return Effect.acquireUseRelease(
+      ChatStore.open(path),
+      (store) =>
+        Effect.gen(function*() {
+          for (let index = 0; index <= chatHistoryMaxEntries; index += 1) {
+            yield* store.put({
+              createdAt: index,
+              id: `turn-${index.toString().padStart(2, "0")}`,
+              jobId: `job-${index}`,
+              message: `message ${index}`,
+              mode: "ask"
+            })
+          }
+          const turns = yield* store.list()
+          expect(turns).toHaveLength(chatHistoryMaxEntries)
+          expect(turns.map(({ createdAt }) => createdAt)).toEqual(
+            Array.from({ length: chatHistoryMaxEntries }, (_, index) => index + 1)
+          )
+          expect(yield* store.getByJob("job-0")).toMatchObject({ id: "turn-00" })
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it("keeps a maximum-size browser chat history below the response limit", () => {
+    const history = Schema.decodeUnknownSync(ChatHistory)({
+      entries: Array.from({ length: chatHistoryMaxEntries }, (_, index) => ({
+        createdAt: index,
+        id: `turn-${index}`,
+        message: "m".repeat(2_000),
+        mode: "ask",
+        reply: "r".repeat(20_000),
+        state: "completed",
+        updatedAt: index
+      }))
+    })
+    expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(
+      fleetResponseBodyMaxBytes
+    )
   })
 
   it("rejects blank chat messages at the boundary", () => {

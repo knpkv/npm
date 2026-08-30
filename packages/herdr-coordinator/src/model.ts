@@ -25,6 +25,8 @@ export type ChatState = typeof ChatState.Type
 
 export const CoordinatorReply = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(20_000))
 
+export const chatHistoryMaxEntries = 32
+
 export const ChatEntry = Schema.Struct({
   createdAt: Schema.Number,
   id: Identifier,
@@ -48,7 +50,9 @@ export const ChatEntry = Schema.Struct({
 )
 export interface ChatEntry extends Schema.Schema.Type<typeof ChatEntry> {}
 
-export const ChatHistory = Schema.Struct({ entries: Schema.Array(ChatEntry) })
+export const ChatHistory = Schema.Struct({
+  entries: Schema.Array(ChatEntry).check(Schema.isMaxLength(chatHistoryMaxEntries))
+})
 export interface ChatHistory extends Schema.Schema.Type<typeof ChatHistory> {}
 
 export const CoordinatorLifecycleStarted = Schema.Struct({

@@ -1,10 +1,20 @@
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
-import { WorkCheckpointConflictError, WorkStoreError } from "./errors.js"
-import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "./model.js"
+import { WorkCheckpointConflictError, WorkProjectionError, WorkStoreError } from "./errors.js"
+import {
+  WorkGoalCheckpoint,
+  type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  workHistoryMaxEvents,
+  workSnapshotMaxGoals
+} from "./model.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
+const CountRow = Schema.Struct({ count: Schema.Number })
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
+type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
+type AppendDecision =
+  | { readonly _tag: "inserted"; readonly changes: bigint | number }
+  | { readonly _tag: "rejected"; readonly error: AppendRejection }
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(
@@ -20,7 +30,10 @@ const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
 export interface WorkStoreService {
   readonly append: (
     event: WorkGoalCheckpointType
-  ) => Effect.Effect<WorkGoalCheckpointType, WorkCheckpointConflictError | WorkStoreError>
+  ) => Effect.Effect<
+    WorkGoalCheckpointType,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly list: () => Effect.Effect<ReadonlyArray<WorkGoalCheckpointType>, WorkStoreError>
 }
 
@@ -72,18 +85,97 @@ export class WorkStore implements WorkStoreService {
       Effect.mapError(storeError("append.decode"))
     )
     const inserted = yield* Effect.try({
-      try: () =>
-        this.#database.prepare(
-          "INSERT OR IGNORE INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-        ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded)),
+      try: () => {
+        let transaction = false
+        try {
+          this.#database.exec("BEGIN IMMEDIATE")
+          transaction = true
+          const reject = (error: AppendRejection): AppendDecision => {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return { _tag: "rejected", error }
+          }
+          const duplicate = this.#database.prepare(
+            `SELECT 1 FROM work_goal_events
+             WHERE event_id = ? OR (goal_id = ? AND occurred_at = ?)
+             LIMIT 1`
+          ).get(decoded.eventId, decoded.goal.id, decoded.occurredAt)
+          if (duplicate !== undefined) {
+            return reject(
+              new WorkCheckpointConflictError({
+                eventId: decoded.eventId,
+                goalId: decoded.goal.id,
+                occurredAt: decoded.occurredAt
+              })
+            )
+          }
+          const eventCount = Schema.decodeUnknownSync(CountRow)(
+            this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
+          ).count
+          if (eventCount >= workHistoryMaxEvents) {
+            return reject(
+              new WorkProjectionError({
+                cause: decoded,
+                detail: `work history cannot exceed ${workHistoryMaxEvents} checkpoints`,
+                reason: "capacity_exceeded"
+              })
+            )
+          }
+          const firstGoalRow = this.#database.prepare(
+            "SELECT record FROM work_goal_events WHERE goal_id = ? ORDER BY occurred_at ASC, event_id ASC LIMIT 1"
+          ).get(decoded.goal.id)
+          if (firstGoalRow === undefined) {
+            if (decoded.occurredAt !== decoded.goal.createdAt) {
+              return reject(
+                new WorkProjectionError({
+                  cause: decoded,
+                  detail: `goal ${decoded.goal.id} must begin at its creation timestamp`,
+                  reason: "inconsistent_history"
+                })
+              )
+            }
+            const goalCount = Schema.decodeUnknownSync(CountRow)(
+              this.#database.prepare("SELECT COUNT(DISTINCT goal_id) AS count FROM work_goal_events").get()
+            ).count
+            if (goalCount >= workSnapshotMaxGoals) {
+              return reject(
+                new WorkProjectionError({
+                  cause: decoded,
+                  detail: `work snapshots cannot exceed ${workSnapshotMaxGoals} goals`,
+                  reason: "capacity_exceeded"
+                })
+              )
+            }
+          } else {
+            const firstGoal = Schema.decodeUnknownSync(WorkGoalCheckpoint)(
+              JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(firstGoalRow).record)
+            )
+            if (firstGoal.goal.createdAt !== decoded.goal.createdAt) {
+              return reject(
+                new WorkProjectionError({
+                  cause: decoded,
+                  detail: `goal ${decoded.goal.id} changed its creation timestamp`,
+                  reason: "inconsistent_history"
+                })
+              )
+            }
+          }
+          const result = this.#database.prepare(
+            "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+          ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
+          this.#database.exec("COMMIT")
+          transaction = false
+          return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
+        } catch (error) {
+          if (transaction) this.#database.exec("ROLLBACK")
+          throw error
+        }
+      },
       catch: storeError("append.insert")
     })
-    if (inserted.changes === 0) {
-      return yield* new WorkCheckpointConflictError({
-        eventId: decoded.eventId,
-        goalId: decoded.goal.id,
-        occurredAt: decoded.occurredAt
-      })
+    if (inserted._tag === "rejected") return yield* inserted.error
+    if (inserted.changes !== 1 && inserted.changes !== 1n) {
+      return yield* storeError("append.insert.count")(inserted.changes)
     }
     yield* this.secureFiles()
     return decoded

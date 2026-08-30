@@ -5,7 +5,13 @@ export class WorkProjectionError extends Schema.TaggedError<WorkProjectionError>
   {
     cause: Schema.Defect(),
     detail: Schema.String,
-    reason: Schema.Literals(["malformed", "duplicate_event", "ambiguous_checkpoint", "inconsistent_history"])
+    reason: Schema.Literals([
+      "malformed",
+      "duplicate_event",
+      "ambiguous_checkpoint",
+      "inconsistent_history",
+      "capacity_exceeded"
+    ])
   }
 ) {}
 
