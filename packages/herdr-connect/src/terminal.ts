@@ -26,50 +26,76 @@ export const terminalStderrMaxBytes = 1024 * 1024
 export const terminalEventMaxLineBytes = 4 * 1024 * 1024 + 4 * 1024
 
 interface TerminalLineState {
-  readonly bytes: ReadonlyArray<number>
+  readonly buffer: Uint8Array
+  readonly length: number
 }
 
-const emptyTerminalLine = (): TerminalLineState => ({ bytes: [] })
+const terminalLineInitialBytes = 64 * 1_024
 
-const decodeTerminalLine = (bytes: ReadonlyArray<number>): string => {
-  const content = bytes.at(-1) === 13 ? bytes.slice(0, -1) : bytes
-  return new TextDecoder().decode(Uint8Array.from(content))
+const emptyTerminalLine = (): TerminalLineState => ({
+  buffer: new Uint8Array(terminalLineInitialBytes),
+  length: 0
+})
+
+const decodeTerminalLine = (bytes: Uint8Array): string => {
+  const content = bytes.at(-1) === 13 ? bytes.subarray(0, -1) : bytes
+  return new TextDecoder().decode(content)
 }
 
-const boundedTerminalLines = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
+const growTerminalLineBuffer = (
+  buffer: Uint8Array,
+  requiredBytes: number
+): Uint8Array => {
+  if (requiredBytes <= buffer.byteLength) return buffer
+  let capacity = buffer.byteLength
+  while (capacity < requiredBytes) {
+    capacity = Math.min(capacity * 2, terminalEventMaxLineBytes)
+  }
+  const grown = new Uint8Array(capacity)
+  grown.set(buffer)
+  return grown
+}
+
+export const boundedTerminalLines = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
   stream.pipe(
     Stream.mapAccumEffect(
       emptyTerminalLine,
       (state, chunk) => {
-        const pending = [...state.bytes]
+        let buffer = state.buffer
+        let length = state.length
         const lines: Array<string> = []
-        for (const byte of chunk) {
-          if (byte === 10) {
-            lines.push(decodeTerminalLine(pending))
-            pending.length = 0
-          } else {
-            pending.push(byte)
-            if (pending.length > terminalEventMaxLineBytes) {
-              return Effect.fail(
-                new TerminalProtocolError({
-                  cause: pending.length,
-                  detail: `Herdr terminal event exceeded ${terminalEventMaxLineBytes} bytes`
-                })
-              )
-            }
+        let offset = 0
+        while (offset < chunk.byteLength) {
+          const newline = chunk.indexOf(10, offset)
+          const end = newline === -1 ? chunk.byteLength : newline
+          const nextLength = length + end - offset
+          if (nextLength > terminalEventMaxLineBytes) {
+            return Effect.fail(
+              new TerminalProtocolError({
+                cause: nextLength,
+                detail: `Herdr terminal event exceeded ${terminalEventMaxLineBytes} bytes`
+              })
+            )
           }
+          buffer = growTerminalLineBuffer(buffer, nextLength)
+          buffer.set(chunk.subarray(offset, end), length)
+          length = nextLength
+          if (newline === -1) break
+          lines.push(decodeTerminalLine(buffer.subarray(0, length)))
+          length = 0
+          offset = newline + 1
         }
         const result: readonly [TerminalLineState, ReadonlyArray<string>] = [
-          { bytes: pending },
+          { buffer, length },
           lines
         ]
         return Effect.succeed(result)
       },
       {
         onHalt: (state) =>
-          state.bytes.length === 0
+          state.length === 0
             ? []
-            : [decodeTerminalLine(state.bytes)]
+            : [decodeTerminalLine(state.buffer.subarray(0, state.length))]
       }
     )
   )

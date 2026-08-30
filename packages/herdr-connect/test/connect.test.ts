@@ -29,7 +29,7 @@ import {
 } from "../src/relationship-store.js"
 import { resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
-import { makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
+import { boundedTerminalLines, makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
 import { calendarConnectAgents, connectLineageRows } from "../src/view.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its test layer.
@@ -909,6 +909,23 @@ describe("Connect public seams", () => {
     expect(Buffer.byteLength(JSON.stringify(command))).toBeLessThanOrEqual(
       terminalCommandMaxPayloadBytes
     )
+  })
+
+  it.effect("decodes a maximum terminal line across transport chunks", () => {
+    const encoded = new TextEncoder().encode(
+      `${"A".repeat(terminalEventMaxLineBytes)}\n`
+    )
+    const chunkBytes = 32 * 1_024
+    const chunks = Array.from(
+      { length: Math.ceil(encoded.byteLength / chunkBytes) },
+      (_, index) => encoded.subarray(index * chunkBytes, (index + 1) * chunkBytes)
+    )
+    return Effect.gen(function*() {
+      const line = yield* Stream.runHead(
+        boundedTerminalLines(Stream.fromIterable(chunks))
+      )
+      expect(Option.getOrThrow(line)).toHaveLength(terminalEventMaxLineBytes)
+    })
   })
 
   it.effect("turns a timed-out peer into a partial failure", () => {
