@@ -1,6 +1,7 @@
-import { Effect, Schema } from "effect"
+import { Effect, Exit, Schema, Semaphore } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { ConnectRelationshipError, ConnectRelationshipStoreError } from "./errors.js"
+import { validateConnectRelationships } from "./forest.js"
 import { ConnectAgent, ConnectAgentRelationship } from "./model.js"
 
 export const PersistedConnectAgentMetadata = Schema.Struct({
@@ -19,6 +20,11 @@ export const PersistedConnectAgentMetadata = Schema.Struct({
 export type PersistedConnectAgentMetadata = typeof PersistedConnectAgentMetadata.Type
 
 export type RelationshipObservationSource = "durable_worker" | "trusted_live_inventory"
+
+export interface RelationshipObservation {
+  readonly metadata: PersistedConnectAgentMetadata
+  readonly source: RelationshipObservationSource
+}
 
 const RelationshipRow = Schema.Struct({
   agent_id: Schema.String,
@@ -64,17 +70,19 @@ const sameMetadata = (
   right: PersistedConnectAgentMetadata
 ): boolean =>
   left.agentId === right.agentId &&
-  left.host === right.host &&
+  left.host.toLowerCase() === right.host.toLowerCase() &&
   left.paneId === right.paneId &&
   left.relationship?.parentAgentId === right.relationship?.parentAgentId &&
   left.relationship?.relation === right.relationship?.relation
 
 export class AgentRelationshipStore {
   readonly #database: DatabaseSync
+  readonly #transactions: Semaphore.Semaphore
   readonly path: string
 
-  private constructor(path: string) {
+  private constructor(path: string, transactions: Semaphore.Semaphore) {
     this.path = path
+    this.#transactions = transactions
     this.#database = new DatabaseSync(path)
     try {
       this.#database.exec(`
@@ -131,11 +139,13 @@ export class AgentRelationshipStore {
   }
 
   static readonly open = Effect.fn("AgentRelationshipStore.open")(
-    (path: string) =>
-      Effect.try({
-        try: () => new AgentRelationshipStore(path),
+    function*(path: string) {
+      const transactions = yield* Semaphore.make(1)
+      return yield* Effect.try({
+        try: () => new AgentRelationshipStore(path, transactions),
         catch: storeError("open")
       })
+    }
   )
 
   readonly persist = Effect.fn("AgentRelationshipStore.persist")(function*(
@@ -143,12 +153,40 @@ export class AgentRelationshipStore {
     metadata: PersistedConnectAgentMetadata,
     source: RelationshipObservationSource
   ) {
-    const row = yield* Effect.try({
-      try: () => {
-        this.#database.exec("BEGIN IMMEDIATE")
-        try {
-          const changed = this.#database.prepare(
-            `INSERT INTO connect_agent_relationships
+    const stored = yield* this.persistAll([{ metadata, source }])
+    const persisted = stored.find(
+      (candidate) =>
+        candidate.agentId === metadata.agentId &&
+        candidate.host.toLowerCase() === metadata.host.toLowerCase()
+    )
+    if (persisted === undefined) {
+      return yield* new ConnectRelationshipStoreError({
+        cause: metadata,
+        operation: "persist.result"
+      })
+    }
+    return persisted
+  })
+
+  readonly persistAll = Effect.fn("AgentRelationshipStore.persistAll")(function*(
+    this: AgentRelationshipStore,
+    observations: ReadonlyArray<RelationshipObservation>
+  ) {
+    const database = this.#database
+    const listUnlocked = this.listUnlocked()
+    return yield* this.#transactions.withPermits(1)(
+      Effect.acquireUseRelease(
+        Effect.try({
+          try: () => database.exec("BEGIN IMMEDIATE"),
+          catch: storeError("persist.begin")
+        }),
+        () =>
+          Effect.gen(function*() {
+            for (const { metadata, source } of observations) {
+              yield* Effect.try({
+                try: () => {
+                  const changed = database.prepare(
+                    `INSERT INTO connect_agent_relationships
               (agent_id, host, pane_id, parent_agent_id, relation, observed_at)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
@@ -168,53 +206,79 @@ export class AgentRelationshipStore {
                  )
                )
              RETURNING agent_id, host, pane_id, parent_agent_id, relation, observed_at`
-          ).get(
-            metadata.agentId,
-            metadata.host,
-            metadata.paneId,
-            metadata.relationship?.parentAgentId ?? null,
-            metadata.relationship?.relation ?? null,
-            metadata.observedAt,
-            source
-          )
-          const stored = changed ?? this.#database.prepare(
-            `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
+                  ).get(
+                    metadata.agentId,
+                    metadata.host,
+                    metadata.paneId,
+                    metadata.relationship?.parentAgentId ?? null,
+                    metadata.relationship?.relation ?? null,
+                    metadata.observedAt,
+                    source
+                  )
+                  return changed ?? database.prepare(
+                    `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
              FROM connect_agent_relationships
              WHERE host = ? AND agent_id = ?`
-          ).get(metadata.host, metadata.agentId)
-          this.#database.exec("COMMIT")
-          return stored
-        } catch (error) {
-          this.#database.exec("ROLLBACK")
-          throw error
-        }
-      },
-      catch: storeError("persist")
-    })
-    const persisted = yield* decodeRow(row)
-    if (!sameMetadata(persisted, metadata)) {
-      return yield* new ConnectRelationshipError({
-        detail: `agent ${metadata.agentId} already has different relationship ownership`,
-        reason: "ambiguous_ownership"
-      })
-    }
-    return persisted
+                  ).get(metadata.host, metadata.agentId)
+                },
+                catch: storeError("persist.upsert")
+              }).pipe(Effect.flatMap(decodeRow))
+            }
+            const persisted = yield* listUnlocked
+            const finalObservations = new Map<string, PersistedConnectAgentMetadata>()
+            for (const { metadata } of observations) {
+              finalObservations.set(`${metadata.host.toLowerCase()}\u0000${metadata.agentId}`, metadata)
+            }
+            for (const metadata of finalObservations.values()) {
+              const current = persisted.find(
+                (candidate) =>
+                  candidate.agentId === metadata.agentId &&
+                  candidate.host.toLowerCase() === metadata.host.toLowerCase()
+              )
+              if (current === undefined || !sameMetadata(current, metadata)) {
+                return yield* new ConnectRelationshipError({
+                  detail: `agent ${metadata.agentId} already has different relationship ownership`,
+                  reason: "ambiguous_ownership"
+                })
+              }
+            }
+            yield* validateConnectRelationships(
+              persisted.map(({ agentId: id, host, relationship }) =>
+                relationship === undefined ? { host, id } : { host, id, relationship }
+              )
+            )
+            return persisted
+          }),
+        (_, exit) =>
+          Effect.try({
+            try: () => database.exec(Exit.isSuccess(exit) ? "COMMIT" : "ROLLBACK"),
+            catch: storeError(Exit.isSuccess(exit) ? "persist.commit" : "persist.rollback")
+          })
+      )
+    )
   })
 
   readonly list = Effect.fn("AgentRelationshipStore.list")(function*(
     this: AgentRelationshipStore
   ) {
-    const rows = yield* Effect.try({
-      try: () =>
-        this.#database.prepare(
-          `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
-         FROM connect_agent_relationships
-         ORDER BY host, agent_id`
-        ).all(),
-      catch: storeError("list")
-    })
-    return yield* Effect.forEach(rows, decodeRow)
+    return yield* this.#transactions.withPermits(1)(this.listUnlocked())
   })
+
+  private listUnlocked() {
+    const database = this.#database
+    return Effect.gen(function*() {
+      const rows = yield* Effect.try({
+        try: () =>
+          database.prepare(
+            `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
+             FROM connect_agent_relationships
+             ORDER BY host, agent_id`
+          ).all(),
+        catch: storeError("list")
+      })
+      return yield* Effect.forEach(rows, decodeRow)
+    })
+  }
 
   close(): void {
     this.#database.close()

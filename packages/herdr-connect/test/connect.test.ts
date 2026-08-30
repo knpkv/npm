@@ -22,7 +22,11 @@ import {
   terminalCommandMaxPayloadBytes,
   TerminalSelection
 } from "../src/model.js"
-import { AgentRelationshipStore, PersistedConnectAgentMetadata } from "../src/relationship-store.js"
+import {
+  AgentRelationshipStore,
+  PersistedConnectAgentMetadata,
+  type RelationshipObservation
+} from "../src/relationship-store.js"
 import { resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
 import { makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
@@ -39,6 +43,30 @@ const provideNodeHttpClient = Effect.provide(NodeHttpClient.layerNodeHttp)
 const provideTestClock = Effect.provide(TestClock.layer())
 
 describe("Connect public seams", () => {
+  const hostConfiguration = (root: string): HostConfiguration => ({
+    allowedUsers: ["andrey@example.com"],
+    applyCommand: null,
+    browserMcpRecoverCommand: null,
+    applyMachines: ["SER8"],
+    approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test/" },
+    approvalNodes: ["node-ser8"],
+    approvalPort: 4_779,
+    checkCommand: ["true"],
+    coordinatorCommand: ["true"],
+    crossHost: false,
+    herdrCommand: "herdr",
+    host: "SER8",
+    localPort: 4_777,
+    machines: [{ host: "SER8", nodeId: "node-ser8" }],
+    port: 4_778,
+    pushAllowedOrigins: ["https://push.example.test"],
+    pushSubject: "mailto:andrey@example.com",
+    repository: root,
+    approvalTls: null,
+    stateDirectory: root,
+    tailscaleCommand: "tailscale"
+  })
+
   const agent = (
     id: string,
     host: string,
@@ -186,7 +214,12 @@ describe("Connect public seams", () => {
       const reopened = yield* AgentRelationshipStore.open(path)
       expect(yield* reopened.list()).toEqual([delegated, parent, reviewed])
       expect(yield* reopened.persist({ ...delegated, observedAt: 999 }, "durable_worker")).toEqual(delegated)
-      const remote = { ...delegated, host: "PI", observedAt: 2_000 }
+      const remote = {
+        agentId: "agent-remote",
+        host: "PI",
+        observedAt: 2_000,
+        paneId: "w2:p1"
+      }
       expect(yield* reopened.persist(remote, "durable_worker")).toEqual(remote)
       const staleAmbiguous = yield* Effect.result(reopened.persist({
         ...delegated,
@@ -224,6 +257,74 @@ describe("Connect public seams", () => {
       })
       expect(yield* store.persist(reparented, "trusted_live_inventory")).toEqual(reparented)
       expect(yield* store.list()).toEqual([reparented])
+      store.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("treats hostname casing as the same relationship owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-host-case-test-"))
+    const path = join(root, "relationships.sqlite")
+    const original = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-host-case",
+      host: "ser8",
+      observedAt: 1_000,
+      paneId: "w3:p52"
+    })
+    return Effect.gen(function*() {
+      const store = yield* AgentRelationshipStore.open(path)
+      yield* store.persist(original, "durable_worker")
+      expect(yield* store.persist({ ...original, host: "SER8", observedAt: 2_000 }, "durable_worker"))
+        .toMatchObject({ agentId: original.agentId, host: "ser8", observedAt: 2_000 })
+      expect(yield* store.list()).toHaveLength(1)
+      store.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("rolls back a cyclic live-inventory relationship batch", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-cycle-rollback-test-"))
+    const path = join(root, "relationships.sqlite")
+    const cycleA = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-cycle-a",
+      host: "SER8",
+      observedAt: 1_000,
+      paneId: "w3:p53"
+    })
+    const cycleB = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-cycle-b",
+      host: "SER8",
+      observedAt: 1_000,
+      paneId: "w3:p54",
+      relationship: { parentAgentId: "agent-cycle-a", relation: "delegated" }
+    })
+    const original = [cycleA, cycleB]
+    const originalObservations: ReadonlyArray<RelationshipObservation> = original.map(
+      (metadata) => ({ metadata, source: "durable_worker" })
+    )
+    return Effect.gen(function*() {
+      const store = yield* AgentRelationshipStore.open(path)
+      yield* store.persistAll(originalObservations)
+      const result = yield* Effect.result(store.persistAll([
+        {
+          metadata: {
+            ...cycleA,
+            observedAt: 2_000,
+            relationship: { parentAgentId: "agent-cycle-b", relation: "review" }
+          },
+          source: "trusted_live_inventory"
+        },
+        {
+          metadata: { ...cycleB, observedAt: 2_000 },
+          source: "trusted_live_inventory"
+        }
+      ]))
+      expect(result).toMatchObject({ failure: { reason: "cyclic" } })
+      expect(yield* store.list()).toEqual(original)
       store.close()
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
@@ -473,29 +574,7 @@ describe("Connect public seams", () => {
 
   it.effect("recovers a stale stored parent from newer same-pane live inventory without exposing it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-directory-replay-test-"))
-    const hostConfig = {
-      allowedUsers: ["andrey@example.com"],
-      applyCommand: null,
-      browserMcpRecoverCommand: null,
-      applyMachines: ["SER8"],
-      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test/" },
-      approvalNodes: ["node-ser8"],
-      approvalPort: 4_779,
-      checkCommand: ["true"],
-      coordinatorCommand: ["true"],
-      crossHost: false,
-      herdrCommand: "herdr",
-      host: "SER8",
-      localPort: 4_777,
-      machines: [{ host: "SER8", nodeId: "node-ser8" }],
-      port: 4_778,
-      pushAllowedOrigins: ["https://push.example.test"],
-      pushSubject: "mailto:andrey@example.com",
-      repository: root,
-      approvalTls: null,
-      stateDirectory: root,
-      tailscaleCommand: "tailscale"
-    } satisfies HostConfiguration
+    const hostConfig = hostConfiguration(root)
     const source: AgentSource = {
       agents: () =>
         Effect.succeed({
@@ -592,6 +671,84 @@ describe("Connect public seams", () => {
             paneId: "w1:p1"
           }
         ])
+      })
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("leaves stored relationships unchanged when live inventory is cyclic", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-directory-cycle-test-"))
+    const source: AgentSource = {
+      agents: () =>
+        Effect.succeed({
+          agents: [
+            {
+              activityRevision: 1,
+              agentId: "agent-cycle-a",
+              kind: "codex",
+              name: "Cycle A",
+              paneId: "w1:p3",
+              parentAgentId: "agent-cycle-b",
+              relation: "review",
+              status: "working",
+              work: "npm"
+            },
+            {
+              activityRevision: 1,
+              agentId: "agent-cycle-b",
+              kind: "codex",
+              name: "Cycle B",
+              paneId: "w1:p4",
+              parentAgentId: "agent-cycle-a",
+              relation: "delegated",
+              status: "working",
+              work: "npm"
+            }
+          ],
+          available: true,
+          error: null
+        }),
+      workers: () => Effect.succeed([])
+    }
+    const original = [
+      Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+        agentId: "agent-cycle-a",
+        host: "SER8",
+        observedAt: 1_000,
+        paneId: "w1:p3"
+      }),
+      Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+        agentId: "agent-cycle-b",
+        host: "SER8",
+        observedAt: 1_000,
+        paneId: "w1:p4",
+        relationship: { parentAgentId: "agent-cycle-a", relation: "delegated" }
+      })
+    ]
+    const originalObservations: ReadonlyArray<RelationshipObservation> = original.map(
+      (metadata) => ({ metadata, source: "durable_worker" })
+    )
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const activity = yield* Effect.acquireRelease(
+          AgentActivityStore.open(join(root, "activity.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationships = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        yield* relationships.persistAll(originalObservations)
+        expect(
+          yield* Effect.result(
+            localConnectAgents(hostConfiguration(root), source, activity, relationships, 2_000)
+          )
+        ).toMatchObject({
+          failure: { cause: { reason: "cyclic" }, reason: "invalid_response" }
+        })
+        expect(yield* relationships.list()).toEqual(original)
       })
     ).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),

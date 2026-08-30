@@ -20,20 +20,26 @@ export const ConnectForest = Schema.Struct({
 })
 export type ConnectForest = typeof ConnectForest.Type
 
+export interface ConnectRelationshipNode {
+  readonly host: string
+  readonly id: string
+  readonly relationship?: {
+    readonly parentAgentId: string
+    readonly relation: ConnectAgentRelation
+  }
+}
+
 const relationshipError = (
   reason: ConnectRelationshipError["reason"],
   detail: string
 ) => new ConnectRelationshipError({ detail, reason })
 
-export const buildConnectForest = Effect.fn("HerdrConnect.buildForest")(
-  function*(input: ReadonlyArray<ConnectAgent>) {
-    const agents = yield* Schema.decodeUnknownEffect(
-      Schema.Array(ConnectAgent).check(Schema.isMaxLength(1_024))
-    )(input).pipe(
-      Effect.mapError(() => relationshipError("malformed", "agent relationship input is malformed"))
-    )
-    const keyOf = (agent: Pick<ConnectAgent, "host" | "id">): string => `${agent.host.toLowerCase()}\u0000${agent.id}`
-    const byKey = new Map<string, ConnectAgent>()
+const keyOf = (agent: Pick<ConnectRelationshipNode, "host" | "id">): string =>
+  `${agent.host.toLowerCase()}\u0000${agent.id}`
+
+export const validateConnectRelationships = Effect.fn("HerdrConnect.validateRelationships")(
+  function*(agents: ReadonlyArray<ConnectRelationshipNode>) {
+    const byKey = new Map<string, ConnectRelationshipNode>()
     for (const agent of agents) {
       const key = keyOf(agent)
       if (byKey.has(key)) {
@@ -44,13 +50,8 @@ export const buildConnectForest = Effect.fn("HerdrConnect.buildForest")(
       }
       byKey.set(key, agent)
     }
-    const roots: Array<{ readonly host: string; readonly agentId: string }> = []
-    const edges: Array<ConnectForestEdge> = []
     for (const agent of agents) {
-      if (agent.relationship === undefined) {
-        roots.push({ agentId: agent.id, host: agent.host })
-        continue
-      }
+      if (agent.relationship === undefined) continue
       const parent = byKey.get(
         `${agent.host.toLowerCase()}\u0000${agent.relationship.parentAgentId}`
       )
@@ -64,20 +65,11 @@ export const buildConnectForest = Effect.fn("HerdrConnect.buildForest")(
             `agent ${agent.id} and its parent belong to different hosts`
           )
         }
-        roots.push({ agentId: agent.id, host: agent.host })
-        continue
       }
-      edges.push({
-        host: agent.host,
-        agentId: agent.id,
-        parentHost: parent.host,
-        parentAgentId: agent.relationship.parentAgentId,
-        relation: agent.relationship.relation
-      })
     }
     for (const agent of agents) {
       const path = new Set<string>()
-      let current: ConnectAgent | undefined = agent
+      let current: ConnectRelationshipNode | undefined = agent
       while (current !== undefined) {
         const key = keyOf(current)
         if (path.has(key)) {
@@ -93,6 +85,44 @@ export const buildConnectForest = Effect.fn("HerdrConnect.buildForest")(
             `${current.host.toLowerCase()}\u0000${current.relationship.parentAgentId}`
           )
       }
+    }
+  }
+)
+
+export const buildConnectForest = Effect.fn("HerdrConnect.buildForest")(
+  function*(input: ReadonlyArray<ConnectAgent>) {
+    const agents = yield* Schema.decodeUnknownEffect(
+      Schema.Array(ConnectAgent).check(Schema.isMaxLength(1_024))
+    )(input).pipe(
+      Effect.mapError(() => relationshipError("malformed", "agent relationship input is malformed"))
+    )
+    yield* validateConnectRelationships(agents)
+    const byKey = new Map<string, ConnectAgent>()
+    for (const agent of agents) {
+      const key = keyOf(agent)
+      byKey.set(key, agent)
+    }
+    const roots: Array<{ readonly host: string; readonly agentId: string }> = []
+    const edges: Array<ConnectForestEdge> = []
+    for (const agent of agents) {
+      if (agent.relationship === undefined) {
+        roots.push({ agentId: agent.id, host: agent.host })
+        continue
+      }
+      const parent = byKey.get(
+        `${agent.host.toLowerCase()}\u0000${agent.relationship.parentAgentId}`
+      )
+      if (parent === undefined) {
+        roots.push({ agentId: agent.id, host: agent.host })
+        continue
+      }
+      edges.push({
+        host: agent.host,
+        agentId: agent.id,
+        parentHost: parent.host,
+        parentAgentId: agent.relationship.parentAgentId,
+        relation: agent.relationship.relation
+      })
     }
     return yield* Schema.decodeUnknownEffect(ConnectForest)({ edges, roots }).pipe(
       Effect.mapError(() => relationshipError("malformed", "validated forest could not be encoded"))
