@@ -14,7 +14,7 @@ Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, 
 
 interface MountedDock {
   readonly host: HTMLDivElement
-  readonly portal: HTMLDivElement
+  readonly portal: ParentNode
   readonly root: Root
 }
 
@@ -42,6 +42,18 @@ const mountWithOwnedPortal = async (element: ReactElement): Promise<MountedDock>
   if (portal === null) throw new Error("PortalProvider did not create its portal root")
   const entry = { host, portal, root }
   mounted.push(entry)
+  return entry
+}
+
+const mountInShadowRoot = async (element: ReactElement): Promise<MountedDock> => {
+  const host = document.createElement("div")
+  const portalHost = document.createElement("div")
+  const portal = portalHost.attachShadow({ mode: "open" })
+  document.body.append(host, portalHost)
+  const root = createRoot(host)
+  const entry = { host, portal, root }
+  mounted.push(entry)
+  await act(async () => root.render(<PortalProvider container={portal}>{element}</PortalProvider>))
   return entry
 }
 
@@ -186,5 +198,17 @@ describe("RelayDock", () => {
 
     expect(dialog).not.toBeNull()
     expect(dialog?.contains(document.activeElement)).toBe(true)
+  })
+
+  it("isolates light-DOM siblings when the modal portal target is a ShadowRoot", async () => {
+    const { host, portal } = await mountInShadowRoot(dock({ defaultOpen: true }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+
+    expect(dialog).not.toBeNull()
+    expect(host.inert).toBe(true)
+    await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    expect(portal.querySelector('[role="dialog"]')).toBeNull()
+    expect(host.inert).toBe(false)
   })
 })

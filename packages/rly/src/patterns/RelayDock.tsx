@@ -35,6 +35,7 @@ const focusableSelector = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])'
 ].join(",")
 
@@ -325,7 +326,7 @@ const DockLayer = ({
     if (!modal || event.key !== "Tab") return
 
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-      (element) => element.hidden === false && element.tabIndex >= 0
+      (element) => element.hidden === false && (element.tabIndex >= 0 || element.isContentEditable)
     )
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel

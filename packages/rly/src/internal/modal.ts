@@ -50,9 +50,12 @@ export const useModalEntryMotion = (open: boolean, requested: ModalEntryMotion):
   return resolved
 }
 
+const hasHTMLElementInertContract = <Value extends object>(element: Value): element is Value & HTMLElement =>
+  "inert" in element && Predicate.isBoolean(element.inert)
+
 /** Narrows DOM elements through the HTML-only inert contract without relying on a realm-specific constructor. */
 export const isHTMLElement = (element: Element | null): element is HTMLElement =>
-  element !== null && "inert" in element && Predicate.isBoolean(element.inert)
+  element !== null && hasHTMLElementInertContract(element)
 
 /** Stages nested default-open or controlled overlays until their parent content is mounted. */
 export const ModalNestingBoundary = ({ children }: ModalNestingBoundaryProps): ReactElement => {
@@ -99,12 +102,12 @@ export const useModalIsolation = (layerRef: RefObject<HTMLDivElement | null>, is
     if (!isOpen) return
     const layer = layerRef.current
     if (layer === null) return
-    let current: HTMLElement = layer
+    let current: Element = layer
     const retained: Array<HTMLElement> = []
 
     while (true) {
       if (current === current.ownerDocument.body) break
-      const parent = current.parentElement
+      const parent = current.parentNode
       if (parent === null) break
       let hasReachedCurrent = false
       for (const sibling of parent.children) {
@@ -118,7 +121,15 @@ export const useModalIsolation = (layerRef: RefObject<HTMLDivElement | null>, is
           retained.push(sibling)
         }
       }
-      current = parent
+      const parentElement = current.parentElement
+      if (parentElement !== null) {
+        current = parentElement
+        continue
+      }
+      if (!("host" in parent)) break
+      const host = parent.host
+      if (!Predicate.isObjectOrArray(host) || !hasHTMLElementInertContract(host)) break
+      current = host
     }
 
     return () => {

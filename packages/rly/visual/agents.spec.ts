@@ -183,6 +183,20 @@ test("modal Relay presentations isolate and scroll-lock the page without swallow
   await expect(dock).toBeVisible()
 })
 
+test("modal Relay focus traversal includes a native rich-text editor", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const thread = dock.getByRole("region", { name: "Relay thread" })
+  const editor = dock.getByRole("textbox", { name: "Rich Relay reply" })
+
+  await thread.focus()
+  await page.keyboard.press("Tab")
+  await expect(editor).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
+})
+
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_200 })
   await page.goto(story("patterns-agentdrawer--interaction"))
