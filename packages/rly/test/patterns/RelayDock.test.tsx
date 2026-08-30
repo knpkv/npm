@@ -170,9 +170,13 @@ describe("RelayDock", () => {
     expect(dialog).not.toBeNull()
     expect(dialog?.tagName).toBe("SECTION")
     expect(dialog?.contains(document.activeElement)).toBe(true)
+    expect(host.inert).toBe(true)
+    expect(document.documentElement.style.overflow).toBe("hidden")
     await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
+    expect(host.inert).toBe(false)
+    expect(document.documentElement.style.overflow).toBe("")
     expect(document.activeElement).toBe(trigger)
   })
 

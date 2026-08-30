@@ -16,6 +16,12 @@ interface InertRecord {
   readonly previous: boolean
 }
 
+interface ScrollLockRecord {
+  count: number
+  readonly overflow: string
+  readonly overscrollBehavior: string
+}
+
 interface ModalNestingState {
   readonly isContentMounted: boolean
   readonly setContentMounted: (isMounted: boolean) => void
@@ -26,6 +32,7 @@ interface ModalNestingBoundaryProps {
 }
 
 const inertRecords = new WeakMap<HTMLElement, InertRecord>()
+const scrollLockRecords = new WeakMap<Document, ScrollLockRecord>()
 const ModalNestingContext = createContext<ModalNestingState | null>(null)
 let focusTransitionGeneration = 0
 
@@ -120,6 +127,46 @@ export const useModalIsolation = (layerRef: RefObject<HTMLDivElement | null>, is
   }, [isOpen, layerRef])
 }
 
+const retainScrollLock = (ownerDocument: Document): void => {
+  const record = scrollLockRecords.get(ownerDocument)
+  if (record !== undefined) {
+    record.count += 1
+    return
+  }
+  const root = ownerDocument.documentElement
+  scrollLockRecords.set(ownerDocument, {
+    count: 1,
+    overflow: root.style.overflow,
+    overscrollBehavior: root.style.overscrollBehavior
+  })
+  root.style.overflow = "hidden"
+  root.style.overscrollBehavior = "none"
+}
+
+const releaseScrollLock = (ownerDocument: Document): void => {
+  const record = scrollLockRecords.get(ownerDocument)
+  if (record === undefined) return
+  if (record.count > 1) {
+    record.count -= 1
+    return
+  }
+  const root = ownerDocument.documentElement
+  root.style.overflow = record.overflow
+  root.style.overscrollBehavior = record.overscrollBehavior
+  scrollLockRecords.delete(ownerDocument)
+}
+
+/** Shares a reference-counted document scroll lock across custom rly modal surfaces. */
+export const useModalScrollLock = (layerRef: RefObject<HTMLDivElement | null>, isOpen: boolean): void => {
+  useLayoutEffect(() => {
+    if (!isOpen) return
+    const ownerDocument = layerRef.current?.ownerDocument
+    if (ownerDocument === undefined) return
+    retainScrollLock(ownerDocument)
+    return () => releaseScrollLock(ownerDocument)
+  }, [isOpen, layerRef])
+}
+
 /** Invalidates an older deferred restoration whenever a newer modal transition starts. */
 export const invalidateModalFocusRestore = (): void => {
   focusTransitionGeneration += 1
@@ -129,6 +176,6 @@ export const invalidateModalFocusRestore = (): void => {
 export const restoreModalFocusAfterCleanup = (target: HTMLElement | null): void => {
   const generation = ++focusTransitionGeneration
   setTimeout(() => {
-    if (focusTransitionGeneration === generation && target?.isConnected) target.focus()
+    if (focusTransitionGeneration === generation && target !== null && target.isConnected === true) target.focus()
   }, 0)
 }

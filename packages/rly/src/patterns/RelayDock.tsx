@@ -19,7 +19,8 @@ import {
   ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
-  useModalIsolation
+  useModalIsolation,
+  useModalScrollLock
 } from "../internal/modal.js"
 import { Field } from "../primitives/Field.js"
 import { Select, type RlySelectOption } from "../primitives/Select.js"
@@ -275,6 +276,29 @@ const DockInitialFocus = ({ target }: { readonly target: RefObject<HTMLButtonEle
   return null
 }
 
+const DockLayerSurface = ({
+  children,
+  modal
+}: {
+  readonly children: ReactNode
+  readonly modal: boolean
+}): ReactElement => {
+  const layerRef = useRef<HTMLDivElement>(null)
+  useModalContentRegistration()
+  useModalIsolation(layerRef, modal)
+  useModalScrollLock(layerRef, modal)
+  return (
+    <div
+      className={style("layer")}
+      data-rly-modal-layer={modal ? "" : undefined}
+      data-rly-relay-dock-modal={modal ? "true" : "false"}
+      ref={layerRef}
+    >
+      {children}
+    </div>
+  )
+}
+
 const DockLayer = ({
   closeRef,
   compactViewport,
@@ -288,12 +312,11 @@ const DockLayer = ({
   state,
   title
 }: DockLayerProps): ReactElement => {
-  const layerRef = useRef<HTMLDivElement>(null)
   const descriptionId = `${headingId}-description`
-  useModalContentRegistration()
-  useModalIsolation(layerRef, modal)
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const panel = event.currentTarget
+    if (!event.nativeEvent.composedPath().includes(panel)) return
     if (event.key === "Escape") {
       event.stopPropagation()
       onClose()
@@ -301,7 +324,6 @@ const DockLayer = ({
     }
     if (!modal || event.key !== "Tab") return
 
-    const panel = event.currentTarget
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
       (element) => element.hidden === false && element.tabIndex >= 0
     )
@@ -320,12 +342,7 @@ const DockLayer = ({
     <PortalBoundary>
       {(container) => (
         <RadixPortal.Root container={container}>
-          <div
-            className={style("layer")}
-            data-rly-modal-layer={modal ? "" : undefined}
-            data-rly-relay-dock-modal={modal ? "true" : "false"}
-            ref={layerRef}
-          >
+          <DockLayerSurface modal={modal}>
             {modal ? (
               <div
                 aria-hidden="true"
@@ -366,7 +383,7 @@ const DockLayer = ({
               <DockInitialFocus target={closeRef} />
               <DockContents context={context} footer={footer} selection={selection} state={state} />
             </section>
-          </div>
+          </DockLayerSurface>
         </RadixPortal.Root>
       )}
     </PortalBoundary>
