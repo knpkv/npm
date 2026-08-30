@@ -1,0 +1,46 @@
+id: require-host-environment-for-git-child-env
+valid:
+  - |
+    const host = yield* ChildEnv.HostEnvironment
+    ChildEnv.gitChildEnv(host.variables)
+  - |
+    const host = yield* ChildEnv.HostEnvironment
+    ChildEnv.gitChildEnv(host.variables, { GIT_CONFIG_GLOBAL: "/dev/null" })
+  - |
+    const runtimeLayer = ChildEnv.layerHostEnvironment(process.env)
+  - |
+    Effect.provideService(ChildEnv.HostEnvironment, {
+      variables: {
+        ...host.variables,
+        GIT_DIR: canaryGitDirectory
+      }
+    })
+invalid:
+  - |
+    ChildEnv.gitChildEnv(process.env)
+  - |
+    ChildEnv.gitChildEnv(process.env, { GIT_CONFIG_GLOBAL: "/dev/null" })
+  - |
+    ChildEnv.gitChildEnv({
+      ...process.env,
+      GIT_DIR: canaryGitDirectory
+    })
+  - |
+    ChildEnv.gitChildEnv(
+      {
+        ...process.env,
+        GIT_DIR: canaryGitDirectory
+      },
+      { GIT_CONFIG_GLOBAL: "/dev/null" }
+    )
+  - |
+    Effect.provideService(ChildEnv.HostEnvironment, {
+      variables: process.env
+    })
+  - |
+    Effect.provideService(ChildEnv.HostEnvironment, {
+      variables: {
+        ...process.env,
+        GIT_DIR: canaryGitDirectory
+      }
+    })

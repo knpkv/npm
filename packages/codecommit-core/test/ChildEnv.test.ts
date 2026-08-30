@@ -22,6 +22,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { fileURLToPath } from "node:url"
@@ -51,6 +52,7 @@ const childEnvironmentUnder = (runtime: string) => (env: Record<string, string |
   })
 
 const childEnvironment = childEnvironmentUnder("node")
+const testRuntimeLayer = Layer.merge(NodeServices.layer, ChildEnv.layerHostEnvironment(process.env))
 
 /**
  * Whether the child can still locate a home directory.
@@ -355,10 +357,11 @@ describe("ChildEnv.gitChildEnv", () => {
 
   it.effect("drops hook-owned repository controls while preserving the explicit Git command", () =>
     Effect.gen(function*() {
+      const host = yield* ChildEnv.HostEnvironment
       const env = yield* childEnvironment(
         ChildEnv.gitChildEnv(
           {
-            ...process.env,
+            ...host.variables,
             GIT_DIR: "/outer/repository/.git",
             GIT_INDEX_FILE: "/outer/repository/index",
             Git_Config_Key_0: "core.hooksPath",
@@ -374,5 +377,5 @@ describe("ChildEnv.gitChildEnv", () => {
       assert.isFalse("git_config_value_0" in env)
       assert.strictEqual(env.GIT_CONFIG_GLOBAL, "/dev/null")
       assert.isTrue(hasSearchPath(env))
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(Effect.provide(testRuntimeLayer)))
 })
