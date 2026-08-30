@@ -18,6 +18,10 @@ interface MountedDock {
   readonly root: Root
 }
 
+interface MountedShadowDock extends Omit<MountedDock, "portal"> {
+  readonly portal: ShadowRoot
+}
+
 const mounted: Array<MountedDock> = []
 const modelOptions = [{ label: "Codex", value: "codex" }]
 const profileOptions = [{ label: "Review", value: "review" }]
@@ -45,7 +49,7 @@ const mountWithOwnedPortal = async (element: ReactElement): Promise<MountedDock>
   return entry
 }
 
-const mountInShadowRoot = async (element: ReactElement): Promise<MountedDock> => {
+const mountInShadowRoot = async (element: ReactElement): Promise<MountedShadowDock> => {
   const host = document.createElement("div")
   const portalHost = document.createElement("div")
   const portal = portalHost.attachShadow({ mode: "open" })
@@ -203,9 +207,36 @@ describe("RelayDock", () => {
   it("isolates light-DOM siblings when the modal portal target is a ShadowRoot", async () => {
     const { host, portal } = await mountInShadowRoot(dock({ defaultOpen: true }))
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = dialog?.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const controls = dialog?.querySelectorAll<HTMLElement>('[role="combobox"]')
+    const composer = dialog?.querySelector<HTMLTextAreaElement>('[aria-label="Message Relay"]')
 
     expect(dialog).not.toBeNull()
     expect(host.inert).toBe(true)
+    controls?.[0]?.focus()
+    await act(async () =>
+      dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" }))
+    )
+    expect(portal.activeElement).toBe(controls?.[0])
+    controls?.[1]?.focus()
+    await act(async () =>
+      dialog?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab", shiftKey: true })
+      )
+    )
+    expect(portal.activeElement).toBe(controls?.[1])
+    composer?.focus()
+    await act(async () =>
+      dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" }))
+    )
+    expect(portal.activeElement).toBe(close)
+    close?.focus()
+    await act(async () =>
+      dialog?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab", shiftKey: true })
+      )
+    )
+    expect(portal.activeElement).toBe(composer)
     await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
