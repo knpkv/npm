@@ -1,6 +1,7 @@
 import { Schema } from "effect"
+import { fleetJobRecordMaxBytes } from "./limits.js"
 
-const JobIdentifier = Schema.String.check(
+export const JobIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(256)
 )
@@ -77,6 +78,12 @@ const NoNullByte = Schema.makeFilter(
   (value: string) => !value.includes("\u0000"),
   { expected: "text without a null byte" }
 )
+export const JobActor = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  NoNullByte
+)
+export type JobActor = typeof JobActor.Type
 const JobPath = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(2 * 1_024),
@@ -186,16 +193,16 @@ export const AgentWorkerObservations = Schema.Array(
 export type AgentWorkerObservations = typeof AgentWorkerObservations.Type
 
 export const JobRecord = Schema.Struct({
-  id: Schema.String,
+  id: JobIdentifier,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
-  actor: Schema.String,
+  actor: JobActor,
   hash: JobHash,
-  approvalNonce: Schema.NullOr(Schema.String),
+  approvalNonce: Schema.NullOr(JobIdentifier),
   approvalExpiresAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  approvedBy: Schema.NullOr(Schema.String),
+  approvedBy: Schema.NullOr(JobActor),
   approvedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  rejectedBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  rejectedBy: Schema.optionalKey(Schema.NullOr(JobActor)),
   rejectedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   expiredAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   status: JobStatus,
@@ -218,6 +225,12 @@ export const JobRecord = Schema.Struct({
         (record.worker !== undefined &&
           (record.status === "succeeded" || record.status === "failed" || record.status === "interrupted"))),
     { expected: "exact Connect target and terminal evidence only for the matching started worker" }
+  ),
+  Schema.makeFilter(
+    (record) =>
+      new TextEncoder().encode(JSON.stringify(record)).byteLength <=
+        fleetJobRecordMaxBytes,
+    { expected: `serialized job record at most ${fleetJobRecordMaxBytes} bytes` }
   )
 )
 export type JobRecord = typeof JobRecord.Type

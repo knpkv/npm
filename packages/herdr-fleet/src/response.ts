@@ -1,8 +1,9 @@
 import { Effect, Predicate, Schema, Stream } from "effect"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { FleetResponseBodyError } from "./errors.js"
+import { fleetResponseBodyMaxBytes } from "./limits.js"
 
-export const fleetResponseBodyMaxBytes = 1024 * 1024
+export { fleetResponseBodyMaxBytes } from "./limits.js"
 
 interface ResponseBodyState {
   readonly bytes: number

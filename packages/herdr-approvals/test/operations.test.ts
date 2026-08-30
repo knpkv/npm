@@ -4,8 +4,11 @@ import {
   decodeBoundedResponseJson,
   fleetResponseBodyMaxBytes,
   type HostConfiguration,
+  type HostOperations,
   JobRecord,
-  jobTextMaxLength
+  JobStore,
+  jobTextMaxLength,
+  makeFleetService
 } from "@knpkv/herdr-fleet"
 import { Effect, Result, Schema } from "effect"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -266,6 +269,89 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices
     )
+  })
+
+  it.effect("rejects an oversized actor before durable job mutation", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-job-envelope-test-"))
+    const operations: HostOperations = {
+      inspect: () =>
+        Effect.succeed({
+          applyConfigured: true,
+          branch: "main",
+          dirty: false,
+          repository: root,
+          revision: "abc123"
+        }),
+      listAgents: () => Effect.succeed({ agents: [], available: true, error: null }),
+      run: () => Effect.succeed("\u0001".repeat(commandOutputMaxBytes)),
+      runLocal: () => Effect.succeed("ok"),
+      runCoordinatorChat: () => Effect.succeed("ok")
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            operations,
+            store
+          })
+          expect(
+            yield* Effect.result(
+              fleet.submit(
+                {
+                  payload: {
+                    kind: "agent.message",
+                    message: "\u0001".repeat(jobTextMaxLength),
+                    session: "agent-1"
+                  }
+                },
+                "\u0001".repeat(30_000)
+              )
+            )
+          ).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+          expect(yield* fleet.history(1)).toEqual([])
+
+          const submitted = yield* fleet.submit(
+            {
+              payload: {
+                kind: "agent.message",
+                message: "\u0001".repeat(jobTextMaxLength),
+                session: "agent-1"
+              }
+            },
+            "andrey@example.com"
+          )
+          if (submitted.approvalNonce === null) {
+            return yield* Effect.die("approval nonce missing")
+          }
+          yield* fleet.approve(
+            submitted.id,
+            { hash: submitted.hash, nonce: submitted.approvalNonce },
+            "andrey@example.com"
+          )
+          const completed = yield* fleet.run(submitted.id)
+          const body = JSON.stringify(completed)
+          expect(Buffer.byteLength(body)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
+          expect(
+            yield* decodeBoundedResponseJson(
+              HttpClientResponse.fromWeb(
+                HttpClientRequest.get("http://fleet.test/job"),
+                new Response(body)
+              ),
+              JobRecord
+            )
+          ).toEqual(completed)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
   })
 
   it.effect("keeps maximum command output inside a serialized job response", () => {

@@ -17,6 +17,7 @@ import {
   AgentWorkerObservations,
   type CoreJobPayload,
   type HostDetails,
+  JobActor,
   type JobHash,
   type JobPayload,
   type JobRecord,
@@ -109,6 +110,17 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     )
   const approvalTtlMs = options.approvalTtlMs ?? 15 * 60 * 1000
 
+  const decodeActor = Effect.fn("FleetService.decodeActor")(function*(actor: string) {
+    return yield* Schema.decodeUnknownEffect(JobActor)(actor).pipe(
+      Effect.mapError(
+        (cause) =>
+          new FleetValidationError({
+            detail: `invalid job actor: ${String(cause)}`
+          })
+      )
+    )
+  })
+
   const load = Effect.fn("FleetService.load")(function*(jobId: string) {
     const record = yield* options.store.get(jobId)
     if (record === undefined) {
@@ -151,6 +163,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     request: JobRequest,
     actor: string
   ) {
+    const validatedActor = yield* decodeActor(actor)
     const timestamp = yield* now
     const approval = requiresApproval(request.payload)
     if (approval && options.approvalEnabled === false) {
@@ -162,8 +175,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       id: yield* id,
       createdAt: timestamp,
       updatedAt: timestamp,
-      actor,
-      hash: yield* jobHash(options.host, actor, request.payload).pipe(
+      actor: validatedActor,
+      hash: yield* jobHash(options.host, validatedActor, request.payload).pipe(
         Effect.provideService(Crypto.Crypto, cryptoService)
       ),
       approvalNonce: approval ? yield* nonce : null,
@@ -207,13 +220,14 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     approval: Approval,
     actor: string
   ) {
+    const validatedActor = yield* decodeActor(actor)
     const timestamp = yield* now
     const record = yield* pendingApproval(jobId, approval, timestamp)
     return yield* options.store.transition(
       record,
       updated(record, timestamp, {
         status: "queued",
-        approvedBy: actor,
+        approvedBy: validatedActor,
         approvedAt: timestamp,
         approvalNonce: null,
         approvalExpiresAt: null
@@ -226,13 +240,14 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     approval: Approval,
     actor: string
   ) {
+    const validatedActor = yield* decodeActor(actor)
     const timestamp = yield* now
     const record = yield* pendingApproval(jobId, approval, timestamp)
     return yield* options.store.transition(
       record,
       updated(record, timestamp, {
         status: "rejected",
-        rejectedBy: actor,
+        rejectedBy: validatedActor,
         rejectedAt: timestamp,
         approvalNonce: null,
         approvalExpiresAt: null
