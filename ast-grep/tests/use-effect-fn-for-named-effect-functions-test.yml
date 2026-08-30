@@ -17,6 +17,10 @@ valid:
       return yield* Effect.succeed(value)
     })
   - |
+    const fetchJson = Effect.fn("Feature.fetchJson")(function*<A>(schema: Schema.Codec<A>) {
+      return yield* Schema.decodeUnknownEffect(schema)({})
+    })
+  - |
     const publish = Effect.fn("Feature.publish")(function*<Failure, Requirements>(value: string) {
       return yield* Effect.uninterruptibleMask(() => Effect.succeed(value))
     })
@@ -45,6 +49,13 @@ valid:
     const collectMatching = Effect.fn("PrListService.collectMatching")((stream) =>
       stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
     )
+  - |
+    class Store {
+      readonly put = Effect.fn("Store.put")(function*(value: string) {
+        return yield* Effect.succeed(value)
+      })
+      close(): void {}
+    }
 invalid:
   - |
     const collect: FilterServiceContract["collect"] = (targets) =>
@@ -96,8 +107,33 @@ invalid:
         return value
       }).pipe(Effect.provide(layer))
   - |
+    class Store {
+      put() {
+        return Effect.gen(function*() {
+          return yield* Effect.succeed("stored")
+        })
+      }
+    }
+  - |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+      }
+    }
+  - |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+      }
+    }
+  - |
     const publish = <Failure, Requirements>(value: string) =>
       Effect.uninterruptibleMask(() => Effect.succeed(value))
+  - |
+    const fetchJson = <A,>(schema: Schema.Codec<A>) =>
+      Effect.gen(function*() {
+        return yield* Schema.decodeUnknownEffect(schema)({})
+      })
   - |
     const publish = function<Failure, Requirements>(value: string) {
       return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
