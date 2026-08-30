@@ -39,6 +39,13 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(",")
 
+const hasActiveElement = (node: Node): node is Node & DocumentOrShadowRoot => "activeElement" in node
+
+const activeElementFor = (panel: HTMLElement): Element | null => {
+  const root = panel.getRootNode()
+  return hasActiveElement(root) ? root.activeElement : panel.ownerDocument.activeElement
+}
+
 /** One explicit piece of application-owned context attached to the current Relay thread. */
 export interface RlyRelayDockContextChip {
   readonly id: string
@@ -330,7 +337,7 @@ const DockLayer = ({
     )
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
-    const active = panel.ownerDocument.activeElement
+    const active = activeElementFor(panel)
     const leavingStart = event.shiftKey && (active === first || !panel.contains(active))
     const leavingEnd = !event.shiftKey && (active === last || !panel.contains(active))
     if (!leavingStart && !leavingEnd) return
