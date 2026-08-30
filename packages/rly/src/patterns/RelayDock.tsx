@@ -334,7 +334,7 @@ const DockLayer = ({
                 onPointerDown={onClose}
               />
             ) : null}
-            <aside
+            <section
               aria-describedby={descriptionId}
               aria-labelledby={headingId}
               aria-modal={modal ? true : undefined}
@@ -365,7 +365,7 @@ const DockLayer = ({
               </header>
               <DockInitialFocus target={closeRef} />
               <DockContents context={context} footer={footer} selection={selection} state={state} />
-            </aside>
+            </section>
           </div>
         </RadixPortal.Root>
       )}
