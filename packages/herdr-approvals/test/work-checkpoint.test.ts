@@ -29,7 +29,7 @@ const config: HostConfiguration = {
   allowedUsers: ["andrey@example.com"],
   applyCommand: null,
   applyMachines: ["SER8"],
-  approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test/" },
+  approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:4779/" },
   approvalNodes: ["node-ser8"],
   approvalPort: 4_779,
   browserMcpRecoverCommand: null,

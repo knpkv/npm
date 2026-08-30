@@ -54,7 +54,7 @@ const config = (stateDirectory: string): HostConfiguration => ({
   approvalHub: {
     host: "SER8",
     nodeId: "node-ser8",
-    url: "https://ser8.example.test/"
+    url: "https://ser8.example.test:4779/"
   },
   approvalNodes: ["node-ser8"],
   approvalPort: 4779,

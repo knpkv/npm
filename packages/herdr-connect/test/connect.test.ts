@@ -48,7 +48,7 @@ describe("Connect public seams", () => {
     applyCommand: null,
     browserMcpRecoverCommand: null,
     applyMachines: ["SER8"],
-    approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test/" },
+    approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:4779/" },
     approvalNodes: ["node-ser8"],
     approvalPort: 4_779,
     checkCommand: ["true"],
@@ -1047,7 +1047,7 @@ done
       approvalHub: {
         host: "SER8",
         nodeId: "hub-node",
-        url: "https://ser8.example.ts.net/"
+        url: "https://ser8.example.ts.net:4779/"
       },
       approvalNodes: ["phone-node"],
       approvalPort: 4779,

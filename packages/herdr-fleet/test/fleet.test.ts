@@ -84,7 +84,7 @@ describe("fleet local authority", () => {
       approvalHub: {
         host: "SER8",
         nodeId: "node-ser8",
-        url: "https://ser8.example.test/"
+        url: "https://ser8.example.test:4779/"
       },
       approvalNodes: ["node-ser8"],
       approvalPort: 4_779,
@@ -108,6 +108,25 @@ describe("fleet local authority", () => {
     }
     expect(Result.isSuccess(Schema.decodeUnknownResult(HostConfiguration)(valid)))
       .toBe(true)
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test/" }
+      })
+    )).toBe(true)
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test:4779/" }
+      })
+    )).toBe(true)
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        approvalPort: 443,
+        approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test/" }
+      })
+    )).toBe(true)
     expect(Result.isFailure(
       Schema.decodeUnknownResult(HostConfiguration, {
         onExcessProperty: "error"
