@@ -3,23 +3,39 @@ import {
   type KeyboardEvent,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   useId,
   useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore
 } from "react"
+import { Portal as RadixPortal } from "radix-ui"
 import { Icon } from "../foundations/Icon.js"
+import { PortalBoundary } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
-import { restoreModalFocusAfterCleanup } from "../internal/modal.js"
+import {
+  invalidateModalFocusRestore,
+  ModalNestingBoundary,
+  restoreModalFocusAfterCleanup,
+  useModalContentRegistration,
+  useModalIsolation
+} from "../internal/modal.js"
 import { Field } from "../primitives/Field.js"
 import { Select, type RlySelectOption } from "../primitives/Select.js"
-import { Sheet } from "../primitives/Sheet.js"
 import { StatePanel } from "../primitives/StatePanel.js"
 import styles from "./RelayDock.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
 const compactViewportQuery = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])'
+].join(",")
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */
 export interface RlyRelayDockContextChip {
@@ -231,7 +247,7 @@ const DockContents = ({
   const contextLabelId = useId()
   const selectionLabelId = useId()
   return (
-    <>
+    <div className={style("contents")} data-rly-relay-dock-scroll="">
       <div className={style("fixedContext")}>
         <ContextChips context={context} labelId={contextLabelId} />
         <SelectionControls labelId={selectionLabelId} selection={selection} />
@@ -240,7 +256,120 @@ const DockContents = ({
         <DockState state={state} />
       </section>
       {footer === undefined ? null : <footer className={style("footer")}>{footer}</footer>}
-    </>
+    </div>
+  )
+}
+
+interface DockLayerProps extends Pick<RelayDockBaseProps, "context" | "footer" | "selection" | "state"> {
+  readonly compactViewport: boolean
+  readonly description: string
+  readonly headingId: string
+  readonly modal: boolean
+  readonly onClose: () => void
+  readonly title: string
+  readonly closeRef: RefObject<HTMLButtonElement | null>
+}
+
+const DockInitialFocus = ({ target }: { readonly target: RefObject<HTMLButtonElement | null> }): null => {
+  useLayoutEffect(() => target.current?.focus(), [target])
+  return null
+}
+
+const DockLayer = ({
+  closeRef,
+  compactViewport,
+  context,
+  description,
+  footer,
+  headingId,
+  modal,
+  onClose,
+  selection,
+  state,
+  title
+}: DockLayerProps): ReactElement => {
+  const layerRef = useRef<HTMLDivElement>(null)
+  const descriptionId = `${headingId}-description`
+  useModalContentRegistration()
+  useModalIsolation(layerRef, modal)
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key === "Escape") {
+      event.stopPropagation()
+      onClose()
+      return
+    }
+    if (!modal || event.key !== "Tab") return
+
+    const panel = event.currentTarget
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+      (element) => element.hidden === false && element.tabIndex >= 0
+    )
+    const first = focusable[0] ?? panel
+    const last = focusable[focusable.length - 1] ?? panel
+    const active = panel.ownerDocument.activeElement
+    const leavingStart = event.shiftKey && (active === first || !panel.contains(active))
+    const leavingEnd = !event.shiftKey && (active === last || !panel.contains(active))
+    if (!leavingStart && !leavingEnd) return
+    event.preventDefault()
+    const target = event.shiftKey ? last : first
+    target.focus()
+  }
+
+  return (
+    <PortalBoundary>
+      {(container) => (
+        <RadixPortal.Root container={container}>
+          <div
+            className={style("layer")}
+            data-rly-modal-layer={modal ? "" : undefined}
+            data-rly-relay-dock-modal={modal ? "true" : "false"}
+            ref={layerRef}
+          >
+            {modal ? (
+              <div
+                aria-hidden="true"
+                className={style("overlay")}
+                data-rly-relay-dock-overlay=""
+                onPointerDown={onClose}
+              />
+            ) : null}
+            <aside
+              aria-describedby={descriptionId}
+              aria-labelledby={headingId}
+              aria-modal={modal ? true : undefined}
+              className={classNames(style("panel"), modal ? style("sheet") : style("rail"))}
+              data-rly-relay-dock-presentation={compactViewport ? "mobile-sheet" : modal ? "overlay" : "rail"}
+              onKeyDown={handleKeyDown}
+              role={modal ? "dialog" : "complementary"}
+              tabIndex={-1}
+            >
+              <header className={style("railHeader")}>
+                <div className={style("railHeading")}>
+                  <h1 className={style("title")} id={headingId}>
+                    {title}
+                  </h1>
+                  <p className={style("description")} id={descriptionId}>
+                    {description}
+                  </p>
+                </div>
+                <button
+                  aria-label={`Close ${title}`}
+                  className={style("close")}
+                  onClick={onClose}
+                  ref={closeRef}
+                  type="button"
+                >
+                  <Icon decorative name="close" />
+                </button>
+              </header>
+              <DockInitialFocus target={closeRef} />
+              <DockContents context={context} footer={footer} selection={selection} state={state} />
+            </aside>
+          </div>
+        </RadixPortal.Root>
+      )}
+    </PortalBoundary>
   )
 }
 
@@ -271,7 +400,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   const modal = compactViewport || desktopPresentation === "overlay"
   const triggerRef = useRef<HTMLButtonElement>(null)
   const railCloseRef = useRef<HTMLButtonElement>(null)
-  const previousStateRef = useRef({ modal, open: resolvedOpen })
+  const previousStateRef = useRef({ modal, open: false })
   const headingId = useId()
   const visibleDescription = requireText(description, "RelayDock description")
   const visibleTitle = requireText(title, "RelayDock title")
@@ -285,17 +414,15 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   useLayoutEffect(() => {
     const previousState = previousStateRef.current
     previousStateRef.current = { modal, open: resolvedOpen }
-    if (!previousState.open && resolvedOpen && !modal) railCloseRef.current?.focus()
-    if (previousState.open && !resolvedOpen && !previousState.modal) {
+    if (!previousState.open && resolvedOpen) {
+      invalidateModalFocusRestore()
+      railCloseRef.current?.focus()
+    } else if (previousState.open && resolvedOpen && previousState.modal !== modal) {
+      railCloseRef.current?.focus()
+    } else if (previousState.open && !resolvedOpen) {
       restoreModalFocusAfterCleanup(triggerRef.current)
     }
   }, [modal, resolvedOpen])
-
-  const closeRailOnEscape = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key !== "Escape") return
-    event.stopPropagation()
-    requestOpenChange(false)
-  }
 
   return (
     <div
@@ -318,44 +445,22 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         <RelayMark />
         <span>{visibleTriggerLabel}</span>
       </button>
-      {modal ? (
-        <Sheet.Root onOpenChange={requestOpenChange} open={resolvedOpen}>
-          <Sheet.Content
-            className={style("sheet")}
-            data-rly-relay-dock-presentation={compactViewport ? "mobile-sheet" : "overlay"}
+      {!resolvedOpen ? null : (
+        <ModalNestingBoundary>
+          <DockLayer
+            closeRef={railCloseRef}
+            compactViewport={compactViewport}
+            context={context}
             description={visibleDescription}
-            side="end"
+            footer={footer}
+            headingId={headingId}
+            modal={modal}
+            onClose={() => requestOpenChange(false)}
+            selection={selection}
+            state={state}
             title={visibleTitle}
-          >
-            <DockContents context={context} footer={footer} selection={selection} state={state} />
-          </Sheet.Content>
-        </Sheet.Root>
-      ) : !resolvedOpen ? null : (
-        <aside
-          aria-labelledby={headingId}
-          className={style("rail")}
-          data-rly-relay-dock-presentation="rail"
-          onKeyDown={closeRailOnEscape}
-        >
-          <header className={style("railHeader")}>
-            <div className={style("railHeading")}>
-              <h1 className={style("title")} id={headingId}>
-                {visibleTitle}
-              </h1>
-              <p className={style("description")}>{visibleDescription}</p>
-            </div>
-            <button
-              aria-label={`Close ${visibleTitle}`}
-              className={style("close")}
-              onClick={() => requestOpenChange(false)}
-              ref={railCloseRef}
-              type="button"
-            >
-              <Icon decorative name="close" />
-            </button>
-          </header>
-          <DockContents context={context} footer={footer} selection={selection} state={state} />
-        </aside>
+          />
+        </ModalNestingBoundary>
       )}
     </div>
   )

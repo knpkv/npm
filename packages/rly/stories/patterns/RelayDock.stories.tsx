@@ -23,6 +23,15 @@ const models = [
   { label: "Claude", value: "claude" }
 ]
 
+const ThreadMarker = (): ReactElement => {
+  const [updates, setUpdates] = useState(0)
+  return (
+    <button onClick={() => setUpdates((count) => count + 1)} type="button">
+      Thread marker: {updates}
+    </button>
+  )
+}
+
 const readyState: RlyRelayDockState = {
   content: (
     <div style={stackStyle}>
@@ -30,6 +39,7 @@ const readyState: RlyRelayDockState = {
       <Text>Check the approval rules and the stale inline finding.</Text>
       <Text tone="secondary">Relay · 20:12</Text>
       <Text>The review is ready. Two findings still need a human decision.</Text>
+      <ThreadMarker />
     </div>
   ),
   status: "ready"

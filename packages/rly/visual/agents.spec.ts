@@ -31,6 +31,22 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
   await expect(changedFile).toBeFocused()
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("relay-dock-rail.png") })
 
+  const draft = page.getByRole("textbox", { name: "Message Relay" })
+  await draft.fill("Keep this draft across presentations")
+  await page.getByRole("button", { name: "Thread marker: 0" }).click()
+  await page.setViewportSize({ height: 844, width: 390 })
+  const responsiveSheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(responsiveSheet).toBeVisible()
+  await expect(draft).toHaveValue("Keep this draft across presentations")
+  await expect(page.getByRole("button", { name: "Thread marker: 1" })).toBeVisible()
+  await page.setViewportSize({ height: 900, width: 1_440 })
+  await expect(rail).toBeVisible()
+  await expect(rail.getByRole("button", { name: "Close Relay" })).toBeFocused()
+  await expect(draft).toHaveValue("Keep this draft across presentations")
+  await expect(page.getByRole("button", { name: "Thread marker: 1" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "Open Relay" })).toBeFocused()
+
   await page.setViewportSize({ height: 844, width: 390 })
   await page.goto(story("patterns-relaydock--mobile-sheet"))
   const sheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
@@ -87,15 +103,13 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
     })
     expect(
       await landscapeSheet.locator(":scope > :first-child").evaluate((header) => {
-        const sheetClass = [...(header.parentElement?.classList ?? [])].find((className) =>
+        const sheetClasses = [...(header.parentElement?.classList ?? [])].filter((className) =>
           className.includes("RelayDock")
         )
-        if (sheetClass === undefined) return false
-        const selector = `.${CSS.escape(sheetClass)} > :first-child`
         return [...header.ownerDocument.styleSheets].some((styleSheet) =>
           [...styleSheet.cssRules].some(
             (rule) =>
-              rule.cssText.includes(selector) &&
+              sheetClasses.some((className) => rule.cssText.includes(`.${CSS.escape(className)} > :first-child`)) &&
               rule.cssText.includes("safe-area-inset-left") &&
               rule.cssText.includes("safe-area-inset-right")
           )
@@ -103,6 +117,24 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
       })
     ).toBe(true)
     await expectNoHorizontalOverflow(landscapePage)
+    const scrollRegion = landscapeSheet.locator("[data-rly-relay-dock-scroll]")
+    expect(
+      await scrollRegion.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        scrollHeight: element.scrollHeight
+      }))
+    ).toMatchObject({ overflowY: "auto" })
+    expect(await scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    const landscapeThread = landscapeSheet.getByRole("region", { name: "Relay thread" })
+    await landscapeThread.scrollIntoViewIfNeeded()
+    expect((await landscapeThread.boundingBox())?.height).toBeGreaterThan(0)
+    const landscapeDraft = landscapeSheet.getByRole("textbox", { name: "Message Relay" })
+    await landscapeDraft.scrollIntoViewIfNeeded()
+    await expect(landscapeDraft).toBeInViewport()
+    const askRelay = landscapeSheet.getByRole("button", { name: "Ask Relay" })
+    await askRelay.scrollIntoViewIfNeeded()
+    await expect(askRelay).toBeInViewport()
   } finally {
     await landscapeContext.close()
   }
