@@ -66,14 +66,39 @@
     position: relative;
   }
 
-  .sheet,
-  .rail {
+  .layer {
+    inset: var(--rly-space-0);
+    pointer-events: none;
+    position: fixed;
+    z-index: 90;
+  }
+
+  .layer[data-rly-relay-dock-modal="true"] {
+    z-index: 100;
+  }
+
+  .overlay {
+    background: var(--rly-color-text-1);
+    inset: var(--rly-space-0);
+    opacity: 0.3;
+    pointer-events: auto;
+    position: fixed;
+  }
+
+  .panel {
     background: var(--rly-color-surface-1);
+    block-size: 100vh;
+    block-size: 100dvh;
     color: var(--rly-color-text-1);
     display: flex;
     flex-direction: column;
+    inset-block: var(--rly-space-0);
+    inset-inline-end: var(--rly-space-0);
+    overflow: hidden;
     padding-block-end: env(safe-area-inset-bottom, 0px);
     padding-block-start: env(safe-area-inset-top, 0px);
+    pointer-events: auto;
+    position: fixed;
   }
 
   .sheet {
@@ -82,16 +107,10 @@
   }
 
   .rail {
-    block-size: 100vh;
-    block-size: 100dvh;
     border-inline-start: 1px solid var(--rly-color-border-1);
     box-shadow: -12px 0 32px color-mix(in srgb, var(--rly-color-text-1) 8%, transparent);
     inline-size: min(38vw, 30rem);
-    inset-block: var(--rly-space-0);
-    inset-inline-end: var(--rly-space-0);
     min-inline-size: 24rem;
-    position: fixed;
-    z-index: 90;
   }
 
   .railHeader {
@@ -139,6 +158,10 @@
     flex: none;
     gap: var(--rly-space-16);
     padding: var(--rly-space-16) var(--rly-space-24) var(--rly-space-20);
+  }
+
+  .contents {
+    display: contents;
   }
 
   .context,
@@ -244,6 +267,23 @@
 
     .selectionGrid {
       grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+  }
+
+  @media (max-height: 40rem) and (pointer: coarse) {
+    .sheet .contents {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-block-size: var(--rly-space-0);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .sheet .body {
+      flex: none;
+      min-block-size: var(--rly-space-64);
+      overflow: visible;
     }
   }
 }
