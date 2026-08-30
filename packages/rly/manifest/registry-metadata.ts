@@ -21,6 +21,14 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "overlay"
   ]),
+  RelayDock: registryMetadata("Present one adapter-owned Relay thread in explicit page context", [
+    "collapsed",
+    "empty",
+    "error",
+    "loading",
+    "ready",
+    "unavailable"
+  ], ["agent", "conversation", "overlay", "select"]),
   AgentJob: registryMetadata("Present cancellable agent progress and terminal outcomes", [
     "cancelled",
     "failed",

@@ -571,6 +571,29 @@
       ]
     },
     {
+      "name": "RelayDock",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayDock.tsx",
+        "story": "packages/rly/stories/patterns/RelayDock.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayDock.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayDock.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaydock--interaction",
+      "storyIds": [
+        "patterns-relaydock--interaction",
+        "patterns-relaydock--desktop-rail",
+        "patterns-relaydock--empty",
+        "patterns-relaydock--error",
+        "patterns-relaydock--loading",
+        "patterns-relaydock--mobile-sheet",
+        "patterns-relaydock--unavailable"
+      ]
+    },
+    {
       "name": "ReleasePreview",
       "paths": {
         "source": "packages/rly/src/patterns/ReleasePreview.tsx",
