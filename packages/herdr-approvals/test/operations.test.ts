@@ -1,7 +1,15 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { type HostConfiguration, jobTextMaxLength } from "@knpkv/herdr-fleet"
-import { Effect, Result } from "effect"
+import {
+  decodeBoundedResponseJson,
+  fleetResponseBodyMaxBytes,
+  type HostConfiguration,
+  JobRecord,
+  jobTextMaxLength
+} from "@knpkv/herdr-fleet"
+import { Effect, Result, Schema } from "effect"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -82,6 +90,17 @@ describe("host command output", () => {
         })
         expect(result.failure.detail).toContain("exceeded")
       }
+
+      const exact = yield* makeHostOperations(
+        config(root, [
+          "sh",
+          "-c",
+          `dd if=/dev/zero bs=${commandOutputMaxBytes} count=1 2>/dev/null | tr '\\000' x`
+        ])
+      )
+      expect(Buffer.byteLength(yield* exact.run({ kind: "nix.check" }))).toBe(
+        commandOutputMaxBytes
+      )
 
       const herdrCommand = join(root, "herdr-test")
       writeFileSync(herdrCommand, "#!/bin/sh\nprintf 'accepted'\n", {
@@ -247,5 +266,51 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices
     )
+  })
+
+  it.effect("keeps maximum command output inside a serialized job response", () => {
+    const response = (body: string) =>
+      HttpClientResponse.fromWeb(
+        HttpClientRequest.get("http://fleet.test/job"),
+        new Response(body)
+      )
+    return Effect.gen(function*() {
+      for (
+        const output of [
+          "x".repeat(commandOutputMaxBytes),
+          "\u0001".repeat(commandOutputMaxBytes)
+        ]
+      ) {
+        for (
+          const outcome of [
+            { error: null, result: output, status: "succeeded" },
+            {
+              error: `command exited with code 7: ${output}`,
+              result: null,
+              status: "failed"
+            }
+          ]
+        ) {
+          const record = Schema.decodeUnknownSync(JobRecord)({
+            actor: "andrey@example.com",
+            approvalNonce: null,
+            approvedBy: null,
+            createdAt: 1_000,
+            hash: "0".repeat(64),
+            id: "job-max-output",
+            payload: {
+              kind: "agent.message",
+              message: "\u0001".repeat(jobTextMaxLength),
+              session: "agent-1"
+            },
+            updatedAt: 1_000,
+            ...outcome
+          })
+          const body = JSON.stringify(record)
+          expect(Buffer.byteLength(body)).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
+          expect(yield* decodeBoundedResponseJson(response(body), JobRecord)).toEqual(record)
+        }
+      }
+    })
   })
 })

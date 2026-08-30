@@ -38,7 +38,11 @@ const HerdrAgents = Schema.Struct({
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
 
-export const commandOutputMaxBytes = 1024 * 1024
+/**
+ * Reserves transport-envelope headroom when one-byte control output expands to
+ * six JSON bytes beside the largest accepted job payload.
+ */
+export const commandOutputMaxBytes = 128 * 1024
 
 type AgentLineage = Pick<
   typeof AgentSummary.Type,
