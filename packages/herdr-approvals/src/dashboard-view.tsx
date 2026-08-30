@@ -34,10 +34,12 @@ type DashboardViewProps = {
   readonly busyJobId: string | null
   readonly chatBusy: boolean
   readonly notificationState: NotificationState
+  readonly historyLoading?: boolean
   readonly onChatSubmit: ((mode: ChatMode, message: string) => Promise<boolean>) | undefined
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
   readonly onEnableNotifications: (() => void) | undefined
+  readonly onLoadHistory?: (() => void) | undefined
   readonly onRefresh: (() => void) | undefined
   readonly pull: {
     readonly distance: number
@@ -157,11 +159,13 @@ const ApprovalActions = ({
 
 const AgendaItem = ({
   busy,
+  connectBaseUrl,
   host,
   onDecision,
   record
 }: {
   readonly busy: boolean
+  readonly connectBaseUrl: string
   readonly host: string
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly record: JobRecord
@@ -204,7 +208,10 @@ const AgendaItem = ({
       </div>
       <JobTimeline record={record} />
       {record.connectTarget === undefined || record.worker === undefined ? null : (
-        <a className="worker-connect-link" href={record.connectTarget.url}>
+        <a
+          className="worker-connect-link"
+          href={new URL(record.connectTarget.url, connectBaseUrl).href}
+        >
           Open {record.worker.name} in Connect
         </a>
       )}
@@ -524,11 +531,13 @@ export const DashboardView = ({
   approvalOnly = false,
   busyJobId,
   chatBusy,
+  historyLoading = false,
   notificationState,
   onChatSubmit,
   onDecision,
   onDisableNotifications,
   onEnableNotifications,
+  onLoadHistory,
   onRefresh,
   pull,
   showHeader = true,
@@ -671,6 +680,7 @@ export const DashboardView = ({
                 <AgendaItem
                   key={item.record.id}
                   busy={busyJobId === item.record.id}
+                  connectBaseUrl={snapshot.approvalApp.canonicalUrl}
                   host={snapshot.host}
                   onDecision={approvalDecision}
                   record={item.record}
@@ -688,6 +698,7 @@ export const DashboardView = ({
               <AgendaItem
                 key={record.id}
                 busy={busyJobId === record.id}
+                connectBaseUrl={snapshot.approvalApp.canonicalUrl}
                 host={snapshot.host}
                 onDecision={approvalDecision}
                 record={record}
@@ -710,7 +721,32 @@ export const DashboardView = ({
             ) : null}
           </div>
         </Surface>
-        {approvalOnly ? <ApprovalDecisionHistory records={snapshot.records} /> : <ActivityHistory records={history} />}
+        {approvalOnly ? (
+          <>
+            <ApprovalDecisionHistory records={snapshot.records} />
+            {snapshot.historyNextCursor === null ? null : (
+              <div className="activity-load-more">
+                <Button
+                  loading={historyLoading}
+                  onClick={onLoadHistory}
+                  type="button"
+                  variant="quiet"
+                >
+                  Load earlier decisions
+                </Button>
+              </div>
+            )}
+          </>
+        ) : (
+          <ActivityHistory
+            hasMore={snapshot.historyNextCursor !== null}
+            loading={historyLoading}
+            {...(onLoadHistory === undefined
+              ? {}
+              : { onLoadMore: onLoadHistory })}
+            records={history}
+          />
+        )}
         <Machines snapshot={snapshot} />
       </main>
     </div>

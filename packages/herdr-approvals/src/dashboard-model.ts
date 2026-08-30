@@ -36,6 +36,17 @@ export const RemotePendingApproval = Schema.Struct({
   approval: PendingApproval
 })
 
+export const PendingApprovalTarget = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("local"),
+    record: JobRecord
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("remote"),
+    remote: RemotePendingApproval
+  })
+])
+
 export const PendingApprovalFailure = Schema.Struct({
   host: Schema.String,
   reason: Schema.Literals([
@@ -83,3 +94,4 @@ export type DashboardHistoryPage = typeof DashboardHistoryPage.Type
 export type PendingApproval = typeof PendingApproval.Type
 export type PendingApprovalFailure = typeof PendingApprovalFailure.Type
 export type PendingApprovalSummary = typeof PendingApprovalSummary.Type
+export type PendingApprovalTarget = typeof PendingApprovalTarget.Type

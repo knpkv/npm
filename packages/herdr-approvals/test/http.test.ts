@@ -37,7 +37,7 @@ import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
-import { DashboardSnapshot, PendingApprovalSummary } from "../src/dashboard-model.js"
+import { DashboardSnapshot, PendingApprovalSummary, PendingApprovalTarget } from "../src/dashboard-model.js"
 import { makeRunner, recordWorkCheckpointRequest, startHttpServer } from "../src/http.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
@@ -344,6 +344,36 @@ esac
 
           expect(new Set(ids).size).toBe(pendingApprovalPageMaxRecords + 2)
           expect(ids).toEqual([...ids].sort().reverse())
+
+          if (server.approvalUrl === null) {
+            return yield* Effect.die("approval listener missing")
+          }
+          const initial = Schema.decodeUnknownSync(DashboardSnapshot)(
+            yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`).then((response) => response.json()))
+          )
+          expect(initial.pendingApprovals.local).toHaveLength(
+            pendingApprovalPageMaxRecords
+          )
+          const hiddenJobId = ids.at(-1)
+          if (hiddenJobId === undefined) {
+            return yield* Effect.die("hidden approval fixture missing")
+          }
+          const targetUrl = new URL(
+            "/v1/pending-approval",
+            server.approvalUrl
+          )
+          targetUrl.searchParams.set("host", hostConfig.host)
+          targetUrl.searchParams.set("jobId", hiddenJobId)
+          const targetResponse = yield* Effect.promise(() => fetch(targetUrl))
+          expect(targetResponse.status).toBe(200)
+          expect(
+            Schema.decodeUnknownSync(PendingApprovalTarget)(
+              yield* Effect.promise(() => targetResponse.json())
+            )
+          ).toMatchObject({
+            _tag: "local",
+            record: { id: hiddenJobId, status: "pending_approval" }
+          })
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(
@@ -425,6 +455,80 @@ esac
             JSON.parse(dashboardBody)
           )
           expect(dashboard.historyNextCursor).not.toBeNull()
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(
+        Effect.sync(() => rmSync(root, { force: true, recursive: true }))
+      ),
+      provideNodeServices
+    )
+  })
+
+  it.effect("routes the approval hub through its canonical TLS URL", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-hub-link-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{"hub":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]},"worker":{"HostName":"PI","ID":"node-pi","Online":true,"TailscaleIPs":["127.0.0.3"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      machines: [
+        { host: "ALPHA", nodeId: "node-alpha" },
+        { host: "SER8", nodeId: "node-ser8" },
+        { host: "PI", nodeId: "node-pi" }
+      ],
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          if (server.approvalUrl === null) {
+            return yield* Effect.die("approval listener missing")
+          }
+          const response = yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`))
+          expect(response.status).toBe(200)
+          const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)(
+            yield* Effect.promise(() => response.json())
+          )
+          expect(snapshot.directory?.links).toEqual([
+            {
+              host: "SER8",
+              online: true,
+              url: hostConfig.approvalHub.url
+            },
+            {
+              host: "PI",
+              online: true,
+              url: "http://127.0.0.3:0/"
+            }
+          ])
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(

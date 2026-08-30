@@ -24,7 +24,6 @@ import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordi
 import type {
   FleetApprovalError,
   FleetJobConflictError,
-  FleetJobNotFoundError,
   FleetService,
   FleetStoreError,
   FleetTransitionConflictError,
@@ -34,6 +33,7 @@ import type {
 import {
   decodeBoundedResponseJson,
   FleetAuthorizationError,
+  FleetJobNotFoundError,
   FleetOperationError,
   FleetValidationError,
   JobHash,
@@ -82,12 +82,18 @@ import {
   type DashboardSnapshot,
   type PendingApproval,
   type PendingApprovalFailure,
-  PendingApprovalSummary
+  PendingApprovalSummary,
+  type PendingApprovalTarget
 } from "./dashboard-model.js"
 import { DashboardView } from "./dashboard-view.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
-import { type ApprovalNotificationCandidate, PushSubscriptionRecord, PushSubscriptionRemoval } from "./model.js"
+import {
+  ApprovalNotificationCandidate,
+  type ApprovalNotificationCandidate as ApprovalNotificationCandidateType,
+  PushSubscriptionRecord,
+  PushSubscriptionRemoval
+} from "./model.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { makePushWorker } from "./push-worker.js"
@@ -390,11 +396,20 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
   )
   return peers.map((peer) => {
     const address = peer.ipv4 ?? undefined
+    const approvalHub = peer.host.toLowerCase() ===
+        config.approvalHub.host.toLowerCase() &&
+      config.machines.some(
+        (machine) =>
+          machine.host.toLowerCase() === peer.host.toLowerCase() &&
+          machine.nodeId === config.approvalHub.nodeId
+      )
     return {
       host: peer.host,
       online: peer.online,
       approvalUrl: address === undefined
         ? null
+        : approvalHub
+        ? config.approvalHub.url
         : `http://${address}:${config.approvalPort}/`,
       pendingUrl: address === undefined
         ? null
@@ -643,6 +658,63 @@ const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
     return { remote, failures }
   }
 )
+
+const resolvePendingApprovalTarget = Effect.fn(
+  "HostHttp.resolvePendingApprovalTarget"
+)(function*(
+  config: HostConfiguration,
+  service: FleetService,
+  target: ApprovalNotificationCandidateType
+) {
+  if (target.host.toLowerCase() === config.host.toLowerCase()) {
+    const record = yield* service.get(target.jobId)
+    if (record.status !== "pending_approval") {
+      return yield* new FleetJobNotFoundError({ jobId: target.jobId })
+    }
+    return { _tag: "local", record } satisfies PendingApprovalTarget
+  }
+  const peers = yield* fleetPeers(config)
+  const peer = peers.find(
+    ({ host }) => host.toLowerCase() === target.host.toLowerCase()
+  )
+  if (peer === undefined || peer.approvalUrl === null) {
+    return yield* new FleetJobNotFoundError({ jobId: target.jobId })
+  }
+  const seen = new Set<string>()
+  let cursor: typeof PendingApprovalCursor.Type | null = null
+  do {
+    const page: PendingApprovalSummary = yield* fetchPeerPending(peer, cursor).pipe(
+      Effect.mapError(
+        (cause) =>
+          new FleetOperationError({
+            cause,
+            detail: `could not resolve pending approval on ${peer.host}`,
+            operation: "fleet.pending_approval_target"
+          })
+      )
+    )
+    const approval = page.approvals.find(({ id }) => id === target.jobId)
+    if (approval !== undefined) {
+      return {
+        _tag: "remote",
+        remote: { approval, approvalUrl: peer.approvalUrl, host: peer.host }
+      } satisfies PendingApprovalTarget
+    }
+    cursor = page.nextCursor
+    if (cursor !== null) {
+      const key = `${cursor.createdAt}\u0000${cursor.id}`
+      if (seen.has(key)) {
+        return yield* new FleetOperationError({
+          cause: key,
+          detail: `peer ${peer.host} repeated a pending approval cursor`,
+          operation: "fleet.pending_approval_target"
+        })
+      }
+      seen.add(key)
+    }
+  } while (cursor !== null)
+  return yield* new FleetJobNotFoundError({ jobId: target.jobId })
+})
 
 export const notificationCandidates = Effect.fn(
   "HostHttp.notificationCandidates"
@@ -1527,6 +1599,36 @@ export const startHttpServer = async (
               yield* authorized
               const cursor = yield* decodePendingApprovalCursor(url)
               return yield* dashboardHistory(service, cursor)
+            })
+            await respond(response, effect)
+            return
+          }
+
+          if (
+            approvalSurface &&
+            request.method === "GET" &&
+            url.pathname === "/v1/pending-approval"
+          ) {
+            const effect = Effect.gen(function*() {
+              yield* authorized
+              const target = yield* Schema.decodeUnknownEffect(
+                ApprovalNotificationCandidate
+              )({
+                host: url.searchParams.get("host"),
+                jobId: url.searchParams.get("jobId")
+              }).pipe(
+                Effect.mapError(
+                  () =>
+                    new FleetValidationError({
+                      detail: "pending approval target requires valid host and jobId"
+                    })
+                )
+              )
+              return yield* resolvePendingApprovalTarget(
+                config,
+                service,
+                target
+              )
             })
             await respond(response, effect)
             return

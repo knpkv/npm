@@ -172,6 +172,71 @@ describe("dashboard approval capability", () => {
     expect(render(false)).not.toContain("KNPKV-SER8")
   })
 
+  it("routes worker Connect links through the canonical hub", () => {
+    const base = snapshot(false)
+    const active: DashboardSnapshot["records"][number] = {
+      ...base.records[0],
+      approvalExpiresAt: null,
+      approvalNonce: null,
+      connectTarget: {
+        agentId: "agent-worker",
+        host: "PI",
+        url: "/connect/?agent=agent-worker&host=PI"
+      },
+      status: "running",
+      worker: {
+        agentId: "agent-worker",
+        host: "PI",
+        name: "Worker",
+        paneId: "w2:p1"
+      }
+    }
+    const markup = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{
+          ...base,
+          pendingApprovals: { failures: [], local: [], remote: [] },
+          records: [active]
+        }}
+      />
+    )
+    expect(markup).toContain(
+      'href="https://ser8.example.test/connect/?agent=agent-worker&amp;host=PI"'
+    )
+  })
+
+  it("offers a continuation when older activity remains", () => {
+    const continued = {
+      ...snapshot(false),
+      historyNextCursor: { createdAt: 1_000, id: "job-1" }
+    }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onLoadHistory={() => undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={continued}
+      />
+    )
+    expect(html).toContain("Load earlier activity")
+  })
+
   it("keeps agent activity and general job history out of the approval-only surface", () => {
     const markup = renderApprovalOnly()
     expect(markup).toContain("Recent approval history")

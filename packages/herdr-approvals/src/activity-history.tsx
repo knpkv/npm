@@ -276,7 +276,17 @@ const ActivityRow = ({
   )
 }
 
-export const ActivityHistory = ({ records }: { readonly records: ReadonlyArray<JobRecord> }): ReactElement => {
+export const ActivityHistory = ({
+  hasMore = false,
+  loading = false,
+  onLoadMore,
+  records
+}: {
+  readonly hasMore?: boolean
+  readonly loading?: boolean
+  readonly onLoadMore?: () => void
+  readonly records: ReadonlyArray<JobRecord>
+}): ReactElement => {
   const items = useMemo(() => activityItemsFor(records), [records])
   const [filter, setFilter] = useState<ActivityFilter>("all")
   const [query, setQuery] = useState("")
@@ -381,10 +391,24 @@ export const ActivityHistory = ({ records }: { readonly records: ReadonlyArray<J
           </section>
         ))
       )}
-      {visible.length < filtered.length ? (
+      {visible.length < filtered.length || hasMore ? (
         <div className="activity-load-more">
-          <Button onClick={() => setVisibleCount((count) => count + pageSize)} type="button" variant="quiet">
-            {`Load earlier · ${String(filtered.length - visible.length)} remaining`}
+          <Button
+            disabled={loading}
+            loading={loading}
+            onClick={() => {
+              if (visible.length < filtered.length) {
+                setVisibleCount((count) => count + pageSize)
+              } else {
+                onLoadMore?.()
+              }
+            }}
+            type="button"
+            variant="quiet"
+          >
+            {visible.length < filtered.length
+              ? `Load earlier · ${String(filtered.length - visible.length)} remaining`
+              : "Load earlier activity"}
           </Button>
         </div>
       ) : null}

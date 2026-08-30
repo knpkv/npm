@@ -7,7 +7,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import { useEffect, useRef, type TouchEvent } from "react"
+import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
@@ -22,7 +22,13 @@ import {
 } from "./push-subscription.js"
 import { CoordinatorChatPanel, type NotificationState } from "./approval-app-view.js"
 import { ActivityHistory } from "./activity-history.js"
-import { DashboardSnapshot, type DashboardSnapshot as DashboardSnapshotType } from "./dashboard-model.js"
+import {
+  DashboardSnapshot,
+  type DashboardSnapshot as DashboardSnapshotType,
+  DashboardHistoryPage,
+  PendingApprovalTarget,
+  type PendingApprovalTarget as PendingApprovalTargetType
+} from "./dashboard-model.js"
 import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import { FleetShell } from "./shell-view.js"
 import { readApprovalDeepLink } from "./pwa.js"
@@ -85,6 +91,60 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
+
+const loadDashboardHistory = Effect.fn("Dashboard.loadHistory")((
+  cursor: NonNullable<DashboardSnapshotType["historyNextCursor"]>
+) => {
+  const parameters = new URLSearchParams({
+    cursorCreatedAt: String(cursor.createdAt),
+    cursorId: cursor.id
+  })
+  return fetchJson(
+    DashboardHistoryPage,
+    `/v1/dashboard-history?${parameters.toString()}`
+  )
+})
+
+const loadPendingApprovalTarget = Effect.fn(
+  "Dashboard.loadPendingApprovalTarget"
+)((target: { readonly host: string; readonly jobId: string }) => {
+  const parameters = new URLSearchParams(target)
+  return fetchJson(
+    PendingApprovalTarget,
+    `/v1/pending-approval?${parameters.toString()}`
+  )
+})
+
+const withPendingApprovalTarget = (
+  snapshot: DashboardSnapshotType,
+  target: PendingApprovalTargetType | null
+): DashboardSnapshotType => {
+  if (target === null) return snapshot
+  if (target._tag === "local") {
+    return snapshot.pendingApprovals.local.some(({ id }) => id === target.record.id)
+      ? snapshot
+      : {
+        ...snapshot,
+        pendingApprovals: {
+          ...snapshot.pendingApprovals,
+          local: [...snapshot.pendingApprovals.local, target.record]
+        }
+      }
+  }
+  return snapshot.pendingApprovals.remote.some(
+      ({ approval, host }) =>
+        approval.id === target.remote.approval.id &&
+        host.toLowerCase() === target.remote.host.toLowerCase()
+    )
+    ? snapshot
+    : {
+      ...snapshot,
+      pendingApprovals: {
+        ...snapshot.pendingApprovals,
+        remote: [...snapshot.pendingApprovals.remote, target.remote]
+      }
+    }
+}
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
   yield* fetchJson(JobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
@@ -284,6 +344,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     notificationAction: browserRuntime.fn((enable: boolean) =>
       enable ? enableNotifications() : disableNotifications()
     ),
+    historyPage: browserRuntime.fn(loadDashboardHistory),
+    pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
     pull: Atom.make<PullState>(initialPull)
   }
 }
@@ -303,9 +365,19 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const runNotificationAction = useAtomSet(atoms.notificationAction, {
     mode: "promiseExit"
   })
+  const runPendingTarget = useAtomSet(atoms.pendingTarget, {
+    mode: "promiseExit"
+  })
+  const runHistoryPage = useAtomSet(atoms.historyPage, {
+    mode: "promiseExit"
+  })
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
   const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
   const [pull, setPull] = useAtom(atoms.pull)
+  const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
+  const [historyBusy, setHistoryBusy] = useState(false)
+  const [historyRecords, setHistoryRecords] = useState<DashboardSnapshotType["records"]>([])
+  const [historyNextCursor, setHistoryNextCursor] = useState(initial.historyNextCursor)
   const start = useRef<number | null>(null)
   useAtomMount(atoms.chatPoll)
 
@@ -349,7 +421,10 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setBusyJobId(decision.jobId)
     const exit = await runDecision(decision)
     setBusyJobId(null)
-    if (Exit.isSuccess(exit)) refreshDashboard()
+    if (Exit.isSuccess(exit)) {
+      setDeepLinkTarget(null)
+      refreshDashboard()
+    }
   }
   const onChatSubmit = async (mode: ChatMode, message: string): Promise<boolean> => {
     setBusyChat(true)
@@ -365,6 +440,18 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const onNotificationAction = async (enable: boolean): Promise<void> => {
     await runNotificationAction(enable)
     refreshNotification()
+  }
+  const onLoadHistory = async (): Promise<void> => {
+    if (historyNextCursor === null || historyBusy) return
+    setHistoryBusy(true)
+    const exit = await runHistoryPage(historyNextCursor)
+    setHistoryBusy(false)
+    if (Exit.isFailure(exit)) {
+      Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
+      return
+    }
+    setHistoryRecords((records) => [...records, ...exit.value.records])
+    setHistoryNextCursor(exit.value.nextCursor)
   }
 
   const snapshot = AsyncResult.isSuccess(result)
@@ -386,6 +473,16 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const pendingBadgeCount =
     (snapshot?.pendingApprovals.local.length ?? 0) + (snapshot?.pendingApprovals.remote.length ?? 0)
   const canonical = snapshot?.approvalApp.canonical === true
+  const currentSnapshot = snapshot === null
+    ? null
+    : withPendingApprovalTarget(
+      {
+        ...(chat === undefined ? snapshot : { ...snapshot, chat }),
+        historyNextCursor,
+        records: [...snapshot.records, ...historyRecords]
+      },
+      deepLinkTarget
+    )
   useEffect(() => {
     if (!waiting && pull.refreshing) {
       setPull(initialPull)
@@ -401,12 +498,33 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }, [canonical, pendingBadgeCount, runBadge])
   useEffect(() => {
     if (snapshot === null) return
+    setHistoryRecords([])
+    setHistoryNextCursor(snapshot.historyNextCursor)
+  }, [snapshot?.observedAt])
+  useEffect(() => {
+    if (currentSnapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)
     if (Result.isFailure(decoded)) {
       Effect.runFork(Effect.logWarning(decoded.failure))
       return
     }
     if (decoded.success === null) return
+    const loaded = currentSnapshot.pendingApprovals.local.some(
+        ({ id }) =>
+          id === decoded.success?.jobId &&
+          currentSnapshot.host.toLowerCase() === decoded.success?.host.toLowerCase()
+      ) || currentSnapshot.pendingApprovals.remote.some(
+        ({ approval, host }) =>
+          approval.id === decoded.success?.jobId &&
+          host.toLowerCase() === decoded.success?.host.toLowerCase()
+      )
+    if (!loaded && deepLinkTarget === null) {
+      void runPendingTarget(decoded.success).then((exit) => {
+        if (Exit.isSuccess(exit)) setDeepLinkTarget(exit.value)
+        else Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
+      })
+      return
+    }
     const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find(
       (item) =>
         item.dataset.approvalHost === decoded.success?.host && item.dataset.approvalJob === decoded.success?.jobId
@@ -418,8 +536,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     return () => {
       delete target.dataset.approvalTarget
     }
-  }, [snapshot?.observedAt])
-  if (snapshot === null) {
+  }, [currentSnapshot?.observedAt, deepLinkTarget, runPendingTarget])
+  if (currentSnapshot === null) {
     return (
       <main className="app app-error">
         <h1>Host activity unavailable</h1>
@@ -427,17 +545,19 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       </main>
     )
   }
-  const current = chat === undefined ? snapshot : { ...snapshot, chat }
+  const current = currentSnapshot
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
       busyJobId={busyJobId}
       chatBusy={busyChat}
+      historyLoading={historyBusy}
       notificationState={notificationState}
       onChatSubmit={onChatSubmit}
       onDecision={(decision) => void onDecision(decision)}
       onDisableNotifications={() => void onNotificationAction(false)}
       onEnableNotifications={() => void onNotificationAction(true)}
+      onLoadHistory={() => void onLoadHistory()}
       onRefresh={refreshDashboard}
       pull={pull}
       showHeader={!canonical}
@@ -479,7 +599,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
                 <WorkBoard snapshots={current.work} />
               )}
               <AgentActivity snapshot={current} />
-              <ActivityHistory records={current.records} />
+              <ActivityHistory
+                hasMore={current.historyNextCursor !== null}
+                loading={historyBusy}
+                onLoadMore={() => void onLoadHistory()}
+                records={current.records}
+              />
             </section>
           }
         />
