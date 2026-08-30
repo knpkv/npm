@@ -2,11 +2,21 @@ import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/mode
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+const utf8 = new TextEncoder()
+const utf8MaxBytes = (maximumBytes: number) =>
+  Schema.makeFilter(
+    (value: string) => utf8.encode(value).byteLength <= maximumBytes,
+    { expected: `UTF-8 text no larger than ${maximumBytes} bytes` }
+  )
 
 export const ChatMode = Schema.Literals(["ask", "work"])
 export type ChatMode = typeof ChatMode.Type
 
-export const ChatMessage = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000))
+export const ChatMessage = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_000),
+  utf8MaxBytes(2_000)
+)
 
 export const ChatRequest = Schema.Struct({ message: ChatMessage, mode: ChatMode })
 export interface ChatRequest extends Schema.Schema.Type<typeof ChatRequest> {}
@@ -23,7 +33,11 @@ export interface StoredChatTurn extends Schema.Schema.Type<typeof StoredChatTurn
 export const ChatState = Schema.Literals(["pending", "running", "failed", "interrupted", "completed"])
 export type ChatState = typeof ChatState.Type
 
-export const CoordinatorReply = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(20_000))
+export const CoordinatorReply = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(20_000),
+  utf8MaxBytes(20_000)
+)
 
 export const chatHistoryMaxEntries = 32
 

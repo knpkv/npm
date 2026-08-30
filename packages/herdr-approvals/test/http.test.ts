@@ -1,14 +1,23 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { terminalCommandMaxPayloadBytes, type TerminalConnector, type TerminalSession } from "@knpkv/herdr-connect"
+import {
+  terminalCommandMaxPayloadBytes,
+  type TerminalConnector,
+  terminalFrameMaxEncodedBytes,
+  type TerminalSession
+} from "@knpkv/herdr-connect"
 import {
   FleetAuthorizationError,
+  fleetResponseBodyMaxBytes,
   type FleetService,
   FleetValidationError,
   type HostConfiguration,
   type HostOperations,
+  type JobRecord,
   JobStore,
-  makeFleetService
+  jobTextMaxLength,
+  makeFleetService,
+  pendingApprovalPageMaxRecords
 } from "@knpkv/herdr-fleet"
 import type { TailscaleClient } from "@knpkv/herdr-tailscale"
 import {
@@ -27,6 +36,7 @@ import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
+import { PendingApprovalSummary } from "../src/dashboard-model.js"
 import { makeRunner, recordWorkCheckpointRequest, startHttpServer } from "../src/http.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
 
@@ -239,8 +249,105 @@ describe("host HTTP authority", () => {
   it("bounds terminal payload buffering in both directions", () => {
     expect(terminalBufferCanAccept(0, terminalBufferLimitBytes)).toBe(true)
     expect(terminalBufferCanAccept(1, terminalBufferLimitBytes)).toBe(false)
-    expect(terminalBufferCanAccept(0, terminalBufferLimitBytes + 1)).toBe(false)
+    expect(terminalBufferCanAccept(0, terminalBufferLimitBytes + 1)).toBe(true)
     expect(terminalBufferCanAccept(terminalBufferLimitBytes - 1, 1)).toBe(true)
+  })
+
+  it.effect("pages pending approvals below the peer response limit", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-pending-page-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* Effect.forEach(
+            Array.from({
+              length: pendingApprovalPageMaxRecords + 2
+            }, (_, index): JobRecord => ({
+              actor: "andrey@example.com",
+              approvalNonce: `nonce-${index}`,
+              approvedBy: null,
+              createdAt: index + 1,
+              error: null,
+              hash: index.toString(16).padStart(64, "0"),
+              id: `job-${String(index).padStart(2, "0")}`,
+              payload: {
+                kind: "agent.delegate",
+                mode: "work",
+                prompt: "\u0001".repeat(jobTextMaxLength),
+                repository: "/repo"
+              },
+              result: null,
+              status: "pending_approval",
+              updatedAt: index + 1
+            })),
+            (record) => store.put(record),
+            { discard: true }
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          expect(yield* fleet.pendingApprovals()).toHaveLength(
+            pendingApprovalPageMaxRecords + 2
+          )
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+
+          const ids: Array<string> = []
+          let cursor: typeof PendingApprovalSummary.Type["nextCursor"] = null
+          do {
+            const pageUrl = new URL("/v1/pending-approvals", server.tailnetUrl)
+            if (cursor !== null) {
+              pageUrl.searchParams.set("cursorCreatedAt", String(cursor.createdAt))
+              pageUrl.searchParams.set("cursorId", cursor.id)
+            }
+            const response = yield* Effect.promise(() => fetch(pageUrl))
+            expect(response.status).toBe(200)
+            const body = yield* Effect.promise(() => response.text())
+            expect(Buffer.byteLength(body)).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
+            const page = Schema.decodeUnknownSync(PendingApprovalSummary)(JSON.parse(body))
+            expect(page.approvals.length).toBeLessThanOrEqual(
+              pendingApprovalPageMaxRecords
+            )
+            for (const { id } of page.approvals) ids.push(id)
+            cursor = page.nextCursor
+          } while (cursor !== null)
+
+          expect(new Set(ids).size).toBe(pendingApprovalPageMaxRecords + 2)
+          expect(ids).toEqual([...ids].sort().reverse())
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
   })
 
   it.effect("rejects every forwarded identity", () =>
@@ -778,7 +885,9 @@ esac
               ? Stream.empty
               : attempt === 4
               ? Stream.make({
-                bytes: Buffer.alloc(terminalBufferLimitBytes + 1).toString("base64"),
+                bytes: Buffer.alloc(
+                  terminalFrameMaxEncodedBytes / 4 * 3
+                ).toString("base64"),
                 encoding: "ansi",
                 full: true,
                 height: 30,
@@ -911,20 +1020,22 @@ esac
             yield* Deferred.await(sendInterrupted)
             expect(sends).toBe(1)
 
-            let oversizedFrames = 0
-            const oversizedClose = yield* Effect.promise(
+            let maximumFrameBytes = 0
+            const maximumFrameClose = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
                   const socket = new WebSocketClient(url)
                   socket.once("error", reject)
-                  socket.on("message", (_data, isBinary) => {
-                    if (isBinary) oversizedFrames += 1
+                  socket.on("message", (data, isBinary) => {
+                    if (isBinary) maximumFrameBytes = Buffer.byteLength(data)
                   })
                   socket.once("close", (code) => resolve(code))
                 })
             )
-            expect(oversizedClose).toBe(4_429)
-            expect(oversizedFrames).toBe(0)
+            expect(maximumFrameClose).toBe(1_000)
+            expect(maximumFrameBytes).toBe(
+              terminalFrameMaxEncodedBytes / 4 * 3
+            )
 
             const held = yield* Effect.promise(
               () =>

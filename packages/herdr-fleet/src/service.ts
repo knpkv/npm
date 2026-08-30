@@ -22,6 +22,7 @@ import {
   type JobRecord,
   type JobRequest,
   type LocalJobPayload,
+  type PendingApprovalCursor,
   requiresApproval,
   workerObservationMaxLength
 } from "./model.js"
@@ -55,6 +56,8 @@ export type Approval = {
   readonly hash: JobHash
   readonly nonce: string
 }
+
+export const pendingApprovalPageMaxRecords = 8
 
 type Options = {
   readonly host: string
@@ -362,11 +365,39 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
 
   const history = Effect.fn("FleetService.history")((limit: number) => options.store.list(limit))
 
+  const pendingApprovalPage = Effect.fn("FleetService.pendingApprovalPage")(
+    function*(cursor: PendingApprovalCursor | null) {
+      const scanned = yield* options.store.listPending(
+        cursor,
+        pendingApprovalPageMaxRecords + 1
+      )
+      const records = yield* Effect.forEach(
+        scanned.slice(0, pendingApprovalPageMaxRecords),
+        (record) => get(record.id)
+      )
+      const last = scanned[pendingApprovalPageMaxRecords - 1]
+      return {
+        records: records.filter((record) => record.status === "pending_approval"),
+        nextCursor: scanned.length > pendingApprovalPageMaxRecords && last !== undefined
+          ? { createdAt: last.createdAt, id: last.id }
+          : null
+      }
+    }
+  )
+
   const pendingApprovals = Effect.fn("FleetService.pendingApprovals")(
     function*() {
-      const pending = yield* options.store.listPending()
-      const current = yield* Effect.forEach(pending, (record) => get(record.id))
-      return current.filter((record) => record.status === "pending_approval")
+      const records: Array<JobRecord> = []
+      let cursor: PendingApprovalCursor | null = null
+      do {
+        const page: {
+          readonly records: ReadonlyArray<JobRecord>
+          readonly nextCursor: PendingApprovalCursor | null
+        } = yield* pendingApprovalPage(cursor)
+        for (const record of page.records) records.push(record)
+        cursor = page.nextCursor
+      } while (cursor !== null)
+      return records
     }
   )
 
@@ -483,6 +514,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     runCoordinatorChat,
     get,
     history,
+    pendingApprovalPage,
     pendingApprovals,
     agents,
     workers,

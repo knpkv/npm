@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { FleetJobConflictError, FleetStoreError, FleetTransitionConflictError } from "./errors.js"
-import { JobRecord } from "./model.js"
+import { JobRecord, type PendingApprovalCursor } from "./model.js"
 
 const storeError = (operation: string) => (cause: unknown) =>
   new FleetStoreError({ operation, detail: String(cause), cause })
@@ -151,13 +151,15 @@ export class JobStore {
   })
 
   readonly listPending = Effect.fn("JobStore.listPending")(function*(
-    this: JobStore
+    this: JobStore,
+    cursor: PendingApprovalCursor | null,
+    limit: number
   ) {
     const database = this.#database
     const rows = yield* Effect.try({
       try: () =>
-        database
-          .prepare(
+        cursor === null
+          ? database.prepare(
             `
               SELECT record
               FROM jobs
@@ -165,10 +167,29 @@ export class JobStore {
                 WHEN json_valid(record)
                 THEN json_extract(record, '$.status')
               END = ?
-              ORDER BY created_at DESC
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?
             `
-          )
-          .all("pending_approval"),
+          ).all("pending_approval", limit)
+          : database.prepare(
+            `
+              SELECT record
+              FROM jobs
+              WHERE CASE
+                WHEN json_valid(record)
+                THEN json_extract(record, '$.status')
+              END = ?
+                AND (created_at < ? OR (created_at = ? AND id < ?))
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?
+            `
+          ).all(
+            "pending_approval",
+            cursor.createdAt,
+            cursor.createdAt,
+            cursor.id,
+            limit
+          ),
       catch: storeError("listPending")
     })
     return yield* decodeRows("listPending", rows)

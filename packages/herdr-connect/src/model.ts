@@ -116,6 +116,8 @@ export const TerminalClientCommand = Schema.Union([
 ])
 export type TerminalClientCommand = typeof TerminalClientCommand.Type
 
+export const terminalFrameMaxEncodedBytes = 4 * 1024 * 1024
+
 export const HerdrTerminalEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("terminal.frame"),
@@ -125,7 +127,7 @@ export const HerdrTerminalEvent = Schema.Union([
     height: Schema.Number,
     full: Schema.Boolean,
     bytes: Schema.String.check(
-      Schema.isMaxLength(4 * 1024 * 1024),
+      Schema.isMaxLength(terminalFrameMaxEncodedBytes),
       Schema.isPattern(
         /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
       )

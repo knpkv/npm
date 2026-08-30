@@ -222,6 +222,12 @@ export const JobRecord = Schema.Struct({
 )
 export type JobRecord = typeof JobRecord.Type
 
+export const PendingApprovalCursor = Schema.Struct({
+  createdAt: Schema.Number,
+  id: JobIdentifier
+})
+export type PendingApprovalCursor = typeof PendingApprovalCursor.Type
+
 export const FleetMachine = Schema.Struct({
   host: JobIdentifier,
   nodeId: JobIdentifier

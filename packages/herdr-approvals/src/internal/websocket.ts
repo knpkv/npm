@@ -13,4 +13,6 @@ export const terminalBufferLimitBytes = 1024 * 1024
 export const terminalBufferCanAccept = (
   bufferedBytes: number,
   payloadBytes: number
-): boolean => bufferedBytes + payloadBytes <= terminalBufferLimitBytes
+): boolean =>
+  bufferedBytes === 0 ||
+  bufferedBytes + payloadBytes <= terminalBufferLimitBytes

@@ -245,6 +245,19 @@ describe("coordinator contracts", () => {
     expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(
       fleetResponseBodyMaxBytes
     )
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(ChatHistory)({
+        entries: Array.from({ length: chatHistoryMaxEntries }, (_, index) => ({
+          createdAt: index,
+          id: `turn-multibyte-${index}`,
+          message: "界".repeat(2_000),
+          mode: "ask",
+          reply: "界".repeat(20_000),
+          state: "completed",
+          updatedAt: index
+        }))
+      })
+    )).toBe(true)
   })
 
   it("rejects blank chat messages at the boundary", () => {

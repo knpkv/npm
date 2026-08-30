@@ -1,5 +1,5 @@
 import { ChatHistory } from "@knpkv/herdr-coordinator/model"
-import { HostStatus, JobPayload, JobRecord } from "@knpkv/herdr-fleet/model"
+import { HostStatus, JobPayload, JobRecord, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Schema } from "effect"
 
@@ -26,7 +26,8 @@ export const PendingApproval = Schema.Struct({
 
 export const PendingApprovalSummary = Schema.Struct({
   host: Schema.String,
-  approvals: Schema.Array(PendingApproval)
+  approvals: Schema.Array(PendingApproval),
+  nextCursor: Schema.NullOr(PendingApprovalCursor)
 })
 
 export const RemotePendingApproval = Schema.Struct({

@@ -15,6 +15,7 @@ import {
   makeHerdrTerminalConnector,
   TerminalClientCommand,
   terminalCommandMaxPayloadBytes,
+  terminalFrameMaxEncodedBytes,
   TerminalSelection,
   TerminalServerSignal
 } from "@knpkv/herdr-connect"
@@ -42,7 +43,8 @@ import {
   PeerPendingStatusError,
   PeerPendingTimeoutError,
   PeerPendingTransportError,
-  PeerPendingUnavailableError
+  PeerPendingUnavailableError,
+  PendingApprovalCursor
 } from "@knpkv/herdr-fleet"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
@@ -96,7 +98,7 @@ type Approval = typeof Approval.Type
 const TcpAddress = Schema.Struct({ address: Schema.String, port: Schema.Number })
 
 const peerPendingTimeoutMs = 1_500
-const terminalFrameMaxPayload = 4 * 1024 * 1024
+const terminalFrameMaxPayload = terminalFrameMaxEncodedBytes
 
 export type UiAssets = {
   readonly script: string
@@ -416,17 +418,46 @@ const pendingApproval = (record: JobRecord): PendingApproval => ({
 })
 
 const localPendingSummary = Effect.fn("HostHttp.localPendingSummary")(
-  function*(host: string, service: FleetService) {
-    const records = yield* service.pendingApprovals()
+  function*(
+    host: string,
+    service: FleetService,
+    cursor: typeof PendingApprovalCursor.Type | null
+  ) {
+    const page = yield* service.pendingApprovalPage(cursor)
     return {
       host,
-      approvals: records.map(pendingApproval)
+      approvals: page.records.map(pendingApproval),
+      nextCursor: page.nextCursor
     } satisfies PendingApprovalSummary
   }
 )
 
+const decodePendingApprovalCursor = Effect.fn(
+  "HostHttp.decodePendingApprovalCursor"
+)(function*(url: URL) {
+  const createdAt = url.searchParams.get("cursorCreatedAt")
+  const id = url.searchParams.get("cursorId")
+  if (createdAt === null && id === null) return null
+  if (createdAt === null || id === null) {
+    return yield* new FleetValidationError({
+      detail: "pending approval cursor requires cursorCreatedAt and cursorId"
+    })
+  }
+  return yield* Schema.decodeUnknownEffect(PendingApprovalCursor)({
+    createdAt: Number(createdAt),
+    id
+  }).pipe(
+    Effect.mapError(
+      () => new FleetValidationError({ detail: "invalid pending approval cursor" })
+    )
+  )
+})
+
 const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
-  function*(peer: PeerTarget) {
+  function*(
+    peer: PeerTarget,
+    cursor: typeof PendingApprovalCursor.Type | null
+  ) {
     const pendingUrl = peer.pendingUrl
     if (pendingUrl === null || peer.approvalUrl === null) {
       return yield* new PeerPendingUnavailableError({
@@ -441,7 +472,12 @@ const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
       })
     }
     const client = yield* HttpClient.HttpClient
-    const response = yield* client.get(pendingUrl).pipe(
+    const pageUrl = new URL(pendingUrl)
+    if (cursor !== null) {
+      pageUrl.searchParams.set("cursorCreatedAt", String(cursor.createdAt))
+      pageUrl.searchParams.set("cursorId", cursor.id)
+    }
+    const response = yield* client.get(pageUrl.toString()).pipe(
       Effect.mapError(
         (cause) =>
           new PeerPendingTransportError({
@@ -493,6 +529,31 @@ const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
     )
 )
 
+const fetchAllPeerPending = Effect.fn("HostHttp.fetchAllPeerPending")(
+  function*(peer: PeerTarget) {
+    const approvals: Array<PendingApproval> = []
+    const seen = new Set<string>()
+    let cursor: typeof PendingApprovalCursor.Type | null = null
+    do {
+      const page: PendingApprovalSummary = yield* fetchPeerPending(peer, cursor)
+      for (const approval of page.approvals) approvals.push(approval)
+      cursor = page.nextCursor
+      if (cursor !== null) {
+        const key = `${cursor.createdAt}\u0000${cursor.id}`
+        if (seen.has(key)) {
+          return yield* new PeerPendingDecodeError({
+            cause: key,
+            detail: "peer repeated a pending approval cursor",
+            host: peer.host
+          })
+        }
+        seen.add(key)
+      }
+    } while (cursor !== null)
+    return { approvals, host: peer.host, nextCursor: null } satisfies PendingApprovalSummary
+  }
+)
+
 const pendingFailureReason = (
   error: PeerPendingError
 ): PendingApprovalFailure["reason"] => {
@@ -511,10 +572,17 @@ const pendingFailureReason = (
 }
 
 const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
-  function*(peers: ReadonlyArray<PeerTarget>) {
+  function*(
+    peers: ReadonlyArray<PeerTarget>,
+    pagination: "first" | "all" = "first"
+  ) {
     const results = yield* Effect.all(
       peers.map((peer) =>
-        Effect.result(fetchPeerPending(peer)).pipe(
+        Effect.result(
+          pagination === "all"
+            ? fetchAllPeerPending(peer)
+            : fetchPeerPending(peer, null)
+        ).pipe(
           Effect.map((result) => ({ peer, result }))
         )
       ),
@@ -568,7 +636,7 @@ export const notificationCandidates = Effect.fn(
     )
     return localCandidates
   }
-  const aggregated = yield* aggregatePeerPending(peers.success)
+  const aggregated = yield* aggregatePeerPending(peers.success, "all")
   if (aggregated.failures.length > 0) {
     yield* Effect.logWarning(
       "PushWorker.peer_pending_partial_failure",
@@ -1336,7 +1404,7 @@ export const startHttpServer = async (
           const dashboard = Effect.gen(function*() {
             const observedAt = now()
             const resolvedLocalApprovals = approvalSurface
-              ? yield* service.pendingApprovals()
+              ? (yield* service.pendingApprovalPage(null)).records
               : []
             const state = yield* Effect.all({
               records: service.history(50),
@@ -1564,12 +1632,14 @@ export const startHttpServer = async (
             request.method === "GET" &&
             url.pathname === "/v1/pending-approvals"
           ) {
+            const effect = Effect.gen(function*() {
+              yield* authorized
+              const cursor = yield* decodePendingApprovalCursor(url)
+              return yield* localPendingSummary(config.host, service, cursor)
+            })
             await respond(
               response,
-              Effect.andThen(
-                authorized,
-                localPendingSummary(config.host, service)
-              )
+              effect
             )
             return
           }
