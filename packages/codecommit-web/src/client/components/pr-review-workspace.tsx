@@ -831,6 +831,7 @@ const ReadyReviewWorkspace = ({
       }
       if (hydratedSession.fingerprint === sessionFingerprint(completedReview, turns, dispositions)) {
         hydratedSessionRef.current = null
+        if (skipSessionWriteRef.current === reviewSessionKey) skipSessionWriteRef.current = null
         return
       }
       hydratedSessionRef.current = null

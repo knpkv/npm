@@ -727,6 +727,14 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page.getByText("acknowledged")).toBeVisible()
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const key = Object.keys(window.localStorage).find((candidate) =>
+        candidate.startsWith("codecommit:relay-review-session:")
+      )
+      return key === undefined ? null : window.localStorage.getItem(key)
+    })
+  ).toContain("\"F1\":\"acknowledged\"")
   const persistedBefore = await page.evaluate(() => {
     const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")

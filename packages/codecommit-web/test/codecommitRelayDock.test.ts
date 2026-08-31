@@ -20,6 +20,7 @@ import {
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
   makeCodeCommitRelayConversation,
+  makeCodeCommitRelaySelection,
   makeCodeCommitRelayThreadRegistration
 } from "../src/client/codecommitRelayDock.js"
 import type { PullRequestRelayReviewResponse } from "../src/server/Api.js"
@@ -96,6 +97,13 @@ describe("CodeCommit Relay dock adapter", () => {
         registration
       )
     ).toBe(false)
+  })
+
+  it("shows the completed profile's concrete model in the dock selector", () => {
+    const selected = makeCodeCommitRelaySelection({ id: "thorough", model: "gpt-5.6-luna", name: "Thorough" })
+
+    expect(selected.modelId).toBe("gpt-5.6-luna")
+    expect(selected.models).toEqual([{ id: "gpt-5.6-luna", label: "gpt-5.6-luna" }])
   })
 
   it("uses repository account identity without changing the credential route alias", () => {

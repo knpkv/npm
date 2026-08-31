@@ -143,10 +143,19 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
   return <RelayProductDock host={host}>{children}</RelayProductDock>
 }
 
-interface ReviewProfileSelection {
+export interface ReviewProfileSelection {
   readonly id: string
+  readonly model: string
   readonly name: string
 }
+
+export const makeCodeCommitRelaySelection = (profile: ReviewProfileSelection | undefined): RelaySelectorState =>
+  Schema.decodeUnknownSync(RelaySelectorState)({
+    modelId: profile?.model ?? "configured-default",
+    models: [{ id: profile?.model ?? "configured-default", label: profile?.model ?? "Configured default" }],
+    profileId: profile?.id ?? "configured-review",
+    profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
+  })
 
 interface CodeCommitRelayThreadProps {
   readonly accountId: string
@@ -281,16 +290,7 @@ export const CodeCommitRelayThread = ({
   selectedFindingId,
   turns
 }: CodeCommitRelayThreadProps): null => {
-  const selection = useMemo(
-    () =>
-      Schema.decodeUnknownSync(RelaySelectorState)({
-        modelId: "configured-default",
-        models: [{ id: "configured-default", label: "Configured default" }],
-        profileId: profile?.id ?? "configured-review",
-        profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
-      }),
-    [profile?.id, profile?.name]
-  )
+  const selection = useMemo(() => makeCodeCommitRelaySelection(profile), [profile?.id, profile?.model, profile?.name])
   const repositoryAccountId = codeCommitRepositoryAccountIdentity(pullRequest.account)
   const conversation = useMemo(
     () => makeCodeCommitRelayConversation(accountId, pullRequest, selection),
