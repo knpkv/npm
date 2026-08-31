@@ -17,6 +17,7 @@ import {
   matchesCodeCommitPullRequestRoute
 } from "../src/client/codecommit-route.js"
 import {
+  codeCommitRelayAccountKind,
   codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
@@ -122,6 +123,7 @@ describe("CodeCommit Relay dock adapter", () => {
     })
 
     expect(codeCommitRepositoryAccountIdentity(account)).toBe("repository-account")
+    expect(codeCommitRelayAccountKind(account)).toBe("repository")
     expect(codeCommitRouteAccountIdentity(account)).toBe("credential-account")
   })
 
@@ -134,6 +136,7 @@ describe("CodeCommit Relay dock adapter", () => {
     })
 
     expect(codeCommitRepositoryAccountIdentity(account)).toBe("credential-account")
+    expect(codeCommitRelayAccountKind(account)).toBe("credential")
     expect(
       makeCodeCommitRelayConversation(
         "credential-account",

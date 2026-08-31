@@ -47,6 +47,9 @@ const nonEmptyAccountId = (accountId: string | undefined): string | undefined =>
 export const codeCommitRepositoryAccountIdentity = (account: Domain.Account): string =>
   nonEmptyAccountId(account.repoAccountId) ?? nonEmptyAccountId(account.awsAccountId) ?? account.profile
 
+export const codeCommitRelayAccountKind = (account: Domain.Account): "credential" | "repository" =>
+  nonEmptyAccountId(account.repoAccountId) === undefined ? "credential" : "repository"
+
 export const codeCommitRouteAccountIdentity = (account: Domain.Account): string =>
   account.awsAccountId ?? account.profile
 

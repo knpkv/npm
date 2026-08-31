@@ -10,24 +10,32 @@ import type { OpenPullRequestCandidate, OpenPullRequestResolution } from "./open
 const candidateMatchesAccount = (candidate: OpenPullRequestCandidate, accountId: string): boolean =>
   candidate.accountLabel === accountId || candidate.accountLabel.endsWith(` · AWS ${accountId}`)
 
+/** Apply the host account constraint before classifying a locator result. */
+export const controlCenterRelayCandidatesForAccount = (
+  resolution: OpenPullRequestResolution,
+  accountId: string | undefined
+): ReadonlyArray<OpenPullRequestCandidate> => {
+  switch (resolution._tag) {
+    case "found":
+      return accountId === undefined || candidateMatchesAccount(resolution.candidate, accountId)
+        ? [resolution.candidate]
+        : []
+    case "ambiguous":
+      return accountId === undefined
+        ? resolution.candidates
+        : resolution.candidates.filter((candidate) => candidateMatchesAccount(candidate, accountId))
+    case "account-identity-unavailable":
+    case "not-found":
+      return []
+  }
+}
+
 export const selectControlCenterRelayCandidate = (
   resolution: OpenPullRequestResolution,
   accountId: string | undefined
 ): OpenPullRequestCandidate | undefined => {
-  switch (resolution._tag) {
-    case "found":
-      return accountId === undefined || candidateMatchesAccount(resolution.candidate, accountId)
-        ? resolution.candidate
-        : undefined
-    case "ambiguous": {
-      if (accountId === undefined) return undefined
-      const matches = resolution.candidates.filter((candidate) => candidateMatchesAccount(candidate, accountId))
-      return matches.length === 1 ? matches[0] : undefined
-    }
-    case "account-identity-unavailable":
-    case "not-found":
-      return undefined
-  }
+  const matches = controlCenterRelayCandidatesForAccount(resolution, accountId)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 export const decodeControlCenterRelaySelector = (input: typeof RelaySelectorState.Encoded): RelaySelectorState => {

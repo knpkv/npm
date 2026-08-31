@@ -1,12 +1,7 @@
 /** Schema-validated durable storage for per-PR Relay conversations. @module */
 import { Data, Result, Schema } from "effect"
 
-import {
-  MAXIMUM_RELAY_REVIEW_TURNS,
-  PullRequestRelayReviewResponse,
-  RelayReviewConversationTurns,
-  RelayReviewSkillIds
-} from "../server/Api.js"
+import { PullRequestRelayReviewResponse, RelayReviewConversationTurns, RelayReviewSkillIds } from "../server/Api.js"
 import {
   appendReviewTurn,
   FindingDisposition,
@@ -100,6 +95,9 @@ const recoverInterruptedPublications = (
     {}
   )
 
+const hasInterruptedPublication = (session: StoredRelayReviewSession): boolean =>
+  Object.values(session.dispositions).some((disposition) => disposition === "posting")
+
 const sameResource = (left: RelayReviewSessionResourceIdentity, right: RelayReviewSessionResourceIdentity): boolean =>
   left.accountId === right.accountId &&
   left.pullRequestId === right.pullRequestId &&
@@ -170,11 +168,7 @@ const compatibleStaleIncomingTurns = (
   const incomingTailIsCurrent = incomingTail !== undefined && currentTurnIds.has(turnIdentity(incomingTail))
   const currentTailIsIncoming = currentTail !== undefined && incomingTurnIds.has(turnIdentity(currentTail))
   const isOlderWindow = hasOverlap && incomingTailIsCurrent && !currentTailIsIncoming
-  if (
-    !hasOverlap &&
-    incoming.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS &&
-    current.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS
-  ) {
+  if (!hasOverlap && current.turns.length > 0 && incoming.turns.length > 0) {
     const appendedTurnIds = new Set(incoming.appendedTurnIds ?? [])
     const appendedTurns = compatible.filter((turn) => appendedTurnIds.has(turnIdentity(turn)))
     return appendedTurns.reduce(
@@ -322,6 +316,13 @@ export const relayReviewSessionStorageKey = (identity: RelayReviewSessionResourc
     )
   }:${encodeURIComponent(identity.region)}:${encodeURIComponent(identity.pullRequestId)}`
 
+/** Derive the exact review identity from the durable resource and reviewed head. */
+export const relayReviewSessionIdentity = (
+  resource: RelayReviewSessionResourceIdentity,
+  review: Pick<PullRequestRelayReviewResponse, "baseCommit" | "headCommit" | "revisionId">
+): string =>
+  `${resource.accountId}:${resource.repositoryName}:${resource.region}:${resource.pullRequestId}:${review.revisionId}:${review.baseCommit}:${review.headCommit}`
+
 export const readRelayReviewSession = (
   storage: RelayReviewSessionReadableStorage,
   key: string,
@@ -340,8 +341,59 @@ export const readRelayReviewSession = (
   }
   return Result.succeed({
     ...decoded.success,
-    dispositions: recoverInterruptedPublications(decoded.success.dispositions)
+    dispositions: decoded.success.dispositions
   })
+}
+
+/** Coordinate publication recovery with the tab that may still own the provider request. */
+export const relayReviewSessionPublicationLockName = (key: string, findingId: string): string =>
+  `${relayReviewSessionLockName}:publication:${encodeURIComponent(key)}:${encodeURIComponent(findingId)}`
+
+/** Recover abandoned publication markers only after the owning tab's lock is released. */
+export const recoverRelayReviewSession = async (
+  storage: RelayReviewSessionReadableStorage & RelayReviewSessionWritableStorage,
+  key: string,
+  resource: RelayReviewSessionResourceIdentity,
+  lock: RelayReviewSessionLock
+): Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>> => {
+  const initial = readRelayReviewSession(storage, key, resource)
+  if (Result.isFailure(initial) || initial.success === null || !hasInterruptedPublication(initial.success)) {
+    return initial
+  }
+  const findingIds = Object.entries(initial.success.dispositions)
+    .filter(([, disposition]) => disposition === "posting")
+    .map(([findingId]) => findingId)
+    .sort()
+  const recover = (): Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>> =>
+    lock.request(relayReviewSessionLockName, async () => {
+      const current = readRelayReviewSession(storage, key, resource)
+      if (Result.isFailure(current) || current.success === null || !hasInterruptedPublication(current.success)) {
+        return current
+      }
+      const recovered = recoverInterruptedPublications(current.success.dispositions)
+      const outcome = writeRelayReviewSessionUnlocked(storage, key, {
+        dispositions: recovered,
+        expectedIdentity: current.success.identity,
+        expectedVersion: current.success.version,
+        identity: current.success.identity,
+        resource,
+        review: current.success.review,
+        skillIds: current.success.skillIds,
+        turns: current.success.turns
+      })
+      return Result.isFailure(outcome) ? Result.fail(outcome.failure) : Result.succeed(outcome.success.session)
+    })
+  const guarded = findingIds.reduceRight<
+    () => Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>>
+  >(
+    (next, findingId) => () => lock.request(relayReviewSessionPublicationLockName(key, findingId), next),
+    recover
+  )
+  try {
+    return await guarded()
+  } catch {
+    return Result.fail(new RelayReviewSessionStorageUnavailable({ operation: "write" }))
+  }
 }
 
 export const writeRelayReviewSession = async (
@@ -355,13 +407,8 @@ export const writeRelayReviewSession = async (
       const redirect = readRelayReviewSessionRedirect(storage, key)
       if (Result.isFailure(redirect)) return Result.fail(redirect.failure)
       if (redirect.success === null) return writeRelayReviewSessionUnlocked(storage, key, session)
-      const target = readRelayReviewSession(storage, redirect.success.targetKey, redirect.success.targetResource)
-      if (Result.isFailure(target)) return Result.fail(target.failure)
       return writeRelayReviewSessionUnlocked(storage, redirect.success.targetKey, {
         ...session,
-        expectedIdentity: redirect.success.targetIdentity,
-        expectedVersion: target.success?.version ?? 0,
-        identity: redirect.success.targetIdentity,
         resource: redirect.success.targetResource
       })
     })
@@ -377,7 +424,6 @@ export const migrateRelayReviewSession = async (
   sourceResource: RelayReviewSessionResourceIdentity,
   targetKey: string,
   targetResource: RelayReviewSessionResourceIdentity,
-  targetIdentity: string,
   lock: RelayReviewSessionLock
 ): Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>> => {
   try {
@@ -389,11 +435,12 @@ export const migrateRelayReviewSession = async (
       }
       const target = readRelayReviewSession(storage, targetKey, targetResource)
       if (Result.isFailure(target)) return Result.fail(target.failure)
+      const migrationIdentity = relayReviewSessionIdentity(targetResource, source.success.review)
       const migrated = writeRelayReviewSessionUnlocked(storage, targetKey, {
         dispositions: source.success.dispositions,
-        expectedIdentity: targetIdentity,
+        expectedIdentity: migrationIdentity,
         expectedVersion: target.success === null ? 0 : Math.max(0, target.success.version - 1),
-        identity: targetIdentity,
+        identity: migrationIdentity,
         resource: targetResource,
         review: source.success.review,
         skillIds: source.success.skillIds,
@@ -402,7 +449,7 @@ export const migrateRelayReviewSession = async (
       if (Result.isFailure(migrated)) return Result.fail(migrated.failure)
       const redirect: RelayReviewSessionRedirect = {
         _tag: "RelayReviewSessionRedirect",
-        targetIdentity,
+        targetIdentity: migrationIdentity,
         targetKey,
         targetResource
       }

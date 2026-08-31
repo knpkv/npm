@@ -38,6 +38,7 @@ import {
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
 import {
+  codeCommitRelayAccountKind,
   codeCommitRelayExecutionProfile,
   CodeCommitRelayThread,
   type CodeCommitRelayContinuationOutcome
@@ -58,10 +59,13 @@ import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
   readRelayReviewSession,
   migrateRelayReviewSession,
+  recoverRelayReviewSession,
+  relayReviewSessionPublicationLockName,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
   type RelayReviewSessionWrite,
   relayReviewSessionStorageKey,
+  relayReviewSessionIdentity,
   writeRelayReviewSession
 } from "../review-session-storage.js"
 import {
@@ -113,6 +117,9 @@ const sessionFingerprint = (
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   dispositions: FindingDispositions
 ): string => JSON.stringify({ completedReview, dispositions, turns })
+
+const hasPostingDisposition = (dispositions: FindingDispositions): boolean =>
+  Object.values(dispositions).some((disposition) => disposition === "posting")
 
 const lineCount = (text: string): number => {
   if (text.length === 0) return 0
@@ -684,16 +691,19 @@ const ReadyReviewWorkspace = ({
     diff
   )
   const reviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
-    const stableAccountId =
+    const repositoryAccountId =
       pullRequest.account.repoAccountId !== undefined && pullRequest.account.repoAccountId.length > 0
         ? pullRequest.account.repoAccountId
-        : pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
-          ? pullRequest.account.awsAccountId
-          : undefined
+        : undefined
+    const stableAccountId =
+      repositoryAccountId ??
+      (pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+        ? pullRequest.account.awsAccountId
+        : undefined)
     return stableAccountId === undefined
       ? null
       : {
-          accountKind: "repository",
+          accountKind: codeCommitRelayAccountKind(pullRequest.account),
           accountId: stableAccountId,
           pullRequestId: String(pullRequest.id),
           region: String(pullRequest.account.region),
@@ -781,6 +791,40 @@ const ReadyReviewWorkspace = ({
     contentStateCache.identity === reviewIdentity ? contentStateCache.values : new Map<number, RlyDiffFileContent>()
   const files = diff.files.map((file) => toRlyFile(file, contentStates.get(file.index) ?? { state: "ready" }))
   const inventory: RlyDiffInventory = { files, state: "ready" }
+
+  const persistDispositions = useCallback(
+    async (nextDispositions: FindingDispositions): Promise<boolean> => {
+      const currentReview = completedReviewRef.current
+      if (currentReview === null || reviewResource === null || reviewSessionKey === null) return true
+      const lock = browserRelayReviewSessionLock()
+      if (lock === null) return true
+      const written = await writeRelayReviewSession(
+        window.localStorage,
+        reviewSessionKey,
+        {
+          dispositions: nextDispositions,
+          expectedIdentity: currentReview.expectedIdentity,
+          expectedVersion: reviewSessionVersionRef.current,
+          identity: currentReview.identity,
+          resource: reviewResource,
+          review: currentReview.value,
+          skillIds: currentReview.skillIds,
+          turns: turnsRef.current
+        },
+        lock
+      )
+      if (Result.isFailure(written)) {
+        setReviewFailure({
+          description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+          title: "PR conversation not saved"
+        })
+        return false
+      }
+      reviewSessionVersionRef.current = written.success.session.version
+      return true
+    },
+    [reviewResource, reviewSessionKey]
+  )
 
   useEffect(() => {
     if (reviewSessionKey !== null && hydratedProfileKeyRef.current === reviewSessionKey) {
@@ -890,7 +934,6 @@ const ReadyReviewWorkspace = ({
             legacyReviewResource,
             reviewSessionKey,
             reviewResource,
-            reviewIdentity,
             lock
           ).then((migrated) => {
             if (Result.isFailure(migrated)) {
@@ -937,7 +980,10 @@ const ReadyReviewWorkspace = ({
     hydratedProfileKeyRef.current = reviewSessionKey
     skipSessionWriteRef.current = reviewSessionKey
     reviewSessionVersionRef.current = hydrated.version
-    const hydratedIdentity = hydratedFromLegacy ? reviewIdentity : hydrated.identity
+    const hydratedIdentity =
+      hydratedFromLegacy && reviewResource !== null
+        ? relayReviewSessionIdentity(reviewResource, hydrated.review)
+        : hydrated.identity
     const restored = replaceRelayReviewPreservingTurns(hydrated.turns, {
       expectedIdentity: hydratedIdentity,
       identity: hydratedIdentity,
@@ -955,6 +1001,30 @@ const ReadyReviewWorkspace = ({
       fingerprint: sessionFingerprint(restored, hydrated.turns, hydrated.dispositions),
       key: reviewSessionKey,
       pendingInitialPass: true
+    }
+    const lock = browserRelayReviewSessionLock()
+    if (lock !== null && hasPostingDisposition(hydrated.dispositions)) {
+      void recoverRelayReviewSession(
+        window.localStorage,
+        reviewSessionKey,
+        reviewResource ?? hydrated.resource,
+        lock
+      ).then((recovered) => {
+        if (
+          sessionMigrationKeyRef.current !== reviewSessionKey ||
+          Result.isFailure(recovered) ||
+          recovered.success === null
+        )
+          return
+        reviewSessionVersionRef.current = recovered.success.version
+        dispositionsRef.current = recovered.success.dispositions
+        setDispositions(recovered.success.dispositions)
+        hydratedSessionRef.current = {
+          fingerprint: sessionFingerprint(restored, hydrated.turns, recovered.success.dispositions),
+          key: reviewSessionKey,
+          pendingInitialPass: false
+        }
+      })
     }
   }, [legacyReviewResource, legacyReviewSessionKey, reviewIdentity, reviewResource, reviewSessionKey])
 
@@ -1238,51 +1308,71 @@ const ReadyReviewWorkspace = ({
   const postFinding = useCallback(
     async (finding: RelayReviewFinding): Promise<void> => {
       if (review === null || reviewIsStale) return
-      setReviewFailure(null)
-      setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
-      try {
-        const receipt = await postFindingRequest({
-          params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
-          payload: {
-            revisionId: review.revisionId,
-            baseCommit: review.baseCommit,
-            headCommit: review.headCommit,
-            finding
-          }
-        })
-        onFindingPosted(receipt.operationId)
-        setDispositions((current) => {
+      const publish = async (): Promise<void> => {
+        setReviewFailure(null)
+        const posting = { ...dispositionsRef.current, [finding.id]: "posting" } satisfies FindingDispositions
+        dispositionsRef.current = posting
+        setDispositions(posting)
+        if (!(await persistDispositions(posting))) return
+        try {
+          const receipt = await postFindingRequest({
+            params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
+            payload: {
+              revisionId: review.revisionId,
+              baseCommit: review.baseCommit,
+              headCommit: review.headCommit,
+              finding
+            }
+          })
+          onFindingPosted(receipt.operationId)
           const settlement = settleFindingPublication(
             completedReviewRef.current?.value.result.findings ?? [],
             finding,
-            current,
+            dispositionsRef.current,
             "posted"
           )
+          dispositionsRef.current = settlement.dispositions
+          setDispositions(settlement.dispositions)
           if (settlement.stale) {
             setReviewFailure({
               description: "CodeCommit received an older finding snapshot. Re-review before relying on it.",
               title: "Finding post needs review"
             })
           }
-          return settlement.dispositions
-        })
-      } catch (cause) {
-        setDispositions(
-          (current) =>
-            settleFindingPublication(
-              completedReviewRef.current?.value.result.findings ?? [],
-              finding,
-              current,
-              "failed"
-            ).dispositions
-        )
-        setReviewFailure({
-          description: failureMessage(cause, "CodeCommit did not accept this finding."),
-          title: "Finding post failed"
-        })
+          await persistDispositions(settlement.dispositions)
+        } catch (cause) {
+          const settlement = settleFindingPublication(
+            completedReviewRef.current?.value.result.findings ?? [],
+            finding,
+            dispositionsRef.current,
+            "failed"
+          )
+          dispositionsRef.current = settlement.dispositions
+          setDispositions(settlement.dispositions)
+          setReviewFailure({
+            description: failureMessage(cause, "CodeCommit did not accept this finding."),
+            title: "Finding post failed"
+          })
+          await persistDispositions(settlement.dispositions)
+        }
       }
+      const lock = browserRelayReviewSessionLock()
+      if (lock === null || reviewSessionKey === null) {
+        await publish()
+        return
+      }
+      await lock.request(relayReviewSessionPublicationLockName(reviewSessionKey, finding.id), publish)
     },
-    [accountId, onFindingPosted, postFindingRequest, pullRequest.id, review, reviewIsStale]
+    [
+      accountId,
+      onFindingPosted,
+      persistDispositions,
+      postFindingRequest,
+      pullRequest.id,
+      review,
+      reviewIsStale,
+      reviewSessionKey
+    ]
   )
 
   const selectFinding = useCallback(

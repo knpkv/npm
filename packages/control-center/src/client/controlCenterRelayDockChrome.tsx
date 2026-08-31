@@ -16,7 +16,11 @@ import { useNavigate } from "react-router"
 
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { useBrowserSession } from "./BrowserSession.js"
-import { controlCenterRelayHostSelection, selectControlCenterRelayCandidate } from "./controlCenterRelayDock.js"
+import {
+  controlCenterRelayCandidatesForAccount,
+  controlCenterRelayHostSelection,
+  selectControlCenterRelayCandidate
+} from "./controlCenterRelayDock.js"
 import { workspaceEntityPath } from "./workspaceEntityPaths.js"
 
 /** Install Control Center's authenticated resolver behind the shared Relay chrome. */
@@ -74,8 +78,16 @@ export const ControlCenterRelayDockChrome = (): ReactElement => {
           })
         }
         if (resolution._tag === "ambiguous") {
+          const matches = controlCenterRelayCandidatesForAccount(resolution, locator.accountId)
+          if (locator.accountId !== undefined && matches.length === 0) {
+            return yield* new PullRequestConversationNotFound({
+              product: "control-center",
+              pullRequestId: locator.pullRequestId,
+              repositoryName: locator.repositoryName
+            })
+          }
           return yield* new PullRequestConversationAmbiguous({
-            matches: resolution.candidates.length,
+            matches: matches.length,
             product: "control-center",
             pullRequestId: locator.pullRequestId,
             repositoryName: locator.repositoryName
