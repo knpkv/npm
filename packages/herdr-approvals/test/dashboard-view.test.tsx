@@ -167,6 +167,31 @@ describe("dashboard approval capability", () => {
     expect(render(true)).toContain("/v1/jobs/job-1/reject")
   })
 
+  it("encodes schema-valid job identifiers in approval form actions", () => {
+    const base = snapshot(true)
+    const pending = { ...base.records[0], id: "job/with-slash" }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={() => undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{
+          ...base,
+          pendingApprovals: { ...base.pendingApprovals, local: [pending] },
+          records: [pending]
+        }}
+      />
+    )
+    expect(html).toContain("/v1/jobs/job%2Fwith-slash/approve")
+    expect(html).toContain("/v1/jobs/job%2Fwith-slash/reject")
+  })
+
   it("names the configured canonical approval hub", () => {
     expect(render(false)).toContain("Open ser8.example.test")
     expect(render(false)).not.toContain("KNPKV-SER8")

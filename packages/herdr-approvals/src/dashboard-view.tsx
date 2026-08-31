@@ -139,16 +139,17 @@ const ApprovalActions = ({
         nonce: record.approvalNonce ?? ""
       })
     }
+  const jobPath = encodeURIComponent(record.id)
   return (
     <div className="approval-actions">
-      <form method="post" action={`/v1/jobs/${record.id}/reject`} onSubmit={submit("reject")}>
+      <form method="post" action={`/v1/jobs/${jobPath}/reject`} onSubmit={submit("reject")}>
         <input type="hidden" name="hash" value={record.hash} />
         <input type="hidden" name="nonce" value={record.approvalNonce} />
         <Button type="submit" variant="quiet" disabled={busy}>
           Reject
         </Button>
       </form>
-      <form method="post" action={`/v1/jobs/${record.id}/approve`} onSubmit={submit("approve")}>
+      <form method="post" action={`/v1/jobs/${jobPath}/approve`} onSubmit={submit("approve")}>
         <input type="hidden" name="hash" value={record.hash} />
         <input type="hidden" name="nonce" value={record.approvalNonce} />
         <Button type="submit" variant="primary" loading={busy}>

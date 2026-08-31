@@ -17,7 +17,7 @@ import {
   type HostConfiguration,
   type HostOperations,
   JobHistoryPage,
-  type JobRecord,
+  JobRecord,
   JobStore,
   jobTextMaxLength,
   makeFleetService,
@@ -1407,6 +1407,92 @@ esac
           expect((yield* fleet.get(pending.id)).status).not.toBe(
             "pending_approval"
           )
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("routes encoded schema-valid job identifiers exactly once", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-job-route-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            id: Effect.succeed("job/with-slash"),
+            nonce: Effect.succeed("nonce-route"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const pending = yield* fleet.submit(
+            { payload: { kind: "nix.apply", ref: "main" } },
+            "submitter@example.com"
+          )
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          if (server.approvalUrl === null) {
+            return yield* Effect.die("approval listener missing")
+          }
+          const segment = encodeURIComponent(pending.id)
+          const fetched = yield* Effect.promise(() => fetch(`${server.url}/v1/jobs/${segment}`))
+          expect(fetched.status).toBe(200)
+          expect(
+            Schema.decodeUnknownSync(JobRecord)(yield* Effect.promise(() => fetched.json())).id
+          ).toBe(pending.id)
+
+          const decided = yield* Effect.promise(() =>
+            fetch(`${server.approvalUrl}/v1/jobs/${segment}/approve`, {
+              body: new URLSearchParams({
+                hash: pending.hash,
+                nonce: pending.approvalNonce ?? ""
+              }),
+              headers: {
+                "content-type": "application/x-www-form-urlencoded",
+                origin: new URL(server.approvalUrl).origin
+              },
+              method: "POST",
+              redirect: "manual"
+            })
+          )
+          expect(decided.status).toBe(303)
+          expect((yield* fleet.get(pending.id)).status).not.toBe("pending_approval")
+          const localHost = new URL(server.url).host
+          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/job/with-slash`, localHost))).toBe(
+            404
+          )
+          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/%`, localHost))).toBe(400)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

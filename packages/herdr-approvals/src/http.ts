@@ -40,6 +40,7 @@ import {
   fleetResponseBodyMaxBytes,
   FleetValidationError,
   JobHash,
+  JobIdentifier,
   JobRequest,
   PeerPendingDecodeError,
   PeerPendingHostMismatchError,
@@ -109,6 +110,19 @@ import { workCheckpointPath } from "./work-checkpoint.js"
 const Approval = Schema.Struct({ hash: JobHash, nonce: Schema.String })
 type Approval = typeof Approval.Type
 const TcpAddress = Schema.Struct({ address: Schema.String, port: Schema.Number })
+
+const decodeJobPathSegment = Effect.fn("ApprovalHttp.decodeJobPathSegment")((segment: string) =>
+  Effect.try({
+    try: () => decodeURIComponent(segment),
+    catch: () => new FleetValidationError({ detail: "invalid job identifier path segment" })
+  }).pipe(
+    Effect.flatMap((value) =>
+      Schema.decodeUnknownEffect(JobIdentifier)(value).pipe(
+        Effect.mapError(() => new FleetValidationError({ detail: "invalid job identifier path segment" }))
+      )
+    )
+  )
+)
 
 const peerPendingTimeoutMs = 1_500
 const terminalFrameMaxPayload = terminalFrameMaxEncodedBytes
@@ -2058,14 +2072,19 @@ export const startHttpServer = async (
             return
           }
           const jobMatch = /^\/v1\/jobs\/([^/]+)$/.exec(url.pathname)
+          const jobIdSegment = jobMatch?.[1]
           if (
             !approvalSurface &&
             request.method === "GET" &&
-            jobMatch?.[1] !== undefined
+            jobIdSegment !== undefined
           ) {
             await respond(
               response,
-              Effect.andThen(authorized, service.get(jobMatch[1]))
+              Effect.gen(function*() {
+                yield* authorized
+                const jobId = yield* decodeJobPathSegment(jobIdSegment)
+                return yield* service.get(jobId)
+              })
             )
             return
           }
@@ -2099,10 +2118,11 @@ export const startHttpServer = async (
             const effect = Effect.gen(function*() {
               const who = yield* authorized
               yield* sameOrigin(request, expectedOrigin())
+              const jobId = yield* decodeJobPathSegment(approvalJobId)
               const approval = yield* readApproval(request)
               const record = decision === "approve"
-                ? yield* service.approve(approvalJobId, approval, who)
-                : yield* service.reject(approvalJobId, approval, who)
+                ? yield* service.approve(jobId, approval, who)
+                : yield* service.reject(jobId, approval, who)
               if (record.status === "queued") yield* enqueueJob(record.id)
               return record
             })
