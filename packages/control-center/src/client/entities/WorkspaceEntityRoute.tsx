@@ -19,6 +19,7 @@ import type { DurableAgentPrompt } from "../../api/agent.js"
 import type { SubmitClockifyActionRequest } from "../../api/deliveryGraph.js"
 import type { EntityId as EntityIdType, WorkspaceId as WorkspaceIdType } from "../../domain/identifiers.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
+import { ControlCenterRelayThread } from "../controlCenterRelayThread.js"
 import {
   decodeEntityRouteId,
   resolveWorkspaceEntityOrigin,
@@ -723,45 +724,58 @@ const ConnectedWorkspaceEntity = ({
     routableReleaseIds
   )
   return (
-    <WorkspaceEntityView
-      clockifyActionCanApprove={
-        browserSession.state._tag === "authenticated" &&
-        (browserSession.state.session.permission === "workspace-owner" ||
-          browserSession.state.session.permission === "workspace-approver")
-      }
-      clockifyActionCanCorrect={
-        browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
-      }
-      clockifyActionState={clockifyActions.state}
-      clockifyActionSubmit={clockifyActions.submit}
-      confluenceCanEdit={
-        browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
-      }
-      confluenceSynchronizationState={canSynchronizeConfluence ? confluenceSynchronization.state : null}
-      onAskAgent={() => navigate(agentPath, { state: location.state })}
-      onConfluenceSaved={confluenceSynchronization.synchronizeAfterMutation}
-      onConfluenceSynchronize={confluenceSynchronization.synchronizeNow}
-      onSessionExpired={browserSession.invalidateSession}
-      originHref={resolvedOriginHref}
-      originLabel={originLabel(resolvedOriginHref, workspaceId)}
-      originState={resolvedOrigin.origin.state}
-      retry={controller.retry}
-      reviewCanEnqueue={reviewCanEnqueue}
-      reviewCancel={reviewController.cancel}
-      reviewExtendBudget={reviewController.extendBudget}
-      reviewPublication={reviewController.publication}
-      reviewPublicationCancel={reviewController.cancelPublication}
-      reviewLoadEarlier={reviewController.loadEarlier}
-      reviewPublicationPreview={reviewController.previewPublication}
-      reviewRetry={reviewController.retry}
-      reviewSuggestionPublish={reviewController.publishSuggestion}
-      reviewTargetSuggestion={reviewController.targetSuggestion}
-      reviewStart={reviewController.start}
-      reviewState={reviewController.state}
-      state={controller.state}
-      sessionKey={sessionKey}
-      workspaceId={workspaceId}
-    />
+    <>
+      {(controller.state._tag === "ready" || controller.state._tag === "stale") &&
+      controller.state.inspection.entity.projection.details._tag === "pull-request" ? (
+        <ControlCenterRelayThread
+          canEnqueue={reviewCanEnqueue}
+          entityId={entityId}
+          inspection={controller.state.inspection}
+          reviewState={reviewController.state}
+          startReview={reviewController.start}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+      <WorkspaceEntityView
+        clockifyActionCanApprove={
+          browserSession.state._tag === "authenticated" &&
+          (browserSession.state.session.permission === "workspace-owner" ||
+            browserSession.state.session.permission === "workspace-approver")
+        }
+        clockifyActionCanCorrect={
+          browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
+        }
+        clockifyActionState={clockifyActions.state}
+        clockifyActionSubmit={clockifyActions.submit}
+        confluenceCanEdit={
+          browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
+        }
+        confluenceSynchronizationState={canSynchronizeConfluence ? confluenceSynchronization.state : null}
+        onAskAgent={() => navigate(agentPath, { state: location.state })}
+        onConfluenceSaved={confluenceSynchronization.synchronizeAfterMutation}
+        onConfluenceSynchronize={confluenceSynchronization.synchronizeNow}
+        onSessionExpired={browserSession.invalidateSession}
+        originHref={resolvedOriginHref}
+        originLabel={originLabel(resolvedOriginHref, workspaceId)}
+        originState={resolvedOrigin.origin.state}
+        retry={controller.retry}
+        reviewCanEnqueue={reviewCanEnqueue}
+        reviewCancel={reviewController.cancel}
+        reviewExtendBudget={reviewController.extendBudget}
+        reviewPublication={reviewController.publication}
+        reviewPublicationCancel={reviewController.cancelPublication}
+        reviewLoadEarlier={reviewController.loadEarlier}
+        reviewPublicationPreview={reviewController.previewPublication}
+        reviewRetry={reviewController.retry}
+        reviewSuggestionPublish={reviewController.publishSuggestion}
+        reviewTargetSuggestion={reviewController.targetSuggestion}
+        reviewStart={reviewController.start}
+        reviewState={reviewController.state}
+        state={controller.state}
+        sessionKey={sessionKey}
+        workspaceId={workspaceId}
+      />
+    </>
   )
 }
 
