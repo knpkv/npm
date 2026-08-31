@@ -1978,6 +1978,15 @@ const runSelfTest = () => {
     `packages/public/src/view.tsx: type depth exceeded ${canonicalTypeMaxDepth} while canonicalizing number`
   )
 
+  const nestedGeneric = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<T> }\nexport const Public = <T extends string>(props: Props<T>) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(nestedGeneric, nestedGeneric, ["packages/public/src/index.ts"]), [])
+
   const aliasPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
