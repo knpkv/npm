@@ -149,6 +149,8 @@ export class AgentRelationshipStore {
           ALTER TABLE connect_agent_relationships
           ADD COLUMN source TEXT NOT NULL DEFAULT 'durable_worker'
           CHECK (source IN ('durable_worker', 'trusted_live_inventory'));
+          UPDATE connect_agent_relationships
+          SET source = 'trusted_live_inventory';
           INSERT INTO connect_store_metadata (key, value)
           VALUES ('relationship_schema', '4')
           ON CONFLICT(key) DO UPDATE SET value = excluded.value;
@@ -226,7 +228,14 @@ export class AgentRelationshipStore {
                parent_agent_id = excluded.parent_agent_id,
                relation = excluded.relation,
                observed_at = excluded.observed_at,
-               source = excluded.source
+               source = CASE
+                 WHEN connect_agent_relationships.source = 'trusted_live_inventory'
+                   AND excluded.source = 'durable_worker'
+                   AND connect_agent_relationships.parent_agent_id IS excluded.parent_agent_id
+                   AND connect_agent_relationships.relation IS excluded.relation
+                 THEN connect_agent_relationships.source
+                 ELSE excluded.source
+               END
              WHERE connect_agent_relationships.pane_id = excluded.pane_id
                AND (
                  (

@@ -9,6 +9,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { AgentActivityStore } from "../src/activity-store.js"
 import {
   type AgentSource,
@@ -315,6 +316,10 @@ describe("Connect public seams", () => {
       observedAt: 2_000,
       relationship: { parentAgentId: "agent-coordinator-current", relation: "delegated" }
     })
+    const confirmed = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      ...repaired,
+      observedAt: 3_000
+    })
     return Effect.gen(function*() {
       const store = yield* AgentRelationshipStore.open(path)
       yield* store.persist(original, "durable_worker")
@@ -322,7 +327,73 @@ describe("Connect public seams", () => {
       expect(yield* store.persistAll([{ metadata: original, source: "durable_worker" }])).toEqual([
         repaired
       ])
-      expect(yield* store.list()).toEqual([repaired])
+      expect(yield* store.persist(confirmed, "durable_worker")).toEqual(confirmed)
+      expect(
+        yield* store.persistAll([{
+          metadata: { ...original, observedAt: 2_500 },
+          source: "durable_worker"
+        }])
+      ).toEqual([confirmed])
+      expect(yield* store.list()).toEqual([confirmed])
+      store.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("keeps newer version-three ownership authoritative after migration", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-v3-migration-test-"))
+    const path = join(root, "relationships.sqlite")
+    const database = new DatabaseSync(path)
+    database.exec(`
+      CREATE TABLE connect_store_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO connect_store_metadata (key, value)
+      VALUES ('relationship_schema', '3');
+      CREATE TABLE connect_agent_relationships (
+        host TEXT NOT NULL COLLATE NOCASE,
+        agent_id TEXT NOT NULL,
+        pane_id TEXT NOT NULL,
+        parent_agent_id TEXT,
+        relation TEXT,
+        observed_at INTEGER NOT NULL,
+        PRIMARY KEY (host, agent_id),
+        CHECK ((parent_agent_id IS NULL) = (relation IS NULL))
+      );
+      INSERT INTO connect_agent_relationships
+        (host, agent_id, pane_id, parent_agent_id, relation, observed_at)
+      VALUES
+        ('SER8', 'agent-child', 'w1:p2', 'agent-coordinator-current', 'delegated', 2000),
+        ('SER8', 'agent-durable', 'w1:p3', NULL, NULL, 1500);
+    `)
+    database.close()
+    const repaired = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-child",
+      host: "SER8",
+      observedAt: 2_000,
+      paneId: "w1:p2",
+      relationship: { parentAgentId: "agent-coordinator-current", relation: "delegated" }
+    })
+    const durable = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-durable",
+      host: "SER8",
+      observedAt: 1_500,
+      paneId: "w1:p3"
+    })
+    return Effect.gen(function*() {
+      const store = yield* AgentRelationshipStore.open(path)
+      expect(yield* store.persist(durable, "durable_worker")).toEqual(durable)
+      expect(
+        yield* store.persist({
+          ...repaired,
+          observedAt: 1_000,
+          relationship: { parentAgentId: "agent-coordinator-old", relation: "delegated" }
+        }, "durable_worker")
+      ).toEqual(repaired)
+      expect(yield* store.list()).toEqual([repaired, durable])
       store.close()
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
