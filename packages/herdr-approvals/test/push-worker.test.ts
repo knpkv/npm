@@ -237,6 +237,45 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("retries a subscription replaced while its previous keys are in flight", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-replaced-test-"))
+    const replacement: PushSubscriptionRecord = {
+      ...subscription,
+      keys: { auth: "replacement_auth", p256dh: "replacement_p256dh" }
+    }
+    const sentKeys: Array<PushSubscriptionRecord["keys"]> = []
+    const pass = (store: ApprovalAppStore) =>
+      runPushPass({
+        allowedPushOrigins: ["https://push.example.test"],
+        allowedUsers: ["alice@example.com"],
+        loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-replaced" }]),
+        now: Effect.succeed(1_000),
+        send: (target) =>
+          Effect.gen(function*() {
+            sentKeys.push(target.keys)
+            if (sentKeys.length === 1) {
+              yield* store.putSubscription(replacement, "alice@example.com")
+            }
+          }),
+        store
+      })
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* pass(store)
+          yield* pass(store)
+          expect(sentKeys).toEqual([subscription.keys, replacement.keys])
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("retries an accepted delivery after its push TTL", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-ttl-test-"))
     let sends = 0

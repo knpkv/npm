@@ -241,6 +241,31 @@ export class ApprovalAppStore {
     return stored.owner === owner
   })
 
+  readonly hasExactSubscription = Effect.fn("ApprovalAppStore.hasExactSubscription")(function*(
+    this: ApprovalAppStore,
+    subscription: PushSubscriptionRecordType,
+    owner: string
+  ) {
+    const database = this.#database
+    const row = yield* Effect.try({
+      try: () =>
+        database
+          .prepare("SELECT record FROM push_subscriptions WHERE endpoint = ?")
+          .get(subscription.endpoint),
+      catch: storeError("subscription.hasExact")
+    })
+    if (row === undefined) return false
+    const stored = yield* decodeRow(
+      "subscription.hasExact.decode",
+      StoredPushSubscription,
+      row
+    )
+    return stored.owner === owner &&
+      stored.expirationTime === subscription.expirationTime &&
+      stored.keys.auth === subscription.keys.auth &&
+      stored.keys.p256dh === subscription.keys.p256dh
+  })
+
   readonly listSubscriptions = Effect.fn("ApprovalAppStore.listSubscriptions")(function*(
     this: ApprovalAppStore
   ) {

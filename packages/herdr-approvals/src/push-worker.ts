@@ -75,8 +75,8 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
               if (delivered) return
               yield* options.send(target, payload)
               if (
-                !(yield* options.store.hasSubscription(
-                  target.endpoint,
+                !(yield* options.store.hasExactSubscription(
+                  target,
                   target.owner
                 ))
               ) return
