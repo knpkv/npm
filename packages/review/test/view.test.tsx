@@ -23,6 +23,14 @@ describe("shared review controls", () => {
     expect(markup).not.toContain("Security")
   })
 
+  it("keeps an unknown restored profile visibly unresolved", () => {
+    const markup = renderToStaticMarkup(
+      <ReviewProfileControl onProfileChange={() => undefined} profiles={[profile]} selectedProfileId="removed" />
+    )
+    expect(markup).toContain('<option value="" selected="">Select a profile</option>')
+    expect(markup).not.toContain('<option value="explain" selected="">')
+  })
+
   it("visibly labels retained output after a failed rerun", () => {
     const markup = renderToStaticMarkup(
       <ReviewResultStatus

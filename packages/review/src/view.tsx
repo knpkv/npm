@@ -67,9 +67,9 @@ export const ReviewProfileControl = ({
             const profile = profiles.find(({ id }) => id === event.currentTarget.value)
             if (profile !== undefined) onProfileChange(profile)
           }}
-          value={selectedProfileId ?? ""}
+          value={selected?.id ?? ""}
         >
-          {selectedProfileId === null ? <option value="">Select a profile</option> : null}
+          {selected === undefined ? <option value="">Select a profile</option> : null}
           {profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.name}
