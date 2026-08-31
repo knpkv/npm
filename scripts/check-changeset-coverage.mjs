@@ -183,6 +183,13 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
       return `${wrapper}<${argumentsText}>`
     }
   }
+  if (TypeScript.isTypeReferenceNode(typeNode) && typeNode.typeArguments !== undefined) {
+    const wrapper = normalizeTypeText(typeNode.typeName)
+    const argumentsText = typeNode.typeArguments
+      .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+      .join(",")
+    return `${wrapper}<${argumentsText}>`
+  }
   if (TypeScript.isUnionTypeNode(typeNode)) {
     return `union(${typeNode.types
       .map((member) => canonicalTypeText(member, analysis, filePath, substitutions, seen))
@@ -1246,6 +1253,35 @@ const runSelfTest = () => {
     publicCallableChanges(wrappedGenericPrevious, wrappedGenericChanged, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
   )
+  const qualifiedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: React.ComponentType<T>, box: NS.Box<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const qualifiedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: React.ComponentType<U>, box: NS.Box<U>) => Promise<U> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(qualifiedGenericPrevious, qualifiedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const qualifiedGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: React.ComponentType<number>, box: NS.Box<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(qualifiedGenericPrevious, qualifiedGenericChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
 
   const methodPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
@@ -1323,6 +1359,48 @@ const runSelfTest = () => {
       "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
     ]
   ])
+  const conditionalSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const conditionalManifest = {
+    exports: { ".": { import: "./src/index.ts", require: "./src/index.ts" } }
+  }
+  const directManifest = { exports: { ".": "./src/index.ts" } }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
+    [{ identity: "exports:.", sourcePath: "packages/public/src/index.ts" }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(
+        {
+          exports: {
+            ".": { import: "./src/index.ts", require: "./src/index.ts" },
+            "./view.js": { import: "./src/view.js", require: "./src/view.js" }
+          }
+        },
+        "packages/public",
+        [...conditionalSources.keys()]
+      ),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
   assert.deepEqual(
     publicCallableChanges(
       removedEntryPrevious,
@@ -1558,13 +1636,16 @@ const manifestEntries = (manifest) => {
     const target = effectiveManifest[field]
     if (Predicate.isString(target)) entries.push({ identity: field, target })
   }
-  const collectExports = (value, identity) => {
-    if (Predicate.isString(value)) entries.push({ identity, target: value })
-    else if (Predicate.isObjectOrArray(value)) {
-      for (const [key, nested] of Object.entries(value)) collectExports(nested, `${identity}:${key}`)
+  const collectExports = (value, subpath) => {
+    if (Predicate.isString(value)) {
+      entries.push({ identity: `exports:${subpath ?? "."}`, target: value })
+    } else if (Predicate.isObjectOrArray(value)) {
+      for (const [key, nested] of Object.entries(value)) {
+        collectExports(nested, subpath ?? key)
+      }
     }
   }
-  if (effectiveManifest.exports !== undefined) collectExports(effectiveManifest.exports, "exports")
+  if (effectiveManifest.exports !== undefined) collectExports(effectiveManifest.exports, undefined)
   return entries
 }
 
