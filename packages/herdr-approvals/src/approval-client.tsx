@@ -2,7 +2,7 @@ import { RegistryProvider, useAtom, useAtomMount, useAtomRefresh, useAtomSet, us
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { StatePanel } from "@knpkv/rly/primitives"
-import { Cause, Effect, Exit, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -33,9 +33,14 @@ import {
 } from "./dashboard-model.js"
 import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import {
+  dashboardHistoryState,
+  dashboardHasPendingApprovalTarget,
+  dashboardPendingBadgeCount,
   dashboardPendingState,
-  mergeDashboardPendingPage,
-  rotateFailedDashboardPendingPage
+  loadDashboardPendingPage,
+  mergeDashboardHistoryPage,
+  pendingApprovalTargetAfterRevalidation,
+  withPendingApprovalTarget
 } from "./internal/dashboard-pending-state.js"
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
@@ -127,36 +132,6 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
   const parameters = new URLSearchParams(target)
   return fetchJson(PendingApprovalTarget, `/v1/pending-approval?${parameters.toString()}`)
 })
-
-const withPendingApprovalTarget = (
-  snapshot: DashboardSnapshotType,
-  target: PendingApprovalTargetType | null
-): DashboardSnapshotType => {
-  if (target === null) return snapshot
-  if (target._tag === "local") {
-    return snapshot.pendingApprovals.local.some(({ id }) => id === target.record.id)
-      ? snapshot
-      : {
-          ...snapshot,
-          pendingApprovals: {
-            ...snapshot.pendingApprovals,
-            local: [...snapshot.pendingApprovals.local, target.record]
-          }
-        }
-  }
-  return snapshot.pendingApprovals.remote.some(
-    ({ approval, host }) =>
-      approval.id === target.remote.approval.id && host.toLowerCase() === target.remote.host.toLowerCase()
-  )
-    ? snapshot
-    : {
-        ...snapshot,
-        pendingApprovals: {
-          ...snapshot.pendingApprovals,
-          remote: [...snapshot.pendingApprovals.remote, target.remote]
-        }
-      }
-}
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
   yield* fetchJson(JobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
@@ -430,8 +405,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [pull, setPull] = useAtom(atoms.pull)
   const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
   const [historyBusy, setHistoryBusy] = useState(false)
-  const [historyRecords, setHistoryRecords] = useState<DashboardSnapshotType["records"]>([])
-  const [historyNextCursor, setHistoryNextCursor] = useState(initial.historyNextCursor)
+  const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], initial.historyNextCursor))
   const [pendingBusy, setPendingBusy] = useState(false)
   const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
   const start = useRef<number | null>(null)
@@ -499,30 +473,28 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     refreshNotification()
   }
   const onLoadHistory = async (): Promise<void> => {
-    if (historyNextCursor === null || historyBusy) return
+    if (historyState.nextCursor === null || historyBusy) return
+    const request = {
+      cursor: historyState.nextCursor,
+      generation: historyState.generation
+    }
     setHistoryBusy(true)
-    const exit = await runHistoryPage(historyNextCursor)
+    const exit = await runHistoryPage(request.cursor)
     setHistoryBusy(false)
     if (Exit.isFailure(exit)) {
       Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
       return
     }
-    setHistoryRecords((records) => [...records, ...exit.value.records])
-    setHistoryNextCursor(exit.value.nextCursor)
+    setHistoryState((state) => mergeDashboardHistoryPage(state, request, exit.value))
   }
   const onLoadPending = async (): Promise<void> => {
-    const continuation = pendingState.nextCursors.at(0)
-    if (continuation === undefined || pendingBusy) return
-    const request = { continuation, generation: pendingState.generation }
+    if (pendingBusy) return
     setPendingBusy(true)
-    const exit = await runPendingPage(continuation)
+    const result = await loadDashboardPendingPage(pendingState, runPendingPage, setPendingState)
     setPendingBusy(false)
-    if (Exit.isFailure(exit)) {
-      setPendingState((state) => rotateFailedDashboardPendingPage(state, request))
-      Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
-      return
+    if (result._tag === "Failure") {
+      Effect.runFork(Effect.logWarning(Cause.pretty(result.cause)))
     }
-    setPendingState((state) => mergeDashboardPendingPage(state, request, exit.value))
   }
 
   const snapshot = AsyncResult.isSuccess(result)
@@ -546,8 +518,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       ? "error"
       : "loading"
   const waiting = AsyncResult.isWaiting(result)
-  const pendingBadgeCount =
-    (snapshot?.pendingApprovals.local.length ?? 0) + (snapshot?.pendingApprovals.remote.length ?? 0)
+  const pendingBadgeCount = dashboardPendingBadgeCount(pendingState)
   const canonical = snapshot?.approvalApp.canonical === true
   const currentSnapshot =
     snapshot === null
@@ -557,9 +528,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
             ...(chat === undefined && work === undefined
               ? snapshot
               : { ...snapshot, chat: chat ?? null, work: work ?? null }),
-            historyNextCursor,
+            historyNextCursor: historyState.nextCursor,
             pendingApprovals: pendingState,
-            records: [...snapshot.records, ...historyRecords]
+            records: [...snapshot.records, ...historyState.records]
           },
           deepLinkTarget
         )
@@ -569,7 +540,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
   }, [pull.refreshing, setPull, waiting])
   useEffect(() => {
-    if (!canonical || !pushSupported()) return
+    if (!canonical || pendingBadgeCount === null || !pushSupported()) return
     void runBadge(pendingBadgeCount).then((exit) => {
       if (Exit.isFailure(exit)) {
         Effect.runFork(Effect.logError(Cause.pretty(exit.cause)))
@@ -578,34 +549,46 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }, [canonical, pendingBadgeCount, runBadge])
   useEffect(() => {
     if (snapshot === null) return
-    setHistoryRecords([])
-    setHistoryNextCursor(snapshot.historyNextCursor)
+    setHistoryState((state) => dashboardHistoryState(state.generation + 1, [], snapshot.historyNextCursor))
     setPendingState((state) => dashboardPendingState(state.generation + 1, snapshot.pendingApprovals))
   }, [snapshot])
   useEffect(() => {
-    if (currentSnapshot === null) return
+    if (snapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)
     if (Result.isFailure(decoded)) {
       Effect.runFork(Effect.logWarning(decoded.failure))
       return
     }
     if (decoded.success === null) return
-    const loaded =
-      currentSnapshot.pendingApprovals.local.some(
-        ({ id }) =>
-          id === decoded.success?.jobId && currentSnapshot.host.toLowerCase() === decoded.success?.host.toLowerCase()
-      ) ||
-      currentSnapshot.pendingApprovals.remote.some(
-        ({ approval, host }) =>
-          approval.id === decoded.success?.jobId && host.toLowerCase() === decoded.success?.host.toLowerCase()
-      )
-    if (!loaded && deepLinkTarget === null) {
-      void runPendingTarget(decoded.success).then((exit) => {
-        if (Exit.isSuccess(exit)) setDeepLinkTarget(exit.value)
-        else Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
-      })
+    if (dashboardHasPendingApprovalTarget(snapshot, decoded.success)) {
+      setDeepLinkTarget(null)
       return
     }
+    let current = true
+    void runPendingTarget(decoded.success).then((exit) => {
+      if (!current) return
+      if (Exit.isSuccess(exit)) {
+        setDeepLinkTarget((target) =>
+          pendingApprovalTargetAfterRevalidation(target, { _tag: "Found", target: exit.value })
+        )
+        return
+      }
+      const failure = Cause.findErrorOption(exit.cause)
+      const missing =
+        Option.isSome(failure) && failure.value._tag === "BrowserStatusError" && failure.value.status === 404
+      setDeepLinkTarget((target) =>
+        pendingApprovalTargetAfterRevalidation(target, { _tag: missing ? "Missing" : "Retry" })
+      )
+      if (!missing) Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
+    })
+    return () => {
+      current = false
+    }
+  }, [snapshot?.observedAt, runPendingTarget])
+  useEffect(() => {
+    if (currentSnapshot === null) return
+    const decoded = readApprovalDeepLink(window.location.search)
+    if (Result.isFailure(decoded) || decoded.success === null) return
     const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find((item) =>
       matchesApprovalDeepLink(item.dataset, decoded.success)
     )
@@ -616,7 +599,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     return () => {
       delete target.dataset.approvalTarget
     }
-  }, [currentSnapshot?.observedAt, deepLinkTarget, runPendingTarget])
+  }, [currentSnapshot?.observedAt, deepLinkTarget])
   if (currentSnapshot === null) {
     return (
       <main className="app app-error">

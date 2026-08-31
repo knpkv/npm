@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
+import type { JobRecord } from "@knpkv/herdr-fleet/model"
 import { Effect, Result } from "effect"
 import { authorize } from "../src/auth.js"
+import type { DashboardSnapshot, PendingApprovalTarget } from "../src/dashboard-model.js"
+import {
+  dashboardPendingBadgeCount,
+  pendingApprovalTargetAfterRevalidation,
+  withPendingApprovalTarget
+} from "../src/internal/dashboard-pending-state.js"
 import {
   approvalDeepLink,
   type ApprovalWorkerClients,
@@ -11,7 +18,90 @@ import {
   showApprovalNotification
 } from "../src/pwa.js"
 
+const approvalRecord = (id: string): JobRecord => ({
+  actor: "andrey@example.com",
+  approvalNonce: `nonce-${id}`,
+  approvedBy: null,
+  createdAt: 1,
+  error: null,
+  hash: "a".repeat(64),
+  id,
+  payload: { kind: "nix.check" },
+  result: null,
+  status: "pending_approval",
+  updatedAt: 1
+})
+
 describe("approval PWA", () => {
+  it("removes a cached deep-link card after definitive revalidation", () => {
+    const cached = {
+      _tag: "local",
+      record: approvalRecord("job-deep-link")
+    } satisfies PendingApprovalTarget
+    const refreshed = {
+      approvalApp: {
+        canonical: true,
+        canonicalUrl: "https://ser8.example.test:4779/",
+        chatEnabled: false,
+        pushEnabled: true
+      },
+      approvalsEnabled: true,
+      chat: null,
+      directory: null,
+      historyNextCursor: null,
+      host: "SER8",
+      observedAt: 2,
+      pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+      records: [],
+      status: {
+        applyConfigured: false,
+        branch: "main",
+        dirty: false,
+        herdr: { agents: [], available: true, error: null },
+        host: "SER8",
+        repository: "/repo",
+        revision: "abc123"
+      },
+      work: null
+    } satisfies DashboardSnapshot
+
+    expect(withPendingApprovalTarget(refreshed, cached).pendingApprovals.local).toHaveLength(1)
+    expect(
+      withPendingApprovalTarget(
+        refreshed,
+        pendingApprovalTargetAfterRevalidation(cached, { _tag: "Missing" })
+      ).pendingApprovals.local
+    ).toEqual([])
+    expect(
+      pendingApprovalTargetAfterRevalidation(cached, { _tag: "Retry" })
+    ).toEqual(cached)
+    expect(
+      withPendingApprovalTarget(
+        refreshed,
+        pendingApprovalTargetAfterRevalidation(cached, { _tag: "Found", target: cached })
+      ).pendingApprovals.local.map(({ id }) => id)
+    ).toEqual(["job-deep-link"])
+  })
+
+  it("preserves the existing badge until every pending page is loaded", () => {
+    expect(
+      dashboardPendingBadgeCount({
+        failures: [],
+        local: Array.from({ length: 8 }, (_, index) => approvalRecord(`job-${String(index)}`)),
+        nextCursors: [{ cursor: { createdAt: 1, id: "job-cursor" }, host: "SER8" }],
+        remote: []
+      })
+    ).toBeNull()
+    expect(
+      dashboardPendingBadgeCount({
+        failures: [],
+        local: Array.from({ length: 9 }, (_, index) => approvalRecord(`job-${String(index)}`)),
+        nextCursors: [],
+        remote: []
+      })
+    ).toBe(9)
+  })
+
   it.effect("trusts only header-free loopback requests", () =>
     Effect.gen(function*() {
       expect(
