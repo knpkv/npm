@@ -1446,6 +1446,37 @@ describe("Connect public seams", () => {
     }).pipe(provideTestClock)
   })
 
+  it.effect("starts release interruption while kill acknowledgement is pending", () => {
+    let kills = 0
+    let releaseInterruptions = 0
+    return Effect.gen(function*() {
+      const fiber = yield* releaseTerminalControl(
+        Effect.never.pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              releaseInterruptions += 1
+            })
+          )
+        ),
+        Effect.never,
+        Effect.sleep("5 seconds").pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              kills += 1
+            })
+          )
+        )
+      ).pipe(Effect.forkChild({ startImmediately: true, uninterruptible: false }))
+
+      yield* TestClock.adjust("1 second")
+      expect(releaseInterruptions).toBe(1)
+      expect(kills).toBe(0)
+      yield* TestClock.adjust("5 seconds")
+      yield* Fiber.join(fiber)
+      expect(kills).toBe(1)
+    }).pipe(provideTestClock)
+  })
+
   it.effect("releases the scoped Herdr terminal control client", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-connect-test-"))
     const command = join(root, "herdr-test")
