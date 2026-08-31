@@ -41,8 +41,11 @@ const hostSelection = Schema.decodeUnknownSync(RelaySelectorState)({
   profiles: [{ id: "configured-review", label: "Configured review" }]
 })
 
+const nonEmptyAccountId = (accountId: string | undefined): string | undefined =>
+  accountId !== undefined && accountId.length > 0 ? accountId : undefined
+
 export const codeCommitRepositoryAccountIdentity = (account: Domain.Account): string =>
-  account.repoAccountId ?? account.awsAccountId ?? account.profile
+  nonEmptyAccountId(account.repoAccountId) ?? nonEmptyAccountId(account.awsAccountId) ?? account.profile
 
 export const codeCommitRouteAccountIdentity = (account: Domain.Account): string =>
   account.awsAccountId ?? account.profile

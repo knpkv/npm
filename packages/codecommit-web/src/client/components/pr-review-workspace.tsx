@@ -103,6 +103,11 @@ interface HydratedSessionMarker {
   pendingInitialPass: boolean
 }
 
+interface RelayReviewSessionMigrationState {
+  readonly key: string
+  readonly status: "failed" | "pending"
+}
+
 const sessionFingerprint = (
   completedReview: RelayReviewCompletion | null,
   turns: ReadonlyArray<RelayReviewConversationTurn>,
@@ -731,6 +736,9 @@ const ReadyReviewWorkspace = ({
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
   const legacyReviewSessionKey =
     legacyReviewResource === null ? null : relayReviewSessionStorageKey(legacyReviewResource)
+  const sessionMigrationKeyRef = useRef(reviewSessionKey)
+  sessionMigrationKeyRef.current = reviewSessionKey
+  const sessionMigrationStatusRef = useRef<RelayReviewSessionMigrationState["status"] | "idle">("idle")
   const reviewSessionVersionRef = useRef(0)
   const skipSessionWriteRef = useRef<string | null>(null)
   const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
@@ -743,6 +751,7 @@ const ReadyReviewWorkspace = ({
     readonly description: string
     readonly title: string
   } | null>(null)
+  const [sessionMigration, setSessionMigration] = useState<RelayReviewSessionMigrationState | null>(null)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
   const [progress, setProgress] = useState<
@@ -808,6 +817,8 @@ const ReadyReviewWorkspace = ({
   }, [commentNavigation, diff])
 
   useEffect(() => {
+    sessionMigrationStatusRef.current = "idle"
+    setSessionMigration(null)
     if (reviewResource === null || reviewSessionKey === null) {
       hydratedProfileKeyRef.current = null
       skipSessionWriteRef.current = null
@@ -852,6 +863,8 @@ const ReadyReviewWorkspace = ({
       hydratedFromLegacy = hydrated !== null
       if (hydrated !== null) {
         if (hydrated.resource.accountKind !== "credential") {
+          sessionMigrationStatusRef.current = "failed"
+          setSessionMigration({ key: reviewSessionKey, status: "failed" })
           setReviewFailure({
             description:
               "Relay cannot safely migrate this legacy PR conversation because its account provenance is ambiguous.",
@@ -861,12 +874,16 @@ const ReadyReviewWorkspace = ({
         }
         const lock = browserRelayReviewSessionLock()
         if (lock === null) {
+          sessionMigrationStatusRef.current = "failed"
+          setSessionMigration({ key: reviewSessionKey, status: "failed" })
           setReviewFailure({
             description:
               "This browser cannot coordinate Relay writes across tabs. Relay did not migrate this PR conversation.",
             title: "PR conversation not saved"
           })
         } else {
+          sessionMigrationStatusRef.current = "pending"
+          setSessionMigration({ key: reviewSessionKey, status: "pending" })
           void migrateRelayReviewSession(
             window.localStorage,
             legacyReviewSessionKey,
@@ -877,12 +894,25 @@ const ReadyReviewWorkspace = ({
             lock
           ).then((migrated) => {
             if (Result.isFailure(migrated)) {
-              setReviewFailure({
-                description: "Local storage is unavailable. Relay could not migrate this PR conversation.",
-                title: "PR conversation not saved"
-              })
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                sessionMigrationStatusRef.current = "failed"
+                setSessionMigration({ key: reviewSessionKey, status: "failed" })
+                setReviewFailure({
+                  description: "Local storage is unavailable. Relay could not migrate this PR conversation.",
+                  title: "PR conversation not saved"
+                })
+              }
             } else if (migrated.success !== null) {
-              reviewSessionVersionRef.current = migrated.success.version
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                sessionMigrationStatusRef.current = "idle"
+                reviewSessionVersionRef.current = migrated.success.version
+                setSessionMigration((current) => (current?.key === reviewSessionKey ? null : current))
+              }
+            } else {
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                sessionMigrationStatusRef.current = "idle"
+                setSessionMigration((current) => (current?.key === reviewSessionKey ? null : current))
+              }
             }
           })
         }
@@ -946,9 +976,12 @@ const ReadyReviewWorkspace = ({
       skipSessionWriteRef.current = null
       return
     }
+    if (sessionMigrationStatusRef.current !== "idle" || sessionMigration !== null) return
+    const currentCompletedReview = completedReviewRef.current
+    const currentTurns = turnsRef.current
     if (
-      completedReview === null ||
-      completedReview.identity !== reviewIdentity ||
+      currentCompletedReview === null ||
+      currentCompletedReview.identity !== reviewIdentity ||
       reviewResource === null ||
       reviewSessionKey === null
     )
@@ -965,13 +998,13 @@ const ReadyReviewWorkspace = ({
     let active = true
     const appendedTurnIds = appendedTurnIdsRef.current
     const session = {
-      expectedIdentity: completedReview.expectedIdentity,
+      expectedIdentity: currentCompletedReview.expectedIdentity,
       expectedVersion: reviewSessionVersionRef.current,
-      identity: completedReview.identity,
+      identity: currentCompletedReview.identity,
       resource: reviewResource,
-      review: completedReview.value,
-      skillIds: completedReview.skillIds,
-      turns,
+      review: currentCompletedReview.value,
+      skillIds: currentCompletedReview.skillIds,
+      turns: currentTurns,
       dispositions
     } satisfies RelayReviewSessionWrite
     const sessionToPersist = appendedTurnIds === undefined ? session : { ...session, appendedTurnIds }
@@ -1008,7 +1041,7 @@ const ReadyReviewWorkspace = ({
     return () => {
       active = false
     }
-  }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, turns])
+  }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, sessionMigration, turns])
 
   useEffect(() => {
     if (selectedFileIndex !== null && diff.files.some(({ index }) => index === selectedFileIndex)) return

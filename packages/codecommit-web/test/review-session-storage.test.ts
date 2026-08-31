@@ -771,6 +771,62 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("drops an appended exchange whose finding changed in the durable review", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (id: string): RelayReviewConversationTurn => ({
+      id,
+      findingId: "F1",
+      role: "user",
+      message: id
+    })
+    const currentTurns = Array.from({ length: 40 }, (_, index) => turn(`turn-${String(index + 41)}`))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-2",
+      resource,
+      review: {
+        ...review,
+        revisionId: "revision-2",
+        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+      },
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-2",
+      resource,
+      review: {
+        ...review,
+        revisionId: "revision-2",
+        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+      },
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnIds: ["turn-81", "turn-82"],
+      expectedVersion: 1,
+      identity: "exact-head-2",
+      resource,
+      review,
+      skillIds: [],
+      turns: [
+        ...Array.from({ length: 38 }, (_, index) => turn(`turn-${String(index + 2)}`)),
+        turn("turn-81"),
+        turn("turn-82")
+      ],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) expect(restored.success?.turns).toHaveLength(40)
+  })
+
   it("serializes cross-tab writes through the session lock", async () => {
     const key = relayReviewSessionStorageKey(resource)
     let tail = Promise.resolve()

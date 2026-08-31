@@ -5,6 +5,8 @@ import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 declare global {
   interface Window {
     emitReviewWorkspaceEvent?: (data: string) => number
+    releaseRelayMigration?: () => void
+    releaseRelayMigrationReady?: boolean
   }
 }
 
@@ -602,6 +604,86 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
     profile: { id: "thorough", kind: "security", model: "configured-default" }
   })
   await expect(page.getByRole("log").locator("li")).toHaveCount(4)
+})
+
+test("waits for legacy session migration before persisting the first continuation", async ({ page }) => {
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    continueReview: () => changedReviewResult,
+    pullRequest: () => ({
+      ...pullRequest,
+      account: { ...pullRequest.account, repoAccountId: "222222222222" }
+    })
+  })
+  const sourceKey = "codecommit:relay-review-session:111111111111:payments-api:eu-west-1:42"
+  const targetPrefix = "codecommit:relay-review-session:222222222222:payments-api:eu-west-1:42"
+  await page.addInitScript(({ key, session }) => {
+    window.localStorage.setItem(key, JSON.stringify(session))
+    void navigator.locks.request("codecommit:relay-review-session", async () => {
+      await new Promise<void>((resolve) => {
+        window.releaseRelayMigration = resolve
+        window.releaseRelayMigrationReady = true
+      })
+    })
+  }, {
+    key: sourceKey,
+    session: {
+      identity: "legacy-head",
+      resource: {
+        accountKind: "credential",
+        accountId: "111111111111",
+        pullRequestId: "42",
+        region: "eu-west-1",
+        repositoryName: "payments-api"
+      },
+      review: {
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        kind: "review",
+        profile: {
+          id: "thorough",
+          name: "Thorough review",
+          kind: "review",
+          provider: "codex",
+          harness: "native-codex",
+          model: "configured-default",
+          skillIds: []
+        },
+        result: { verdict: "Saved legacy review.", findings: changedReviewResult.findings }
+      },
+      skillIds: [],
+      turns: [],
+      dispositions: {},
+      version: 2
+    }
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect.poll(() => page.evaluate(() => window.releaseRelayMigrationReady === true)).toBe(true)
+  await expect(page.getByRole("button", { name: "Run again" })).toBeVisible()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue before migration completes.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await expect(page.getByText("The retry finding changed after re-review.")).toBeVisible()
+  expect(
+    await page.evaluate(
+      (prefix) => Object.keys(window.localStorage).some((key) => key.startsWith(prefix)),
+      targetPrefix
+    )
+  ).toBe(false)
+
+  await page.evaluate(() => {
+    window.releaseRelayMigration?.()
+    window.releaseRelayMigration = undefined
+  })
+  await expect.poll(async () =>
+    page.evaluate((prefix) => {
+      const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith(prefix))
+      return key === undefined ? null : window.localStorage.getItem(key)
+    }, targetPrefix)
+  ).toContain("The retry finding changed after re-review.")
 })
 
 test("preserves completed conversations when a rerun fails", async ({ page }) => {

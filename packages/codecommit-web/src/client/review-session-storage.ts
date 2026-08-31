@@ -176,7 +176,7 @@ const compatibleStaleIncomingTurns = (
     current.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS
   ) {
     const appendedTurnIds = new Set(incoming.appendedTurnIds ?? [])
-    const appendedTurns = incoming.turns.filter((turn) => appendedTurnIds.has(turnIdentity(turn)))
+    const appendedTurns = compatible.filter((turn) => appendedTurnIds.has(turnIdentity(turn)))
     return appendedTurns.reduce(
       (turns, turn) => appendReviewTurn(turns, turn),
       current.turns

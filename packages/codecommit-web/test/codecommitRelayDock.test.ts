@@ -125,6 +125,28 @@ describe("CodeCommit Relay dock adapter", () => {
     expect(codeCommitRouteAccountIdentity(account)).toBe("credential-account")
   })
 
+  it("uses the credential account when repository identity is empty", () => {
+    const account = new Domain.Account({
+      awsAccountId: "credential-account",
+      profile: "dev-administratoraccess",
+      region: "eu-central-1",
+      repoAccountId: ""
+    })
+
+    expect(codeCommitRepositoryAccountIdentity(account)).toBe("credential-account")
+    expect(
+      makeCodeCommitRelayConversation(
+        "credential-account",
+        {
+          account,
+          id: Domain.PullRequestId.make("42"),
+          repositoryName: Domain.RepositoryName.make("payments")
+        },
+        selection
+      ).thread.accountId
+    ).toBe("credential-account")
+  })
+
   it("keeps the located repository and region in the redirect route", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
