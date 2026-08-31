@@ -5,6 +5,8 @@ export const terminalKillOptions = {
   forceKillAfter: "1 second"
 } satisfies KillOptions
 
+export const terminalReleaseKillOptions = { killSignal: "SIGKILL" } satisfies KillOptions
+
 export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(function*<
   ReleaseError,
   ExitError,
