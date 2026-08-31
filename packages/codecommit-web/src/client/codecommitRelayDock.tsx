@@ -4,6 +4,7 @@ import {
   PullRequestConversationAmbiguous,
   PullRequestConversationContinuationFailed,
   PullRequestConversationContinuationRejected,
+  type PullRequestConversationLocator,
   PullRequestConversationNotFound,
   PullRequestConversationRedirectFailed,
   pullRequestThreadIdentity,
@@ -45,54 +46,55 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
   const host = useMemo<RelayProductDockHost>(
     () => ({
       context: [{ id: "product", label: "Product", value: "CodeCommit" }],
-      locatePullRequestConversation: Effect.fn("CodeCommitRelayDock.locatePullRequestConversation")(
-        function* (locator) {
-          if (state.currentUser === undefined) {
-            return yield* new RelayAuthenticationRequired({
-              operation: "locate-pull-request-conversation",
-              product: "codecommit"
-            })
-          }
-          const matches = state.pullRequests.filter(
-            (pullRequest) =>
-              String(pullRequest.id) === String(locator.pullRequestId) &&
-              String(pullRequest.repositoryName) === String(locator.repositoryName) &&
-              String(pullRequest.account.region) === String(locator.region) &&
-              (locator.accountId === undefined || accountIdentity(pullRequest) === locator.accountId)
-          )
-          if (matches.length === 0) {
-            return yield* new PullRequestConversationNotFound({
-              product: "codecommit",
-              pullRequestId: locator.pullRequestId,
-              repositoryName: locator.repositoryName
-            })
-          }
-          if (matches.length > 1) {
-            return yield* new PullRequestConversationAmbiguous({
-              matches: matches.length,
-              product: "codecommit",
-              pullRequestId: locator.pullRequestId,
-              repositoryName: locator.repositoryName
-            })
-          }
-          const match = matches[0]
-          if (match === undefined) {
-            return yield* new PullRequestConversationNotFound({
-              product: "codecommit",
-              pullRequestId: locator.pullRequestId,
-              repositoryName: locator.repositoryName
-            })
-          }
-          const accountId = accountIdentity(match)
-          const href = `/accounts/${encodeURIComponent(accountId)}/prs/${encodeURIComponent(match.id)}`
-          yield* Effect.tryPromise({
-            try: async () => {
-              await navigate(href)
-            },
-            catch: () => new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
+      locatePullRequestConversation: Effect.fn("CodeCommitRelayDock.locatePullRequestConversation")(function* (
+        locator: PullRequestConversationLocator
+      ) {
+        if (state.currentUser === undefined) {
+          return yield* new RelayAuthenticationRequired({
+            operation: "locate-pull-request-conversation",
+            product: "codecommit"
           })
         }
-      ),
+        const matches = state.pullRequests.filter(
+          (pullRequest) =>
+            String(pullRequest.id) === String(locator.pullRequestId) &&
+            String(pullRequest.repositoryName) === String(locator.repositoryName) &&
+            String(pullRequest.account.region) === String(locator.region) &&
+            (locator.accountId === undefined || accountIdentity(pullRequest) === locator.accountId)
+        )
+        if (matches.length === 0) {
+          return yield* new PullRequestConversationNotFound({
+            product: "codecommit",
+            pullRequestId: locator.pullRequestId,
+            repositoryName: locator.repositoryName
+          })
+        }
+        if (matches.length > 1) {
+          return yield* new PullRequestConversationAmbiguous({
+            matches: matches.length,
+            product: "codecommit",
+            pullRequestId: locator.pullRequestId,
+            repositoryName: locator.repositoryName
+          })
+        }
+        const match = matches[0]
+        if (match === undefined) {
+          return yield* new PullRequestConversationNotFound({
+            product: "codecommit",
+            pullRequestId: locator.pullRequestId,
+            repositoryName: locator.repositoryName
+          })
+        }
+        const accountId = accountIdentity(match)
+        const href = `/accounts/${encodeURIComponent(accountId)}/prs/${encodeURIComponent(match.id)}`
+        yield* Effect.tryPromise({
+          try: async () => {
+            await navigate(href)
+          },
+          catch: (): PullRequestConversationRedirectFailed =>
+            new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
+        })
+      }),
       product: "codecommit",
       selection: hostSelection
     }),
@@ -217,7 +219,8 @@ export const CodeCommitRelayThread = ({
         }
         return Effect.tryPromise({
           try: () => continueReview(selectedFindingId, request.message),
-          catch: () => new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
+          catch: (): PullRequestConversationContinuationFailed =>
+            new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
         })
       },
       messages: threadMessages(review, turns),
