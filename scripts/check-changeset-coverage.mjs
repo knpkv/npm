@@ -639,8 +639,8 @@ const sourcePaths = (paths) =>
 const manifestEntryPoints = (manifest, directory) => {
   const paths = []
   const collect = (value) => {
-    if (typeof value === "string") paths.push(value)
-    else if (value !== null && typeof value === "object") {
+    if (Predicate.isString(value)) paths.push(value)
+    else if (Predicate.isObjectOrArray(value)) {
       for (const nested of Object.values(value)) collect(nested)
     }
   }
