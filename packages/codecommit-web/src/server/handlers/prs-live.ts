@@ -42,7 +42,11 @@ import {
   withRelayReviewStreamPermit
 } from "../review/PullRequestReview.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
-import { discoverReviewSkills, selectedReviewSkillPrompt } from "../review/ReviewSkillCatalog.js"
+import {
+  discoverReviewSkills,
+  type ReviewSkillDefinition,
+  selectedReviewSkillPrompt
+} from "../review/ReviewSkillCatalog.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -102,6 +106,17 @@ export const resolveRelayReviewProfile = Effect.fn("PrsLive.resolveRelayReviewPr
     return yield* new ApiError({ message: "The selected Relay profile is unknown or has changed; reload settings" })
   }
   return configured
+})
+
+/** Resolve one server-owned profile and its catalog-owned prompt as one execution configuration. */
+export const resolveRelayReviewExecution = Effect.fn("PrsLive.resolveRelayReviewExecution")(function*(
+  configService: Pick<ConfigService.ConfigService["Service"], "load">,
+  requested: RelayReviewProfile,
+  skills: ReadonlyArray<ReviewSkillDefinition>
+) {
+  const profile = yield* resolveRelayReviewProfile(configService, requested)
+  const skillPrompt = yield* selectedReviewSkillPrompt(skills, profile.skillIds)
+  return { profile, skillPrompt }
 })
 
 const stripRelayReviewMarker = (content: string): string => content.replace(relayReviewMarker, "")
@@ -269,7 +284,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("relayReview", ({ params, payload }) =>
         Effect.gen(function*() {
-          const profile = yield* resolveRelayReviewProfile(configService, payload.profile)
+          const skills = yield* discoverReviewSkills()
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* withRelayReviewPermit(
             relaySemaphore,
@@ -278,17 +294,17 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               pullRequest,
               payload,
               profile,
-              changedFiles
+              changedFiles,
+              skillPrompt
             )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("relayReviewStream", ({ params }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
-          const profile = yield* resolveRelayReviewProfile(configService, payload.profile)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, profile.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayReview(
@@ -312,10 +328,9 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
       .handleRaw("relayReviewContinueStream", ({ params }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
-          const profile = yield* resolveRelayReviewProfile(configService, payload.profile)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, profile.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayConversation(

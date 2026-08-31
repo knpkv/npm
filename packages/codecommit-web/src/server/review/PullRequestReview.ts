@@ -822,15 +822,21 @@ const RelayExplainConversationResult = Schema.Struct({
 export const relayConversationOutputSchema = (kind: RelayReviewKind): Schema.Top =>
   kind === "explain" ? RelayExplainConversationResult : RelayReviewConversationResult
 
-const decodeRelayConversationResult = Schema.decodeUnknownOption(
+const decodeRelayReviewConversationResult = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayReviewConversationResult)
 )
 
-const parseRelayConversationResult = (message: string) => {
+const decodeRelayExplainConversationResult = Schema.decodeUnknownOption(
+  Schema.fromJsonString(RelayExplainConversationResult)
+)
+
+/** Decode a conversation against the selected review kind without changing its wire shape. */
+export const parseRelayConversationResult = (message: string, kind: RelayReviewKind) => {
   const trimmed = message.trim()
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/u.exec(trimmed)?.[1]
-  return decodeRelayConversationResult(trimmed).pipe(
-    Option.orElse(() => fenced === undefined ? Option.none() : decodeRelayConversationResult(fenced))
+  const decode = kind === "explain" ? decodeRelayExplainConversationResult : decodeRelayReviewConversationResult
+  return decode(trimmed).pipe(
+    Option.orElse(() => fenced === undefined ? Option.none() : decode(fenced))
   )
 }
 
@@ -939,7 +945,7 @@ export const continuePullRequestRelayReview = Effect.fn(
         Stream.runLast,
         Effect.mapError((cause) => reviewError("relay-conversation", "Relay conversation failed", cause))
       )
-      const result = parseRelayConversationResult(Option.getOrElse(response, () => ""))
+      const result = parseRelayConversationResult(Option.getOrElse(response, () => ""), kind)
       if (Option.isNone(result)) {
         return yield* reviewError("relay-conversation-decode", "Relay returned malformed conversation JSON")
       }

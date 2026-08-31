@@ -12,6 +12,7 @@ import {
   makePullRequestChangedFilesSource,
   makeRelayConversationPrompt,
   makeRelayReviewPrompt,
+  parseRelayConversationResult,
   parseRelayReviewResult,
   postPullRequestRelayFinding,
   PullRequestReviewError,
@@ -1239,6 +1240,33 @@ describe("CodeCommit web review boundary", () => {
         }
       })
     ).toBe(true)
+
+    const explainConversation = {
+      reply: "The service owns retries.",
+      review: {
+        findings: [],
+        verdict: "Architecture overview.",
+        explanation: "Uses a service boundary."
+      }
+    }
+    expect(
+      parseRelayConversationResult(JSON.stringify(explainConversation), "explain")
+    ).toEqual(Option.some(explainConversation))
+    expect(
+      parseRelayConversationResult(
+        JSON.stringify({ reply: "Missing detail.", review: { findings: [], verdict: "Overview." } }),
+        "explain"
+      )
+    ).toEqual(Option.none())
+    expect(
+      parseRelayConversationResult(
+        JSON.stringify({ reply: "One concern.", review: { findings: [finding], verdict: "One issue." } }),
+        "review"
+      )
+    ).toEqual(Option.some({
+      reply: "One concern.",
+      review: { findings: [finding], verdict: "One issue." }
+    }))
   })
 
   it.effect("rejects Relay findings outside exact changed-file and changed-line evidence", () =>

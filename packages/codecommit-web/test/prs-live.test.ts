@@ -5,6 +5,7 @@ import { Deferred, Effect, Schema } from "effect"
 import {
   cachedPullRequest,
   completeSinglePullRequestRefresh,
+  resolveRelayReviewExecution,
   resolveRelayReviewProfile,
   selectedPullRequest
 } from "../src/server/handlers/prs-live.js"
@@ -63,6 +64,41 @@ describe("PR handler selection", () => {
         Effect.flip
       )
       expect(failure.message).toContain("unknown or has changed")
+    }))
+
+  it.effect("resolves profile skills as one Relay execution configuration", () =>
+    Effect.gen(function*() {
+      const configured = ConfigService.defaultReviewConfig.profiles[0]
+      const explain = ConfigService.defaultReviewConfig.profiles.find(({ kind }) => kind === "explain")
+      if (configured === undefined || explain === undefined) return
+      const service = {
+        load: Effect.succeed({
+          accounts: [],
+          autoDetect: false,
+          autoRefresh: false,
+          refreshIntervalSeconds: 300,
+          review: ConfigService.defaultReviewConfig,
+          sandbox: ConfigService.defaultSandboxConfig
+        })
+      }
+      const skills = configured.skillIds.map((id) => ({
+        id,
+        name: id,
+        description: "Configured review method.",
+        source: "Test",
+        prompt: `Apply ${id}`
+      }))
+
+      const execution = yield* resolveRelayReviewExecution(service, configured, skills)
+      expect(execution.profile).toEqual(configured)
+      expect(execution.skillPrompt).toContain(`Apply ${configured.skillIds[0] ?? "missing"}`)
+
+      const unavailable = yield* resolveRelayReviewExecution(service, configured, skills.slice(0, 1)).pipe(
+        Effect.flip
+      )
+      expect(unavailable.message).toContain("unavailable")
+
+      expect((yield* resolveRelayReviewExecution(service, explain, skills)).skillPrompt).toBe("")
     }))
 
   it.effect("acknowledges a manual refresh only after its provider projection completes", () =>
