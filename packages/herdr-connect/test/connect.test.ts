@@ -2,11 +2,11 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, Option, Result, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Option, Result, Schedule, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -20,7 +20,7 @@ import {
 } from "../src/directory.js"
 import { buildConnectForest } from "../src/forest.js"
 import { connectAgentId } from "../src/id.js"
-import { releaseTerminalControl } from "../src/internal/terminal-release.js"
+import { releaseTerminalControl, terminalKillOptions } from "../src/internal/terminal-release.js"
 import { nextConnectAgentIndex } from "../src/keyboard.js"
 import {
   ConnectAgent,
@@ -1275,18 +1275,25 @@ describe("Connect public seams", () => {
   it.effect("kills terminal control when the release write does not complete", () => {
     let kills = 0
     return Effect.gen(function*() {
+      expect(terminalKillOptions).toEqual({ forceKillAfter: "1 second" })
+      const stopped = yield* Deferred.make<void>()
       const fiber = yield* Effect.forkChild(
-        releaseTerminalControl(
-          Effect.never,
-          Effect.never,
-          Effect.sync(() => {
-            kills += 1
-          })
-        )
+        Effect.scoped(
+          Effect.addFinalizer(() =>
+            releaseTerminalControl(
+              Deferred.await(stopped),
+              Deferred.await(stopped),
+              Effect.sync(() => {
+                kills += 1
+              }).pipe(Effect.andThen(Deferred.succeed(stopped, undefined)))
+            )
+          )
+        ),
+        { startImmediately: true, uninterruptible: false }
       )
       yield* TestClock.adjust("1 second")
       expect(kills).toBe(1)
-      yield* Fiber.interrupt(fiber)
+      expect(fiber.pollUnsafe()).toBeDefined()
     }).pipe(provideTestClock)
   })
 
@@ -1421,6 +1428,37 @@ done
           expect(readFileSync(inputPath, "utf8")).toContain(
             "{\"type\":\"terminal.release\"}"
           )
+
+          if (platform() !== "win32") {
+            const forcedReadyPath = join(root, "forced-ready")
+            writeFileSync(
+              command,
+              `#!/bin/sh
+trap '' TERM
+: > '${forcedReadyPath}'
+IFS= read -r line || :
+while :; do sleep 60; done
+`,
+              { mode: 0o700 }
+            )
+            yield* Effect.scoped(
+              Effect.gen(function*() {
+                yield* connector.open({
+                  agentId,
+                  cols: 100,
+                  host: config.host,
+                  rows: 30
+                })
+                yield* Effect.sync(() => existsSync(forcedReadyPath)).pipe(
+                  Effect.repeat({
+                    while: (ready) => !ready,
+                    schedule: Schedule.spaced("10 millis")
+                  })
+                )
+              })
+            ).pipe(TestClock.withLive)
+            expect(existsSync(forcedReadyPath)).toBe(true)
+          }
 
           writeFileSync(
             command,

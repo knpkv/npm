@@ -4,7 +4,7 @@ import { Crypto, Effect, Predicate, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { TerminalAgentNotFoundError, TerminalProtocolError, TerminalTransportError } from "./errors.js"
 import { connectAgentId } from "./id.js"
-import { releaseTerminalControl } from "./internal/terminal-release.js"
+import { releaseTerminalControl, terminalKillOptions } from "./internal/terminal-release.js"
 import { HerdrTerminalEvent, type TerminalClientCommand, type TerminalSelection } from "./model.js"
 
 export type TerminalError =
@@ -178,6 +178,8 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
           ],
           {
             cwd: config.repository,
+            forceKillAfter: terminalKillOptions.forceKillAfter,
+            killSignal: "SIGTERM",
             stdin: { endOnDone: false, stream: "pipe" }
           }
         )
@@ -193,10 +195,12 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
     })
 
     yield* Effect.addFinalizer(() =>
-      releaseTerminalControl(
-        send({ type: "terminal.release" }),
-        handle.exitCode,
-        handle.kill()
+      Effect.interruptible(
+        releaseTerminalControl(
+          send({ type: "terminal.release" }),
+          handle.exitCode,
+          handle.kill(terminalKillOptions)
+        )
       )
     )
 
