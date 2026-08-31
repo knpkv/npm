@@ -231,4 +231,69 @@ describe("RelayProductDock", () => {
       await disposeDock(rendered)
     }
   })
+
+  it("clears a continuation draft when the registered PR changes", async () => {
+    const conversationFor = (pullRequestId: string) =>
+      Effect.runPromise(
+        Schema.decodeUnknownEffect(PullRequestConversation)({
+          _tag: "codecommit",
+          route: {
+            accountId: "123456789012",
+            href: `/accounts/123456789012/prs/${pullRequestId}`,
+            pullRequestId
+          },
+          selection,
+          thread: {
+            accountId: "123456789012",
+            pullRequestId,
+            region: "eu-west-1",
+            repositoryName: "payments"
+          }
+        })
+      )
+    const conversation184 = await conversationFor("184")
+    const conversation185 = await conversationFor("185")
+    const delivered: Array<string> = []
+    const registrationFor = (
+      conversation: typeof conversation184,
+      label: string
+    ): RelayPullRequestDockRegistration => ({
+      context: [{ id: "pull-request", label: "PR", value: label }],
+      conversation,
+      continuePullRequestConversation: ({ message }) =>
+        Effect.sync(() => {
+          delivered.push(`${label}:${message}`)
+        }),
+      messages: [],
+      selection,
+      status: "ready"
+    })
+    const rendered = await renderDock(
+      <RelayProductDock host={host}>
+        <RegisteredThread registration={registrationFor(conversation184, "#184")} />
+      </RelayProductDock>
+    )
+    try {
+      await click(queryRequired(rendered.container, "[data-rly-relay-dock-trigger]"))
+      const input = queryRequired<HTMLTextAreaElement>(rendered.portal, "textarea")
+      await setTextareaValue(input, "Do not send this to PR 185.")
+
+      await act(async () =>
+        rendered.root.render(
+          <PortalProvider container={rendered.portal}>
+            <RelayProductDock host={host}>
+              <RegisteredThread registration={registrationFor(conversation185, "#185")} />
+            </RelayProductDock>
+          </PortalProvider>
+        )
+      )
+
+      expect(queryRequired<HTMLTextAreaElement>(rendered.portal, "textarea").value).toBe("")
+      await setTextareaValue(queryRequired<HTMLTextAreaElement>(rendered.portal, "textarea"), "Continue PR 185.")
+      await click(queryRequired(rendered.portal, 'button[type="submit"]'))
+      expect(delivered).toEqual(["#185:Continue PR 185."])
+    } finally {
+      await disposeDock(rendered)
+    }
+  })
 })

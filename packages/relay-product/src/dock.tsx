@@ -23,6 +23,7 @@ import {
   type PullRequestConversationLookupFailure,
   type PullRequestConversationRedirectFailed,
   PullRequestConversationLocator,
+  pullRequestThreadIdentity,
   type RelayAuthenticationFailure,
   type RelayProductAdapterContractError,
   type RelayProductContinuationReceiptMismatch
@@ -307,7 +308,7 @@ const relayDockState = (
 }
 
 const selectionIdentity = (registration: RelayPullRequestDockRegistration | null): string =>
-  registration === null ? "host" : `${registration.conversation._tag}:${registration.conversation.route.href}`
+  registration === null ? "host" : JSON.stringify(pullRequestThreadIdentity(registration.conversation))
 
 const selectorRevision = (selection: RelaySelectorState): string =>
   JSON.stringify({
@@ -374,7 +375,7 @@ export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDo
           defaultOpen={false}
           footer={
             readyRegistration === null ? undefined : (
-              <PullRequestContinuation registration={readyRegistration} selection={selection} />
+              <PullRequestContinuation key={identity} registration={readyRegistration} selection={selection} />
             )
           }
           selection={{

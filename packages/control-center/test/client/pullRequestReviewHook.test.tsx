@@ -1298,12 +1298,13 @@ describe("usePullRequestReview", () => {
   it("rejects an enqueue that settles after its request is aborted", async () => {
     const failures: Array<PullRequestReviewRequestAborted> = []
     let enqueueSignal: AbortSignal | undefined
+    let resolveEnqueue: ((review: PullRequestReviewState) => void) | undefined
     const transport = {
       enqueue: vi.fn(
         (_entityId, _provider, _prompt, signal) =>
-          new Promise<PullRequestReviewState>((_resolve, reject) => {
+          new Promise<PullRequestReviewState>((resolve) => {
             enqueueSignal = signal
-            signal.addEventListener("abort", () => reject(new LateEnqueueFailure()), { once: true })
+            resolveEnqueue = resolve
           })
       ),
       load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
@@ -1341,6 +1342,11 @@ describe("usePullRequestReview", () => {
     })
     await act(async () => mountedRoot?.unmount())
     expect(enqueueSignal?.aborted).toBe(true)
+    if (resolveEnqueue === undefined) throw new LateEnqueueFailure()
+    await act(async () => {
+      resolveEnqueue?.(reviewFor(BASE_A, HEAD_A))
+      await Promise.resolve()
+    })
     await vi.waitFor(() => expect(failures).toHaveLength(1))
     expect(failures[0]).toBeInstanceOf(PullRequestReviewRequestAborted)
     mountedRoot = undefined
