@@ -20,18 +20,27 @@ import { save } from "./save.js"
 import type { ConfigValidationResult } from "./validate.js"
 import { validate } from "./validate.js"
 
-export { reviewProfileSkillLimit } from "../ReviewProfile.js"
+export {
+  defaultReviewConfig,
+  defaultReviewProfiles,
+  ReviewConfig,
+  ReviewHarness,
+  reviewHarnessOptions,
+  ReviewKind,
+  reviewKindOptions,
+  ReviewModel,
+  reviewModelOptions,
+  ReviewProfileConfig,
+  reviewProfileSkillLimit,
+  ReviewProvider,
+  reviewProviderOptions
+} from "../ReviewProfile.js"
 export { discoverAwsProfiles } from "./detectProfiles.js"
 export {
   AccountConfig,
-  defaultReviewConfig,
-  defaultReviewProfiles,
   defaultSandboxConfig,
   defaultSandboxImage,
   DetectedProfile,
-  ReviewConfig,
-  ReviewKind,
-  ReviewProfileConfig,
   SandboxConfig,
   TuiConfig
 } from "./internal.js"

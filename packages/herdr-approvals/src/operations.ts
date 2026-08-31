@@ -15,23 +15,42 @@ import {
 import { Effect, Path, Ref, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
+const HerdrAgentFields = {
+  agent_status: Schema.String,
+  cwd: Schema.String,
+  foreground_cwd: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  pane_id: Schema.String,
+  state_change_seq: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isBetween({ maximum: Number.MAX_SAFE_INTEGER, minimum: 0 })
+  ),
+  tokens: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+}
+
+const HerdrAgent = Schema.Struct({
+  agent: Schema.String,
+  ...HerdrAgentFields
+})
+
+const HerdrLaunchPendingAgent = Schema.Struct({
+  launch_pending: Schema.Literal(true),
+  ...HerdrAgentFields
+})
+
+const HerdrAgentEntry = Schema.Union([
+  HerdrLaunchPendingAgent,
+  HerdrAgent
+])
+
+const isHerdrLaunchPendingAgent = Schema.is(HerdrLaunchPendingAgent)
+const isHerdrAgent = (
+  agent: typeof HerdrAgentEntry.Type
+): agent is typeof HerdrAgent.Type => !isHerdrLaunchPendingAgent(agent)
+
 const HerdrAgents = Schema.Struct({
   result: Schema.Struct({
-    agents: Schema.Array(
-      Schema.Struct({
-        agent: Schema.String,
-        agent_status: Schema.String,
-        cwd: Schema.String,
-        foreground_cwd: Schema.optionalKey(Schema.String),
-        name: Schema.optionalKey(Schema.NullOr(Schema.String)),
-        pane_id: Schema.String,
-        state_change_seq: Schema.Number.check(
-          Schema.isInt(),
-          Schema.isBetween({ maximum: Number.MAX_SAFE_INTEGER, minimum: 0 })
-        ),
-        tokens: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
-      })
-    )
+    agents: Schema.Array(HerdrAgentEntry)
   })
 })
 
@@ -212,28 +231,31 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
         })
       ),
       Effect.flatMap((parsed) =>
-        Effect.forEach(parsed.result.agents, (agent) => {
-          return Effect.gen(function*() {
-            const basename = paths.basename(agent.foreground_cwd ?? agent.cwd)
-            const work = yield* Schema.decodeUnknownEffect(AgentWorkLabel)(
-              basename === "" ? "root" : basename
-            ).pipe(Effect.mapError(operationError("herdr.agent_list.work")))
-            const lineage = yield* decodeLineage(agent.tokens)
-            return yield* Schema.decodeUnknownEffect(AgentSummary)({
-              agentId: lineage.agentId,
-              activityRevision: agent.state_change_seq,
-              kind: agent.agent,
-              name: agent.name ?? `${agent.agent}@${agent.pane_id}`,
-              paneId: agent.pane_id,
-              parentAgentId: lineage.parentAgentId,
-              relation: lineage.relation,
-              status: agent.agent_status,
-              work
-            }).pipe(
-              Effect.mapError(operationError("herdr.agent_list.agent"))
-            )
-          })
-        })
+        Effect.forEach(
+          parsed.result.agents.filter(isHerdrAgent),
+          (agent) => {
+            return Effect.gen(function*() {
+              const basename = paths.basename(agent.foreground_cwd ?? agent.cwd)
+              const work = yield* Schema.decodeUnknownEffect(AgentWorkLabel)(
+                basename === "" ? "root" : basename
+              ).pipe(Effect.mapError(operationError("herdr.agent_list.work")))
+              const lineage = yield* decodeLineage(agent.tokens)
+              return yield* Schema.decodeUnknownEffect(AgentSummary)({
+                agentId: lineage.agentId,
+                activityRevision: agent.state_change_seq,
+                kind: agent.agent,
+                name: agent.name ?? `${agent.agent}@${agent.pane_id}`,
+                paneId: agent.pane_id,
+                parentAgentId: lineage.parentAgentId,
+                relation: lineage.relation,
+                status: agent.agent_status,
+                work
+              }).pipe(
+                Effect.mapError(operationError("herdr.agent_list.agent"))
+              )
+            })
+          }
+        )
       ),
       Effect.map(
         (agents): AgentInventory => ({ agents, available: true, error: null })

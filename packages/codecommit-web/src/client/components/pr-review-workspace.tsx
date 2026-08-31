@@ -144,8 +144,11 @@ function failureMessage<Failure>(failure: Failure, fallback: string): string {
 const exactReviewIdentity = (
   accountId: string,
   pullRequestId: Domain.PullRequestId,
+  repositoryName: string,
+  region: string,
   diff: Pick<PullRequestDiffResponse, "baseCommit" | "headCommit" | "revisionId">
-): string => `${accountId}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
+): string =>
+  `${accountId}:${repositoryName}:${region}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
 export const fileIndexForFinding = (
   files: PullRequestDiffResponse["files"],
@@ -623,7 +626,13 @@ const ReadyReviewWorkspace = ({
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
-  const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
+  const reviewIdentity = exactReviewIdentity(
+    accountId,
+    pullRequest.id,
+    String(pullRequest.repositoryName),
+    String(pullRequest.account.region),
+    diff
+  )
   const reviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
     const stableAccountId = pullRequest.account.repoAccountId ?? pullRequest.account.awsAccountId
     return stableAccountId === undefined
@@ -852,7 +861,7 @@ const ReadyReviewWorkspace = ({
         const completed = replaceRelayReviewPreservingTurns(turns, {
           expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
           identity: reviewIdentity,
-          skillIds: payload.skillIds,
+          skillIds: payload.profile.skillIds,
           value: completedEvent.review
         })
         completedReviewRef.current = completed
@@ -887,8 +896,7 @@ const ReadyReviewWorkspace = ({
         revisionId: diff.revisionId,
         baseCommit: diff.baseCommit,
         headCommit: diff.headCommit,
-        kind: selectedKind,
-        skillIds: selectedProfile.skillIds
+        profile: selectedProfile
       }
     )
     if (outcome.completed) {
@@ -928,8 +936,7 @@ const ReadyReviewWorkspace = ({
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
           headCommit: diff.headCommit,
-          kind: review.kind,
-          skillIds: completedReview?.skillIds ?? [],
+          profile: review.profile,
           currentReview: review.result,
           turns,
           findingId,

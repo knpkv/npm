@@ -16,6 +16,7 @@ const storeError = (operation: string) => (cause: unknown) => new WorkStoreError
 type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
+  | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
   | { readonly _tag: "rejected"; readonly error: AppendRejection }
 
 const utf8 = new TextEncoder()
@@ -59,6 +60,9 @@ const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
       })
     )
   )
+
+const encodeEvent = (event: WorkGoalCheckpointType): string =>
+  JSON.stringify(Schema.encodeSync(WorkGoalCheckpoint)(event))
 
 export interface WorkStoreService {
   readonly append: (
@@ -132,12 +136,21 @@ export class WorkStore implements WorkStoreService {
             transaction = false
             return { _tag: "rejected", error }
           }
-          const duplicate = this.#database.prepare(
-            `SELECT 1 FROM work_goal_events
-             WHERE event_id = ? OR (goal_id = ? AND occurred_at = ?)
-             LIMIT 1`
-          ).get(decoded.eventId, decoded.goal.id, decoded.occurredAt)
-          if (duplicate !== undefined) {
+          const existingRows = this.#database.prepare(
+            `SELECT record FROM work_goal_events
+             WHERE event_id = ? OR (goal_id = ? AND occurred_at = ?)`
+          ).all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
+          if (existingRows.length > 0) {
+            const encoded = encodeEvent(decoded)
+            const existingEvents = Schema.decodeUnknownSync(StoredEventRows)(existingRows).map(
+              ({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record))
+            )
+            const existingEvent = existingEvents[0]
+            if (existingEvents.length === 1 && existingEvent !== undefined && encodeEvent(existingEvent) === encoded) {
+              this.#database.exec("ROLLBACK")
+              transaction = false
+              return { _tag: "replayed", event: existingEvent } satisfies AppendDecision
+            }
             return reject(
               new WorkCheckpointConflictError({
                 eventId: decoded.eventId,
@@ -211,7 +224,7 @@ export class WorkStore implements WorkStoreService {
           }
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-          ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
+          ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, encodeEvent(decoded))
           this.#database.exec("COMMIT")
           transaction = false
           return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
@@ -223,6 +236,7 @@ export class WorkStore implements WorkStoreService {
       catch: storeError("append.insert")
     })
     if (inserted._tag === "rejected") return yield* inserted.error
+    if (inserted._tag === "replayed") return inserted.event
     if (inserted.changes !== 1 && inserted.changes !== 1n) {
       return yield* storeError("append.insert.count")(inserted.changes)
     }

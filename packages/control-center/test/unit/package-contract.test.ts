@@ -31,6 +31,7 @@ const validManifest = {
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/relay-product": "workspace:^",
+    "@knpkv/review": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@distilled.cloud/aws": "1.0.0-rc.4",
     effect: "4.0.0-rc.109",

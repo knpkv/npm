@@ -10,7 +10,7 @@
  *
  * @module
  */
-import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, ConfigService, PRService, ReadClient } from "@knpkv/codecommit-core"
 import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
@@ -25,6 +25,7 @@ import {
   type PullRequestDiffContentResponse,
   type PullRequestRefreshResponse,
   RelayReviewContinueStreamRequest,
+  type RelayReviewProfile,
   RelayReviewStreamEvent,
   RelayReviewStreamRequest
 } from "../Api.js"
@@ -41,7 +42,11 @@ import {
   withRelayReviewStreamPermit
 } from "../review/PullRequestReview.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
-import { discoverReviewSkills, selectedReviewSkillPrompt } from "../review/ReviewSkillCatalog.js"
+import {
+  discoverReviewSkills,
+  type ReviewSkillDefinition,
+  selectedReviewSkillPrompt
+} from "../review/ReviewSkillCatalog.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -86,6 +91,33 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
 const relayEventEncoder = new TextEncoder()
 const encodeRelayStreamEvent = Schema.encodeSync(Schema.fromJsonString(RelayReviewStreamEvent))
 const relayReviewMarker = /\n\n<!-- knpkv-codecommit-review:[0-9a-f]{64} -->$/u
+const sameReviewProfile = Schema.toEquivalence(ConfigService.ReviewProfileConfig)
+
+/** Resolve only an exact saved profile snapshot; stale or forged execution fields fail closed. */
+export const resolveRelayReviewProfile = Effect.fn("PrsLive.resolveRelayReviewProfile")(function*(
+  configService: Pick<ConfigService.ConfigService["Service"], "load">,
+  requested: RelayReviewProfile
+) {
+  const config = yield* configService.load.pipe(
+    Effect.mapError(() => new ApiError({ message: "Relay profiles are unavailable" }))
+  )
+  const configured = config.review.profiles.find(({ id }) => id === requested.id)
+  if (configured === undefined || !sameReviewProfile(configured, requested)) {
+    return yield* new ApiError({ message: "The selected Relay profile is unknown or has changed; reload settings" })
+  }
+  return configured
+})
+
+/** Resolve one server-owned profile and its catalog-owned prompt as one execution configuration. */
+export const resolveRelayReviewExecution = Effect.fn("PrsLive.resolveRelayReviewExecution")(function*(
+  configService: Pick<ConfigService.ConfigService["Service"], "load">,
+  requested: RelayReviewProfile,
+  skills: ReadonlyArray<ReviewSkillDefinition>
+) {
+  const profile = yield* resolveRelayReviewProfile(configService, requested)
+  const skillPrompt = yield* selectedReviewSkillPrompt(skills, profile.skillIds)
+  return { profile, skillPrompt }
+})
 
 const stripRelayReviewMarker = (content: string): string => content.replace(relayReviewMarker, "")
 
@@ -183,6 +215,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const fileSystem = yield* FileSystem.FileSystem
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const relayFindingPublisher = yield* RelayFindingPublisher
+    const configService = yield* ConfigService.ConfigService
 
     return handlers
       .handle("list", () =>
@@ -251,6 +284,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handle("relayReview", ({ params, payload }) =>
         Effect.gen(function*() {
+          const skills = yield* discoverReviewSkills()
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
           const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           return yield* withRelayReviewPermit(
             relaySemaphore,
@@ -258,24 +293,25 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
               readClient,
               pullRequest,
               payload,
-              payload.kind,
-              changedFiles
+              profile,
+              changedFiles,
+              skillPrompt
             )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("relayReviewStream", ({ params }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayReview(
               readClient,
               pullRequest,
               payload,
-              payload.kind,
+              profile,
               changedFiles,
               skillPrompt
             )
@@ -292,16 +328,16 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
       .handleRaw("relayReviewContinueStream", ({ params }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayConversation(
               readClient,
               pullRequest,
               payload,
-              payload.kind,
+              profile,
               payload.currentReview,
               payload.turns,
               payload.findingId,
