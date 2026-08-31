@@ -137,27 +137,8 @@ export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(function
       },
     source: "trusted_live_inventory"
   }))
-  const storedRelationships = yield* relationshipStore.list().pipe(
-    Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))
-  )
-  const storedByAgent = new Map(
-    storedRelationships.map((metadata) => [
-      `${metadata.host.toLowerCase()}\u0000${metadata.agentId}`,
-      metadata
-    ])
-  )
-  const currentDurableObservations = durableObservations.filter(({ metadata }) => {
-    const stored = storedByAgent.get(`${metadata.host.toLowerCase()}\u0000${metadata.agentId}`)
-    return stored === undefined ||
-      stored.paneId !== metadata.paneId ||
-      stored.observedAt <= metadata.observedAt ||
-      (
-        stored.relationship?.parentAgentId === metadata.relationship?.parentAgentId &&
-        stored.relationship?.relation === metadata.relationship?.relation
-      )
-  })
   const persisted = yield* relationshipStore.persistAll([
-    ...currentDurableObservations,
+    ...durableObservations,
     ...liveObservations
   ]).pipe(
     Effect.mapError((cause) => new ConnectPeerError({ cause, host: config.host, reason: "invalid_response" }))

@@ -32,7 +32,8 @@ const RelationshipRow = Schema.Struct({
   observed_at: Schema.Number,
   parent_agent_id: Schema.NullOr(Schema.String),
   pane_id: Schema.String,
-  relation: Schema.NullOr(Schema.String)
+  relation: Schema.NullOr(Schema.String),
+  source: Schema.Literals(["durable_worker", "trusted_live_inventory"])
 })
 
 const storeError = (operation: string) => (cause: unknown) => new ConnectRelationshipStoreError({ cause, operation })
@@ -60,9 +61,10 @@ const decodeRow = Effect.fn("AgentRelationshipStore.decodeRow")(function*(
         relation: decoded.relation
       }
     }
-  return yield* Schema.decodeUnknownEffect(PersistedConnectAgentMetadata)(
+  const decodedMetadata = yield* Schema.decodeUnknownEffect(PersistedConnectAgentMetadata)(
     metadata
   ).pipe(Effect.mapError(storeError("decode.metadata")))
+  return { metadata: decodedMetadata, source: decoded.source }
 })
 
 const sameMetadata = (
@@ -107,7 +109,10 @@ export class AgentRelationshipStore {
       const decodedVersion = Schema.decodeUnknownResult(
         Schema.Struct({ value: Schema.String })
       )(version)
-      if (decodedVersion._tag === "Failure" || decodedVersion.success.value !== "3") {
+      if (
+        decodedVersion._tag === "Failure" ||
+        (decodedVersion.success.value !== "3" && decodedVersion.success.value !== "4")
+      ) {
         this.#database.exec(`
           BEGIN IMMEDIATE;
           CREATE TABLE connect_agent_relationships_v2 (
@@ -128,6 +133,24 @@ export class AgentRelationshipStore {
           ALTER TABLE connect_agent_relationships_v2 RENAME TO connect_agent_relationships;
           INSERT INTO connect_store_metadata (key, value)
           VALUES ('relationship_schema', '3')
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+          COMMIT;
+        `)
+      }
+      const migratedVersion = this.#database.prepare(
+        "SELECT value FROM connect_store_metadata WHERE key = 'relationship_schema'"
+      ).get()
+      const decodedMigratedVersion = Schema.decodeUnknownResult(
+        Schema.Struct({ value: Schema.String })
+      )(migratedVersion)
+      if (decodedMigratedVersion._tag === "Failure" || decodedMigratedVersion.success.value !== "4") {
+        this.#database.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE connect_agent_relationships
+          ADD COLUMN source TEXT NOT NULL DEFAULT 'durable_worker'
+          CHECK (source IN ('durable_worker', 'trusted_live_inventory'));
+          INSERT INTO connect_store_metadata (key, value)
+          VALUES ('relationship_schema', '4')
           ON CONFLICT(key) DO UPDATE SET value = excluded.value;
           COMMIT;
         `)
@@ -191,17 +214,19 @@ export class AgentRelationshipStore {
         }),
         () =>
           Effect.gen(function*() {
+            const acceptedObservations: Array<RelationshipObservation> = []
             for (const { metadata, source } of observations) {
-              yield* Effect.try({
+              const currentObservation = yield* Effect.try({
                 try: () => {
                   const changed = database.prepare(
                     `INSERT INTO connect_agent_relationships
-              (agent_id, host, pane_id, parent_agent_id, relation, observed_at)
-             VALUES (?, ?, ?, ?, ?, ?)
+              (agent_id, host, pane_id, parent_agent_id, relation, observed_at, source)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(host, agent_id) DO UPDATE SET
                parent_agent_id = excluded.parent_agent_id,
                relation = excluded.relation,
-               observed_at = excluded.observed_at
+               observed_at = excluded.observed_at,
+               source = excluded.source
              WHERE connect_agent_relationships.pane_id = excluded.pane_id
                AND (
                  (
@@ -214,7 +239,7 @@ export class AgentRelationshipStore {
                    AND excluded.observed_at > connect_agent_relationships.observed_at
                  )
                )
-             RETURNING agent_id, host, pane_id, parent_agent_id, relation, observed_at`
+             RETURNING agent_id, host, pane_id, parent_agent_id, relation, observed_at, source`
                   ).get(
                     metadata.agentId,
                     metadata.host,
@@ -222,20 +247,28 @@ export class AgentRelationshipStore {
                     metadata.relationship?.parentAgentId ?? null,
                     metadata.relationship?.relation ?? null,
                     metadata.observedAt,
+                    source,
                     source
                   )
                   return changed ?? database.prepare(
-                    `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
+                    `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at, source
              FROM connect_agent_relationships
              WHERE host = ? AND agent_id = ?`
                   ).get(metadata.host, metadata.agentId)
                 },
                 catch: storeError("persist.upsert")
               }).pipe(Effect.flatMap(decodeRow))
+              const current = currentObservation.metadata
+              const staleDurableLoser = source === "durable_worker" &&
+                currentObservation.source === "trusted_live_inventory" &&
+                current.paneId === metadata.paneId &&
+                current.observedAt > metadata.observedAt &&
+                !sameMetadata(current, metadata)
+              if (!staleDurableLoser) acceptedObservations.push({ metadata, source })
             }
             const persisted = yield* listUnlocked
             const finalObservations = new Map<string, PersistedConnectAgentMetadata>()
-            for (const { metadata } of observations) {
+            for (const { metadata } of acceptedObservations) {
               finalObservations.set(`${metadata.host.toLowerCase()}\u0000${metadata.agentId}`, metadata)
             }
             for (const metadata of finalObservations.values()) {
@@ -279,13 +312,14 @@ export class AgentRelationshipStore {
       const rows = yield* Effect.try({
         try: () =>
           database.prepare(
-            `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at
+            `SELECT agent_id, host, pane_id, parent_agent_id, relation, observed_at, source
              FROM connect_agent_relationships
              ORDER BY host, agent_id`
           ).all(),
         catch: storeError("list")
       })
-      return yield* Effect.forEach(rows, decodeRow)
+      const observations = yield* Effect.forEach(rows, decodeRow)
+      return observations.map(({ metadata }) => metadata)
     })
   }
 

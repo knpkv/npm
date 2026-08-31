@@ -300,6 +300,36 @@ describe("Connect public seams", () => {
     )
   })
 
+  it.effect("keeps a newer live repair when a stale durable observation loses the transaction", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-stale-loser-test-"))
+    const path = join(root, "relationships.sqlite")
+    const original = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      agentId: "agent-workspace_integrator",
+      host: "SER8",
+      observedAt: 1_000,
+      paneId: "w3:p50",
+      relationship: { parentAgentId: "agent-coordinator-old", relation: "delegated" }
+    })
+    const repaired = Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+      ...original,
+      observedAt: 2_000,
+      relationship: { parentAgentId: "agent-coordinator-current", relation: "delegated" }
+    })
+    return Effect.gen(function*() {
+      const store = yield* AgentRelationshipStore.open(path)
+      yield* store.persist(original, "durable_worker")
+      yield* store.persist(repaired, "trusted_live_inventory")
+      expect(yield* store.persistAll([{ metadata: original, source: "durable_worker" }])).toEqual([
+        repaired
+      ])
+      expect(yield* store.list()).toEqual([repaired])
+      store.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("treats hostname casing as the same relationship owner", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relationship-host-case-test-"))
     const path = join(root, "relationships.sqlite")
