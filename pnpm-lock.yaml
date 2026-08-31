@@ -656,6 +656,9 @@ importers:
       '@knpkv/jira-api-client':
         specifier: workspace:^
         version: link:../jira-api-client
+      '@knpkv/review':
+        specifier: workspace:^
+        version: link:../review
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
