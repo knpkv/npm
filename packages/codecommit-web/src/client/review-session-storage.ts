@@ -1,19 +1,61 @@
-/** Schema-validated tab storage for exact-revision Relay conversations. @module */
-import { Option, Schema } from "effect"
+/** Schema-validated durable storage for per-PR Relay conversations. @module */
+import { Data, Result, Schema } from "effect"
 
-import { PullRequestRelayReviewResponse, RelayReviewConversationTurns } from "../server/Api.js"
-import { FindingDisposition } from "./review-session-state.js"
+import { PullRequestRelayReviewResponse, RelayReviewConversationTurns, RelayReviewSkillIds } from "../server/Api.js"
+import { appendReviewTurn, FindingDisposition, type FindingDispositions } from "./review-session-state.js"
+
+export const RelayReviewSessionResourceIdentity = Schema.Struct({
+  accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+})
+export interface RelayReviewSessionResourceIdentity
+  extends Schema.Schema.Type<typeof RelayReviewSessionResourceIdentity>
+{}
 
 const StoredRelayReviewSession = Schema.Struct({
   identity: Schema.String,
+  resource: RelayReviewSessionResourceIdentity,
   review: PullRequestRelayReviewResponse,
+  skillIds: RelayReviewSkillIds,
   turns: RelayReviewConversationTurns,
-  dispositions: Schema.Record(Schema.String, FindingDisposition)
+  dispositions: Schema.Record(Schema.String, FindingDisposition),
+  version: Schema.Int.check(Schema.isGreaterThan(0))
 })
 
 export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 
-const decodeStoredSession = Schema.decodeUnknownOption(Schema.fromJsonString(StoredRelayReviewSession))
+export interface RelayReviewSessionWrite {
+  readonly dispositions: FindingDispositions
+  readonly identity: string
+  readonly resource: RelayReviewSessionResourceIdentity
+  readonly review: PullRequestRelayReviewResponse
+  readonly skillIds: typeof RelayReviewSkillIds.Type
+  readonly turns: typeof RelayReviewConversationTurns.Type
+}
+
+const decodeStoredSession = Schema.decodeUnknownResult(Schema.fromJsonString(StoredRelayReviewSession))
+
+export class RelayReviewSessionStorageUnavailable extends Data.TaggedError("RelayReviewSessionStorageUnavailable")<{
+  readonly operation: "read" | "write"
+}> {}
+
+export class RelayReviewSessionInvalid extends Data.TaggedError("RelayReviewSessionInvalid")<{}> {}
+
+export class RelayReviewSessionResourceMismatch extends Data.TaggedError("RelayReviewSessionResourceMismatch")<{}> {}
+
+export type RelayReviewSessionReadFailure =
+  | RelayReviewSessionStorageUnavailable
+  | RelayReviewSessionInvalid
+  | RelayReviewSessionResourceMismatch
+
+interface RelayReviewSessionReadableStorage {
+  readonly getItem: (key: string) => string | null
+}
+
+interface RelayReviewSessionWritableStorage {
+  readonly setItem: (key: string, value: string) => void
+}
 
 const recoverInterruptedPublications = (
   dispositions: StoredRelayReviewSession["dispositions"]
@@ -26,34 +68,114 @@ const recoverInterruptedPublications = (
     {}
   )
 
-/** Keep one review session per pull request; the decoded exact identity prevents cross-head restoration. */
-export const relayReviewSessionStorageKey = (accountId: string, pullRequestId: string): string =>
-  `codecommit:relay-review-session:${encodeURIComponent(accountId)}:${encodeURIComponent(pullRequestId)}`
+const sameResource = (
+  left: RelayReviewSessionResourceIdentity,
+  right: RelayReviewSessionResourceIdentity
+): boolean =>
+  left.accountId === right.accountId &&
+  left.pullRequestId === right.pullRequestId &&
+  left.repositoryName === right.repositoryName
 
-export const readRelayReviewSession = (
-  storage: Storage,
-  key: string,
-  expectedIdentity: string
-): StoredRelayReviewSession | null => {
-  try {
-    const encoded = storage.getItem(key)
-    if (encoded === null) return null
-    const decoded = decodeStoredSession(encoded)
-    if (Option.isNone(decoded) || decoded.value.identity !== expectedIdentity) return null
-    return { ...decoded.value, dispositions: recoverInterruptedPublications(decoded.value.dispositions) }
-  } catch {
-    return null
+const dispositionRank = (disposition: FindingDisposition): number => {
+  switch (disposition) {
+    case "pending":
+      return 0
+    case "acknowledged":
+    case "failed":
+    case "rejected":
+      return 1
+    case "posting":
+      return 2
+    case "posted-stale":
+      return 3
+    case "posted":
+      return 4
   }
 }
 
-export const writeRelayReviewSession = (
-  storage: Storage,
+const mergeDispositions = (
+  current: FindingDispositions,
+  incoming: FindingDispositions
+): FindingDispositions =>
+  Object.entries(incoming).reduce<FindingDispositions>((merged, [findingId, disposition]) => {
+    const existing = merged[findingId]
+    return existing !== undefined && dispositionRank(existing) > dispositionRank(disposition)
+      ? merged
+      : { ...merged, [findingId]: disposition }
+  }, current)
+
+const mergeTurns = (
+  current: typeof RelayReviewConversationTurns.Type,
+  incoming: typeof RelayReviewConversationTurns.Type
+): typeof RelayReviewConversationTurns.Type => {
+  const identities = new Set(current.map((turn) => JSON.stringify(turn)))
+  return incoming.reduce<typeof RelayReviewConversationTurns.Type>((merged, turn) => {
+    const identity = JSON.stringify(turn)
+    if (identities.has(identity)) return merged
+    identities.add(identity)
+    return appendReviewTurn(merged, turn)
+  }, current)
+}
+
+const mergeStoredSession = (
+  current: StoredRelayReviewSession,
+  incoming: RelayReviewSessionWrite
+): StoredRelayReviewSession =>
+  current.identity === incoming.identity
+    ? {
+      ...incoming,
+      dispositions: mergeDispositions(current.dispositions, incoming.dispositions),
+      turns: mergeTurns(current.turns, incoming.turns),
+      version: current.version + 1
+    }
+    : {
+      ...incoming,
+      turns: mergeTurns(current.turns, incoming.turns),
+      version: current.version + 1
+    }
+
+/** Keep one durable review session per pull request; its exact reviewed head remains explicit inside the payload. */
+export const relayReviewSessionStorageKey = (identity: RelayReviewSessionResourceIdentity): string =>
+  `codecommit:relay-review-session:${encodeURIComponent(identity.accountId)}:${
+    encodeURIComponent(
+      identity.repositoryName
+    )
+  }:${encodeURIComponent(identity.pullRequestId)}`
+
+export const readRelayReviewSession = (
+  storage: RelayReviewSessionReadableStorage,
   key: string,
-  session: StoredRelayReviewSession
-): void => {
-  try {
-    storage.setItem(key, JSON.stringify(session))
-  } catch {
-    // A blocked or full session store must not break the active in-memory review.
+  expectedResource: RelayReviewSessionResourceIdentity
+): Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure> => {
+  const encoded = Result.try({
+    try: () => storage.getItem(key),
+    catch: () => new RelayReviewSessionStorageUnavailable({ operation: "read" })
+  })
+  if (Result.isFailure(encoded)) return Result.fail(encoded.failure)
+  if (encoded.success === null) return Result.succeed(null)
+  const decoded = decodeStoredSession(encoded.success)
+  if (Result.isFailure(decoded)) return Result.fail(new RelayReviewSessionInvalid())
+  if (!sameResource(decoded.success.resource, expectedResource)) {
+    return Result.fail(new RelayReviewSessionResourceMismatch())
   }
+  return Result.succeed({
+    ...decoded.success,
+    dispositions: recoverInterruptedPublications(decoded.success.dispositions)
+  })
+}
+
+export const writeRelayReviewSession = (
+  storage: RelayReviewSessionReadableStorage & RelayReviewSessionWritableStorage,
+  key: string,
+  session: RelayReviewSessionWrite
+): Result.Result<void, RelayReviewSessionReadFailure> => {
+  const existing = readRelayReviewSession(storage, key, session.resource)
+  if (Result.isFailure(existing)) return Result.fail(existing.failure)
+  const next = existing.success === null
+    ? { ...session, version: 1 }
+    : mergeStoredSession(existing.success, session)
+  return Result.try({
+    try: () => storage.setItem(key, JSON.stringify(next)),
+    catch: () => new RelayReviewSessionStorageUnavailable({ operation: "write" })
+  })
 }

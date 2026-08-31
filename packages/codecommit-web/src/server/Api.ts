@@ -217,7 +217,7 @@ export const RelayExplainResult = Schema.Struct({
   )
 )
 
-/** One ephemeral Relay result bound to the exact diff that was reviewed. */
+/** One Relay result bound to the exact diff that was reviewed within a durable pull-request thread. */
 export const PullRequestRelayReviewResponse = Schema.Struct({
   pullRequestId: PullRequestId,
   revisionId: Schema.String,
