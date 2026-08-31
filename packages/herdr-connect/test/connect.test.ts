@@ -39,7 +39,12 @@ import {
 } from "../src/relationship-store.js"
 import { resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
-import { boundedTerminalLines, makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
+import {
+  boundedTerminalLines,
+  makeHerdrTerminalConnector,
+  releaseTerminalControl,
+  terminalEventMaxLineBytes
+} from "../src/terminal.js"
 import { calendarConnectAgents, connectLineageRows } from "../src/view.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its test layer.
@@ -1255,6 +1260,24 @@ describe("Connect public seams", () => {
       Effect.provideService(HttpClient.HttpClient, client),
       provideTestClock
     )
+  })
+
+  it.effect("kills terminal control when the release write does not complete", () => {
+    let kills = 0
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(
+        releaseTerminalControl(
+          Effect.never,
+          Effect.never,
+          Effect.sync(() => {
+            kills += 1
+          })
+        )
+      )
+      yield* TestClock.adjust("1 second")
+      expect(kills).toBe(1)
+      yield* Fiber.interrupt(fiber)
+    }).pipe(provideTestClock)
   })
 
   it.effect("releases the scoped Herdr terminal control client", () => {

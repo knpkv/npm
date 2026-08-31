@@ -109,6 +109,35 @@ export const boundedTerminalLines = <E, R>(
 const transportError = (operation: string) => (cause: unknown) =>
   new TerminalTransportError({ cause, detail: String(cause), operation })
 
+/** @internal Owns the bounded terminal-control shutdown sequence. */
+export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(function*<
+  ReleaseError,
+  ExitError,
+  KillError,
+  ReleaseRequirements,
+  ExitRequirements,
+  KillRequirements
+>(
+  release: Effect.Effect<void, ReleaseError, ReleaseRequirements>,
+  exitCode: Effect.Effect<unknown, ExitError, ExitRequirements>,
+  kill: Effect.Effect<unknown, KillError, KillRequirements>
+) {
+  yield* release.pipe(
+    Effect.timeoutOrElse({
+      duration: "1 second",
+      orElse: () => kill
+    }),
+    Effect.ignore
+  )
+  yield* exitCode.pipe(
+    Effect.timeoutOrElse({
+      duration: "1 second",
+      orElse: () => kill
+    }),
+    Effect.ignore
+  )
+})
+
 export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(function*(
   config: HostConfiguration,
   service: FleetService
@@ -192,17 +221,10 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
     })
 
     yield* Effect.addFinalizer(() =>
-      send({ type: "terminal.release" }).pipe(
-        Effect.ignore,
-        Effect.andThen(
-          handle.exitCode.pipe(
-            Effect.timeoutOrElse({
-              duration: "1 second",
-              orElse: () => handle.kill()
-            })
-          )
-        ),
-        Effect.ignore
+      releaseTerminalControl(
+        send({ type: "terminal.release" }),
+        handle.exitCode,
+        handle.kill()
       )
     )
 
