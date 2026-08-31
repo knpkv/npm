@@ -1,3 +1,4 @@
+/** @effect-diagnostics missingEffectContext:skip-file */
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import { streamEvents } from "@knpkv/ai-codex"
