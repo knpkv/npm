@@ -1,5 +1,5 @@
 /** Immutable CodeCommit diff reads and prompt-only Relay execution for the web review workbench. @module */
-import { streamEvents } from "@knpkv/ai-codex"
+import { type CodexEventStreamOptions, streamEvents } from "@knpkv/ai-codex"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
@@ -15,10 +15,12 @@ import {
   type PullRequestDiffResponse,
   type PullRequestRelayReviewResponse,
   RelayExplainResult,
+  RelayNativeReviewResult,
   type RelayReviewConversationTurn,
   type RelayReviewFinding,
   type RelayReviewKind,
   RelayReviewMessage,
+  type RelayReviewProfile,
   type RelayReviewProgressPhase,
   RelayReviewResult,
   type RelayReviewStreamEvent
@@ -32,6 +34,11 @@ const MAXIMUM_RELAY_DIFF_LINE_PAIRS = 4_000_000
 const RELAY_PATCH_SEPARATOR = "\n"
 const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 const textEncoder = new TextEncoder()
+
+const withProfileModel = (
+  profile: RelayReviewProfile,
+  options: CodexEventStreamOptions
+): CodexEventStreamOptions => profile.model === "configured-default" ? options : { ...options, model: profile.model }
 
 export class PullRequestReviewError extends Schema.TaggedError<PullRequestReviewError>()(
   "PullRequestReviewError",
@@ -695,6 +702,10 @@ const decodeCodexProgress = Schema.decodeUnknownOption(CodexProgressEvent)
 const decodeRelayResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayReviewResult))
 const decodeRelayExplainResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayExplainResult))
 
+/** Exact native output contract selected before the provider process starts. */
+export const relayReviewOutputSchema = (kind: RelayReviewKind): Schema.Top =>
+  kind === "explain" ? RelayExplainResult : RelayNativeReviewResult
+
 export const parseRelayReviewResult = (
   message: string,
   kind: RelayReviewKind
@@ -712,7 +723,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevision: ExpectedReviewRevision,
-  kind: RelayReviewKind,
+  profile: RelayReviewProfile,
   changedFiles?: PullRequestChangedFilesSource,
   skillPrompt: string = "",
   reportProgress: RelayReviewProgressReporter = noProgress
@@ -721,6 +732,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
   PullRequestReviewError,
   FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
 > {
+  const kind = profile.kind
   return yield* Effect.scoped(
     Effect.gen(function*() {
       yield* reportProgress({ phase: "revision", message: "Checking exact CodeCommit revision" })
@@ -740,14 +752,15 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
       const fileSystem = yield* FileSystem.FileSystem
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-web-relay-" })
       yield* reportProgress({ phase: "agent", message: "Relay is reviewing the exact patch" })
-      const message = yield* streamEvents({
+      const message = yield* streamEvents(withProfileModel(profile, {
         access: "read-only",
         cwd: workspace,
         maxPromptBytes: MAXIMUM_RELAY_PROMPT_BYTES,
+        outputSchema: relayReviewOutputSchema(kind),
         prompt,
         promptOnly: true,
         timeout: "5 minutes"
-      }).pipe(
+      })).pipe(
         Stream.tap((line) => {
           const event = decodeCodexProgress(line)
           if (Option.isNone(event)) return Effect.void
@@ -783,6 +796,7 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
         baseCommit: scope.revision.destinationCommit,
         headCommit: scope.revision.sourceCommit,
         kind,
+        profile,
         result: result.value
       }
     })
@@ -797,8 +811,16 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
 
 const RelayReviewConversationResult = Schema.Struct({
   reply: RelayReviewMessage,
-  review: RelayReviewResult
+  review: RelayNativeReviewResult
 })
+
+const RelayExplainConversationResult = Schema.Struct({
+  reply: RelayReviewMessage,
+  review: RelayExplainResult
+})
+
+export const relayConversationOutputSchema = (kind: RelayReviewKind): Schema.Top =>
+  kind === "explain" ? RelayExplainConversationResult : RelayReviewConversationResult
 
 const decodeRelayConversationResult = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayReviewConversationResult)
@@ -862,7 +884,7 @@ export const continuePullRequestRelayReview = Effect.fn(
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevision: ExpectedReviewRevision,
-  kind: RelayReviewKind,
+  profile: RelayReviewProfile,
   currentReview: typeof RelayReviewResult.Type,
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   findingId: string,
@@ -871,6 +893,7 @@ export const continuePullRequestRelayReview = Effect.fn(
   skillPrompt: string = "",
   reportProgress: RelayReviewProgressReporter = noProgress
 ) {
+  const kind = profile.kind
   return yield* Effect.scoped(
     Effect.gen(function*() {
       yield* reportProgress({ phase: "revision", message: "Checking latest exact revision" })
@@ -895,14 +918,15 @@ export const continuePullRequestRelayReview = Effect.fn(
       const fileSystem = yield* FileSystem.FileSystem
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-web-relay-" })
       yield* reportProgress({ phase: "agent", message: "Relay is reconciling the finding deck" })
-      const response = yield* streamEvents({
+      const response = yield* streamEvents(withProfileModel(profile, {
         access: "read-only",
         cwd: workspace,
         maxPromptBytes: MAXIMUM_RELAY_PROMPT_BYTES,
+        outputSchema: relayConversationOutputSchema(kind),
         prompt,
         promptOnly: true,
         timeout: "5 minutes"
-      }).pipe(
+      })).pipe(
         Stream.tap((line) => {
           const event = decodeCodexProgress(line)
           return Option.isSome(event) && event.value.type === "item.completed" && event.value.item?.type === "reasoning"
@@ -935,6 +959,7 @@ export const continuePullRequestRelayReview = Effect.fn(
           baseCommit: scope.revision.destinationCommit,
           headCommit: scope.revision.sourceCommit,
           kind,
+          profile,
           result: reconciledReview.value
         } satisfies PullRequestRelayReviewResponse,
         reply: result.value.reply
@@ -990,7 +1015,7 @@ export const streamPullRequestRelayReview = (
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevision: ExpectedReviewRevision,
-  kind: RelayReviewKind,
+  profile: RelayReviewProfile,
   changedFiles: PullRequestChangedFilesSource | undefined,
   skillPrompt: string
 ) =>
@@ -999,7 +1024,7 @@ export const streamPullRequestRelayReview = (
       client,
       pullRequest,
       expectedRevision,
-      kind,
+      profile,
       changedFiles,
       skillPrompt,
       report
@@ -1011,7 +1036,7 @@ export const streamPullRequestRelayConversation = (
   client: ReadClient.CodeCommitReadClientService,
   pullRequest: Domain.PullRequest,
   expectedRevision: ExpectedReviewRevision,
-  kind: RelayReviewKind,
+  profile: RelayReviewProfile,
   currentReview: typeof RelayReviewResult.Type,
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   findingId: string,
@@ -1024,7 +1049,7 @@ export const streamPullRequestRelayConversation = (
       client,
       pullRequest,
       expectedRevision,
-      kind,
+      profile,
       currentReview,
       turns,
       findingId,

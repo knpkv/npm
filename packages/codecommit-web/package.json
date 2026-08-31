@@ -19,6 +19,7 @@
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
+    "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",
     "test:browser": "pnpm --filter @knpkv/rly build && pnpm build && playwright test --config playwright.config.ts",
     "lint": "eslint \"{src,test,e2e}/**/*.{ts,tsx}\" playwright.config.ts",
     "docgen": "docgen"
@@ -32,6 +33,7 @@
     "@formkit/auto-animate": "^0.10.0",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
+    "@knpkv/review": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",

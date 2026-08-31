@@ -1,7 +1,14 @@
 /** Relay review profiles and environment skill selection. @module */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { ReviewConfig as ReviewSettings, ReviewProfileConfig } from "@knpkv/codecommit-core/ConfigService.js"
-import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
+import {
+  reviewHarnessOptions,
+  reviewKindOptions,
+  reviewModelOptions,
+  reviewProviderOptions,
+  type ReviewConfig as ReviewSettings,
+  type ReviewProfileConfig,
+  reviewProfileSkillLimit
+} from "@knpkv/codecommit-core/ReviewProfile.js"
 import { Exit, Option } from "effect"
 import type * as Atom from "effect/unstable/reactivity/Atom"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
@@ -148,6 +155,18 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
     )
   }, [])
 
+  const updateProfile = useCallback((profileId: string, patch: Partial<ReviewProfileConfig>) => {
+    setSavedNow(false)
+    setReview((current) =>
+      current === null
+        ? null
+        : {
+            ...current,
+            profiles: current.profiles.map((profile) => (profile.id === profileId ? { ...profile, ...patch } : profile))
+          }
+    )
+  }, [])
+
   const save = useCallback(async () => {
     const data = configRef.current
     if (data === null || review === null) return
@@ -244,9 +263,79 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
               <div>
                 <h3 className="text-sm font-semibold">{profile.name}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {profile.kind} · {profile.skillIds.length}/{reviewProfileSkillLimit} selected
+                  {profile.provider} · {profile.harness} · {profile.model}
                 </p>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-xs font-medium">
+                  Review kind
+                  <select
+                    className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                    disabled={saving}
+                    onChange={(event) => {
+                      const kind = reviewKindOptions.find((candidate) => candidate === event.target.value)
+                      if (kind !== undefined) updateProfile(profile.id, { kind })
+                    }}
+                    value={profile.kind}
+                  >
+                    <option value="review">Full review</option>
+                    <option value="security">Security</option>
+                    <option value="tests">Tests</option>
+                    <option value="explain">Explain</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-medium">
+                  Provider
+                  <select
+                    className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                    disabled={saving}
+                    onChange={(event) => {
+                      const provider = reviewProviderOptions.find((candidate) => candidate === event.target.value)
+                      if (provider !== undefined) updateProfile(profile.id, { provider })
+                    }}
+                    value={profile.provider}
+                  >
+                    {reviewProviderOptions.map((provider) => (
+                      <option key={provider}>{provider}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-medium">
+                  Harness
+                  <select
+                    className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                    disabled={saving}
+                    onChange={(event) => {
+                      const harness = reviewHarnessOptions.find((candidate) => candidate === event.target.value)
+                      if (harness !== undefined) updateProfile(profile.id, { harness })
+                    }}
+                    value={profile.harness}
+                  >
+                    {reviewHarnessOptions.map((harness) => (
+                      <option key={harness}>{harness}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-medium">
+                  Model
+                  <select
+                    className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                    disabled={saving}
+                    onChange={(event) => {
+                      const model = reviewModelOptions.find((candidate) => candidate === event.target.value)
+                      if (model !== undefined) updateProfile(profile.id, { model })
+                    }}
+                    value={profile.model}
+                  >
+                    {reviewModelOptions.map((model) => (
+                      <option key={model}>{model}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {profile.skillIds.length}/{reviewProfileSkillLimit} prompt-only methods selected
+              </p>
               {AsyncResult.isSuccess(skills) ? (
                 <ReviewProfileSkillPicker
                   disabled={saving}

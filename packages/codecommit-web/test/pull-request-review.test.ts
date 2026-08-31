@@ -15,6 +15,8 @@ import {
   parseRelayReviewResult,
   postPullRequestRelayFinding,
   PullRequestReviewError,
+  relayConversationOutputSchema,
+  relayReviewOutputSchema,
   streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
   withRelayReviewPermit,
@@ -121,20 +123,33 @@ describe("CodeCommit web review boundary", () => {
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
       headCommit: "b".repeat(40),
-      kind: "review",
-      skillIds: ["builtin:pr-review"]
+      profile: {
+        id: "thorough",
+        name: "Thorough review",
+        kind: "review",
+        provider: "codex",
+        harness: "native-codex",
+        model: "configured-default",
+        skillIds: ["builtin:pr-review"]
+      }
     }
     expect(Exit.isSuccess(Schema.decodeUnknownExit(RelayReviewStreamRequest)(streamRequest))).toBe(true)
     expect(Exit.isFailure(
       Schema.decodeUnknownExit(RelayReviewStreamRequest)({
         ...streamRequest,
-        skillIds: [" "]
+        profile: { ...streamRequest.profile, skillIds: [" "] }
       })
     )).toBe(true)
     expect(Exit.isFailure(
       Schema.decodeUnknownExit(RelayReviewStreamRequest)({
         ...streamRequest,
-        skillIds: ["x".repeat(257)]
+        profile: { ...streamRequest.profile, skillIds: ["x".repeat(257)] }
+      })
+    )).toBe(true)
+    expect(Exit.isFailure(
+      Schema.decodeUnknownExit(RelayReviewStreamRequest)({
+        ...streamRequest,
+        profile: { ...streamRequest.profile, model: "unknown-model" }
       })
     )).toBe(true)
 
@@ -1179,11 +1194,51 @@ describe("CodeCommit web review boundary", () => {
     )
     expect(Option.isNone(explainWithFindings)).toBe(true)
 
+    const explainWithUncontractedFinding = parseRelayReviewResult(
+      JSON.stringify({
+        findings: [{
+          severity: "high",
+          title: "Retry amplification",
+          location: "src/retry.ts:1",
+          description: "Retries can duplicate a request."
+        }],
+        verdict: "Architecture overview.",
+        explanation: "Uses a service boundary."
+      }),
+      "explain"
+    )
+    expect(Option.isNone(explainWithUncontractedFinding)).toBe(true)
+
     const explanation = parseRelayReviewResult(
       JSON.stringify({ findings: [], verdict: "Architecture overview.", explanation: "Uses a service boundary." }),
       "explain"
     )
     expect(Option.isSome(explanation)).toBe(true)
+
+    expect(
+      Schema.is(relayReviewOutputSchema("explain"))({
+        findings: [],
+        verdict: "Architecture overview.",
+        explanation: "Uses a service boundary."
+      })
+    ).toBe(true)
+    expect(
+      Schema.is(relayReviewOutputSchema("explain"))({
+        findings: [finding],
+        verdict: "Architecture overview.",
+        explanation: "Uses a service boundary."
+      })
+    ).toBe(false)
+    expect(
+      Schema.is(relayConversationOutputSchema("explain"))({
+        reply: "The service owns retries.",
+        review: {
+          findings: [],
+          verdict: "Architecture overview.",
+          explanation: "Uses a service boundary."
+        }
+      })
+    ).toBe(true)
   })
 
   it.effect("rejects Relay findings outside exact changed-file and changed-line evidence", () =>

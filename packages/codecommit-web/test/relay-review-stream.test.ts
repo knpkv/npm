@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from "@effect/vitest"
-import { runRelayReviewStream } from "../src/client/relay-review-stream.js"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import type {
   PullRequestRelayReviewResponse,
   RelayReviewStreamEvent,
@@ -12,8 +11,15 @@ const request: RelayReviewStreamRequest = {
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
-  kind: "review",
-  skillIds: []
+  profile: {
+    id: "thorough",
+    name: "Thorough review",
+    kind: "review",
+    provider: "codex",
+    harness: "native-codex",
+    model: "configured-default",
+    skillIds: []
+  }
 }
 
 const completedReview: PullRequestRelayReviewResponse = {
@@ -22,8 +28,13 @@ const completedReview: PullRequestRelayReviewResponse = {
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
   kind: "review",
+  profile: request.profile,
   result: { findings: [], verdict: "No findings." }
 }
+
+afterEach(() => {
+  vi.resetModules()
+})
 
 describe("Relay review NDJSON transport", () => {
   it("emits progress before a split terminal frame completes", async () => {
@@ -34,11 +45,17 @@ describe("Relay review NDJSON transport", () => {
       }
     })
     const originalFetch = window.fetch
-    window.fetch = () => Promise.resolve(new Response(body, { status: 200 }))
+    window.fetch = (input) =>
+      Promise.resolve(
+        new Response(input === "/api/session/current" ? null : body, {
+          status: input === "/api/session/current" ? 204 : 200
+        })
+      )
     const events: Array<RelayReviewStreamEvent> = []
     const firstEvent = Promise.withResolvers<void>()
     const encoder = new TextEncoder()
     try {
+      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       const running = runRelayReviewStream("/review", request, (event) => {
         events.push(event)
         firstEvent.resolve()
@@ -69,8 +86,14 @@ describe("Relay review NDJSON transport", () => {
       }
     })
     const originalFetch = window.fetch
-    window.fetch = () => Promise.resolve(new Response(body, { status: 200 }))
+    window.fetch = (input) =>
+      Promise.resolve(
+        new Response(input === "/api/session/current" ? null : body, {
+          status: input === "/api/session/current" ? 204 : 200
+        })
+      )
     try {
+      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
         _tag: "RelayReviewTransportError",
         message: "Relay progress stream ended before a terminal event"
@@ -91,8 +114,14 @@ describe("Relay review NDJSON transport", () => {
       }
     })
     const originalFetch = window.fetch
-    window.fetch = () => Promise.resolve(new Response(body, { status: 200 }))
+    window.fetch = (input) =>
+      Promise.resolve(
+        new Response(input === "/api/session/current" ? null : body, {
+          status: input === "/api/session/current" ? 204 : 200
+        })
+      )
     try {
+      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
         _tag: "RelayReviewTransportError",
         message: "Relay returned frames after the terminal event"

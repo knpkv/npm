@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Domain, Errors, PRService } from "@knpkv/codecommit-core"
+import { ConfigService, Domain, Errors, PRService } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Schema } from "effect"
 
 import {
   cachedPullRequest,
   completeSinglePullRequestRefresh,
+  resolveRelayReviewProfile,
   selectedPullRequest
 } from "../src/server/handlers/prs-live.js"
 
@@ -42,6 +43,28 @@ const awsAccountPullRequest = new Domain.PullRequest({
 })
 
 describe("PR handler selection", () => {
+  it.effect("accepts only the exact server-owned Relay profile snapshot", () =>
+    Effect.gen(function*() {
+      const configured = ConfigService.defaultReviewConfig.profiles[0]
+      if (configured === undefined) return
+      const service = {
+        load: Effect.succeed({
+          accounts: [],
+          autoDetect: false,
+          autoRefresh: false,
+          refreshIntervalSeconds: 300,
+          review: ConfigService.defaultReviewConfig,
+          sandbox: ConfigService.defaultSandboxConfig
+        })
+      }
+
+      expect(yield* resolveRelayReviewProfile(service, configured)).toEqual(configured)
+      const failure = yield* resolveRelayReviewProfile(service, { ...configured, model: "gpt-5.6-luna" }).pipe(
+        Effect.flip
+      )
+      expect(failure.message).toContain("unknown or has changed")
+    }))
+
   it.effect("acknowledges a manual refresh only after its provider projection completes", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()

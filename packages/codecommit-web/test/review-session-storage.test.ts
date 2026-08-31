@@ -15,6 +15,15 @@ const review: PullRequestRelayReviewResponse = {
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
   kind: "review",
+  profile: {
+    id: "thorough",
+    name: "Thorough review",
+    kind: "review",
+    provider: "codex",
+    harness: "native-codex",
+    model: "configured-default",
+    skillIds: ["builtin:pr-review"]
+  },
   result: {
     verdict: "One finding.",
     findings: [{
@@ -37,13 +46,12 @@ describe("Relay review session storage", () => {
     writeRelayReviewSession(window.sessionStorage, key, {
       identity: "exact-head-1",
       review,
-      skillIds: ["builtin:pr-review"],
       turns: [{ findingId: "F1", role: "user", message: "Verify this again." }],
       dispositions: { F1: "rejected" }
     })
 
     expect(readRelayReviewSession(window.sessionStorage, key, "exact-head-1")).toMatchObject({
-      skillIds: ["builtin:pr-review"],
+      review: { profile: { skillIds: ["builtin:pr-review"] } },
       turns: [{ message: "Verify this again." }],
       dispositions: { F1: "rejected" }
     })
@@ -62,7 +70,6 @@ describe("Relay review session storage", () => {
     writeRelayReviewSession(window.sessionStorage, key, {
       identity: "exact-head-1",
       review,
-      skillIds: [],
       turns: [],
       dispositions: { interrupted: "posting", pending: "pending", posted: "posted" }
     })
