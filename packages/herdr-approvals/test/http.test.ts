@@ -45,6 +45,7 @@ import { DashboardSnapshot, PendingApprovalSummary, PendingApprovalTarget } from
 import {
   budgetDashboardSnapshot,
   dashboardSnapshotBytes,
+  listenerAuthority,
   makeRunner,
   recordWorkCheckpointRequest,
   startHttpServer
@@ -339,6 +340,11 @@ describe("host HTTP authority", () => {
         }
       })
     }))
+
+  it("canonicalizes default HTTP listener authorities", () => {
+    expect(listenerAuthority("100.64.0.1", 80)).toBe("100.64.0.1")
+    expect(listenerAuthority("100.64.0.1", 4_779)).toBe("100.64.0.1:4779")
+  })
 
   it.effect("records only authorized valid Work checkpoints and projects them immediately", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-checkpoint-"))

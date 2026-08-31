@@ -265,6 +265,9 @@ const sameOrigin = (request: IncomingMessage, expected: string) => {
     )
 }
 
+export const listenerAuthority = (address: string, port: number): string =>
+  new URL(`http://${address}:${port}/`).host.toLowerCase()
+
 const approvalIcon =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
 
@@ -2151,7 +2154,7 @@ export const startHttpServer = async (
       }
       const bound = decodedAddress.success
       if (mode !== "serve") {
-        expectedHost = `${bound.address}:${bound.port}`.toLowerCase()
+        expectedHost = listenerAuthority(bound.address, bound.port)
       }
       activeServers.add(server)
       return {
