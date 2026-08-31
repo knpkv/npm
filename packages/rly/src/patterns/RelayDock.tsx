@@ -22,6 +22,7 @@ import {
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
   useModalIsolation,
+  useParentModalPresent,
   useParentModalReady,
   useModalScrollLock
 } from "../internal/modal.js"
@@ -328,6 +329,7 @@ interface DockLayerProps extends Pick<RelayDockBaseProps, "context" | "footer" |
   readonly description: string
   readonly headingId: string
   readonly modal: boolean
+  readonly parentModalPresent: boolean
   readonly onClose: () => void
   readonly restoreTargetRef: RefObject<HTMLElement | null>
   readonly title: string
@@ -356,10 +358,12 @@ const DockInitialFocus = ({
 
 const DockLayerSurface = ({
   children,
-  modal
+  modal,
+  modalLayer
 }: {
   readonly children: ReactNode
   readonly modal: boolean
+  readonly modalLayer: boolean
 }): ReactElement => {
   const layerRef = useRef<HTMLDivElement>(null)
   useModalContentRegistration()
@@ -368,7 +372,7 @@ const DockLayerSurface = ({
   return (
     <div
       className={style("layer")}
-      data-rly-modal-layer={modal ? "" : undefined}
+      data-rly-modal-layer={modalLayer ? "" : undefined}
       data-rly-relay-dock-modal={modal ? "true" : "false"}
       ref={layerRef}
     >
@@ -386,6 +390,7 @@ const DockLayer = ({
   headingId,
   modal,
   onClose,
+  parentModalPresent,
   restoreTargetRef,
   selection,
   state,
@@ -397,8 +402,8 @@ const DockLayer = ({
     const panel = event.currentTarget
     if (!event.nativeEvent.composedPath().includes(panel)) return
     if (event.defaultPrevented) return
-    if (event.nativeEvent.isComposing) return
     if (event.key === "Escape") {
+      if (event.nativeEvent.isComposing) return
       event.stopPropagation()
       onClose()
       return
@@ -409,7 +414,9 @@ const DockLayer = ({
       (element) =>
         isRenderedFocusable(element) &&
         isSequentiallyFocusableRadio(element, panel) &&
-        (element.tabIndex >= 0 || element.isContentEditable || element.matches("details > summary:first-of-type"))
+        (element.tabIndex >= 0 ||
+          (element.isContentEditable && !element.hasAttribute("tabindex")) ||
+          element.matches("details > summary:first-of-type"))
     )
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
@@ -426,7 +433,7 @@ const DockLayer = ({
     <PortalBoundary>
       {(container) => (
         <RadixPortal.Root container={container}>
-          <DockLayerSurface modal={modal}>
+          <DockLayerSurface modal={modal} modalLayer={modal || parentModalPresent}>
             {modal ? (
               <div
                 aria-hidden="true"
@@ -496,6 +503,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
     ...props
   } = componentProps
   const [defaultState, setDefaultState] = useState(defaultOpen)
+  const parentModalPresent = useParentModalPresent()
   const parentModalReady = useParentModalReady()
   const portalTarget = usePortalTarget()
   const resolvedOpen = (open ?? defaultState) && parentModalReady && portalTarget.available
@@ -565,6 +573,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
             headingId={headingId}
             modal={modal}
             onClose={() => requestOpenChange(false)}
+            parentModalPresent={parentModalPresent}
             restoreTargetRef={restoreTargetRef}
             selection={selection}
             state={state}

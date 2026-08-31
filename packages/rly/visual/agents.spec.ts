@@ -285,6 +285,42 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   await expect(uncheckedRadio).not.toBeFocused()
   await page.keyboard.press("Shift+Tab")
   await expect(visibleSummaryAction).toBeFocused()
+
+  const composingEditor = dock.getByRole("textbox", { name: "Composing Relay reply" })
+  await dock.evaluate((element) => {
+    const editor = element.ownerDocument.createElement("textarea")
+    editor.setAttribute("aria-label", "Composing Relay reply")
+    element.append(editor)
+  })
+  await composingEditor.focus()
+  expect(
+    await composingEditor.evaluate((editor) => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+        key: "Tab"
+      })
+      editor.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+  ).toBe(true)
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await expect(close).toBeFocused()
+  expect(
+    await close.evaluate((button) => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+        key: "Tab",
+        shiftKey: true
+      })
+      button.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+  ).toBe(true)
+  await expect(composingEditor).toBeFocused()
 })
 
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
