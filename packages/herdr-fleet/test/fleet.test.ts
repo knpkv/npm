@@ -127,6 +127,21 @@ describe("fleet local authority", () => {
         approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test/" }
       })
     )).toBe(true)
+    const portFields: ReadonlyArray<"localPort" | "port" | "approvalPort"> = [
+      "localPort",
+      "port",
+      "approvalPort"
+    ]
+    for (const field of portFields) {
+      for (const invalidPort of [0, 4_779.5, 65_536]) {
+        expect(Result.isFailure(
+          Schema.decodeUnknownResult(HostConfiguration)({
+            ...valid,
+            [field]: invalidPort
+          })
+        )).toBe(true)
+      }
+    }
     expect(Result.isFailure(
       Schema.decodeUnknownResult(HostConfiguration, {
         onExcessProperty: "error"

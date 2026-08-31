@@ -276,14 +276,19 @@ const Command = Schema.Array(CommandArgument).check(
   )
 )
 
+const TcpPort = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 1, maximum: 65_535 })
+)
+
 export const HostConfiguration = Schema.Struct({
   host: Schema.String,
   repository: Schema.String,
   stateDirectory: Schema.String,
   crossHost: Schema.Boolean,
-  port: Schema.Number,
-  localPort: Schema.Number,
-  approvalPort: Schema.Number,
+  port: TcpPort,
+  localPort: TcpPort,
+  approvalPort: TcpPort,
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
   machines: FleetMachines,
