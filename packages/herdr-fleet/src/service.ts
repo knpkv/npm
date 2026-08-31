@@ -363,19 +363,25 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
   const runCoordinatorChat = Effect.fn("FleetService.runCoordinatorChat")(
     function*(jobId: string) {
       const record = yield* get(jobId)
-      if (record.payload.kind !== "agent.delegate") {
+      if (
+        record.payload.kind !== "agent.delegate" ||
+        record.payload.channel !== "coordinator_chat"
+      ) {
         return yield* new FleetValidationError({
-          detail: "coordinator chat job is not agent.delegate"
+          detail: "coordinator chat job is not a channelled agent.delegate"
         })
       }
-      return yield* runWith(jobId, (payload, workerStarted) =>
-        payload.kind === "agent.delegate"
-          ? options.operations.runCoordinatorChat(payload, workerStarted, jobId)
-          : Effect.fail(
-            new FleetValidationError({
-              detail: "coordinator chat payload changed before execution"
-            })
-          ))
+      return yield* runWith(
+        jobId,
+        (payload, workerStarted) =>
+          payload.kind === "agent.delegate" && payload.channel === "coordinator_chat"
+            ? options.operations.runCoordinatorChat(payload, workerStarted, jobId)
+            : Effect.fail(
+              new FleetValidationError({
+                detail: "coordinator chat payload changed before execution"
+              })
+            )
+      )
     }
   )
 

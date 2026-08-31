@@ -306,6 +306,84 @@ describe("fleet local authority", () => {
       ).toBe(generic)
     }).pipe(provideNodeServices))
 
+  it.effect("executes only channelled delegates through coordinator chat", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-coordinator-channel-test-"))
+    let coordinatorRuns = 0
+    const coordinatorOperations: HostOperations = {
+      ...operations,
+      runCoordinatorChat: () =>
+        Effect.sync(() => {
+          coordinatorRuns += 1
+          return "coordinator: ok"
+        })
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const genericService = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-generic-delegate"),
+            nonce: Effect.succeed("nonce-generic-delegate"),
+            now: Effect.succeed(1_000),
+            operations: coordinatorOperations,
+            store
+          })
+          const generic = yield* genericService.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "ordinary delegate",
+              repository: "/repo"
+            }
+          }, "owner")
+          yield* genericService.approve(generic.id, {
+            hash: generic.hash,
+            nonce: "nonce-generic-delegate"
+          }, "owner")
+          expect(yield* Effect.result(genericService.runCoordinatorChat(generic.id))).toMatchObject({
+            failure: { _tag: "FleetValidationError" }
+          })
+          expect((yield* genericService.get(generic.id)).status).toBe("queued")
+          expect(coordinatorRuns).toBe(0)
+
+          const coordinatorService = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-coordinator-delegate"),
+            nonce: Effect.succeed("nonce-coordinator-delegate"),
+            now: Effect.succeed(1_001),
+            operations: coordinatorOperations,
+            store
+          })
+          const coordinator = yield* coordinatorService.submit({
+            payload: {
+              channel: "coordinator_chat",
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "coordinator delegate",
+              repository: "/repo"
+            }
+          }, "owner")
+          yield* coordinatorService.approve(coordinator.id, {
+            hash: coordinator.hash,
+            nonce: "nonce-coordinator-delegate"
+          }, "owner")
+          expect(yield* coordinatorService.runCoordinatorChat(coordinator.id)).toMatchObject({
+            result: "coordinator: ok",
+            status: "succeeded"
+          })
+          expect(coordinatorRuns).toBe(1)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("accepts only lowercase hexadecimal SHA-256 job hashes", () =>
     Effect.gen(function*() {
       const hash = yield* jobHash("SER8", "owner", { kind: "nix.check" })
