@@ -27,11 +27,17 @@
   .connect-directory-screen {
     background: var(--rly-color-surface-1);
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
   .connect-terminal-screen {
-    inset: 0;
+    background: var(--rly-color-surface-1);
+    block-size: var(--connect-visual-viewport-height, 100dvh);
+    box-sizing: border-box;
+    inset-block-start: var(--connect-visual-viewport-offset, 0px);
+    inset-inline: 0;
+    padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
     pointer-events: none;
     position: fixed;
     visibility: hidden;
@@ -75,6 +81,7 @@
   .connect-agents {
     inline-size: min(100%, 76rem);
     justify-self: center;
+    max-inline-size: 100%;
     min-block-size: 0;
     overflow-y: auto;
     padding: var(--rly-space-20) var(--rly-space-20) var(--rly-space-32);
@@ -305,7 +312,7 @@
   }
 
   .terminal-stage {
-    block-size: 100dvh;
+    block-size: 100%;
     background: var(--rly-color-surface-1);
     border: 0;
     border-radius: 0;
@@ -375,35 +382,121 @@
   }
 
   @media (max-width: 700px) {
+    .connect-shell-embedded {
+      block-size: auto;
+      overflow: visible;
+    }
+
+    .connect-shell-embedded .connect-agents {
+      overflow-y: visible;
+    }
+
     .connect-header {
+      min-block-size: var(--rly-space-48);
       padding: var(--rly-space-8) var(--rly-space-12);
     }
 
+    .connect-header > div > :first-child {
+      display: none;
+    }
+
+    .connect-header h1,
+    .connect-embedded-intro h1 {
+      font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+        var(--rly-type-card-title-font);
+      letter-spacing: var(--rly-type-card-title-tracking);
+    }
+
+    .fleet-app-nav {
+      gap: var(--rly-space-8);
+    }
+
+    .fleet-app-nav a {
+      font-size: var(--rly-type-meta-size);
+      padding-block: var(--rly-space-4);
+    }
+
+    .connect-embedded-intro {
+      align-items: center;
+      gap: var(--rly-space-8);
+      padding: var(--rly-space-8);
+    }
+
+    .connect-embedded-intro > div {
+      display: block;
+      min-inline-size: 0;
+    }
+
+    .connect-embedded-intro > div > :first-child,
+    .connect-embedded-intro > div > :last-child {
+      display: none;
+    }
+
     .connect-agents {
-      padding: var(--rly-space-12) var(--rly-space-8) var(--rly-space-24);
+      padding: var(--rly-space-8) var(--rly-space-8) var(--rly-space-24);
     }
 
     .connect-search {
-      padding: 0;
+      padding-block-end: var(--rly-space-8);
       position: static;
     }
 
+    .connect-search > span {
+      block-size: 1px;
+      clip-path: inset(50%);
+      inline-size: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+    }
+
+    .connect-search input {
+      min-block-size: 2.25rem;
+    }
+
     .connect-filter-row {
-      display: grid;
-      justify-content: stretch;
+      flex-wrap: nowrap;
+      justify-content: flex-start;
+      margin-block-end: var(--rly-space-8);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .connect-group-filter,
+    .connect-status-filter {
+      flex: 0 0 auto;
+    }
+
+    .connect-group-filter button,
+    .connect-status-filter button {
+      line-height: var(--rly-type-meta-line-height);
+      padding-block: var(--rly-space-4);
     }
 
     .connect-agent-tree {
-      gap: var(--rly-space-24);
+      gap: var(--rly-space-16);
     }
 
     .connect-day-heading {
+      margin-block-end: 0;
+      min-block-size: 2rem;
+      padding-block-end: var(--rly-space-4);
       padding-inline: var(--rly-space-8);
     }
 
     .connect-day-heading > div {
-      display: grid;
-      gap: 0;
+      display: flex;
+      gap: var(--rly-space-8);
+    }
+
+    .connect-day-heading strong {
+      font-size: var(--rly-type-label-size);
+    }
+
+    .connect-day-heading span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .connect-agent-list::before {
@@ -413,7 +506,7 @@
     .connect-agent {
       gap: var(--rly-space-8);
       grid-template-columns: 3.5rem 0.5rem minmax(0, 1fr) auto;
-      padding: var(--rly-space-12) var(--rly-space-8);
+      padding: var(--rly-space-8);
     }
 
     .connect-failures,

@@ -27,6 +27,7 @@ import {
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
+import { bindTerminalViewport } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 
@@ -443,6 +444,7 @@ export const ConnectSurface = ({
   const preferenceApplied = useRef(false)
   const requestId = useRef(0)
   const terminalRef = useRef<HTMLDivElement>(null)
+  const terminalViewportRef = useRef<HTMLDivElement>(null)
   useAtomMount(atoms.agentsPoll)
 
   useEffect(() => {
@@ -454,6 +456,13 @@ export const ConnectSurface = ({
       container.replaceChildren()
     }
   }, [connectionRequest, setConnection])
+
+  const terminalConnected = connection._tag === "connected"
+  useEffect(() => {
+    const room = terminalViewportRef.current
+    if (!terminalConnected || room === null) return
+    return bindTerminalViewport(room, window)
+  }, [terminalConnected])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value
@@ -664,6 +673,7 @@ export const ConnectSurface = ({
         directory={directoryScreen}
         mode={connection._tag === "connected" ? "terminal" : "directory"}
         terminal={terminalScreen}
+        terminalViewportRef={terminalViewportRef}
       />
       {roomFooter}
     </div>
