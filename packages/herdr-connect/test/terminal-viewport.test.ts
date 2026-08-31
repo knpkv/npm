@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { bindTerminalViewport, type TerminalVisualViewport } from "../src/terminal-viewport.js"
 
 class FakeStyle implements Pick<CSSStyleDeclaration, "removeProperty" | "setProperty"> {

@@ -43,6 +43,9 @@ const hasExportModifier = (node) =>
 
 const normalizeTypeText = (typeNode) => typeNode.getText().replace(/\s+/gu, " ").trim()
 
+const hasReadonlyModifier = (node) =>
+  node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ReadonlyKeyword) === true
+
 const analyzeSources = (sources) => {
   const modules = new Map()
   for (const [filePath, source] of sources) {
@@ -148,56 +151,206 @@ const resolveExportedType = (analysis, filePath, name, seen = new Set()) => {
   return localAlias === undefined ? undefined : { filePath, node: localAlias }
 }
 
-const typeMembers = (typeNode, analysis, filePath, seen = new Set()) => {
-  if (TypeScript.isParenthesizedTypeNode(typeNode)) return typeMembers(typeNode.type, analysis, filePath, seen)
+const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map(), seen = new Set()) => {
+  if (TypeScript.isParenthesizedTypeNode(typeNode))
+    return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen)
+  if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
+    const substituted = substitutions.get(typeNode.typeName.text)
+    if (substituted !== undefined) {
+      return Predicate.isString(substituted)
+        ? substituted
+        : canonicalTypeText(substituted, analysis, filePath, substitutions, seen)
+    }
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+    if (declaration !== undefined) {
+      const key = `${declaration.filePath}\u0000${typeNode.typeName.text}`
+      if (seen.has(key)) return normalizeTypeText(typeNode)
+      const nextSeen = new Set(seen).add(key)
+      const nextSubstitutions = new Map(substitutions)
+      for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
+        const argument = typeNode.typeArguments?.[index]
+        if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+      }
+      if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
+        return canonicalTypeText(declaration.node.type, analysis, declaration.filePath, nextSubstitutions, nextSeen)
+      }
+    }
+    if (typeNode.typeArguments !== undefined) {
+      const wrapper = normalizeTypeText(typeNode.typeName)
+      const argumentsText = typeNode.typeArguments
+        .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+        .join(",")
+      return `${wrapper}<${argumentsText}>`
+    }
+  }
+  if (TypeScript.isTypeReferenceNode(typeNode) && typeNode.typeArguments !== undefined) {
+    const wrapper = normalizeTypeText(typeNode.typeName)
+    const argumentsText = typeNode.typeArguments
+      .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+      .join(",")
+    return `${wrapper}<${argumentsText}>`
+  }
+  if (TypeScript.isUnionTypeNode(typeNode)) {
+    return `union(${typeNode.types
+      .map((member) => canonicalTypeText(member, analysis, filePath, substitutions, seen))
+      .toSorted()
+      .join("|")})`
+  }
+  if (TypeScript.isIntersectionTypeNode(typeNode)) {
+    return `intersection(${typeNode.types
+      .map((member) => canonicalTypeText(member, analysis, filePath, substitutions, seen))
+      .toSorted()
+      .join("&")})`
+  }
+  if (TypeScript.isFunctionTypeNode(typeNode)) {
+    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    return `function<${generic.descriptor}>(${typeNode.parameters
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
+      .join(",")}):${
+      typeNode.type === undefined
+        ? "unknown"
+        : canonicalTypeText(typeNode.type, analysis, filePath, generic.substitutions, seen)
+    }`
+  }
+  return normalizeTypeText(typeNode)
+}
+
+const genericDescriptor = (typeParameters, analysis, filePath, substitutions) => {
+  const nextSubstitutions = new Map(substitutions)
+  for (const [index, parameter] of (typeParameters ?? []).entries()) {
+    nextSubstitutions.set(parameter.name.text, `generic#${index}`)
+  }
+  const descriptor = (typeParameters ?? [])
+    .map((parameter, index) => {
+      const constraint =
+        parameter.constraint === undefined
+          ? ""
+          : `extends:${canonicalTypeText(parameter.constraint, analysis, filePath, nextSubstitutions)}`
+      const defaultType =
+        parameter.default === undefined
+          ? ""
+          : `default:${canonicalTypeText(parameter.default, analysis, filePath, nextSubstitutions)}`
+      return `${index}:${constraint}:${defaultType}`
+    })
+    .join(",")
+  return { descriptor, substitutions: nextSubstitutions }
+}
+
+const parameterDescriptor = (parameter, analysis, filePath, substitutions) => {
+  const marker = parameter.dotDotDotToken === undefined ? "" : "..."
+  const optional = parameter.questionToken === undefined ? "" : "?"
+  const type =
+    parameter.type === undefined ? "unknown" : canonicalTypeText(parameter.type, analysis, filePath, substitutions)
+  return `${marker}${optional}:${type}`
+}
+
+const memberDescriptor = (member, analysis, filePath, substitutions) => {
+  const optional = member.questionToken === undefined ? "required" : "optional"
+  const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
+  if (TypeScript.isMethodSignature(member)) {
+    const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions)
+    const parameters = member.parameters
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
+      .join(",")
+    const returnType =
+      member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, generic.substitutions)
+    return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
+  }
+  const type = member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, substitutions)
+  return `${readonly}${optional}:${type}`
+}
+
+const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutions = new Map()) => {
+  if (TypeScript.isParenthesizedTypeNode(typeNode))
+    return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     const members = new Map()
+    let resolved = true
     for (const member of typeNode.types) {
-      for (const [name, type] of typeMembers(member, analysis, filePath, seen)) members.set(name, type)
+      const result = typeMembers(member, analysis, filePath, seen, substitutions)
+      if (!result.resolved) resolved = false
+      for (const [name, type] of result.members) members.set(name, type)
     }
-    return members
+    return { members, resolved }
   }
   if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
     const members = new Map()
+    let resolved = true
+    if (TypeScript.isInterfaceDeclaration(typeNode)) {
+      for (const clause of typeNode.heritageClauses ?? []) {
+        for (const heritageType of clause.types) {
+          const result = typeMembers(heritageType, analysis, filePath, seen, substitutions)
+          if (!result.resolved) resolved = false
+          for (const [name, type] of result.members) members.set(name, type)
+        }
+      }
+    }
     for (const member of typeNode.members) {
       if (!TypeScript.isPropertySignature(member) && !TypeScript.isMethodSignature(member)) continue
       const name = member.name
       if (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name)) {
         continue
       }
-      members.set(name.text, member.type === undefined ? "unknown" : normalizeTypeText(member.type))
+      members.set(name.text, memberDescriptor(member, analysis, filePath, substitutions))
     }
-    if (TypeScript.isInterfaceDeclaration(typeNode)) {
-      for (const clause of typeNode.heritageClauses ?? []) {
-        for (const heritageType of clause.types) {
-          for (const [name, type] of typeMembers(heritageType, analysis, filePath, seen)) members.set(name, type)
-        }
-      }
-    }
-    return members
+    return { members, resolved }
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
-    if (declaration === undefined) return new Map()
+    if (declaration === undefined) return { members: new Map(), resolved: false }
     const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.typeName.text}`)
+    const nextSubstitutions = new Map(substitutions)
+    for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
+      const argument = typeNode.typeArguments?.[index]
+      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+    }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
-      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen)
+      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
     }
     if (TypeScript.isInterfaceDeclaration(declaration.node)) {
-      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen)
+      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen, nextSubstitutions)
     }
   }
-  return new Map()
+  if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
+    if (declaration === undefined) return { members: new Map(), resolved: false }
+    const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.expression.text}`)
+    const nextSubstitutions = new Map(substitutions)
+    for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
+      const argument = typeNode.typeArguments?.[index]
+      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+    }
+    if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
+      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+    }
+    if (TypeScript.isInterfaceDeclaration(declaration.node)) {
+      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+    }
+  }
+  return { members: new Map(), resolved: false }
 }
 
 const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSources(sources)) => {
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
   const exports = new Map()
-  const addCallable = (name, parameters) => {
+  const addCallable = (name, parameters, returnType, contextualType) => {
+    const contextualParameters = contextualType === undefined ? [] : contextualType.parameters
     const firstParameter = parameters[0]
-    if (firstParameter === undefined || firstParameter.type === undefined) return
-    exports.set(name, typeMembers(firstParameter.type, analysis, filePath))
+    const contextualParameter = contextualParameters[0]
+    const parameterType = firstParameter?.type ?? contextualParameter?.type
+    const properties =
+      parameterType === undefined
+        ? { members: new Map(), resolved: false }
+        : typeMembers(parameterType, analysis, filePath)
+    const contextualReturnType = contextualType?.type
+    const effectiveReturnType = returnType ?? contextualReturnType
+    exports.set(name, {
+      properties,
+      returnType:
+        effectiveReturnType === undefined ? undefined : canonicalTypeText(effectiveReturnType, analysis, filePath),
+      returnResolved: effectiveReturnType !== undefined
+    })
   }
   const visit = (node) => {
     if (TypeScript.isVariableStatement(node) && hasExportModifier(node)) {
@@ -210,11 +363,15 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
         ) {
           continue
         }
-        addCallable(declaration.name.text, initializer.parameters)
+        const contextualType =
+          declaration.type !== undefined && TypeScript.isFunctionTypeNode(declaration.type)
+            ? declaration.type
+            : undefined
+        addCallable(declaration.name.text, initializer.parameters, initializer.type, contextualType)
       }
     }
     if (TypeScript.isFunctionDeclaration(node) && node.name !== undefined && hasExportModifier(node)) {
-      addCallable(node.name.text, node.parameters)
+      addCallable(node.name.text, node.parameters, node.type, undefined)
     }
     TypeScript.forEachChild(node, visit)
   }
@@ -226,8 +383,8 @@ const callableParameterTypes = (source, filePath) => {
   const detailed = callableParameterTypesInSources(new Map([[filePath, source]]), filePath)
   return new Map(
     [...detailed]
-      .filter(([, properties]) => properties.size > 0)
-      .map(([name, properties]) => [name, new Set(properties.keys())])
+      .filter(([, signature]) => signature.properties.resolved && signature.properties.members.size > 0)
+      .map(([name, signature]) => [name, new Set(signature.properties.members.keys())])
   )
 }
 
@@ -269,6 +426,13 @@ const resolveLocalModule = (fromPath, specifier, sourceFiles) => {
   return candidates.find((candidate) => sourceFiles.has(candidate))
 }
 
+const normalizeEntryPoints = (entryPoints) =>
+  entryPoints.map((entryPoint) =>
+    Predicate.isString(entryPoint) ? { identity: entryPoint, sourcePath: entryPoint } : entryPoint
+  )
+
+const conditionPathKey = (conditionPath) => (conditionPath ?? []).join("\u0000")
+
 const reachableCallableEntries = (sources, entryPoints) => {
   const info = analyzeSources(sources).modules
   const resolved = new Map()
@@ -308,8 +472,14 @@ const reachableCallableEntries = (sources, entryPoints) => {
     resolved.set(filePath, result)
     return result
   }
-  return entryPoints.flatMap((entryPoint) =>
-    [...exportsFor(entryPoint)].map(([exportedName, target]) => ({ entryPoint, exportedName, target }))
+  return normalizeEntryPoints(entryPoints).flatMap(({ conditionPath, identity, publicSubpath, sourcePath }) =>
+    [...exportsFor(sourcePath)].map(([exportedName, target]) => ({
+      conditionPath,
+      entryPoint: identity,
+      exportedName,
+      publicSubpath,
+      target
+    }))
   )
 }
 
@@ -323,67 +493,303 @@ const reachableCallableNames = (sources, entryPoints) => {
   return reachable
 }
 
-const publicCallableChanges = (previousSources, currentSources, entryPoints) => {
-  const signatures = (sources) => {
+const publicCallableChanges = (
+  previousSources,
+  currentSources,
+  previousEntryPoints,
+  currentEntryPoints = previousEntryPoints
+) => {
+  const signatures = (sources, entryPoints) => {
     const analysis = analyzeSources(sources)
     const result = new Map()
-    for (const { entryPoint, exportedName, target } of reachableCallableEntries(sources, entryPoints)) {
-      const properties = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
-      if (properties === undefined) continue
-      result.set(`${entryPoint}\u0000${exportedName}`, { filePath: target.filePath, name: target.name, properties })
+    for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
+      sources,
+      entryPoints
+    )) {
+      const signature = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
+      if (signature === undefined) continue
+      const identity = `${entryPoint}\u0000${exportedName}`
+      const existing = result.get(identity) ?? []
+      if (
+        !existing.some(
+          ({ conditionPath: existingConditionPath, filePath, name, publicSubpath: existingPublicSubpath }) =>
+            filePath === target.filePath &&
+            name === target.name &&
+            conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath) &&
+            existingPublicSubpath === publicSubpath
+        )
+      ) {
+        existing.push({ conditionPath, filePath: target.filePath, name: target.name, publicSubpath, ...signature })
+        result.set(identity, existing)
+      }
     }
     return result
   }
-  const previous = signatures(previousSources)
-  const current = signatures(currentSources)
+  const previous = signatures(previousSources, previousEntryPoints)
+  const current = signatures(currentSources, currentEntryPoints)
   const changes = []
-  for (const [identity, currentSignature] of current) {
-    const previousSignature = previous.get(identity)
-    const previousProperties = previousSignature?.properties ?? new Map()
-    for (const property of [...currentSignature.properties.keys()].toSorted()) {
-      if (!previousProperties.has(property)) {
-        changes.push({
-          kind: "addition",
-          filePath: currentSignature.filePath,
-          name: currentSignature.name,
-          properties: [property]
-        })
+  const signatureContract = (signature) =>
+    [
+      signature.properties.resolved ? "resolved" : "unresolved",
+      [...signature.properties.members.entries()]
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([name, type]) => `${name}:${type}`)
+        .join(","),
+      signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
+    ].join("|")
+  const signatureTargetKey = (signature) => `${signature.filePath}\u0000${signature.name}`
+  const signaturePublicSubpathKey = (signature) => signature.publicSubpath ?? ""
+  const signatureOccurrenceKey = (signature) =>
+    `${signatureTargetKey(signature)}\u0000${signaturePublicSubpathKey(signature)}`
+  const pairSignatures = (previousSignatures, currentSignatures) => {
+    const previousBaselines = previousSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
+    const currentBaselines = currentSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
+    const previousHasConditional = previousSignatures.some(
+      (signature) => conditionPathKey(signature.conditionPath) !== ""
+    )
+    const currentHasConditional = currentSignatures.some(
+      (signature) => conditionPathKey(signature.conditionPath) !== ""
+    )
+    const baselineFor = (baselines, signature, index) =>
+      baselines.find(
+        (baseline) => baseline.publicSubpath !== undefined && baseline.publicSubpath === signature.publicSubpath
+      ) ??
+      baselines.find((baseline) => signatureTargetKey(baseline) === signatureTargetKey(signature)) ??
+      (baselines.length === 1
+        ? baselines[0]
+        : (baselines.find((baseline) => signatureContract(baseline) === signatureContract(signature)) ??
+          baselines[index % baselines.length]))
+    if (previousBaselines.length > 0 && currentHasConditional) {
+      return {
+        pairs: currentSignatures.map((signature, index) => [
+          baselineFor(previousBaselines, signature, index),
+          signature
+        ]),
+        currentOnly: [],
+        previousOnly: []
       }
     }
-    for (const property of [...previousProperties.keys()].toSorted()) {
-      if (!currentSignature.properties.has(property)) {
-        changes.push({
-          kind: "removal",
-          filePath: currentSignature.filePath,
-          name: currentSignature.name,
-          properties: [property]
-        })
+    if (currentBaselines.length > 0 && previousHasConditional) {
+      return {
+        pairs: previousSignatures.map((signature, index) => [
+          signature,
+          baselineFor(currentBaselines, signature, index)
+        ]),
+        currentOnly: [],
+        previousOnly: []
       }
     }
-    for (const property of [...currentSignature.properties.keys()].toSorted()) {
-      const previousType = previousProperties.get(property)
-      const currentType = currentSignature.properties.get(property)
-      if (previousType !== undefined && currentType !== undefined && previousType !== currentType) {
-        changes.push({
-          kind: "type-change",
-          filePath: currentSignature.filePath,
-          name: currentSignature.name,
-          properties: [property]
-        })
+    const remainingPrevious = [...previousSignatures]
+    const pairs = []
+    const unmatchedCurrent = []
+    for (const currentSignature of currentSignatures) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          conditionPathKey(previousSignature.conditionPath) === conditionPathKey(currentSignature.conditionPath) &&
+          signaturePublicSubpathKey(previousSignature) === signaturePublicSubpathKey(currentSignature)
+      )
+      if (index === -1) {
+        unmatchedCurrent.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
       }
+    }
+    const unmatchedAfterPublicSubpath = []
+    for (const currentSignature of unmatchedCurrent) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          previousSignature.publicSubpath !== undefined &&
+          previousSignature.publicSubpath === currentSignature.publicSubpath
+      )
+      if (index === -1) {
+        unmatchedAfterPublicSubpath.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const unmatchedAfterTarget = []
+    for (const currentSignature of unmatchedAfterPublicSubpath) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          previousSignature.filePath === currentSignature.filePath && previousSignature.name === currentSignature.name
+      )
+      if (index === -1) {
+        unmatchedAfterTarget.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const unmatchedAfterContract = []
+    for (const currentSignature of unmatchedAfterTarget) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) => signatureContract(previousSignature) === signatureContract(currentSignature)
+      )
+      if (index === -1) {
+        unmatchedAfterContract.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const fallbackCount = Math.min(remainingPrevious.length, unmatchedAfterContract.length)
+    for (let index = 0; index < fallbackCount; index += 1) {
+      pairs.push([remainingPrevious[index], unmatchedAfterContract[index]])
+    }
+    const pairedTargetKeys = new Set(
+      pairs.flatMap(([previousSignature, currentSignature]) => [
+        signatureOccurrenceKey(previousSignature),
+        signatureOccurrenceKey(currentSignature)
+      ])
+    )
+    const currentOnly = unmatchedAfterContract
+      .slice(fallbackCount)
+      .filter(
+        (signature) =>
+          !previousSignatures.some(
+            (previousSignature) =>
+              conditionPathKey(previousSignature.conditionPath) === "" &&
+              pairedTargetKeys.has(signatureOccurrenceKey(signature))
+          )
+      )
+    const previousOnly = remainingPrevious
+      .slice(fallbackCount)
+      .filter(
+        (signature) =>
+          !currentSignatures.some(
+            (currentSignature) =>
+              conditionPathKey(currentSignature.conditionPath) === "" &&
+              pairedTargetKeys.has(signatureOccurrenceKey(signature))
+          )
+      )
+    return {
+      pairs,
+      currentOnly,
+      previousOnly
     }
   }
-  return changes
+  const compareSignatures = (previousSignature, currentSignature) => {
+    const currentProperties = currentSignature?.properties.members ?? new Map()
+    const previousProperties = previousSignature?.properties.members ?? new Map()
+    if (
+      currentSignature !== undefined &&
+      currentSignature.properties.resolved &&
+      (previousSignature === undefined || previousSignature.properties.resolved)
+    ) {
+      for (const property of [...currentProperties.keys()].toSorted()) {
+        if (!previousProperties.has(property)) {
+          changes.push({
+            kind: "addition",
+            filePath: currentSignature.filePath,
+            name: currentSignature.name,
+            properties: [property]
+          })
+        }
+      }
+      for (const property of [...previousProperties.keys()].toSorted()) {
+        if (!currentProperties.has(property)) {
+          changes.push({
+            kind: "removal",
+            filePath: currentSignature.filePath,
+            name: currentSignature.name,
+            properties: [property]
+          })
+        }
+      }
+    }
+    if (currentSignature !== undefined) {
+      for (const property of [...currentProperties.keys()].toSorted()) {
+        const previousType = previousProperties.get(property)
+        const currentType = currentProperties.get(property)
+        if (previousType !== undefined && currentType !== undefined && previousType !== currentType) {
+          changes.push({
+            kind: "type-change",
+            filePath: currentSignature.filePath,
+            name: currentSignature.name,
+            properties: [property]
+          })
+        }
+      }
+    }
+    if (
+      previousSignature !== undefined &&
+      currentSignature !== undefined &&
+      currentSignature.returnResolved &&
+      previousSignature.returnResolved &&
+      currentSignature.returnType !== previousSignature.returnType
+    ) {
+      changes.push({
+        kind: "return-type-change",
+        filePath: currentSignature.filePath,
+        name: currentSignature.name,
+        properties: []
+      })
+    }
+  }
+  const compareIdentity = (currentSignatures, previousSignatures) => {
+    const { pairs, currentOnly, previousOnly } = pairSignatures(previousSignatures, currentSignatures)
+    const comparedPairs = new Set()
+    for (const [previousSignature, currentSignature] of pairs) {
+      const pairKey = [
+        signatureOccurrenceKey(previousSignature),
+        signatureOccurrenceKey(currentSignature),
+        conditionPathKey(previousSignature.conditionPath),
+        conditionPathKey(currentSignature.conditionPath),
+        signatureContract(previousSignature),
+        signatureContract(currentSignature)
+      ].join("\u0000")
+      if (comparedPairs.has(pairKey)) continue
+      comparedPairs.add(pairKey)
+      compareSignatures(previousSignature, currentSignature)
+    }
+    const currentTargets = new Set()
+    for (const currentSignature of currentOnly) {
+      const targetKey = signatureOccurrenceKey(currentSignature)
+      if (currentTargets.has(targetKey)) continue
+      currentTargets.add(targetKey)
+      compareSignatures(undefined, currentSignature)
+    }
+    const previousTargets = new Set()
+    for (const previousSignature of previousOnly) {
+      const targetKey = signatureOccurrenceKey(previousSignature)
+      if (previousTargets.has(targetKey)) continue
+      previousTargets.add(targetKey)
+      changes.push({
+        kind: "callable-removal",
+        filePath: previousSignature.filePath,
+        name: previousSignature.name,
+        properties: [...previousSignature.properties.members.keys()].toSorted()
+      })
+    }
+  }
+  for (const [identity, currentSignatures] of current) {
+    compareIdentity(currentSignatures, previous.get(identity) ?? [])
+  }
+  for (const [identity, previousSignatures] of previous) {
+    if (!current.has(identity)) compareIdentity([], previousSignatures)
+  }
+  const uniqueChanges = new Map()
+  for (const change of changes) {
+    const key = `${change.kind}\u0000${change.filePath}\u0000${change.name}\u0000${change.properties.join("\u0000")}`
+    if (!uniqueChanges.has(key)) uniqueChanges.set(key, change)
+  }
+  return [...uniqueChanges.values()]
 }
 
 const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
   changes.flatMap(({ filePath, kind = "addition", name, packageName, properties }) => {
     if (releaseTypes.get(packageName) !== "patch") return []
+    const action =
+      kind === "addition" ? "add" : kind === "removal" ? "remove" : kind === "callable-removal" ? "remove" : "change"
     const diagnostic = [
-      `${packageName}: patch changeset cannot ${kind === "addition" ? "add" : kind === "removal" ? "remove" : "change"} public callable props`,
-      properties.join(", "),
+      `${packageName}: patch changeset cannot ${action} public callable${kind === "callable-removal" ? "" : " props"}`,
+      properties.length === 0 ? undefined : properties.join(", "),
       `(${name} in ${filePath})`
-    ].join(" ")
+    ]
+      .filter((part) => part !== undefined)
+      .join(" ")
     return [diagnostic]
   })
 
@@ -523,6 +929,15 @@ const runSelfTest = () => {
     }),
     []
   )
+  assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: true }, []), true)
+  assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, []), false)
+  assert.equal(
+    shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, [
+      "packages/public/src/index.ts"
+    ]),
+    true
+  )
+  assert.equal(shouldAnalyzePublicCallableChanges(records[1], ["packages/private/src/index.ts"]), false)
   assert.equal(
     manifestsDifferForRelease(
       { dependencies: { effect: "4.0.0-rc.109" } },
@@ -789,6 +1204,754 @@ const runSelfTest = () => {
       properties: ["terminalViewportRef"]
     }
   ])
+
+  const optionalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { label?: string }\nexport const Public = (props: Props) => props.label"
+    ]
+  ])
+  const optionalCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { label: string }\nexport const Public = (props: Props) => props.label"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(optionalPrevious, optionalCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["label"] }
+  ])
+
+  const inheritedPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface BaseProps { value: string }\ninterface Props extends BaseProps {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const inheritedCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface BaseProps { value: string; terminalViewportRef?: string }\ninterface Props extends BaseProps {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(inheritedPrevious, inheritedCurrent, ["packages/public/src/index.ts"]), [
+    {
+      kind: "addition",
+      filePath: "packages/public/src/view.tsx",
+      name: "Public",
+      properties: ["terminalViewportRef"]
+    }
+  ])
+
+  const unionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string; label: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unionCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(unionPrevious, unionCurrent, ["packages/public/src/index.ts"]), [])
+
+  const removedCurrent = new Map([
+    ["packages/public/src/index.ts", "export {}"],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(movedPrevious, removedCurrent, ["packages/public/src/index.ts"]), [
+    {
+      kind: "callable-removal",
+      filePath: "packages/public/src/old-view.tsx",
+      name: "Public",
+      properties: ["value"]
+    }
+  ])
+
+  const unresolvedCallablePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unresolvedCallableCurrent = new Map([
+    ["packages/public/src/index.ts", "export {}"],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unresolvedCallableRemoval = publicCallableChanges(unresolvedCallablePrevious, unresolvedCallableCurrent, [
+    "packages/public/src/index.ts"
+  ]).map((change) => ({ ...change, packageName: "@fixture/public" }))
+  assert.deepEqual(unresolvedCallableRemoval, [
+    {
+      kind: "callable-removal",
+      filePath: "packages/public/src/view.tsx",
+      name: "Public",
+      packageName: "@fixture/public",
+      properties: []
+    }
+  ])
+  assert.deepEqual(
+    validatePublicCallableReleaseTypes({
+      changes: unresolvedCallableRemoval,
+      releaseTypes: new Map([["@fixture/public", "patch"]])
+    }),
+    ["@fixture/public: patch changeset cannot remove public callable (Public in packages/public/src/view.tsx)"]
+  )
+
+  const overriddenPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface BaseProps { value: string }\ninterface Props extends BaseProps { value: "a" }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  const overriddenCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface BaseProps { value: string }\ninterface Props extends BaseProps { value: "b" }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(overriddenPrevious, overriddenCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const unresolvedBasePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = ExternalProps & { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unresolvedBaseCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = ExternalProps & { value: number }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(unresolvedBasePrevious, unresolvedBaseCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  const genericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface Base<T> { value: T }\ninterface Props extends Base<string> {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const genericCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface Base<T> { value: T }\ninterface Props extends Base<number> {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(genericPrevious, genericCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const aliasPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type ID = string\ntype Props = { value: ID }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const aliasCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type UserID = string\ntype Props = { value: UserID }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(aliasPrevious, aliasCurrent, ["packages/public/src/index.ts"]), [])
+
+  const contextualSource = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public: (props: Props) => string = (props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(contextualSource, contextualSource, ["packages/public/src/index.ts"]), [])
+  const contextualChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: number }\nexport const Public: (props: Props) => string = (props) => String(props.value)"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(contextualSource, contextualChanged, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const genericCallablePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: T) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const genericCallableCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends number>(value: T) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(genericCallablePrevious, genericCallableCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
+  const genericCallableRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: U) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(genericCallablePrevious, genericCallableRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const wrappedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: ReadonlyArray<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const wrappedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: ReadonlyArray<U>) => Promise<U> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(wrappedGenericPrevious, wrappedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const wrappedGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: ReadonlyArray<string>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(wrappedGenericPrevious, wrappedGenericChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
+  const qualifiedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: React.ComponentType<T>, box: NS.Box<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const qualifiedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: React.ComponentType<U>, box: NS.Box<U>) => Promise<U> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(qualifiedGenericPrevious, qualifiedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const qualifiedGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: React.ComponentType<number>, box: NS.Box<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(qualifiedGenericPrevious, qualifiedGenericChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
+
+  const methodPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb(value: string): void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const methodCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb(value: number): void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(methodPrevious, methodCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }
+  ])
+  const methodRenameCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb(nextValue: string): void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(methodPrevious, methodRenameCurrent, ["packages/public/src/index.ts"]), [])
+
+  const returnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props): string => props.value"
+    ]
+  ])
+  const returnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props): number => Number(props.value)"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(returnPrevious, returnCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
+
+  const readonlyPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const readonlyCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { readonly value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(readonlyPrevious, readonlyCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const removedEntryPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const removedEntryCurrent = new Map([
+    ["packages/public/src/index.ts", "export {}"],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const conditionalSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const conditionalManifest = {
+    exports: { ".": { import: "./src/index.ts", require: "./src/index.ts" } }
+  }
+  const directManifest = { exports: { ".": "./src/index.ts" } }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
+    [
+      { conditionPath: ["import"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
+      { conditionPath: ["require"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" }
+    ]
+  )
+  const topLevelConditionalManifest = {
+    exports: { import: "./src/index.ts", require: "./src/index.ts" }
+  }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(topLevelConditionalManifest, "packages/public", [...conditionalSources.keys()]),
+    [
+      { conditionPath: ["import"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
+      { conditionPath: ["require"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    []
+  )
+  const splitConditionalPrevious = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const splitConditionalCurrent = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: number }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const splitConditionalManifest = {
+    exports: { ".": { import: "./src/import-view.tsx", require: "./src/require-view.tsx" } }
+  }
+  const splitConditionalDescriptors = (sources) =>
+    manifestEntryPointDescriptors(splitConditionalManifest, "packages/public", [...sources.keys()])
+  assert.deepEqual(
+    publicCallableChanges(
+      splitConditionalPrevious,
+      splitConditionalCurrent,
+      splitConditionalDescriptors(splitConditionalPrevious),
+      splitConditionalDescriptors(splitConditionalCurrent)
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/import-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      splitConditionalPrevious,
+      splitConditionalPrevious,
+      splitConditionalDescriptors(splitConditionalPrevious),
+      splitConditionalDescriptors(splitConditionalPrevious)
+    ),
+    []
+  )
+  const swappedConditionalPrevious = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const swappedConditionalCurrent = swappedConditionalPrevious
+  const swappedConditionalCurrentManifest = {
+    exports: { ".": { import: "./src/require-view.tsx", require: "./src/import-view.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      swappedConditionalPrevious,
+      swappedConditionalCurrent,
+      manifestEntryPointDescriptors(splitConditionalManifest, "packages/public", [
+        ...swappedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(swappedConditionalCurrentManifest, "packages/public", [
+        ...swappedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/require-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      },
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/import-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
+  )
+  const sharedConditionalPrevious = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"']
+  ])
+  const sharedConditionalCurrent = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"'],
+    ["packages/public/src/changed.tsx", "export const Public = (): number => 1"]
+  ])
+  const sharedConditionalPreviousManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/shared.tsx" } }
+  }
+  const sharedConditionalCurrentManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/changed.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      sharedConditionalPrevious,
+      sharedConditionalCurrent,
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(sharedConditionalCurrentManifest, "packages/public", [
+        ...sharedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "return-type-change",
+        filePath: "packages/public/src/changed.tsx",
+        name: "Public",
+        properties: []
+      }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      sharedConditionalPrevious,
+      sharedConditionalPrevious,
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ])
+    ),
+    []
+  )
+  const directBaselinePrevious = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"']
+  ])
+  const directBaselineManifest = { exports: { ".": "./src/shared.tsx" } }
+  assert.deepEqual(
+    publicCallableChanges(
+      directBaselinePrevious,
+      sharedConditionalCurrent,
+      manifestEntryPointDescriptors(directBaselineManifest, "packages/public", [...directBaselinePrevious.keys()]),
+      manifestEntryPointDescriptors(sharedConditionalCurrentManifest, "packages/public", [
+        ...sharedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "return-type-change",
+        filePath: "packages/public/src/changed.tsx",
+        name: "Public",
+        properties: []
+      }
+    ]
+  )
+  const directBaselineConditionalCurrent = new Map([
+    ...directBaselinePrevious,
+    ["packages/public/src/changed.tsx", 'export const Public = (): string => "other"']
+  ])
+  const directBaselineConditionalManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/changed.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      directBaselinePrevious,
+      directBaselineConditionalCurrent,
+      manifestEntryPointDescriptors(directBaselineManifest, "packages/public", [...directBaselinePrevious.keys()]),
+      manifestEntryPointDescriptors(directBaselineConditionalManifest, "packages/public", [
+        ...directBaselineConditionalCurrent.keys()
+      ])
+    ),
+    []
+  )
+  const duplicateIdentityPrevious = new Map([
+    ["packages/public/src/view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const duplicateIdentityCurrent = new Map([
+    ["packages/public/src/view.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const duplicateIdentityEntryPoints = [
+    { identity: "main", sourcePath: "packages/public/src/view.tsx" },
+    { identity: "exports:.", sourcePath: "packages/public/src/view.tsx" }
+  ]
+  assert.deepEqual(
+    publicCallableChanges(
+      duplicateIdentityPrevious,
+      duplicateIdentityCurrent,
+      duplicateIdentityEntryPoints,
+      duplicateIdentityEntryPoints
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
+  )
+  const wildcardDirectPrevious = new Map([
+    ["packages/public/src/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const wildcardConditionalManifest = {
+    exports: { "./*": { import: "./dist/*.js", require: "./dist/*.js" } }
+  }
+  const wildcardDirectManifest = { exports: { "./*": "./dist/*.js" } }
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardDirectPrevious,
+      wildcardDirectPrevious,
+      manifestEntryPointDescriptors(wildcardDirectManifest, "packages/public", [...wildcardDirectPrevious.keys()]),
+      manifestEntryPointDescriptors(wildcardConditionalManifest, "packages/public", [...wildcardDirectPrevious.keys()])
+    ),
+    []
+  )
+  const wildcardMovedPrevious = new Map([
+    ["packages/public/src/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const wildcardMovedCurrent = new Map([
+    ["packages/public/src/impl/a.tsx", "export const Public = (props: { value: number }) => props.value"],
+    ["packages/public/src/impl/b.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const wildcardMovedPreviousManifest = { exports: { "./*": "./dist/*.js" } }
+  const wildcardMovedCurrentManifest = {
+    exports: { "./*": { import: "./dist/impl/*.js", require: "./dist/impl/*.js" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardMovedPrevious,
+      wildcardMovedCurrent,
+      manifestEntryPointDescriptors(wildcardMovedPreviousManifest, "packages/public", [
+        ...wildcardMovedPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(wildcardMovedCurrentManifest, "packages/public", [...wildcardMovedCurrent.keys()])
+    ),
+    [
+      { kind: "type-change", filePath: "packages/public/src/impl/a.tsx", name: "Public", properties: ["value"] },
+      { kind: "type-change", filePath: "packages/public/src/impl/b.tsx", name: "Public", properties: ["value"] }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardDirectPrevious,
+      new Map([
+        ["packages/public/src/impl/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+        ["packages/public/src/impl/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+      ]),
+      manifestEntryPointDescriptors(wildcardDirectManifest, "packages/public", [...wildcardDirectPrevious.keys()]),
+      manifestEntryPointDescriptors({ exports: { "./*": "./dist/impl/*.js" } }, "packages/public", [
+        "packages/public/src/impl/a.tsx",
+        "packages/public/src/impl/b.tsx"
+      ])
+    ),
+    []
+  )
+  const repeatedWildcardManifest = { exports: { "./feature/*": "./dist/*/*.js" } }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(repeatedWildcardManifest, "packages/public", [
+      "packages/public/src/a/a.tsx",
+      "packages/public/src/a/b.tsx"
+    ]),
+    [
+      {
+        identity: "exports:./feature/*",
+        publicSubpath: "./feature/a",
+        sourcePath: "packages/public/src/a/a.tsx"
+      }
+    ]
+  )
+  const adjacentWildcardManifest = { exports: { "./feature/*": "./dist/**.js" } }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(adjacentWildcardManifest, "packages/public", ["packages/public/src/aa.tsx"]),
+    [
+      {
+        identity: "exports:./feature/*",
+        publicSubpath: "./feature/a",
+        sourcePath: "packages/public/src/aa.tsx"
+      }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(topLevelConditionalManifest, "packages/public", [...conditionalSources.keys()]),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(
+        {
+          exports: {
+            ".": { import: "./src/index.ts", require: "./src/index.ts" },
+            "./view.js": { import: "./src/view.js", require: "./src/view.js" }
+          }
+        },
+        "packages/public",
+        [...conditionalSources.keys()]
+      ),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      removedEntryPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+        ]
+      ]),
+      [{ identity: "exports:./view.js", sourcePath: "packages/public/src/view.tsx" }],
+      []
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  assert.deepEqual(
+    manifestEntryPoints({ exports: { ".": "./src/index.ts", "./view.js": "./src/view.js" } }, "packages/public", [
+      "packages/public/src/index.ts",
+      "packages/public/src/view.tsx"
+    ]),
+    ["packages/public/src/index.ts", "packages/public/src/view.tsx"]
+  )
+  assert.deepEqual(
+    manifestEntryPointDescriptors(
+      { exports: { ".": "./src/index.ts", "./view.js": "./src/view.js" } },
+      "packages/public",
+      ["packages/public/src/index.ts", "packages/public/src/view.tsx"]
+    ),
+    [
+      { identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
+      { identity: "exports:./view.js", sourcePath: "packages/public/src/view.tsx" }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      removedEntryPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+        ]
+      ]),
+      manifestEntryPointDescriptors(
+        { exports: { ".": "./src/index.ts", "./view.js": "./src/view.js" } },
+        "packages/public",
+        [...removedEntryPrevious.keys()]
+      ),
+      manifestEntryPointDescriptors({ exports: { ".": "./src/index.ts" } }, "packages/public", [
+        ...removedEntryCurrent.keys()
+      ])
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
 }
 
 const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content, location) {
@@ -953,38 +2116,74 @@ const sourcePaths = (paths) =>
       !isExcludedSourcePath(changedPath)
   )
 
-const entryPathPattern = (entryPath) => {
-  const escaped = entryPath.replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
-  return new RegExp(`^${escaped.replaceAll("*", ".*")}$`, "u")
+const entryPathCaptures = (entryPath, candidate) => {
+  const wildcardCount = entryPath.length - entryPath.replaceAll("*", "").length
+  if (wildcardCount === 0) return entryPath === candidate ? [] : undefined
+  const prefix = entryPath.split("*")[0]
+  if (!candidate.startsWith(prefix)) return undefined
+  const captureStart = prefix.length
+  for (let captureEnd = captureStart; captureEnd <= candidate.length; captureEnd += 1) {
+    const capture = candidate.slice(captureStart, captureEnd)
+    if (entryPath.replaceAll("*", capture) === candidate) return [capture]
+  }
+  return undefined
 }
 
-const manifestEntryPoints = (manifest, directory, sourceFiles) => {
-  const paths = []
-  const collect = (value) => {
-    if (Predicate.isString(value)) paths.push(value)
-    else if (Predicate.isObjectOrArray(value)) {
-      for (const nested of Object.values(value)) collect(nested)
-    }
-  }
+const publicSubpathFor = (identity, captures) => {
+  if (!identity.startsWith("exports:")) return undefined
+  const subpath = identity.slice("exports:".length)
+  if (!subpath.includes("*") || captures.length === 0) return undefined
+  return subpath.replaceAll("*", captures[0])
+}
+
+const manifestEntries = (manifest) => {
+  const entries = []
   const publishConfig =
     Predicate.isObjectOrArray(manifest.publishConfig) && !Array.isArray(manifest.publishConfig)
       ? manifest.publishConfig
       : undefined
   const effectiveManifest = publishConfig === undefined ? manifest : { ...manifest, ...publishConfig }
-  for (const field of ["main", "module", "types", "exports"]) collect(effectiveManifest[field])
+  for (const field of ["main", "module", "types"]) {
+    const target = effectiveManifest[field]
+    if (Predicate.isString(target)) entries.push({ identity: field, target })
+  }
+  const collectExports = (value, subpath, conditionPath = []) => {
+    if (Predicate.isString(value)) {
+      const entry = { identity: `exports:${subpath ?? "."}`, target: value }
+      if (conditionPath.length > 0) entry.conditionPath = conditionPath
+      entries.push(entry)
+    } else if (Predicate.isObjectOrArray(value)) {
+      for (const [key, nested] of Object.entries(value)) {
+        const isSubpath = subpath === undefined && key.startsWith(".")
+        const nextSubpath = subpath ?? (isSubpath ? key : ".")
+        const nextConditionPath = isSubpath ? [] : [...conditionPath, key]
+        collectExports(nested, nextSubpath, nextConditionPath)
+      }
+    }
+  }
+  if (effectiveManifest.exports !== undefined) collectExports(effectiveManifest.exports, undefined)
+  return entries
+}
+
+const manifestEntryPointDescriptors = (manifest, directory, sourceFiles) => {
+  if (!Predicate.isObjectOrArray(manifest) || Array.isArray(manifest)) return []
+  const entries = manifestEntries(manifest)
 
   const candidates = sourceFiles === undefined ? [] : [...sourceFiles]
   const mapEntryPath = (entryPath) => {
     const normalized = entryPath.replace(/^\.\//u, "")
     const sourcePrefix = `${directory}/src/`
     if (normalized.startsWith("src/")) {
-      const sourcePattern = entryPathPattern(normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx)$/u, ".ts"))
-      return candidates.filter((candidate) => sourcePattern.test(candidate.slice(sourcePrefix.length)))
+      const sourcePattern = normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx|tsx?)$/u, "")
+      return candidates.flatMap((candidate) => {
+        const candidateStem = candidate.slice(sourcePrefix.length).replace(/\.(?:tsx?|jsx)$/u, "")
+        const captures = entryPathCaptures(sourcePattern, candidateStem)
+        return captures === undefined ? [] : [{ sourcePath: candidate, captures }]
+      })
     }
     if (!normalized.startsWith("dist/")) return []
     const outputPath = normalized.slice("dist/".length)
-    const outputPattern = entryPathPattern(outputPath)
-    return candidates.filter((candidate) => {
+    return candidates.flatMap((candidate) => {
       const sourceRelative = candidate.slice(sourcePrefix.length)
       const sourceStem = sourceRelative.replace(/\.(?:tsx?|jsx)$/u, "")
       const outputCandidates = [
@@ -994,11 +2193,37 @@ const manifestEntryPoints = (manifest, directory, sourceFiles) => {
         `src/${sourceStem}.js`,
         `src/${sourceStem}.jsx`
       ]
-      return outputCandidates.some((outputCandidate) => outputPattern.test(outputCandidate))
+      for (const outputCandidate of outputCandidates) {
+        const captures = entryPathCaptures(outputPath, outputCandidate)
+        if (captures !== undefined) return [{ sourcePath: candidate, captures }]
+      }
+      return []
     })
   }
-  return [...new Set(paths.flatMap(mapEntryPath))].filter((entryPath) => !isExcludedSourcePath(entryPath))
+  const descriptors = []
+  for (const { conditionPath, identity, target } of entries) {
+    for (const { captures, sourcePath } of mapEntryPath(target)) {
+      if (!isExcludedSourcePath(sourcePath)) {
+        const descriptor = { identity, sourcePath }
+        if (conditionPath !== undefined) descriptor.conditionPath = conditionPath
+        const publicSubpath = publicSubpathFor(identity, captures)
+        if (publicSubpath !== undefined) descriptor.publicSubpath = publicSubpath
+        descriptors.push(descriptor)
+      }
+    }
+  }
+  const uniqueDescriptors = new Map()
+  for (const descriptor of descriptors) {
+    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}\u0000${conditionPathKey(descriptor.conditionPath)}\u0000${descriptor.publicSubpath ?? ""}`
+    const existing = uniqueDescriptors.get(key)
+    if (existing === undefined) uniqueDescriptors.set(key, descriptor)
+  }
+  return [...uniqueDescriptors.values()]
 }
+
+const manifestEntryPoints = (manifest, directory, sourceFiles) => [
+  ...new Set(manifestEntryPointDescriptors(manifest, directory, sourceFiles).map(({ sourcePath }) => sourcePath))
+]
 
 const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
   function* (fileSystem, path, directory, relativeDirectory) {
@@ -1017,6 +2242,9 @@ const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
   }
 )
 
+const shouldAnalyzePublicCallableChanges = (record, changedSourceFiles) =>
+  record.publishable && (changedSourceFiles.length > 0 || record.changedReleaseManifest)
+
 const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicCallableChanges")(
   function* (git, fileSystem, path, repositoryRoot, mergeBase, paths, records) {
     const changes = []
@@ -1025,7 +2253,7 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
       const changedSourceFiles = sourcePaths(paths).filter((changedPath) =>
         changedPath.startsWith(`${record.directory}/`)
       )
-      if (changedSourceFiles.length === 0) continue
+      if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles)) continue
       const sourceRoot = path.join(repositoryRoot, record.directory, "src")
       const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
       const currentSources = new Map()
@@ -1041,8 +2269,18 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         const source = yield* gitOption(git, ["show", `${mergeBase}:${relativePath}`])
         if (source !== undefined) previousSources.set(relativePath, source)
       }
-      const entryPoints = manifestEntryPoints(record.manifest, record.directory, relativeSourceFiles)
-      for (const change of publicCallableChanges(previousSources, currentSources, entryPoints)) {
+      const currentEntryPoints = manifestEntryPointDescriptors(record.manifest, record.directory, relativeSourceFiles)
+      const previousEntryPoints = manifestEntryPointDescriptors(
+        record.previousManifest,
+        record.directory,
+        previousRelativeSourceFiles
+      )
+      for (const change of publicCallableChanges(
+        previousSources,
+        currentSources,
+        previousEntryPoints,
+        currentEntryPoints
+      )) {
         changes.push({ ...change, packageName: record.name })
       }
     }
@@ -1075,6 +2313,7 @@ const loadPackageRecords = Effect.fn("ChangesetCoverage.loadPackageRecords")(
         changedReleaseManifest: paths.has(manifestRelativePath) && manifestsDifferForRelease(current, previous),
         directory: `packages/${entry}`,
         manifest: current,
+        previousManifest: previous,
         name: current.name ?? `packages/${entry}`,
         publishable: current.private !== true
       })
