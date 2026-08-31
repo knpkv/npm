@@ -534,9 +534,11 @@ const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
       kind === "addition" ? "add" : kind === "removal" ? "remove" : kind === "callable-removal" ? "remove" : "change"
     const diagnostic = [
       `${packageName}: patch changeset cannot ${action} public callable${kind === "callable-removal" ? "" : " props"}`,
-      properties.join(", "),
+      properties.length === 0 ? undefined : properties.join(", "),
       `(${name} in ${filePath})`
-    ].join(" ")
+    ]
+      .filter((part) => part !== undefined)
+      .join(" ")
     return [diagnostic]
   })
 
@@ -1016,6 +1018,40 @@ const runSelfTest = () => {
     }
   ])
 
+  const unresolvedCallablePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unresolvedCallableCurrent = new Map([
+    ["packages/public/src/index.ts", "export {}"],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unresolvedCallableRemoval = publicCallableChanges(unresolvedCallablePrevious, unresolvedCallableCurrent, [
+    "packages/public/src/index.ts"
+  ]).map((change) => ({ ...change, packageName: "@fixture/public" }))
+  assert.deepEqual(unresolvedCallableRemoval, [
+    {
+      kind: "callable-removal",
+      filePath: "packages/public/src/view.tsx",
+      name: "Public",
+      packageName: "@fixture/public",
+      properties: []
+    }
+  ])
+  assert.deepEqual(
+    validatePublicCallableReleaseTypes({
+      changes: unresolvedCallableRemoval,
+      releaseTypes: new Map([["@fixture/public", "patch"]])
+    }),
+    ["@fixture/public: patch changeset cannot remove public callable (Public in packages/public/src/view.tsx)"]
+  )
+
   const overriddenPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -1175,7 +1211,13 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(
       removedEntryPrevious,
-      removedEntryCurrent,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+        ]
+      ]),
       [{ identity: "exports:./view.js", sourcePath: "packages/public/src/view.tsx" }],
       []
     ),
@@ -1199,6 +1241,27 @@ const runSelfTest = () => {
       { identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
       { identity: "exports:./view.js", sourcePath: "packages/public/src/view.tsx" }
     ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      removedEntryPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+        ]
+      ]),
+      manifestEntryPointDescriptors(
+        { exports: { ".": "./src/index.ts", "./view.js": "./src/view.js" } },
+        "packages/public",
+        [...removedEntryPrevious.keys()]
+      ),
+      manifestEntryPointDescriptors({ exports: { ".": "./src/index.ts" } }, "packages/public", [
+        ...removedEntryCurrent.keys()
+      ])
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
 }
 
