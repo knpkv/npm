@@ -264,7 +264,7 @@ const DockContents = ({
       <section aria-label="Relay thread" className={style("body")} tabIndex={0}>
         <DockState state={state} />
       </section>
-      {footer === undefined ? null : <footer className={style("footer")}>{footer}</footer>}
+      {footer === undefined || footer === null ? null : <footer className={style("footer")}>{footer}</footer>}
     </div>
   )
 }

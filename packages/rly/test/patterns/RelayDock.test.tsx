@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement } from "react"
+import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
@@ -63,10 +63,12 @@ const mountInShadowRoot = async (element: ReactElement): Promise<MountedShadowDo
 
 const dock = ({
   defaultOpen,
+  footer = <textarea aria-label="Message Relay" />,
   presentation = "overlay",
   state = { content: <p>One review thread</p>, status: "ready" }
 }: {
   readonly defaultOpen?: boolean
+  readonly footer?: ReactNode
   readonly presentation?: RlyRelayDockDesktopPresentation
   readonly state?: RlyRelayDockState
 } = {}): ReactElement => (
@@ -78,7 +80,7 @@ const dock = ({
     ]}
     {...(defaultOpen === undefined ? {} : { defaultOpen })}
     desktopPresentation={presentation}
-    footer={<textarea aria-label="Message Relay" />}
+    footer={footer}
     selection={{
       model: { onValueChange: () => undefined, options: modelOptions, value: "codex" },
       profile: { onValueChange: () => undefined, options: profileOptions, value: "review" }
@@ -202,6 +204,15 @@ describe("RelayDock", () => {
 
     expect(dialog).not.toBeNull()
     expect(dialog?.contains(document.activeElement)).toBe(true)
+  })
+
+  it("omits a null footer while rendering supplied footer content", async () => {
+    const withoutFooter = await mount(dock({ defaultOpen: true, footer: null }))
+    const withFooter = await mount(dock({ defaultOpen: true }))
+
+    expect(withoutFooter.portal.querySelector("footer")).toBeNull()
+    expect(withFooter.portal.querySelectorAll("footer")).toHaveLength(1)
+    expect(withFooter.portal.querySelector('[aria-label="Message Relay"]')).not.toBeNull()
   })
 
   it("isolates light-DOM siblings when the modal portal target is a ShadowRoot", async () => {
