@@ -87,7 +87,8 @@ export const WorkApprovalTarget = Schema.Struct({
       const parsed = new URL(url)
       const approvalHosts = parsed.searchParams.getAll("approvalHost")
       const approvalJobs = parsed.searchParams.getAll("approvalJob")
-      return parsed.searchParams.getAll("tab").length === 1 &&
+      return parsed.pathname === "/" &&
+        parsed.searchParams.getAll("tab").length === 1 &&
         parsed.searchParams.get("tab") === "approvals" &&
         approvalHosts.length === 1 &&
         approvalJobs.length === 1 &&
@@ -174,12 +175,13 @@ export const WorkGoal = Schema.Struct({
         (goal.requests === undefined || goal.requests.every(({ requestedAt }) => requestedAt <= goal.updatedAt)) &&
         (goal.review === undefined || goal.review === null || goal.review.updatedAt <= goal.updatedAt) &&
         (agent === undefined || agent === null || (
+          (agent.relationship === undefined || agent.relationship.parentAgentId !== agent.agentId) &&
           goal.connectTarget !== null &&
           goal.connectTarget.agentId === agent.agentId &&
           goal.connectTarget.host.toLowerCase() === agent.host.toLowerCase()
         ))
     },
-    { expected: "ordered goal timestamps, blocker state, and authoritative agent target" }
+    { expected: "ordered goal timestamps, blocker state, and non-cyclic authoritative agent target" }
   )
 )
 export interface WorkGoal extends Schema.Schema.Type<typeof WorkGoal> {}

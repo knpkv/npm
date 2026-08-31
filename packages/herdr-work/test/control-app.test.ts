@@ -131,9 +131,36 @@ describe("Work control app", () => {
         }
       }]
     })
+    const wrongPath = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      approvalTarget: {
+        host: "SER8",
+        jobId: "approval-job-42",
+        url: "https://ser8.example.test/not-found?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
+      }
+    })
 
     expect(generic._tag).toBe("Failure")
     expect(mismatched._tag).toBe("Failure")
+    expect(wrongPath._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
+  })
+
+  it("rejects a self-parenting agent hierarchy", () => {
+    const selfParent = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      agentHierarchy: {
+        agent: {
+          ...workGoalInput.agentHierarchy.agent,
+          relationship: {
+            ...workGoalInput.agentHierarchy.agent.relationship,
+            parentAgentId: "agent-work-owner"
+          }
+        }
+      }
+    })
+
+    expect(selfParent._tag).toBe("Failure")
     expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
   })
 
