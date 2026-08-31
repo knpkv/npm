@@ -43,6 +43,12 @@ const hasExportModifier = (node) =>
 
 const normalizeTypeText = (typeNode) => typeNode.getText().replace(/\s+/gu, " ").trim()
 
+class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") {
+  get message() {
+    return this.reason
+  }
+}
+
 const hasReadonlyModifier = (node) =>
   node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ReadonlyKeyword) === true
 
@@ -158,6 +164,12 @@ const nextCanonicalTypeContext = (context, substitutionPath = context.substituti
   substitutionPath
 })
 
+const failCanonicalType = (filePath, typeNode, reason) => {
+  throw new ChangesetCoverageError({
+    reason: `${filePath}: ${reason} while canonicalizing ${normalizeTypeText(typeNode)}`
+  })
+}
+
 const canonicalTypeText = (
   typeNode,
   analysis,
@@ -166,7 +178,9 @@ const canonicalTypeText = (
   seen = new Set(),
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
-  if (context.depth > canonicalTypeMaxDepth) return `depth-limit(${normalizeTypeText(typeNode)})`
+  if (context.depth > canonicalTypeMaxDepth) {
+    failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
+  }
   if (TypeScript.isParenthesizedTypeNode(typeNode))
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
@@ -174,7 +188,7 @@ const canonicalTypeText = (
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return substituted
       if (context.substitutionPath.has(typeNode)) {
-        return `cycle(${normalizeTypeText(typeNode)})`
+        failCanonicalType(filePath, typeNode, "recursive type substitution")
       }
       const substitutionPath = new Set(context.substitutionPath).add(typeNode)
       return canonicalTypeText(
@@ -189,7 +203,7 @@ const canonicalTypeText = (
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration !== undefined) {
       const key = `${declaration.filePath}\u0000${typeNode.typeName.text}`
-      if (seen.has(key)) return normalizeTypeText(typeNode)
+      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
       const nextSeen = new Set(seen).add(key)
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
@@ -890,12 +904,6 @@ const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
     return [diagnostic]
   })
 
-class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") {
-  get message() {
-    return this.reason
-  }
-}
-
 const fail = (reason, cause) => Effect.fail(new ChangesetCoverageError({ cause, reason }))
 
 const splitLines = (output) => output.split(/\r?\n/u).filter((line) => line.length > 0)
@@ -1486,25 +1494,55 @@ const runSelfTest = () => {
     publicCallableChanges(recursiveGenericPrevious, recursiveGenericCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
-  const deeplyNestedType = (leaf) =>
-    `${"Wrap<".repeat(canonicalTypeMaxDepth + 1)}${leaf}${">".repeat(canonicalTypeMaxDepth + 1)}`
+  const cyclicSources = new Map([["packages/public/src/cycle.ts", "type Loop = Loop"]])
+  const cyclicModule = analyzeSources(cyclicSources).modules.get("packages/public/src/cycle.ts")
+  assert(cyclicModule !== undefined)
+  const cyclicAlias = cyclicModule.declarations.get("Loop")
+  assert(TypeScript.isTypeAliasDeclaration(cyclicAlias))
+  assert.throws(
+    () =>
+      canonicalTypeText(
+        cyclicAlias.type,
+        analyzeSources(cyclicSources),
+        "packages/public/src/cycle.ts",
+        new Map([["Loop", cyclicAlias.type]])
+      ),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/cycle.ts: recursive type substitution while canonicalizing Loop"
+  )
+  const deeplyNestedType = (leaf, depth) => `${"Wrap<".repeat(depth)}${leaf}${">".repeat(depth)}`
   const deeplyNestedPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
       "packages/public/src/view.tsx",
-      `type Props = { value: ${deeplyNestedType("string")} }\nexport const Public = (props: Props) => props.value`
+      `type Props = { value: ${deeplyNestedType("string", canonicalTypeMaxDepth)} }\nexport const Public = (props: Props) => props.value`
     ]
   ])
   const deeplyNestedCurrent = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
       "packages/public/src/view.tsx",
-      `type Props = { value: ${deeplyNestedType("number")} }\nexport const Public = (props: Props) => props.value`
+      `type Props = { value: ${deeplyNestedType("number", canonicalTypeMaxDepth)} }\nexport const Public = (props: Props) => props.value`
     ]
   ])
   assert.deepEqual(publicCallableChanges(deeplyNestedPrevious, deeplyNestedCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
   ])
+  const deeplyNestedOverflow = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      `type Props = { value: ${deeplyNestedType("number", canonicalTypeMaxDepth + 1)} }\nexport const Public = (props: Props) => props.value`
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(deeplyNestedPrevious, deeplyNestedOverflow, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason ===
+        `packages/public/src/view.tsx: type depth exceeded ${canonicalTypeMaxDepth} while canonicalizing number`
+  )
 
   const aliasPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
