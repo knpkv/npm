@@ -103,7 +103,7 @@ import {
 } from "./model.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
-import { makePushWorker } from "./push-worker.js"
+import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath } from "./work-checkpoint.js"
 
@@ -906,7 +906,10 @@ export const notificationCandidates = Effect.fn(
       "PushWorker.peer_directory_unavailable",
       peers.failure
     )
-    return localCandidates
+    return {
+      candidates: localCandidates,
+      pendingCount: null
+    } satisfies ApprovalNotificationBatch
   }
   const aggregated = yield* aggregatePeerPending(peers.success, "all")
   if (aggregated.failures.length > 0) {
@@ -915,7 +918,7 @@ export const notificationCandidates = Effect.fn(
       aggregated.failures
     )
   }
-  return [
+  const candidates = [
     ...localCandidates,
     ...aggregated.remote.map(
       (remote): ApprovalNotificationCandidate => ({
@@ -924,6 +927,10 @@ export const notificationCandidates = Effect.fn(
       })
     )
   ]
+  return {
+    candidates,
+    pendingCount: aggregated.failures.length === 0 ? candidates.length : null
+  } satisfies ApprovalNotificationBatch
 })
 
 const dashboardPage = (snapshot: DashboardSnapshot): string => {

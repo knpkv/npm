@@ -36,9 +36,12 @@ export const showApprovalNotification = async (
   setBadge: (count: number) => Promise<void>,
   payload: ApprovalPushPayload
 ): Promise<void> => {
-  const badge = await Effect.runPromise(
-    Effect.result(Effect.tryPromise(() => setBadge(payload.pendingCount)))
-  )
+  const pendingCount = payload.pendingCount
+  const badge = pendingCount === null
+    ? Result.succeed(undefined)
+    : await Effect.runPromise(
+      Effect.result(Effect.tryPromise(() => setBadge(pendingCount)))
+    )
   await registration.showNotification(`Approval needed on ${payload.host}`, {
     badge: "/assets/approval-icon.svg",
     body: `Job ${payload.jobId} is waiting for approval.`,

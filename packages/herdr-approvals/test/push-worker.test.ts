@@ -6,8 +6,8 @@ import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { PushDeliveryError } from "../src/errors.js"
-import type { PushSubscriptionRecord } from "../src/model.js"
-import { runPushPass } from "../src/push-worker.js"
+import type { ApprovalNotificationCandidate, ApprovalPushPayload, PushSubscriptionRecord } from "../src/model.js"
+import { type ApprovalNotificationBatch, runPushPass } from "../src/push-worker.js"
 import { ApprovalAppStore } from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -19,6 +19,10 @@ const subscription: PushSubscriptionRecord = {
   expirationTime: null,
   keys: { auth: "auth_key", p256dh: "p256dh_key" }
 }
+
+const completeCandidates = (
+  candidates: ReadonlyArray<ApprovalNotificationCandidate>
+): ApprovalNotificationBatch => ({ candidates, pendingCount: candidates.length })
 
 describe("push delivery retries", () => {
   it.effect("converges concurrent VAPID initialization on the persisted winner", () => {
@@ -216,7 +220,7 @@ describe("push delivery retries", () => {
           yield* runPushPass({
             allowedPushOrigins: ["https://push.example.test"],
             allowedUsers: ["alice@example.com"],
-            loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-expired" }]),
+            loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-expired" }])),
             send: () => store.deleteSubscriptionPrivileged(subscription.endpoint),
             store
           })
@@ -248,7 +252,7 @@ describe("push delivery retries", () => {
       runPushPass({
         allowedPushOrigins: ["https://push.example.test"],
         allowedUsers: ["alice@example.com"],
-        loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-replaced" }]),
+        loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-replaced" }])),
         now: Effect.succeed(1_000),
         send: (target) =>
           Effect.gen(function*() {
@@ -376,7 +380,7 @@ describe("push delivery retries", () => {
       runPushPass({
         allowedPushOrigins: ["https://push.example.test"],
         allowedUsers: ["alice@example.com"],
-        loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-ttl" }]),
+        loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-ttl" }])),
         now: Effect.succeed(61_001),
         send: () =>
           Effect.sync(() => {
@@ -424,7 +428,7 @@ describe("push delivery retries", () => {
           yield* runPushPass({
             allowedPushOrigins: ["https://push.example.test"],
             allowedUsers: ["alice@example.com"],
-            loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-1" }]),
+            loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-1" }])),
             send: () =>
               Effect.sync(() => {
                 sends += 1
@@ -487,7 +491,7 @@ describe("push delivery retries", () => {
           yield* runPushPass({
             allowedPushOrigins: ["https://push.example.test"],
             allowedUsers: ["alice@example.com"],
-            loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-1" }]),
+            loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-1" }])),
             now: Effect.succeed(1_000),
             send: (target) =>
               Effect.sync(() => {
@@ -541,6 +545,43 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("delivers without replacing the badge for an incomplete fleet", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-partial-count-test-"))
+    const sent: Array<ApprovalPushPayload> = []
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* runPushPass({
+            allowedPushOrigins: ["https://push.example.test"],
+            allowedUsers: ["alice@example.com"],
+            loadCandidates: () =>
+              Effect.succeed({
+                candidates: [{ host: "SER8", jobId: "job-local" }],
+                pendingCount: null
+              }),
+            now: Effect.succeed(1_000),
+            send: (_target, payload) =>
+              Effect.sync(() => {
+                sent.push(payload)
+              }),
+            store
+          })
+          expect(sent).toEqual([{
+            host: "SER8",
+            jobId: "job-local",
+            pendingCount: null
+          }])
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("retries missing and failed deliveries, then suppresses success", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-worker-test-"))
     let attempts = 0
@@ -551,7 +592,7 @@ describe("push delivery retries", () => {
         const pass = runPushPass({
           allowedPushOrigins: ["https://push.example.test"],
           allowedUsers: ["alice@example.com"],
-          loadCandidates: () => Effect.succeed([{ host: "SER8", jobId: "job-1" }]),
+          loadCandidates: () => Effect.succeed(completeCandidates([{ host: "SER8", jobId: "job-1" }])),
           now: Effect.succeed(1_000),
           send: () =>
             Effect.suspend(() => {
@@ -613,11 +654,11 @@ describe("push delivery retries", () => {
             allowedPushOrigins: ["https://push.example.test"],
             allowedUsers: ["alice@example.com"],
             loadCandidates: () =>
-              Effect.succeed([
+              Effect.succeed(completeCandidates([
                 { host: "ser8", jobId: "job-1" },
                 { host: "ser8", jobId: "job-2" },
                 { host: "pi", jobId: "job-1" }
-              ]),
+              ])),
             now: Effect.succeed(1_001),
             send: () =>
               Effect.sync(() => {

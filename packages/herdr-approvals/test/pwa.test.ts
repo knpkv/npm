@@ -152,6 +152,26 @@ describe("approval PWA", () => {
     ])
   })
 
+  it("preserves the badge when the fleet count is incomplete", async () => {
+    const events: Array<string> = []
+    const registration: ApprovalWorkerRegistration = {
+      scope: "https://ser8.example.ts.net/",
+      showNotification: (title) => {
+        events.push(title)
+        return Promise.resolve()
+      }
+    }
+    await showApprovalNotification(
+      registration,
+      (count) => {
+        events.push(`badge:${String(count)}`)
+        return Promise.resolve()
+      },
+      { host: "SER8", jobId: "job-local", pendingCount: null }
+    )
+    expect(events).toEqual(["Approval needed on SER8"])
+  })
+
   it("still shows the notification when badge update fails", async () => {
     const notifications: Array<string> = []
     const registration: ApprovalWorkerRegistration = {

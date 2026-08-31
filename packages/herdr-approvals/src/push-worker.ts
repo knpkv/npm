@@ -5,11 +5,16 @@ import { pushDeliveryTtlMillis } from "./push-policy.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import type { ApprovalAppStore } from "./store.js"
 
+export type ApprovalNotificationBatch = {
+  readonly candidates: ReadonlyArray<ApprovalNotificationCandidate>
+  readonly pendingCount: number | null
+}
+
 type PushPassOptions<LoadError, SendError, LoadServices, SendServices> = {
   readonly allowedPushOrigins: ReadonlyArray<string>
   readonly allowedUsers: ReadonlyArray<string>
   readonly loadCandidates: () => Effect.Effect<
-    ReadonlyArray<ApprovalNotificationCandidate>,
+    ApprovalNotificationBatch,
     LoadError,
     LoadServices
   >
@@ -29,10 +34,9 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
 >(
   options: PushPassOptions<LoadError, SendError, LoadServices, SendServices>
 ) {
-  const candidates = yield* options.loadCandidates()
+  const { candidates, pendingCount } = yield* options.loadCandidates()
   const subscriptions = yield* options.store.listSubscriptions()
   const timestamp = yield* (options.now ?? Clock.currentTimeMillis)
-  const pendingCount = candidates.length
   yield* Effect.forEach(
     candidates,
     (candidate) =>

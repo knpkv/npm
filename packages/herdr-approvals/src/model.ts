@@ -60,7 +60,7 @@ export type ApprovalNotificationCandidate = typeof ApprovalNotificationCandidate
 export const ApprovalPushPayload = Schema.Struct({
   host: ApprovalNotificationCandidate.fields.host,
   jobId: ApprovalNotificationCandidate.fields.jobId,
-  pendingCount: Schema.Number
+  pendingCount: Schema.NullOr(Schema.Number)
 })
 export type ApprovalPushPayload = typeof ApprovalPushPayload.Type
 

@@ -23,7 +23,7 @@ import {
   makeFleetService,
   pendingApprovalPageMaxRecords
 } from "@knpkv/herdr-fleet"
-import type { TailscaleClient } from "@knpkv/herdr-tailscale"
+import { Tailscale, type TailscaleClient, TailscaleCommandError } from "@knpkv/herdr-tailscale"
 import {
   makeWorkService,
   WorkGoalCheckpoint,
@@ -52,6 +52,7 @@ import {
   dashboardSnapshotBytes,
   listenerAuthority,
   makeRunner,
+  notificationCandidates,
   recordWorkCheckpointRequest,
   startHttpServer
 } from "../src/http.js"
@@ -252,6 +253,50 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("host HTTP authority", () => {
+  it.effect("marks notification counts incomplete when fleet discovery fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
+    const unavailable = new TailscaleCommandError({
+      cause: "unavailable",
+      operation: "status"
+    })
+    const tailscale: TailscaleClient = {
+      ipv4: Effect.fail(unavailable),
+      status: Effect.fail(unavailable),
+      whois: () => Effect.fail(unavailable)
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "ALPHA",
+            id: Effect.succeed("job-local"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          yield* fleet.submit(
+            { payload: { kind: "nix.apply", ref: "main" } },
+            "andrey@example.com"
+          )
+          expect(
+            yield* notificationCandidates(config(root), fleet).pipe(
+              Effect.provideService(Tailscale, tailscale)
+            )
+          ).toEqual({
+            candidates: [{ host: "ALPHA", jobId: "job-local" }],
+            pendingCount: null
+          })
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it("escapes configured hosts in the dashboard document title", () => {
     const host = "SER8</title><script data-xss=\"true\">alert(1)</script>"
     const title = dashboardDocumentTitle(host)
