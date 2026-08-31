@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 
 import {
+  migrateRelayReviewSession,
   readRelayReviewSession,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
@@ -150,6 +151,38 @@ describe("Relay review session storage", () => {
     expect(Result.isSuccess(readRelayReviewSession(localStorage, usKey, usResource))).toBe(true)
     const restored = readRelayReviewSession(localStorage, usKey, usResource)
     if (Result.isSuccess(restored)) expect(restored.success).toBeNull()
+  })
+
+  it("migrates a credential-keyed session when repository identity is enriched", async () => {
+    const sourceKey = relayReviewSessionStorageKey(resource)
+    const targetResource: RelayReviewSessionResourceIdentity = { ...resource, accountId: "222222222222" }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: ["builtin:pr-review"],
+      turns: [{ findingId: "F1", role: "user", message: "Keep this review." }],
+      dispositions: { F1: "acknowledged" }
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      resource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isSuccess(migrated)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.resource).toEqual(targetResource)
+      expect(restored.success?.turns).toEqual([{ findingId: "F1", role: "user", message: "Keep this review." }])
+      expect(restored.success?.dispositions).toEqual({ F1: "acknowledged" })
+    }
   })
 
   it("merges stale tab writes without losing turns or regressing publication state", async () => {

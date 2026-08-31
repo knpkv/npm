@@ -318,3 +318,27 @@ export const writeRelayReviewSession = async (
     return Result.fail(new RelayReviewSessionStorageUnavailable({ operation: "write" }))
   }
 }
+
+/** Move a validated session when provider enrichment replaces the credential identity with the repository identity. */
+export const migrateRelayReviewSession = async (
+  storage: RelayReviewSessionReadableStorage & RelayReviewSessionWritableStorage,
+  sourceKey: string,
+  sourceResource: RelayReviewSessionResourceIdentity,
+  targetKey: string,
+  targetResource: RelayReviewSessionResourceIdentity,
+  lock: RelayReviewSessionLock
+): Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>> => {
+  const source = readRelayReviewSession(storage, sourceKey, sourceResource)
+  if (Result.isFailure(source) || source.success === null) return source
+  const migrated = await writeRelayReviewSession(storage, targetKey, {
+    dispositions: source.success.dispositions,
+    expectedIdentity: source.success.identity,
+    expectedVersion: 0,
+    identity: source.success.identity,
+    resource: targetResource,
+    review: source.success.review,
+    skillIds: source.success.skillIds,
+    turns: source.success.turns
+  }, lock)
+  return Result.isFailure(migrated) ? Result.fail(migrated.failure) : Result.succeed(migrated.success.session)
+}

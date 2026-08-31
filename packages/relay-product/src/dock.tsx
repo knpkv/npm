@@ -256,7 +256,8 @@ export const relaySelectionMatchesRegistration = (
   selection: RelaySelectorState,
   registration: RelayPullRequestDockRegistration
 ): boolean =>
-  selection.profileId === registration.selection.profileId && selection.modelId === registration.selection.modelId
+  registration.selection.profiles.some(({ id }) => id === selection.profileId) &&
+  registration.selection.models.some(({ id }) => id === selection.modelId)
 
 const PullRequestContinuation = ({
   registration,

@@ -57,6 +57,7 @@ import {
 import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
   readRelayReviewSession,
+  migrateRelayReviewSession,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
   type RelayReviewSessionWrite,
@@ -690,11 +691,35 @@ const ReadyReviewWorkspace = ({
     pullRequest.id,
     pullRequest.repositoryName
   ])
+  const legacyReviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
+    const credentialAccountId = pullRequest.account.awsAccountId
+    const repositoryAccountId = pullRequest.account.repoAccountId
+    if (
+      credentialAccountId === undefined ||
+      repositoryAccountId === undefined ||
+      credentialAccountId === repositoryAccountId
+    )
+      return null
+    return {
+      accountId: credentialAccountId,
+      pullRequestId: String(pullRequest.id),
+      region: String(pullRequest.account.region),
+      repositoryName: String(pullRequest.repositoryName)
+    }
+  }, [
+    pullRequest.account.awsAccountId,
+    pullRequest.account.repoAccountId,
+    pullRequest.account.region,
+    pullRequest.id,
+    pullRequest.repositoryName
+  ])
   const [contentStateCache, setContentStateCache] = useState<{
     readonly identity: string
     readonly values: ReadonlyMap<number, RlyDiffFileContent>
   }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
+  const legacyReviewSessionKey =
+    legacyReviewResource === null ? null : relayReviewSessionStorageKey(legacyReviewResource)
   const reviewSessionVersionRef = useRef(0)
   const skipSessionWriteRef = useRef<string | null>(null)
   const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
@@ -798,7 +823,50 @@ const ReadyReviewWorkspace = ({
       })
       return
     }
-    if (stored.success === null) {
+    let hydrated = stored.success
+    if (hydrated === null && legacyReviewResource !== null && legacyReviewSessionKey !== null) {
+      const legacy = readRelayReviewSession(window.localStorage, legacyReviewSessionKey, legacyReviewResource)
+      if (Result.isFailure(legacy)) {
+        setReviewFailure({
+          description:
+            legacy.failure._tag === "RelayReviewSessionInvalid"
+              ? "The saved PR conversation is invalid. Clear this site's local data before starting a new review."
+              : "Local storage is unavailable. Relay cannot durably retain this PR conversation.",
+          title: "PR conversation unavailable"
+        })
+        return
+      }
+      hydrated = legacy.success
+      if (hydrated !== null) {
+        const lock = browserRelayReviewSessionLock()
+        if (lock === null) {
+          setReviewFailure({
+            description:
+              "This browser cannot coordinate Relay writes across tabs. Relay did not migrate this PR conversation.",
+            title: "PR conversation not saved"
+          })
+        } else {
+          void migrateRelayReviewSession(
+            window.localStorage,
+            legacyReviewSessionKey,
+            legacyReviewResource,
+            reviewSessionKey,
+            reviewResource,
+            lock
+          ).then((migrated) => {
+            if (Result.isFailure(migrated)) {
+              setReviewFailure({
+                description: "Local storage is unavailable. Relay could not migrate this PR conversation.",
+                title: "PR conversation not saved"
+              })
+            } else if (migrated.success !== null) {
+              reviewSessionVersionRef.current = migrated.success.version
+            }
+          })
+        }
+      }
+    }
+    if (hydrated === null) {
       skipSessionWriteRef.current = reviewSessionKey
       hydratedSessionRef.current = {
         fingerprint: sessionFingerprint(null, [], {}),
@@ -814,26 +882,26 @@ const ReadyReviewWorkspace = ({
       return
     }
     skipSessionWriteRef.current = reviewSessionKey
-    reviewSessionVersionRef.current = stored.success.version
-    const restored = replaceRelayReviewPreservingTurns(stored.success.turns, {
-      expectedIdentity: stored.success.identity,
-      identity: stored.success.identity,
-      skillIds: stored.success.skillIds,
-      value: stored.success.review
+    reviewSessionVersionRef.current = hydrated.version
+    const restored = replaceRelayReviewPreservingTurns(hydrated.turns, {
+      expectedIdentity: hydrated.identity,
+      identity: hydrated.identity,
+      skillIds: hydrated.skillIds,
+      value: hydrated.review
     })
     completedReviewRef.current = restored
-    dispositionsRef.current = stored.success.dispositions
+    dispositionsRef.current = hydrated.dispositions
     setCompletedReview(restored)
-    setSelectedProfileId(stored.success.review.profile.id)
-    setTurns(stored.success.turns)
-    setDispositions(stored.success.dispositions)
-    setSelectedFindingId(stored.success.turns.at(-1)?.findingId ?? stored.success.review.result.findings[0]?.id ?? null)
+    setSelectedProfileId(hydrated.review.profile.id)
+    setTurns(hydrated.turns)
+    setDispositions(hydrated.dispositions)
+    setSelectedFindingId(hydrated.turns.at(-1)?.findingId ?? hydrated.review.result.findings[0]?.id ?? null)
     hydratedSessionRef.current = {
-      fingerprint: sessionFingerprint(restored, stored.success.turns, stored.success.dispositions),
+      fingerprint: sessionFingerprint(restored, hydrated.turns, hydrated.dispositions),
       key: reviewSessionKey,
       pendingInitialPass: true
     }
-  }, [reviewIdentity, reviewResource, reviewSessionKey])
+  }, [legacyReviewResource, legacyReviewSessionKey, reviewIdentity, reviewResource, reviewSessionKey])
 
   useEffect(() => {
     const hydratedSession = hydratedSessionRef.current
