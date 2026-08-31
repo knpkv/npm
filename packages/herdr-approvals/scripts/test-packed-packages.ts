@@ -186,13 +186,17 @@ const program = Effect.scoped(
       `${
         JSON.stringify({
           dependencies: { "@test/not-installed": "99.99.99" },
-          files: ["README.md"],
+          files: ["README.md", "prepack-marker"],
           name: "@test/sample",
+          scripts: {
+            prepack: "node -e \"require('node:fs').writeFileSync('prepack-marker', 'ran')\""
+          },
           version: "1.0.0"
         })
       }\n`
     )
     yield* fileSystem.writeFileString(path.join(cleanPackage, "README.md"), "fixture\n")
+    yield* fileSystem.writeFileString(path.join(cleanPackage, "prepack-marker"), "source")
     const cleanArchive = path.join(first, "test-sample-1.0.0.tgz")
     yield* run(
       spawner,
@@ -204,7 +208,7 @@ const program = Effect.scoped(
       .split("\n")
       .filter((entry) => entry !== "")
       .sort()
-    const cleanExpected = yield* expectedFiles(fileSystem, path, cleanPackage, ["README.md"])
+    const cleanExpected = yield* expectedFiles(fileSystem, path, cleanPackage, ["README.md", "prepack-marker"])
     if (JSON.stringify(cleanListing) !== JSON.stringify(cleanExpected)) {
       return yield* new HerdrPackContractError({
         reason: `Clean staged manifest packed unexpected files: ${JSON.stringify({ cleanExpected, cleanListing })}`
@@ -222,6 +226,17 @@ const program = Effect.scoped(
     ) {
       return yield* new HerdrPackContractError({
         reason: "Clean staged manifest did not pack without installing dependencies"
+      })
+    }
+    const cleanPrepackMarker = yield* run(
+      spawner,
+      "tar",
+      ["-xOf", cleanArchive, "package/prepack-marker"],
+      cleanWorkspace
+    )
+    if (cleanPrepackMarker !== "source") {
+      return yield* new HerdrPackContractError({
+        reason: `Clean staged pack ran prepack scripts: ${JSON.stringify(cleanPrepackMarker)}`
       })
     }
 

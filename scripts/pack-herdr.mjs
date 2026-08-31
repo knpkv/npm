@@ -12,6 +12,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 const pnpmVersion = "11.21.0"
 const pnpmExecutable = "corepack"
 const pnpmInvocation = [`pnpm@${pnpmVersion}`]
+const ignoreScriptsArgument = "--config.ignore-scripts=true"
 
 class PackError extends Data.TaggedError("PackError") {
   get message() {
@@ -217,7 +218,7 @@ const program = Effect.scoped(
       spawner,
       stdio,
       pnpmExecutable,
-      [...pnpmInvocation, "pack", "--pack-destination", destination],
+      [...pnpmInvocation, ignoreScriptsArgument, "pack", "--pack-destination", destination],
       staging,
       true
     )

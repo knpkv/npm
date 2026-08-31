@@ -267,7 +267,14 @@ const canonicalTypeText = (
     const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions, context)
     return `function<${generic.descriptor}>(${typeNode.parameters
       .map((parameter) =>
-        parameterDescriptor(parameter, analysis, filePath, generic.substitutions, nextCanonicalTypeContext(context))
+        parameterDescriptor(
+          parameter,
+          analysis,
+          filePath,
+          generic.substitutions,
+          seen,
+          nextCanonicalTypeContext(context)
+        )
       )
       .join(",")}):${
       typeNode.type === undefined
@@ -331,6 +338,7 @@ const parameterDescriptor = (
   analysis,
   filePath,
   substitutions,
+  seen = new Set(),
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
   const marker = parameter.dotDotDotToken === undefined ? "" : "..."
@@ -338,7 +346,7 @@ const parameterDescriptor = (
   const type =
     parameter.type === undefined
       ? "unknown"
-      : canonicalTypeText(parameter.type, analysis, filePath, substitutions, new Set(), context)
+      : canonicalTypeText(parameter.type, analysis, filePath, substitutions, seen, context)
   return `${marker}${optional}:${type}`
 }
 
@@ -347,6 +355,7 @@ const memberDescriptor = (
   analysis,
   filePath,
   substitutions,
+  seen = new Set(),
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
   const optional = member.questionToken === undefined ? "required" : "optional"
@@ -354,18 +363,19 @@ const memberDescriptor = (
   if (TypeScript.isMethodSignature(member)) {
     const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
     const parameters = member.parameters
-      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions, context))
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions, seen, context))
       .join(",")
     const returnType =
       member.type === undefined
         ? "unknown"
-        : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, new Set(), context)
+        : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, seen, context)
     return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
   }
   const type =
     member.type === undefined
       ? "unknown"
-      : canonicalTypeText(member.type, analysis, filePath, substitutions, new Set(), context)
+      : canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
+  if (member.type !== undefined) typeMembers(member.type, analysis, filePath, seen, substitutions)
   return `${readonly}${optional}:${type}`
 }
 
@@ -400,13 +410,21 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
       if (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name)) {
         continue
       }
-      members.set(name.text, memberDescriptor(member, analysis, filePath, substitutions))
+      members.set(name.text, memberDescriptor(member, analysis, filePath, substitutions, seen))
     }
     return { members, resolved }
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
+    if (substitutions.has(typeNode.typeName.text)) return { members: new Map(), resolved: false }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
-    if (declaration === undefined) return { members: new Map(), resolved: false }
+    if (declaration === undefined) {
+      let resolved = false
+      for (const argument of typeNode.typeArguments ?? []) {
+        const result = typeMembers(argument, analysis, filePath, seen, substitutions)
+        if (result.resolved) resolved = true
+      }
+      return { members: new Map(), resolved }
+    }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
@@ -427,7 +445,14 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
   }
   if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
-    if (declaration === undefined) return { members: new Map(), resolved: false }
+    if (declaration === undefined) {
+      let resolved = false
+      for (const argument of typeNode.typeArguments ?? []) {
+        const result = typeMembers(argument, analysis, filePath, seen, substitutions)
+        if (result.resolved) resolved = true
+      }
+      return { members: new Map(), resolved }
+    }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
@@ -1530,6 +1555,23 @@ const runSelfTest = () => {
     (cause) =>
       cause instanceof ChangesetCoverageError &&
       cause.reason === "packages/public/src/view.tsx: recursive type declaration while canonicalizing Loop"
+  )
+  const recursiveObjectSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; branch: Branch }\nexport type Branch = { payload: Payload; node: Node }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(recursiveObjectSources, recursiveObjectSources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
   )
   const finiteAliasSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
