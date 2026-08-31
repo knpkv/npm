@@ -53,6 +53,7 @@ import {
 import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
   readRelayReviewSession,
+  type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
   relayReviewSessionStorageKey,
   writeRelayReviewSession
@@ -82,6 +83,25 @@ const MAXIMUM_RENDERABLE_DIFF_INPUT_LINES = 5_000
 const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
 const MAXIMUM_RENDERABLE_DIFF_INPUT_BYTES = 512 * 1024
 const diffTextEncoder = new TextEncoder()
+
+const browserRelayReviewSessionLock = (): RelayReviewSessionLock | null => {
+  if (!("locks" in window.navigator)) return null
+  return {
+    request: (name, effect) => window.navigator.locks.request(name, () => effect())
+  }
+}
+
+interface HydratedSessionMarker {
+  readonly fingerprint: string
+  readonly key: string
+  pendingInitialPass: boolean
+}
+
+const sessionFingerprint = (
+  completedReview: RelayReviewCompletion | null,
+  turns: ReadonlyArray<RelayReviewConversationTurn>,
+  dispositions: FindingDispositions
+): string => JSON.stringify({ completedReview, dispositions, turns })
 
 const lineCount = (text: string): number => {
   if (text.length === 0) return 0
@@ -672,6 +692,7 @@ const ReadyReviewWorkspace = ({
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
   const reviewSessionVersionRef = useRef(0)
   const skipSessionWriteRef = useRef<string | null>(null)
+  const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
   const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
@@ -742,6 +763,7 @@ const ReadyReviewWorkspace = ({
   useEffect(() => {
     if (reviewResource === null || reviewSessionKey === null) {
       skipSessionWriteRef.current = null
+      hydratedSessionRef.current = null
       reviewSessionVersionRef.current = 0
       setReviewFailure({
         description: "CodeCommit has not resolved a stable AWS account identity for this pull request.",
@@ -752,6 +774,7 @@ const ReadyReviewWorkspace = ({
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
       skipSessionWriteRef.current = null
+      hydratedSessionRef.current = null
       reviewSessionVersionRef.current = 0
       setReviewFailure({
         description:
@@ -764,6 +787,11 @@ const ReadyReviewWorkspace = ({
     }
     if (stored.success === null) {
       skipSessionWriteRef.current = reviewSessionKey
+      hydratedSessionRef.current = {
+        fingerprint: sessionFingerprint(null, [], {}),
+        key: reviewSessionKey,
+        pendingInitialPass: true
+      }
       reviewSessionVersionRef.current = 0
       if (completedReviewRef.current !== null) return
       setCompletedReview(null)
@@ -787,9 +815,26 @@ const ReadyReviewWorkspace = ({
     setTurns(stored.success.turns)
     setDispositions(stored.success.dispositions)
     setSelectedFindingId(stored.success.turns.at(-1)?.findingId ?? stored.success.review.result.findings[0]?.id ?? null)
+    hydratedSessionRef.current = {
+      fingerprint: sessionFingerprint(restored, stored.success.turns, stored.success.dispositions),
+      key: reviewSessionKey,
+      pendingInitialPass: true
+    }
   }, [reviewIdentity, reviewResource, reviewSessionKey])
 
   useEffect(() => {
+    const hydratedSession = hydratedSessionRef.current
+    if (hydratedSession?.key === reviewSessionKey) {
+      if (hydratedSession.pendingInitialPass) {
+        hydratedSession.pendingInitialPass = false
+        return
+      }
+      if (hydratedSession.fingerprint === sessionFingerprint(completedReview, turns, dispositions)) {
+        hydratedSessionRef.current = null
+        return
+      }
+      hydratedSessionRef.current = null
+    }
     if (reviewSessionKey !== null && skipSessionWriteRef.current === reviewSessionKey) {
       skipSessionWriteRef.current = null
       return
@@ -801,22 +846,39 @@ const ReadyReviewWorkspace = ({
       reviewSessionKey === null
     )
       return
-    const written = writeRelayReviewSession(window.localStorage, reviewSessionKey, {
-      expectedIdentity: completedReview.expectedIdentity,
-      expectedVersion: reviewSessionVersionRef.current,
-      identity: completedReview.identity,
-      resource: reviewResource,
-      review: completedReview.value,
-      skillIds: completedReview.skillIds,
-      turns,
-      dispositions
-    })
-    if (Result.isFailure(written)) {
+    const lock = browserRelayReviewSessionLock()
+    if (lock === null) {
       setReviewFailure({
-        description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+        description:
+          "This browser cannot coordinate Relay writes across tabs. Relay did not save this PR conversation.",
         title: "PR conversation not saved"
       })
-    } else {
+      return
+    }
+    let active = true
+    void writeRelayReviewSession(
+      window.localStorage,
+      reviewSessionKey,
+      {
+        expectedIdentity: completedReview.expectedIdentity,
+        expectedVersion: reviewSessionVersionRef.current,
+        identity: completedReview.identity,
+        resource: reviewResource,
+        review: completedReview.value,
+        skillIds: completedReview.skillIds,
+        turns,
+        dispositions
+      },
+      lock
+    ).then((written) => {
+      if (!active) return
+      if (Result.isFailure(written)) {
+        setReviewFailure({
+          description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+          title: "PR conversation not saved"
+        })
+        return
+      }
       reviewSessionVersionRef.current = written.success.session.version
       if (written.success._tag === "stale-review-preserved") {
         skipSessionWriteRef.current = reviewSessionKey
@@ -836,6 +898,9 @@ const ReadyReviewWorkspace = ({
           title: "Newer PR review preserved"
         })
       }
+    })
+    return () => {
+      active = false
     }
   }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, turns])
 

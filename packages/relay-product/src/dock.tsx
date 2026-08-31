@@ -7,6 +7,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import {
   type FormEvent,
+  Component,
   lazy,
   type ReactElement,
   type ReactNode,
@@ -45,6 +46,27 @@ const LazyRelayDock = lazy(async () => {
   const patterns = await import("@knpkv/rly/patterns")
   return { default: patterns.RelayDock }
 })
+
+interface RelayDockChromeBoundaryState {
+  readonly failed: boolean
+}
+
+/** Keep routed product content mounted when optional Relay chrome cannot load. */
+export class RelayProductDockChromeBoundary extends Component<
+  { readonly children: ReactNode },
+  RelayDockChromeBoundaryState
+> {
+  override state: RelayDockChromeBoundaryState = { failed: false }
+
+  static getDerivedStateFromError(cause: unknown): RelayDockChromeBoundaryState {
+    void cause
+    return { failed: true }
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children
+  }
+}
 
 type RelayProductDockContinuationFailure =
   | RelayAuthenticationFailure
@@ -230,6 +252,12 @@ const ThreadMessages = ({ messages }: { readonly messages: ReadonlyArray<RelayPr
     </ol>
   )
 
+export const relaySelectionMatchesRegistration = (
+  selection: RelaySelectorState,
+  registration: RelayPullRequestDockRegistration
+): boolean =>
+  selection.profileId === registration.selection.profileId && selection.modelId === registration.selection.modelId
+
 const PullRequestContinuation = ({
   registration,
   selection
@@ -240,9 +268,14 @@ const PullRequestContinuation = ({
   const [message, setMessage] = useState("")
   const [validation, setValidation] = useState<string | null>(null)
   const [action, runAction] = useRelayDockAction()
+  const selectionMatchesRegistration = relaySelectionMatchesRegistration(selection, registration)
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
+    if (!selectionMatchesRegistration) {
+      setValidation("Rerun Relay with the selected profile or model before continuing this PR thread.")
+      return
+    }
     const decoded = Schema.decodeUnknownResult(ContinuePullRequestConversationRequest)({
       conversation: registration.conversation,
       message: message.trim(),
@@ -277,7 +310,10 @@ const PullRequestContinuation = ({
           {validation ?? action.description}
         </p>
       )}
-      <button disabled={action.pending || message.trim().length === 0} type="submit">
+      {!selectionMatchesRegistration && validation === null ? (
+        <p aria-live="polite">Rerun Relay with the selected profile or model before continuing this PR thread.</p>
+      ) : null}
+      <button disabled={action.pending || message.trim().length === 0 || !selectionMatchesRegistration} type="submit">
         {action.pending ? "Continuing on this PR…" : "Continue on this PR"}
       </button>
     </form>
@@ -369,30 +405,32 @@ export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDo
         zIndex: 80
       }}
     >
-      <Suspense fallback={null}>
-        <LazyRelayDock
-          context={registration?.context ?? host.context}
-          defaultOpen={false}
-          footer={
-            readyRegistration === null ? undefined : (
-              <PullRequestContinuation key={identity} registration={readyRegistration} selection={selection} />
-            )
-          }
-          selection={{
-            model: {
-              onValueChange: setModel,
-              options: selection.models.map(({ id, label }) => ({ label, value: id })),
-              value: selection.modelId
-            },
-            profile: {
-              onValueChange: setProfile,
-              options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
-              value: selection.profileId
+      <RelayProductDockChromeBoundary>
+        <Suspense fallback={null}>
+          <LazyRelayDock
+            context={registration?.context ?? host.context}
+            defaultOpen={false}
+            footer={
+              readyRegistration === null ? undefined : (
+                <PullRequestContinuation key={identity} registration={readyRegistration} selection={selection} />
+              )
             }
-          }}
-          state={relayDockState(host, registration)}
-        />
-      </Suspense>
+            selection={{
+              model: {
+                onValueChange: setModel,
+                options: selection.models.map(({ id, label }) => ({ label, value: id })),
+                value: selection.modelId
+              },
+              profile: {
+                onValueChange: setProfile,
+                options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
+                value: selection.profileId
+              }
+            }}
+            state={relayDockState(host, registration)}
+          />
+        </Suspense>
+      </RelayProductDockChromeBoundary>
     </div>
   )
 }

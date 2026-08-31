@@ -9,6 +9,7 @@ import { createRoot, type Root } from "react-dom/client"
 import {
   PullRequestConversation,
   RelayProductDock,
+  RelayProductDockChromeBoundary,
   type RelayProductDockHost,
   type RelayPullRequestDockRegistration,
   RelaySelectorState,
@@ -61,6 +62,12 @@ class MissingDockTestElement extends Data.TaggedError("MissingDockTestElement")<
   readonly selector: string
 }> {}
 
+class DockChromeFailure extends Data.TaggedError("DockChromeFailure") {}
+
+const ThrowingDockChrome = (): ReactElement => {
+  throw new DockChromeFailure()
+}
+
 const queryRequired = <ElementType extends Element>(parent: ParentNode, selector: string): ElementType => {
   const element = parent.querySelector<ElementType>(selector)
   if (element === null) throw new MissingDockTestElement({ selector })
@@ -82,6 +89,22 @@ const RegisteredThread = ({ registration }: { readonly registration: RelayPullRe
 }
 
 describe("RelayProductDock", () => {
+  it("contains a rejected lazy dock without unmounting routed content", async () => {
+    const rendered = await renderDock(
+      <>
+        <output data-routed-page="true">page</output>
+        <RelayProductDockChromeBoundary>
+          <ThrowingDockChrome />
+        </RelayProductDockChromeBoundary>
+      </>
+    )
+    try {
+      expect(rendered.container.querySelector("[data-routed-page]")?.textContent).toBe("page")
+    } finally {
+      await disposeDock(rendered)
+    }
+  })
+
   it("renders on the host page collapsed, then exposes the profile and model selectors", async () => {
     const rendered = await renderDock(
       <RelayProductDock host={host}>

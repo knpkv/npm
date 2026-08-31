@@ -3,6 +3,7 @@ import * as Result from "effect/Result"
 
 import {
   readRelayReviewSession,
+  type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
   relayReviewSessionStorageKey,
   type RelayReviewSessionWrite,
@@ -66,6 +67,10 @@ const makeStorage = (): MemoryStorage => {
 const localStorage = makeStorage()
 const sessionStorage = makeStorage()
 
+const immediateLock: RelayReviewSessionLock = {
+  request: async (_name, effect) => effect()
+}
+
 const writeSession = (
   storage: MemoryStorage,
   key: string,
@@ -78,7 +83,7 @@ const writeSession = (
     ...session,
     expectedIdentity: session.expectedIdentity ?? session.identity,
     expectedVersion: session.expectedVersion ?? 0
-  })
+  }, immediateLock)
 
 describe("Relay review session storage", () => {
   beforeEach(() => {
@@ -86,9 +91,9 @@ describe("Relay review session storage", () => {
     sessionStorage.clear()
   })
 
-  it("restores one durable PR conversation across exact heads", () => {
+  it("restores one durable PR conversation across exact heads", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -115,9 +120,9 @@ describe("Relay review session storage", () => {
     expect(Result.isFailure(readRelayReviewSession(sessionStorage, key, resource))).toBe(true)
   })
 
-  it("rejects a schema-valid conversation stored for another repository identity", () => {
+  it("rejects a schema-valid conversation stored for another repository identity", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -135,14 +140,14 @@ describe("Relay review session storage", () => {
     if (Result.isFailure(restored)) expect(restored.failure._tag).toBe("RelayReviewSessionResourceMismatch")
   })
 
-  it("keeps regional PR sessions under distinct durable identities", () => {
+  it("keeps regional PR sessions under distinct durable identities", async () => {
     const euKey = relayReviewSessionStorageKey(resource)
     const usResource: RelayReviewSessionResourceIdentity = { ...resource, region: "us-east-1" }
     const usKey = relayReviewSessionStorageKey(usResource)
 
     expect(euKey).not.toBe(usKey)
 
-    writeSession(localStorage, euKey, {
+    await writeSession(localStorage, euKey, {
       identity: "exact-head-1",
       resource,
       review,
@@ -156,7 +161,7 @@ describe("Relay review session storage", () => {
     if (Result.isSuccess(restored)) expect(restored.success).toBeNull()
   })
 
-  it("merges stale tab writes without losing turns or regressing publication state", () => {
+  it("merges stale tab writes without losing turns or regressing publication state", async () => {
     const key = relayReviewSessionStorageKey(resource)
     const staleTab = {
       identity: "exact-head-1",
@@ -166,12 +171,12 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F1: "pending" }
     }
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       ...staleTab,
       turns: [{ findingId: "F1", role: "user", message: "First tab" }],
       dispositions: { F1: "posted" }
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       ...staleTab,
       turns: [{ findingId: "F1", role: "user", message: "Second tab" }]
     })
@@ -186,9 +191,9 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("keeps the PR transcript when a new exact head replaces the review", () => {
+  it("keeps the PR transcript when a new exact head replaces the review", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -196,7 +201,7 @@ describe("Relay review session storage", () => {
       turns: [{ findingId: "F1", role: "user", message: "Check the first head." }],
       dispositions: { F1: "posted" }
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedIdentity: "exact-head-1",
       expectedVersion: 1,
       identity: "exact-head-2",
@@ -218,9 +223,9 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("recovers interrupted publications without changing settled dispositions", () => {
+  it("recovers interrupted publications without changing settled dispositions", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(sessionStorage, key, {
+    await writeSession(sessionStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -253,7 +258,7 @@ describe("Relay review session storage", () => {
     if (Result.isFailure(restored)) expect(restored.failure._tag).toBe("RelayReviewSessionStorageUnavailable")
   })
 
-  it("preserves repeated turns with different stable IDs and deduplicates one replayed ID", () => {
+  it("preserves repeated turns with different stable IDs and deduplicates one replayed ID", async () => {
     const key = relayReviewSessionStorageKey(resource)
     const repeatedTurn = (id: string): RelayReviewConversationTurn => ({
       id,
@@ -261,7 +266,7 @@ describe("Relay review session storage", () => {
       role: "user",
       message: "Check again."
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -269,7 +274,7 @@ describe("Relay review session storage", () => {
       turns: [repeatedTurn("turn-1"), repeatedTurn("turn-2")],
       dispositions: {}
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -286,9 +291,9 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("keeps a newer exact-head review when an older tab writes later", () => {
+  it("keeps a newer exact-head review when an older tab writes later", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -296,7 +301,7 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F1: "pending" }
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedIdentity: "exact-head-1",
       expectedVersion: 1,
       identity: "exact-head-2",
@@ -306,7 +311,7 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F2: "posted" }
     })
-    const staleWrite = writeSession(localStorage, key, {
+    const staleWrite = await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -330,7 +335,7 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("does not bind stale finding state to a reused finding id", () => {
+  it("does not bind stale finding state to a reused finding id", async () => {
     const key = relayReviewSessionStorageKey(resource)
     const revisedReview: PullRequestRelayReviewResponse = {
       ...review,
@@ -340,7 +345,7 @@ describe("Relay review session storage", () => {
         findings: review.result.findings.map((finding) => ({ ...finding, summary: "A different finding." }))
       }
     }
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -348,7 +353,7 @@ describe("Relay review session storage", () => {
       turns: [{ findingId: "F1", id: "old-finding-turn", role: "user", message: "Old finding." }],
       dispositions: { F1: "posted" }
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedIdentity: "exact-head-1",
       expectedVersion: 1,
       identity: "exact-head-2",
@@ -358,7 +363,7 @@ describe("Relay review session storage", () => {
       turns: [{ findingId: "PR", id: "pr-turn", role: "user", message: "PR-level context." }],
       dispositions: { F1: "pending" }
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedVersion: 2,
       identity: "exact-head-2",
       resource,
@@ -368,7 +373,7 @@ describe("Relay review session storage", () => {
       dispositions: { F1: "pending" }
     })
 
-    const staleWrite = writeSession(localStorage, key, {
+    const staleWrite = await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -387,7 +392,7 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("keeps the winning bounded turn window when an older tab writes later", () => {
+  it("keeps the winning bounded turn window when an older tab writes later", async () => {
     const key = relayReviewSessionStorageKey(resource)
     const turn = (index: number): RelayReviewConversationTurn => ({
       id: `turn-${index}`,
@@ -398,7 +403,7 @@ describe("Relay review session storage", () => {
     const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
       Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
 
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedVersion: 0,
       identity: "exact-head-1",
       resource,
@@ -407,7 +412,7 @@ describe("Relay review session storage", () => {
       turns: window(1, 40),
       dispositions: {}
     })
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -417,7 +422,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    const staleOlderWindow = writeSession(localStorage, key, {
+    const staleOlderWindow = await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -436,7 +441,7 @@ describe("Relay review session storage", () => {
       )
     }
 
-    const staleNewerTurn = writeSession(localStorage, key, {
+    const staleNewerTurn = await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -456,9 +461,106 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("preserves a same-head review when a stale tab writes after a newer version", () => {
+  it("does not resurrect a disjoint evicted window from a stale tab", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    const initial = writeSession(localStorage, key, {
+    const turn = (index: number): RelayReviewConversationTurn => ({
+      id: `turn-${index}`,
+      findingId: "F1",
+      role: "user",
+      message: `Turn ${index}`
+    })
+    const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
+      Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
+
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+    const staleWrite = await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(1, 40),
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(
+        Array.from({ length: 40 }, (_, offset) => `turn-${offset + 41}`)
+      )
+    }
+  })
+
+  it("serializes cross-tab writes through the session lock", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    let tail = Promise.resolve()
+    const lock: RelayReviewSessionLock = {
+      request: async (_name, effect) => {
+        const previous = tail
+        let release = (): void => undefined
+        tail = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        await previous
+        try {
+          return await effect()
+        } finally {
+          release()
+        }
+      }
+    }
+    const first = writeRelayReviewSession(localStorage, key, {
+      expectedIdentity: "exact-head-1",
+      expectedVersion: 0,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [{ id: "first", findingId: "F1", role: "user", message: "First" }],
+      dispositions: {}
+    }, lock)
+    const second = writeRelayReviewSession(localStorage, key, {
+      expectedIdentity: "exact-head-1",
+      expectedVersion: 0,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [{ id: "second", findingId: "F1", role: "user", message: "Second" }],
+      dispositions: {}
+    }, lock)
+
+    const results = await Promise.all([first, second])
+    expect(results.every(Result.isSuccess)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["first", "second"])
+      expect(restored.success?.version).toBe(2)
+    }
+  })
+
+  it("preserves a same-head review when a stale tab writes after a newer version", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const initial = await writeSession(localStorage, key, {
       expectedVersion: 0,
       identity: "exact-head-1",
       resource,
@@ -469,7 +571,7 @@ describe("Relay review session storage", () => {
     })
     expect(Result.isSuccess(initial)).toBe(true)
 
-    const current = writeSession(localStorage, key, {
+    const current = await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -480,7 +582,7 @@ describe("Relay review session storage", () => {
     })
     expect(Result.isSuccess(current)).toBe(true)
 
-    const stale = writeSession(localStorage, key, {
+    const stale = await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -506,9 +608,9 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("accepts a same-head write only when its observed version is current", () => {
+  it("accepts a same-head write only when its observed version is current", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       expectedVersion: 0,
       identity: "exact-head-1",
       resource,
@@ -518,7 +620,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    const written = writeSession(localStorage, key, {
+    const written = await writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -536,9 +638,9 @@ describe("Relay review session storage", () => {
     }
   })
 
-  it("persists current-head reconciliations without rank-merging them away", () => {
+  it("persists current-head reconciliations without rank-merging them away", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(localStorage, key, {
+    await writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -546,7 +648,7 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F1: "posted" }
     })
-    const replaced = writeSession(localStorage, key, {
+    const replaced = await writeSession(localStorage, key, {
       identity: "exact-head-1",
       expectedVersion: 1,
       resource,

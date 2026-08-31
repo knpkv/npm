@@ -8,6 +8,7 @@ import {
   PullRequestConversation,
   pullRequestThreadIdentity,
   type RelayPullRequestDockRegistration,
+  relaySelectionMatchesRegistration,
   RelaySelectorState
 } from "@knpkv/relay-product"
 import {
@@ -71,6 +72,32 @@ const requireReadyRegistration = (
   registration.status === "ready" ? Effect.succeed(registration) : Effect.die("Expected a ready Relay registration")
 
 describe("CodeCommit Relay dock adapter", () => {
+  it("keeps the continuation bound to the registered profile and model", () => {
+    const registration = makeCodeCommitRelayThreadRegistration({
+      available: true,
+      context: [],
+      continueReview: () => Promise.resolve({ _tag: "completed" }),
+      conversation,
+      isReviewing: false,
+      review: explainReview,
+      selectedFindingId: null,
+      selection,
+      turns: []
+    })
+
+    expect(relaySelectionMatchesRegistration(selection, registration)).toBe(true)
+    expect(
+      relaySelectionMatchesRegistration(
+        Schema.decodeUnknownSync(RelaySelectorState)({
+          ...selection,
+          profileId: "other-profile",
+          profiles: [{ id: "other-profile", label: "Other profile" }]
+        }),
+        registration
+      )
+    ).toBe(false)
+  })
+
   it("uses repository account identity without changing the credential route alias", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
