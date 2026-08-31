@@ -186,6 +186,7 @@ describe("RelayDock", () => {
     expect(rail.querySelector('[aria-labelledby*="rly-relay-dock-model-"]')).not.toBeNull()
     expect(host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")?.hidden).toBe(true)
     expect(rail.querySelectorAll('[aria-label="Close Relay"]')).toHaveLength(1)
+    expect(rail.parentElement?.hasAttribute("data-rly-modal-layer")).toBe(false)
   })
 
   it("keeps profile and model label associations unique across Dock instances", async () => {
@@ -378,6 +379,25 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("excludes explicitly non-tabbable editors from the modal focus boundary", async () => {
+    const footer = (
+      <>
+        <textarea aria-label="Last sequential editor" />
+        <div aria-label="Programmatic editor" contentEditable tabIndex={-1} />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const lastSequential = portal.querySelector<HTMLTextAreaElement>('[aria-label="Last sequential editor"]')
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    lastSequential?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("excludes controls disabled by an ancestor from the modal focus boundary", async () => {
     const footer = (
       <>
@@ -545,6 +565,28 @@ describe("RelayDock", () => {
     )
     expect(portal.querySelector('[role="dialog"]')).toBe(dialog)
     expect(composer?.value).toBe("Draft reply")
+
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const forward = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: "Tab"
+    })
+    await act(async () => composer?.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => close?.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(composer)
   })
 
   it("isolates background siblings mounted after the modal opens", async () => {
@@ -562,6 +604,25 @@ describe("RelayDock", () => {
 
     await act(async () => portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')?.click())
     expect(lateBackgroundAction.inert).toBe(false)
+  })
+
+  it("keeps a nested desktop rail interactive inside its parent modal", async () => {
+    const { portal } = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content title="Outer dialog">{dock({ presentation: "rail" })}</Dialog.Content>
+      </Dialog.Root>
+    )
+    const open = portal.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
+    await act(async () => open?.click())
+    const railLayer = portal.querySelector<HTMLElement>('[data-rly-relay-dock-modal="false"]')
+    const close = railLayer?.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+
+    expect(railLayer).not.toBeNull()
+    expect(railLayer?.hasAttribute("data-rly-modal-layer")).toBe(true)
+    expect(railLayer?.inert).toBe(false)
+    await act(async () => close?.click())
+    expect(portal.querySelector('[data-rly-relay-dock-presentation="rail"]')).toBeNull()
+    expect(portal.querySelector('[role="dialog"]')).not.toBeNull()
   })
 
   it("focuses an initially open dialog after the owned portal target mounts", async () => {

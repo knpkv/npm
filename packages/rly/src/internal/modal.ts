@@ -66,6 +66,9 @@ export const ModalNestingBoundary = ({ children }: ModalNestingBoundaryProps): R
 /** Reports whether a logical parent modal is ready to host a nested overlay. */
 export const useParentModalReady = (): boolean => useContext(ModalNestingContext)?.isContentMounted ?? true
 
+/** Reports whether this component belongs to a logical parent modal. */
+export const useParentModalPresent = (): boolean => useContext(ModalNestingContext) !== null
+
 /** Registers the current portal content so deeper overlays mount in logical stack order. */
 export const useModalContentRegistration = (): void => {
   const setContentMounted = useContext(ModalNestingContext)?.setContentMounted
