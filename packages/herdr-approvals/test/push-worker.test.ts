@@ -276,6 +276,57 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("records delivery only for the exact subscription revision", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-revision-test-"))
+    const replacement: PushSubscriptionRecord = {
+      ...subscription,
+      keys: { auth: "replacement_auth", p256dh: "replacement_p256dh" }
+    }
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          expect(
+            yield* store.recordDeliveryIfSubscriptionMatches(
+              "SER8",
+              "job-revision",
+              subscription,
+              "alice@example.com",
+              1_000
+            )
+          ).toBe(true)
+          yield* store.putSubscription(replacement, "alice@example.com")
+          expect(
+            yield* store.recordDeliveryIfSubscriptionMatches(
+              "SER8",
+              "job-revision",
+              subscription,
+              "alice@example.com",
+              1_001
+            )
+          ).toBe(false)
+          expect(
+            yield* store.hasDelivered("SER8", "job-revision", subscription.endpoint)
+          ).toBe(false)
+          expect(
+            yield* store.recordDeliveryIfSubscriptionMatches(
+              "SER8",
+              "job-revision",
+              replacement,
+              "alice@example.com",
+              1_001
+            )
+          ).toBe(true)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("retries an accepted delivery after its push TTL", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-ttl-test-"))
     let sends = 0

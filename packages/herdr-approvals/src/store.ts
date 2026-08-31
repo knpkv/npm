@@ -45,6 +45,41 @@ const StoredPushSubscription = Schema.Struct({
 })
 type StoredPushSubscription = typeof StoredPushSubscription.Type
 
+const subscriptionMatches = (
+  stored: StoredPushSubscription,
+  subscription: PushSubscriptionRecordType,
+  owner: string
+): boolean =>
+  stored.owner === owner &&
+  stored.expirationTime === subscription.expirationTime &&
+  stored.keys.auth === subscription.keys.auth &&
+  stored.keys.p256dh === subscription.keys.p256dh
+
+const recordDelivery = (
+  database: DatabaseSync,
+  host: string,
+  jobId: string,
+  endpoint: string,
+  deliveredAt: number
+): void => {
+  const updated = database
+    .prepare(
+      `UPDATE push_deliveries
+       SET delivered_at = max(delivered_at, ?)
+       WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
+    )
+    .run(deliveredAt, host, jobId, endpoint)
+  if (updated.changes !== 0 && updated.changes !== 0n) return
+  database
+    .prepare(
+      `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
+         delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at)`
+    )
+    .run(host, jobId, endpoint, deliveredAt)
+}
+
 const decodeRow = <A>(
   operation: string,
   schema: Schema.Codec<A, unknown, never, never>,
@@ -241,29 +276,43 @@ export class ApprovalAppStore {
     return stored.owner === owner
   })
 
-  readonly hasExactSubscription = Effect.fn("ApprovalAppStore.hasExactSubscription")(function*(
+  readonly recordDeliveryIfSubscriptionMatches = Effect.fn(
+    "ApprovalAppStore.recordDeliveryIfSubscriptionMatches"
+  )(function*(
     this: ApprovalAppStore,
+    host: string,
+    jobId: string,
     subscription: PushSubscriptionRecordType,
-    owner: string
+    owner: string,
+    deliveredAt: number
   ) {
     const database = this.#database
-    const row = yield* Effect.try({
+    const normalizedHost = host.toLowerCase()
+    const recorded = yield* Effect.try({
       try: () =>
-        database
-          .prepare("SELECT record FROM push_subscriptions WHERE endpoint = ?")
-          .get(subscription.endpoint),
-      catch: storeError("subscription.hasExact")
+        immediateTransaction(database, () => {
+          const row = database
+            .prepare("SELECT record FROM push_subscriptions WHERE endpoint = ?")
+            .get(subscription.endpoint)
+          if (row === undefined) return false
+          const encoded = Schema.decodeUnknownSync(StoredJsonRow)(row)
+          const stored = Schema.decodeUnknownSync(StoredPushSubscription)(
+            JSON.parse(encoded.record)
+          )
+          if (!subscriptionMatches(stored, subscription, owner)) return false
+          recordDelivery(
+            database,
+            normalizedHost,
+            jobId,
+            subscription.endpoint,
+            deliveredAt
+          )
+          return true
+        }),
+      catch: storeError("delivery.recordIfSubscriptionMatches")
     })
-    if (row === undefined) return false
-    const stored = yield* decodeRow(
-      "subscription.hasExact.decode",
-      StoredPushSubscription,
-      row
-    )
-    return stored.owner === owner &&
-      stored.expirationTime === subscription.expirationTime &&
-      stored.keys.auth === subscription.keys.auth &&
-      stored.keys.p256dh === subscription.keys.p256dh
+    if (recorded) yield* this.secureFiles()
+    return recorded
   })
 
   readonly listSubscriptions = Effect.fn("ApprovalAppStore.listSubscriptions")(function*(
@@ -312,24 +361,7 @@ export class ApprovalAppStore {
     const database = this.#database
     const normalizedHost = host.toLowerCase()
     yield* Effect.try({
-      try: () => {
-        const updated = database
-          .prepare(
-            `UPDATE push_deliveries
-             SET delivered_at = max(delivered_at, ?)
-             WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
-          )
-          .run(deliveredAt, normalizedHost, jobId, endpoint)
-        if (updated.changes !== 0 && updated.changes !== 0n) return
-        database
-          .prepare(
-            `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
-               delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at)`
-          )
-          .run(normalizedHost, jobId, endpoint, deliveredAt)
-      },
+      try: () => recordDelivery(database, normalizedHost, jobId, endpoint, deliveredAt),
       catch: storeError("delivery.record")
     })
     yield* this.secureFiles()
