@@ -52,26 +52,31 @@ export const ControlCenterRelayDockChrome = (): ReactElement => {
               new PullRequestConversationLookupFailed({ product: "control-center" })
           )
         )
-        const openPullRequest = yield* Effect.tryPromise({
-          try: () => import("./openPullRequest/openPullRequest.js"),
-          catch: (): PullRequestConversationLookupFailed =>
-            new PullRequestConversationLookupFailed({ product: "control-center" })
-        })
-        const resolution = yield* Effect.tryPromise({
-          try: (signal) => openPullRequest.browserOpenPullRequestTransport.resolve(providerLocator, signal),
-          catch: (): PullRequestConversationLookupFailed =>
-            new PullRequestConversationLookupFailed({ product: "control-center" })
-        })
+        const openPullRequest = yield* Effect.tryPromise(() => import("./openPullRequest/openPullRequest.js")).pipe(
+          Effect.mapError(
+            (): PullRequestConversationLookupFailed =>
+              new PullRequestConversationLookupFailed({ product: "control-center" })
+          )
+        )
+        const resolution = yield* Effect.tryPromise((signal) =>
+          openPullRequest.browserOpenPullRequestTransport.resolve(providerLocator, signal)
+        ).pipe(
+          Effect.mapError(
+            (): PullRequestConversationLookupFailed =>
+              new PullRequestConversationLookupFailed({ product: "control-center" })
+          )
+        )
         const candidate = selectControlCenterRelayCandidate(resolution, locator.accountId)
         if (candidate !== undefined) {
           const href = workspaceEntityPath(session.workspaceId, candidate.entityId)
-          return yield* Effect.tryPromise({
-            try: async () => {
-              await navigate(href)
-            },
-            catch: (): PullRequestConversationRedirectFailed =>
-              new PullRequestConversationRedirectFailed({ href, product: "control-center" })
-          })
+          return yield* Effect.tryPromise(async () => {
+            await navigate(href)
+          }).pipe(
+            Effect.mapError(
+              (): PullRequestConversationRedirectFailed =>
+                new PullRequestConversationRedirectFailed({ href, product: "control-center" })
+            )
+          )
         }
         if (resolution._tag === "ambiguous") {
           return yield* new PullRequestConversationAmbiguous({

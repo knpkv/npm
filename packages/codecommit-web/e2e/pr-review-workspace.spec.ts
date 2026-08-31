@@ -573,7 +573,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   defaultProfileId = "thorough"
   await page.reload()
   await expect(page.getByLabel("Profile")).toHaveValue("quick")
-  await expect(page.getByText("Test review").first()).toBeVisible()
+  await expect(page.getByLabel("Profile").locator("option:checked")).toHaveText("Test review")
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
@@ -601,7 +601,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   expect(runs[1]).toMatchObject({
     profile: { id: "thorough", kind: "security", model: "configured-default" }
   })
-  await expect(page.getByRole("log").locator("li")).toHaveCount(0)
+  await expect(page.getByRole("log").locator("li")).toHaveCount(4)
 })
 
 test("preserves completed conversations when a rerun fails", async ({ page }) => {
@@ -728,10 +728,10 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page.getByText("acknowledged")).toBeVisible()
   const persistedBefore = await page.evaluate(() => {
-    const key = Object.keys(window.sessionStorage).find((candidate) =>
+    const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")
     )
-    return key === undefined ? null : window.sessionStorage.getItem(key)
+    return key === undefined ? null : window.localStorage.getItem(key)
   })
   expect(persistedBefore).not.toBeNull()
 
@@ -746,10 +746,10 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   await expect(page.getByText("acknowledged")).toBeVisible()
   expect(
     await page.evaluate(() => {
-      const key = Object.keys(window.sessionStorage).find((candidate) =>
+      const key = Object.keys(window.localStorage).find((candidate) =>
         candidate.startsWith("codecommit:relay-review-session:")
       )
-      return key === undefined ? null : window.sessionStorage.getItem(key)
+      return key === undefined ? null : window.localStorage.getItem(key)
     })
   ).toBe(persistedBefore)
 })
@@ -858,15 +858,15 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
-  await expect.poll(() => page.evaluate(() => window.sessionStorage.length)).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => window.localStorage.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
-    const key = Object.keys(window.sessionStorage).find((candidate) =>
+    const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")
     )
     if (key === undefined) throw new Error("Relay session was not stored")
-    const session = JSON.parse(window.sessionStorage.getItem(key) ?? "null")
+    const session = JSON.parse(window.localStorage.getItem(key) ?? "null")
     session.dispositions = { ...session.dispositions, F1: "posting", F2: "posted" }
-    window.sessionStorage.setItem(key, JSON.stringify(session))
+    window.localStorage.setItem(key, JSON.stringify(session))
   })
 
   await page.reload()
@@ -1103,8 +1103,8 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByRole("button", { name: "Run again" }).click()
-  await expect(page.getByText("Verify this again.")).toHaveCount(0)
-  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(0)
+  await expect(page.getByText("Verify this again.")).toHaveCount(1)
+  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })

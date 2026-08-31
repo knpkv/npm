@@ -141,6 +141,9 @@ function failureMessage<Failure>(failure: Failure, fallback: string): string {
   return isFailureWithMessage(failure) ? failure.message : fallback
 }
 
+const relayReviewFailureDescription = (message: string, hasPriorReview: boolean): string =>
+  hasPriorReview ? `Previous result retained. The latest rerun failed. ${message}` : message
+
 const exactReviewIdentity = (
   accountId: string,
   pullRequestId: Domain.PullRequestId,
@@ -669,6 +672,8 @@ const ReadyReviewWorkspace = ({
     ReadonlyArray<Extract<RelayReviewStreamEvent, { readonly type: "progress" }>>
   >([])
   const [turns, setTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
+  const turnsRef = useRef<ReadonlyArray<RelayReviewConversationTurn>>([])
+  turnsRef.current = turns
   const [message, setMessage] = useState("")
   const [dispositions, setDispositions] = useState<FindingDispositions>({})
   const [conversationCollapsed, setConversationCollapsed] = useState(true)
@@ -761,6 +766,7 @@ const ReadyReviewWorkspace = ({
     completedReviewRef.current = restored
     dispositionsRef.current = stored.success.dispositions
     setCompletedReview(restored)
+    setSelectedProfileId(stored.success.review.profile.id)
     setTurns(stored.success.turns)
     setDispositions(stored.success.dispositions)
     setSelectedFindingId(stored.success.turns.at(-1)?.findingId ?? stored.success.review.result.findings[0]?.id ?? null)
@@ -792,6 +798,17 @@ const ReadyReviewWorkspace = ({
     } else {
       reviewSessionVersionRef.current = written.success.session.version
       if (written.success._tag === "stale-review-preserved") {
+        const preserved = replaceRelayReviewPreservingTurns(written.success.session.turns, {
+          expectedIdentity: written.success.session.identity,
+          identity: written.success.session.identity,
+          skillIds: written.success.session.skillIds,
+          value: written.success.session.review
+        })
+        completedReviewRef.current = preserved
+        setCompletedReview(preserved)
+        dispositionsRef.current = written.success.session.dispositions
+        setTurns(written.success.session.turns)
+        setDispositions(written.success.session.dispositions)
         setReviewFailure({
           description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
           title: "Newer PR review preserved"
@@ -825,6 +842,7 @@ const ReadyReviewWorkspace = ({
       setIsReviewing(true)
       setReviewFailure(null)
       setProgress([])
+      const priorTurns = turnsRef.current
       let terminalError: string | null = null
       const terminal: RelayStreamTerminal = {}
       try {
@@ -838,7 +856,10 @@ const ReadyReviewWorkspace = ({
             }
             if (event.type === "error") {
               terminalError = event.message
-              setReviewFailure({ description: event.message, title: "Relay review failed" })
+              setReviewFailure({
+                description: relayReviewFailureDescription(event.message, completedReviewRef.current !== null),
+                title: "Relay review failed"
+              })
               return
             }
             terminal.event = event
@@ -846,7 +867,10 @@ const ReadyReviewWorkspace = ({
           controller.signal
         )
         if (terminalError !== null) {
-          setReviewFailure({ description: terminalError, title: "Relay review failed" })
+          setReviewFailure({
+            description: relayReviewFailureDescription(terminalError, completedReviewRef.current !== null),
+            title: "Relay review failed"
+          })
           return { completed: false }
         }
         const completedEvent = terminal.event
@@ -858,7 +882,7 @@ const ReadyReviewWorkspace = ({
             : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
         dispositionsRef.current = nextDispositions
         setDispositions(nextDispositions)
-        const completed = replaceRelayReviewPreservingTurns(turns, {
+        const completed = replaceRelayReviewPreservingTurns(priorTurns, {
           expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
           identity: reviewIdentity,
           skillIds: payload.profile.skillIds,
@@ -873,7 +897,10 @@ const ReadyReviewWorkspace = ({
       } catch (cause) {
         if (!controller.signal.aborted) {
           setReviewFailure({
-            description: failureMessage(cause, "Relay could not complete this review."),
+            description: relayReviewFailureDescription(
+              failureMessage(cause, "Relay could not complete this review."),
+              completedReviewRef.current !== null
+            ),
             title: "Relay review failed"
           })
         }
@@ -885,7 +912,7 @@ const ReadyReviewWorkspace = ({
         }
       }
     },
-    [reviewIdentity, turns]
+    [reviewIdentity]
   )
 
   const executeReview = useCallback(async (): Promise<void> => {
@@ -929,7 +956,8 @@ const ReadyReviewWorkspace = ({
         })
         return { _tag: "failed" }
       }
-      const nextTurns = appendReviewTurn(turns, userTurn)
+      const currentTurns = turnsRef.current
+      const nextTurns = appendReviewTurn(currentTurns, userTurn)
       const outcome = await runStream(
         `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
         {
@@ -938,7 +966,7 @@ const ReadyReviewWorkspace = ({
           headCommit: diff.headCommit,
           profile: review.profile,
           currentReview: review.result,
-          turns,
+          turns: currentTurns,
           findingId,
           message: nextMessage
         }
@@ -957,17 +985,7 @@ const ReadyReviewWorkspace = ({
       setMessage("")
       return { _tag: "completed" }
     },
-    [
-      accountId,
-      diff.baseCommit,
-      diff.headCommit,
-      diff.revisionId,
-      pullRequest.id,
-      review,
-      runStream,
-      completedReview,
-      turns
-    ]
+    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, runStream]
   )
 
   const postFinding = useCallback(
@@ -1197,24 +1215,25 @@ const ReadyReviewWorkspace = ({
               >
                 {isReviewing ? "Relay reviewing…" : review === null ? "Run Relay" : "Run again"}
               </Button>
-              <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
-                {reviewFocuses.map((focus) => {
-                  const Icon = focus.icon
-                  return (
-                    <button
-                      aria-pressed={selectedKind === focus.kind}
-                      disabled={isReviewing}
-                      key={focus.kind}
-                      onClick={() => setKind(focus.kind)}
-                      title={focus.description}
-                      type="button"
-                    >
-                      <Icon aria-hidden="true" />
-                      {focus.label}
-                    </button>
-                  )
-                })}
-              </div>
+              {isReviewing ? null : (
+                <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
+                  {reviewFocuses.map((focus) => {
+                    const Icon = focus.icon
+                    return (
+                      <button
+                        aria-pressed={selectedKind === focus.kind}
+                        key={focus.kind}
+                        onClick={() => setKind(focus.kind)}
+                        title={focus.description}
+                        type="button"
+                      >
+                        <Icon aria-hidden="true" />
+                        {focus.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </section>
 
             {AsyncResult.isFailure(config) ? (
@@ -1287,6 +1306,11 @@ const ReadyReviewWorkspace = ({
 
             {reviewFailure === null ? null : (
               <div className={styles.reviewFailure}>
+                {reviewFailure.description.startsWith("Previous result retained.") ? (
+                  <Text tone="secondary" variant="label">
+                    Previous result
+                  </Text>
+                ) : null}
                 <StatePanel
                   announce="polite"
                   description={reviewFailure.description}

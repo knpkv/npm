@@ -102,13 +102,14 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
           String(match.repositoryName),
           String(match.account.region)
         )
-        yield* Effect.tryPromise({
-          try: async () => {
-            await navigate(href)
-          },
-          catch: (): PullRequestConversationRedirectFailed =>
-            new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
-        })
+        yield* Effect.tryPromise(async () => {
+          await navigate(href)
+        }).pipe(
+          Effect.mapError(
+            (): PullRequestConversationRedirectFailed =>
+              new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
+          )
+        )
       }),
       product: "codecommit",
       selection: hostSelection
@@ -216,11 +217,11 @@ export const makeCodeCommitRelayThreadRegistration = ({
           thread
         })
       }
-      return Effect.tryPromise({
-        try: () => continueReview(continuationTarget, request.message),
-        catch: (): PullRequestConversationContinuationFailed =>
-          new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
-      }).pipe(
+      return Effect.tryPromise(() => continueReview(continuationTarget, request.message)).pipe(
+        Effect.mapError(
+          (): PullRequestConversationContinuationFailed =>
+            new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
+        ),
         Effect.flatMap((outcome) =>
           outcome._tag === "completed"
             ? Effect.void

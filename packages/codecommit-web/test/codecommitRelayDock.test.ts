@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 import {
   ContinuePullRequestConversationRequest,
   PullRequestConversation,
+  pullRequestThreadIdentity,
   type RelayPullRequestDockRegistration,
   RelaySelectorState
 } from "@knpkv/relay-product"
@@ -47,7 +48,7 @@ type ReadyRegistration = Extract<RelayPullRequestDockRegistration, { readonly st
 
 const requireReadyRegistration = (
   registration: RelayPullRequestDockRegistration
-): Effect.Effect<ReadyRegistration> =>
+): Effect.Effect<ReadyRegistration, never, never> =>
   registration.status === "ready" ? Effect.succeed(registration) : Effect.die("Expected a ready Relay registration")
 
 describe("CodeCommit Relay dock adapter", () => {
@@ -90,6 +91,19 @@ describe("CodeCommit Relay dock adapter", () => {
       region: "eu-central-1",
       repositoryName: "payments"
     })).toBe(false)
+  })
+
+  it("keeps regional PRs in separate Relay thread identities", () => {
+    const east = Schema.decodeUnknownSync(PullRequestConversation)({
+      ...conversation,
+      thread: { ...conversation.thread, region: "us-east-1" }
+    })
+    const west = Schema.decodeUnknownSync(PullRequestConversation)({
+      ...conversation,
+      thread: { ...conversation.thread, region: "us-west-2" }
+    })
+
+    expect(pullRequestThreadIdentity(east)).not.toEqual(pullRequestThreadIdentity(west))
   })
 
   it.effect("keeps a zero-finding PR review ready and continues at PR scope", () =>

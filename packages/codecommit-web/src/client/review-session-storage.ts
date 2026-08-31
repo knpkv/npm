@@ -10,8 +10,10 @@ export const RelayReviewSessionResourceIdentity = Schema.Struct({
   region: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
-export interface RelayReviewSessionResourceIdentity
-  extends Schema.Schema.Type<typeof RelayReviewSessionResourceIdentity>
+export interface RelayReviewSessionResourceIdentity extends
+  Schema.Schema.Type<
+    typeof RelayReviewSessionResourceIdentity
+  >
 {}
 
 const StoredRelayReviewSession = Schema.Struct({
@@ -29,8 +31,8 @@ export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 export interface RelayReviewSessionWrite {
   readonly dispositions: FindingDispositions
   readonly expectedIdentity: string
-  /** Version observed when this tab read the durable session; omitted callers are treated as stale writers. */
-  readonly expectedVersion?: number
+  /** Version observed when this tab read the durable session. */
+  readonly expectedVersion: number
   readonly identity: string
   readonly resource: RelayReviewSessionResourceIdentity
   readonly review: PullRequestRelayReviewResponse
@@ -76,10 +78,7 @@ const recoverInterruptedPublications = (
     {}
   )
 
-const sameResource = (
-  left: RelayReviewSessionResourceIdentity,
-  right: RelayReviewSessionResourceIdentity
-): boolean =>
+const sameResource = (left: RelayReviewSessionResourceIdentity, right: RelayReviewSessionResourceIdentity): boolean =>
   left.accountId === right.accountId &&
   left.pullRequestId === right.pullRequestId &&
   left.region === right.region &&
@@ -102,10 +101,7 @@ const dispositionRank = (disposition: FindingDisposition): number => {
   }
 }
 
-const mergeDispositions = (
-  current: FindingDispositions,
-  incoming: FindingDispositions
-): FindingDispositions =>
+const mergeDispositions = (current: FindingDispositions, incoming: FindingDispositions): FindingDispositions =>
   Object.entries(incoming).reduce<FindingDispositions>((merged, [findingId, disposition]) => {
     const existing = merged[findingId]
     return existing !== undefined && dispositionRank(existing) > dispositionRank(disposition)
@@ -117,7 +113,7 @@ const mergeTurns = (
   current: typeof RelayReviewConversationTurns.Type,
   incoming: typeof RelayReviewConversationTurns.Type
 ): typeof RelayReviewConversationTurns.Type => {
-  const turnIdentity = (turn: typeof RelayReviewConversationTurns.Type[number]): string =>
+  const turnIdentity = (turn: (typeof RelayReviewConversationTurns.Type)[number]): string =>
     turn.id ?? JSON.stringify(turn)
   const identities = new Set(current.map(turnIdentity))
   return incoming.reduce<typeof RelayReviewConversationTurns.Type>((merged, turn) => {
@@ -148,13 +144,16 @@ const mergeStoredSession = (
 ): RelayReviewSessionWriteOutcome => {
   const turns = mergeTurns(current.turns, incoming.turns)
   const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
-  if (incoming.expectedVersion !== current.version) {
+  const observedCurrentVersion = incoming.expectedVersion === current.version
+  if (!observedCurrentVersion) {
     return {
       _tag: "stale-review-preserved",
       session: { ...current, dispositions, turns, version: current.version + 1 }
     }
   }
-  if (current.identity === incoming.identity) {
+  const sameHead = current.identity === incoming.identity
+  const expectedHead = current.identity === incoming.expectedIdentity
+  if (sameHead) {
     return {
       _tag: "stored",
       session: {
@@ -163,7 +162,7 @@ const mergeStoredSession = (
       }
     }
   }
-  if (current.identity === incoming.expectedIdentity) {
+  if (expectedHead) {
     return { _tag: "stored", session: storedSession(incoming, turns, current.version + 1) }
   }
   return {
